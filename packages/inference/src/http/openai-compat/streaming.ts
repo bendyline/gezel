@@ -49,21 +49,28 @@ export interface NonStreamingChatResult {
     completion_tokens: number;
     total_tokens: number;
   };
+  /** The reply cap the engine applied, when lower than the request's (see {@link appliedMaxTokens}). */
+  gezel_max_tokens?: number;
 }
 
 /**
- * Truncation detection: providers don't surface the engine's own finish
- * reason through `LLMSession`, so we infer `length` from usage — the
- * turn consumed at least the effective output cap. Callers that
- * auto-continue on `length` (agent loops, long-form writers) need this;
- * reporting truncation as `stop` silently ends their loop mid-thought.
+ * Truncation detection. An engine that reports its own stop reason
+ * ({@link LLMSession.lastTurnFinish}) is believed. Otherwise we infer
+ * `length` from usage — the turn consumed at least the effective output
+ * cap. Callers that auto-continue on `length` (agent loops, long-form
+ * writers) need this; reporting truncation as `stop` silently ends their
+ * loop mid-thought. The inference alone failed for Apple's on-device model,
+ * which clamps every reply to 1,024 tokens: measured against the caller's
+ * larger cap, its cut-off replies read as `stop`.
  */
 function inferFinishReason(
   hasToolCalls: boolean,
   usage: TurnUsage | null,
   lengthCapTokens: number | undefined,
+  reported?: LLMSession['lastTurnFinish'],
 ): 'stop' | 'tool_calls' | 'length' {
   if (hasToolCalls) return 'tool_calls';
+  if (reported) return reported.reason;
   if (
     lengthCapTokens !== undefined &&
     lengthCapTokens > 0 &&
@@ -73,6 +80,20 @@ function inferFinishReason(
     return 'length';
   }
   return 'stop';
+}
+
+/**
+ * The reply cap the engine actually applied, reported as the
+ * `gezel_max_tokens` extension when it differs from what the request asked
+ * for, so a caller learns its `max_tokens` was lowered instead of finding
+ * out from a truncated reply.
+ */
+function appliedMaxTokens(
+  session: LLMSession,
+  lengthCapTokens: number | undefined,
+): { gezel_max_tokens: number } | Record<string, never> {
+  const applied = session.lastTurnFinish?.maxTokens;
+  return applied !== undefined && applied !== lengthCapTokens ? { gezel_max_tokens: applied } : {};
 }
 
 function toOpenAIToolCalls(
@@ -202,7 +223,12 @@ export async function runNonStreaming(
             content,
             ...(hasToolCalls ? { tool_calls: toOpenAIToolCalls(captured) } : {}),
           },
-          finish_reason: inferFinishReason(hasToolCalls, usageRef.value, lengthCapTokens),
+          finish_reason: inferFinishReason(
+            hasToolCalls,
+            usageRef.value,
+            lengthCapTokens,
+            session.lastTurnFinish,
+          ),
         },
       ],
       usage: {
@@ -210,6 +236,7 @@ export async function runNonStreaming(
         completion_tokens: usageRef.value?.outputTokens ?? 0,
         total_tokens: (usageRef.value?.inputTokens ?? 0) + (usageRef.value?.outputTokens ?? 0),
       },
+      ...appliedMaxTokens(session, lengthCapTokens),
     };
   } finally {
     unsubUsage();
@@ -832,7 +859,12 @@ export async function runStreaming(
     }
 
     // Final content chunk: finish_reason=stop (or tool_calls).
-    const finishReason = inferFinishReason(hasToolCalls, usageRef.value, lengthCapTokens);
+    const finishReason = inferFinishReason(
+      hasToolCalls,
+      usageRef.value,
+      lengthCapTokens,
+      session.lastTurnFinish,
+    );
     await writeSSE(
       {
         data: JSON.stringify({
@@ -848,6 +880,7 @@ export async function runStreaming(
             },
           ],
           ...nullUsage,
+          ...appliedMaxTokens(session, lengthCapTokens),
         }),
       },
       'finish',

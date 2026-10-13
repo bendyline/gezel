@@ -25,12 +25,18 @@ execution; the helper turns one request into one generation.
 | Daemon → helper | Helper → daemon |
 | --- | --- |
 | `{"type":"hello"}` | `{"type":"hello","available","reason?","contextTokens","maxOutputTokens","version","os","modelCapabilities?","supportsTokenUsage?"}` |
-| `{"type":"generate","id","messages","tools","maxTokens","contextSize"}` | `{"type":"delta","id","text"}`, then `done` (`stopReason`) or `error` (`code`, `message`) |
+| `{"type":"generate","id","messages","tools","maxTokens","contextSize","schema?"}` | `{"type":"delta","id","text"}`, then `done` (`stopReason`) or `error` (`code`, `message`) |
 | — | `{"type":"usage","id","inputTokens","outputTokens"}` (protocol 2, OS 27 stream usage) |
 | — | `{"type":"tool_call","id","callId","name","arguments"}` (Apple's own tool loop, mid-generation) |
 | `{"type":"tool_result","id","callId","output","endTurn?"}` or `{…,"error"}` | — |
 | `{"type":"cancel","id"}` | `{"type":"done","id","stopReason":"cancelled"}` |
 | `{"type":"count","id","messages","tools"}` | `{"type":"count","id","tokens"}` (macOS 26.4+) |
+
+`schema` (a `NativeToolSchema` node, any root kind) constrains the reply with
+Apple's guided generation. Snapshots of structured content are not prefixes of
+the finished JSON, so that reply arrives as a single delta when generation
+ends; a reply stopped by `maxTokens` still parses (Apple closes it) but its last
+item can lack keys, and `stopReason` is `length`.
 
 `endTurn` stops generation after that result (a handoff, a question, a
 terminal tool). Closing stdin cancels everything and exits, so a daemon that

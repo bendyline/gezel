@@ -159,6 +159,8 @@ it('enumerates Apple readiness and context through the public inventory without 
       availability: 'available',
       context_window: 4096,
       max_output_tokens: 2048,
+      default_output_tokens: 2048,
+      capabilities: expect.objectContaining({ structuredOutput: true, images: false }),
     }),
   );
 });

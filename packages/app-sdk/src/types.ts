@@ -323,6 +323,18 @@ export interface ChatRequest {
    * `400 tools_not_supported_for_provider`.
    */
   tools?: ChatTool[];
+  /**
+   * OpenAI's structured output. A `json_schema` reply follows the schema:
+   * llama.cpp enforces it with a grammar and Apple's on-device model with
+   * guided generation. A model whose listing lacks
+   * `capabilities.structuredOutput` may not honour it, so validate the reply.
+   * A reply that ends with `finish_reason: 'length'` is partial: Apple closes
+   * the unfinished JSON, so it parses, but its last item can lack keys.
+   */
+  response_format?:
+    | { type: 'text' }
+    | { type: 'json_object' }
+    | { type: 'json_schema'; json_schema: { name?: string; schema: unknown; strict?: boolean } };
 }
 
 export interface ChatCompletionResponse {
@@ -337,13 +349,20 @@ export interface ChatCompletionResponse {
       content: string;
       tool_calls?: ChatToolCall[];
     };
-    finish_reason: 'stop' | 'tool_calls';
+    finish_reason: 'stop' | 'tool_calls' | 'length';
   }>;
   usage: {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
   };
+  /**
+   * The reply cap the model actually applied, present only when it differs
+   * from the request's `max_tokens`. Apple's on-device model stops every
+   * reply at 1,024 tokens whatever was asked; size requests from a model's
+   * listed `max_output_tokens` to avoid the cut.
+   */
+  gezel_max_tokens?: number;
 }
 
 export interface ChatCompletionChunk {
@@ -368,6 +387,8 @@ export interface ChatCompletionChunk {
     finish_reason: 'stop' | 'tool_calls' | 'length' | null;
   }>;
   usage?: ChatCompletionResponse['usage'] | null;
+  /** Sent with the finishing chunk; see {@link ChatCompletionResponse.gezel_max_tokens}. */
+  gezel_max_tokens?: number;
 }
 
 /** Opt-in cross-host replies: native providers may not report token usage. */

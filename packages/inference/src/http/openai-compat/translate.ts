@@ -6,10 +6,9 @@ import type { ImageAttachment, ProviderName } from '../../providers/types.js';
  *
  * Mirrors the public-facing subset of OpenAI's Chat Completions API.
  * Sampling fields (`temperature`, `max_tokens`, `top_p`,
- * `presence_penalty`, `frequency_penalty`) and the unsupported-in-v1
- * fields (`tool_choice`, `response_format`) are parsed here but
- * **rejected at the route layer** with a clear `400` rather than silently
- * dropped — sampling is set per-model via tuning, not per-request (yet).
+ * `presence_penalty`, `frequency_penalty`), string-form `tool_choice` and
+ * `response_format` are overlaid onto the model's resolved tuning
+ * (`overlayOpenAiRequestTuning`); a provider then applies what it supports.
  * `tools` IS honored (forwarded to the provider as external tools).
  *
  * The `model` field carries a selectable gezel or provider+model id:

@@ -8,6 +8,7 @@ import {
   type NativeTool,
   type NativeToolCall,
   type NativeToolReply,
+  type NativeToolSchema,
   createAwakeTimeout,
   createLogger,
 } from '@bendyline/gezel';
@@ -25,6 +26,11 @@ export interface AppleFmGenerateRequest {
   tools?: NativeTool[];
   maxTokens: number;
   contextSize: number;
+  /**
+   * Constrains the reply to this shape with Apple's guided generation. The
+   * reply then arrives as one delta of JSON text when generation finishes.
+   */
+  schema?: NativeToolSchema;
 }
 
 export interface AppleFmGenerateHandlers {

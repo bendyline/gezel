@@ -3,11 +3,14 @@ import {
   NATIVE_TOOL_LISTINGS,
   type NativeTool,
   type NativeToolListing,
+  type NativeToolSchema,
   PROMPT_FOOTPRINT_POLICY,
   createAwakeTimeout,
   createLogger,
+  decodeNativeResponse,
   decodeNativeToolArguments,
   narrowerNativeListing,
+  nativeResponseSchema,
   nativeToolSpecs,
   resolvePromptFootprint,
 } from '@bendyline/gezel';
@@ -165,6 +168,11 @@ export class AppleFoundationModelsProvider implements LLMProvider {
         this.hello!.maxOutputTokens,
         opts.tuning?.sampling?.maxTokens ?? this.hello!.maxOutputTokens,
       ),
+      // `response_format: json_schema` reaches here as tuning. Apple's guided
+      // generation enforces it; before, it was accepted and silently ignored.
+      ...(opts.tuning?.output?.jsonSchema !== undefined
+        ? { responseSchema: opts.tuning.output.jsonSchema }
+        : {}),
       ...(opts.terminalToolPolicy ? { terminalToolPolicy: opts.terminalToolPolicy } : {}),
     });
   }
@@ -182,6 +190,8 @@ export interface AppleFoundationSessionDeps {
   /** Where the tool ladder starts, from the shared prompt footprint. */
   startListing?: NativeToolListing;
   terminalToolPolicy?: SessionOpts['terminalToolPolicy'];
+  /** JSON Schema every reply must follow, enforced by guided generation. */
+  responseSchema?: unknown;
 }
 
 /** @internal Exported for unit tests. */
@@ -192,6 +202,8 @@ export class AppleFoundationSession extends StreamingSessionBase implements LLMS
   private readonly history: Message[];
   /** Where this conversation last fitted; later turns start there. */
   private listing: NativeToolListing = 'full';
+  private readonly responseSchema: NativeToolSchema | undefined;
+  private finish: LLMSession['lastTurnFinish'] = null;
 
   constructor(private readonly deps: AppleFoundationSessionDeps) {
     super();
@@ -199,6 +211,13 @@ export class AppleFoundationSession extends StreamingSessionBase implements LLMS
     this.systemMessage = deps.systemMessage;
     this.history = [...deps.history];
     this.listing = deps.startListing ?? 'full';
+    this.responseSchema =
+      deps.responseSchema === undefined ? undefined : nativeResponseSchema(deps.responseSchema);
+  }
+
+  /** Apple's own stop reason, and the 1,024-token cap it was held to. */
+  get lastTurnFinish(): LLMSession['lastTurnFinish'] {
+    return this.finish;
   }
 
   setSystemMessage(message: string): void {
@@ -238,6 +257,8 @@ export class AppleFoundationSession extends StreamingSessionBase implements LLMS
       : 'full';
     let droppedHistory = false;
     let text = '';
+    let stopReason: 'stop' | 'length' | 'cancelled' = 'stop';
+    this.finish = null;
     let usage: AppleFoundationModelsUsage | undefined;
     let calls = 0;
     let ended: string | null = null;
@@ -316,12 +337,13 @@ export class AppleFoundationSession extends StreamingSessionBase implements LLMS
           { role: 'user', content: prompt },
         ];
         try {
-          const stopReason = await this.deps.helper.generate(
+          stopReason = await this.deps.helper.generate(
             {
               messages,
               tools,
               maxTokens: this.deps.maxTokens,
               contextSize: this.deps.contextTokens,
+              ...(this.responseSchema ? { schema: this.responseSchema } : {}),
             },
             {
               onUsage: (value) => {
@@ -329,7 +351,8 @@ export class AppleFoundationSession extends StreamingSessionBase implements LLMS
               },
               onDelta: (chunk) => {
                 text += chunk;
-                this.emitDelta(chunk);
+                // A guided reply is decoded whole once it finishes.
+                if (!this.responseSchema) this.emitDelta(chunk);
               },
               onToolCall: (call) => {
                 const next = serial.then(() => runTool(call.name, call.arguments, tools));
@@ -378,10 +401,33 @@ export class AppleFoundationSession extends StreamingSessionBase implements LLMS
     }
 
     this.listing = listing;
+    if (this.responseSchema && ended === null) {
+      // Apple renders an unfinished guided reply as closed JSON with keys
+      // missing (a review stopped at `"category":"clar"}]`). Restoring nulls
+      // there would dress the half-written item up as complete, so a reply
+      // cut off at the cap is passed on as generated, marked `length`.
+      if (stopReason !== 'length') text = this.decodeGuidedReply(text);
+      if (text) this.emitDelta(text);
+    }
+    if (stopReason !== 'cancelled')
+      this.finish = { reason: stopReason, maxTokens: this.deps.maxTokens };
     const reply = ended ?? text;
     this.history.splice(0, this.history.length, ...history, { role: 'user', content: prompt });
     if (reply) this.history.push({ role: 'assistant', content: reply });
     return reply;
+  }
+
+  /** The reply in the shape the app's schema asked for; text that is not JSON passes through. */
+  private decodeGuidedReply(text: string): string {
+    let value: unknown;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      return text;
+    }
+    return JSON.stringify(
+      decodeNativeResponse(this.deps.responseSchema, this.responseSchema!, value),
+    );
   }
 
   /** Input tokens are exact where the OS can count them (macOS 26.4+). */
