@@ -35,7 +35,7 @@ import { projectRecipientKey, writeChatThreadSelection } from './components/chat
 import { ENGAGEMENT_MODES } from './components/engagement-modes.js';
 import { FirstRunProvider } from './components/first-run-context.js';
 import { HeaderDensityContext, useHeaderDensityMeasurement } from './components/header-density.js';
-import { NIGHT_SHIFT_MOON_PATH } from './components/night-shift-glyph.js';
+import { NIGHT_SHIFT_MOON_PATH, NightShiftMoonGlyph } from './components/night-shift-glyph.js';
 import {
   OUTPUT_PANE_MAXIMIZED_EVENT,
   requestOutputPaneRestore,
@@ -943,7 +943,7 @@ function TaskSpeedMenu({
 }) {
   const current = ENGAGEMENT_MODES.find((o) => o.mode === mode) ?? ENGAGEMENT_MODES[0]!;
   const title = state.active
-    ? `Crew activity: Night Shift running (${state.source ?? 'active'}); ${current.label} mode. Click to change.`
+    ? `Crew activity: ${current.label}. Night Shift running. Click to change.`
     : `Crew activity: ${current.label}. Click to change.`;
 
   const [open, setOpen] = useState(false);
@@ -1072,13 +1072,22 @@ function TaskSpeedMenu({
   const hasWork =
     tasks !== null &&
     (backgroundWork.length > 0 || tasks.active.length > 0 || tasks.upcoming.length > 0);
-  const periodLine = nightShiftPeriodLine(state, status);
   const tallyItems = tally ? nightShiftTallyItems(tally) : [];
   // The review reports on a window that may still be running — calling that
   // "last night" at 2am, directly under a live tally, reads as a different
   // night's work when it is in fact tonight's.
   const reviewHeading =
     review && Date.parse(review.windowEnd) > Date.now() ? 'Finished so far' : 'Done last night';
+  const paused = mode === 'reactive' || mode === 'off';
+  const lastNight =
+    review && Date.parse(review.windowEnd) <= Date.now()
+      ? {
+          tasks: review.tasksCompleted.length,
+          reports: review.reports.length,
+          questions: tally && !tally.live ? tally.questionsRaised : 0,
+        }
+      : null;
+  const summary = nightShiftSummary(state, status, mode, lastNight);
 
   return (
     <DropdownMenu.Root open={open} onOpenChange={handleOpenChange}>
@@ -1100,77 +1109,102 @@ function TaskSpeedMenu({
         >
           <EngagementModeMenu mode={mode} onSelect={handleModeSelect} />
           <DropdownMenu.Separator className="app-task-speed-separator" />
-          <DropdownMenu.Label className="app-nightshift-section-label">
-            <NightShiftGlyph active={false} />
-            <span>Night Shift</span>
-          </DropdownMenu.Label>
-          <div className="app-nightshift-status">
-            {state.active
-              ? `Running — ${state.source === 'manual' ? 'manual shift' : 'scheduled window'}`
-              : 'Not running'}
-            {periodLine && <span className="app-nightshift-period">{periodLine}</span>}
-            {status?.heldOnBattery && (
-              <span className="app-nightshift-quota-hold">
-                Paused while this computer runs on battery. It picks up when you plug in.
+          <div className="app-nightshift">
+            <div className="app-nightshift-head">
+              <span
+                className={`app-nightshift-sky${state.active ? ' is-live' : ''}`}
+                aria-hidden="true"
+              >
+                <NightShiftMoonGlyph />
               </span>
-            )}
-            {status?.quotaHold && (
-              <span className="app-nightshift-quota-hold">{quotaHoldLine(status.quotaHold)}</span>
-            )}
-          </div>
-          {tallyItems.length > 0 && tally && (
-            <div className="app-nightshift-tally">
-              <div className="app-nightshift-task-heading">
-                {tally.live ? 'So far this shift' : 'Last night'}
+              <div className="app-nightshift-heading">
+                <DropdownMenu.Label className="app-nightshift-title">
+                  Night Shift
+                </DropdownMenu.Label>
+                <span className="app-nightshift-line">{summary.line}</span>
               </div>
-              <div className="app-nightshift-tally-items">
-                {tallyItems.map((item) => (
-                  <span className="app-nightshift-tally-item" key={item.key}>
-                    <span className="app-nightshift-tally-count">
-                      {item.count.toLocaleString()}
-                    </span>{' '}
-                    {item.label}
-                  </span>
+              {summary.badge && (
+                <span className={`app-nightshift-badge is-${summary.badge.tone}`}>
+                  {summary.badge.tone === 'live' && (
+                    <span className="app-nightshift-badge-dot" aria-hidden="true" />
+                  )}
+                  {summary.badge.text}
+                </span>
+              )}
+            </div>
+            {status?.quotaHold && (
+              <p className="app-nightshift-note">{quotaHoldLine(status.quotaHold)}</p>
+            )}
+            {summary.track && (
+              <div className="app-nightshift-track">
+                <div className="app-nightshift-track-bar" aria-hidden="true">
+                  {summary.track.progress > 0 && (
+                    <>
+                      <span
+                        className="app-nightshift-track-fill"
+                        style={{ width: `${summary.track.progress * 100}%` }}
+                      />
+                      <span
+                        className="app-nightshift-track-now"
+                        style={{ left: `${summary.track.progress * 100}%` }}
+                      />
+                    </>
+                  )}
+                </div>
+                <div className="app-nightshift-track-ticks">
+                  <span>{summary.track.start}</span>
+                  <span>{summary.track.end}</span>
+                </div>
+              </div>
+            )}
+            {tallyItems.length > 0 && tally && (
+              <div className="app-nightshift-group">
+                <div className="app-nightshift-task-heading">
+                  {tally.live ? 'So far this shift' : 'Last night'}
+                </div>
+                <div className="app-nightshift-tally-items">
+                  {tallyItems.map((item) => (
+                    <span className="app-nightshift-tally-item" key={item.key}>
+                      <span className="app-nightshift-tally-count">
+                        {item.count.toLocaleString()}
+                      </span>{' '}
+                      {item.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {hasWork && tasks && (backgroundWork.length > 0 || tasks.active.length > 0) && (
+              <div className="app-nightshift-group">
+                <div className="app-nightshift-task-heading">Working on</div>
+                {backgroundWork.map((work) => (
+                  <NightShiftWorkRow
+                    key={work.id}
+                    title={work.title}
+                    meta={[work.projectName, work.detail].filter(Boolean).join(' · ')}
+                    active
+                  />
+                ))}
+                {tasks.active.map((t) => (
+                  <NightShiftTaskRow key={t.ref} task={t} active />
                 ))}
               </div>
-            </div>
-          )}
-          {hasWork && tasks && (
-            <div className="app-nightshift-tasks">
-              {(backgroundWork.length > 0 || tasks.active.length > 0) && (
-                <div className="app-nightshift-task-group">
-                  <div className="app-nightshift-task-heading">Working on</div>
-                  {backgroundWork.map((work) => (
-                    <NightShiftWorkRow
-                      key={work.id}
-                      title={work.title}
-                      meta={[work.projectName, work.detail].filter(Boolean).join(' · ')}
-                      active
-                    />
-                  ))}
-                  {tasks.active.map((t) => (
-                    <NightShiftTaskRow key={t.ref} task={t} active />
-                  ))}
+            )}
+            {hasWork && tasks && tasks.upcoming.length > 0 && (
+              <div className="app-nightshift-group">
+                <div className="app-nightshift-task-heading">
+                  {paused ? 'Waiting' : state.active ? 'Up next' : 'Queued for tonight'}
                 </div>
-              )}
-              {tasks.upcoming.length > 0 && (
-                <div className="app-nightshift-task-group">
-                  <div className="app-nightshift-task-heading">
-                    {state.active ? 'Up next' : 'Queued for tonight'}
-                  </div>
-                  {tasks.upcoming.map((t) => (
-                    <NightShiftTaskRow key={t.ref} task={t} />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {state.active && tasks !== null && !hasWork && (
-            <div className="app-nightshift-empty">No work is running or queued.</div>
-          )}
-          {review && (review.tasksCompleted.length > 0 || review.reports.length > 0) && (
-            <div className="app-nightshift-tasks">
-              <div className="app-nightshift-task-group">
+                {tasks.upcoming.map((t) => (
+                  <NightShiftTaskRow key={t.ref} task={t} />
+                ))}
+              </div>
+            )}
+            {state.active && tasks !== null && !hasWork && (
+              <div className="app-nightshift-empty">No work is running or queued.</div>
+            )}
+            {review && (review.tasksCompleted.length > 0 || review.reports.length > 0) && (
+              <div className="app-nightshift-group">
                 <div className="app-nightshift-task-heading">{reviewHeading}</div>
                 {review.reports.map((r) => (
                   <button
@@ -1185,7 +1219,7 @@ function TaskSpeedMenu({
                       )
                     }
                   >
-                    <span className="app-nightshift-task-dot" aria-hidden="true" />
+                    <span className="app-nightshift-task-dot is-done" aria-hidden="true" />
                     <span className="app-nightshift-task-text">
                       <span className="app-nightshift-task-title">{r.title}</span>
                       <span className="app-nightshift-task-meta">
@@ -1210,7 +1244,7 @@ function TaskSpeedMenu({
                       )
                     }
                   >
-                    <span className="app-nightshift-task-dot" aria-hidden="true" />
+                    <span className="app-nightshift-task-dot is-done" aria-hidden="true" />
                     <span className="app-nightshift-task-text">
                       <span className="app-nightshift-task-title">{t.title}</span>
                       <span className="app-nightshift-task-meta">{t.projectName}</span>
@@ -1218,33 +1252,19 @@ function TaskSpeedMenu({
                   </button>
                 ))}
               </div>
-            </div>
-          )}
-          <div className="app-nightshift-action-tray gz-tray" role="presentation">
-            {state.active ? (
-              <DropdownMenu.Item
-                className="app-nav-menu-item app-nightshift-action gz-key gz-key--stacked"
-                onSelect={() => run('stop')}
-              >
-                <span className="app-engagement-menu-label">Stop night shift</span>
-                <span className="app-engagement-menu-hint">
-                  {state.source === 'manual'
-                    ? 'Stop now and revert to the schedule.'
-                    : "Stop for tonight — it won't auto-restart until the next window."}
-                </span>
-              </DropdownMenu.Item>
-            ) : (
-              <DropdownMenu.Item
-                className="app-nav-menu-item app-nightshift-action gz-key gz-key--stacked"
-                onSelect={() => run('start')}
-              >
-                <span className="app-engagement-menu-label">Start night shift now</span>
-                <span className="app-engagement-menu-hint">
-                  Run deferred indexing + the meester review while you're away.
-                </span>
-              </DropdownMenu.Item>
             )}
           </div>
+          {summary.action && (
+            <div className="app-nightshift-action-tray gz-tray" role="presentation">
+              <DropdownMenu.Item
+                className="app-nav-menu-item app-nightshift-action gz-key gz-key--stacked"
+                onSelect={() => run(summary.action!.run)}
+              >
+                <span className="app-engagement-menu-label">{summary.action.label}</span>
+                <span className="app-engagement-menu-hint">{summary.action.hint}</span>
+              </DropdownMenu.Item>
+            </div>
+          )}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -1264,38 +1284,164 @@ function NightShiftTaskRow({
   return <NightShiftWorkRow title={task.title} meta={meta} active={active} />;
 }
 
+interface NightShiftSummary {
+  line: string;
+  badge: { text: string; tone: 'idle' | 'live' | 'held' | 'paused' } | null;
+  /** The window drawn as a track, with the share of it already behind us. */
+  track: { start: string; end: string; progress: number } | null;
+  action: { run: 'start' | 'stop'; label: string; hint: string } | null;
+}
+
+/** Last night's finished work, for the line shown the morning after. */
+interface LastNight {
+  tasks: number;
+  reports: number;
+  questions: number;
+}
+
 /**
- * The second status line: when this period started and when it ends.
+ * Everything the Night Shift section says, decided in one place.
  *
- * A scheduled shift is bounded by its window, so it can promise a close.
- * A manual one can't — it runs until its work drains, whatever the clock
- * says — so it states its start and says so. With nothing running, the
- * line answers the daytime question instead: when does the next window open.
+ * Chat only and Off hold every task, so a shift there would do nothing: the
+ * section says so and offers no Start key. A scheduled shift is bounded by
+ * its window, so it can promise a close; a manual one runs until its work
+ * drains, whatever the clock says, so it promises none.
  */
-function nightShiftPeriodLine(
+function nightShiftSummary(
   state: NightShiftState,
   status: NightShiftStatusResponse | null,
-): string | null {
+  mode: EngagementMode,
+  lastNight: LastNight | null,
+): NightShiftSummary {
   const window = status?.window ?? null;
-  if (state.active) {
-    const started = status?.startedAt ? formatClock(status.startedAt) : null;
-    if (!started) return null;
-    // Only a scheduled shift ends with the window; a manual one outlives it.
-    if (state.source === 'manual' || !window?.open) {
-      return `Started ${started} · runs until the work is done`;
-    }
-    const ends = formatClock(window.end);
-    const left = formatTimeLeft(Date.parse(window.end) - Date.now());
-    if (!ends) return `Started ${started}`;
-    return left
-      ? `Started ${started} · ends ${ends} (${left} left)`
-      : `Started ${started} · ends ${ends}`;
+  const start = window ? formatClock(window.start) : null;
+  const end = window ? formatClock(window.end) : null;
+  const ticks = start && end ? { start, end } : null;
+  const running = { text: 'Running', tone: 'live' } as const;
+  const stop =
+    state.source === 'manual'
+      ? {
+          run: 'stop' as const,
+          label: 'Stop the Night Shift',
+          hint: start ? `The ${start} schedule carries on.` : 'It stops now.',
+        }
+      : {
+          run: 'stop' as const,
+          label: 'Stop for tonight',
+          hint: start ? `It starts again tomorrow at ${start}.` : 'It starts again next window.',
+        };
+
+  if (mode === 'reactive' || mode === 'off') {
+    return {
+      line:
+        mode === 'off'
+          ? 'Off pauses everything, so the Night Shift waits.'
+          : 'Chat only pauses task work, so the Night Shift waits.',
+      badge: { text: 'Paused', tone: 'paused' },
+      track: null,
+      action: state.active ? stop : null,
+    };
   }
-  if (!window) return null;
-  const start = formatClock(window.start);
-  const end = formatClock(window.end);
-  if (!start || !end) return null;
-  return window.open ? `Window ${start} – ${end}` : `Next window ${start} – ${end}`;
+
+  if (state.active) {
+    if (state.source !== 'manual' && window?.open && ticks) {
+      const left = formatTimeLeft(Date.parse(window.end) - Date.now());
+      return {
+        line: left ? `Ends at ${ticks.end}, ${left} from now.` : `Ends at ${ticks.end}.`,
+        badge: running,
+        track: { ...ticks, progress: windowProgress(window) },
+        action: stop,
+      };
+    }
+    const started = status?.startedAt ? formatClock(status.startedAt) : null;
+    const who = state.source === 'manual' ? 'You started it' : 'Started';
+    return {
+      line: started
+        ? `${who} at ${started}. It stops when the queue is empty.`
+        : 'It stops when the queue is empty.',
+      badge: running,
+      track: null,
+      action: stop,
+    };
+  }
+
+  if (status?.heldOnBattery) {
+    return {
+      line: 'Waiting while this computer runs on battery. It picks up when you plug in.',
+      badge: { text: 'On hold', tone: 'held' },
+      track: ticks && { ...ticks, progress: 0 },
+      action: null,
+    };
+  }
+
+  const startNow = {
+    run: 'start' as const,
+    label: 'Start the Night Shift now',
+    hint:
+      window && !window.open && start
+        ? `Instead of waiting until ${start}.`
+        : 'Your gezellen work through the queue now.',
+  };
+  if (!window) {
+    return {
+      line: lastNightLine(lastNight) ?? 'No nightly schedule is set. Start it when you step away.',
+      badge: null,
+      track: null,
+      action: startNow,
+    };
+  }
+  if (window.open) {
+    return {
+      line: end ? `Not running. Tonight's window closes at ${end}.` : 'Not running tonight.',
+      badge: { text: 'Idle', tone: 'idle' },
+      track: ticks && { ...ticks, progress: 0 },
+      action: startNow,
+    };
+  }
+  return {
+    line:
+      lastNightLine(lastNight) ??
+      (start
+        ? `Your gezellen work through the queue from ${start}.`
+        : 'Your gezellen work through the queue overnight.'),
+    badge: { text: nightWord(window.start), tone: 'idle' },
+    track: ticks && { ...ticks, progress: 0 },
+    action: startNow,
+  };
+}
+
+function lastNightLine(night: LastNight | null): string | null {
+  if (!night || (night.tasks === 0 && night.reports === 0)) return null;
+  const did =
+    night.tasks > 0
+      ? `finished ${night.tasks} task${night.tasks === 1 ? '' : 's'}`
+      : `wrote ${night.reports} report${night.reports === 1 ? '' : 's'}`;
+  const ask =
+    night.questions === 0
+      ? ''
+      : night.questions === 1
+        ? ' One question is waiting for you.'
+        : ` ${night.questions} questions are waiting for you.`;
+  return `Last night your gezellen ${did}.${ask}`;
+}
+
+/** "Tonight", "Tomorrow", or the weekday a window opens on. */
+function nightWord(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return 'Tonight';
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(at) - midnight(new Date())) / 86_400_000);
+  if (days <= 0) return 'Tonight';
+  if (days === 1) return 'Tomorrow';
+  return at.toLocaleDateString(undefined, { weekday: 'long' });
+}
+
+/** Share of an open window already behind us, 0 to 1. */
+function windowProgress(window: { start: string; end: string }): number {
+  const start = Date.parse(window.start);
+  const end = Date.parse(window.end);
+  if (!(end > start)) return 0;
+  return Math.min(1, Math.max(0, (Date.now() - start) / (end - start)));
 }
 
 /** Local wall-clock time of an ISO instant, or null when unparseable. */

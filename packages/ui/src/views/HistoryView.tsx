@@ -308,7 +308,7 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
-              <Select.Item value="__ALL__">All gezels</Select.Item>
+              <Select.Item value="__ALL__">All gezellen</Select.Item>
               {gezels.map((g) => (
                 <Select.Item key={g.id} value={g.id}>
                   {g.name}

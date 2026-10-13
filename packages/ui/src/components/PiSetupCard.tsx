@@ -87,7 +87,7 @@ export function PiSetupCard({
       notice={card.notice}
       error={card.error}
       reasonsIntro="The managed setup needs an update:"
-      emptyModelsNote="No gezels or inference models compatible with the pi tool loop are available yet."
+      emptyModelsNote="No gezellen or inference models compatible with the pi tool loop are available yet."
       intro={
         <>
           pi keeps its own tools, permissions, and conversation loop while a gezel supplies the

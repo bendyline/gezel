@@ -134,6 +134,4 @@ overrides:
   "ws": "8.21.1"
 
 patchedDependencies:
-  # GHSA-vfj7-8cjw-p6xm has no upstream fix; bound parser and AST walker depth.
-  "braces@3.0.3": "patches/braces@3.0.3.patch"
   "app-builder-lib@26.15.3": "patches/app-builder-lib@26.15.3.patch"

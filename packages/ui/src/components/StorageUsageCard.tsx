@@ -67,7 +67,7 @@ export function StorageUsageCard() {
           <dl>
             <dt>Downloads Gezel can fetch again</dt>
             <dd>{formatBytes(summary.redownloadableBytes)}</dd>
-            <dt>Your gezels, projects, and documents</dt>
+            <dt>Your gezellen, projects, and documents</dt>
             <dd>{formatBytes(summary.userContentBytes)}</dd>
           </dl>
 

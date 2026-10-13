@@ -190,7 +190,7 @@ export function ImageRecognitionSettings() {
         <p className="muted small" style={{ marginTop: 0 }}>
           "Always" keeps images on this device even when the chat model could see them itself —
           cheaper than sending pictures to a paid model, and nothing leaves the machine. Individual
-          gezels can override this.
+          gezellen can override this.
         </p>
         <div
           className="gz-tray"

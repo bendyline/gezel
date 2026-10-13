@@ -157,6 +157,27 @@ Both are used unmodified.
 
 ---
 
+## Brand marks in Connected Apps
+
+The tabs of Settings → Connected Apps show each product's mark as inline SVG
+path data, compiled into the UI from
+[ConnectedAppTabIcon.tsx](packages/ui/src/components/ConnectedAppTabIcon.tsx).
+The marks are trademarks of their owners. They only name the product a tab
+sets up and imply no endorsement.
+
+| Marks | License | Source |
+|---|---|---|
+| OpenAI, Microsoft, plug | Icons [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Font Awesome Free 7.3.1 by [Fonticons, Inc.](https://fontawesome.com/) |
+| Visual Studio Code (`vscode`) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Codicons 0.0.46-24 by [Microsoft Corporation](https://github.com/microsoft/vscode-codicons) |
+| LibreOffice, Ollama, OpenCode | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | [Simple Icons](https://simpleicons.org/) 16.35.0 |
+
+Changes, as CC BY 4.0 requires noting them: the Microsoft glyph is redrawn as
+its four squares, each filled with a Microsoft logo color, and the `vscode`
+codicon is filled with Visual Studio Code's blue. The pi tab's π is drawn in
+this repository.
+
+---
+
 ## Code compiled into the browser bundles
 
 The web UI and the Office pane compile about 300 third-party packages into

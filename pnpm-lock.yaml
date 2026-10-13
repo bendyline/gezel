@@ -33,7 +33,6 @@ overrides:
 
 patchedDependencies:
   app-builder-lib@26.15.3: 5357766ccf0569ff700b84ec2a83fb4cc98d719c26d79969d913fb0321b0da05
-  braces@3.0.3: ee1c4bfbdef673a0229fcbc3eedbea94e3f95a52748e089c6c22e63088e5825e
 
 importers:
 
@@ -11640,7 +11639,7 @@ snapshots:
     dependencies:
       balanced-match: 4.0.4
 
-  braces@3.0.3(patch_hash=ee1c4bfbdef673a0229fcbc3eedbea94e3f95a52748e089c6c22e63088e5825e):
+  braces@3.0.3:
     dependencies:
       fill-range: 7.1.1
 
@@ -14140,7 +14139,7 @@ snapshots:
 
   micromatch@4.0.8:
     dependencies:
-      braces: 3.0.3(patch_hash=ee1c4bfbdef673a0229fcbc3eedbea94e3f95a52748e089c6c22e63088e5825e)
+      braces: 3.0.3
       picomatch: 2.3.2
 
   mime-db@1.52.0: {}

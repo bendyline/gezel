@@ -1082,7 +1082,7 @@ export function NewProjectDialog({
                             )}
                           </div>
                           <small className="muted">
-                            Read-only: gezels read this folder and change nothing in it unless you
+                            Read-only: gezellen read this folder and change nothing in it unless you
                             allow it in the project's settings.
                           </small>
                         </label>

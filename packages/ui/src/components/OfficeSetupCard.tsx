@@ -205,7 +205,7 @@ export function OfficeSetupCard({
       </div>
 
       <p className="muted small harness-setup-intro">
-        Adds a Gezel button to the Home tab. It opens a pane where your gezels chat with you about
+        Adds a Gezel button to the Home tab. It opens a pane where your gezellen chat with you about
         the document you have open, and can read it and make the edits you ask for. Everything stays
         on this computer.
       </p>

@@ -19,6 +19,7 @@ import { DeliverableCard } from '../components/DeliverableCard.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { PromptDialog } from '../components/PromptDialog.js';
 import { TaskChatPane } from '../components/TaskChatPane.js';
+import { TaskOutputsList } from '../components/TaskOutputsList.js';
 import { TaskStatusKeys } from '../components/TaskStatusKeys.js';
 import { TaskStepPanel } from '../components/TaskStepPanel.js';
 import { TaskStepTracker } from '../components/TaskStepTracker.js';
@@ -752,6 +753,13 @@ export function TaskDetail({
               <h4>Plan</h4>
               <pre className="task-plan-body">{task.plan}</pre>
             </section>
+          )}
+          {result && (
+            <TaskOutputsList
+              projectId={task.projectId}
+              outputs={result.outputs}
+              deliverable={result.deliverable}
+            />
           )}
           {error && <p className="error">{error}</p>}
 

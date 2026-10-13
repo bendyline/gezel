@@ -323,7 +323,7 @@ describe('Crew activity menu', () => {
     const proactive = await screen.findByRole('menuitemradio', { name: /Proactive/ });
     expect(proactive).toHaveAttribute('aria-checked', 'true');
     expect(proactive.querySelector('.app-engagement-mode-icon-proactive')).toBeInTheDocument();
-    expect(proactive.querySelector('.gz-stop-marker svg')).toBeInTheDocument();
+    expect(proactive).toHaveClass('gz-key-active');
 
     expect(
       screen
@@ -341,10 +341,25 @@ describe('Crew activity menu', () => {
         .querySelector('.app-engagement-mode-icon-off'),
     ).toBeInTheDocument();
     expect(screen.getByText('Night Shift')).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /Start night shift now/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Start the Night Shift now/ })).toBeInTheDocument();
   });
 
-  it('lets the keyboard explore stops without changing activity until a choice is committed', async () => {
+  it('explains the latched mode beneath the tray', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
+    );
+
+    const readout = await screen.findByText(/they start work, check in on projects/);
+    expect(readout.closest('.app-engagement-readout')).toHaveTextContent(
+      /^Proactive — Your gezellen/,
+    );
+    const order = screen.getAllByRole('menuitemradio').map((item) => item.textContent);
+    expect(order).toEqual(['Off', 'Chat only', 'Tasks + chat', 'Proactive']);
+  });
+
+  it('lets the keyboard walk the tray without changing activity until a choice is committed', async () => {
     const user = userEvent.setup();
     render(<App />);
     const trigger = await screen.findByRole('button', {
@@ -352,21 +367,26 @@ describe('Crew activity menu', () => {
     });
     trigger.focus();
     await user.keyboard('{ArrowDown}');
-    const proactive = await screen.findByRole('menuitemradio', { name: /Proactive/ });
-    await waitFor(() => expect(proactive).toHaveFocus());
-    await user.keyboard('{ArrowDown}{ArrowDown}');
+    const off = await screen.findByRole('menuitemradio', { name: /^Off/ });
+    await waitFor(() => expect(off).toHaveFocus());
+    await user.keyboard('{ArrowRight}{ArrowRight}');
+    expect(screen.getByRole('menuitemradio', { name: /Tasks \+ chat/ })).toHaveFocus();
+    await user.keyboard('{ArrowLeft}');
     expect(screen.getByRole('menuitemradio', { name: /Chat only/ })).toHaveFocus();
-    expect(proactive).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('menuitemradio', { name: /Proactive/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
     expect(api.updateConfig).not.toHaveBeenCalled();
     await user.keyboard('{Escape}');
     expect(trigger).toHaveFocus();
     expect(api.updateConfig).not.toHaveBeenCalled();
 
     await user.keyboard('{ArrowDown}');
-    await waitFor(() =>
-      expect(screen.getByRole('menuitemradio', { name: /Proactive/ })).toHaveFocus(),
-    );
-    await user.keyboard('{ArrowDown}{Enter}');
+    await waitFor(() => expect(screen.getByRole('menuitemradio', { name: /^Off/ })).toHaveFocus());
+    await user.keyboard('{ArrowLeft}');
+    expect(screen.getByRole('menuitemradio', { name: /Proactive/ })).toHaveFocus();
+    await user.keyboard('{ArrowLeft}{Enter}');
     await waitFor(() =>
       expect(api.updateConfig).toHaveBeenCalledWith({ aiEngagementMode: 'scheduled' }),
     );
@@ -394,7 +414,7 @@ describe('Crew activity menu', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Proactive. Night Shift running. Click to change.',
       }),
     );
     await user.click(screen.getByRole('menuitemradio', { name: new RegExp(`^${label}`) }));
@@ -412,7 +432,7 @@ describe('Crew activity menu', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Proactive. Night Shift running. Click to change.',
       }),
     );
     await user.click(screen.getByRole('menuitemradio', { name: /Tasks \+ chat/ }));
@@ -444,14 +464,14 @@ describe('Night Shift header status', () => {
     render(<App />);
 
     const trigger = await screen.findByRole('button', {
-      name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
+      name: 'Crew activity: Proactive. Night Shift running. Click to change.',
     });
     expect(trigger.querySelectorAll('.app-nightshift-cloud')).toHaveLength(2);
     expect(trigger.querySelector('.app-nightshift-moon')).toHaveClass('is-active');
 
     await user.click(trigger);
     const proactive = await screen.findByRole('menuitemradio', { name: /Proactive/ });
-    expect(proactive.querySelector('.gz-stop-marker svg')).toBeInTheDocument();
+    expect(proactive).toHaveClass('gz-key-active');
   });
 
   it('shows the selected mode glyph when Night Shift is off', async () => {
@@ -472,7 +492,7 @@ describe('Night Shift header status', () => {
       await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
     );
 
-    const action = await screen.findByRole('menuitem', { name: /Start night shift now/ });
+    const action = await screen.findByRole('menuitem', { name: /Start the Night Shift now/ });
     expect(action).toHaveClass('app-nightshift-action', 'gz-key', 'gz-key--stacked');
     expect(action.parentElement).toHaveClass('app-nightshift-action-tray', 'gz-tray');
   });
@@ -484,11 +504,11 @@ describe('Night Shift header status', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Proactive. Night Shift running. Click to change.',
       }),
     );
 
-    const action = await screen.findByRole('menuitem', { name: /Stop night shift/ });
+    const action = await screen.findByRole('menuitem', { name: /Stop the Night Shift/ });
     expect(action).toHaveClass('app-nightshift-action', 'gz-key', 'gz-key--stacked');
     expect(action.parentElement).toHaveClass('app-nightshift-action-tray', 'gz-tray');
   });
@@ -512,7 +532,7 @@ describe('Night Shift header status', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Proactive. Night Shift running. Click to change.',
       }),
     );
 
@@ -550,7 +570,7 @@ describe('Night Shift header status', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Proactive. Night Shift running. Click to change.',
       }),
     );
 
@@ -558,7 +578,7 @@ describe('Night Shift header status', () => {
     expect(screen.queryByText('Up next')).not.toBeInTheDocument();
   });
 
-  it('names when the running shift started and when its window closes', async () => {
+  it('names when a scheduled shift ends and how long that is', async () => {
     const user = userEvent.setup();
     const startedAt = new Date(Date.now() - 2 * 60 * 60_000);
     const windowEnd = new Date(Date.now() + 90 * 60_000);
@@ -576,15 +596,14 @@ describe('Night Shift header status', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Crew activity: Night Shift running (scheduled); Proactive mode. Click to change.',
+        name: 'Crew activity: Proactive. Night Shift running. Click to change.',
       }),
     );
 
     expect(
-      await screen.findByText(
-        `Started ${clock(startedAt)} · ends ${clock(windowEnd)} (1h 30m left)`,
-      ),
+      await screen.findByText(`Ends at ${clock(windowEnd)}, 1h 30m from now.`),
     ).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Stop for tonight/ })).toBeInTheDocument();
   });
 
   it('points at the next window while nothing is running', async () => {
@@ -604,8 +623,64 @@ describe('Night Shift header status', () => {
     );
 
     expect(
-      await screen.findByText(`Next window ${clock(start)} – ${clock(end)}`),
+      await screen.findByText(`Your gezellen work through the queue from ${clock(start)}.`),
     ).toBeInTheDocument();
+    const ticks = document.querySelector('.app-nightshift-track-ticks');
+    expect(ticks).toHaveTextContent(`${clock(start)}${clock(end)}`);
+    expect(screen.getByRole('menuitem', { name: /Start the Night Shift now/ })).toHaveTextContent(
+      `Instead of waiting until ${clock(start)}.`,
+    );
+  });
+
+  it("says it is not running while tonight's window is open", async () => {
+    const user = userEvent.setup();
+    const end = new Date(Date.now() + 3 * 60 * 60_000);
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({
+      active: false,
+      source: null,
+      startedAt: null,
+      window: {
+        start: new Date(Date.now() - 60 * 60_000).toISOString(),
+        end: end.toISOString(),
+        open: true,
+      },
+    });
+    render(<App />);
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
+    );
+
+    expect(
+      await screen.findByText(`Not running. Tonight's window closes at ${clock(end)}.`),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Idle')).toBeInTheDocument();
+  });
+
+  it('holds the shift and offers no start while Chat only pauses task work', async () => {
+    const user = userEvent.setup();
+    const config = vi.mocked(api.getConfig).getMockImplementation();
+    try {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'copilot',
+        aiEngagementMode: 'reactive',
+      } as never);
+      render(<App />);
+
+      await user.click(
+        await screen.findByRole('button', { name: 'Crew activity: Chat only. Click to change.' }),
+      );
+
+      expect(
+        await screen.findByText('Chat only pauses task work, so the Night Shift waits.'),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Paused')).toBeInTheDocument();
+      expect(
+        screen.queryByRole('menuitem', { name: /Start the Night Shift now/ }),
+      ).not.toBeInTheDocument();
+    } finally {
+      if (config) vi.mocked(api.getConfig).mockImplementation(config);
+    }
   });
 
   it('promises no closing time for a manual shift', async () => {
@@ -625,12 +700,14 @@ describe('Night Shift header status', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Proactive. Night Shift running. Click to change.',
       }),
     );
 
     expect(
-      await screen.findByText(`Started ${clock(startedAt)} · runs until the work is done`),
+      await screen.findByText(
+        `You started it at ${clock(startedAt)}. It stops when the queue is empty.`,
+      ),
     ).toBeInTheDocument();
   });
 
@@ -656,7 +733,7 @@ describe('Night Shift header status', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Proactive. Night Shift running. Click to change.',
       }),
     );
 
@@ -692,7 +769,7 @@ describe('Night Shift header status', () => {
     const running = render(<App />);
     await user.click(
       await screen.findByRole('button', {
-        name: 'Crew activity: Night Shift running (scheduled); Proactive mode. Click to change.',
+        name: 'Crew activity: Proactive. Night Shift running. Click to change.',
       }),
     );
     expect(await screen.findByText('Finished so far')).toBeInTheDocument();

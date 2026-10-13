@@ -95,7 +95,7 @@ export function resolveActivity(input: {
           item.detail =
             wait.reason === 'engagement-off'
               ? 'AI work is off. Change Activity in Settings to let this start.'
-              : 'Automatic work is paused. Gezels still reply when you ask them.';
+              : 'Automatic work is paused. Gezellen still reply when you ask them.';
           item.heldByActivity = true;
           break;
         case 'night-shift':

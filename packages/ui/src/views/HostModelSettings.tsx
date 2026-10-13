@@ -95,8 +95,8 @@ export function HostModelSettings() {
           <section>
             <h3>Keep a copy of your work</h3>
             <p>
-              Back up your projects, gezels, conversations, and documents to a file. You can review
-              a backup before restoring it.
+              Back up your projects, gezellen, conversations, and documents to a file. You can
+              review a backup before restoring it.
             </p>
             <button type="button" onClick={() => requestBackupRestore({ tab: 'backup' })}>
               Back up content…

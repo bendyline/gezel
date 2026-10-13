@@ -145,6 +145,12 @@ describe('ConnectedAppsPanel', () => {
       'LibreOffice',
       'Ollama',
     ]);
+    for (const tab of tabs) {
+      expect(tab.querySelector('svg.connected-apps-tab-icon')).toHaveAttribute(
+        'aria-hidden',
+        'true',
+      );
+    }
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'LibreOffice' }));

@@ -29,13 +29,7 @@ Current dispositions:
 
 | Package | Disposition | Review deadline |
 | --- | --- | --- |
-| `braces@3.0.3` | [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) is resolved in the packaged payload by `patches/braces@3.0.3.patch`. Parsing and AST walkers enforce a nesting bound of 64. | 2026-11-09 |
 | `sharp@0.35.3` | [GHSA-rgj7-g3m4-5g8c](https://github.com/advisories/GHSA-rgj7-g3m4-5g8c) and [GHSA-wq5f-xc86-pv6w](https://github.com/advisories/GHSA-wq5f-xc86-pv6w) do not affect the private no-image stub. The vulnerable image libraries are absent; the existing Sharp tree verifier rejects surviving upstream payloads. | 2027-01-08 |
-
-For braces, `scripts/braces-security.test.mjs` exercises deeply nested braces,
-parentheses, mixed and unclosed groups, caller-supplied ASTs, and ordinary glob
-behavior. The patch applies to the dependency itself, in addition to the tighter
-product file-glob schema. Replace it with an upstream fix when available.
 
 To revise a disposition, review the replacement implementation and advisory,
 update the patch through pnpm's native patch workflow under the dependency mutation
@@ -49,8 +43,7 @@ corresponding dependency or workaround is removed.
 
 pnpm workspace patches do not transfer into applications that install the public
 npm packages. The separate clean npm-consumer audit retains its critical threshold
-and does not use desktop exceptions. The braces disposition therefore applies to
-the verified packaged application payload, not arbitrary npm installations.
+and does not use desktop exceptions.
 
 ## F1 remediation, 2026-10-10
 

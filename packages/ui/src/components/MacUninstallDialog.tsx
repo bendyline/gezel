@@ -107,7 +107,7 @@ export function MacUninstallDialog() {
                 onChange={(event) => setRemoveSharedData(event.target.checked)}
               />
               <span>
-                <strong>Machine-shared projects and gezels</strong>
+                <strong>Machine-shared projects and gezellen</strong>
                 <small>
                   Permanently deletes the shared crew and project definitions in{' '}
                   <code>/Users/Shared/Gezel</code> for everyone on this Mac.
@@ -133,7 +133,7 @@ export function MacUninstallDialog() {
 
           {!removeMachineData && !deletesUserWork && (
             <p className="gz-uninstall-preserve muted small">
-              Your downloaded models, projects, gezels, chats, credentials, and settings will be
+              Your downloaded models, projects, gezellen, chats, credentials, and settings will be
               ready if you reinstall Gezel later.
             </p>
           )}

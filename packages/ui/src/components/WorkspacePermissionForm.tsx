@@ -2,7 +2,7 @@ import type { Question, WorkspaceWritePermissionIntent } from '@bendyline/gezel'
 import { MANAGED_WORKSPACE_WRITE_SETTING_LABEL } from '@bendyline/gezel';
 import type { ReactNode } from 'react';
 import { api } from '../api.js';
-import { RenderedMarkdown } from './chat-bubbles.js';
+import { QuestionPrompt } from './QuestionPrompt.js';
 import { useQuestionDraft } from './question-drafts.js';
 import '../styles/workspace-permission.css';
 
@@ -60,9 +60,7 @@ export function WorkspacePermissionForm({
         <PermissionIcon />
         <strong>Permission request</strong>
       </div>
-      <div className="pending-question-prompt">
-        <RenderedMarkdown markdown={question.prompt} />
-      </div>
+      <QuestionPrompt question={question} />
       <dl className="workspace-permission-scope">
         <dt>Permission</dt>
         <dd>Create, edit, rename and delete project files</dd>
@@ -82,7 +80,7 @@ export function WorkspacePermissionForm({
         )}
         <dt>Applies to</dt>
         <dd>
-          All gezels using built-in tools, scripts and background work, throughout this folder and
+          All gezellen using built-in tools, scripts and background work, throughout this folder and
           its subfolders
         </dd>
         <dt>Duration</dt>

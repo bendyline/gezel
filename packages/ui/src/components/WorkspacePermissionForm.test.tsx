@@ -44,7 +44,7 @@ describe('project permission card', () => {
     expect(screen.getByText('D:/Projects/Slides')).toBeInTheDocument();
     expect(screen.getByText('Create, edit, rename and delete project files')).toBeInTheDocument();
     expect(
-      screen.getByText(/All gezels using built-in tools, scripts and background work/),
+      screen.getByText(/All gezellen using built-in tools, scripts and background work/),
     ).toBeInTheDocument();
     expect(screen.getByText('Until revoked, including future tasks')).toBeInTheDocument();
     expect(screen.queryByText('Only one harmless file')).toBeNull();

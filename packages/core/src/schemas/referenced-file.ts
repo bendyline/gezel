@@ -23,6 +23,16 @@ export const ReferencedFileSchema = z.object({
 export type ReferencedFile = z.infer<typeof ReferencedFileSchema>;
 
 /**
+ * A referenced file that may live in another project than the record naming
+ * it: a task-finished card is filed in the wrap-up thread's project but lists
+ * the task's own files. `projectId` is set only when the projects differ.
+ */
+export const ProjectReferencedFileSchema = ReferencedFileSchema.extend({
+  projectId: z.string().optional(),
+});
+export type ProjectReferencedFile = z.infer<typeof ProjectReferencedFileSchema>;
+
+/**
  * The one file a task hands its owner — the PowerPoint, the report, the
  * page — as opposed to the sources, outlines, and reviews it made on the
  * way. Resolved by the service from the task's craftbook and what its

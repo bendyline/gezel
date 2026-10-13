@@ -90,7 +90,7 @@ export function OpenCodeSetupCard({
       notice={card.notice}
       error={card.error}
       reasonsIntro="The managed setup needs an update:"
-      emptyModelsNote="No gezels or inference models compatible with the OpenCode tool loop are available yet."
+      emptyModelsNote="No gezellen or inference models compatible with the OpenCode tool loop are available yet."
       intro={
         <>
           OpenCode keeps its own tools, permissions, and conversation loop while a gezel supplies

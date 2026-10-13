@@ -798,14 +798,28 @@
   overflow-x: visible;
 }
 
+/* The marks widen every tab, so the padding narrows to keep all eight on one
+   row in a 1280px window with both rails open. */
+.connected-apps-tabs > .gz-tabs-list > .gz-tabs-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding-inline: 0.55rem;
+}
+
+/* A product's mark beside its name; ConnectedAppTabIcon picks its color. */
+.connected-apps-tab-icon {
+  flex: none;
+  width: 1em;
+  height: 1em;
+}
+
 .connected-apps-tab-dot {
-  display: inline-block;
+  flex: none;
   width: 7px;
   height: 7px;
-  margin-left: 0.35rem;
   border-radius: 50%;
   background: var(--warning);
-  vertical-align: middle;
 }
 
 .connected-apps-serving {

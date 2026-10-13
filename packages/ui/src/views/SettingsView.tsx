@@ -801,7 +801,7 @@ function DaemonSettingsView() {
     try {
       const res = await api.resetGezelTemplates();
       const n = res.reset.length;
-      setStatus(`reset ${n} gezel${n === 1 ? '' : 's'} to template defaults`);
+      setStatus(`reset ${n} ${n === 1 ? 'gezel' : 'gezellen'} to template defaults`);
     } catch (err) {
       setStatus(`reset failed: ${(err as Error).message}`);
     }
@@ -946,8 +946,8 @@ function DaemonSettingsView() {
       window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setStatus(
         show
-          ? 'gezels show their names and poppetjes'
-          : 'gezels show role-based names and plain letter avatars',
+          ? 'gezellen show their names and poppetjes'
+          : 'gezellen show role-based names and plain letter avatars',
       );
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
@@ -2035,7 +2035,7 @@ function DaemonSettingsView() {
                 <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
                   The daily reserve scales with the time left: 10% a day with 4 days until reset
                   keeps the last 40% for you. Work already running finishes; held work resumes when
-                  your quota frees up. Gezels on local models are never held.
+                  your quota frees up. Gezellen on local models are never held.
                 </p>
               </section>
               <section style={{ marginTop: '2rem' }}>
@@ -2043,7 +2043,7 @@ function DaemonSettingsView() {
                 <p className="muted" style={{ marginTop: 0 }}>
                   Restore every gezel created from a template back to the <code>about.md</code>{' '}
                   their template ships, discarding any edits you’ve made to their instructions.
-                  Bespoke gezels (written from scratch) are left untouched.
+                  Bespoke gezellen (written from scratch) are left untouched.
                 </p>
                 <button type="button" className="subtle" onClick={() => void resetTemplatesNow()}>
                   Reset to defaults
@@ -3628,7 +3628,7 @@ function DaemonSettingsView() {
               </div>
               <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
                 Gezel’s narrow destructive-command guard stays on in every mode. Projects and
-                individual gezels can override this default.
+                individual gezellen can override this default.
               </p>
 
               {codexCliProbe.kind === 'ok' && (
@@ -3897,7 +3897,7 @@ function DaemonSettingsView() {
                 </div>
               </div>
               <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
-                Projects and individual gezels can override this default.
+                Projects and individual gezellen can override this default.
               </p>
 
               {anthropicCliProbe.kind === 'ok' && (
@@ -4002,7 +4002,7 @@ function DaemonSettingsView() {
                 </div>
                 <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
                   Each ready process stays with one chat thread, so later turns skip the start-up
-                  wait. More processes mean faster replies when several gezels work at once, and
+                  wait. More processes mean faster replies when several gezellen work at once, and
                   more memory (about 100–200 MB each). When the pool is full, the idle process that
                   was used longest ago is closed.
                 </p>

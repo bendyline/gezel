@@ -110,7 +110,7 @@ export function assertScriptExecutionAllowed(
     (trigger.kind === 'chat' || trigger.kind === 'step')
   ) {
     throw new Error(
-      'Security policy: script execution is disabled. Raise the security level in Settings → Security & Compliance to let gezels run scripts.',
+      'Security policy: script execution is disabled. Raise the security level in Settings → Security & Compliance to let gezellen run scripts.',
     );
   }
 }

@@ -72,7 +72,7 @@ export function VSCodeSetupCard({
       notice={card.notice}
       error={card.error}
       reasonsIntro="The managed setup needs an update:"
-      emptyModelsNote="No gezels or inference models compatible with VS Code's agent tool loop are available yet."
+      emptyModelsNote="No gezellen or inference models compatible with VS Code's agent tool loop are available yet."
       intro={
         <>
           VS Code keeps its native agent tools, permissions, and conversation loop. Gezel adds your

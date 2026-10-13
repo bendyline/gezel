@@ -338,6 +338,7 @@ export function ActivityControl() {
                                 openQuestionInChat(question);
                                 setOpen(false);
                               }}
+                              onNavigate={() => setOpen(false)}
                             />
                           </Suspense>
                         </div>

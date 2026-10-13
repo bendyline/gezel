@@ -1797,7 +1797,7 @@ export class Store {
     if (!existing) throw new Error(`agent ${id} not found`);
     if (existing.storageScope === 'machine-shared') {
       throw new Error(
-        'Machine-shared gezels cannot be removed from an individual account. Shared removal is not available yet.',
+        'Machine-shared gezellen cannot be removed from an individual account. Shared removal is not available yet.',
       );
     }
 

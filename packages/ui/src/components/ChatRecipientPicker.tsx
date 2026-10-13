@@ -95,7 +95,7 @@ export function ChatRecipientPicker({
             type="search"
             value={query}
             placeholder="Search by name or role"
-            aria-label="Search gezels"
+            aria-label="Search gezellen"
             onChange={(event) => setQuery(event.target.value)}
           />
         )}

@@ -2681,7 +2681,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 ) : null}
                               </div>
                               <small className="muted">
-                                Gezels address linked files with the existing file tools at{' '}
+                                Gezellen address linked files with the existing file tools at{' '}
                                 <code>../project-id/…</code>. Writes still follow the linked
                                 project’s own workspace-write setting.
                               </small>
@@ -2722,7 +2722,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                   ? selected.github.checkoutDir
                                     ? `Linked. Checkout: ${selected.github.checkoutDir}${selected.github.branch ? ` (${selected.github.branch})` : ''}`
                                     : 'Linked. Use the GitHub tab to clone.'
-                                  : 'Optional. When set, gezels gain a GitHub-linked checkout and a new GitHub tab.'}
+                                  : 'Optional. When set, gezellen gain a GitHub-linked checkout and a new GitHub tab.'}
                                 {gitStatus && (
                                   <>
                                     {' '}
@@ -2925,7 +2925,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               <h4>Recent workspace changes</h4>
                               {writesJournal.length === 0 ? (
                                 <p className="muted small">
-                                  No workspace mutations recorded yet. Gezels that call{' '}
+                                  No workspace mutations recorded yet. Gezellen that call{' '}
                                   <code>write_file</code>, <code>delete_path</code>,{' '}
                                   <code>make_dir</code>, or <code>rename</code> will show up here.
                                 </p>
@@ -3022,7 +3022,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     message={
                       selected.workingDir ? (
                         <>
-                          Gezels will be able to create, modify, and delete files inside{' '}
+                          Gezellen will be able to create, modify, and delete files inside{' '}
                           <code>{selected.workingDir}</code>. Every change is logged in the Settings
                           section. You can turn this back off at any time.
                         </>

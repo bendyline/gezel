@@ -165,7 +165,7 @@ export function ChannelsSettings({ config, onConfigChanged }: Props) {
       <section className="provider-card">
         <h3>Webhook</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          A generic HTTP channel. Gezels (and the service itself) can POST a message here, and
+          A generic HTTP channel. Gezellen (and the service itself) can POST a message here, and
           whatever listens on the other end decides what to do with it — push to your phone via
           ntfy.sh, drop into a Slack channel via an incoming webhook, forward to Discord, or relay
           through a self-hosted service.

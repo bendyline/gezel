@@ -6,6 +6,7 @@ import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { CodexSetupCard } from './CodexSetupCard.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { ConnectedAppTabIcon, type ConnectedAppsTab } from './ConnectedAppTabIcon.js';
 import { LibreOfficeSetupCard } from './LibreOfficeSetupCard.js';
 import { OfficeSetupCard } from './OfficeSetupCard.js';
 import { OpenCodeSetupCard } from './OpenCodeSetupCard.js';
@@ -102,16 +103,6 @@ type EndpointsStatusScope = 'endpoints' | 'ollama';
  * isn't the moment the user finds out.
  */
 const NO_APP_TOOLS_PROVIDERS = new Set(['copilot', 'anthropic-cli', 'codex-cli']);
-
-type ConnectedAppsTab =
-  | 'overview'
-  | 'codex'
-  | 'vscode'
-  | 'opencode'
-  | 'pi'
-  | 'office'
-  | 'libreoffice'
-  | 'ollama';
 
 type SetupTab = Exclude<ConnectedAppsTab, 'overview' | 'ollama'>;
 
@@ -404,13 +395,17 @@ export function ConnectedAppsPanel() {
         onValueChange={(value) => setTab(value as ConnectedAppsTab)}
       >
         <Tabs.List aria-label="Integrations">
-          <Tabs.Trigger value="overview">Overview</Tabs.Trigger>
+          <Tabs.Trigger value="overview">
+            <ConnectedAppTabIcon tab="overview" />
+            Overview
+          </Tabs.Trigger>
           {SETUP_TABS.map(({ id, label }) => {
             const setupState = setupStates[id];
             const attention =
               setupState && NEEDS_ATTENTION.has(setupState) ? harnessStateLabel(setupState) : null;
             return (
               <Tabs.Trigger key={id} value={id} title={attention ?? undefined}>
+                <ConnectedAppTabIcon tab={id} />
                 {label}
                 {attention && (
                   <>
@@ -421,7 +416,10 @@ export function ConnectedAppsPanel() {
               </Tabs.Trigger>
             );
           })}
-          <Tabs.Trigger value="ollama">Ollama</Tabs.Trigger>
+          <Tabs.Trigger value="ollama">
+            <ConnectedAppTabIcon tab="ollama" />
+            Ollama
+          </Tabs.Trigger>
         </Tabs.List>
 
         <Tabs.Content value="overview" forceMount>

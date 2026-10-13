@@ -108,7 +108,7 @@ export function LibreOfficeSetupCard({
       </div>
 
       <p className="muted small harness-setup-intro">
-        Adds a Gezel panel to Writer, Calc, and Impress, where your gezels chat with you about the
+        Adds a Gezel panel to Writer, Calc, and Impress, where your gezellen chat with you about the
         open document and can read and edit it. It is installed for your account only.
       </p>
 

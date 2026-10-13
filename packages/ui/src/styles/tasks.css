@@ -638,6 +638,66 @@
   line-height: 1.45;
 }
 
+/* Every file the task made besides its deliverable, one row each. A row is
+   the whole link: the name reads first, where it lives trails in muted text,
+   the same recipe as the night review's report rows. */
+.task-outputs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.task-output-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease-out;
+}
+
+.task-output-row:hover {
+  background: var(--panel);
+}
+
+.task-output-icon {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.task-output-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.task-output-where {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.task-outputs-more {
+  margin-top: 0.35rem;
+}
+
 .task-detail-ref {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--muted);

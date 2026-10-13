@@ -62,7 +62,7 @@ export function CodexSetupCard({
       notice={card.notice}
       error={card.error}
       reasonsIntro="The managed setup needs an update:"
-      emptyModelsNote="No gezels or inference models compatible with the Codex tool loop are available yet."
+      emptyModelsNote="No gezellen or inference models compatible with the Codex tool loop are available yet."
       intro={
         <>
           Codex keeps its coding tools, sandbox, approvals, and conversation loop while a gezel

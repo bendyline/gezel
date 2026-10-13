@@ -1,38 +1,36 @@
 import type { AIEngagementMode } from '@bendyline/gezel';
 
-/** Ordered from most independent to paused; shared by the menu and Settings. */
+/**
+ * Ordered from paused to most independent, so a tray reads left to right as
+ * the crew coming to the bench. Shared by the titlebar menu and Settings.
+ */
 export const ENGAGEMENT_MODES: {
   mode: AIEngagementMode;
   label: string;
-  hint: string;
   description: string;
 }[] = [
   {
-    mode: 'proactive',
-    label: 'Proactive',
-    hint: 'Gezels take initiative, work together, and keep tasks moving.',
+    mode: 'off',
+    label: 'Off',
     description:
-      'Your crew can take initiative and work together. Chat, tasks, schedules, proactive check-ins, and messages between gezels are all enabled.',
-  },
-  {
-    mode: 'scheduled',
-    label: 'Tasks + chat',
-    hint: 'Gezels carry out tasks and schedules, and answer you in chat.',
-    description:
-      'Your crew carries out active tasks and schedules, and answers you in chat. Proactive check-ins and messages between gezels are paused.',
+      'Everything is paused, even chat. A reply already underway can finish; queued messages are canceled.',
   },
   {
     mode: 'reactive',
     label: 'Chat only',
-    hint: 'Gezels answer when you ask. Task work is paused.',
     description:
-      'Your crew responds to your direct messages. New task steps, scheduled jobs, proactive check-ins, and messages between gezels are paused. An in-flight turn can finish.',
+      'Your gezellen answer when you ask. Tasks and schedules wait until you switch back.',
   },
   {
-    mode: 'off',
-    label: 'Off',
-    hint: 'The whole crew is paused, including chat.',
+    mode: 'scheduled',
+    label: 'Tasks + chat',
     description:
-      'Chat and all background AI activity are paused. An in-flight turn can finish; queued messages are canceled.',
+      'Your gezellen work through tasks and schedules and answer you in chat. Nobody starts anything unasked.',
+  },
+  {
+    mode: 'proactive',
+    label: 'Proactive',
+    description:
+      'Your gezellen also take initiative: they start work, check in on projects, and hand work to each other.',
   },
 ];

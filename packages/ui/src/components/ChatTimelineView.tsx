@@ -2348,7 +2348,12 @@ export function ChatTimelineView({
           }
           return next;
         });
-        if (event.type === 'question_asked') void refreshLatest();
+        // The event carries the question as filed; the list read adds the
+        // files its prompt names, so the inline card's paths become links.
+        if (event.type === 'question_asked') {
+          void refreshLatest();
+          void refreshQuestions();
+        }
       }
 
       function createSlot(gid: string, pid: string, sid: string): LiveSlot {
@@ -2390,6 +2395,7 @@ export function ChatTimelineView({
       messages,
       onToolActivity,
       refreshLatest,
+      refreshQuestions,
       refetchGezels,
       defaultProvider,
       inflightProjectId,

@@ -24,7 +24,10 @@ Three words that should describe any screen:
 3. **Historic** — Gezel is a guild. The vocabulary (gezel, meester, voorman)
    is Dutch apprenticeship terminology; the visuals should echo the world
    those words come from. A guild hall, an apprentice's bench, a master's
-   ledger — not a SaaS dashboard.
+   ledger — not a SaaS dashboard. The plural follows the Dutch: **gezellen**
+   (possessive "gezellen's") in anything a person reads. Technical names keep
+   **gezels** — the `gezels/` folder, routes, ids, API and tool names — and so
+   does text written only for a model.
 
 What this *doesn't* mean: kitsch, pastiche, or literal skeuomorphism. The one place a
 *vaguely* skeuomorphic cue is welcome is physicality on things you press:
@@ -241,27 +244,29 @@ Rules:
   `border-radius: 999px` on anything with a text label, it should almost
   certainly be a key or a small-radius chip instead.
 
-### Crew activity: four stops on one track
+### Crew activity: one tray, read left to right
 
-The titlebar's **Crew activity** menu presents independence as a vertical
-spectrum: **Proactive → Tasks + chat → Chat only → Off**. Use the
-`gz-tray--stops` / `gz-key--stop` extension of keys in trays: a continuous
-rail with four circular stops, a check inside the selected stop, and the
-latched face behind that choice. The whole row is the target. Hover and
-keyboard focus stay distinct from the committed selection.
+The titlebar's **Crew activity** menu is the product's most-used dropdown,
+so it stays simple: a heading, one line ("How much your gezellen do on their
+own."), and one described tray of four keys ordered from paused to most
+independent: **Off → Chat only → Tasks + chat → Proactive**. Each key is the
+mode's icon over its label, so the row reads as one story, the crew coming
+to the bench. The latched key explains itself in the readout beneath, through
+the described-tray stem; Off latches danger-red. Settings shows the same
+tray in the same order with the same copy (`engagement-modes.ts`).
 
-These are discrete menu radio choices, not a continuous range. Arrow keys
-move focus; Enter, Space, or a click commits one mode and closes the menu.
-Do not switch through intermediate modes while a pointer moves along the
-track: Chat only and Off can stop a running Night Shift. Night Shift stays
-below the spectrum as its own section, never as a fifth stop.
+These are discrete menu radio choices, not a continuous range. Left and
+right arrows walk the tray (Radix menus only move up and down, so the tray
+adds them); Enter, Space, or a click commits one mode and closes the menu.
+Chat only and Off can stop a running Night Shift. Night Shift stays below
+the tray as its own section, never as a fifth key.
 
 The icon family is the crew at the workbench: one bench that never moves,
 with up to three poppetje figures standing behind it in fixed places, the
 lead in the middle a little taller. Off leaves the bench empty with the
 hammer lying on it; Chat only brings the lead to the bench; Tasks + chat
 brings the whole crew; Proactive has the lead raise the hammer unasked. The
-figures stand for a crew, not a literal count of active gezels. Three shapes
+figures stand for a crew, not a literal count of active gezellen. Three shapes
 are deliberate. The H-frame legs make it a workbench; a plain table reads as
 a desk or a meeting table. The hammer has a flat face and a rounded peen and
 is held upright in the lead's fist: a symmetric mallet raised behind a bench
@@ -270,6 +275,27 @@ And initiative is a raised tool, never a raised hand, which reads as waiting
 to be called on. Labels and descriptions always explain the mode; color alone
 never does. Reuse `EngagementModeIcon` and the shared mode copy in the
 titlebar, menu, and Settings so this vocabulary remains consistent.
+
+### Night Shift: a tile, a badge, and the night as a track
+
+The menu's second section answers "when?" before anything else. A sage night
+tile holds the moon (the titlebar key's own look while a shift runs), then
+the title with one status line, and a read-only status badge: the night it
+next runs (Tonight, Tomorrow, a weekday), Running, Idle, On hold, or Paused.
+Everything after the tile shares one left edge; list dots sit in the tile's
+column. A thin track draws the window from its start to its end and fills to
+now while a scheduled shift runs, so the line never has to spell out "3h 46m
+left" twice. A manual shift draws no track: it runs until the queue is
+empty, so it promises no end.
+
+The section must say when the shift cannot run. Chat only and Off hold all
+task work, so the badge reads Paused, the line says which mode is holding
+it, and there is no Start key (a Start that does nothing is worse than none).
+All of this wording is decided in one place, `nightShiftSummary` in
+[App.tsx](../packages/ui/src/App.tsx); add a state there, not in the markup.
+Name times plainly ("Instead of waiting until 10:00 PM", "It starts again
+tomorrow at 10:00 PM") and never the machinery ("deferred indexing",
+"scheduled window").
 
 ## Controls: budget sliders
 
@@ -905,7 +931,12 @@ tab shows it. Hiding
 a warning behind an unselected tab is the regression tabs invite, so every
 panel stays mounted and a tab whose setup needs action carries a small warning
 dot (a true circle), with the state in its accessible name ("Codex, needs
-attention"). The row has no icons to shed to, so it wraps instead of scrolling.
+attention"). Each tab leads with the product's own mark
+(`ConnectedAppTabIcon`): in its brand color where it has one, and in the tab's
+ink where the mark is black. A product with no published mark gets a plain
+drawn glyph, never someone else's. The row wraps rather than shedding labels,
+because several marks (OpenCode's block, pi's π) don't name their product on
+their own.
 Copy that points at another tab names it ("on the Overview tab"), never
 "above" or "below".
 
@@ -1432,7 +1463,10 @@ the two tabs' combined width, with a smaller format tile and file name; the
 location, size, timestamp, and repeated extension label are hidden. Open keeps
 its label; Show in folder and Save a copy use icon buttons with tooltips and
 accessible names. On a receipt that finished its task, it shrinks to a one-line
-chip beside the task chip. Three rules keep it honest:
+chip beside the task chip. The task page's overview lists every other file the
+task made under **Other files** (**Files** when there is no deliverable), one
+row each that opens it, folded after eight: the wrap-up's and the Ready card's
+"…and 3 more" send the person there. Three rules keep it honest:
 
 - **The daemon decides what the deliverable is, and only a file that exists
   gets a card.** The resolver lives in
@@ -1443,9 +1477,13 @@ chip beside the task chip. Three rules keep it honest:
   "PowerPoint deck · in progress", because the tracker may point at the product
   before the last step signs it off.
 - **A path in prose links only when the daemon has verified it.** The same holds
-  in chat replies and in task notes. When a reply names a file the workspace
-  index has not caught up with, the daemon checks it directly on disk, within a
-  fixed limit. It never guesses from a same-named file.
+  in chat replies, in task notes, and in question cards (Activity, Home, chat).
+  When a reply names a file the workspace index has not caught up with, the
+  daemon checks it directly on disk, within a fixed limit; a card's paths are
+  always checked that way. It never guesses from a same-named file. A file
+  opened from a card opens in its own project (a finished card filed in the
+  meester's thread lists the task's files), and a host floating over the app,
+  Activity or the project questions dialog, closes so the file is in view.
 
 **A cited fact shows its source; an unsourced one is said out loud.** A
 gezel writing in factual mode (see [factual-writing.md](factual-writing.md))

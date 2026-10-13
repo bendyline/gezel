@@ -159,7 +159,7 @@ function handoffHoldNote(state: TaskRunnerState): string | undefined {
     return 'AI engagement is off — turn it back on in Settings to start these.';
   }
   if (state.holdReason === 'engagement-paused') {
-    return 'Activity is set to reactive — gezels answer you, but nothing starts on its own.';
+    return 'Activity is set to reactive — gezellen answer you, but nothing starts on its own.';
   }
   if (state.holdReason === 'provider-busy') return 'Waiting for a free slot.';
   return undefined;
@@ -1519,7 +1519,9 @@ export function QueueSessionRows({
   return (
     <div
       className="queue-meter-panel activity-queue"
-      aria-label={selection.part === 'running' ? 'Gezels working now' : 'Gezels waiting their turn'}
+      aria-label={
+        selection.part === 'running' ? 'Gezellen working now' : 'Gezellen waiting their turn'
+      }
     >
       {selection.preparing.length > 0 && onDeviceProvider && (
         <section className="queue-meter-panel-section">

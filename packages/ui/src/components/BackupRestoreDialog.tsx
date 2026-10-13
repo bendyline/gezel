@@ -285,7 +285,7 @@ export function BackupRestoreDialog() {
             <h3>{tab === 'backup' ? 'Back up your content' : 'Restore from a backup'}</h3>
           </AlertDialog.Title>
           <AlertDialog.Description className="muted small">
-            A backup holds your gezels, projects, and documents. Saved credentials are never
+            A backup holds your gezellen, projects, and documents. Saved credentials are never
             included — reconnect your services after restoring.
           </AlertDialog.Description>
 
@@ -435,8 +435,8 @@ export function BackupRestoreDialog() {
                           onChange={(e) => setRestoreSettings(e.target.checked)}
                         />
                         <span>
-                          Also restore settings: which gezels hold roles such as your Meester. Your
-                          AI providers, models, folders and security level stay as they are.
+                          Also restore settings: which gezellen hold roles such as your Meester.
+                          Your AI providers, models, folders and security level stay as they are.
                         </span>
                       </label>
                     )}

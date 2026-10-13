@@ -443,10 +443,10 @@ export function ProjectAddGezelDialog({
           ) : (
             <>
               <label className="project-add-gezel-search">
-                <span className="sr-only">Search gezels and roles</span>
+                <span className="sr-only">Search gezellen and roles</span>
                 <input
                   type="text"
-                  placeholder="Search gezels and roles…"
+                  placeholder="Search gezellen and roles…"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   disabled={busy}
@@ -563,9 +563,9 @@ export function ProjectAddGezelDialog({
                   ) : (
                     <p className="muted small project-add-gezel-empty">
                       {otherAvailableGezels.length > 0
-                        ? 'No workshop gezels match that search.'
+                        ? 'No workshop gezellen match that search.'
                         : suggestedOptions.some((option) => option.kind === 'existing')
-                          ? 'No other workshop gezels are available.'
+                          ? 'No other workshop gezellen are available.'
                           : 'Every available gezel is already on this project.'}
                     </p>
                   )}

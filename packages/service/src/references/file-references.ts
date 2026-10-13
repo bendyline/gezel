@@ -239,6 +239,80 @@ export function createWorkspaceFileProbe(
   };
 }
 
+/** Most path tokens one text may check on disk when resolved without an inventory. */
+export const MAX_STAT_TOKENS_PER_TEXT = 12;
+
+/** A verified file and the project it was found in. */
+export type ProjectFileHit = ReferencedFile & { projectId: string };
+
+export type FileStatResolver = (
+  content: string,
+  projectIds: readonly string[],
+) => Promise<ProjectFileHit[]>;
+
+/**
+ * Find the files a short text names by checking each extension-bearing path
+ * token on disk, with no inventory. Question cards are read on a five-second
+ * poll, where an artifact walk and a workspace listing per read cost far more
+ * than the few stats a prompt's paths need. Without an inventory there is no
+ * basename index, so a bare name resolves only at a store's root, never to a
+ * same-named file deeper down.
+ *
+ * Each of `projectIds` is tried in order and the first that has the file wins.
+ * Answers are remembered for the resolver's lifetime: create one per request.
+ */
+export function createFileStatResolver(
+  store: Pick<Store, 'statProjectArtifactPath' | 'statProjectWorkspacePath'>,
+): FileStatResolver {
+  const known = new Map<string, Promise<boolean>>();
+  const isFile = (projectId: string, file: ReferencedFile): Promise<boolean> => {
+    const key = `${projectId}\u0000${file.kind}\u0000${file.path.toLowerCase()}`;
+    let hit = known.get(key);
+    if (!hit) {
+      const stat =
+        file.kind === 'artifact'
+          ? store.statProjectArtifactPath(projectId, file.path)
+          : store.statProjectWorkspacePath(projectId, file.path);
+      hit = stat.then(
+        (s) => s.kind === 'file',
+        () => false,
+      );
+      known.set(key, hit);
+    }
+    return hit;
+  };
+  return async (content, projectIds) => {
+    // Qualified paths first: they are exact claims, and the budget must not
+    // run out on version numbers in the prose before it reaches them.
+    const tokens = scanPathTokens(content)
+      .filter((token) => token.extended)
+      .sort((a, b) => Number(b.qualified) - Number(a.qualified));
+    const checked = new Set<string>();
+    const hits = new Map<string, ProjectFileHit>();
+    for (const token of tokens) {
+      const lower = token.path.toLowerCase();
+      if (checked.has(lower)) continue;
+      if (checked.size >= MAX_STAT_TOKENS_PER_TEXT) break;
+      checked.add(lower);
+      const drawer = splitDrawerPrefix(token.path);
+      const candidates: ReferencedFile[] = drawer
+        ? [drawer]
+        : [
+            { kind: 'artifact', path: token.path },
+            { kind: 'workspace', path: token.path },
+          ];
+      found: for (const projectId of projectIds) {
+        for (const file of candidates) {
+          if (!(await isFile(projectId, file))) continue;
+          hits.set(`${projectId}:${file.kind}:${file.path.toLowerCase()}`, { ...file, projectId });
+          break found;
+        }
+      }
+    }
+    return [...hits.values()];
+  };
+}
+
 /** Union two reference lists in the parser's canonical order. */
 export function mergeReferencedFiles(
   a: readonly ReferencedFile[],

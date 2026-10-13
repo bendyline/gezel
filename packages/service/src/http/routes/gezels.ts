@@ -91,7 +91,7 @@ export function gezelRoutes(ctx: ServiceContext): Hono {
       return c.json(
         {
           error:
-            'Machine-shared gezels cannot be removed from an individual account. Shared removal is not available yet.',
+            'Machine-shared gezellen cannot be removed from an individual account. Shared removal is not available yet.',
           reason: 'machine_shared',
         },
         400,
