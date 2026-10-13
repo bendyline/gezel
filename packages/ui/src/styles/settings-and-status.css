@@ -772,6 +772,42 @@
   gap: var(--space-sm);
 }
 
+/* One tab per integration. Every panel is force-mounted so each setup card
+   keeps its status for the tab row's dot; only the selected one shows. */
+.connected-apps-tabs > .gz-tabs-content[data-state="inactive"] {
+  display: none;
+}
+
+/* Each tab holds a single integration, so its setup card drops the frame,
+   as the single-subject provider panes do (`.settings-panel-flat`). The
+   header keeps its rule. The top padding stands in for the 1em margin the
+   other tabs' plain h3 keeps (1em of --text-xl), so headings don't jump
+   between tabs. */
+.connected-apps-tabs .harness-setup-card {
+  margin-bottom: 0;
+  padding: var(--text-xl) 0 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Eight short labels and no icons to shed to, so the row wraps rather than
+   hiding tabs off the end of a scroller. */
+.connected-apps-tabs > .gz-tabs-list {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+
+.connected-apps-tab-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 0.35rem;
+  border-radius: 50%;
+  background: var(--warning);
+  vertical-align: middle;
+}
+
 .connected-apps-serving {
   display: flex;
   align-items: center;

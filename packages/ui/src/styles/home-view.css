@@ -617,16 +617,73 @@
 }
 
 /* The intro is the "What is gezel?" Handboek article embedded as a live
-   page: a row of controls (Open in Handboek + the Read/Watch tray on the
-   toggle variant), then the page itself — a cream sheet. Hosted by the
-   workshop greeting's tour tab and the first-run tutorial column; the old
-   sage "brand card" band it once sat in is gone. */
+   page: a right-aligned tray (Read/Watch keys, then an Open in Handboek
+   key, on the toggle variant), then the page itself — a cream sheet.
+   Hosted by the workshop greeting's Handboek tab and the welcome tour; the
+   old sage "brand card" band it once sat in is gone. */
 .home-intro-article-controls {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   gap: 0.6rem;
   margin: 0.35rem 0 0.6rem;
+}
+
+.home-intro-modes {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+/* Separates the latched view choice from the action beside it, so Open in
+   Handboek doesn't read as a third view. */
+.home-intro-tray-divider {
+  width: 1px;
+  margin: 0.25rem 0.15rem;
+  background: var(--tray-border);
+}
+
+/* On Home's Handboek tab the article is the whole sheet: the page stretches
+   to the sheet's height and scrolls itself, and the article spans the full
+   width (Squisq keeps prose on its own reading measure inside it). */
+.home-workshop-greeting-cols-fill {
+  flex-wrap: nowrap;
+}
+.home-workshop-greeting-cols-fill .home-workshop-greeting-left {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+.home-workshop-greeting-cols-fill .home-workshop-tour-inline,
+.home-workshop-tour-inline .home-intro-article,
+.home-workshop-tour-inline .home-intro-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.home-workshop-tour-inline .home-intro-page {
+  min-height: 16rem;
+}
+.home-workshop-tour-inline .home-intro-doc {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  padding: 0;
+}
+.home-workshop-tour-inline .home-intro-doc > * {
+  max-width: none;
+}
+/* Pad inside Squisq's own surface, not the scroller: in dark mode the frame
+   and the page are different tones, so scroller padding shows as a band. */
+.home-workshop-tour-inline .home-intro-doc .squisq-linear {
+  min-height: 100%;
+  padding-inline: 1.5rem;
+  box-sizing: border-box;
+}
+.home-workshop-tour-inline .home-intro-player {
+  flex: 1;
+  height: auto;
+  min-height: 0;
 }
 
 .home-intro-page {

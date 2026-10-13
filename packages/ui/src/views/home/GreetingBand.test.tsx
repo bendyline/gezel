@@ -6,8 +6,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
 import { freshStatusReport, greetingForHour } from './utils.js';
 
+const poppetjes = vi.hoisted(() => ({ show: false }));
 vi.mock('../../components/useShowPoppetjes.js', () => ({
-  useShowPoppetjes: () => false,
+  useShowPoppetjes: () => poppetjes.show,
 }));
 vi.mock('./StatusReportPanel.js', () => ({
   StatusReportPanel: ({ report }: { report: MeesterStatusReport }) => (
@@ -195,6 +196,22 @@ describe('GreetingBand', () => {
     expect(screen.getByRole('radio', { name: 'Watch' })).not.toBeChecked();
     expect(screen.queryByText('What a meester is')).not.toBeInTheDocument();
     expect(screen.queryByText(/off-disk/i)).not.toBeInTheDocument();
+  });
+
+  it('gives the Handboek reader the full sheet instead of the meester figure', () => {
+    poppetjes.show = true;
+    try {
+      const { unmount } = renderBand();
+      expect(screen.getByText('- Meester')).toBeInTheDocument();
+      expect(document.querySelector('.home-workshop-greeting-cols-fill')).toBeNull();
+      unmount();
+
+      renderBand({ tab: 'tour' });
+      expect(screen.queryByText('- Meester')).not.toBeInTheDocument();
+      expect(document.querySelector('.home-workshop-greeting-cols-fill')).not.toBeNull();
+    } finally {
+      poppetjes.show = false;
+    }
   });
 });
 

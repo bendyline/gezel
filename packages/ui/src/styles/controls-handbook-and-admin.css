@@ -166,6 +166,118 @@
   box-shadow: none;
 }
 
+/* A discrete spectrum: the rail joins the choices, while the checked stop
+   and latched face identify the committed value independently of focus. */
+.gz-tray.gz-tray--stops {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0.25rem;
+  padding: 0.25rem;
+}
+
+.gz-key.gz-key--stop {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px 28px minmax(0, 1fr);
+  gap: 0.7rem;
+  min-height: 5rem;
+  padding: 0.65rem 0.7rem;
+  text-align: left;
+  white-space: normal;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  transform: none;
+  user-select: none;
+}
+
+.gz-key--stop::before {
+  content: "";
+  position: absolute;
+  left: calc(0.7rem + 7px);
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: var(--border-strong, var(--text-muted));
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.gz-key--stop:first-child::before {
+  top: 50%;
+}
+
+.gz-key--stop:last-child::before {
+  bottom: 50%;
+}
+
+.gz-key.gz-key--stop:where(:hover, [data-highlighted]) {
+  background: var(--key-bg-hover);
+}
+
+.gz-key.gz-key--stop[aria-checked="true"] {
+  background: var(--key-pressed-bg);
+  border-color: var(--key-pressed-border);
+  color: var(--key-pressed-ink);
+  box-shadow: var(--key-pressed-shadow);
+}
+
+.gz-key--stop[aria-checked="true"]::before {
+  background: currentColor;
+}
+
+.gz-key--stop[aria-checked="true"] .gz-key-hint {
+  color: inherit;
+  opacity: 0.85;
+}
+
+.gz-key.gz-key--stop:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: -2px;
+}
+
+.gz-stop-marker {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--text-muted);
+  border-radius: 50%;
+  background: var(--tray-bg);
+}
+
+.gz-key--stop[aria-checked="true"] .gz-stop-marker {
+  background: var(--key-pressed-ink);
+  border-color: var(--key-pressed-ink);
+  color: var(--action-bg);
+}
+
+.gz-stop-marker svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.gz-stop-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.gz-stop-copy .gz-key-label {
+  font-weight: 600;
+}
+
+.gz-stop-copy .gz-key-hint {
+  line-height: 1.4;
+}
+
 /* A key that reports a derived state rather than offering a choice (the
    security posture's "Custom", reached by editing individual capability
    switches): it sits latched at full strength while refusing interaction.

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import type { LocalHarnessSetupState } from '@bendyline/gezel';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { Select } from '../primitives/index.js';
+import { Select, Tabs } from '../primitives/index.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { CodexSetupCard } from './CodexSetupCard.js';
@@ -15,6 +16,7 @@ import {
   formatVerificationCode,
   isVerificationCodeReady,
 } from './grant-verification.js';
+import { harnessStateLabel } from './harness-setup/useHarnessSetupCard.js';
 
 /**
  * Settings → Connected Apps tab. Lists every third-party app that's
@@ -29,6 +31,12 @@ import {
  * Connected apps get a revoke button. Revocation hits `DELETE
  * /v1/apps/:appId/token` which invalidates the token immediately;
  * the app sees its next call fail with 401.
+ *
+ * Each integration gets its own tab after Overview. Pending requests and
+ * errors sit above the tab row because an app may be waiting on the person
+ * whichever tab is open (LibreOffice falls back to a connection code). Every
+ * panel stays mounted so each setup card keeps its status, and the tab row
+ * can mark the ones that need attention instead of hiding the warning.
  */
 interface ConnectedApp {
   appId: string;
@@ -79,8 +87,8 @@ const AUTOMATIC_FALLBACK_GEZEL = '__AUTOMATIC__';
  * that add-in for good.
  */
 const SELF_CONNECTING_ADD_INS: Record<string, string> = {
-  office: 'To disconnect it for good, remove it under Use Gezel in Word, Excel, and PowerPoint.',
-  libreoffice: 'To disconnect it for good, remove it under Use Gezel in LibreOffice.',
+  office: 'To disconnect it for good, remove it on the Office tab.',
+  libreoffice: 'To disconnect it for good, remove it on the LibreOffice tab.',
   vscode: 'To disconnect it for good, uninstall the Gezel extension in VS Code.',
 };
 
@@ -94,6 +102,30 @@ type EndpointsStatusScope = 'endpoints' | 'ollama';
  * isn't the moment the user finds out.
  */
 const NO_APP_TOOLS_PROVIDERS = new Set(['copilot', 'anthropic-cli', 'codex-cli']);
+
+type ConnectedAppsTab =
+  | 'overview'
+  | 'codex'
+  | 'vscode'
+  | 'opencode'
+  | 'pi'
+  | 'office'
+  | 'libreoffice'
+  | 'ollama';
+
+type SetupTab = Exclude<ConnectedAppsTab, 'overview' | 'ollama'>;
+
+const SETUP_TABS: ReadonlyArray<{ id: SetupTab; label: string }> = [
+  { id: 'codex', label: 'Codex' },
+  { id: 'vscode', label: 'VS Code' },
+  { id: 'opencode', label: 'OpenCode' },
+  { id: 'pi', label: 'pi' },
+  { id: 'office', label: 'Office' },
+  { id: 'libreoffice', label: 'LibreOffice' },
+];
+
+/** Setup states the person has to act on. Their tab carries a warning dot. */
+const NEEDS_ATTENTION: ReadonlySet<LocalHarnessSetupState> = new Set(['update-needed', 'conflict']);
 
 export function ConnectedAppsPanel() {
   const [state, setState] = useState<ConnectedAppsResponse | null>(null);
@@ -115,6 +147,23 @@ export function ConnectedAppsPanel() {
   const [harnessSetupRefreshKey, setHarnessSetupRefreshKey] = useState(0);
   const [defaultProvider, setDefaultProvider] = useState<string>('copilot');
   const [meesterGezelId, setMeesterGezelId] = useState<string | undefined>();
+  const [tab, setTab] = useState<ConnectedAppsTab>('overview');
+  const [setupStates, setSetupStates] = useState<Partial<Record<SetupTab, LocalHarnessSetupState>>>(
+    {},
+  );
+
+  const reportSetupState = useMemo(() => {
+    const report = (id: SetupTab) => (next: LocalHarnessSetupState) =>
+      setSetupStates((current) => (current[id] === next ? current : { ...current, [id]: next }));
+    return {
+      codex: report('codex'),
+      vscode: report('vscode'),
+      opencode: report('opencode'),
+      pi: report('pi'),
+      office: report('office'),
+      libreoffice: report('libreoffice'),
+    } satisfies Record<SetupTab, (state: LocalHarnessSetupState) => void>;
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -167,8 +216,8 @@ export function ConnectedAppsPanel() {
       emulateOllama?: boolean;
     }) => {
       const previous = endpoints;
-      // The Ollama toggle now lives in its own subsection, below the harness
-      // cards. Report its save beside the control the user just used.
+      // The Ollama toggle lives on its own tab. Report its save beside the
+      // control the user just used.
       const scope: EndpointsStatusScope =
         next.emulateOllama !== previous.emulateOllama ? 'ollama' : 'endpoints';
       setEndpoints(next);
@@ -283,154 +332,6 @@ export function ConnectedAppsPanel() {
         </p>
       )}
 
-      <div className="settings-subsection">
-        <h3>OpenAI-compatible endpoints</h3>
-        <p className="muted small">
-          Other apps (editors, browser tools) can use your gezellen and models through standard
-          OpenAI-style endpoints. Each app still needs your approval below before it gets access.
-        </p>
-        <label className="debug-toggle">
-          <input
-            type="checkbox"
-            checked={endpointsEnabled}
-            onChange={(e) =>
-              void saveEndpoints({ ...endpoints, enabled: e.target.checked ? undefined : false })
-            }
-          />
-          <span>Allow apps to connect</span>
-        </label>
-        {endpointsEnabled ? (
-          <p className="muted small">
-            Point apps at <code>{api.getBaseUrl()}/v1</code>
-          </p>
-        ) : (
-          <p className="muted small">
-            Turned off — connected apps are refused and new apps cannot ask for access until this is
-            back on.
-          </p>
-        )}
-        <div className="connected-apps-serving">
-          <span id="serving-gezel-label">Fallback gezel</span>
-          <Select.Root
-            value={configuredFallbackGezel ? configuredFallbackGezel.id : AUTOMATIC_FALLBACK_GEZEL}
-            onValueChange={(v) =>
-              void saveEndpoints({
-                ...endpoints,
-                servingGezelId: v === AUTOMATIC_FALLBACK_GEZEL ? undefined : v,
-              })
-            }
-            disabled={!endpointsEnabled}
-          >
-            <Select.Trigger aria-labelledby="serving-gezel-label">
-              <Select.Value />
-            </Select.Trigger>
-            <Select.Content>
-              <Select.Item value={AUTOMATIC_FALLBACK_GEZEL}>
-                Automatic
-                {automaticFallbackGezel ? ` — ${automaticFallbackGezel.name}` : ''}
-              </Select.Item>
-              {gezels.map((g) => (
-                <Select.Item key={g.id} value={g.id}>
-                  {g.name}
-                  {g.role ? ` — ${g.role}` : ''}
-                  {` (${resolveProvider(g)})`}
-                </Select.Item>
-              ))}
-            </Select.Content>
-          </Select.Root>
-        </div>
-        <p className="muted small">
-          Apps receive your gezellen as model choices, including their names and roles. If an app
-          asks for something else, {fallbackGezel?.name ?? 'your default gezel'} answers with their
-          character and model settings.
-        </p>
-        {fallbackGezel && fallbackLacksAppTools && (
-          <p className="small connected-apps-caution">
-            {fallbackGezel.name} runs on {resolveProvider(fallbackGezel)}, which can't accept tools
-            sent by apps — editors that use tools will get an error. For full compatibility, pick a
-            gezel on a local model or a direct API provider.
-          </p>
-        )}
-        <label className="debug-toggle">
-          <input
-            type="checkbox"
-            checked={endpoints.supportingBehaviors !== false}
-            onChange={(e) =>
-              void saveEndpoints({
-                ...endpoints,
-                supportingBehaviors: e.target.checked ? undefined : false,
-              })
-            }
-            disabled={!endpointsEnabled}
-          />
-          <span>Supporting behaviors</span>
-        </label>
-        <p className="muted small">
-          Gezel knows how to get the best out of each model — catching runaway rambling, folding
-          leaked reasoning, and applying model-specific fixes. Turn this off for plain serving: apps
-          still get the gezel's character and each model's tuned settings (sampling, thinking mode),
-          but no runtime interventions.
-        </p>
-        {endpointsStatus?.scope === 'endpoints' && (
-          <output className="muted small">{endpointsStatus.text}</output>
-        )}
-      </div>
-
-      <CodexSetupCard
-        key={`codex-${harnessSetupRefreshKey}`}
-        endpointsEnabled={endpointsEnabled}
-        onChanged={refresh}
-      />
-
-      <VSCodeSetupCard
-        key={`vscode-${harnessSetupRefreshKey}`}
-        endpointsEnabled={endpointsEnabled}
-        onChanged={refresh}
-      />
-
-      <OpenCodeSetupCard
-        key={`opencode-${harnessSetupRefreshKey}`}
-        endpointsEnabled={endpointsEnabled}
-        onChanged={refresh}
-      />
-
-      <PiSetupCard
-        key={`pi-${harnessSetupRefreshKey}`}
-        endpointsEnabled={endpointsEnabled}
-        onChanged={refresh}
-      />
-
-      <OfficeSetupCard key={`office-${harnessSetupRefreshKey}`} onChanged={refresh} />
-
-      <LibreOfficeSetupCard key={`libreoffice-${harnessSetupRefreshKey}`} onChanged={refresh} />
-
-      <div className="settings-subsection">
-        <h3>Ollama emulation</h3>
-        <label className="debug-toggle">
-          <input
-            type="checkbox"
-            checked={endpoints.emulateOllama === true}
-            onChange={(e) =>
-              void saveEndpoints({
-                ...endpoints,
-                emulateOllama: e.target.checked ? true : undefined,
-              })
-            }
-            disabled={!endpointsEnabled}
-          />
-          <span>Emulate Ollama (port 11434)</span>
-        </label>
-        <p className="muted small">
-          Apps that auto-discover Ollama will find gezel instead — no setup needed in each app.
-          Security note: Ollama's convention is no password, so while this is on, any program on
-          this computer can use your models without asking first. Gezel refuses to take the port if
-          Ollama itself is already running.
-        </p>
-        {endpointsStatus?.scope === 'ollama' && (
-          <output className="muted small">{endpointsStatus.text}</output>
-        )}
-      </div>
-
       {pending.length > 0 && (
         <div className="settings-subsection">
           <h3>Pending requests</h3>
@@ -497,74 +398,287 @@ export function ConnectedAppsPanel() {
         </div>
       )}
 
-      <div className="settings-subsection">
-        <h3>Connected</h3>
-        {connected.length === 0 ? (
-          <p className="muted small">
-            No apps connected. Apps that use the gezel SDK appear here after you approve them.
-          </p>
-        ) : (
-          <div className="connected-apps-table-wrap">
-            <table className="connected-apps-table" aria-label="Connected apps">
-              <thead>
-                <tr>
-                  <th scope="col">App</th>
-                  <th scope="col">Scopes</th>
-                  <th scope="col">Last used</th>
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {connected.map((app) => (
-                  <tr key={app.appId}>
-                    <td data-label="App">
-                      <div className="connected-apps-identity">
-                        <span className="connected-apps-name">{app.appName}</span>
-                        {app.kind === 'device' && (
-                          <span className="connected-apps-kind">Device</span>
-                        )}
-                      </div>
-                      <span className="connected-apps-id">{app.appId}</span>
-                    </td>
-                    <td data-label="Scopes">
-                      {app.scopes.length > 0 ? (
-                        <ul className="connected-apps-scopes">
-                          {app.scopes.map((scope) => (
-                            <li key={scope}>{scope}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <span className="connected-apps-empty">None</span>
-                      )}
-                    </td>
-                    <td data-label="Last used">
-                      <span
-                        className="connected-apps-last-used"
-                        title={app.lastUsedAt ? formatAbsoluteTime(app.lastUsedAt) : undefined}
-                      >
-                        {formatRelative(app.lastUsedAt)}
-                      </span>
-                    </td>
-                    <td className="connected-apps-action">
-                      <button
-                        type="button"
-                        className="connected-apps-revoke"
-                        aria-label={`Revoke ${app.appName}`}
-                        onClick={() => setRevokeTarget(app)}
-                        disabled={busy !== null}
-                      >
-                        Revoke
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <Tabs.Root
+        className="connected-apps-tabs"
+        value={tab}
+        onValueChange={(value) => setTab(value as ConnectedAppsTab)}
+      >
+        <Tabs.List aria-label="Integrations">
+          <Tabs.Trigger value="overview">Overview</Tabs.Trigger>
+          {SETUP_TABS.map(({ id, label }) => {
+            const setupState = setupStates[id];
+            const attention =
+              setupState && NEEDS_ATTENTION.has(setupState) ? harnessStateLabel(setupState) : null;
+            return (
+              <Tabs.Trigger key={id} value={id} title={attention ?? undefined}>
+                {label}
+                {attention && (
+                  <>
+                    <span className="connected-apps-tab-dot" aria-hidden="true" />
+                    <span className="sr-only">, {attention.toLowerCase()}</span>
+                  </>
+                )}
+              </Tabs.Trigger>
+            );
+          })}
+          <Tabs.Trigger value="ollama">Ollama</Tabs.Trigger>
+        </Tabs.List>
+
+        <Tabs.Content value="overview" forceMount>
+          <div className="settings-subsection">
+            <h3>OpenAI-compatible endpoints</h3>
+            <p className="muted small">
+              Other apps (editors, browser tools) can use your gezellen and models through standard
+              OpenAI-style endpoints. Each app still needs your approval before it gets access.
+            </p>
+            <label className="debug-toggle">
+              <input
+                type="checkbox"
+                checked={endpointsEnabled}
+                onChange={(e) =>
+                  void saveEndpoints({
+                    ...endpoints,
+                    enabled: e.target.checked ? undefined : false,
+                  })
+                }
+              />
+              <span>Allow apps to connect</span>
+            </label>
+            {endpointsEnabled ? (
+              <p className="muted small">
+                Point apps at <code>{api.getBaseUrl()}/v1</code>
+              </p>
+            ) : (
+              <p className="muted small">
+                Turned off — connected apps are refused and new apps cannot ask for access until
+                this is back on.
+              </p>
+            )}
+            <div className="connected-apps-serving">
+              <span id="serving-gezel-label">Fallback gezel</span>
+              <Select.Root
+                value={
+                  configuredFallbackGezel ? configuredFallbackGezel.id : AUTOMATIC_FALLBACK_GEZEL
+                }
+                onValueChange={(v) =>
+                  void saveEndpoints({
+                    ...endpoints,
+                    servingGezelId: v === AUTOMATIC_FALLBACK_GEZEL ? undefined : v,
+                  })
+                }
+                disabled={!endpointsEnabled}
+              >
+                <Select.Trigger aria-labelledby="serving-gezel-label">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Item value={AUTOMATIC_FALLBACK_GEZEL}>
+                    Automatic
+                    {automaticFallbackGezel ? ` — ${automaticFallbackGezel.name}` : ''}
+                  </Select.Item>
+                  {gezels.map((g) => (
+                    <Select.Item key={g.id} value={g.id}>
+                      {g.name}
+                      {g.role ? ` — ${g.role}` : ''}
+                      {` (${resolveProvider(g)})`}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+            </div>
+            <p className="muted small">
+              Apps receive your gezellen as model choices, including their names and roles. If an
+              app asks for something else, {fallbackGezel?.name ?? 'your default gezel'} answers
+              with their character and model settings.
+            </p>
+            {fallbackGezel && fallbackLacksAppTools && (
+              <p className="small connected-apps-caution">
+                {fallbackGezel.name} runs on {resolveProvider(fallbackGezel)}, which can't accept
+                tools sent by apps — editors that use tools will get an error. For full
+                compatibility, pick a gezel on a local model or a direct API provider.
+              </p>
+            )}
+            <label className="debug-toggle">
+              <input
+                type="checkbox"
+                checked={endpoints.supportingBehaviors !== false}
+                onChange={(e) =>
+                  void saveEndpoints({
+                    ...endpoints,
+                    supportingBehaviors: e.target.checked ? undefined : false,
+                  })
+                }
+                disabled={!endpointsEnabled}
+              />
+              <span>Supporting behaviors</span>
+            </label>
+            <p className="muted small">
+              Gezel knows how to get the best out of each model — catching runaway rambling, folding
+              leaked reasoning, and applying model-specific fixes. Turn this off for plain serving:
+              apps still get the gezel's character and each model's tuned settings (sampling,
+              thinking mode), but no runtime interventions.
+            </p>
+            {endpointsStatus?.scope === 'endpoints' && (
+              <output className="muted small">{endpointsStatus.text}</output>
+            )}
           </div>
-        )}
-      </div>
+
+          <div className="settings-subsection">
+            <h3>Connected</h3>
+            {connected.length === 0 ? (
+              <p className="muted small">
+                No apps connected. Apps that use the gezel SDK appear here after you approve them.
+              </p>
+            ) : (
+              <div className="connected-apps-table-wrap">
+                <table className="connected-apps-table" aria-label="Connected apps">
+                  <thead>
+                    <tr>
+                      <th scope="col">App</th>
+                      <th scope="col">Scopes</th>
+                      <th scope="col">Last used</th>
+                      <th scope="col">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {connected.map((app) => (
+                      <tr key={app.appId}>
+                        <td data-label="App">
+                          <div className="connected-apps-identity">
+                            <span className="connected-apps-name">{app.appName}</span>
+                            {app.kind === 'device' && (
+                              <span className="connected-apps-kind">Device</span>
+                            )}
+                          </div>
+                          <span className="connected-apps-id">{app.appId}</span>
+                        </td>
+                        <td data-label="Scopes">
+                          {app.scopes.length > 0 ? (
+                            <ul className="connected-apps-scopes">
+                              {app.scopes.map((scope) => (
+                                <li key={scope}>{scope}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <span className="connected-apps-empty">None</span>
+                          )}
+                        </td>
+                        <td data-label="Last used">
+                          <span
+                            className="connected-apps-last-used"
+                            title={app.lastUsedAt ? formatAbsoluteTime(app.lastUsedAt) : undefined}
+                          >
+                            {formatRelative(app.lastUsedAt)}
+                          </span>
+                        </td>
+                        <td className="connected-apps-action">
+                          <button
+                            type="button"
+                            className="connected-apps-revoke"
+                            aria-label={`Revoke ${app.appName}`}
+                            onClick={() => setRevokeTarget(app)}
+                            disabled={busy !== null}
+                          >
+                            Revoke
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </Tabs.Content>
+
+        <Tabs.Content value="codex" forceMount>
+          <CodexSetupCard
+            key={`codex-${harnessSetupRefreshKey}`}
+            endpointsEnabled={endpointsEnabled}
+            onChanged={refresh}
+            onStateChange={reportSetupState.codex}
+          />
+        </Tabs.Content>
+
+        <Tabs.Content value="vscode" forceMount>
+          <VSCodeSetupCard
+            key={`vscode-${harnessSetupRefreshKey}`}
+            endpointsEnabled={endpointsEnabled}
+            onChanged={refresh}
+            onStateChange={reportSetupState.vscode}
+          />
+        </Tabs.Content>
+
+        <Tabs.Content value="opencode" forceMount>
+          <OpenCodeSetupCard
+            key={`opencode-${harnessSetupRefreshKey}`}
+            endpointsEnabled={endpointsEnabled}
+            onChanged={refresh}
+            onStateChange={reportSetupState.opencode}
+          />
+        </Tabs.Content>
+
+        <Tabs.Content value="pi" forceMount>
+          <PiSetupCard
+            key={`pi-${harnessSetupRefreshKey}`}
+            endpointsEnabled={endpointsEnabled}
+            onChanged={refresh}
+            onStateChange={reportSetupState.pi}
+          />
+        </Tabs.Content>
+
+        <Tabs.Content value="office" forceMount>
+          <OfficeSetupCard
+            key={`office-${harnessSetupRefreshKey}`}
+            onChanged={refresh}
+            onStateChange={reportSetupState.office}
+          />
+        </Tabs.Content>
+
+        <Tabs.Content value="libreoffice" forceMount>
+          <LibreOfficeSetupCard
+            key={`libreoffice-${harnessSetupRefreshKey}`}
+            onChanged={refresh}
+            onStateChange={reportSetupState.libreoffice}
+          />
+        </Tabs.Content>
+
+        <Tabs.Content value="ollama" forceMount>
+          <div className="settings-subsection">
+            <h3>Ollama emulation</h3>
+            <label className="debug-toggle">
+              <input
+                type="checkbox"
+                checked={endpoints.emulateOllama === true}
+                onChange={(e) =>
+                  void saveEndpoints({
+                    ...endpoints,
+                    emulateOllama: e.target.checked ? true : undefined,
+                  })
+                }
+                disabled={!endpointsEnabled}
+              />
+              <span>Emulate Ollama (port 11434)</span>
+            </label>
+            <p className="muted small">
+              Apps that auto-discover Ollama will find gezel instead — no setup needed in each app.
+              Security note: Ollama's convention is no password, so while this is on, any program on
+              this computer can use your models without asking first. Gezel refuses to take the port
+              if Ollama itself is already running.
+            </p>
+            {!endpointsEnabled && (
+              <p className="harness-setup-caution small">
+                Turn on <strong>Allow apps to connect</strong> on the Overview tab to use this.
+              </p>
+            )}
+            {endpointsStatus?.scope === 'ollama' && (
+              <output className="muted small">{endpointsStatus.text}</output>
+            )}
+          </div>
+        </Tabs.Content>
+      </Tabs.Root>
 
       <ConfirmDialog
         open={revokeTarget !== null}

@@ -219,7 +219,7 @@
   /* Flat sage, no texture: the bar must match the flat colors it meets —
      the Windows/Linux window-control overlay (`titleBarOverlay.color` in
      the Electron main process) and a phone's system-bar insets. */
-  background-color: var(--titlebar, #667f62);
+  background-color: var(--titlebar, #5c6a4a);
   color: #f3ede0;
   /* The header doubles as the OS title bar — the whole strip is the drag
      handle, with interactive children opting out via `no-drag` below. */
@@ -949,8 +949,8 @@ button.search-palette-group-more:hover {
   gap: 0.35rem;
   padding: 0.2rem 0.6rem;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(243, 237, 224, 0.25);
-  background: #6c8367;
+  border: 1px solid color-mix(in srgb, var(--titlebar-ink) 25%, transparent);
+  background: var(--titlebar);
   color: var(--titlebar-ink);
   font-size: 0.72rem;
   font-family: inherit;
@@ -960,13 +960,14 @@ button.search-palette-group-more:hover {
   white-space: nowrap;
   transition: border-color 0.15s, background 0.15s;
 }
+/* Pills darken rather than lighten on hover, as Activity does: a lighter
+   fill would drop the cream label below 4.5:1 on the brand sage. */
 .engine-pill:hover {
-  border-color: rgba(243, 237, 224, 0.55);
-  background: #728c6c;
+  border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
+  background: color-mix(in srgb, black 10%, var(--titlebar));
 }
 .engine-pill-busy {
-  border-color: rgba(243, 237, 224, 0.55);
-  background: #748a6f;
+  border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
 }
 .engine-pill-dot {
   width: 7px;
@@ -1632,8 +1633,8 @@ button.machine-memory-unload-button {
   gap: 0.3rem;
   padding: 0.2rem 0.55rem;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(243, 237, 224, 0.25);
-  background: #6c8367;
+  border: 1px solid color-mix(in srgb, var(--titlebar-ink) 25%, transparent);
+  background: var(--titlebar);
   color: var(--titlebar-ink);
   font-size: 0.72rem;
   cursor: pointer;
@@ -1641,8 +1642,8 @@ button.machine-memory-unload-button {
 }
 .queue-meter-button:hover,
 .narration-stop:hover {
-  border-color: rgba(243, 237, 224, 0.55);
-  background: #728c6c;
+  border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
+  background: color-mix(in srgb, black 10%, var(--titlebar));
 }
 /* The compact header's face for this button (glyph + one total); the desktop
    bar shows the per-engine chips instead. */
@@ -1650,8 +1651,8 @@ button.machine-memory-unload-button {
   display: none;
 }
 .queue-meter-button-open {
-  border-color: rgba(243, 237, 224, 0.55);
-  background: #748a6f;
+  border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
+  background: color-mix(in srgb, black 10%, var(--titlebar));
 }
 
 .queue-meter-chip,
@@ -3889,7 +3890,7 @@ body.app-resizing webview {
   padding: 2px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid color-mix(in srgb, var(--titlebar-ink) 25%, transparent);
-  background: color-mix(in srgb, var(--titlebar) 95%, var(--titlebar-ink));
+  background: var(--titlebar);
   color: var(--titlebar-ink, #f3ede0);
   white-space: nowrap;
   min-width: 0;
@@ -3902,8 +3903,8 @@ button.boekwachter-pill {
   cursor: pointer;
 }
 button.boekwachter-pill:hover {
-  border-color: color-mix(in srgb, var(--titlebar-ink) 45%, transparent);
-  background: color-mix(in srgb, var(--titlebar) 88%, var(--titlebar-ink));
+  border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
+  background: color-mix(in srgb, black 10%, var(--titlebar));
 }
 button.boekwachter-pill:focus-visible {
   outline: 2px solid var(--focus-ring, var(--accent));

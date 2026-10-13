@@ -52,6 +52,23 @@ describe('CatalogArtwork', () => {
     expect(screen.queryByText('category mark')).not.toBeInTheDocument();
   });
 
+  it('hands the loaded image to the caller', () => {
+    const onImageLoad = vi.fn();
+    const { container } = render(
+      <CatalogArtwork
+        logoUrl="blob:catalog-logo"
+        fallback={<span>category mark</span>}
+        onImageLoad={onImageLoad}
+      />,
+    );
+    const image = container.querySelector('img')!;
+    expect(onImageLoad).not.toHaveBeenCalled();
+
+    fireEvent.load(image);
+
+    expect(onImageLoad).toHaveBeenCalledWith(image);
+  });
+
   it('retains the fallback after an image fails and tries a new URL', () => {
     const { container, rerender } = render(
       <CatalogArtwork logoUrl="blob:first" fallback={<span>fallback</span>} />,

@@ -956,7 +956,7 @@
    restore button joins it only while that pane is maximized. Both mirror
    `.app-nav-hamburger`'s transparent square with a hover halo so the cluster
    reads as one unified control row. Restore gets a 36×36 escape hit target
-   that fills nearly the whole titlebar. Off mode tints play/pause red so the
+   that fills nearly the whole titlebar. Off mode tints the crew glyph red so the
    user can spot at a glance that AI is fully paused. */
 .app-engagement-trigger,
 .app-output-restore {
@@ -1018,8 +1018,23 @@
   color: var(--titlebar-ink);
 }
 .app-task-speed-menu {
-  width: 19rem;
+  width: 22rem;
   max-width: calc(100vw - 1rem);
+}
+.app-engagement-heading {
+  padding: 0.55rem 0.75rem 0.15rem;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.app-engagement-intro {
+  margin: 0;
+  padding: 0 0.75rem 0.45rem;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.gz-key--stop .app-engagement-mode-icon {
+  width: 28px;
+  height: 28px;
 }
 .app-task-speed-separator {
   height: 1px;
@@ -1243,39 +1258,9 @@
   padding-top: 0.4rem;
   padding-bottom: 0.4rem;
 }
-.app-engagement-menu-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  width: 100%;
-}
-.app-engagement-menu-icon {
-  flex: 0 0 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  opacity: 0.82;
-}
 .app-engagement-mode-icon {
   display: block;
-}
-.app-engagement-menu-check {
-  flex: 0 0 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-left: auto;
-  border-radius: var(--radius-sm);
-}
-.app-nav-menu-item.active .app-engagement-menu-check {
-  color: var(--accent-selection-ink);
-  background: var(--success);
-  border: 1px solid color-mix(in srgb, var(--success) 72%, var(--text));
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--success) 45%, transparent);
+  flex-shrink: 0;
 }
 .app-engagement-menu-label {
   font-weight: 500;
@@ -1284,8 +1269,6 @@
   font-size: 0.78em;
   opacity: 0.72;
   line-height: 1.3;
-  /* align under the label, clearing the mode-glyph column */
-  margin-left: calc(18px + 0.4rem);
 }
 
 .chat-composer-disabled-banner {

@@ -8,9 +8,18 @@ import {
   starterCraftbookIds,
   visibleCatalogItems,
 } from '@bendyline/gezel';
-import { Suspense, lazy, useEffect, useMemo, useReducer, useState } from 'react';
+import {
+  type CSSProperties,
+  Suspense,
+  lazy,
+  useEffect,
+  useMemo,
+  useReducer,
+  useState,
+} from 'react';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
+import { sampleArtworkPaper } from '../../components/artwork-paper.js';
 import { navigateToTab } from '../../components/nav-actions.js';
 import { useInterests } from '../../components/useInterests.js';
 import { useShowWorkInProgressFeatures } from '../../components/useShowWorkInProgressFeatures.js';
@@ -102,24 +111,11 @@ export function MakeSomething({ projectId, projects }: { projectId: string; proj
       ) : (
         <div className="home-make-tray">
           {books.map((book) => (
-            <button
-              type="button"
+            <MakeSomethingCard
               key={book.manifest.id}
-              className="home-make-card"
-              onClick={() => setSelection(book.manifest.id)}
-            >
-              <span className="home-make-art" aria-hidden="true">
-                <CatalogArtwork
-                  iconSvg={book.item.iconSvg}
-                  logoUrl={book.item.logoUrl}
-                  fallback={<ProjectGlyph glyph={craftbookGlyph(book.manifest)} size={28} />}
-                />
-              </span>
-              <span className="home-make-name">{planDisplayName(book.manifest)}</span>
-              <span className="home-make-description">
-                {planOutputSummary(book.manifest) ?? book.manifest.description}
-              </span>
-            </button>
+              book={book}
+              onOpen={() => setSelection(book.manifest.id)}
+            />
           ))}
         </div>
       )}
@@ -141,5 +137,31 @@ export function MakeSomething({ projectId, projects }: { projectId: string; proj
         </Suspense>
       )}
     </section>
+  );
+}
+
+/** The card takes the paper its artwork is drawn on, so the mark bleeds into it. */
+function MakeSomethingCard({ book, onOpen }: { book: BookItem; onOpen: () => void }) {
+  const [paper, setPaper] = useState<string | null>(null);
+  return (
+    <button
+      type="button"
+      className="home-make-card"
+      style={paper ? ({ '--home-make-paper': paper } as CSSProperties) : undefined}
+      onClick={onOpen}
+    >
+      <span className="home-make-art" aria-hidden="true">
+        <CatalogArtwork
+          iconSvg={book.item.iconSvg}
+          logoUrl={book.item.logoUrl}
+          fallback={<ProjectGlyph glyph={craftbookGlyph(book.manifest)} size={36} />}
+          onImageLoad={(image) => setPaper(sampleArtworkPaper(image))}
+        />
+      </span>
+      <span className="home-make-name">{planDisplayName(book.manifest)}</span>
+      <span className="home-make-description">
+        {planOutputSummary(book.manifest) ?? book.manifest.description}
+      </span>
+    </button>
   );
 }

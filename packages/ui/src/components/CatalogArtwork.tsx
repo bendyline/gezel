@@ -23,12 +23,14 @@ export function CatalogArtwork({
   svgClassName,
   imageClassName,
   fallback,
+  onImageLoad,
 }: {
   iconSvg?: string;
   logoUrl?: string;
   svgClassName?: string;
   imageClassName?: string;
   fallback: ReactNode;
+  onImageLoad?: (image: HTMLImageElement) => void;
 }) {
   const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
   const [loadedLogoUrl, setLoadedLogoUrl] = useState<string | null>(null);
@@ -45,7 +47,10 @@ export function CatalogArtwork({
           src={artworkUrl}
           alt=""
           hidden={loadedLogoUrl !== artworkUrl}
-          onLoad={() => setLoadedLogoUrl(artworkUrl)}
+          onLoad={(event) => {
+            setLoadedLogoUrl(artworkUrl);
+            onImageLoad?.(event.currentTarget);
+          }}
           onError={() => setFailedLogoUrl(artworkUrl)}
         />
       </>

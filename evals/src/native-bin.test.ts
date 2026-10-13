@@ -6,11 +6,33 @@ import {
   cpuOverrideRefusal,
   ds4HelpSupportsVision,
   installedAppRoots,
+  parseLlamaVersionBanner,
   pinnedLlamaRevision,
   resolveLlamaBinary,
   resolveSdBinary,
   shouldProbeLlamaBackend,
 } from './native-bin.ts';
+
+describe('parseLlamaVersionBanner', () => {
+  it.each([
+    ['version: 10099 (1a064ab0)', '10099', '1a064ab0'],
+    ['version: 0.6.0 (build 11429, commit d81235049)', '11429', 'd81235049'],
+    [
+      'backend initialized\r\nversion: 0.6.0-dev (build 11588, commit 7f51953d7)\r\nbuilt with Clang',
+      '11588',
+      '7f51953d7',
+    ],
+  ])('identifies engine provenance from %s', (banner, buildNumber, revision) => {
+    expect(parseLlamaVersionBanner(banner)).toEqual({ buildNumber, revision });
+  });
+
+  it.each(['', 'built with Clang 20.1.8', 'version: 0.6.0 (build unknown, commit unknown)'])(
+    'does not invent provenance from %s',
+    (banner) => {
+      expect(parseLlamaVersionBanner(banner)).toEqual({ buildNumber: null, revision: null });
+    },
+  );
+});
 
 describe('ds4HelpSupportsVision', () => {
   it('recognizes the dedicated encoder option without matching prose', () => {

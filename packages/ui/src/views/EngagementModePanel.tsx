@@ -1,5 +1,8 @@
+import type { AIEngagementMode } from '@bendyline/gezel';
+import { EngagementModeIcon } from '../components/EngagementModeIcon.js';
+import { ENGAGEMENT_MODES } from '../components/engagement-modes.js';
 import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
-export type EngagementMode = 'proactive' | 'scheduled' | 'reactive' | 'off';
+export type EngagementMode = AIEngagementMode;
 export type WorkshopTempo = 'gezellig' | 'bedrijvig' | 'druk' | 'dolle-boel';
 
 const TEMPOS: {
@@ -38,37 +41,6 @@ const TEMPOS: {
   },
 ];
 
-const ENGAGEMENT_MODES: {
-  id: EngagementMode;
-  label: string;
-  description: string;
-}[] = [
-  {
-    id: 'proactive',
-    label: 'Proactive',
-    description:
-      'Default. All task work, scheduled triggers, proactive prompts, anti-stall nudges, voorman health checks, and cross-gezel messaging run.',
-  },
-  {
-    id: 'scheduled',
-    label: 'Tasks + Reactive',
-    description:
-      'Chat works, all active task work continues, and scheduled tasks still fire. No proactive nudges or cross-gezel messaging between gezellen.',
-  },
-  {
-    id: 'reactive',
-    label: 'Reactive only',
-    description:
-      'AI only responds to your direct chat messages. New task steps and scheduled jobs are paused; an in-flight turn can finish. No proactive nudges or cross-gezel messages.',
-  },
-  {
-    id: 'off',
-    label: 'Off',
-    description:
-      'AI is disabled. Chat is inactive and all background activity is paused. The current in-flight turn finishes; queued messages are canceled.',
-  },
-];
-
 /**
  * Settings → Your Team → "AI engagement": the global activity switch
  * (`config.aiEngagementMode`) plus, while proactive, the workshop tempo
@@ -86,15 +58,15 @@ export function EngagementModePanel({
   onTempoChange: (tempo: WorkshopTempo) => void | Promise<void>;
 }) {
   const current =
-    ENGAGEMENT_MODES.find((m) => m.id === mode) ??
+    ENGAGEMENT_MODES.find((m) => m.mode === mode) ??
     (ENGAGEMENT_MODES[0] as (typeof ENGAGEMENT_MODES)[number]);
   const currentTempo = TEMPOS.find((t) => t.id === tempo) ?? (TEMPOS[1] as (typeof TEMPOS)[number]);
   return (
     <section className={`engagement-mode-panel engagement-mode-${mode}`}>
       <h3>AI engagement</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        Global control over how much AI activity is allowed. Use this as a panic button when you
-        want to conserve tokens or step away from the app.
+        Choose how independently your crew works, from taking initiative together to waiting for
+        your messages or pausing entirely.
       </p>
       <div
         className="engagement-mode-switch gz-tray gz-tray--described"
@@ -104,15 +76,16 @@ export function EngagementModePanel({
       >
         {ENGAGEMENT_MODES.map((m) => (
           <button
-            key={m.id}
+            key={m.mode}
             type="button"
             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
             role="radio"
-            aria-checked={mode === m.id}
-            tabIndex={mode === m.id ? 0 : -1}
-            className={`gz-key${mode === m.id ? ' gz-key-active' : ''}`}
-            onClick={() => void onChange(m.id)}
+            aria-checked={mode === m.mode}
+            tabIndex={mode === m.mode ? 0 : -1}
+            className={`gz-key${mode === m.mode ? ' gz-key-active' : ''}`}
+            onClick={() => void onChange(m.mode)}
           >
+            <EngagementModeIcon mode={m.mode} />
             {m.label}
           </button>
         ))}

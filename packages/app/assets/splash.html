@@ -7,7 +7,7 @@
       html, body {
         margin: 0;
         height: 100%;
-        background: #667f62;
+        background: #5c6a4a;
         overflow: hidden;
         user-select: none;
         -webkit-user-select: none;
@@ -20,7 +20,7 @@
         position: relative;
         height: 100%;
         width: 100%;
-        background-color: #667f62;
+        background-color: #5c6a4a;
         /* Stretch the mark's empty upper band across the window so the
            centered artwork sits in one continuous mottled-sage field. */
         background-image: url("./gezel-mark.png");
@@ -39,11 +39,16 @@
         animation: fade-in 360ms ease-out forwards;
       }
 
+      /* The mark's field is a lighter, cooler sage (~#6c7668). Multiplying
+         by this tint lands it on the brand sage #5c6a4a, so the native
+         window controls painted in that color sit flush against the splash,
+         while the artwork keeps its contrast instead of washing out. */
       .splash::after {
         content: "";
         position: absolute;
         inset: 0;
-        background: rgba(102, 127, 98, 0.2);
+        background: #d9e5b5;
+        mix-blend-mode: multiply;
         pointer-events: none;
       }
 

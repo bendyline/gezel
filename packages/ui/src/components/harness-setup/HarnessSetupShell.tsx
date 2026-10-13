@@ -127,8 +127,8 @@ export function HarnessSetupShell({
 
           {!endpointsEnabled && (
             <p className="harness-setup-caution small">
-              Turn on <strong>Allow apps to connect</strong> above before setting up or updating
-              this.
+              Turn on <strong>Allow apps to connect</strong> on the Overview tab before setting up
+              or updating this.
             </p>
           )}
 

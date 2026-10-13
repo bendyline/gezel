@@ -129,6 +129,62 @@ describe('ConnectedAppsPanel', () => {
     vi.unstubAllGlobals();
   });
 
+  it('puts each integration on its own tab and opens on Overview', async () => {
+    render(<ConnectedAppsPanel />);
+
+    const tabs = within(await screen.findByRole('tablist', { name: 'Integrations' })).getAllByRole(
+      'tab',
+    );
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      'Overview',
+      'Codex',
+      'VS Code',
+      'OpenCode',
+      'pi',
+      'Office',
+      'LibreOffice',
+      'Ollama',
+    ]);
+    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'LibreOffice' }));
+    expect(screen.getByRole('tab', { name: 'LibreOffice' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('marks the tab of an integration whose setup needs attention', async () => {
+    getCodexSetupStatus.mockResolvedValue({
+      state: 'conflict',
+      models: [],
+      reasons: [],
+      codexInstalled: true,
+      endpointsEnabled: true,
+      profileName: 'gezel-local',
+      profilePath: '/tmp/gezel-codex/gezel-local.config.toml',
+      launchCommand: 'codex --profile gezel-local',
+      bridge: { baseUrl: 'https://127.0.0.1:3333/v1', listening: true, port: 3333 },
+      canConfigure: false,
+      canRemove: true,
+      canRepair: true,
+    });
+    render(<ConnectedAppsPanel />);
+
+    expect(await screen.findByRole('tab', { name: 'Codex, needs attention' })).toHaveAttribute(
+      'title',
+      'Needs attention',
+    );
+    expect(screen.getByRole('tab', { name: 'VS Code' })).not.toHaveAttribute('title');
+  });
+
+  it('keeps pending requests above the tabs so every tab shows them', async () => {
+    render(<ConnectedAppsPanel />);
+    const request = await screen.findByText(/wants command-line control/);
+    expect(request.closest('[role="tabpanel"]')).toBeNull();
+  });
+
   it('renders connected apps as one row per app with distinct permission columns', async () => {
     render(<ConnectedAppsPanel />);
 

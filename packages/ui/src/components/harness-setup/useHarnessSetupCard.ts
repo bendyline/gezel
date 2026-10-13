@@ -38,6 +38,8 @@ export interface UseHarnessSetupCardOptions<S extends HarnessSetupStatusLike, C 
   /** False for integrations that publish the whole roster with no default model. */
   modelSelection?: boolean;
   onChanged?: () => void | Promise<void>;
+  /** Tells the host which state the setup is in, so a tab can flag it. */
+  onStateChange?: (state: LocalHarnessSetupState) => void;
 }
 
 /**
@@ -96,6 +98,11 @@ export function useHarnessSetupCard<S extends HarnessSetupStatusLike, C extends 
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
     };
   }, [refresh]);
+
+  const state = status?.state;
+  useEffect(() => {
+    if (state) latest.current.onStateChange?.(state);
+  }, [state]);
 
   const desktopMode = window.__GEZEL__?.mode;
   const localDesktopMode =

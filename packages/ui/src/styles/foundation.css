@@ -49,6 +49,9 @@
   --gezel-paper-control: #ece8e5;
   --gezel-paper-control-deep: #e4dfdc;
   --gezel-paper-inset: #ddd3bd;
+  /* The rag paper Workshop Marks are drawn on. Theme-stable on purpose: a
+     surface that hosts the artwork sits on this ground in both themes. */
+  --gezel-paper-mark: #e6d5bc;
   /* True black, for surfaces that must meet the phone's own system bars. */
   --gezel-paper-night: #000;
   --gezel-ink: #1c1c1c;
@@ -56,9 +59,9 @@
   --gezel-ink-warm: #2a2520;
   --gezel-ink-warm-muted: #5a4f42;
   --gezel-ink-warm-quiet: #6b6152;
-  --gezel-sage: #667f62;
+  /* Deep enough that the cream titlebar labels clear 4.5:1 (~5:1). */
+  --gezel-sage: #5c6a4a;
   --gezel-sage-muted: #8a9a76;
-  --gezel-sage-deep: #5c6a4a;
   --gezel-sage-forest: #3d4d3a;
   --gezel-sage-soft: #d6dec6;
   --gezel-terra: #b0724c;
@@ -132,8 +135,10 @@
      active-state colors keep their existing treatments. */
   --toolbar-icon-ink: var(--gezel-toolbar-ink);
 
-  /* Brand palette */
-  --titlebar: var(--gezel-sage-deep);
+  /* Brand palette. The titlebar must stay the brand sage: the Windows/Linux
+     window-control overlay, the window background and the splash paint it
+     outside the renderer (titlebar-color.test.ts). */
+  --titlebar: var(--gezel-sage);
   --titlebar-ink: var(--gezel-cream-ink);
   /* Fill colour the home-tab gezel logotype flips to when active.
      Light mode: dark forest green that complements the sage titlebar
@@ -151,7 +156,7 @@
      `--sage-ink` is the text tone that sits legibly on a low-alpha sage
      fill in each theme. */
   --sage: var(--gezel-sage-muted);
-  --sage-deep: var(--gezel-sage-deep);
+  --sage-deep: var(--gezel-sage);
   --sage-ink: #38512e;
   --sage-soft: var(--gezel-sage-soft);
 

@@ -272,7 +272,10 @@ export function GreetingBand({
         }}
       >
         {(!collapsed || contentMounted) && (
-          <Tabs.Content value={activeTab} className="home-workshop-greeting-cols">
+          <Tabs.Content
+            value={activeTab}
+            className={`home-workshop-greeting-cols${activeTab === 'tour' ? ' home-workshop-greeting-cols-fill' : ''}`}
+          >
             <div className="home-workshop-greeting-left">
               {activeTab === 'night' && morning ? (
                 <MorningPanel
@@ -310,8 +313,9 @@ export function GreetingBand({
 
             {/* The whole standing figure + shelf + label is a poppetje showcase;
             when poppetjes are off (e.g. boring mode) hide it entirely rather
-            than fall back to a letter tile on a shelf. */}
-            {showPoppetjes && activeTab !== 'make' && (
+            than fall back to a letter tile on a shelf. Make something and the
+            Handboek reader take the sheet's full width instead. */}
+            {showPoppetjes && activeTab !== 'make' && activeTab !== 'tour' && (
               <div className="home-workshop-greeting-right">
                 <MeesterFigure
                   meesterName={meesterName}

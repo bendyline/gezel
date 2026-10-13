@@ -321,6 +321,17 @@ interface LaunchProbe {
  * keep it rather than discarding it to `stdio: 'ignore'`.
  */
 const launchProbeCache = new Map<string, LaunchProbe>();
+
+export function parseLlamaVersionBanner(banner: string): {
+  buildNumber: string | null;
+  revision: string | null;
+} {
+  const semver = /^version:\s*\S+\s+\(build\s+(\d+),\s*commit\s+([0-9a-f]{7,40})\)/m.exec(banner);
+  const legacy = /^version:\s*(\d+)\s+\(([0-9a-f]{7,40})\)/m.exec(banner);
+  const match = semver ?? legacy;
+  return { buildNumber: match?.[1] ?? null, revision: match?.[2] ?? null };
+}
+
 function probeBinary(path: string): LaunchProbe {
   const cached = launchProbeCache.get(path);
   if (cached !== undefined) return cached;
@@ -330,15 +341,12 @@ function probeBinary(path: string): LaunchProbe {
     windowsHide: true,
     timeout: 15_000,
   });
-  // llama-server prints `version: <build> (<short-sha>)` on STDERR, not
-  // stdout. Scan both so an upstream stream change doesn't silently blank
+  // llama-server prints its version on stderr. Scan both so a stream change doesn't blank
   // the field — a null revision disables the pin check rather than failing it.
   const banner = `${result.stderr ?? ''}\n${result.stdout ?? ''}`;
-  const match = /^version:\s*(\S+)\s+\(([0-9a-f]{7,40})\)/m.exec(banner);
   const probe: LaunchProbe = {
     ok: result.status === 0,
-    buildNumber: match?.[1] ?? null,
-    revision: match?.[2] ?? null,
+    ...parseLlamaVersionBanner(banner),
   };
   launchProbeCache.set(path, probe);
   return probe;

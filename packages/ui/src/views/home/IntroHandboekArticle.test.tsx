@@ -103,6 +103,19 @@ describe('IntroHandboekArticle', () => {
     expect(screen.getByTestId('linear-doc-view')).toBeInTheDocument();
   });
 
+  it('keeps Open in Handboek in the view tray, outside the Read/Watch choice', async () => {
+    render(<IntroHandboekArticle />);
+    await screen.findByTestId('linear-doc-view');
+    const tray = screen.getByRole('group', { name: 'Handboek article' });
+    const open = screen.getByRole('button', { name: /Open in Handboek/ });
+    const choice = screen.getByRole('radiogroup', { name: 'View as' });
+    expect(tray).toContainElement(open);
+    expect(tray).toContainElement(choice);
+    expect(choice).not.toContainElement(open);
+    expect(screen.getByRole('radio', { name: 'Read' })).toHaveAttribute('tabindex', '0');
+    expect(screen.getByRole('radio', { name: 'Watch' })).toHaveAttribute('tabindex', '-1');
+  });
+
   it('routes "Open in Handboek" to its Knowledge catalog', async () => {
     const user = userEvent.setup();
     const events: CustomEvent[] = [];

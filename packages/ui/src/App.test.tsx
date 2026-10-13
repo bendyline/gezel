@@ -301,7 +301,7 @@ describe('Output pane titlebar restore', () => {
   });
 });
 
-describe('Task speed menu', () => {
+describe('Crew activity menu', () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: false, source: null });
@@ -314,35 +314,78 @@ describe('Task speed menu', () => {
     render(<App />);
 
     const trigger = await screen.findByRole('button', {
-      name: 'Task speed: Proactive. Click to change.',
+      name: 'Crew activity: Proactive. Click to change.',
     });
     expect(trigger.querySelector('.app-engagement-mode-icon-proactive')).toBeInTheDocument();
 
     await user.click(trigger);
 
-    const proactive = await screen.findByRole('menuitem', { name: /Proactive/ });
+    const proactive = await screen.findByRole('menuitemradio', { name: /Proactive/ });
+    expect(proactive).toHaveAttribute('aria-checked', 'true');
     expect(proactive.querySelector('.app-engagement-mode-icon-proactive')).toBeInTheDocument();
-    expect(proactive.querySelector('.app-engagement-menu-check svg')).toBeInTheDocument();
+    expect(proactive.querySelector('.gz-stop-marker svg')).toBeInTheDocument();
 
     expect(
       screen
-        .getByRole('menuitem', { name: /Tasks \+ Reactive/ })
+        .getByRole('menuitemradio', { name: /Tasks \+ chat/ })
         .querySelector('.app-engagement-mode-icon-scheduled'),
     ).toBeInTheDocument();
     expect(
       screen
-        .getByRole('menuitem', { name: /Reactive only/ })
+        .getByRole('menuitemradio', { name: /Chat only/ })
         .querySelector('.app-engagement-mode-icon-reactive'),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('menuitem', { name: /^Off/ }).querySelector('.app-engagement-mode-icon-off'),
+      screen
+        .getByRole('menuitemradio', { name: /^Off/ })
+        .querySelector('.app-engagement-mode-icon-off'),
     ).toBeInTheDocument();
     expect(screen.getByText('Night Shift')).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /Start night shift now/ })).toBeInTheDocument();
   });
 
+  it('lets the keyboard explore stops without changing activity until a choice is committed', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const trigger = await screen.findByRole('button', {
+      name: 'Crew activity: Proactive. Click to change.',
+    });
+    trigger.focus();
+    await user.keyboard('{ArrowDown}');
+    const proactive = await screen.findByRole('menuitemradio', { name: /Proactive/ });
+    await waitFor(() => expect(proactive).toHaveFocus());
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(screen.getByRole('menuitemradio', { name: /Chat only/ })).toHaveFocus();
+    expect(proactive).toHaveAttribute('aria-checked', 'true');
+    expect(api.updateConfig).not.toHaveBeenCalled();
+    await user.keyboard('{Escape}');
+    expect(trigger).toHaveFocus();
+    expect(api.updateConfig).not.toHaveBeenCalled();
+
+    await user.keyboard('{ArrowDown}');
+    await waitFor(() =>
+      expect(screen.getByRole('menuitemradio', { name: /Proactive/ })).toHaveFocus(),
+    );
+    await user.keyboard('{ArrowDown}{Enter}');
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({ aiEngagementMode: 'scheduled' }),
+    );
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    await user.click(
+      await screen.findByRole('button', { name: 'Crew activity: Tasks + chat. Click to change.' }),
+    );
+    expect(screen.getByRole('menuitemradio', { name: /Tasks \+ chat/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.getByRole('menuitemradio', { name: /Proactive/ })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+  });
+
   it.each([
-    ['Reactive only', 'reactive'],
+    ['Chat only', 'reactive'],
     ['Off', 'off'],
   ] as const)('stops a running Night Shift when %s is selected', async (label, nextMode) => {
     const user = userEvent.setup();
@@ -351,10 +394,10 @@ describe('Task speed menu', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
       }),
     );
-    await user.click(screen.getByRole('menuitem', { name: new RegExp(`^${label}`) }));
+    await user.click(screen.getByRole('menuitemradio', { name: new RegExp(`^${label}`) }));
 
     await waitFor(() => {
       expect(api.updateConfig).toHaveBeenCalledWith({ aiEngagementMode: nextMode });
@@ -362,17 +405,17 @@ describe('Task speed menu', () => {
     });
   });
 
-  it('keeps Night Shift running when Tasks + Reactive is selected', async () => {
+  it('keeps Night Shift running when Tasks + chat is selected', async () => {
     const user = userEvent.setup();
     vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
     render(<App />);
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
       }),
     );
-    await user.click(screen.getByRole('menuitem', { name: /Tasks \+ Reactive/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: /Tasks \+ chat/ }));
 
     await waitFor(() =>
       expect(api.updateConfig).toHaveBeenCalledWith({ aiEngagementMode: 'scheduled' }),
@@ -401,21 +444,21 @@ describe('Night Shift header status', () => {
     render(<App />);
 
     const trigger = await screen.findByRole('button', {
-      name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+      name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
     });
     expect(trigger.querySelectorAll('.app-nightshift-cloud')).toHaveLength(2);
     expect(trigger.querySelector('.app-nightshift-moon')).toHaveClass('is-active');
 
     await user.click(trigger);
-    const proactive = await screen.findByRole('menuitem', { name: /Proactive/ });
-    expect(proactive.querySelector('.app-engagement-menu-check svg')).toBeInTheDocument();
+    const proactive = await screen.findByRole('menuitemradio', { name: /Proactive/ });
+    expect(proactive.querySelector('.gz-stop-marker svg')).toBeInTheDocument();
   });
 
   it('shows the selected mode glyph when Night Shift is off', async () => {
     render(<App />);
 
     const trigger = await screen.findByRole('button', {
-      name: 'Task speed: Proactive. Click to change.',
+      name: 'Crew activity: Proactive. Click to change.',
     });
     expect(trigger.querySelector('.app-engagement-mode-icon-proactive')).toBeInTheDocument();
     expect(trigger.querySelector('.app-nightshift-glyph')).not.toBeInTheDocument();
@@ -426,7 +469,7 @@ describe('Night Shift header status', () => {
     render(<App />);
 
     await user.click(
-      await screen.findByRole('button', { name: 'Task speed: Proactive. Click to change.' }),
+      await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
     );
 
     const action = await screen.findByRole('menuitem', { name: /Start night shift now/ });
@@ -441,7 +484,7 @@ describe('Night Shift header status', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
       }),
     );
 
@@ -469,7 +512,7 @@ describe('Night Shift header status', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
       }),
     );
 
@@ -492,7 +535,7 @@ describe('Night Shift header status', () => {
       await waitFor(() => expect(api.listLlamaCppModels).toHaveBeenCalled());
       await act(async () => {});
       expect(
-        screen.queryByRole('button', { name: /^Task speed: .*Click to change\.$/ }),
+        screen.queryByRole('button', { name: /^Crew activity: .*Click to change\.$/ }),
       ).not.toBeInTheDocument();
     } finally {
       if (config) vi.mocked(api.getConfig).mockImplementation(config);
@@ -507,7 +550,7 @@ describe('Night Shift header status', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
       }),
     );
 
@@ -533,7 +576,7 @@ describe('Night Shift header status', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Task speed: Night Shift running (scheduled); Proactive mode. Click to change.',
+        name: 'Crew activity: Night Shift running (scheduled); Proactive mode. Click to change.',
       }),
     );
 
@@ -557,7 +600,7 @@ describe('Night Shift header status', () => {
     render(<App />);
 
     await user.click(
-      await screen.findByRole('button', { name: 'Task speed: Proactive. Click to change.' }),
+      await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
     );
 
     expect(
@@ -582,7 +625,7 @@ describe('Night Shift header status', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
       }),
     );
 
@@ -613,7 +656,7 @@ describe('Night Shift header status', () => {
 
     await user.click(
       await screen.findByRole('button', {
-        name: 'Task speed: Night Shift running (manual); Proactive mode. Click to change.',
+        name: 'Crew activity: Night Shift running (manual); Proactive mode. Click to change.',
       }),
     );
 
@@ -649,7 +692,7 @@ describe('Night Shift header status', () => {
     const running = render(<App />);
     await user.click(
       await screen.findByRole('button', {
-        name: 'Task speed: Night Shift running (scheduled); Proactive mode. Click to change.',
+        name: 'Crew activity: Night Shift running (scheduled); Proactive mode. Click to change.',
       }),
     );
     expect(await screen.findByText('Finished so far')).toBeInTheDocument();
@@ -666,7 +709,7 @@ describe('Night Shift header status', () => {
     });
     render(<App />);
     await user.click(
-      await screen.findByRole('button', { name: 'Task speed: Proactive. Click to change.' }),
+      await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
     );
     expect(await screen.findByText('Done last night')).toBeInTheDocument();
   });
@@ -697,7 +740,7 @@ describe('Night Shift header status', () => {
     render(<App />);
 
     await user.click(
-      await screen.findByRole('button', { name: 'Task speed: Proactive. Click to change.' }),
+      await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
     );
 
     expect(

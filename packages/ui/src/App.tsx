@@ -16,6 +16,8 @@ import { AppBrand } from './components/AppBrand.js';
 import { BackupRestoreDialog } from './components/BackupRestoreDialog.js';
 import { BoekwachterPill } from './components/BoekwachterPill.js';
 import { ClaudeCliPoolPill } from './components/ClaudeCliPoolPill.js';
+import { EngagementModeIcon } from './components/EngagementModeIcon.js';
+import { EngagementModeMenu } from './components/EngagementModeMenu.js';
 import { EngineStatusPill } from './components/EngineStatusPill.js';
 import { GrantConsentDialog } from './components/GrantConsentDialog.js';
 import { MacUninstallDialog } from './components/MacUninstallDialog.js';
@@ -30,6 +32,7 @@ import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
 import { ActivityProvider, useActivity } from './components/activity-context.js';
 import { projectRecipientKey, writeChatThreadSelection } from './components/chat-thread-memory.js';
+import { ENGAGEMENT_MODES } from './components/engagement-modes.js';
 import { FirstRunProvider } from './components/first-run-context.js';
 import { HeaderDensityContext, useHeaderDensityMeasurement } from './components/header-density.js';
 import { NIGHT_SHIFT_MOON_PATH } from './components/night-shift-glyph.js';
@@ -891,71 +894,6 @@ function NavigationMenuIcon() {
   );
 }
 
-/** Task-speed choices shared by the titlebar menu and its trigger glyph. */
-type EngagementOption = {
-  mode: EngagementMode;
-  label: string;
-  hint: string;
-};
-const ENGAGEMENT_OPTIONS: EngagementOption[] = [
-  {
-    mode: 'proactive',
-    label: 'Proactive',
-    hint: 'Full activity — task work, scheduled triggers, nudges, fan-out.',
-  },
-  {
-    mode: 'scheduled',
-    label: 'Tasks + Reactive',
-    hint: 'Task work and scheduled triggers run; no proactive nudges.',
-  },
-  {
-    mode: 'reactive',
-    label: 'Reactive only',
-    hint: 'AI replies to your messages; task work is paused.',
-  },
-  { mode: 'off', label: 'Off', hint: 'AI is paused entirely.' },
-];
-
-function EngagementModeIcon({ mode }: { mode: EngagementMode }) {
-  if (mode === 'scheduled') {
-    return (
-      <svg
-        className={`app-engagement-mode-icon app-engagement-mode-icon-${mode}`}
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="m4 6 1.5 1.5L8 5" />
-        <path d="M11 6h9" />
-        <path d="m4 12 1.5 1.5L8 11" />
-        <path d="M11 12h9" />
-        <path d="M5 18h15" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg
-      className={`app-engagement-mode-icon app-engagement-mode-icon-${mode}`}
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      {mode === 'proactive' ? <path d="M8 5v14l11-7z" /> : null}
-      {mode === 'reactive' ? <path d="M6 5h4v14H6zM14 5h4v14h-4z" /> : null}
-      {mode === 'off' ? <path d="M6 6h12v12H6z" /> : null}
-    </svg>
-  );
-}
-
 type NightShiftState = { active: boolean; source: 'scheduled' | 'manual' | null };
 
 function NightShiftGlyph({ active }: { active: boolean }) {
@@ -1003,10 +941,10 @@ function TaskSpeedMenu({
   nightShift: NightShiftState;
   onNightShiftChange: (s: NightShiftState) => void;
 }) {
-  const current = ENGAGEMENT_OPTIONS.find((o) => o.mode === mode) ?? ENGAGEMENT_OPTIONS[0]!;
+  const current = ENGAGEMENT_MODES.find((o) => o.mode === mode) ?? ENGAGEMENT_MODES[0]!;
   const title = state.active
-    ? `Task speed: Night Shift running (${state.source ?? 'active'}); ${current.label} mode. Click to change.`
-    : `Task speed: ${current.label}. Click to change.`;
+    ? `Crew activity: Night Shift running (${state.source ?? 'active'}); ${current.label} mode. Click to change.`
+    : `Crew activity: ${current.label}. Click to change.`;
 
   const [open, setOpen] = useState(false);
   const [tasks, setTasks] = useState<NightShiftTasksResponse | null>(null);
@@ -1160,38 +1098,7 @@ function TaskSpeedMenu({
           sideOffset={4}
           align="end"
         >
-          {ENGAGEMENT_OPTIONS.map((opt) => (
-            <DropdownMenu.Item
-              key={opt.mode}
-              className={`app-nav-menu-item${opt.mode === mode ? ' active' : ''}`}
-              onSelect={() => handleModeSelect(opt.mode)}
-            >
-              <span className="app-engagement-menu-row">
-                <span className="app-engagement-menu-icon">
-                  <EngagementModeIcon mode={opt.mode} />
-                </span>
-                <span className="app-engagement-menu-label">{opt.label}</span>
-                <span className="app-engagement-menu-check" aria-hidden="true">
-                  {opt.mode === mode ? (
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="3.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : null}
-                </span>
-              </span>
-              <span className="app-engagement-menu-hint">{opt.hint}</span>
-            </DropdownMenu.Item>
-          ))}
+          <EngagementModeMenu mode={mode} onSelect={handleModeSelect} />
           <DropdownMenu.Separator className="app-task-speed-separator" />
           <DropdownMenu.Label className="app-nightshift-section-label">
             <NightShiftGlyph active={false} />

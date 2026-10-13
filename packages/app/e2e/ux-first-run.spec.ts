@@ -102,7 +102,7 @@ test('02 - the sidebar frames onboarding as "Get started"', async () => {
 test('03 - the title bar stays quiet until the workshop is running', async () => {
   const header = page.getByTestId('app-header');
   await expect(header.getByTestId('engine-pill')).toHaveCount(0);
-  await expect(header.getByRole('button', { name: /^Task speed:/ })).toHaveCount(0);
+  await expect(header.getByRole('button', { name: /^Crew activity:/ })).toHaveCount(0);
   await expect(header.getByRole('button', { name: /^Activity/ })).toHaveCount(0);
 });
 

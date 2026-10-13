@@ -112,7 +112,7 @@
 .squisq-editor-shell .squisq-status-bar,
 .squisq-editor-shell[data-theme="dark"] .squisq-status-bar,
 .squisq-editor-shell[data-theme="light"] .squisq-status-bar {
-  background: var(--titlebar, #667f62);
+  background: var(--titlebar, #5c6a4a);
   color: var(--titlebar-ink, #f3ede0);
   border-top-color: rgba(0, 0, 0, 0.25);
 }

@@ -1,4 +1,4 @@
-import type { PiSetupStatusResponse } from '@bendyline/gezel';
+import type { LocalHarnessSetupState, PiSetupStatusResponse } from '@bendyline/gezel';
 import { useCallback } from 'react';
 import { api } from '../api.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
@@ -16,9 +16,11 @@ type Confirmation =
 export function PiSetupCard({
   endpointsEnabled,
   onChanged,
+  onStateChange,
 }: {
   endpointsEnabled: boolean;
   onChanged?: () => void | Promise<void>;
+  onStateChange?: (state: LocalHarnessSetupState) => void;
 }) {
   const runAction = useCallback(
     (confirmation: Confirmation, model: string): Promise<PiSetupStatusResponse> => {
@@ -54,6 +56,7 @@ export function PiSetupCard({
           ? `The previous file was saved as ${next.configBackupPath}.`
           : null,
     ...(onChanged ? { onChanged } : {}),
+    ...(onStateChange ? { onStateChange } : {}),
   });
 
   const { status, confirmation, setConfirmation, setError, busy, copied } = card;

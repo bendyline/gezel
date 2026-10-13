@@ -196,21 +196,21 @@
   background: rgba(255, 255, 255, 0.04);
 }
 
-/* Tasks selection states use the gezel titlebar green (--titlebar:
-   #667f62 → rgb(102, 127, 98)) instead of a generic blue accent so the
-   list reads as part of the same crew/workshop palette as the header. */
+/* Tasks selection states use the gezel titlebar green instead of a generic
+   blue accent so the list reads as part of the same crew/workshop palette
+   as the header. */
 .task-row-active {
   --muted: var(--text);
-  background: rgba(102, 127, 98, 0.22);
+  background: color-mix(in srgb, var(--titlebar) 22%, transparent);
 }
 
 .task-row-selected {
   --muted: var(--text);
-  background: rgba(102, 127, 98, 0.32);
+  background: color-mix(in srgb, var(--titlebar) 32%, transparent);
 }
 
 .task-row-selected:hover {
-  background: rgba(102, 127, 98, 0.38);
+  background: color-mix(in srgb, var(--titlebar) 38%, transparent);
 }
 
 .task-status {
@@ -225,7 +225,7 @@
 }
 
 .task-status-active {
-  background: rgba(102, 127, 98, 0.42);
+  background: color-mix(in srgb, var(--titlebar) 42%, transparent);
   color: #e2ecdf;
 }
 .task-status-paused {

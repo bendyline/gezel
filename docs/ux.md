@@ -50,8 +50,12 @@ pacing of a transition. If a first-time user can't quite put a finger on
   poppetjes), not app chrome.
   Secondary copy uses `--text-muted`, never a fixed gray. Filled action keys
   pair `--action-bg` with `--action-ink`; links use `--accent-text`. These pairs
-  preserve normal-text contrast in both themes. The titlebar uses the deeper
-  sage so its small cream labels remain readable.
+  preserve normal-text contrast in both themes. The brand sage
+  (`--gezel-sage`, #5c6a4a) is deep enough that the titlebar's small cream
+  labels clear 4.5:1. The titlebar uses it exactly: the native Windows/Linux
+  window controls, the window background and the splash paint that color
+  outside the renderer (`BRAND_SAGE` in the Electron main process), so any
+  other tone shows as a seam at the controls.
 - **Motion** is slow-ish and soft: ~120–160ms ease-out for overlay and
   dialog in/out. Nothing snaps or bounces. See the `gz-overlay` /
   `gz-dialog` keyframes for the canonical cadence; match it elsewhere.
@@ -189,6 +193,13 @@ Rules:
   tell them apart. And when one action is more consequential than its
   neighbours (Fix creates a task), give it the accent ink — never a second
   latched-looking fill.
+- **One tray can hold a choice and its actions.** When a view switch has an
+  action that belongs with it, put both in one tray instead of a key tray
+  plus a stray text link. The tray is a `role="group"` named after its
+  subject, the choice keys keep their own inner `role="radiogroup"` (one Tab
+  stop, arrows move), and a 1px `--tray-border` divider separates them from
+  the action keys so an action never reads as one more choice. The Home
+  Handboek tab's *Read · Watch | Open in Handboek* is the reference.
 - **Native `<input type="radio">` stays native** in dense config forms
   (folder scopes, engine settings) — the round dot is a true circle and
   keeps its shape. Reach for keys when the choice is prominent enough to
@@ -229,6 +240,30 @@ Rules:
 - **No new fully-rounded controls.** If you're reaching for
   `border-radius: 999px` on anything with a text label, it should almost
   certainly be a key or a small-radius chip instead.
+
+### Crew activity: four stops on one track
+
+The titlebar's **Crew activity** menu presents independence as a vertical
+spectrum: **Proactive → Tasks + chat → Chat only → Off**. Use the
+`gz-tray--stops` / `gz-key--stop` extension of keys in trays: a continuous
+rail with four circular stops, a check inside the selected stop, and the
+latched face behind that choice. The whole row is the target. Hover and
+keyboard focus stay distinct from the committed selection.
+
+These are discrete menu radio choices, not a continuous range. Arrow keys
+move focus; Enter, Space, or a click commits one mode and closes the menu.
+Do not switch through intermediate modes while a pointer moves along the
+track: Chat only and Off can stop a running Night Shift. Night Shift stays
+below the spectrum as its own section, never as a fifth stop.
+
+The icon family is one three-gezel constellation, with stable positions,
+scale, and stroke weight. Off has three hollow resting nodes; Chat only
+has an incoming cue and one answering node; Tasks + chat activates the
+crew along a branching path; Proactive closes the connections and adds an
+initiative spark. The nodes stand for a crew, not a literal count of active
+gezels. Labels and descriptions always explain the mode; color alone never
+does. Reuse `EngagementModeIcon` and the shared mode copy in the titlebar,
+menu, and Settings so this vocabulary remains consistent.
 
 ## Controls: budget sliders
 
@@ -680,6 +715,16 @@ output. **See all** opens the full plan gallery, whose **Start here** shelf
 uses the same starter set. Use the existing tray and radius tokens; these
 are square-ish keys, never pills.
 
+Each Make something key is a **paper card**: it takes the paper its artwork is
+drawn on, in both themes, so the 64px mark bleeds into the card instead of
+sitting on it as a pasted square. `sampleArtworkPaper`
+([artwork-paper.ts](../packages/ui/src/components/artwork-paper.ts)) reads the
+dominant tone along the artwork's border once it loads; until then, or when the
+border has no single light ground, the card uses `--gezel-paper-mark`. The name
+and description are set in warm ink, the artwork's edge is feathered so a prop
+that runs off it fades out, and hover changes only the border, because a
+background change would expose the artwork's edge.
+
 The starters live inside the intro tab. The folder step waits until the
 welcome is over: on a later visit it keeps its own bounded area above the
 conversation and yields to the draft on short touchscreens. The intro tabs
@@ -843,6 +888,20 @@ the trigger's `data-face`, never the list's `data-fit`. Glyphs come from
 one concept keeps one picture. To keep every section on a phone, an
 iconified project tab may narrow below 44px wide, down to WCAG's 24px
 minimum. It keeps the 44px height.
+
+**A settings page of several integrations gives each its own tab.**
+Settings → Connected Apps opens on **Overview** (the master switch and the
+apps already approved), then one tab per integration. Each tab shows that
+integration's setup without a card frame, because the tab is already the
+container (as on the flat provider pages). Anything waiting on the person,
+such as a pending approval or a load error, sits above the tab row so every
+tab shows it. Hiding
+a warning behind an unselected tab is the regression tabs invite, so every
+panel stays mounted and a tab whose setup needs action carries a small warning
+dot (a true circle), with the state in its accessible name ("Codex, needs
+attention"). The row has no icons to shed to, so it wraps instead of scrolling.
+Copy that points at another tab names it ("on the Overview tab"), never
+"above" or "below".
 
 **Split buttons.** Use a split button when one creation action is the clear,
 frequent default and two or three closely-related variants should remain

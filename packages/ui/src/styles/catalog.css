@@ -421,11 +421,11 @@
 
 .ollama-pull {
   padding: 0.5rem 0.65rem;
-  border: 1px solid rgba(102, 127, 98, 0.35);
+  border: 1px solid color-mix(in srgb, var(--titlebar) 35%, transparent);
   border-radius: 6px;
-  /* Tint matches the sage titlebar (#667f62) so active downloads read as
-     part of the gezel theme instead of a random blue highlight. */
-  background: rgba(102, 127, 98, 0.15);
+  /* Tint matches the sage titlebar so active downloads read as part of the
+     gezel theme instead of a random blue highlight. */
+  background: color-mix(in srgb, var(--titlebar) 15%, transparent);
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
