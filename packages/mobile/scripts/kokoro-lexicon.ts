@@ -5,7 +5,7 @@ import type { Plugin } from 'vite';
 
 const ID = 'virtual:gezel-kokoro-lexicon';
 /** Same gzipped dictionaries the daemon ships; staged by scripts/build-kokoro-lexicon.mjs. */
-const SOURCE = fileURLToPath(new URL('../../service/assets/kokoro/', import.meta.url));
+const SOURCE = fileURLToPath(new URL('../../inference/assets/kokoro/', import.meta.url));
 const FILES = { us: 'lexicon-us-en.txt.gz', gb: 'lexicon-gb-en.txt.gz' } as const;
 
 /**

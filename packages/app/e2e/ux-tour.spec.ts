@@ -84,7 +84,10 @@ test.afterAll(async () => {
 test('01 - home workshop renders and a chat turn round-trips', async () => {
   test.setTimeout(120_000);
   await expect(page.getByTestId('home-workshop')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/Good (morning|afternoon|evening)\./)).toBeVisible();
+  // The Meester's welcome title greets too, so read the workshop's own headline.
+  await expect(
+    page.getByTestId('greeting-band').getByText(/Good (morning|afternoon|evening)\./),
+  ).toBeVisible();
   await shot('01-home-workshop.png');
 
   const editor = page.locator('.squisq-wysiwyg-editor').first();

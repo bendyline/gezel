@@ -446,7 +446,7 @@ Unlike the desktop models below, these ship inside the mobile app bundle.
 The voice pack is published on the sherpa-onnx release page but is data, not
 sherpa-onnx code, and it is still used now that the library is gone. The two
 English dictionaries are **also redistributed with the desktop daemon**, gzipped,
-under `packages/service/assets/kokoro/` beside the voice pack's Apache-2.0
+under `packages/inference/assets/kokoro/` beside the voice pack's Apache-2.0
 `LICENSE`, so both hosts pronounce a sentence the same way;
 `scripts/build-kokoro-lexicon.mjs` stages them from the pinned pack.
 
