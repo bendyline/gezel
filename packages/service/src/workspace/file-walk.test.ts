@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, rm, truncate, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isGitInstalled, runGit } from '../git/git.js';
+import { writeCloudPlaceholder } from '../test-support/cloud-placeholder.js';
 import { discoverWorkspaceFiles, looksCloudOnly } from './file-walk.js';
 
 let dir: string;
@@ -57,9 +58,7 @@ describe('discoverWorkspaceFiles', () => {
 
   it('flags a file whose bytes are not on disk', async () => {
     await writeFile(join(dir, 'local.jpg'), Buffer.alloc(64 * 1024, 1));
-    // A sparse file allocates no blocks, which is what a cloud placeholder reports.
-    await writeFile(join(dir, 'in-icloud.jpg'), '');
-    await truncate(join(dir, 'in-icloud.jpg'), 64 * 1024);
+    await writeCloudPlaceholder(join(dir, 'in-icloud.jpg'), 64 * 1024);
 
     const { files } = await discoverWorkspaceFiles(dir, { maxFiles: 100 });
     const byPath = Object.fromEntries(files.map((f) => [f.path, f.cloudOnly ?? false]));

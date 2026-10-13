@@ -2256,8 +2256,11 @@ export async function startProductService(
   // token is not a chat bug, an engine bug, or a GPU bug, but it presents as
   // all three at once, each at a different call site. See spawn-capability.ts.
   const childProcessSpawn = await probeChildProcessSpawn();
+  let stopWindowsScriptSandbox: (() => Promise<void>) | undefined;
   if (childProcessSpawn === 'denied') log.error(`[spawn] ${SPAWN_DENIED_MESSAGE}`);
-  else if (process.platform === 'win32') await startWindowsScriptSandbox(store, home);
+  else if (process.platform === 'win32') {
+    stopWindowsScriptSandbox = await startWindowsScriptSandbox(store, home);
+  }
 
   // App-serve sites — per-site visitor listeners for shared AI App
   // mini-sites. A product feature: the machine-engine role never serves.
@@ -2748,6 +2751,7 @@ export async function startProductService(
       // seconds into shutdown, and a first-run Chromium download must not
       // outlive it as an orphan.
       const systemBootstrapsStopped = stopSystemBootstraps();
+      const windowsScriptSandboxStopped = stopWindowsScriptSandbox?.();
       // Quiesce chat before tearing down any callback dependencies. In
       // particular, keep the HTTP listener alive while MCP subprocesses and
       // active provider turns unwind; otherwise their service callbacks fail
@@ -2788,6 +2792,7 @@ export async function startProductService(
       engineBinaries.clear();
       systemToolsetInstalls.clear();
       await shutdownStep('system toolsets', () => systemBootstrapsStopped);
+      await shutdownStep('Windows script sandbox', () => windowsScriptSandboxStopped);
       await shutdownStep('image provider', () => imageProvider.shutdown());
       await shutdownStep('video provider', () => videoProvider.shutdown());
       await shutdownStep('speech recognition', () => stt.shutdown());

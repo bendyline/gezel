@@ -78,10 +78,13 @@ export function useIsFirstRun(enabled = true): boolean {
     // The bootstrap flag is not evidence of use: the daemon sets it even
     // when setup fails. This endpoint excludes the automatically created crew
     // and projects. Read it once, shared by estimates and Home's probe events.
-    const usage = api
-      .getSystemHomeInfo()
-      .then((home) => home.usage.everUsed)
-      .catch(() => false);
+    // A portable host has no daemon home to report on and answers 501.
+    const usage = runtimeCapabilities().daemonSettings
+      ? api
+          .getSystemHomeInfo()
+          .then((home) => home.usage.everUsed)
+          .catch(() => false)
+      : Promise.resolve(false);
     const settle = async (needsSetup: boolean, current: number) => {
       const used = await usage;
       if (cancelled || current !== revision) return;

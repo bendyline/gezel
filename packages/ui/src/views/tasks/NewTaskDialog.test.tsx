@@ -1103,7 +1103,8 @@ describe('NewTaskDialog', () => {
     } as Task);
     renderDialog({ quickLaunch: true, initialCraftbookId: 'research-report', projectLocked: true });
     const brief = await screen.findByRole('textbox', { name: 'Topic' });
-    expect(brief).toHaveFocus();
+    // The textarea commits before the passive effect that focuses it runs.
+    await waitFor(() => expect(brief).toHaveFocus());
     expect(screen.getByText('Title').closest('details')).not.toHaveAttribute('open');
     expect(screen.queryByText('outputPath')).not.toBeInTheDocument();
     expect(screen.getByText('A written report')).toBeInTheDocument();

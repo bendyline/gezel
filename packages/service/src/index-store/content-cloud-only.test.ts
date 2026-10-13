@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, rm, stat, truncate, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../fs/store.js';
+import { writeCloudPlaceholder } from '../test-support/cloud-placeholder.js';
 import { ContentIndex } from './content-index.js';
 import { CLOUD_ONLY_META_KEY, runWorkspaceContentIndex } from './content-indexer.js';
 import { IndexStore } from './index-store.js';
@@ -54,17 +55,11 @@ async function fileRow(path: string) {
   }
 }
 
-/** A sparse file: full size, nothing allocated, as a cloud placeholder reports. */
-async function placeholder(path: string, size: number): Promise<void> {
-  await writeFile(path, '');
-  await truncate(path, size);
-}
-
 describe('cloud-only files', () => {
   it('are listed by name, size and date and never read by any tier', async () => {
     await mkdir(join(dir, 'photos'), { recursive: true });
     await writeFile(join(dir, 'photos', 'local.png'), PNG);
-    await placeholder(join(dir, 'photos', 'in-icloud.png'), PNG.length);
+    await writeCloudPlaceholder(join(dir, 'photos', 'in-icloud.png'), PNG.length);
 
     await index();
     const { file, meta } = await fileRow('photos/in-icloud.png');
@@ -80,7 +75,7 @@ describe('cloud-only files', () => {
 
   it('are read once they are back on disk, even with the same size and date', async () => {
     const path = join(dir, 'scan.png');
-    await placeholder(path, PNG.length);
+    await writeCloudPlaceholder(path, PNG.length);
     const { mtime } = await stat(path);
     await index();
     expect((await fileRow('scan.png')).file?.hash).toBeNull();
@@ -103,7 +98,7 @@ describe('cloud-only files', () => {
     expect((await fileRow('old.png')).file?.hash).not.toBeNull();
 
     const { mtime } = await stat(path);
-    await placeholder(path, PNG.length);
+    await writeCloudPlaceholder(path, PNG.length);
     await utimes(path, mtime, mtime);
     await index();
 
@@ -121,7 +116,7 @@ describe('folder overview', () => {
     await writeFile(join(dir, 'photos', 'a.png'), PNG);
     await writeFile(join(dir, 'photos', 'a-copy.png'), PNG);
     await writeFile(join(dir, 'photos', 'a-copy-2.png'), PNG);
-    await placeholder(join(dir, 'photos', 'cloud.png'), PNG.length);
+    await writeCloudPlaceholder(join(dir, 'photos', 'cloud.png'), PNG.length);
     await writeFile(join(dir, 'notes.md'), '# notes\n');
     await index();
 

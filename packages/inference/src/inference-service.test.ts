@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { StreamingSessionBase } from '@bendyline/gezel/local-loop';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type RunningInferenceService, startService } from './inference-service.js';
+import { embedModelId } from './memory/embed-core.js';
 import type { LLMProvider } from './providers/types.js';
 vi.mock('./memory/embeddings.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./memory/embeddings.js')>()),
@@ -94,7 +95,7 @@ describe('in-process inference host', () => {
     expect(embedded.status).toBe(200);
     expect(await embedded.json()).toMatchObject({
       object: 'list',
-      model: 'Xenova/bge-small-en-v1.5',
+      model: embedModelId(),
       data: [
         { index: 0, embedding: [2, 1] },
         { index: 1, embedding: [5, 1] },

@@ -272,9 +272,7 @@ try {
   await checkpoint('phone-document');
 
   await (await navigation()).getByRole('button', { name: 'New gezel', exact: true }).click();
-  await page
-    .getByRole('textbox', { name: 'Name Pick a random name', exact: true })
-    .fill('Ada Field Guide');
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Ada Field Guide');
   await page.getByRole('textbox', { name: 'Role', exact: true }).fill('Nature observer');
   await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'detached' });
@@ -517,7 +515,8 @@ try {
   assert(
     await largeTextDraft.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
-      return bounds.top >= 0 && bounds.bottom <= innerHeight;
+      // Scrolling lands on whole pixels; a fractional box can end just past the edge.
+      return bounds.top >= 0 && bounds.bottom <= innerHeight + 1;
     }),
     'The draft must remain reachable at 200% text size',
   );
