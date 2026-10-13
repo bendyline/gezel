@@ -11,10 +11,17 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
+import {
+  PipelineLoadError,
+  isRetryablePipelineLoadFailure,
+} from '@bendyline/gezel-inference/internal/memory/embed-core';
+import {
+  HF_CACHE_DIR_ENV,
+  TRANSFORMERS_MODULE,
+  isMissingModule,
+} from '@bendyline/gezel-inference/internal/transformers-cache';
 import { profileUnitVector } from '@bendyline/gezel-knowledge';
 import { MEDIA_SEARCH_PROFILE } from '../media-search/profile.js';
-import { HF_CACHE_DIR_ENV, TRANSFORMERS_MODULE, isMissingModule } from '../transformers-cache.js';
-import { PipelineLoadError, isRetryablePipelineLoadFailure } from './embed-core.js';
 import { ImageDecodeError, decodeImage, readBoundedImageFile, rgbaToRgb } from './image-pixels.js';
 import { type MediaEncoder, type MediaModality, loadMediaEncoder } from './media-embed-core.js';
 

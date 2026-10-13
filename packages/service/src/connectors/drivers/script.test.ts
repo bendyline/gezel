@@ -1,9 +1,9 @@
 import type { ConnectorTypeManifest } from '@bendyline/gezel';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { describe, expect, it } from 'vitest';
 import type { Store } from '../../fs/store.js';
 import { parseScriptMeta } from '../../scripts/meta.js';
 import type { RunScriptOptions, ScriptRunner } from '../../scripts/runner.js';
-import type { SecretStore } from '../../secrets/types.js';
 import { ScriptConnectorAdapter } from './script.js';
 
 const TYPE: ConnectorTypeManifest = {

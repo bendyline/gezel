@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   degradeDenseFfnOffloadDecision,
   degradeMoeOffloadDecision,
@@ -8,7 +7,8 @@ import {
   fitsSwaFullInFastMemory,
   planDenseFfnOffload,
   planMoeOffload,
-} from './offload-planner.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/offload-planner';
+import { describe, expect, it } from 'vitest';
 
 const GiB = 1024 ** 3;
 

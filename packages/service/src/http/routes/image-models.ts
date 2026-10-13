@@ -1,17 +1,17 @@
-import { Hono } from 'hono';
-import { streamSSE } from 'hono/streaming';
-import type { SSEStreamingApi } from 'hono/streaming';
-import { imageCatalogFits, imageModelFit, wontRunRefusal } from '../../models/media-fit.js';
+import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import {
   INVALID_MODEL_ID_CODE,
   INVALID_MODEL_ID_MESSAGE,
   isSafeModelId,
-} from '../../models/model-id.js';
-import { ReadOnlyModelError } from '../../models/storage-roots.js';
+} from '@bendyline/gezel-inference/internal/models/model-id';
+import { ReadOnlyModelError } from '@bendyline/gezel-inference/internal/models/storage-roots';
+import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
+import type { SSEStreamingApi } from 'hono/streaming';
+import { imageCatalogFits, imageModelFit, wontRunRefusal } from '../../models/media-fit.js';
 import { resolveImg2ImgSupport } from '../../providers/image/img2img-support.js';
 import { UnknownImageModelError } from '../../providers/image/pull-registry.js';
 import type { EngineContext } from '../engine-context.js';
-import { machineEngineProxy } from './machine-engine-proxy.js';
 import { mediaFitContext } from './media-fit-context.js';
 
 export function imageModelRoutes(ctx: EngineContext): Hono {

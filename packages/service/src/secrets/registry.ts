@@ -1,6 +1,10 @@
+import type {
+  ProviderCredentialName,
+  SecretKey,
+  SecretStore,
+} from '@bendyline/gezel-inference/internal/secrets/types';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
-import type { ProviderCredentialName, SecretKey, SecretStore } from './types.js';
 
 /** All known provider-credential names we enumerate at screen time. */
 const ALL_PROVIDER_CREDENTIAL_NAMES: ProviderCredentialName[] = [

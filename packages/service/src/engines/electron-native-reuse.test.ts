@@ -2,13 +2,13 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   type ElectronNativeReuseOptions,
   reuseVerifiedElectronNativeBinaries,
   verifyNativeBinaries,
-} from './electron-native-reuse.js';
-import type { VerifyOptions } from './signature.js';
+} from '@bendyline/gezel-inference/internal/engines/electron-native-reuse';
+import type { VerifyOptions } from '@bendyline/gezel-inference/internal/engines/signature';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const roots: string[] = [];
 const originalNativeRoot = process.env.GEZEL_NATIVE_BIN_DIR;

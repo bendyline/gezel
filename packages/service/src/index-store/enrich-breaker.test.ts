@@ -1,6 +1,6 @@
 import { resetSuspendClockForTests, startSuspendMonitor } from '@bendyline/gezel';
+import { EngineBusyError } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 import { describe, expect, it, vi } from 'vitest';
-import { EngineBusyError } from '../providers/native/capacity-broker.js';
 import { EnrichTimeoutBreaker, classifyEnrichFailure } from './enrich-breaker.js';
 
 function breaker(

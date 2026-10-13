@@ -36,6 +36,22 @@ test('the CI shards measure every configured package exactly once', () => {
   );
 });
 
+test('preserves the original service coverage scope and floors after extracting inference', () => {
+  const service = targets.find((target) => target.id === 'service');
+  assert.deepEqual(service.include, [
+    'src/**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}',
+    '../inference/src/**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}',
+  ]);
+  assert.equal(service.allowExternal, true);
+  assert.equal(service.config, 'packages/service/vitest.coverage.config.ts');
+  assert.deepEqual(service.thresholds, {
+    statements: 56,
+    branches: 47,
+    functions: 53,
+    lines: 59,
+  });
+});
+
 test('rejects unknown package ids and selections that leave nothing to measure', () => {
   assert.throws(
     () => selectTargets(targets, parseArgs(['--exclude-package', 'servce'])),

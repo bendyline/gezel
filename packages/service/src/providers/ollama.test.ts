@@ -1,4 +1,5 @@
 import { turnCancelledMessage } from '@bendyline/gezel';
+import type { TurnUsage } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OllamaProvider,
@@ -8,7 +9,6 @@ import {
   heuristicNumCtx,
   stableArgsKey,
 } from './ollama.js';
-import type { TurnUsage } from './types.js';
 
 /**
  * Build a mock `fetch` that matches URLs by substring and returns canned

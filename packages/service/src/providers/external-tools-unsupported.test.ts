@@ -1,8 +1,12 @@
+import {
+  ExternalToolsUnsupportedError,
+  type LLMProvider,
+  type SessionOpts,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { describe, expect, it } from 'vitest';
 import { AnthropicCliProvider } from './anthropic-cli/provider.js';
 import { CodexCliProvider } from './codex-cli/provider.js';
 import { CopilotProvider } from './copilot.js';
-import { ExternalToolsUnsupportedError, type LLMProvider, type SessionOpts } from './types.js';
 
 /**
  * Providers that can't advertise-but-not-execute caller-supplied tools

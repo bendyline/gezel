@@ -19,24 +19,24 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-  SPEECH_MODEL_CATALOG,
-  SpeechAssetStore,
-  speechAssetOptions,
-} from '@bendyline/gezel/speech-models';
-import {
   type ModelStorageRoots,
   findModelRoot,
   listOverlayModelIds,
   modelStorageRoots,
   verifyReadOnlyModelPayload,
-} from '../../models/storage-roots.js';
-import { pickFreePort } from '../native/port.js';
-import { NativeEngineSupervisor } from '../native/supervisor.js';
-import { patientFetch } from '../patient-fetch.js';
-import { ensureSpeechModel } from './managed-speech-model.js';
+} from '@bendyline/gezel-inference/internal/models/storage-roots';
+import { ensureSpeechModel } from '@bendyline/gezel-inference/internal/providers/audio/managed-speech-model';
+import type { SpeechToTextProvider } from '@bendyline/gezel-inference/internal/providers/audio/types';
+import { WhisperCppProvider } from '@bendyline/gezel-inference/internal/providers/audio/whisper-cpp';
+import { pickFreePort } from '@bendyline/gezel-inference/internal/providers/native/port';
+import { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
+import { patientFetch } from '@bendyline/gezel-inference/internal/providers/patient-fetch';
+import {
+  SPEECH_MODEL_CATALOG,
+  SpeechAssetStore,
+  speechAssetOptions,
+} from '@bendyline/gezel/speech-models';
 import { MockSpeechToTextProvider } from './mock-stt.js';
-import type { SpeechToTextProvider } from './types.js';
-import { WhisperCppProvider } from './whisper-cpp.js';
 
 export interface SpeechToTextFactoryOptions {
   home: string;

@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import * as atomic from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   gezelPaths,
   projectArtifactsDir,
@@ -8,7 +9,6 @@ import {
   projectTaskNextIdFile,
 } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as atomic from './atomic.js';
 import { TaskFilesStore } from './task-files-store.js';
 
 describe('TaskFilesStore.nextProjectTaskNum', () => {

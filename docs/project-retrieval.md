@@ -125,7 +125,7 @@ rule than project content, because an encyclopedia always has a plausible
 neighbour and a title that shares a word with the request.
 
 - **Vector floors.** A catalog's vector hit counts as evidence only above its
-  cosine floor ([knowledge/vector-floors.ts](../packages/service/src/knowledge/vector-floors.ts)),
+  cosine floor ([knowledge/vector-floors.ts](../packages/inference/src/knowledge/vector-floors.ts)),
   keyed by catalog, then embedding profile. A hit under it neither ranks the
   document nor labels it `vector`. A profile nobody measured keeps its hits
   for ranking but labels them `fts`.
@@ -195,7 +195,7 @@ cross-encoder: it reads the query and each passage together and scores the
 pair on its own, which gives an absolute cut.
 
 - **Where it runs.** `SearchService.searchProject` re-judges the top of the
-  fused order ([search/relevance-stage.ts](../packages/service/src/search/relevance-stage.ts))
+  fused order ([search/relevance-stage.ts](../packages/inference/src/search/relevance-stage.ts))
   for three surfaces: per-turn injection (`filter`, 250 ms), the launch
   reference list (`filter`, 700 ms added to its budget), and the model's
   `search` tool (`reorder`, 400 ms). Keyword hits are judged on their whole
@@ -219,7 +219,7 @@ pair on its own, which gives an absolute cut.
   rest as `hiddenBelowRelevanceFloor` ("No closely relevant results (N weak
   matches hidden)").
 - **Models.** Pinned by sha256 at an exact revision in
-  [relevance/registry.ts](../packages/service/src/relevance/registry.ts),
+  [relevance/registry.ts](../packages/inference/src/relevance/registry.ts),
   stored under `~/.gezel/engines/relevance-models/<id>/`, downloaded when the
   check is on (first run turns it on for new installs; the boot step fetches
   a missing model) and only when the security policy allows app network, and loaded

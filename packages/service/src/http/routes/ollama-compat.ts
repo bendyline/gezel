@@ -1,32 +1,32 @@
 import { externalGezelModelId } from '@bendyline/gezel';
-import { sniffImageMime } from '@bendyline/gezel/local-loop';
-import { Hono } from 'hono';
-import { stream as honoStream } from 'hono/streaming';
-import { ZodError, z } from 'zod';
-import { ModelNotInstalledError } from '../../providers/types.js';
-import type {
-  ExternalToolCall,
-  ExternalToolSpec,
-  ImageAttachment,
-  ProviderName,
-  TurnUsage,
-} from '../../providers/types.js';
-import type { ServiceContext } from '../context.js';
-import { appendCallerOwnedActionLedger } from '../openai-compat/action-ledger.js';
-import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
-import type { ChatTarget } from '../openai-compat/chat-target.js';
-import { resolveChatTarget } from '../openai-compat/chat-target.js';
+import { appendCallerOwnedActionLedger } from '@bendyline/gezel-inference/internal/http/openai-compat/action-ledger';
+import { profileForCallerOwnedInference } from '@bendyline/gezel-inference/internal/http/openai-compat/caller-owned-profile';
+import type { ChatTarget } from '@bendyline/gezel-inference/internal/http/openai-compat/chat-target';
+import { resolveChatTarget } from '@bendyline/gezel-inference/internal/http/openai-compat/chat-target';
 import {
   type OllamaRequestOptions,
   overlayOllamaRequestTuning,
-} from '../openai-compat/request-tuning.js';
+} from '@bendyline/gezel-inference/internal/http/openai-compat/request-tuning';
 import {
   type ChatCompletionRequest,
   flattenTranscriptIntoPrompt,
   parseGezelModelRef,
   resolveModelTarget,
   translateMessagesWithPrefix,
-} from '../openai-compat/translate.js';
+} from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
+import { ModelNotInstalledError } from '@bendyline/gezel-inference/internal/providers/types';
+import type {
+  ExternalToolCall,
+  ExternalToolSpec,
+  ImageAttachment,
+  ProviderName,
+  TurnUsage,
+} from '@bendyline/gezel-inference/internal/providers/types';
+import { sniffImageMime } from '@bendyline/gezel/local-loop';
+import { Hono } from 'hono';
+import { stream as honoStream } from 'hono/streaming';
+import { ZodError, z } from 'zod';
+import type { ServiceContext } from '../context.js';
 
 /**
  * `/ollama/v1/*` — Ollama-compatible facade.

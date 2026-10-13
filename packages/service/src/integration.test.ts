@@ -31,7 +31,7 @@ vi.mock('./projects/infer-project.js', async (importOriginal) => {
   };
 });
 
-vi.mock('./memory/embeddings.js', () => {
+vi.mock('@bendyline/gezel-inference/internal/memory/embeddings', () => {
   const vectorFor = (text: string): number[] => {
     const vector = new Array<number>(16).fill(0);
     for (let i = 0; i < text.length; i++) {

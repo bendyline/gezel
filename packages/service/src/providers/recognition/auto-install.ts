@@ -1,6 +1,6 @@
 import { type GezelConfig, createLogger } from '@bendyline/gezel';
-import { checkDiskSpace } from '../../utils/disk-space.js';
-import type { LlamaCppModelManager } from '../llama-cpp/models.js';
+import type { LlamaCppModelManager } from '@bendyline/gezel-inference/internal/providers/llama-cpp/models';
+import { checkDiskSpace } from '@bendyline/gezel-inference/internal/utils/disk-space';
 import { type RecognitionCatalogEntry, recommendedRecognitionModel } from './catalog.js';
 import { recognitionModelsRoot } from './factory.js';
 import type { RecognitionManager } from './manager.js';

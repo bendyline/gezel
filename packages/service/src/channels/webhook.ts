@@ -1,5 +1,5 @@
 import type { ChannelStatus, WebhookChannelConfig } from '@bendyline/gezel';
-import type { SecretStore } from '../secrets/types.js';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import type { ChannelProvider, SendResult } from './types.js';
 
 export interface WebhookChannelOpts {

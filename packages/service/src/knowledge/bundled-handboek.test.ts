@@ -1,9 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { createInProcessCatalogHost } from '@bendyline/gezel-inference/internal/knowledge/catalog-host';
+import { KnowledgeManager } from '@bendyline/gezel-inference/internal/knowledge/manager';
 import { describe, expect, it } from 'vitest';
-import { createInProcessCatalogHost } from './catalog-host.js';
-import { KnowledgeManager } from './manager.js';
 
 const archive = resolve(import.meta.dirname, '..', '..', 'assets', 'handboek', 'handboek.gezk');
 

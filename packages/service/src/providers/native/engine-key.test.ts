@@ -1,5 +1,10 @@
+import {
+  LOCAL_PROVIDERS,
+  isLocalProvider,
+  makeEngineKey,
+  parseEngineKey,
+} from '@bendyline/gezel-inference/internal/providers/native/engine-key';
 import { describe, expect, it } from 'vitest';
-import { LOCAL_PROVIDERS, isLocalProvider, makeEngineKey, parseEngineKey } from './engine-key.js';
 
 describe('engine-key', () => {
   it('LOCAL_PROVIDERS lists llama-cpp, mlx, and ds4', () => {

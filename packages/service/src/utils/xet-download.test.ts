@@ -1,13 +1,13 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   type DownloadEvent,
   type DownloadResult,
   downloadWithRetry,
-} from './download-with-retry.js';
-import { downloadXet } from './xet-download.js';
+} from '@bendyline/gezel-inference/internal/utils/download-with-retry';
+import { downloadXet } from '@bendyline/gezel-inference/internal/utils/xet-download';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // A scheme-0 (uncompressed) Xet chunk: 8-byte header + raw payload.
 function noneChunk(payload: Buffer): Buffer {

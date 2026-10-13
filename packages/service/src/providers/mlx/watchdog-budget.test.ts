@@ -1,5 +1,8 @@
+import {
+  computePreFirstByteBudgetMs,
+  estimatePromptTokens,
+} from '@bendyline/gezel-inference/internal/providers/mlx/provider';
 import { describe, expect, it } from 'vitest';
-import { computePreFirstByteBudgetMs, estimatePromptTokens } from './provider.js';
 
 // The qwen3.6-27b voorman stall: a 37K-token prompt produced no first token
 // in the old flat 300s pre-first-byte budget and aborted at 343s. These guard

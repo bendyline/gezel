@@ -5,8 +5,8 @@
  */
 import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import type { PromptDraftFiles } from '@bendyline/gezel/runtime';
-import { writeFileAtomic } from '../fs/atomic.js';
 
 export function nodePromptDraftFiles(rootDir: string): PromptDraftFiles {
   const abs = (path: string) => (path ? join(rootDir, ...path.split('/')) : rootDir);

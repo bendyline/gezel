@@ -39,7 +39,7 @@ import {
   projectAllowsAmbientWork,
   projectNightWorkEnabled,
 } from '@bendyline/gezel';
-import { resolveInside } from '../fs/safe-paths.js';
+import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { Store } from '../fs/store.js';
 import { compactCorpus } from './compactor.js';
 import { type DuckRunner, sqlLiteral } from './duck.js';

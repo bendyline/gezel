@@ -2,19 +2,19 @@ import { arch, platform } from 'node:process';
 import { createLogger, securityPolicyForLevel } from '@bendyline/gezel';
 import type { ChatModelManifest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { usesMachineEngine } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import {
   isSupportedOnDevicePlatform as coreIsSupportedOnDevicePlatform,
   resolveOnDeviceProvider,
 } from '@bendyline/gezel/native';
 import { z } from 'zod';
 import type { Store } from '../fs/store.js';
-import { usesMachineEngine } from '../http/routes/machine-engine-proxy.js';
 import type { MachineEngineBridge } from '../machine-engine/bridge.js';
 
 const firstRunLog = createLogger('first-run');
+import type { LlamaCppModelManager } from '@bendyline/gezel-inference/internal/providers/llama-cpp/index';
+import type { MlxModelManager } from '@bendyline/gezel-inference/internal/providers/mlx/index';
 import { detectModelTier } from '../providers/llama-cpp/hardware-tier.js';
-import type { LlamaCppModelManager } from '../providers/llama-cpp/index.js';
-import type { MlxModelManager } from '../providers/mlx/index.js';
 
 /**
  * Re-exported so existing service callers keep one import site. The list

@@ -3,9 +3,12 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { resetPayloadFingerprintHealsForTest } from '@bendyline/gezel-inference/internal/models/catalog-drift';
+import {
+  type MlxInstallEvent,
+  MlxModelManager,
+} from '@bendyline/gezel-inference/internal/providers/mlx/models';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resetPayloadFingerprintHealsForTest } from '../../models/catalog-drift.js';
-import { type MlxInstallEvent, MlxModelManager } from './models.js';
 
 /**
  * MLX inventory answers "out of date" from the payload, not the version

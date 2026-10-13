@@ -1,5 +1,8 @@
+import {
+  type ChatMessage,
+  toWireMessages,
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
 import { describe, expect, it } from 'vitest';
-import { type ChatMessage, toWireMessages } from './provider.js';
 
 const img = { base64: 'AAAA', mimeType: 'image/png', filename: 'shot.png' };
 

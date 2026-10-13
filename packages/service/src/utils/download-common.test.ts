@@ -1,11 +1,11 @@
-import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_MAX_RETRIES,
   DownloadRetryBudget,
   MAX_TOTAL_ATTEMPTS,
   PROGRESS_REFUND_BYTES,
   huggingFaceRequestHeaders,
-} from './download-common.js';
+} from '@bendyline/gezel-inference/internal/utils/download-common';
+import { describe, expect, it } from 'vitest';
 
 const MB = 1024 * 1024;
 

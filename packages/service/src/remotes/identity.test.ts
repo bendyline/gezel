@@ -1,16 +1,16 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { SecretKey, SecretStore } from '../secrets/types.js';
-import { stringifySecretKey } from '../secrets/types.js';
 import {
   deviceIdentityScope,
   fingerprintOfPublicKeyPem,
   loadOrCreateDeviceIdentity,
   signCertFingerprint,
   verifyIdentitySignature,
-} from './identity.js';
+} from '@bendyline/gezel-inference/internal/remotes/identity';
+import type { SecretKey, SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
+import { stringifySecretKey } from '@bendyline/gezel-inference/internal/secrets/types';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 function memSecrets(): SecretStore {
   const map = new Map<string, string>();

@@ -1,5 +1,5 @@
+import { ChatModelInstallRegistry } from '@bendyline/gezel-inference/internal/models/install-registry';
 import { describe, expect, it } from 'vitest';
-import { ChatModelInstallRegistry } from './install-registry.js';
 
 type TestEvent = { type: string; error?: string };
 

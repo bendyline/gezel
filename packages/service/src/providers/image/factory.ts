@@ -27,22 +27,22 @@
 
 import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
-import { imageMediaPool, sdServerRequirement } from '../../models/media-fit.js';
 import {
   type ModelStorageRoots,
   findModelRoot,
   listOverlayModelIds,
   modelStorageRoots,
   verifyReadOnlyModelPayload,
-} from '../../models/storage-roots.js';
+} from '@bendyline/gezel-inference/internal/models/storage-roots';
+import type { GpuArbiter } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
+import type { NativeCapacityOptions } from '@bendyline/gezel-inference/internal/providers/native/device-capacity';
+import { measuredCapacityBudget } from '@bendyline/gezel-inference/internal/providers/native/measured-budget';
+import { pickFreePort } from '@bendyline/gezel-inference/internal/providers/native/port';
+import { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
+import { patientFetch } from '@bendyline/gezel-inference/internal/providers/patient-fetch';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
+import { imageMediaPool, sdServerRequirement } from '../../models/media-fit.js';
 import { localSdCppWeightFiles } from '../../models/weight-facts.js';
-import type { SecretStore } from '../../secrets/types.js';
-import type { GpuArbiter } from '../gpu-arbiter.js';
-import type { NativeCapacityOptions } from '../native/device-capacity.js';
-import { measuredCapacityBudget } from '../native/measured-budget.js';
-import { pickFreePort } from '../native/port.js';
-import { NativeEngineSupervisor } from '../native/supervisor.js';
-import { patientFetch } from '../patient-fetch.js';
 import { GoogleAiImageProvider } from './google-ai.js';
 import { MockImageProvider } from './mock.js';
 import { OpenAIImageProvider } from './openai-image.js';

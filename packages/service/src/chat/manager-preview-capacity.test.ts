@@ -2,11 +2,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import { NOT_ENOUGH_MEMORY_MESSAGE } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { writeSyntheticGguf } from '../providers/llama-cpp/gguf-test-fixture.js';
-import { NOT_ENOUGH_MEMORY_MESSAGE } from '../providers/native/capacity-broker.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ChatEventBus } from './events.js';
 import { ChatManager } from './manager.js';
@@ -16,17 +16,24 @@ import { ChatManager } from './manager.js';
 // on the test host. Pin it high and leave every real estimator in place — the
 // budget half is what these tests are about.
 const availableSystemRamBytesMock = vi.hoisted(() => vi.fn(() => 512 * 1024 ** 3));
-vi.mock('../providers/native/capacity-broker.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../providers/native/capacity-broker.js')>();
-  return { ...actual, availableSystemRamBytes: availableSystemRamBytesMock };
-});
+vi.mock(
+  '@bendyline/gezel-inference/internal/providers/native/capacity-broker',
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import('@bendyline/gezel-inference/internal/providers/native/capacity-broker')
+      >();
+    return { ...actual, availableSystemRamBytes: availableSystemRamBytesMock };
+  },
+);
 
 // The auto-budget fallback (no broker snapshot) measures the host rather than
 // reading the ambient GPU probe. Pin the measurement so the budget under test
 // is the fixture's host, not whatever card the suite happens to run on.
 const detectMemoryProfileCachedMock = vi.hoisted(() => vi.fn());
-vi.mock('../system/memory.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../system/memory.js')>();
+vi.mock('@bendyline/gezel-inference/internal/system/memory', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@bendyline/gezel-inference/internal/system/memory')>();
   return { ...actual, detectMemoryProfileCached: detectMemoryProfileCachedMock };
 });
 

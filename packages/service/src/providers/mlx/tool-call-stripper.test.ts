@@ -1,5 +1,5 @@
+import { LeakyToolCallStripper } from '@bendyline/gezel-inference/internal/providers/mlx/tool-call-stripper';
 import { describe, expect, it } from 'vitest';
-import { LeakyToolCallStripper } from './tool-call-stripper.js';
 
 describe('LeakyToolCallStripper', () => {
   it('passes plain text through unchanged when chunked all at once', () => {

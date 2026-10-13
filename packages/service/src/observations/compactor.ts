@@ -31,7 +31,7 @@ import { existsSync } from 'node:fs';
 import { rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { type ObservationTableManifest, createLogger, nowIso } from '@bendyline/gezel';
-import { resolveInside } from '../fs/safe-paths.js';
+import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { DuckQueryError, type DuckRunOptions, sqlLiteral } from './duck.js';
 import {
   listPartitionFiles,

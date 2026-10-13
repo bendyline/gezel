@@ -47,11 +47,11 @@ import {
   KnowledgeSearchRequestSchema,
   UpdateKnowledgeCatalogRequestSchema,
 } from '@bendyline/gezel';
+import { KnowledgeNotFoundError } from '@bendyline/gezel-inference/internal/knowledge/manager';
+import { KnowledgeSpatialCursorError } from '@bendyline/gezel-inference/internal/knowledge/spatial-query';
+import { embedQuery } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { KnowledgeNotFoundError } from '../../knowledge/manager.js';
-import { KnowledgeSpatialCursorError } from '../../knowledge/spatial-query.js';
-import { embedQuery } from '../../memory/embeddings.js';
 import { parseByteRange } from '../byte-range.js';
 import type { ServiceContext } from '../context.js';
 import { subscribeToInstallSse } from './install-sse.js';

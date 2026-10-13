@@ -1,6 +1,9 @@
+import {
+  CODEX_REASONING_EFFORTS,
+  isCodexReasoningEffort,
+} from '@bendyline/gezel-inference/internal/providers/codex-cli/reasoning';
 import { describe, expect, it } from 'vitest';
 import { CodexCliProvider } from './provider.js';
-import { CODEX_REASONING_EFFORTS, isCodexReasoningEffort } from './reasoning.js';
 
 describe('CodexCliProvider model catalog', () => {
   it('offers the GPT-6 family with the levels Codex lists for each model', async () => {

@@ -1,6 +1,6 @@
 import type { Worker } from 'node:worker_threads';
+import { retireModelWorker } from '@bendyline/gezel-inference/internal/utils/retire-model-worker';
 import { describe, expect, it, vi } from 'vitest';
-import { retireModelWorker } from './retire-model-worker.js';
 
 function fakeWorker() {
   const terminate = vi.fn(async () => 1);

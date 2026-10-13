@@ -181,11 +181,13 @@ export function ChannelsSettings({ config, onConfigChanged }: Props) {
             <input
               type="url"
               placeholder="https://ntfy.sh/your-topic"
+              aria-label="Webhook endpoint"
               value={urlDraft}
               onChange={(e) => setUrlDraft(e.target.value)}
               style={{ flex: '1 1 260px' }}
             />
             <select
+              aria-label="HTTP method"
               value={methodDraft}
               onChange={(e) => setMethodDraft(e.target.value as 'POST' | 'PUT')}
             >
@@ -206,6 +208,7 @@ export function ChannelsSettings({ config, onConfigChanged }: Props) {
             </label>
             <textarea
               placeholder={'{"message":{{message}}}'}
+              aria-label="Body template (optional)"
               value={bodyTemplateDraft}
               onChange={(e) => setBodyTemplateDraft(e.target.value)}
               rows={3}
@@ -218,6 +221,7 @@ export function ChannelsSettings({ config, onConfigChanged }: Props) {
             <input
               type="text"
               placeholder="application/json"
+              aria-label="Content-Type (optional)"
               value={contentTypeDraft}
               onChange={(e) => setContentTypeDraft(e.target.value)}
               style={{ width: '100%' }}

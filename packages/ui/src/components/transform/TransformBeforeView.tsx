@@ -3,7 +3,7 @@ import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { useMemo } from 'react';
 import { useEffectiveTheme } from '../../theme.js';
-import { gezelChatTheme } from '../chat-theme.js';
+import { gezelChatThemeForMode } from '../chat-theme.js';
 import { GEZEL_DARK_SURFACE, GEZEL_LIGHT_SURFACE } from './surfaces.js';
 
 /**
@@ -26,7 +26,12 @@ export function TransformBeforeView({ markdown }: { markdown: string }) {
   return (
     <div className="gz-transform-before-text">
       {doc ? (
-        <LinearDocView doc={doc} theme={gezelChatTheme} surface={surface} thinMargins />
+        <LinearDocView
+          doc={doc}
+          theme={gezelChatThemeForMode(effective)}
+          surface={surface}
+          thinMargins
+        />
       ) : (
         <pre className="gz-transform-before-raw">{markdown}</pre>
       )}

@@ -22,12 +22,12 @@ import {
   serializeCraftbookDoc,
   stepOwnerGezelId,
 } from '@bendyline/gezel';
+import { classifyModelTier } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
+import { profileHasBehavior } from '@bendyline/gezel-inference/internal/model-profile/runtime';
+import type { ResolvedModelProfile } from '@bendyline/gezel-inference/internal/model-profile/types';
 import type { ChatEventBus } from '../chat/events.js';
-import { classifyModelTier } from '../chat/local-model-tier.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
-import { profileHasBehavior } from '../model-profile/runtime.js';
-import type { ResolvedModelProfile } from '../model-profile/types.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
 import { KeurmeesterCaseStore } from './case-store.js';
 import {

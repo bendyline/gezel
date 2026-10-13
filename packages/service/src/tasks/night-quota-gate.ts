@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { type GezelConfig, createLogger } from '@bendyline/gezel';
+import type { ProviderName } from '@bendyline/gezel-inference/internal/providers/types';
 import type { QuotaBucket, UsageTracker } from '../chat/usage.js';
 import {
   type ClaudeQuotaSnapshot,
@@ -7,7 +8,6 @@ import {
 } from '../providers/anthropic-cli/quota.js';
 import { getCliPresence } from '../providers/cli-detection.js';
 import { readCodexQuotaBucketsCached } from '../providers/codex-cli/quota.js';
-import type { ProviderName } from '../providers/types.js';
 
 const log = createLogger('night-shift');
 

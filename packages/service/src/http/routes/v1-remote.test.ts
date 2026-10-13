@@ -10,9 +10,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
+import {
+  CapacityDeniedError,
+  EngineBusyError,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { MockProvider } from '../../providers/mock.js';
-import { CapacityDeniedError, EngineBusyError } from '../../providers/native/capacity-broker.js';
 import { type RunningService, startService } from '../../service.js';
 
 let svc: RunningService;

@@ -4,9 +4,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { extractZip } from '@bendyline/gezel-inference/internal/utils/extract-zip';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as yazl from 'yazl';
-import { extractZip } from './extract-zip.js';
 
 let dir: string;
 

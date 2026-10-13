@@ -49,7 +49,10 @@ export const targets = [
   {
     id: 'service',
     root: 'packages/service',
-    include: sourceInclude,
+    // The extraction changes ownership, not the measured runtime or its floors.
+    include: [sourceInclude, `../inference/${sourceInclude}`],
+    config: 'packages/service/vitest.coverage.config.ts',
+    allowExternal: true,
     thresholds: { statements: 56, branches: 47, functions: 53, lines: 59 },
   },
   {
@@ -250,7 +253,9 @@ export async function main() {
       '--coverage.reporter=text-summary',
       '--coverage.reporter=json-summary',
       `--coverage.reportsDirectory=${reportsDirectory}`,
-      `--coverage.include=${target.include}`,
+      ...[target.include].flat().map((pattern) => `--coverage.include=${pattern}`),
+      ...(target.config ? ['--config', resolve(root, target.config)] : []),
+      ...(target.allowExternal ? ['--coverage.allowExternal=true'] : []),
       ...exclusions.map((pattern) => `--coverage.exclude=${pattern}`),
       // The CLI integration suite runs a real daemon and many CLI children.
       // Parallel coverage workers contend with them on the CI runner, causing

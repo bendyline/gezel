@@ -1,14 +1,17 @@
-import { describe, expect, it, vi } from 'vitest';
-import { nativeVisionEnabledFor, nativeVisionPreferenceFor } from '../vision-capability.js';
-import { MlxEngineGate } from './engine-gate.js';
-import { TOOL_IMAGES_MESSAGE } from './tool-image-retention.js';
+import { MlxEngineGate } from '@bendyline/gezel-inference/internal/providers/mlx/engine-gate';
+import { TOOL_IMAGES_MESSAGE } from '@bendyline/gezel-inference/internal/providers/mlx/tool-image-retention';
 import {
   MlxVisionMode,
   describeVisionNeed,
   mlxCacheFingerprint,
   resolveMlxVisionPolicy,
   unseenToolImagesNote,
-} from './vision-mode.js';
+} from '@bendyline/gezel-inference/internal/providers/mlx/vision-mode';
+import {
+  nativeVisionEnabledFor,
+  nativeVisionPreferenceFor,
+} from '@bendyline/gezel-inference/internal/providers/vision-capability';
+import { describe, expect, it, vi } from 'vitest';
 
 /**
  * A supervisor double that launches through `takeLaunch`, exactly as

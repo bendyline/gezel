@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import type { McpBridgePool } from '../mcp-bridge-pool.js';
 import {
   type ChatCompletionTool,
   applyCallableToolGrammar,
   callableRequestToolNames,
-} from './tool-call-protocol.js';
+} from '@bendyline/gezel-inference/internal/providers/mlx/tool-call-protocol';
+import { describe, expect, it } from 'vitest';
+import type { McpBridgePool } from '../mcp-bridge-pool.js';
 
 function tool(name: string): ChatCompletionTool {
   return { type: 'function', function: { name, description: '', parameters: {} } };

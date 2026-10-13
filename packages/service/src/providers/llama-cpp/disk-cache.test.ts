@@ -10,8 +10,11 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import {
+  pruneLlamaDiskCache,
+  withLlamaDiskCache,
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/disk-cache';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { pruneLlamaDiskCache, withLlamaDiskCache } from './disk-cache.js';
 
 describe('llama snapshot retention', () => {
   let root: string;

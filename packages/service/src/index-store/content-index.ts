@@ -48,6 +48,7 @@ import {
   projectAllowsWorkspaceTables,
   projectManagedWorkspaceWritable,
 } from '@bendyline/gezel';
+import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import {
   fallbackProjectIndexDir,
   fallbackProjectVillageFile,
@@ -60,7 +61,6 @@ import {
 import { resolveImportEdges } from '../filemap/affinity.js';
 import { buildFileMap } from '../filemap/build.js';
 import { VillageFileStore } from '../filemap/village-file.js';
-import { realpathContained, safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import type { MediaEmbedJob, MediaEmbedOutcome } from '../memory/image-embed-core.js';
 import type {
@@ -947,7 +947,9 @@ export class ContentIndex {
           queryVector = opts.queryVector;
         } else {
           try {
-            const { embedQuery, embeddingPipelineStatus } = await import('../memory/embeddings.js');
+            const { embedQuery, embeddingPipelineStatus } = await import(
+              '@bendyline/gezel-inference/internal/memory/embeddings'
+            );
             const status = embeddingPipelineStatus();
             if (opts.skipColdEmbedder && (status === 'cold' || status === 'warming')) {
               queryVector = null; // the service's deferred boot warm owns the load
@@ -1120,7 +1122,7 @@ export class ContentIndex {
     const { index, workspaceDir, artifactsDir } = opened;
     try {
       if (!index.vecAvailable) return { files: 0, embedded: 0 };
-      const { embedBatch } = await import('../memory/embeddings.js');
+      const { embedBatch } = await import('@bendyline/gezel-inference/internal/memory/embeddings');
       let files = 0;
       let embedded = 0;
       for (const file of index.filesNeedingEmbedOnly(limit)) {

@@ -5,7 +5,7 @@ import {
   type QuestionAnswer,
   nowIso,
 } from '@bendyline/gezel';
-import { realpathNearest } from '../fs/safe-paths.js';
+import { realpathNearest } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { Store } from '../fs/store.js';
 
 /** The model supplies a reason; the service supplies every grant-bearing field. */

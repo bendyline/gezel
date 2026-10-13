@@ -15,7 +15,7 @@ import { countIndexed } from './vector-index.js';
  * suffix ("." on a longer sentence) → similarity ≳0.99; a short word vs a
  * long sentence → well below the 0.9 threshold.
  */
-vi.mock('./embeddings.js', () => {
+vi.mock('@bendyline/gezel-inference/internal/memory/embeddings', () => {
   const vectorFor = (text: string): number[] => {
     const vector = new Array<number>(16).fill(0);
     for (let i = 0; i < text.length; i++) {
@@ -53,7 +53,9 @@ vi.mock('./embeddings.js', () => {
   };
 });
 
-const embeddingsMock = (await import('./embeddings.js')) as unknown as {
+const embeddingsMock = (await import(
+  '@bendyline/gezel-inference/internal/memory/embeddings'
+)) as unknown as {
   __setDisabled(v: boolean): void;
   __embedCalls(): number;
 };

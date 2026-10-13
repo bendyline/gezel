@@ -7,8 +7,11 @@ import {
   isSharedLibraryProject,
   nowIso,
 } from '@bendyline/gezel';
+import {
+  type LocalProviderName,
+  isLocalProvider,
+} from '@bendyline/gezel-inference/internal/providers/native/engine-key';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
-import { type LocalProviderName, isLocalProvider } from '../providers/native/engine-key.js';
 
 const log = createLogger('index');
 

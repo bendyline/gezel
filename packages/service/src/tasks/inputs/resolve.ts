@@ -17,7 +17,7 @@ import {
   taskInputManifestPath,
   taskRef,
 } from '@bendyline/gezel';
-import { safeJoin } from '../../fs/safe-paths.js';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { type EnumeratedInput, TaskInputError, enumerateInPlaceInput } from './enumerate.js';
 import type { InputStagingManager, InputStagingMeta } from './staging.js';
 

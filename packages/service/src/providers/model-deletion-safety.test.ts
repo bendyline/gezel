@@ -1,11 +1,11 @@
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { WhisperCppProvider } from '@bendyline/gezel-inference/internal/providers/audio/whisper-cpp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { KokoroProvider } from './audio/kokoro.js';
 import { MockSpeechToTextProvider } from './audio/mock-stt.js';
 import { MockTextToSpeechProvider } from './audio/mock-tts.js';
-import { WhisperCppProvider } from './audio/whisper-cpp.js';
 import { StableDiffusionCppProvider } from './image/sd-cpp.js';
 import { LlamaVisionProvider } from './recognition/llama-vision.js';
 

@@ -17,9 +17,9 @@ import {
   spawnsChildren,
 } from '@bendyline/gezel';
 import type { NightShiftQuietReason } from '@bendyline/gezel';
+import type { ProviderName } from '@bendyline/gezel-inference/internal/providers/types';
 import type { ChatEventBus } from '../chat/events.js';
 import type { Store } from '../fs/store.js';
-import type { ProviderName } from '../providers/types.js';
 import { type TaskManager, stepOwnerGezelId } from './manager.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';
 import { isOwnerStep } from './step-runtime.js';

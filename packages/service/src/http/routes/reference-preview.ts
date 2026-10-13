@@ -1,9 +1,9 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { ReferencePreviewRequestSchema, ReferencePreviewResponseSchema } from '@bendyline/gezel';
+import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { Hono } from 'hono';
 import { normalizeArtifactPath } from '../../fs/project-artifacts-store.js';
-import { realpathContained, safeJoin } from '../../fs/safe-paths.js';
 import {
   adjacentDocFilesPaths,
   ensureConvertedMarkdownSidecar,

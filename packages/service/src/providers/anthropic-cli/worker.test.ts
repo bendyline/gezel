@@ -1,10 +1,10 @@
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SessionResumeError } from '@bendyline/gezel-inference/internal/providers/types';
+import type { ToolCallEvent, TurnUsage } from '@bendyline/gezel-inference/internal/providers/types';
+import type { SessionOpts } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SessionResumeError } from '../types.js';
-import type { ToolCallEvent, TurnUsage } from '../types.js';
-import type { SessionOpts } from '../types.js';
 import type { ClaudeReasoningEffort } from './reasoning.js';
 import { ClaudeWorker, type WorkerTurnHooks } from './worker.js';
 

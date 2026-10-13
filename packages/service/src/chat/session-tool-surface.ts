@@ -17,6 +17,7 @@ import {
   taskInputReadTools,
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
+import type { LocalModelTier } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
 import { TOOL_REGISTRY, unavailableToolsForPlatform } from '@bendyline/gezel-mcp';
 import { outputMediaForStep } from '../craftbook/step-toolsets.js';
 import { windowsMxcState } from '../sandbox/windows-mxc.js';
@@ -24,7 +25,6 @@ import {
   sessionHasCoordinatorScope,
   withoutCoordinatorOnlyTools,
 } from './coordinator-only-tools.js';
-import type { LocalModelTier } from './local-model-tier.js';
 import { promptConditionallyReferencedTools, promptMandatedTools } from './prompt-tool-contract.js';
 import {
   EXTERNAL_SERVICE_TOOLS,

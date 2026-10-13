@@ -1,10 +1,24 @@
 import { estimateLlamaCppResidentBytes, estimateMlxResidentBytes } from '@bendyline/gezel';
+import {
+  CapacityBroker,
+  EngineBusyError,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { makeEngineKey } from '@bendyline/gezel-inference/internal/providers/native/engine-key';
+import {
+  EngineRouter,
+  resolveLocalRoute,
+} from '@bendyline/gezel-inference/internal/providers/native/engine-router';
+import {
+  type ProviderBuilder,
+  ProviderPool,
+} from '@bendyline/gezel-inference/internal/providers/native/provider-pool';
+import type {
+  LLMProvider,
+  LLMSession,
+  ModelInfo,
+  SessionOpts,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { describe, expect, it, vi } from 'vitest';
-import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
-import { CapacityBroker, EngineBusyError } from './capacity-broker.js';
-import { makeEngineKey } from './engine-key.js';
-import { EngineRouter, resolveLocalRoute } from './engine-router.js';
-import { type ProviderBuilder, ProviderPool } from './provider-pool.js';
 
 const GB = 1024 ** 3;
 

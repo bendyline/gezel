@@ -1,7 +1,7 @@
+import type { SessionOpts } from '@bendyline/gezel-inference/internal/providers/types';
 import { ALWAYS_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import { describe, expect, it, vi } from 'vitest';
 import { CopilotProvider } from './copilot.js';
-import type { SessionOpts } from './types.js';
 
 function fakeSdk() {
   const session = {

@@ -1,9 +1,15 @@
 import { type GezelConfig, createLogger } from '@bendyline/gezel';
-import type { InstallEvent, LlamaCppModelManager } from '../providers/llama-cpp/models.js';
-import type { MlxInstallEvent, MlxModelManager } from '../providers/mlx/models.js';
+import { ChatModelInstallRegistry } from '@bendyline/gezel-inference/internal/models/install-registry';
+import type {
+  InstallEvent,
+  LlamaCppModelManager,
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/models';
+import type {
+  MlxInstallEvent,
+  MlxModelManager,
+} from '@bendyline/gezel-inference/internal/providers/mlx/models';
 import { decideAutoInstall } from '../providers/recognition/auto-install.js';
 import type { RecognitionManager } from '../providers/recognition/manager.js';
-import { ChatModelInstallRegistry } from './install-registry.js';
 
 const log = createLogger('models');
 

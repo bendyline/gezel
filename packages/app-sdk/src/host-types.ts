@@ -81,7 +81,8 @@ export interface HostOptions {
    */
   mode?: 'child' | 'in-process';
   /**
-   * Start only the inference and model-management surface needed by an
+   * Use @bendyline/gezel-inference in in-process mode for only the inference
+   * and model-management surface needed by an
    * embedding app. This skips the standalone product's schedulers, channels,
    * editor bridges, indexing, and background maintenance.
    *

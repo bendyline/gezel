@@ -1,6 +1,6 @@
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import type { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
 import { describe, expect, it, vi } from 'vitest';
-import type { NativeEngineSupervisor } from '../native/supervisor.js';
-import { MlxProvider } from './provider.js';
 
 function completionResponse(): Response {
   return new Response(

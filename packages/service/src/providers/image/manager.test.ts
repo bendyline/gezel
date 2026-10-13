@@ -1,10 +1,10 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { SecretKey, SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../../fs/store.js';
 import { createRemotesRegistry } from '../../remotes/registry.js';
-import type { SecretKey, SecretStore } from '../../secrets/types.js';
 import { ImageProviderManager } from './manager.js';
 import { MockImageProvider } from './mock.js';
 

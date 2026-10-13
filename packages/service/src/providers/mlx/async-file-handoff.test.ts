@@ -1,5 +1,5 @@
+import { isSuccessfulAsyncHandoff } from '@bendyline/gezel-inference/internal/providers/mlx/async-file-handoff';
 import { describe, expect, it } from 'vitest';
-import { isSuccessfulAsyncHandoff } from './async-file-handoff.js';
 
 describe('isSuccessfulAsyncHandoff', () => {
   it('terminates after a successful role-typed delegate file handoff', () => {

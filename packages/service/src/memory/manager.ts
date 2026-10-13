@@ -1,6 +1,12 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
+import {
+  type EmbeddingPipelineStatus,
+  embed,
+  embedQuery,
+  embeddingPipelineStatus,
+} from '@bendyline/gezel-inference/internal/memory/embeddings';
 import type { Store } from '../fs/store.js';
 import { termMatchFraction } from '../index-store/query-terms.js';
 import {
@@ -13,12 +19,6 @@ import {
   parseMemoryDay,
   sameProjectMemoryScore,
 } from './daily-markdown.js';
-import {
-  type EmbeddingPipelineStatus,
-  embed,
-  embedQuery,
-  embeddingPipelineStatus,
-} from './embeddings.js';
 import {
   type MemoryEntry,
   type SearchResult,

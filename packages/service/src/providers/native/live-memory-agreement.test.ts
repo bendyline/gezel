@@ -27,11 +27,16 @@ vi.mock('node:os', async (importOriginal) => ({
 }));
 
 const mocks = vi.hoisted(() => ({ available: 0 }));
-vi.mock('./capacity-broker.js', async (original) => ({
-  ...(await original<typeof import('./capacity-broker.js')>()),
-  availableSystemRamBytes: () => mocks.available,
-}));
-vi.mock('./measured-budget.js', () => ({
+vi.mock(
+  '@bendyline/gezel-inference/internal/providers/native/capacity-broker',
+  async (original) => ({
+    ...(await original<
+      typeof import('@bendyline/gezel-inference/internal/providers/native/capacity-broker')
+    >()),
+    availableSystemRamBytes: () => mocks.available,
+  }),
+);
+vi.mock('@bendyline/gezel-inference/internal/providers/native/measured-budget', () => ({
   measuredCapacityBudget: async () => ({
     kind: 'unified' as const,
     budgetBytes: 11.2 * 1024 ** 3,
@@ -42,8 +47,11 @@ vi.mock('./measured-budget.js', () => ({
   }),
 }));
 
-import { clampCtxTokensForMemory, liveRamOsReserveBytes } from './capacity-broker.js';
-import { sampleDeviceCapacity } from './device-capacity.js';
+import {
+  clampCtxTokensForMemory,
+  liveRamOsReserveBytes,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { sampleDeviceCapacity } from '@bendyline/gezel-inference/internal/providers/native/device-capacity';
 
 const GIB = 1024 ** 3;
 

@@ -24,6 +24,12 @@ import {
   createLogger,
   isUserCreatedProject,
 } from '@bendyline/gezel';
+import { modelStorageRoots } from '@bendyline/gezel-inference/internal/models/storage-roots';
+import {
+  perfSnapshot,
+  recordClientPerfReport,
+} from '@bendyline/gezel-inference/internal/perf/responsiveness';
+import { isLocalProvider } from '@bendyline/gezel-inference/internal/providers/native/engine-key';
 import { Octokit } from '@octokit/rest';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
@@ -41,20 +47,17 @@ import {
   InvalidGitHubUrlError,
   previewGitHubRepo,
 } from '../../github/repo-preview.js';
-import { modelStorageRoots } from '../../models/storage-roots.js';
 import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
-import { perfSnapshot, recordClientPerfReport } from '../../perf/responsiveness.js';
 import { resolveCopilotAvailability } from '../../providers/copilot-availability.js';
 import { resolveDefaultProviderName } from '../../providers/default-provider.js';
-import { isLocalProvider } from '../../providers/native/engine-key.js';
 import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
 
 import { collectSystemDiagnosticsCached } from '../../system/diagnostics.js';
 
-import { detectMemoryProfile } from '../../system/memory.js';
-import { checkDiskSpace } from '../../utils/disk-space.js';
+import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
+import { detectMemoryProfile } from '@bendyline/gezel-inference/internal/system/memory';
+import { checkDiskSpace } from '@bendyline/gezel-inference/internal/utils/disk-space';
 import type { ServiceContext } from '../context.js';
-import { machineEngineProxy } from './machine-engine-proxy.js';
 
 const log = createLogger('http');
 

@@ -18,7 +18,9 @@ async function expectDraftInsideApp(page: Page) {
     .toBeLessThanOrEqual(1);
 }
 
-test('Home keeps the draft reachable beside starters and folder setup', async ({ page }) => {
+test('Home keeps the draft reachable beside starters on an established install', async ({
+  page,
+}) => {
   await page.goto('/');
   await page.getByRole('button', { name: /^Home ·/ }).click();
   await expect(page.getByTestId('home-workshop')).toBeVisible();
@@ -37,7 +39,9 @@ test('Home keeps the draft reachable beside starters and folder setup', async ({
   await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
   await expect(conversation).not.toHaveAttribute('inert');
   await expect(conversation).toBeFocused();
-  await expect(page.getByRole('button', { name: 'Skip for now' })).toBeVisible();
+  // This seeded install already has a folder-backed project. Folder setup
+  // is offered only after a first wrap-up when no folder is connected.
+  await expect(page.locator('.folder-onboarding')).toHaveCount(0);
   await expectDraftInsideApp(page);
 
   const editor = page.getByTestId('meester-chat').locator('.squisq-wysiwyg-editor').first();
@@ -60,11 +64,6 @@ test('Home keeps the draft reachable beside starters and folder setup', async ({
     delete document.documentElement.dataset.keyboard;
     document.documentElement.style.removeProperty('--app-viewport-height');
   });
-
-  // Folder setup must remain usable through its own scroll area.
-  await page.getByRole('button', { name: 'Skip for now' }).click();
-  await expect(page.locator('.folder-onboarding')).toHaveCount(0);
-  await expectDraftInsideApp(page);
 
   await page.setViewportSize({ width: 844, height: 390 });
   // Rotation moves the notch inset to the sides and shortens the home-indicator inset.

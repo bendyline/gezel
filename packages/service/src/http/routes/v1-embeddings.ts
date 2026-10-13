@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { resolveModelTarget } from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
 import { Hono } from 'hono';
 import { ZodError, z } from 'zod';
 import type { ServiceContext } from '../context.js';
-import { resolveModelTarget } from '../openai-compat/translate.js';
 
 /**
  * `POST /v1/embeddings` — OpenAI-compatible embeddings.

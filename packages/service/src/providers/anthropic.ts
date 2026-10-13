@@ -1,16 +1,12 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { AwakeBudget, createLogger } from '@bendyline/gezel';
+import type { ResolvedTuning as InferenceResolvedTuning } from '@bendyline/gezel-inference/internal/model-profile/index';
+import { ProviderQueue, runInQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import { StreamingSessionBase } from '@bendyline/gezel-inference/internal/providers/streaming-session';
 import {
-  anthropicDefaultReasoningEffort,
-  anthropicReasoningEfforts,
-  buildAnthropicGenerationOptions,
-} from './anthropic-options.js';
-import { type ApiObservationContext, apiToolSurface, observeApiStream } from './api-observation.js';
-import { CLOUD_TOOL_ROUND_LIMIT } from './cloud-tool-limits.js';
-import { McpBridgePool } from './mcp-bridge-pool.js';
-import { ProviderQueue, runInQueue } from './queue.js';
-import { StreamingSessionBase } from './streaming-session.js';
-import { TERMINAL_ACTION_SKIPPED_OUTPUT, terminalToolClosingText } from './terminal-tool-policy.js';
+  TERMINAL_ACTION_SKIPPED_OUTPUT,
+  terminalToolClosingText,
+} from '@bendyline/gezel-inference/internal/providers/terminal-tool-policy';
 import type {
   ExternalToolCall,
   ExternalToolSpec,
@@ -21,8 +17,16 @@ import type {
   ProviderSessionState,
   SendAndWaitOpts,
   SessionOpts,
-} from './types.js';
-import { buildTurnUsage } from './usage-builder.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
+import { buildTurnUsage } from '@bendyline/gezel-inference/internal/providers/usage-builder';
+import {
+  anthropicDefaultReasoningEffort,
+  anthropicReasoningEfforts,
+  buildAnthropicGenerationOptions,
+} from './anthropic-options.js';
+import { type ApiObservationContext, apiToolSurface, observeApiStream } from './api-observation.js';
+import { CLOUD_TOOL_ROUND_LIMIT } from './cloud-tool-limits.js';
+import { McpBridgePool } from './mcp-bridge-pool.js';
 
 const log = createLogger('anthropic');
 
@@ -180,7 +184,7 @@ export interface AnthropicSessionDeps {
    * Resolved per-model tuning, normalized to the model's supported request
    * parameters. Adaptive thinking uses effort rather than a token budget.
    */
-  tuning?: import('../model-profile/index.js').ResolvedTuning;
+  tuning?: InferenceResolvedTuning;
 }
 
 /**

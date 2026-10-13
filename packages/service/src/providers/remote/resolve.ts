@@ -5,7 +5,7 @@
  * model ids so the manager falls back to its local provider.
  */
 
-import { getPairedRemoteFetch } from '../../remotes/pinned-fetch.js';
+import { getPairedRemoteFetch } from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
 import type { PairedRemote, RemotesRegistry } from '../../remotes/registry.js';
 import { makeRemoteModelId, parseRemoteModelId } from './model-id.js';
 

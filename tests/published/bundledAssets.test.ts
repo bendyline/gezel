@@ -28,15 +28,18 @@ import {
   NATIVE_ENGINE_RELEASE,
   SHA256SUMS_DIGEST,
   isPlaceholderDigest,
-} from '../../packages/service/src/engines/native-manifest';
+} from '../../packages/inference/src/engines/native-manifest';
 import {
   SERVICE_WORKER_ENTRIES,
   type ServiceWorkerEntry,
   findServiceWorkerEntry,
-} from '../../packages/service/src/utils/service-worker-entry';
+} from '../../packages/inference/src/utils/service-worker-entry';
 import { loadPublishedPackages } from './_packages';
 
-const service = loadPublishedPackages().find((p) => p.dir === 'service')!;
+const packages = loadPublishedPackages();
+const service = packages.find((p) => p.dir === 'service')!;
+const inference = packages.find((p) => p.dir === 'inference')!;
+const inferenceWorkers = new Set(['embeddings', 'gguf-metadata', 'knowledge', 'relevance-model']);
 const workerNames = Object.keys(SERVICE_WORKER_ENTRIES) as ServiceWorkerEntry[];
 
 function rendererPayloadContainsLame(root: string): boolean {
@@ -161,7 +164,16 @@ describe('service bundled assets', () => {
       'cache_persist.py',
       'wave_policy.py',
     ]) {
-      expect(existsSync(resolve(service.dist, 'providers/mlx/python', f)), f).toBe(true);
+      expect(
+        existsSync(
+          resolve(
+            packages.find((pkg) => pkg.name === '@bendyline/gezel-inference')!.dist,
+            'providers/mlx/python',
+            f,
+          ),
+        ),
+        f,
+      ).toBe(true);
     }
   });
 });
@@ -190,12 +202,19 @@ describe('service bundled assets', () => {
  */
 describe('service worker entrypoints', () => {
   const daemonEntry = pathToFileURL(resolve(service.dist, 'bin/gezeld.js')).href;
+  const ownerEntry = (name: string, fallback: string) =>
+    inferenceWorkers.has(name)
+      ? pathToFileURL(resolve(inference.dist, 'providers/native/inference.js')).href
+      : fallback;
   const embeddedEntry = pathToFileURL(resolve(service.dist, 'index.js')).href;
 
   it('emits every registered worker', () => {
     expect(workerNames.length).toBeGreaterThan(0);
     for (const name of workerNames) {
-      const built = resolve(service.dist, SERVICE_WORKER_ENTRIES[name].built);
+      const built = resolve(
+        inferenceWorkers.has(name) ? inference.dist : service.dist,
+        SERVICE_WORKER_ENTRIES[name].built,
+      );
       expect(existsSync(built), `${name}: tsup did not emit ${built}`).toBe(true);
     }
   });
@@ -203,7 +222,7 @@ describe('service worker entrypoints', () => {
   // The regression that shipped. Resolution from `dist/bin/gezeld.js` is the
   // path every packaged install and every `gezel start` takes.
   it.each(workerNames)('resolves %s from the daemon entrypoint', (name) => {
-    const resolved = findServiceWorkerEntry(daemonEntry, name);
+    const resolved = findServiceWorkerEntry(ownerEntry(name, daemonEntry), name);
     expect(
       resolved,
       `${name} is unreachable from dist/bin/gezeld.js — the daemon would run without it`,
@@ -212,14 +231,14 @@ describe('service worker entrypoints', () => {
   });
 
   it.each(workerNames)('resolves %s from the embedded entrypoint', (name) => {
-    expect(findServiceWorkerEntry(embeddedEntry, name)).not.toBeNull();
+    expect(findServiceWorkerEntry(ownerEntry(name, embeddedEntry), name)).not.toBeNull();
   });
 
   // Both entrypoints must land on the same file. Diverging here would mean
   // embedded and packaged runs execute different worker code.
   it.each(workerNames)('resolves %s identically from both entrypoints', (name) => {
-    expect(findServiceWorkerEntry(daemonEntry, name)).toBe(
-      findServiceWorkerEntry(embeddedEntry, name),
+    expect(findServiceWorkerEntry(ownerEntry(name, daemonEntry), name)).toBe(
+      findServiceWorkerEntry(ownerEntry(name, embeddedEntry), name),
     );
   });
 });

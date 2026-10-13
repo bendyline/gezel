@@ -19,8 +19,8 @@
 // patient-fetch-exempt: web search providers call remote APIs, where undici's 300s cap is
 // correct — a dead host must time out rather than hang the turn forever.
 import { resolveSecurityPolicy } from '@bendyline/gezel';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import type { Store } from '../../fs/store.js';
-import type { SecretStore } from '../../secrets/types.js';
 import { BraveSearchProvider } from './brave.js';
 import { ChainedSearchProvider } from './chained.js';
 import { MockSearchProvider } from './mock.js';

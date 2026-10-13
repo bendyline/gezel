@@ -11,7 +11,7 @@ import {
   parseCraftbookDoc,
   serializeCraftbookDoc,
 } from '@bendyline/gezel';
-import { writeFileAtomic } from './atomic.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 
 export class InvalidProjectCraftbookError extends Error {
   constructor(id: string, errors: CraftbookDocError[]) {

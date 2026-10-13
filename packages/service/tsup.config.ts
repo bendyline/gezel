@@ -91,7 +91,6 @@ export default defineConfig({
     // Loaded as a worker_thread by memory/embeddings.ts so ONNX embedding
     // inference runs off the Electron main thread; must exist as its own file
     // for `new Worker(...)` to resolve at runtime.
-    'memory/embed-worker': 'src/memory/embed-worker.ts',
     // Sibling worker for CLIP image embeddings (+ the face lane's ONNX
     // sessions). Separate from embed-worker so the two modalities' models,
     // memory budgets, and crash accounting stay independent.
@@ -103,15 +102,12 @@ export default defineConfig({
     // Settings previews context admission for every installed GGUF. Tokenizer
     // metadata can be enormous, so the first inspection must not run on the
     // embedded Electron main thread; subsequent polls hit the parent cache.
-    'providers/llama-cpp/gguf-metadata-worker': 'src/providers/llama-cpp/gguf-metadata-worker.ts',
     // Owns every knowledge-catalog SQLite connection: CatalogHandle is
     // synchronous (node:sqlite), so shard scans must run off the daemon
     // loop (docs/gezk-format.md).
-    'knowledge/search-worker': 'src/knowledge/search-worker.ts',
     // Relevance-model (cross-encoder) inference. Its own worker so ONNX runs
     // never stall text embedding and its crashes never count against the
     // embed worker's limit.
-    'relevance/relevance-worker': 'src/relevance/relevance-worker.ts',
     // Kokoro speech synthesis. An ONNX run blocks its thread for a whole
     // sentence; in embedded mode the event loop it would block is Electron's
     // main process, which beachballed the app for as long as a chat reply
@@ -207,7 +203,6 @@ export default defineConfig({
   // shell string) because PowerShell 5.1 mangles forward slashes inside
   // embedded JS string literals when invoking native commands.
   onSuccess: async () => {
-    cpSync('src/providers/mlx/python', 'dist/providers/mlx/python', { recursive: true });
     // Handboek content: the hand-curated documentation tree lives at the
     // repo root (docs/handboek/) so humans author it next to the other
     // docs, and ships inside the service package so the engine can serve
@@ -244,18 +239,6 @@ export default defineConfig({
     // spawned at runtime against the user's `video` venv. Same rationale
     // as the MLX python copy above.
     cpSync('src/providers/video/python', 'dist/providers/video/python', { recursive: true });
-
-    // Kokoro's pronunciation dictionaries. The daemon phonemizes text itself
-    // rather than calling eSpeak NG (GPL-3, unshippable), so these files are a
-    // hard requirement for speech: without them synthesis has no dictionary.
-    // Staged by scripts/build-kokoro-lexicon.mjs from the pinned voice pack.
-    const kokoroSrc = resolve(__dirname, 'assets', 'kokoro');
-    if (!existsSync(kokoroSrc)) {
-      throw new Error(
-        `Kokoro lexicon assets missing at ${kokoroSrc} — run node scripts/build-kokoro-lexicon.mjs`,
-      );
-    }
-    cpSync(kokoroSrc, 'dist/kokoro-lexicon', { recursive: true });
 
     // Stage the workspace UI bundle into `dist/ui/` so an installed
     // service (e.g. the Node-only CLI distribution) can serve the browser

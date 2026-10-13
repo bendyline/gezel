@@ -32,6 +32,8 @@ import {
   isSafeEntityId,
   isSyncJunkPath,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import {
   daemonTransactionsRoot,
   gezelDir,
@@ -40,8 +42,6 @@ import {
   userMemoriesDir,
 } from '@bendyline/gezel/paths';
 import * as yauzl from 'yauzl';
-import { writeFileAtomic } from '../fs/atomic.js';
-import { realpathContained, safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { mergeMemoryDay } from '../memory/daily-markdown.js';
 import type { StorageJobManager } from './job-manager.js';

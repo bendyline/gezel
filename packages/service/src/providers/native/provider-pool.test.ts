@@ -1,15 +1,25 @@
-import { describe, expect, it, vi } from 'vitest';
-import { AbortedWhileQueuedError } from '../queue.js';
-import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
-import { CapacityBroker, CapacityDeniedError } from './capacity-broker.js';
-import { makeEngineKey } from './engine-key.js';
+import {
+  CapacityBroker,
+  CapacityDeniedError,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { makeEngineKey } from '@bendyline/gezel-inference/internal/providers/native/engine-key';
 import {
   type EngineDrainWait,
   type ProviderBuilder,
   ProviderPool,
   capacityDenialLogLine,
   measuredVramDenialReason,
-} from './provider-pool.js';
+} from '@bendyline/gezel-inference/internal/providers/native/provider-pool';
+import type { ProviderQueue as InferenceProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import { AbortedWhileQueuedError } from '@bendyline/gezel-inference/internal/providers/queue';
+import type { BatchCapability as InferenceBatchCapability } from '@bendyline/gezel-inference/internal/providers/types';
+import type {
+  LLMProvider,
+  LLMSession,
+  ModelInfo,
+  SessionOpts,
+} from '@bendyline/gezel-inference/internal/providers/types';
+import { describe, expect, it, vi } from 'vitest';
 
 const GB = 1024 ** 3;
 
@@ -49,7 +59,7 @@ class BusyFakeProvider extends FakeProvider {
       queuedInteractive: 0,
       queuedBackground: 0,
     }),
-  } as unknown as import('../queue.js').ProviderQueue;
+  } as unknown as InferenceProviderQueue;
 }
 
 function mkBusyBuilder(bytes: number, made: BusyFakeProvider[]): ProviderBuilder {
@@ -60,7 +70,7 @@ function mkBusyBuilder(bytes: number, made: BusyFakeProvider[]): ProviderBuilder
   };
 }
 
-type Describe = ReturnType<import('../queue.js').ProviderQueue['describe']>;
+type Describe = ReturnType<InferenceProviderQueue['describe']>;
 
 function mkDesc(partial: Partial<Describe>): Describe {
   return {
@@ -103,9 +113,9 @@ class QueueFakeProvider extends FakeProvider {
     },
     movePending: (id: number, _direction: 'up' | 'down') =>
       this.desc.pending.some((p) => p.id === id),
-  } as unknown as import('../queue.js').ProviderQueue;
-  get batch(): import('../types.js').BatchCapability {
-    return { maxConcurrency: this.batchWidth } as unknown as import('../types.js').BatchCapability;
+  } as unknown as InferenceProviderQueue;
+  get batch(): InferenceBatchCapability {
+    return { maxConcurrency: this.batchWidth } as unknown as InferenceBatchCapability;
   }
   engineLaunchSnapshot() {
     return this.launchedSlots === undefined

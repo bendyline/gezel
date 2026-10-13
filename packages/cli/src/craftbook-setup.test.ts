@@ -1,5 +1,5 @@
 import { PassThrough, Writable } from 'node:stream';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type CraftbookSetupClient,
   type SetupPrompter,
@@ -301,6 +301,12 @@ describe('ensureCraftbookSetup', () => {
 });
 
 describe('terminalPrompter', () => {
+  // The fake terminal supports ANSI cursor motion and editable input. Do not
+  // inherit TERM=dumb from a non-interactive test runner: Node readline then
+  // deliberately disables those features even when the streams have isTTY.
+  beforeEach(() => vi.stubEnv('TERM', 'xterm-256color'));
+  afterEach(() => vi.unstubAllEnvs());
+
   it('is absent when the input is not a terminal', () => {
     const { terminal } = fakeTerminal();
     terminal.input.isTTY = false;

@@ -3,8 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { NativeCapacityCommand } from '@bendyline/gezel';
+import {
+  DeviceCapacityLedger,
+  type DeviceCapacitySample,
+} from '@bendyline/gezel-inference/internal/providers/native/device-capacity-ledger';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DeviceCapacityLedger, type DeviceCapacitySample } from './device-capacity-ledger.js';
 
 const GIB = 1024 ** 3;
 const dirs: string[] = [];

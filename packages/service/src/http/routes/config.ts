@@ -1,4 +1,12 @@
 import { type GezelConfig, UpdateConfigRequestSchema, createLogger } from '@bendyline/gezel';
+import { usesMachineEngine } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
+import { syncPerfProfiling } from '@bendyline/gezel-inference/internal/perf/responsiveness';
+import { appleFoundationModelsInstalled } from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/provider';
+import { resolveGpuPolicy } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
+import type {
+  ProviderCredentialName,
+  SecretStore,
+} from '@bendyline/gezel-inference/internal/secrets/types';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -6,17 +14,12 @@ import {
   transferBoekwachterMembership,
 } from '../../gezels/autonomous-roles.js';
 import { ensureIndexingJobTask } from '../../index-store/indexing-job.js';
-import { syncPerfProfiling } from '../../perf/responsiveness.js';
-import { appleFoundationModelsInstalled } from '../../providers/apple-foundation-models/provider.js';
 import { getCliPresence } from '../../providers/cli-detection.js';
 import { resolveDefaultProviderName } from '../../providers/default-provider.js';
-import { resolveGpuPolicy } from '../../providers/gpu-arbiter.js';
 import { setWindowsMxcEnabled } from '../../sandbox/windows-mxc.js';
-import type { ProviderCredentialName, SecretStore } from '../../secrets/types.js';
 import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
 import type { ServiceContext } from '../context.js';
 import { configResponseFields } from './config-view.js';
-import { usesMachineEngine } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
 
 const log = createLogger('http');

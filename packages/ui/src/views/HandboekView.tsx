@@ -11,7 +11,7 @@ import { getDocPlaybackDuration } from '@bendyline/squisq/schemas';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AreaIcon } from '../components/AreaIcon.js';
-import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../components/chat-theme.js';
+import { GEZEL_LIGHT_SURFACE, gezelChatThemeForMode } from '../components/chat-theme.js';
 import { consumeOpenHandboek } from '../components/pending-open-handboek.js';
 import { useEffectiveTheme } from '../theme.js';
 import '../styles/handbook.css';
@@ -503,7 +503,7 @@ export function HandboekView() {
                 <LinearDocView
                   doc={doc}
                   className="gezel-article-view"
-                  theme={gezelChatTheme}
+                  theme={gezelChatThemeForMode(effectiveTheme)}
                   surface={surface}
                   imageDisplayMode="inline"
                   showCover={false}
@@ -514,7 +514,7 @@ export function HandboekView() {
                 <DocPlayer
                   key={narratedDoc ? 'narrated' : 'synthetic'}
                   doc={narratedDoc ?? syntheticDoc ?? doc}
-                  theme={gezelChatTheme}
+                  theme={gezelChatThemeForMode(effectiveTheme)}
                   surface={surface}
                   displayMode="video"
                   audioMode={narratedDoc ? 'media' : 'synthetic'}

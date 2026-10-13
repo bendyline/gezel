@@ -7,7 +7,7 @@
 
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { resolveModelDirectory } from '../../models/model-id.js';
+import { resolveModelDirectory } from '@bendyline/gezel-inference/internal/models/model-id';
 import type {
   AudioEngineHealth,
   AudioModelPullEvent,
@@ -16,7 +16,7 @@ import type {
   SpeechToTextProvider,
   TranscribeInput,
   TranscribeOutput,
-} from './types.js';
+} from '@bendyline/gezel-inference/internal/providers/audio/types';
 
 export interface MockSpeechToTextProviderOptions {
   /** Optional dir to track "installed" models so list/pull/delete are observable. */

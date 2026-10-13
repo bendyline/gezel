@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_CACHE_REUSE,
   type EngineFlagInput,
   GPU_RESIDENT_THREADS,
   buildLlamaCppEngineArgs,
-} from './engine-flags.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/engine-flags';
+import { describe, expect, it } from 'vitest';
 
 /** Value token immediately after `flag`, or undefined if the flag is absent. */
 function argValue(args: string[], flag: string): string | undefined {

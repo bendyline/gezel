@@ -179,7 +179,7 @@ try {
     await page.getByRole('tablist', { name: 'Project sections', exact: true }).waitFor();
   }
   async function globalSearch() {
-    const input = page.getByRole('textbox', { name: 'Search', exact: true });
+    const input = page.getByRole('combobox', { name: 'Search', exact: true });
     if (await input.isVisible()) return input;
     // Compact layout collapses global search behind a header button carrying
     // the same accessible name; it becomes the input once activated.

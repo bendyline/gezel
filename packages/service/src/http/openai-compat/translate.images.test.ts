@@ -1,5 +1,5 @@
+import { translateMessages } from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
 import { describe, expect, it } from 'vitest';
-import { translateMessages } from './translate.js';
 
 const TINY_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';

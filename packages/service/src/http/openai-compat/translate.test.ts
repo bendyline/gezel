@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
 import {
   ChatCompletionRequestSchema,
   flattenTranscriptIntoPrompt,
   resolveModelTarget,
   translateMessages,
-} from './translate.js';
+} from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
+import { describe, expect, it } from 'vitest';
 
 describe('ChatCompletionRequestSchema', () => {
   it('accepts a minimal valid request', () => {

@@ -23,8 +23,8 @@
 import { X509Certificate as NodeX509, createHash, randomBytes, type webcrypto } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import * as x509 from '@peculiar/x509';
-import { writeFileAtomic } from '../fs/atomic.js';
 import type { LoopbackCert } from '../http/cert.js';
 import { ensurePrivateDir } from '../local-harness/base.js';
 

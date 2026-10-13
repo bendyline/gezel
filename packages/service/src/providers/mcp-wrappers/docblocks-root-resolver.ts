@@ -22,7 +22,7 @@
 import { createHash } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { isPathInside, safeJoin } from '../../fs/safe-paths.js';
+import { isPathInside, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { McpServerSpec } from '../mcp-bridge.js';
 import type { McpPreProcessVerdict, McpToolWrapper, McpToolWrapperContext } from './types.js';
 

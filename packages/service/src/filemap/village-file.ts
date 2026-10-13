@@ -6,7 +6,7 @@ import {
   VillageFileSchema,
   createLogger,
 } from '@bendyline/gezel';
-import { writeFileAtomic } from '../fs/atomic.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 
 /**
  * The impure half of the village file (`.gezel/village.json`): path resolution,

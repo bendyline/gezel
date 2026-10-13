@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ModelStorageRoots } from '@bendyline/gezel-inference/internal/models/storage-roots';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { ModelStorageRoots } from '../../models/storage-roots.js';
 import { selectWhisperModel } from './stt-factory.js';
 
 let modelsRoot: string;

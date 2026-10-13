@@ -1,6 +1,6 @@
 import { resolveSecurityPolicy } from '@bendyline/gezel';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { OutputRingBuffer } from '../fs/ring.js';
-import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { denyNetBoundaryAvailable, runInSandbox } from '../sandbox/runner.js';
 import { WorkspaceWriteDeniedError } from './errors.js';

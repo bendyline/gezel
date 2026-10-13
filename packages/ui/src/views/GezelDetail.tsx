@@ -403,6 +403,7 @@ export function GezelDetail({
             </div>
           )}
           <EditorShell
+            ariaLabel={`About ${selected.name}`}
             key={`${selected.id}:${aboutRev}`}
             initialMarkdown={selected.about}
             onChange={handleChange}

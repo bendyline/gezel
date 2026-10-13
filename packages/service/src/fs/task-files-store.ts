@@ -1,6 +1,8 @@
 import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { KeyedLock, type Task, TaskSchema, createLogger, isSafeEntityId } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { beginPerfWork } from '@bendyline/gezel-inference/internal/perf/responsiveness';
 import {
   type ExternalFolders,
   gezelPaths,
@@ -13,8 +15,6 @@ import {
   projectTasksDir,
 } from '@bendyline/gezel/paths';
 import { HttpStatusError } from '@bendyline/gezel/runtime';
-import { beginPerfWork } from '../perf/responsiveness.js';
-import { writeFileAtomic } from './atomic.js';
 import { isSyncJunkName } from './sync-junk.js';
 
 export interface TaskFilesStoreOptions {

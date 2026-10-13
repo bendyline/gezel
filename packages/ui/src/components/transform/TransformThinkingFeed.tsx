@@ -3,7 +3,7 @@ import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { useDeferredValue, useEffect, useMemo, useRef } from 'react';
 import { useEffectiveTheme } from '../../theme.js';
-import { gezelChatTheme } from '../chat-theme.js';
+import { gezelChatThemeForMode } from '../chat-theme.js';
 import { GEZEL_DARK_SURFACE, GEZEL_LIGHT_SURFACE } from './surfaces.js';
 
 /**
@@ -38,7 +38,12 @@ export function TransformThinkingFeed({ markdown }: { markdown: string }) {
   return (
     <div ref={containerRef} className="gz-transform-thinking" aria-live="polite">
       {doc ? (
-        <LinearDocView doc={doc} theme={gezelChatTheme} surface={surface} thinMargins />
+        <LinearDocView
+          doc={doc}
+          theme={gezelChatThemeForMode(effective)}
+          surface={surface}
+          thinMargins
+        />
       ) : (
         <pre className="gz-transform-thinking-raw">{markdown}</pre>
       )}

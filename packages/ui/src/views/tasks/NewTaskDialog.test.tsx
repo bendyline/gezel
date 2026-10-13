@@ -251,6 +251,10 @@ describe('NewTaskDialog', () => {
     } as never);
     renderDialog();
     expect(await screen.findByRole('button', { name: /For you/ })).toBeInTheDocument();
+    // Books can render before the effect selects the initial shelf.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /For you/ })).toHaveClass('active'),
+    );
     await waitFor(() =>
       expect(screen.getByRole('radio', { name: /Spreadsheet/ })).toBeInTheDocument(),
     );
@@ -288,6 +292,9 @@ describe('NewTaskDialog', () => {
     };
     const { rerender } = render(<NewTaskDialog open={false} defaultProjectId="" {...props} />);
     rerender(<NewTaskDialog open defaultProjectId="pj-alpha" {...props} />);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /For you/ })).toHaveClass('active'),
+    );
     await waitFor(() =>
       expect(screen.getByRole('radio', { name: /Spreadsheet/ })).toBeInTheDocument(),
     );

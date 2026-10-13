@@ -5,12 +5,12 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
+import type { TextToSpeechProvider } from '@bendyline/gezel-inference/internal/providers/audio/types';
 import type { RemotesRegistry } from '../../remotes/registry.js';
 import { ProviderLifecycle } from '../provider-lifecycle.js';
 import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
 import { RemoteTtsProvider } from './remote-tts.js';
 import { createTextToSpeechProvider } from './tts-factory.js';
-import type { TextToSpeechProvider } from './types.js';
 
 const log = createLogger('audio');
 

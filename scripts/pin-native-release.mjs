@@ -4,7 +4,7 @@
  *
  * Fetches a `native-v<X.Y.Z>` GitHub release, hashes and parses its
  * `SHA256SUMS` asset, and writes the complete trust manifest into
- * `packages/service/src/engines/native-manifest.ts`:
+ * `packages/inference/src/engines/native-manifest.ts`:
  *
  *   NATIVE_ENGINE_RELEASE  the version the engine resolver downloads
  *   SHA256SUMS_DIGEST      sha256 of that release's SHA256SUMS asset
@@ -42,10 +42,10 @@ const GITHUB_API = 'https://api.github.com';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
-const pinFile = resolve(repoRoot, 'packages/service/src/engines/native-manifest.ts');
+const pinFile = resolve(repoRoot, 'packages/inference/src/engines/native-manifest.ts');
 const nativeFilesPinFile = resolve(
   repoRoot,
-  'packages/service/src/engines/native-file-manifest.json',
+  'packages/inference/src/engines/native-file-manifest.json',
 );
 
 const argv = process.argv.slice(2);

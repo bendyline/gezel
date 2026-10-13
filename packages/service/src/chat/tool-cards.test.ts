@@ -1,5 +1,5 @@
+import type { ToolCallEvent } from '@bendyline/gezel-inference/internal/providers/types';
 import { describe, expect, it } from 'vitest';
-import type { ToolCallEvent } from '../providers/types.js';
 import { extractToolCard } from './tool-cards.js';
 
 /** The powerpoint-deck-shaped task snapshot as invoke_craftbook returns it. */

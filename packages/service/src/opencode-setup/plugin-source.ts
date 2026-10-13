@@ -1,8 +1,8 @@
-import { createManagedMarker } from '../fs/managed-marker.js';
 import {
   EXTERNAL_CONVERSATION_ID_HEADER,
   EXTERNAL_WORKING_DIRECTORY_HEADER,
-} from '../http/external-conversation-headers.js';
+} from '@bendyline/gezel-inference/internal/http/external-conversation-headers';
+import { createManagedMarker } from '../fs/managed-marker.js';
 
 export const OPENCODE_PLUGIN_MARKER = createManagedMarker({
   commentPrefix: '// ',

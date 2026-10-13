@@ -1,8 +1,12 @@
 import { mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  LlamaCppLogFile,
+  LlamaProgressLogThrottle,
+  tailLatestEngineLog,
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/log';
 import { afterEach, describe, expect, it } from 'vitest';
-import { LlamaCppLogFile, LlamaProgressLogThrottle, tailLatestEngineLog } from './log.js';
 
 const dirs: string[] = [];
 

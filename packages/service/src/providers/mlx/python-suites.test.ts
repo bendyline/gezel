@@ -22,7 +22,9 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const PYTHON_DIR = fileURLToPath(new URL('./python', import.meta.url));
+const PYTHON_DIR = fileURLToPath(
+  new URL('../../../../inference/src/providers/mlx/python', import.meta.url),
+);
 
 /**
  * Suites that must pass with nothing but the standard library, each with the

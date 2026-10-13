@@ -5,6 +5,7 @@ import { highlightTokens } from './highlight-tokens.js';
 import type { SearchGroup } from './search-nav.js';
 
 interface SearchPaletteProps {
+  id: string;
   groups: SearchGroup[];
   /** What the user typed — its terms are marked in the rows. */
   query: string;
@@ -37,6 +38,7 @@ interface SearchPaletteProps {
  * what it held back rather than dropping it silently.
  */
 export function SearchPalette({
+  id,
   groups,
   query,
   activeIndex,
@@ -83,84 +85,86 @@ export function SearchPalette({
 
   let flat = -1;
   return (
-    <div
-      className="search-palette"
-      data-testid="search-palette"
-      // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA combobox listbox; a native <select> can't host the grouped, multi-line, custom-styled rows.
-      role="listbox"
-      aria-label="Search results"
-      tabIndex={-1}
-    >
-      {groups.map((group) => (
-        <div
-          key={group.kind}
-          className="search-palette-group"
-          // biome-ignore lint/a11y/useSemanticElements: grouping rows within the listbox; <fieldset> would break the listbox/option structure.
-          role="group"
-          aria-label={group.label}
-        >
-          <div className="search-palette-group-header">{group.label}</div>
-          {group.items.map((item) => {
-            flat += 1;
-            const index = flat;
-            const active = index === activeIndex;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                // biome-ignore lint/a11y/useSemanticElements: ARIA option inside the custom listbox above.
-                role="option"
-                aria-selected={active}
-                data-testid="search-option"
-                ref={active ? activeRef : null}
-                className={active ? 'search-option active' : 'search-option'}
-                // mousedown (not click) + preventDefault so the input keeps
-                // focus and doesn't blur-close the palette before the pick.
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  onPick(item);
-                }}
-                onMouseEnter={() => onHover(index)}
-              >
-                <span className="search-option-title">{highlightTokens(item.title, query)}</span>
-                {item.subtitle ? (
-                  <span className="search-option-subtitle">
-                    {item.media
-                      ? `${mediaSpanLabel(item.media)} · ${item.subtitle}`
-                      : item.subtitle}
-                  </span>
-                ) : null}
-                {item.snippet ? (
-                  <span className="search-option-snippet">
-                    <SearchMarkdownSnippet
-                      markdown={item.snippet}
-                      query={query}
-                      formatMarkdown={searchSnippetIsMarkdown(item.kind, item.path ?? item.title)}
-                    />
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-          {group.moreCount ? (
-            onSeeAll ? (
-              <button
-                type="button"
-                className="search-palette-group-more"
-                // mousedown + preventDefault, same reason as the option rows.
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  onSeeAll();
-                }}
-              >
-                +{group.moreCount} more
-              </button>
-            ) : (
-              <div className="search-palette-group-more">+{group.moreCount} more</div>
-            )
-          ) : null}
-        </div>
-      ))}
+    <div className="search-palette" data-testid="search-palette">
+      <div
+        id={id}
+        // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA combobox listbox; a native <select> can't host the grouped, multi-line, custom-styled rows.
+        role="listbox"
+        aria-label="Search results"
+        tabIndex={-1}
+      >
+        {groups.map((group) => (
+          <div
+            key={group.kind}
+            className="search-palette-group"
+            // biome-ignore lint/a11y/useSemanticElements: grouping rows within the listbox; <fieldset> would break the listbox/option structure.
+            role="group"
+            aria-label={group.label}
+          >
+            <div className="search-palette-group-header">{group.label}</div>
+            {group.items.map((item) => {
+              flat += 1;
+              const index = flat;
+              const active = index === activeIndex;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  // biome-ignore lint/a11y/useSemanticElements: ARIA option inside the custom listbox above.
+                  role="option"
+                  aria-selected={active}
+                  id={`${id}-option-${index}`}
+                  tabIndex={-1}
+                  data-testid="search-option"
+                  ref={active ? activeRef : null}
+                  className={active ? 'search-option active' : 'search-option'}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onPick(item)}
+                  onMouseEnter={() => onHover(index)}
+                >
+                  <span className="search-option-title">{highlightTokens(item.title, query)}</span>
+                  {item.subtitle ? (
+                    <span className="search-option-subtitle">
+                      {item.media
+                        ? `${mediaSpanLabel(item.media)} · ${item.subtitle}`
+                        : item.subtitle}
+                    </span>
+                  ) : null}
+                  {item.snippet ? (
+                    <span className="search-option-snippet">
+                      <SearchMarkdownSnippet
+                        markdown={item.snippet}
+                        query={query}
+                        formatMarkdown={searchSnippetIsMarkdown(item.kind, item.path ?? item.title)}
+                      />
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      {groups
+        .filter((group) => group.moreCount)
+        .map((group) =>
+          onSeeAll ? (
+            <button
+              key={group.kind}
+              type="button"
+              className="search-palette-group-more"
+              aria-label={`Show ${group.moreCount} more ${group.label.toLowerCase()}`}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={onSeeAll}
+            >
+              +{group.moreCount} more {group.label.toLowerCase()}
+            </button>
+          ) : (
+            <div key={group.kind} className="search-palette-group-more">
+              +{group.moreCount} more {group.label.toLowerCase()}
+            </div>
+          ),
+        )}
       {/* Names land first and content follows, so say the list is still
           filling rather than letting it look finished and then jump. */}
       {loading ? (
@@ -177,11 +181,8 @@ export function SearchPalette({
           <button
             type="button"
             className="search-palette-see-all"
-            // mousedown + preventDefault, same reason as the option rows.
-            onMouseDown={(e) => {
-              e.preventDefault();
-              onSeeAll();
-            }}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onSeeAll}
           >
             See all results
           </button>

@@ -2,7 +2,7 @@ import { type ExpectedDeliverable, MANAGED_WORKSPACE_WRITE_SETTING_LABEL } from 
 import {
   extractExplicitFileEditTools,
   extractSingleFileSourceRepairTargetPath,
-} from '../providers/direct-file-work-prompt.js';
+} from '@bendyline/gezel-inference/internal/providers/direct-file-work-prompt';
 import {
   isExpectedBinaryDocumentDeliverablePath,
   isExpectedImageDeliverablePath,

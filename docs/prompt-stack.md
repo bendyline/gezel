@@ -87,11 +87,11 @@ the full roster rather than the router surface.
 Prompt text that exists *because of model limitations* does not live in `buildInstructions`
 conditionals — it lives in behaviors
 ([model-profile/behaviors/](../packages/service/src/model-profile/behaviors/), registry in
-[model-profile/registry.ts](../packages/service/src/model-profile/registry.ts)) selected by
+[model-profile/registry.ts](../packages/inference/src/model-profile/registry.ts)) selected by
 the model's catalog manifest, or by tier defaults
-([model-profile/defaults.ts](../packages/service/src/model-profile/defaults.ts)) when the
+([model-profile/defaults.ts](../packages/inference/src/model-profile/defaults.ts)) when the
 manifest declares none. Tier boundaries
-([chat/local-model-tier.ts](../packages/service/src/chat/local-model-tier.ts)): non-local
+([chat/local-model-tier.ts](../packages/inference/src/chat/local-model-tier.ts)): non-local
 provider → `cloud`; else by parameter count — <5B `tiny`, <12B `small`, <45B `medium`,
 ≥45B `large` (unknown local → `tiny`).
 
@@ -411,7 +411,7 @@ Two things this table makes visible:
    exists.)
 7. **Every prompt change is A/B-able without a rebuild.** `GEZEL_FORCE_BEHAVIORS` /
    `GEZEL_REMOVE_BEHAVIORS` (applied in
-   [model-profile/runtime.ts](../packages/service/src/model-profile/runtime.ts)) toggle any
+   [model-profile/runtime.ts](../packages/inference/src/model-profile/runtime.ts)) toggle any
    behavior per daemon; the eval harness exposes them per trial (`forceBehaviors` /
    `removeBehaviors`). New standing text should ship as a behavior first so it can be
    measured before it becomes default.

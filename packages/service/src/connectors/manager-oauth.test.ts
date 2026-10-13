@@ -1,6 +1,6 @@
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../fs/store.js';
-import type { SecretStore } from '../secrets/types.js';
 import { ConnectorManager } from './manager.js';
 import { exchangeLongLivedToken, parseLongLivedExchange } from './oauth.js';
 

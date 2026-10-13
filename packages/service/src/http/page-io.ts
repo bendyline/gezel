@@ -21,8 +21,8 @@ import {
   validateJsonSchema,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { ChatManager } from '../chat/manager.js';
-import { realpathContained, safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import { dispatchToolReaction } from '../project-type/reactions.js';

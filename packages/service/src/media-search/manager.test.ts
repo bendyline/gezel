@@ -2,9 +2,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
+import { HF_CACHE_DIR_ENV } from '@bendyline/gezel-inference/internal/transformers-cache';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { imageEmbedAvailability, setMediaSearchGate } from '../memory/image-embeddings.js';
-import { HF_CACHE_DIR_ENV } from '../transformers-cache.js';
 import { MediaSearchManager, backgroundDownloadsAllowed } from './manager.js';
 
 let home: string;

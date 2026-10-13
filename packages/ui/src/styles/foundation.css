@@ -52,10 +52,10 @@
   /* True black, for surfaces that must meet the phone's own system bars. */
   --gezel-paper-night: #000;
   --gezel-ink: #1c1c1c;
-  --gezel-ink-muted: #666;
+  --gezel-ink-muted: #595959;
   --gezel-ink-warm: #2a2520;
   --gezel-ink-warm-muted: #5a4f42;
-  --gezel-ink-warm-quiet: #8b7e6b;
+  --gezel-ink-warm-quiet: #6b6152;
   --gezel-sage: #667f62;
   --gezel-sage-muted: #8a9a76;
   --gezel-sage-deep: #5c6a4a;
@@ -120,6 +120,8 @@
      not reach 4.5:1 as normal-size text on every paper surface. */
   --accent-text: #8c4428;
   --accent-text-hover: #78381f;
+  --action-bg: var(--accent-text);
+  --action-ink: var(--gezel-cream-ink);
   /* Dark ink keeps selected text legible on both themes' medium-orange
      accent fills. */
   --accent-selection-ink: #231207;
@@ -131,7 +133,7 @@
   --toolbar-icon-ink: var(--gezel-toolbar-ink);
 
   /* Brand palette */
-  --titlebar: var(--gezel-sage);
+  --titlebar: var(--gezel-sage-deep);
   --titlebar-ink: var(--gezel-cream-ink);
   /* Fill colour the home-tab gezel logotype flips to when active.
      Light mode: dark forest green that complements the sage titlebar
@@ -207,7 +209,7 @@
   --key-border: rgba(92, 74, 55, 0.3);
   --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(60, 45, 30, 0.18), 0 2px 3px
     rgba(60, 45, 30, 0.08);
-  --key-pressed-bg: linear-gradient(to bottom, var(--gezel-terra-raised), var(--gezel-terra));
+  --key-pressed-bg: linear-gradient(to bottom, var(--accent-text-hover), var(--accent-text));
   --key-pressed-border: #8f5a3a;
   --key-pressed-ink: #fff6ea;
   --key-pressed-shadow: inset 0 1px 2px rgba(60, 30, 10, 0.28);
@@ -241,12 +243,14 @@
     --gezel-paper-control-deep: #1f2124;
     --gezel-paper-inset: #1f2124;
     --gezel-ink: #f0f0f0;
-    --gezel-ink-muted: #999;
+    --gezel-ink-muted: #a1a1a1;
     --gezel-terra: #c0875d;
     --gezel-terra-hover: #d5a07a;
     --gezel-terra-raised: #b07a50;
     --accent-text: #d5a07a;
     --accent-text-hover: #e0b897;
+    --action-bg: var(--gezel-terra);
+    --action-ink: var(--accent-selection-ink);
     --chat-handoff-bg: rgba(176, 114, 76, 0.08);
     --chat-handoff-border: rgba(176, 114, 76, 0.45);
     --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -312,12 +316,14 @@
   --gezel-paper-control-deep: #1f2124;
   --gezel-paper-inset: #1f2124;
   --gezel-ink: #f0f0f0;
-  --gezel-ink-muted: #999;
+  --gezel-ink-muted: #a1a1a1;
   --gezel-terra: #c0875d;
   --gezel-terra-hover: #d5a07a;
   --gezel-terra-raised: #b07a50;
   --accent-text: #d5a07a;
   --accent-text-hover: #e0b897;
+  --action-bg: var(--gezel-terra);
+  --action-ink: var(--accent-selection-ink);
   --chat-handoff-bg: rgba(176, 114, 76, 0.08);
   --chat-handoff-border: rgba(176, 114, 76, 0.45);
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);

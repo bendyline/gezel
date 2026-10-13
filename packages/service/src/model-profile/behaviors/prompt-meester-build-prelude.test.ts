@@ -7,9 +7,9 @@
  */
 
 import type { ChatMessageToolCall, ProviderName } from '@bendyline/gezel';
+import type { TurnCtx } from '@bendyline/gezel-inference/internal/model-profile/types';
 import { describe, expect, it } from 'vitest';
 import { lintPromptToolContract } from '../../chat/prompt-tool-contract.js';
-import type { TurnCtx } from '../types.js';
 import {
   PromptMeesterBuildPrelude,
   explicitlyRequestsSeparateProject,

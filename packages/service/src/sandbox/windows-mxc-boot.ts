@@ -1,5 +1,5 @@
 import { type GezelConfig, type HealthResponse, resolveSecurityPolicy } from '@bendyline/gezel';
-import { resolveVendoredMxc } from '../engines/resolver.js';
+import { resolveVendoredMxc } from '@bendyline/gezel-inference/internal/engines/resolver';
 import type { Store } from '../fs/store.js';
 import {
   resolveMxcExecutor,

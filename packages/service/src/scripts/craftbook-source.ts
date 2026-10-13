@@ -1,13 +1,13 @@
 import { mkdir, readFile, readdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type GetScriptSourceResponse, ScriptNameSchema } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   craftbookShardPrefix,
   craftbookTemplateDir,
   craftbookTemplateScriptFile,
   craftbookTemplateScriptsDir,
 } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
 import { parseScriptMeta } from './meta.js';
 import { scriptSourceHash } from './source.js';
 

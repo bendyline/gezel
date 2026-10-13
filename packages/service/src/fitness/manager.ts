@@ -24,8 +24,8 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import type { GezelConfig, ModelFitnessRecord, ModelFitnessTrigger } from '@bendyline/gezel';
 import { ModelFitnessRecordSchema, createLogger, modelFitnessKey } from '@bendyline/gezel';
-import { CapacityBroker } from '../providers/native/capacity-broker.js';
-import type { PoolSnapshot } from '../providers/native/provider-pool.js';
+import { CapacityBroker } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import type { PoolSnapshot } from '@bendyline/gezel-inference/internal/providers/native/provider-pool';
 import type { FitnessEngine, FitnessProbeArgs } from './probe.js';
 
 const log = createLogger('fitness');

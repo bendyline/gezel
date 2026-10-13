@@ -4,12 +4,22 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const serviceSrc = fileURLToPath(new URL('../', import.meta.url));
+const inferenceSrc = fileURLToPath(new URL('../../../inference/src/', import.meta.url));
+
+function sourceName(path: string): string {
+  return relative(path.startsWith(inferenceSrc) ? inferenceSrc : serviceSrc, path).replaceAll(
+    '\\',
+    '/',
+  );
+}
 
 function source(relativeUrl: string): string {
   return readFileSync(fileURLToPath(new URL(relativeUrl, import.meta.url)), 'utf8');
 }
 
-function productionTypeScriptFiles(dir = serviceSrc): string[] {
+function productionTypeScriptFiles(dir?: string): string[] {
+  if (!dir)
+    return [...productionTypeScriptFiles(serviceSrc), ...productionTypeScriptFiles(inferenceSrc)];
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = resolve(dir, entry.name);
     if (entry.isDirectory()) return productionTypeScriptFiles(path);
@@ -25,7 +35,7 @@ describe('machine-service child-process contract', () => {
       const body = readFileSync(caller, 'utf8');
       if (!body.includes('resolvePnpmCommand(')) continue;
 
-      const name = relative(serviceSrc, caller).replaceAll('\\', '/');
+      const name = sourceName(caller);
       if (name === 'packages/pnpm.ts') continue;
       if (name === 'workspace/scripts.ts') {
         // This caller delegates process creation to runWorkspaceCommand,
@@ -74,7 +84,7 @@ describe('machine-service child-process contract', () => {
       expect(source(providerPath), providerPath).toContain('windowsHeadlessSpawnOptions()');
     }
 
-    const signature = source('../engines/signature.ts');
+    const signature = source('../../../inference/src/engines/signature.ts');
     expect(signature).toContain("'-WindowStyle'");
     expect(signature).toContain("'Hidden'");
   });
@@ -84,7 +94,7 @@ describe('machine-service child-process contract', () => {
   // is reserved for the few processes intentionally allowed to outlive us.
   it('does not use Windows detachment as the service headless policy', () => {
     for (const caller of productionTypeScriptFiles()) {
-      const name = relative(serviceSrc, caller).replaceAll('\\', '/');
+      const name = sourceName(caller);
       const body = readFileSync(caller, 'utf8');
       if (name === 'providers/ollama-launch.ts') {
         // Ollama intentionally outlives the daemon; only its launcher may

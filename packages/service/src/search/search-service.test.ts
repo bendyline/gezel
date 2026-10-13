@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const embedMock = vi.fn(async (_text: string) => [0.1, 0.2, 0.3]);
 const embeddingStatusMock = vi.fn(() => 'ready' as 'cold' | 'warming' | 'ready');
 const mediaEmbedMock = vi.fn(async (_text: string) => [0.5, 0.5] as number[] | null);
-vi.mock('../memory/embeddings.js', () => ({
+vi.mock('@bendyline/gezel-inference/internal/memory/embeddings', () => ({
   embed: (text: string) => embedMock(text),
   embedQuery: (text: string) => embedMock(text),
   embedKnowledgeQuery: (text: string) => mediaEmbedMock(text),

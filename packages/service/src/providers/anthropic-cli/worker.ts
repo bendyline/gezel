@@ -1,11 +1,16 @@
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { join } from 'node:path';
 import { createLogger, stripMcpPrefix, toolActivityLabel } from '@bendyline/gezel';
+import { SessionResumeError } from '@bendyline/gezel-inference/internal/providers/types';
+import type {
+  SessionOpts,
+  ToolArgsDeltaMeta,
+  ToolCallEvent,
+  TurnUsage,
+} from '@bendyline/gezel-inference/internal/providers/types';
+import { buildTurnUsage } from '@bendyline/gezel-inference/internal/providers/usage-builder';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { isHttpSpec, isStdioSpec } from '../mcp-bridge.js';
-import { SessionResumeError } from '../types.js';
-import type { SessionOpts, ToolArgsDeltaMeta, ToolCallEvent, TurnUsage } from '../types.js';
-import { buildTurnUsage } from '../usage-builder.js';
 import type { ClaudePermissionMode } from './provider.js';
 import {
   claudeRateLimitBuckets,

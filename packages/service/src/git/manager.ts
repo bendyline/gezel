@@ -15,6 +15,8 @@ import type {
   ProjectGitHub,
 } from '@bendyline/gezel';
 import { KeyedLock } from '@bendyline/gezel';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import {
   projectInternalGithubDir,
   projectStorageDir,
@@ -22,11 +24,9 @@ import {
   sharedClonesRoot,
 } from '@bendyline/gezel/paths';
 import { createPatch } from 'diff';
-import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { AmbientGitHubAuth } from '../github/ambient.js';
 import { parseGitHubUrl, sameGitHubRepo, sharedCloneKey } from '../github/url.js';
-import type { SecretStore } from '../secrets/types.js';
 import {
   EMPTY_TREE_SHA,
   LOG_FORMAT,

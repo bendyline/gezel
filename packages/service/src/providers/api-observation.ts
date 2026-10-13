@@ -1,16 +1,10 @@
+import type { ApiObservationContext } from '@bendyline/gezel-inference/internal/providers/observation-context';
+export type { ApiObservationContext } from '@bendyline/gezel-inference/internal/providers/observation-context';
 import { createHash, randomUUID } from 'node:crypto';
 import { createLogger, estimateTokens } from '@bendyline/gezel';
 
 const log = createLogger('api-observation');
-export interface ApiObservationContext {
-  sessionId?: string;
-  gezelId?: string;
-  projectId?: string;
-  taskRef?: string;
-  executionMode?: string;
-  behaviors?: Array<{ id: string; config?: unknown }>;
-  promptSections?: Array<{ name: string; tokens: number; band: string }>;
-}
+
 const hash = (value: unknown) =>
   createHash('sha256')
     .update(JSON.stringify(value) ?? 'undefined')

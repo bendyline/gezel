@@ -1,7 +1,7 @@
 import type { FileTurnIntent } from '@bendyline/gezel';
+import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import type { LLMSession, SessionOpts } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { LLMSession, SessionOpts } from '../types.js';
-import { LlamaCppProvider } from './provider.js';
 
 /**
  * The desktop llama.cpp turn loop, pinned byte for byte: every request body it

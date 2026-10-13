@@ -54,8 +54,8 @@
 }
 
 .tasks-filters button.primary {
-  background: var(--accent, #b0724c);
-  color: #fff;
+  background: var(--action-bg);
+  color: var(--action-ink);
   border: none;
   border-radius: 4px;
   padding: 0.35rem 0.9rem;
@@ -69,6 +69,8 @@
 
 .tasks-kind-filter {
   flex-shrink: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 /* Split creation key: the main action stays one click away while the narrow
@@ -198,10 +200,12 @@
    #667f62 → rgb(102, 127, 98)) instead of a generic blue accent so the
    list reads as part of the same crew/workshop palette as the header. */
 .task-row-active {
+  --muted: var(--text);
   background: rgba(102, 127, 98, 0.22);
 }
 
 .task-row-selected {
+  --muted: var(--text);
   background: rgba(102, 127, 98, 0.32);
 }
 
@@ -405,8 +409,8 @@
   color: var(--muted);
 }
 .task-badge-local {
-  background: var(--accent-soft, #2b6);
-  color: #fff;
+  background: var(--success-bg);
+  color: var(--success-text);
 }
 .task-badge-bundled,
 .task-badge-project {
@@ -557,6 +561,7 @@
   min-width: 0;
   min-height: 0;
   flex: 1;
+  container: task-detail / inline-size;
 }
 
 /* Task pane → Chat tab. Mirrors the gezel-chat-tab flex column so the
@@ -666,8 +671,8 @@
 }
 
 .task-detail-actions .primary {
-  background: var(--accent, #b0724c);
-  color: #fff;
+  background: var(--action-bg);
+  color: var(--action-ink);
   border: none;
   border-radius: 4px;
   padding: 0.35rem 0.9rem;
@@ -1209,6 +1214,7 @@ button.bench-step-foot:disabled {
 
 .task-step-panel {
   position: relative;
+  container: task-step-panel / inline-size;
   z-index: 0;
   border-radius: 8px;
   padding: 0.9rem 1rem;
@@ -1459,6 +1465,30 @@ button.bench-step-foot:disabled {
   outline-offset: -2px;
 }
 
+/* The desktop tab column leaves barely one step visible on a phone. Stack
+   the view keys above a full-width bench, keeping its horizontal scroller. */
+@container task-detail (max-width: 480px) {
+  .task-bench-row {
+    flex-direction: column;
+  }
+
+  .task-bench-sidebar {
+    flex-basis: auto;
+  }
+
+  .task-tab-rail {
+    align-self: flex-start;
+  }
+
+  .task-tab-btn {
+    min-height: 44px;
+    padding-block: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: 0;
+  }
+}
+
 /* The populated panel is the editor "page" the selected step docks into:
    a border around the whole area, a panel fill, and a small upward pull so
    its top edge meets the selected bench-step's foot (the active tab). The
@@ -1525,14 +1555,26 @@ button.bench-step-foot:disabled {
 
 .task-step-panel-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.7rem 1rem;
+}
+
+@container task-step-panel (max-width: 29rem) {
+  .task-step-panel-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .task-step-field {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  min-width: 0;
+}
+
+.task-step-field :is(input, textarea, .gz-select-trigger) {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .task-step-field.full-width {
@@ -1786,8 +1828,8 @@ button.bench-step-foot:disabled {
 }
 
 .task-form-actions .primary {
-  background: var(--accent, #b0724c);
-  color: #fff;
+  background: var(--action-bg);
+  color: var(--action-ink);
   border: none;
   border-radius: 4px;
   padding: 0.4rem 1rem;
@@ -1820,8 +1862,8 @@ button.bench-step-foot:disabled {
   gap: 0.4rem;
 }
 .task-draft-activate button.primary {
-  background: var(--terra, #c9722e);
-  color: #fff;
+  background: var(--action-bg);
+  color: var(--action-ink);
   border: none;
   border-radius: 0.4rem;
   padding: 0.3rem 0.7rem;

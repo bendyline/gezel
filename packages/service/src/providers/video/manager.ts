@@ -7,10 +7,10 @@
 
 import { type GezelConfig, createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import type { ConfigStore } from '../../fs/config-store.js';
-import type { UvRuntime } from '../../python/uv-runtime.js';
+import type { ConfigStore } from '@bendyline/gezel-inference/internal/fs/config-store';
+import type { GpuArbiter } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
+import type { UvRuntime } from '@bendyline/gezel-inference/internal/python/uv-runtime';
 import type { RemotesRegistry } from '../../remotes/registry.js';
-import type { GpuArbiter } from '../gpu-arbiter.js';
 import { ProviderLifecycle } from '../provider-lifecycle.js';
 import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
 import { createVideoProvider } from './factory.js';

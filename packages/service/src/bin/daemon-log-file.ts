@@ -1,6 +1,6 @@
 import { REDACTED } from '@bendyline/gezel';
+import { LlamaCppLogFile as RollingLogFile } from '@bendyline/gezel-inference/internal/providers/llama-cpp/log';
 import { gezelHome, gezelPaths } from '@bendyline/gezel/paths';
-import { LlamaCppLogFile as RollingLogFile } from '../providers/llama-cpp/log.js';
 
 /** A stopping daemon waits this long, at most, for queued lines to reach disk. */
 const FLUSH_BUDGET_MS = 2_000;

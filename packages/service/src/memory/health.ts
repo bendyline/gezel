@@ -17,10 +17,10 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
+import { embedProfileId } from '@bendyline/gezel-inference/internal/memory/embed-core';
+import { embeddingsDisabledReason } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import type { Store } from '../fs/store.js';
 import { type MemoryScope, USER_MEMORY_ID, parseMemoryDay } from './daily-markdown.js';
-import { embedProfileId } from './embed-core.js';
-import { embeddingsDisabledReason } from './embeddings.js';
 import type { MemoryManager } from './manager.js';
 import { countIndexed, readEmbedStamp } from './vector-index.js';
 

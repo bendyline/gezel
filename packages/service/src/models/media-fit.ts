@@ -29,15 +29,15 @@ import {
   videoMemoryRequirement,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import { sdServerLoadProfile } from '../providers/image/sd-cpp.js';
-import type { CapacityBudgetKind } from '../providers/native/capacity-budget.js';
+import type { CapacityBudgetKind } from '@bendyline/gezel-inference/internal/providers/native/capacity-budget';
 import {
   configuredEngineMemoryBytes,
   staticCapacityCeilings,
-} from '../providers/native/device-capacity.js';
-import { measuredCapacityBudget } from '../providers/native/measured-budget.js';
+} from '@bendyline/gezel-inference/internal/providers/native/device-capacity';
+import { measuredCapacityBudget } from '@bendyline/gezel-inference/internal/providers/native/measured-budget';
+import { detectMemoryProfileCached } from '@bendyline/gezel-inference/internal/system/memory';
+import { sdServerLoadProfile } from '../providers/image/sd-cpp.js';
 import { detectVideoAccelerator } from '../providers/video/venv.js';
-import { detectMemoryProfileCached } from '../system/memory.js';
 import {
   imageCatalogWeightFiles,
   sdCppMainComponent,

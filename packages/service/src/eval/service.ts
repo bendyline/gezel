@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
-import type { EngineBinaryRegistry } from '../engines/registry.js';
-import type { SecretStore } from '../secrets/types.js';
+import type { EngineBinaryRegistry } from '@bendyline/gezel-inference/internal/engines/registry';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { EvalCatalogCache } from './catalog.js';
 import { type EvalHarness, resolveEvalHarness } from './harness.js';
 import { type EvalHistorySink, EvalJobManager } from './jobs.js';

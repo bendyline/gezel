@@ -716,6 +716,7 @@ export function TaskDetail({
             </div>
             <div className="task-description-editor">
               <EditorShell
+                ariaLabel="Task description"
                 key={`description-${task.ref}-${descriptionKey}`}
                 initialMarkdown={task.description ?? ''}
                 onChange={(source) => descriptionAutosave.update(source)}
@@ -763,6 +764,7 @@ export function TaskDetail({
                 from the user's vantage point, no scrolling required. */}
             <div className="task-notes-composer">
               <EditorShell
+                ariaLabel="Task note"
                 key={`composer-${composerKey}`}
                 initialMarkdown=""
                 placeholder="Write a note — paste markdown, drag in media, or just start typing."
@@ -853,6 +855,7 @@ export function TaskDetail({
                     </header>
                     <div className="task-note-body">
                       <EditorShell
+                        ariaLabel="Task note"
                         key={editing ? `edit-${n.id}` : n.id}
                         initialMarkdown={n.text}
                         readOnly={!editing}

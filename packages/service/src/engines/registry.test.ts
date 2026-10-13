@@ -1,6 +1,13 @@
+import {
+  EngineBinaryRegistry,
+  engineInstallPhase,
+} from '@bendyline/gezel-inference/internal/engines/registry';
+import type {
+  EngineResolveEvent,
+  EngineResolveResult,
+  ResolveEngineOptions,
+} from '@bendyline/gezel-inference/internal/engines/resolver';
 import { describe, expect, it } from 'vitest';
-import { EngineBinaryRegistry, engineInstallPhase } from './registry.js';
-import type { EngineResolveEvent, EngineResolveResult, ResolveEngineOptions } from './resolver.js';
 
 type ResolveImpl = (
   opts: ResolveEngineOptions,

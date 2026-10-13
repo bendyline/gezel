@@ -1,7 +1,7 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import type { QuotaBucket } from '../../chat/usage.js';
-import { writeFileAtomic } from '../../fs/atomic.js';
 
 const CAPTURE_SCRIPT_NAME = 'quota-statusline.mjs';
 const SNAPSHOT_NAME = 'quota.json';

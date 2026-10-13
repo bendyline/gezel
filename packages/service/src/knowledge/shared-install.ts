@@ -1,3 +1,11 @@
+import type {
+  SharedEnsureResult,
+  SharedKnowledgeInstaller,
+} from '@bendyline/gezel-inference/internal/knowledge/shared-install-contract';
+export type {
+  SharedEnsureResult,
+  SharedKnowledgeInstaller,
+} from '@bendyline/gezel-inference/internal/knowledge/shared-install-contract';
 /**
  * The user daemon's side of shared knowledge placement: ask the machine
  * broker to ensure a trusted coordinate in the machine-shared asset store,
@@ -18,21 +26,6 @@ const SOURCE_PREFIX = '/api/knowledge-shared';
 const TARGET_PREFIX = '/v1/remote/manage/knowledge';
 /** Matches the model downloader's stall policy: the broker pings while a download runs. */
 const STREAM_STALL_TIMEOUT_MS = 40 * 60_000;
-
-export type SharedEnsureResult =
-  | { status: 'ready' }
-  | { status: 'unavailable'; reason: string }
-  | { status: 'failed'; error: string; mismatch: { expected: string; actual: string } };
-
-export interface SharedKnowledgeInstaller {
-  available(): boolean;
-  ensure(
-    coordinate: TrustedKnowledgeCoordinate,
-    onEvent: (event: KnowledgeInstallEvent) => void,
-    signal?: AbortSignal,
-  ): Promise<SharedEnsureResult>;
-  cancel(coordinate: TrustedKnowledgeCoordinate): Promise<boolean>;
-}
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

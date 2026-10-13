@@ -5,13 +5,13 @@
  */
 
 import { type ChatMessage, createLogger } from '@bendyline/gezel';
+import { EmbeddingsDisabledError } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import {
   type MemoryKind,
   type MemoryScope,
   USER_MEMORY_ID,
   isMemoryKind,
 } from './daily-markdown.js';
-import { EmbeddingsDisabledError } from './embeddings.js';
 import type { MemoryManager } from './manager.js';
 
 const log = createLogger('memory');

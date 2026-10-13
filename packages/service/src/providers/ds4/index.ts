@@ -6,4 +6,4 @@
  * {@link LlamaCppModelManager} (ds4 weights are GGUF) pointed at the
  * `engines/ds4/models` directory.
  */
-export { Ds4Provider } from './provider.js';
+export { Ds4Provider } from '@bendyline/gezel-inference/internal/providers/ds4/provider';

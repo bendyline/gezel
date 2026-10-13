@@ -1,9 +1,13 @@
 import { mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  LlamaCppCacheAdapter,
+  llamaLayerPrefixIds,
+  llamaPrefixId,
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/cache-adapter';
+import { withLlamaDiskCache } from '@bendyline/gezel-inference/internal/providers/llama-cpp/disk-cache';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LlamaCppCacheAdapter, llamaLayerPrefixIds, llamaPrefixId } from './cache-adapter.js';
-import { withLlamaDiskCache } from './disk-cache.js';
 
 const disk = vi.hoisted(() => ({ available: 100 * 1024 ** 3 }));
 vi.mock('node:fs/promises', async (original) => ({

@@ -1,7 +1,10 @@
 import type { ProjectCompletionResponse } from '@bendyline/gezel';
+import {
+  CapacityDeniedError,
+  EngineBusyError,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { ModelNotInstalledError } from '@bendyline/gezel-inference/internal/providers/types';
 import { describe, expect, it } from 'vitest';
-import { CapacityDeniedError, EngineBusyError } from '../../providers/native/capacity-broker.js';
-import { ModelNotInstalledError } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
 import { completionRoutes, completionTuning, parseJsonAnswer } from './completions.js';
 

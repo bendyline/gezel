@@ -1,6 +1,7 @@
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback } from 'react';
 import { api } from '../api.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 
 export type GeneralistModeSetting = 'auto' | 'on' | 'off';
 
@@ -62,6 +63,7 @@ export function GeneralistModeSection(props: {
       <div
         className="gz-tray gz-tray--described"
         role="radiogroup"
+        onKeyDown={onRadioKeyDown}
         aria-label="Run in generalist mode"
       >
         {CHOICES.map((choice) => (
@@ -71,6 +73,7 @@ export function GeneralistModeSection(props: {
             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
             role="radio"
             aria-checked={selected === choice.id}
+            tabIndex={selected === choice.id ? 0 : -1}
             className={`gz-key${selected === choice.id ? ' gz-key-active' : ''}`}
             onClick={() => void save(choice.id)}
             title={choice.title}

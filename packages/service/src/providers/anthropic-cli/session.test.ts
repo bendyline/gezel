@@ -1,6 +1,6 @@
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import { SessionResumeError } from '@bendyline/gezel-inference/internal/providers/types';
 import { describe, expect, it } from 'vitest';
-import { ProviderQueue } from '../queue.js';
-import { SessionResumeError } from '../types.js';
 import type { ClaudeReasoningEffort } from './reasoning.js';
 import { AnthropicCliSession, isResumeFailureSignal } from './session.js';
 import type { ClaudeWorkerPool, ClaudeWorkerSpec, PoolSnapshot } from './worker-pool.js';

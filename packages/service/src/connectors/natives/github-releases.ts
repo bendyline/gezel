@@ -13,9 +13,9 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { AmbientGitHubAuth } from '../../github/ambient.js';
 import { getStoredGitHubToken } from '../../github/identity.js';
-import type { SecretStore } from '../../secrets/types.js';
 import { connectorSecretKey, registerNativeAdapter } from '../registry.js';
 import type {
   AdapterDeps,

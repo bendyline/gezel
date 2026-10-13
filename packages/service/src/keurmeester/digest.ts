@@ -7,8 +7,8 @@ import {
   isLocalProvider,
   isProactiveAllowed,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { keurmeesterDigestStatePath, keurmeesterDigestsDir } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import { KeurmeesterCaseStore } from './case-store.js';

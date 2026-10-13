@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
+import { openGreetingTab } from './helpers/greeting.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
@@ -41,7 +42,13 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
   const brand = page.locator('.app-header-brand');
   await expect(brand).toBeVisible({ timeout: 20_000 });
   await brand.click();
-  await expect(page.locator('.squisq-wysiwyg-editor').first()).toBeVisible({ timeout: 20_000 });
+  await openGreetingTab(page);
+  await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
+  const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
+  await expect(conversation).not.toHaveAttribute('inert');
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible({
+    timeout: 20_000,
+  });
   return { app, page };
 }
 
@@ -64,7 +71,7 @@ test('prompt drafts — an unsent message survives closing the app', async () =>
   {
     const { app, page } = await launch();
     try {
-      const editor = page.locator('.squisq-wysiwyg-editor').first();
+      const editor = page.getByRole('textbox', { name: 'Message', exact: true });
       await editor.click();
       await page.keyboard.type(DRAFT_TEXT);
       // The composer's autosave status is failures-only by design, so there
@@ -87,7 +94,7 @@ test('prompt drafts — an unsent message survives closing the app', async () =>
   {
     const { app, page } = await launch();
     try {
-      const editor = page.locator('.squisq-wysiwyg-editor').first();
+      const editor = page.getByRole('textbox', { name: 'Message', exact: true });
       await expect(editor).toContainText(DRAFT_TEXT, { timeout: 20_000 });
     } finally {
       await closeApp(app);

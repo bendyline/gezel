@@ -1,9 +1,12 @@
 import { createLogger } from '@bendyline/gezel';
-import type { ConfigStore } from '../fs/config-store.js';
-import type { LlamaCppModelManager } from '../providers/llama-cpp/index.js';
-import type { MlxModelManager } from '../providers/mlx/index.js';
+import type { ConfigStore } from '@bendyline/gezel-inference/internal/fs/config-store';
+import {
+  modelStorageRoots,
+  reclaimAbandonedModelDownloads,
+} from '@bendyline/gezel-inference/internal/models/storage-roots';
+import type { LlamaCppModelManager } from '@bendyline/gezel-inference/internal/providers/llama-cpp/index';
+import type { MlxModelManager } from '@bendyline/gezel-inference/internal/providers/mlx/index';
 import { migrateLegacyQuantSuffixIds, remapEngineScopedKeys } from './legacy-quant-suffix.js';
-import { modelStorageRoots, reclaimAbandonedModelDownloads } from './storage-roots.js';
 const log = createLogger('models');
 export async function migrateInstalledModelIds(
   home: string,

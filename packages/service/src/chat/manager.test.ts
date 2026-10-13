@@ -3,17 +3,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { securityPolicyForLevel } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import { resolveMlxEffectiveNumCtx } from '@bendyline/gezel-inference/internal/providers/mlx/build-provider';
+import {
+  CapacityDeniedError,
+  NOT_ENOUGH_MEMORY_MESSAGE,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { MlxRuntimeStatusBus } from '@bendyline/gezel-inference/internal/python/mlx-runtime-status-bus';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { PreviewLogBuffer } from '../preview-log/buffer.js';
-import { resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
 import { MockProvider } from '../providers/mock.js';
-import {
-  CapacityDeniedError,
-  NOT_ENOUGH_MEMORY_MESSAGE,
-} from '../providers/native/capacity-broker.js';
-import { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import {
   consultationIdleTimeoutMsForModel,

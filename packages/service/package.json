@@ -125,7 +125,9 @@
     "web-tree-sitter": "^0.25.10",
     "yauzl": "^3.4.0",
     "yazl": "^3.3.1",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@bendyline/gezel-inference": "workspace:*",
+    "@bendyline/gilde": "0.1.95"
   },
   "peerDependencies": {
     "@huggingface/transformers": "^4.3.1",

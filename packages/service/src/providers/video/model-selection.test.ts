@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import type { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { NativeEngineSupervisor } from '../native/supervisor.js';
 import { DiffusersVideoProvider } from './diffusers-video.js';
 import { VideoModelManager, VideoModelSelector } from './models.js';
 

@@ -1,5 +1,9 @@
+import {
+  classifyStartupLine,
+  parseMemorySize,
+  stripLogPrefix,
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/stdout-parser';
 import { describe, expect, it } from 'vitest';
-import { classifyStartupLine, parseMemorySize, stripLogPrefix } from './stdout-parser.js';
 
 describe('stripLogPrefix', () => {
   it('removes the supervisor log prefix', () => {

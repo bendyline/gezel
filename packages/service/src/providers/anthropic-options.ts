@@ -1,5 +1,9 @@
 import { createLogger } from '@bendyline/gezel';
-import { ANTHROPIC_TUNING_MAP, type ResolvedTuning, applyTuning } from '../model-profile/tuning.js';
+import {
+  ANTHROPIC_TUNING_MAP,
+  type ResolvedTuning,
+  applyTuning,
+} from '@bendyline/gezel-inference/internal/model-profile/tuning';
 
 const log = createLogger('anthropic');
 const LEGACY_EFFORTS = ['low', 'medium', 'high'];

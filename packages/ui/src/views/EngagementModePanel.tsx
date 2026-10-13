@@ -1,3 +1,4 @@
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 export type EngagementMode = 'proactive' | 'scheduled' | 'reactive' | 'off';
 export type WorkshopTempo = 'gezellig' | 'bedrijvig' | 'druk' | 'dolle-boel';
 
@@ -98,6 +99,7 @@ export function EngagementModePanel({
       <div
         className="engagement-mode-switch gz-tray gz-tray--described"
         role="radiogroup"
+        onKeyDown={onRadioKeyDown}
         aria-label="AI engagement"
       >
         {ENGAGEMENT_MODES.map((m) => (
@@ -107,6 +109,7 @@ export function EngagementModePanel({
             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
             role="radio"
             aria-checked={mode === m.id}
+            tabIndex={mode === m.id ? 0 : -1}
             className={`gz-key${mode === m.id ? ' gz-key-active' : ''}`}
             onClick={() => void onChange(m.id)}
           >
@@ -132,6 +135,7 @@ export function EngagementModePanel({
           <div
             className="workshop-tempo-switch gz-tray gz-tray--described"
             role="radiogroup"
+            onKeyDown={onRadioKeyDown}
             aria-label="Tempo"
           >
             {TEMPOS.map((t) => (
@@ -141,6 +145,7 @@ export function EngagementModePanel({
                 // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
                 role="radio"
                 aria-checked={tempo === t.id}
+                tabIndex={tempo === t.id ? 0 : -1}
                 className={`gz-key gz-key--stacked${tempo === t.id ? ' gz-key-active' : ''}`}
                 onClick={() => void onTempoChange(t.id)}
                 title={t.hint}

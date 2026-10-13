@@ -1,9 +1,9 @@
 import { lstat, rm } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
+import { isPathInside, realpathContained } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import { SHARED_ASSETS_ENV } from '@bendyline/gezel-inference/internal/models/storage-roots';
 import { activeMachineSharedHome } from '@bendyline/gezel/paths';
-import { isPathInside, realpathContained } from '../fs/safe-paths.js';
-import { SHARED_ASSETS_ENV } from '../models/storage-roots.js';
 import type { StoragePathEntry } from './registry.js';
 
 const log = createLogger('storage');

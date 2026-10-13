@@ -1,3 +1,5 @@
+import type { ToolAudioPersister } from '@bendyline/gezel-inference/internal/providers/audio-persister-contract';
+export type { ToolAudioPersister } from '@bendyline/gezel-inference/internal/providers/audio-persister-contract';
 import type { ChatSession } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 
@@ -12,16 +14,6 @@ import type { Store } from '../fs/store.js';
  *
  *   <project>/artifacts/sessions/<friendly-id>/tool-<n>-audio-<i>.<ext>
  */
-export interface ToolAudioPersister {
-  persist(
-    audios: ReadonlyArray<{
-      base64: string;
-      mimeType: string;
-      durationSeconds?: number;
-      voice?: string;
-    }>,
-  ): Promise<Array<{ path: string; mimeType: string; durationSeconds?: number; voice?: string }>>;
-}
 
 export interface CreateToolAudioPersisterOptions {
   store: Store;

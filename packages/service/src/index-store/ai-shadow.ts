@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createLogger, nowIso } from '@bendyline/gezel';
-import { safeJoin } from '../fs/safe-paths.js';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { chunkMarkdown, shadowDocFilesPaths, writeConvertedMarkdownAt } from './docs.js';
 import { parseFrontmatter, withFrontmatter } from './frontmatter.js';
 import type { FileRecord, IndexProvenance } from './index-store-types.js';

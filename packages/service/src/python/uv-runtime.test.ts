@@ -3,8 +3,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { UvRuntime, versionGte } from '@bendyline/gezel-inference/internal/python/uv-runtime';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { UvRuntime, versionGte } from './uv-runtime.js';
 
 /**
  * Fake child-process and exec so we can drive UvRuntime's detection

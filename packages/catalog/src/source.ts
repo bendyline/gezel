@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { setImmediate as yieldToRequests } from 'node:timers/promises';
 import {
   CRAFTBOOK_TEST_FILENAME,
   type CatalogItemDetail,
@@ -38,6 +39,7 @@ import { z } from 'zod';
 import { categorizeToolset } from './categorize.js';
 import { type ContentTree, openContentTree } from './content-tree.js';
 import { gildeDataDir } from './gilde-data.js';
+import { ListingCache } from './listing-cache.js';
 
 // Through the core logger, not console: a library that writes straight to
 // stderr cannot be silenced by GEZEL_LOG_LEVEL or routed by its host.
@@ -150,6 +152,7 @@ function readFileIndexEntry(raw: unknown): FileIndexEntry | null {
  * version a `minGezelVersion` floor picked — from the item folder.
  */
 class IndexedItemFiles implements ItemFiles {
+  usedFolder = false;
   constructor(
     private readonly entry: FileIndexEntry,
     private readonly folder: ItemFiles,
@@ -168,6 +171,7 @@ class IndexedItemFiles implements ItemFiles {
     if (latest?.file === 'manifest.json' && rel === `versions/${latest.version}/craftbook.json`) {
       return undefined;
     }
+    this.usedFolder = true;
     return this.folder.json(rel);
   }
 
@@ -340,6 +344,7 @@ export class BundledSource implements CatalogSource {
   private readonly useIndex: boolean;
   private readonly gezelVersion: string;
   private tree: { root: string; tree: Promise<ContentTree> } | null = null;
+  private readonly listings = new ListingCache<CatalogItemSummary[] | null>();
 
   constructor(options: BundledSourceOptions | string = {}) {
     // Back-compat: old positional `root: string` signature.
@@ -418,27 +423,42 @@ export class BundledSource implements CatalogSource {
     const indexPath = join(this.root, KIND_DIR[kind], FILE_INDEX_FILENAME);
     const text = await this.readOptional(indexPath);
     if (text === null) return null;
+    return this.listings.read(kind, indexPath, text, () =>
+      this.resolveFileIndex(kind, indexPath, text),
+    );
+  }
+
+  private async resolveFileIndex(kind: CatalogKind, indexPath: string, text: string) {
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
     } catch (err) {
       log.warn(`failed to parse ${indexPath}:`, err);
-      return null;
+      return { items: null, cacheable: false };
     }
     if (!isRecord(parsed) || parsed.kind !== kind || !Array.isArray(parsed.items)) {
       log.warn(`${indexPath}: kind/items mismatch — falling back`);
-      return null;
+      return { items: null, cacheable: false };
     }
     const items: CatalogItemSummary[] = [];
+    let cacheable = true;
+    let sliceStarted = performance.now();
     for (const raw of parsed.items) {
+      // Schema resolution is CPU work. Awaiting already-resolved promises
+      // alone starves HTTP requests for the entire catalog (several seconds).
+      if (performance.now() - sliceStarted >= 8) {
+        await yieldToRequests();
+        sliceStarted = performance.now();
+      }
       const entry = readFileIndexEntry(raw);
       if (!entry) continue;
       const files = new IndexedItemFiles(entry, this.folderFiles(kind, entry.id));
       const manifest = await this.loadResolvedManifest(kind, entry.id, undefined, files);
+      cacheable &&= !files.usedFolder;
       if (manifest) items.push(this.summary(kind, manifest));
     }
     items.sort((a, b) => a.manifest.name.localeCompare(b.manifest.name));
-    return items;
+    return { items, cacheable };
   }
 
   /**
@@ -473,7 +493,12 @@ export class BundledSource implements CatalogSource {
       return null;
     }
     const items: CatalogItemSummary[] = [];
+    let sliceStarted = performance.now();
     for (const raw of obj.entries) {
+      if (performance.now() - sliceStarted >= 8) {
+        await yieldToRequests();
+        sliceStarted = performance.now();
+      }
       const e = raw as { manifest?: unknown; iconSvg?: unknown };
       if (!e.manifest || typeof e.manifest !== 'object') continue;
       // gilde writes the index against its own copy of the schemas, which

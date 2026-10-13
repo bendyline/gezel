@@ -1,9 +1,12 @@
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  SessionResumeError,
+  type ToolCallEvent,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { artifactReadSlices } from '../../chat/artifact-read-evidence.js';
-import { SessionResumeError, type ToolCallEvent } from '../types.js';
 import {
   buildCodexArgs,
   classifyError,

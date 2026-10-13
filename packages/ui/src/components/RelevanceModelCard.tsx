@@ -1,6 +1,7 @@
 import type { RelevanceModelStatusResponse } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 
 /**
  * Settings → Project knowledge: the relevance check. A small on-device model
@@ -78,6 +79,7 @@ export function RelevanceModelCard() {
           <div
             className="gz-tray gz-tray--described"
             role="radiogroup"
+            onKeyDown={onRadioKeyDown}
             aria-label="Relevance model"
             style={{ marginTop: '0.5rem' }}
           >
@@ -90,6 +92,7 @@ export function RelevanceModelCard() {
                   // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
                   role="radio"
                   aria-checked={active}
+                  tabIndex={active || (!selected && model === models[0]) ? 0 : -1}
                   className={`gz-key gz-key--stacked${active ? ' gz-key-active' : ''}`}
                   disabled={saving || overridden}
                   onClick={() => void save({ modelId: model.id })}

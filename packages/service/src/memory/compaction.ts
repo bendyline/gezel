@@ -18,7 +18,8 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type GezelConfig, createLogger, isProactiveAllowed } from '@bendyline/gezel';
-import { writeFileAtomic } from '../fs/atomic.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { embeddingsDisabledReason } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import {
@@ -33,7 +34,6 @@ import {
   parseMemorySource,
   renderMemorySource,
 } from './daily-markdown.js';
-import { embeddingsDisabledReason } from './embeddings.js';
 import { runLessonsDistillation } from './lessons.js';
 import type { MemoryManager } from './manager.js';
 

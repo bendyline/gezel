@@ -1,14 +1,15 @@
 import { turnCancelledMessage } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildStageOneNudge } from '../../tasks/gate-escalation.js';
-import { GpuArbiter } from '../gpu-arbiter.js';
-import type { NativeEngineSupervisor } from '../native/supervisor.js';
-import { LlamaCppCacheAdapter } from './cache-adapter.js';
+import { GpuArbiter } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
+import { LlamaCppCacheAdapter } from '@bendyline/gezel-inference/internal/providers/llama-cpp/cache-adapter';
+import type { LlamaCppModelManager as InferenceLlamaCppModelManager } from '@bendyline/gezel-inference/internal/providers/llama-cpp/models';
 import {
   LlamaCppProvider,
   NativeEngineCrashedError,
   extractPrerequisiteRepairReadPaths,
-} from './provider.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import type { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildStageOneNudge } from '../../tasks/gate-escalation.js';
 
 /**
  * Build an SSE Response body out of an array of events. Pass `'[DONE]'`
@@ -775,7 +776,7 @@ describe('LlamaCppProvider pool lifecycle', () => {
         },
         { id: 'gemma-4b', name: 'Gemma 4B', approxSizeBytes: 3 * 1024 ** 3 },
       ],
-    } as unknown as import('./models.js').LlamaCppModelManager;
+    } as unknown as InferenceLlamaCppModelManager;
     const provider = new LlamaCppProvider({
       baseUrl: 'http://127.0.0.1:1',
       modelManager: manager,

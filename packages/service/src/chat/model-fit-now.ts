@@ -1,14 +1,14 @@
 import type { ChatModelManifest, ModelsFitNowResponse, SessionModelFit } from '@bendyline/gezel';
 import { launchFitsNow, pickRecommendedModel } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { isLocalProvider } from '@bendyline/gezel-inference/internal/providers/native/engine-key';
+import type { ProviderName } from '@bendyline/gezel-inference/internal/providers/types';
 import type { Store } from '../fs/store.js';
 import {
   type LiveLaunchView,
   liveLaunchView,
   toRecoCandidate,
 } from '../providers/llama-cpp/hardware-tier.js';
-import { isLocalProvider } from '../providers/native/engine-key.js';
-import type { ProviderName } from '../providers/types.js';
 import { type ChatManager, effectiveSessionModel } from './manager.js';
 
 export interface ModelFitDeps {

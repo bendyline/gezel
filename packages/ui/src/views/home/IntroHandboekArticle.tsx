@@ -5,7 +5,7 @@ import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
-import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../../components/chat-theme.js';
+import { GEZEL_LIGHT_SURFACE, gezelChatThemeForMode } from '../../components/chat-theme.js';
 import { navigateToTab } from '../../components/nav-actions.js';
 import { queueOpenKnowledge } from '../../components/pending-open-knowledge.js';
 import { useEffectiveTheme } from '../../theme.js';
@@ -198,7 +198,7 @@ export function IntroHandboekArticle({
             <div className="home-intro-player">
               <DocPlayer
                 doc={playerDoc ?? doc}
-                theme={gezelChatTheme}
+                theme={gezelChatThemeForMode(effectiveTheme)}
                 displayMode="video"
                 audioMode="synthetic"
                 captionsEnabled
@@ -225,7 +225,7 @@ export function IntroHandboekArticle({
               <LinearDocView
                 doc={doc}
                 className="gezel-article-view"
-                theme={gezelChatTheme}
+                theme={gezelChatThemeForMode(effectiveTheme)}
                 surface={surface}
                 thinMargins
                 imageDisplayMode="inline"

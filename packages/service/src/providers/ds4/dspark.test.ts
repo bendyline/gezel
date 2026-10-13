@@ -1,5 +1,9 @@
+import {
+  type Ds4DsparkOptions,
+  ds4DsparkArgs,
+  resolveDs4Dspark,
+} from '@bendyline/gezel-inference/internal/providers/ds4/dspark';
 import { describe, expect, it } from 'vitest';
-import { type Ds4DsparkOptions, ds4DsparkArgs, resolveDs4Dspark } from './dspark.js';
 
 const SUPPORT = '/models/DeepSeek-V4-Flash-DSpark-support-0731.gguf';
 

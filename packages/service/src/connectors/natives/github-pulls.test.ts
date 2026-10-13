@@ -1,7 +1,7 @@
 import type { GitHubPullFile, ProjectDetail } from '@bendyline/gezel';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Store } from '../../fs/store.js';
-import type { SecretStore } from '../../secrets/types.js';
 import { clearConnectorTaskPreps, connectorTaskPrepFor } from '../task-prep.js';
 import type { AdapterDeps, ConnectorBindingRef } from '../types.js';
 import { sha8 } from '../writer.js';

@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   REASONING_CHARS_PER_TOKEN,
   applyLlamaCppReasoningBudgetOverride,
@@ -8,7 +7,8 @@ import {
   parseReasoningBudgetEnv,
   parseReasoningPreserveEnv,
   reasoningLaunchOverridesFromEnv,
-} from './reasoning-launch.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/reasoning-launch';
+import { describe, expect, it } from 'vitest';
 
 describe('llama.cpp reasoning launch overrides', () => {
   it.each(['1', 'true', ' TRUE '])('enables preservation for %j', (raw) => {

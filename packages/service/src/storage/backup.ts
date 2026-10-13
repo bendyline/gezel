@@ -17,11 +17,11 @@ import {
   isSharedLibraryProject,
   selectBackupItems,
 } from '@bendyline/gezel';
+import { isPathInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import { checkDiskSpace } from '@bendyline/gezel-inference/internal/utils/disk-space';
 import { gezelDir, gezelPaths, projectStorageDir, userMemoriesDir } from '@bendyline/gezel/paths';
 import * as yazl from 'yazl';
-import { isPathInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
-import { checkDiskSpace } from '../utils/disk-space.js';
 import type { StorageJobManager } from './job-manager.js';
 import { measureTree } from './sizes.js';
 

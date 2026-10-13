@@ -1,6 +1,10 @@
+import type { TurnStatsEvent } from '@bendyline/gezel-inference/internal/providers/streaming-session';
+import type {
+  ExternalToolCall,
+  LLMProvider,
+  LLMSession,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { describe, expect, it } from 'vitest';
-import type { TurnStatsEvent } from '../providers/streaming-session.js';
-import type { ExternalToolCall, LLMProvider, LLMSession } from '../providers/types.js';
 import { type FitnessProbeDeps, runFitnessProbe } from './probe.js';
 
 /**

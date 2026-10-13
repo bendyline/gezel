@@ -1,12 +1,12 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   SecurityStateCorruptionError,
   readSecurityJson,
   writeSecurityJson,
-} from './security-json.js';
+} from '@bendyline/gezel-inference/internal/fs/security-json';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 interface SecurityState {
   version: number;

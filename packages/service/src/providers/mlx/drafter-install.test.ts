@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { MlxModelManager } from './models.js';
+import { MlxModelManager } from '@bendyline/gezel-inference/internal/providers/mlx/models';
 
 /**
  * The drafter install is what turns speculative decoding on for a catalog

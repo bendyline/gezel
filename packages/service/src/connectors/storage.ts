@@ -10,7 +10,7 @@
 import { cp, mkdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
-import { resolveInside } from '../fs/safe-paths.js';
+import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { Store } from '../fs/store.js';
 
 const log = createLogger('connectors');

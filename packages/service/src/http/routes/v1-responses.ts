@@ -1,20 +1,28 @@
 import { createLogger } from '@bendyline/gezel';
-import { type Context, Hono } from 'hono';
-import { bodyLimit } from 'hono/body-limit';
-import { streamSSE } from 'hono/streaming';
-import { ZodError } from 'zod';
-import type { ResolvedTuning } from '../../model-profile/tuning.js';
+import { appendCallerOwnedActionLedger } from '@bendyline/gezel-inference/internal/http/openai-compat/action-ledger';
+import { profileForCallerOwnedInference } from '@bendyline/gezel-inference/internal/http/openai-compat/caller-owned-profile';
+import {
+  type ChatTarget,
+  resolveChatTarget,
+} from '@bendyline/gezel-inference/internal/http/openai-compat/chat-target';
+import {
+  flattenTranscriptIntoPrompt,
+  parseGezelModelRef,
+  resolveModelTarget,
+} from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
+import type { ResolvedTuning } from '@bendyline/gezel-inference/internal/model-profile/tuning';
 import {
   ExternalToolsUnsupportedError,
   ModelNotInstalledError,
   type SessionOpts,
   type TurnUsage,
-} from '../../providers/types.js';
-import type { LLMSession } from '../../providers/types.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
+import type { LLMSession } from '@bendyline/gezel-inference/internal/providers/types';
+import { type Context, Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { streamSSE } from 'hono/streaming';
+import { ZodError } from 'zod';
 import type { ServiceContext } from '../context.js';
-import { appendCallerOwnedActionLedger } from '../openai-compat/action-ledger.js';
-import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
-import { type ChatTarget, resolveChatTarget } from '../openai-compat/chat-target.js';
 import {
   runResponsesNonStreaming,
   runResponsesStreaming,
@@ -24,11 +32,6 @@ import {
   type TranslatedResponsesRequest,
   translateResponsesRequest,
 } from '../openai-compat/responses-translate.js';
-import {
-  flattenTranscriptIntoPrompt,
-  parseGezelModelRef,
-  resolveModelTarget,
-} from '../openai-compat/translate.js';
 
 const log = createLogger('v1-responses');
 const MAX_RESPONSES_BODY_BYTES = 16 * 1024 * 1024;

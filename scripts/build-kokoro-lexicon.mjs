@@ -24,7 +24,7 @@ import { gzipSync } from 'node:zlib';
 
 const repo = dirname(dirname(fileURLToPath(import.meta.url)));
 const pins = JSON.parse(readFileSync(join(repo, 'native/mobile/speech/pins.json'), 'utf8'));
-const destination = join(repo, 'packages/service/assets/kokoro');
+const destination = join(repo, 'packages/inference/assets/kokoro');
 /** Voice-pack members the desktop daemon needs; the rest stay mobile-only. */
 const WANTED = ['lexicon-us-en.txt', 'lexicon-gb-en.txt'];
 

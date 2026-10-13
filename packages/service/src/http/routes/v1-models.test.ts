@@ -1,8 +1,8 @@
+import { v1ModelsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-models';
+import { appleFoundationModelsStatus } from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/status';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { appleFoundationModelsStatus } from '../../providers/apple-foundation-models/status.js';
 import type { ServiceContext } from '../context.js';
-import { v1ModelsRoutes } from './v1-models.js';
-vi.mock('../../providers/apple-foundation-models/status.js', () => ({
+vi.mock('@bendyline/gezel-inference/internal/providers/apple-foundation-models/status', () => ({
   appleFoundationModelsStatus: vi.fn(async () => ({
     supported: false,
     installed: false,

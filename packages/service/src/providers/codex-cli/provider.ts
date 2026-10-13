@@ -1,10 +1,22 @@
 import { createLogger, normalizeCodexPermissionMode } from '@bendyline/gezel';
-import { ProviderQueue } from '../queue.js';
-import { ExternalToolsUnsupportedError, SessionResumeError } from '../types.js';
-import type { LLMProvider, LLMSession, ModelInfo, ProviderName, SessionOpts } from '../types.js';
+import {
+  type CodexReasoningEffort,
+  isCodexReasoningEffort,
+} from '@bendyline/gezel-inference/internal/providers/codex-cli/reasoning';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import {
+  ExternalToolsUnsupportedError,
+  SessionResumeError,
+} from '@bendyline/gezel-inference/internal/providers/types';
+import type {
+  LLMProvider,
+  LLMSession,
+  ModelInfo,
+  ProviderName,
+  SessionOpts,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { type CodexBinary, resolveCodexBinary } from './binary.js';
 import type { CodexPermissionMode } from './invoker.js';
-import { type CodexReasoningEffort, isCodexReasoningEffort } from './reasoning.js';
 import { CodexCliSession, type CodexSessionDeps } from './session.js';
 
 const DEFAULT_MODEL = 'gpt-6.1-sol';

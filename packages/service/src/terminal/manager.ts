@@ -8,7 +8,7 @@ import {
   createLogger,
   nowIso,
 } from '@bendyline/gezel';
-import { safeJoin } from '../fs/safe-paths.js';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';

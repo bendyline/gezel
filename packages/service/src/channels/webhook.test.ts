@@ -1,6 +1,6 @@
+import type { SecretKey, SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
+import { stringifySecretKey } from '@bendyline/gezel-inference/internal/secrets/types';
 import { describe, expect, it } from 'vitest';
-import type { SecretKey, SecretStore } from '../secrets/types.js';
-import { stringifySecretKey } from '../secrets/types.js';
 import { WebhookChannel } from './webhook.js';
 
 function memorySecrets(initial: Record<string, string> = {}): SecretStore {

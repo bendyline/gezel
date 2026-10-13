@@ -10,14 +10,22 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { MLX_TUNING_MAP, applyTuning, resolveTuning } from '../../model-profile/tuning.js';
+import {
+  MLX_TUNING_MAP,
+  applyTuning,
+  resolveTuning,
+} from '@bendyline/gezel-inference/internal/model-profile/tuning';
 
 const SERVER_SRC = readFileSync(
-  fileURLToPath(new URL('./python/gezel_mlx_server.py', import.meta.url)),
+  fileURLToPath(
+    new URL('../../../../inference/src/providers/mlx/python/gezel_mlx_server.py', import.meta.url),
+  ),
   'utf8',
 );
 const BUDGET_SRC = readFileSync(
-  fileURLToPath(new URL('./python/think_budget.py', import.meta.url)),
+  fileURLToPath(
+    new URL('../../../../inference/src/providers/mlx/python/think_budget.py', import.meta.url),
+  ),
   'utf8',
 );
 

@@ -37,6 +37,7 @@ import { useCopilotAvailability } from '../components/useCopilotAvailability.js'
 import { useTotalRamBytes } from '../components/useTotalRamBytes.js';
 import { Poppetje } from '../poppetje/index.js';
 import { Select } from '../primitives/index.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
 import { clearPendingSettingsSection, peekPendingSettingsSection } from '../settings-nav.js';
@@ -3089,7 +3090,12 @@ function DaemonSettingsView() {
 
                   {nightShiftModelOverride?.enabled === true && (
                     <div style={{ marginTop: '0.8rem' }}>
-                      <div className="gz-tray" role="radiogroup" aria-label="Night Shift provider">
+                      <div
+                        className="gz-tray"
+                        role="radiogroup"
+                        onKeyDown={onRadioKeyDown}
+                        aria-label="Night Shift provider"
+                      >
                         {nightShiftProviderChoices.map((choice) => (
                           <button
                             key={choice.id}
@@ -3097,6 +3103,16 @@ function DaemonSettingsView() {
                             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
                             role="radio"
                             aria-checked={nightShiftProvider === choice.id}
+                            tabIndex={
+                              nightShiftProvider === choice.id ||
+                              (providerBlocked(nightShiftProvider) &&
+                                choice ===
+                                  nightShiftProviderChoices.find(
+                                    (candidate) => !providerBlocked(candidate.id),
+                                  ))
+                                ? 0
+                                : -1
+                            }
                             className={`gz-key${
                               nightShiftProvider === choice.id ? ' gz-key-active' : ''
                             }`}
@@ -3329,7 +3345,7 @@ function DaemonSettingsView() {
                         href="https://github.com/settings/tokens"
                         target="_blank"
                         rel="noreferrer"
-                        style={{ color: 'var(--accent)' }}
+                        style={{ color: 'var(--accent-text)' }}
                       >
                         GitHub personal access token
                       </a>{' '}
@@ -3438,7 +3454,7 @@ function DaemonSettingsView() {
                       href="https://platform.openai.com/api-keys"
                       target="_blank"
                       rel="noreferrer"
-                      style={{ color: 'var(--accent)' }}
+                      style={{ color: 'var(--accent-text)' }}
                     >
                       platform.openai.com/api-keys
                     </a>{' '}
@@ -3467,6 +3483,7 @@ function DaemonSettingsView() {
                   <input
                     type="password"
                     placeholder={hasOpenaiKey ? 'Replace key…' : 'Paste OpenAI API key (sk-…)'}
+                    aria-label="OpenAI API key"
                     value={openaiKeyDraft}
                     onChange={(e) => setOpenaiKeyDraft(e.target.value)}
                     style={{ flex: 1 }}
@@ -3474,6 +3491,7 @@ function DaemonSettingsView() {
                   <input
                     type="text"
                     placeholder="Organization (optional)"
+                    aria-label="Organization (optional)"
                     value={openaiOrgDraft}
                     onChange={(e) => setOpenaiOrgDraft(e.target.value)}
                     style={{ width: 200 }}
@@ -3518,7 +3536,7 @@ function DaemonSettingsView() {
                   href="https://github.com/openai/codex"
                   target="_blank"
                   rel="noreferrer"
-                  style={{ color: 'var(--accent)' }}
+                  style={{ color: 'var(--accent-text)' }}
                 >
                   Codex CLI
                 </a>{' '}
@@ -3529,7 +3547,7 @@ function DaemonSettingsView() {
                   Connection
                 </label>
                 {codexCliProbe.kind === 'ok' && (
-                  <span style={{ color: 'var(--success)', fontSize: '0.9rem' }}>
+                  <span style={{ color: 'var(--success-text)', fontSize: '0.9rem' }}>
                     ✓ Codex CLI ready ({codexCliProbe.modelCount} models)
                   </span>
                 )}
@@ -3581,6 +3599,7 @@ function DaemonSettingsView() {
                   <div
                     className="gz-tray gz-tray--described"
                     role="radiogroup"
+                    onKeyDown={onRadioKeyDown}
                     aria-label="Default Codex access"
                   >
                     {CODEX_PERMISSION_CHOICES.map((choice) => {
@@ -3592,6 +3611,7 @@ function DaemonSettingsView() {
                           // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
                           role="radio"
                           aria-checked={selected}
+                          tabIndex={selected ? 0 : -1}
                           className={`gz-key${selected ? ' gz-key-active' : ''}`}
                           onClick={() => void saveCodexCli({ defaultPermissionMode: choice.id })}
                         >
@@ -3657,6 +3677,7 @@ function DaemonSettingsView() {
                   <input
                     type="text"
                     placeholder="(auto — found on PATH)"
+                    aria-label="Codex CLI binary path"
                     value={codexCliBinaryDraft}
                     onChange={(e) => setCodexCliBinaryDraft(e.target.value)}
                     style={{ flex: 1 }}
@@ -3707,7 +3728,7 @@ function DaemonSettingsView() {
                     href="https://platform.claude.com/settings/keys"
                     target="_blank"
                     rel="noreferrer"
-                    style={{ color: 'var(--accent)' }}
+                    style={{ color: 'var(--accent-text)' }}
                   >
                     platform.claude.com/settings/keys
                   </a>{' '}
@@ -3736,6 +3757,7 @@ function DaemonSettingsView() {
                   placeholder={
                     hasAnthropicKey ? 'Replace key…' : 'Paste Anthropic API key (sk-ant-…)'
                   }
+                  aria-label="Anthropic API key"
                   value={anthropicKeyDraft}
                   onChange={(e) => setAnthropicKeyDraft(e.target.value)}
                   style={{ flex: 1 }}
@@ -3782,7 +3804,7 @@ function DaemonSettingsView() {
                   href="https://docs.claude.com/en/docs/claude-code/overview"
                   target="_blank"
                   rel="noreferrer"
-                  style={{ color: 'var(--accent)' }}
+                  style={{ color: 'var(--accent-text)' }}
                 >
                   Claude Code CLI
                 </a>{' '}
@@ -3793,7 +3815,7 @@ function DaemonSettingsView() {
                   Connection
                 </label>
                 {anthropicCliProbe.kind === 'ok' && (
-                  <span style={{ color: 'var(--success)', fontSize: '0.9rem' }}>
+                  <span style={{ color: 'var(--success-text)', fontSize: '0.9rem' }}>
                     ✓ Claude CLI ready ({anthropicCliProbe.modelCount} models)
                   </span>
                 )}
@@ -3845,6 +3867,7 @@ function DaemonSettingsView() {
                   <div
                     className="gz-tray gz-tray--described"
                     role="radiogroup"
+                    onKeyDown={onRadioKeyDown}
                     aria-label="Default permission"
                   >
                     {CLAUDE_PERMISSION_CHOICES.map((choice) => {
@@ -3856,6 +3879,7 @@ function DaemonSettingsView() {
                           // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons is the shared keys-in-trays pattern.
                           role="radio"
                           aria-checked={selected}
+                          tabIndex={selected ? 0 : -1}
                           className={`gz-key${selected ? ' gz-key-active' : ''}`}
                           onClick={() =>
                             void saveAnthropicCli({ defaultPermissionMode: choice.id })
@@ -3918,6 +3942,7 @@ function DaemonSettingsView() {
                   <input
                     type="text"
                     placeholder="(auto — found on PATH)"
+                    aria-label="Claude CLI binary path"
                     value={anthropicCliBinaryDraft}
                     onChange={(e) => setAnthropicCliBinaryDraft(e.target.value)}
                     style={{ flex: 1 }}
@@ -3961,6 +3986,7 @@ function DaemonSettingsView() {
                     type="number"
                     min={1}
                     max={32}
+                    aria-label="Pool size"
                     value={config?.anthropicCli?.poolSize ?? 4}
                     onChange={(e) => {
                       const n = Number.parseInt(e.target.value, 10);
@@ -3989,6 +4015,7 @@ function DaemonSettingsView() {
                     type="number"
                     min={1}
                     max={32}
+                    aria-label="Concurrency"
                     value={
                       config?.providerConcurrency?.['anthropic-cli'] ??
                       config?.anthropicCli?.poolSize ??
@@ -4021,6 +4048,7 @@ function DaemonSettingsView() {
                     min={60}
                     max={3600}
                     step={60}
+                    aria-label="Idle timeout (seconds)"
                     value={config?.anthropicCli?.workerIdleSec ?? 600}
                     onChange={(e) => {
                       const n = Number.parseInt(e.target.value, 10);
@@ -4157,7 +4185,7 @@ function DaemonSettingsView() {
                   href="https://api.search.brave.com/app/keys"
                   target="_blank"
                   rel="noreferrer"
-                  style={{ color: 'var(--accent)' }}
+                  style={{ color: 'var(--accent-text)' }}
                 >
                   api.search.brave.com/app/keys
                 </a>
@@ -4180,6 +4208,7 @@ function DaemonSettingsView() {
                   placeholder={
                     config?.hasBraveSearchApiKey ? 'Replace key…' : 'Paste Brave Search API key…'
                   }
+                  aria-label="Brave Search API key"
                   value={braveKeyDraft}
                   onChange={(e) => setBraveKeyDraft(e.target.value)}
                   style={{ flex: 1 }}
@@ -4478,7 +4507,7 @@ function CopilotConnectionStatus({
     <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center', gap: '0.5rem' }}>
       {probe.kind === 'probing' && <span className="muted small">checking connection…</span>}
       {probe.kind === 'ok' && (
-        <span className="small" style={{ color: 'var(--accent)' }}>
+        <span className="small" style={{ color: 'var(--accent-text)' }}>
           ● Connected {label}
         </span>
       )}

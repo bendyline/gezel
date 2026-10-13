@@ -76,16 +76,20 @@ import {
   projectManagedWorkspaceWritable,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
+import {
+  PathSafetyError,
+  resolveInside,
+  safeJoin,
+} from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import { KnowledgeSpatialCursorError } from '@bendyline/gezel-inference/internal/knowledge/spatial-query';
+import { embedQuery } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { type Context, Hono } from 'hono';
 import type { ReadEntry } from 'tar';
 import { suggestCraftbooks, usefulCraftbooksForSearch } from '../../craftbook/suggest.js';
 import { buildPrOverlay } from '../../filemap/pr-overlay.js';
-import { PathSafetyError, resolveInside, safeJoin } from '../../fs/safe-paths.js';
 import { ensureGezel } from '../../gezels/ensure.js';
 import { restrictedGitArgv, restrictedGitEnv } from '../../git/restricted-args.js';
-import { KnowledgeSpatialCursorError } from '../../knowledge/spatial-query.js';
-import { embedQuery } from '../../memory/embeddings.js';
 import { DuckQueryError, DuckUnavailableError } from '../../observations/duck.js';
 import {
   NoTablesError,

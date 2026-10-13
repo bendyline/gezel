@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -30,6 +30,37 @@ test('prefers a TS module over TSX when both satisfy a NodeNext .js import', asy
     ]);
 
     assert.equal(await resolveSourceImport(testFile, './module.js'), tsFile);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('attributes extracted inference imports to the same source as relative imports', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'gezel-test-surface-'));
+  try {
+    const sourceRoot = join(fixtureRoot, 'packages/inference/src');
+    await mkdir(join(sourceRoot, 'engines'), { recursive: true });
+    for (const [specifier, module] of [
+      ['@bendyline/gezel-inference/internal/engines/native', 'engines/native'],
+      ['@bendyline/gezel-inference', 'index'],
+      ['@bendyline/gezel-inference/native-release', 'native-release-entry'],
+      ['@bendyline/gezel-inference/speech', 'speech'],
+    ]) {
+      const sourceFile = join(sourceRoot, `${module}.ts`);
+      await writeFile(sourceFile, 'export const value = 1;\n');
+      assert.equal(
+        await resolveSourceImport(join(fixtureRoot, 'consumer.test.ts'), specifier, fixtureRoot),
+        sourceFile,
+      );
+    }
+    assert.equal(
+      await resolveSourceImport(
+        join(fixtureRoot, 'consumer.test.ts'),
+        '@unrelated/pkg',
+        fixtureRoot,
+      ),
+      null,
+    );
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }

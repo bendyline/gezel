@@ -15,6 +15,20 @@
   user-select: none;
 }
 
+/* Local paths, model identifiers and provider URLs must fit the pane too. */
+.settings-panel :is(p, code) {
+  overflow-wrap: anywhere;
+}
+
+.settings-panel .new-row {
+  flex-wrap: wrap;
+}
+
+.settings-panel .new-row input:not([type="checkbox"]):not([type="radio"]):not([type="number"]) {
+  flex: 1 1 12rem;
+  min-width: min(100%, 12rem);
+}
+
 .settings-layout
   :where(
     input:not([type]),

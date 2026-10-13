@@ -40,8 +40,8 @@ import {
   toInferencePlatform,
   wellKnownFolders,
 } from '@bendyline/gezel';
+import { realpathNearest } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { activeMachineSharedHome } from '@bendyline/gezel/paths';
-import { realpathNearest } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import { scanFolderProfile } from '../project-type/scan-folder.js';

@@ -29,12 +29,18 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { MLX_TUNING_MAP, applyTuning, resolveTuning } from '../../model-profile/tuning.js';
-import { applyConstrainedTurnShape } from '../constrained-turn.js';
-import { REASONING_DEPTH_TEMPLATE_KWARGS } from '../reasoning-depth.js';
+import {
+  MLX_TUNING_MAP,
+  applyTuning,
+  resolveTuning,
+} from '@bendyline/gezel-inference/internal/model-profile/tuning';
+import { applyConstrainedTurnShape } from '@bendyline/gezel-inference/internal/providers/constrained-turn';
+import { REASONING_DEPTH_TEMPLATE_KWARGS } from '@bendyline/gezel-inference/internal/providers/reasoning-depth';
 
 const SERVER_SRC = readFileSync(
-  fileURLToPath(new URL('./python/gezel_mlx_server.py', import.meta.url)),
+  fileURLToPath(
+    new URL('../../../../inference/src/providers/mlx/python/gezel_mlx_server.py', import.meta.url),
+  ),
   'utf8',
 );
 

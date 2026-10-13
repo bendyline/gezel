@@ -1,7 +1,10 @@
+import {
+  disablesThinking,
+  overlayOpenAiRequestTuning,
+} from '@bendyline/gezel-inference/internal/http/openai-compat/request-tuning';
+import type { ChatCompletionRequest } from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
+import type { ResolvedTuning } from '@bendyline/gezel-inference/internal/model-profile/tuning';
 import { describe, expect, it } from 'vitest';
-import type { ResolvedTuning } from '../../model-profile/tuning.js';
-import { disablesThinking, overlayOpenAiRequestTuning } from './request-tuning.js';
-import type { ChatCompletionRequest } from './translate.js';
 
 const base: ResolvedTuning = {
   sampling: { temperature: 0.7, maxTokens: 8192 },

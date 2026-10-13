@@ -1,5 +1,5 @@
+import type { ResolvedTuning } from '@bendyline/gezel-inference/internal/model-profile/tuning';
 import { describe, expect, it } from 'vitest';
-import type { ResolvedTuning } from '../model-profile/tuning.js';
 import {
   anthropicDefaultReasoningEffort,
   anthropicReasoningEfforts,

@@ -7,7 +7,7 @@ export interface PrewarmTestEmbedderOptions {
 }
 
 async function defaultEmbed(texts: string[]): Promise<number[][]> {
-  const { runEmbed } = await import('../memory/embed-core.js');
+  const { runEmbed } = await import('@bendyline/gezel-inference/internal/memory/embed-core');
   return runEmbed(texts);
 }
 

@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   LlamaCppProvider,
   isLlamaServerOutputFormatRejection,
   llamaServerStreamErrorMessage,
   missingFileEditRecoveryPath,
   widenWireToolSurface,
-} from './provider.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 /**
  * gemma4-31b-q4 / schema-migration (llama.cpp v0.4.1, 2026-09-23). A repair

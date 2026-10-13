@@ -3,12 +3,13 @@ import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { formatKnowledgeUri } from '@bendyline/gezel';
+import {
+  HANDBOEK_KNOWLEDGE_CATALOG,
+  HANDBOEK_KNOWLEDGE_PUBLISHER,
+} from '@bendyline/gezel-inference/internal/knowledge/bundled-catalog';
 import type { CatalogDocument, CompileAsset, CompileTopic } from '@bendyline/gezel-knowledge';
 import { HANDBOEK_AREAS, HANDBOEK_AREA_TITLES, loadCuratedArticles } from './content.js';
 import type { HandboekEngine } from './engine.js';
-
-export const HANDBOEK_KNOWLEDGE_PUBLISHER = 'bendyline';
-export const HANDBOEK_KNOWLEDGE_CATALOG = 'handboek';
 
 export interface HandboekKnowledgeSource {
   topics: CompileTopic[];
@@ -156,3 +157,8 @@ export function rewriteHandboekKnowledgeLinks(
     })
     .join('\n');
 }
+
+export {
+  HANDBOEK_KNOWLEDGE_CATALOG,
+  HANDBOEK_KNOWLEDGE_PUBLISHER,
+} from '@bendyline/gezel-inference/internal/knowledge/bundled-catalog';

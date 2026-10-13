@@ -1,10 +1,10 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { withFrontmatter } from '../index-store/frontmatter.js';
-import type { SecretStore } from '../secrets/types.js';
 import { ConnectorActionManager } from './actions.js';
 import { registerConsentEnforcer } from './consent.js';
 import { registerNativeAdapter } from './registry.js';

@@ -10,9 +10,9 @@
  */
 import { access, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { PortableStore, type PortableStoreOptions } from '@bendyline/gezel/runtime';
 import type { PortableFileEntry, PortableFileSystem } from '@bendyline/gezel/runtime';
-import { writeFileAtomic } from '../fs/atomic.js';
 
 function missing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException)?.code === 'ENOENT';

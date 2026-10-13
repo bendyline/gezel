@@ -21,7 +21,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
-import { downloadWithSha256 } from '../../providers/audio/whisper-cpp.js';
+import { downloadWithSha256 } from '@bendyline/gezel-inference/internal/providers/audio/whisper-cpp';
 
 const log = createLogger('face');
 

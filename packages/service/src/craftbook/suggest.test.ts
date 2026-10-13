@@ -1,5 +1,5 @@
+import { EmbeddingsDisabledError } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import { describe, expect, it } from 'vitest';
-import { EmbeddingsDisabledError } from '../memory/embeddings.js';
 import {
   type CraftbookCandidate,
   rankCraftbookSuggestions,

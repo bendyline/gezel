@@ -1,4 +1,5 @@
 import { createLogger } from '@bendyline/gezel';
+import type { SessionOpts } from '@bendyline/gezel-inference/internal/providers/types';
 import { TOOL_REGISTRY, canonicalToolName } from '@bendyline/gezel-mcp';
 import {
   type AnthropicTool,
@@ -6,7 +7,6 @@ import {
   type OpenAIFunctionTool,
   type ToolOutputBudgetOptions,
 } from './mcp-bridge.js';
-import type { SessionOpts } from './types.js';
 import { UnresolvedToolFailureLedger } from './unresolved-tool-failure-ledger.js';
 
 const log = createLogger('mcp-bridge');

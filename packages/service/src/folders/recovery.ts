@@ -1,8 +1,8 @@
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { foldersStateDir } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
 import type { FolderScope } from './scope.js';
 
 const log = createLogger('folders');

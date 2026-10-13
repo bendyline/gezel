@@ -11,7 +11,7 @@ import {
   createLogger,
 } from '@bendyline/gezel';
 
-import { realpathContained, safeJoin } from '../fs/safe-paths.js';
+import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { makePhotoRendition } from './thumbnails.js';
 
 const log = createLogger('index');

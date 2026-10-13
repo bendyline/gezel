@@ -102,7 +102,7 @@ export async function hostInProcess(
       await running.stop().catch(() => undefined);
       await clearOwnRuntime(home);
       throw new GezelSdkError(
-        'the installed @bendyline/gezel-service does not support the inference-only in-process profile; update @bendyline/gezel-app-sdk and @bendyline/gezel-service together',
+        'the installed host does not support the inference-only in-process profile; update @bendyline/gezel-app-sdk and @bendyline/gezel-inference together',
         { code: 'service_inference_only_unsupported' },
       );
     }
@@ -187,11 +187,14 @@ async function adoptSibling(
 
 async function loadService(opts: HostOptions): Promise<HostServiceModule> {
   if (opts.serviceModule) return opts.serviceModule;
+  const packageName = opts.inferenceOnly
+    ? '@bendyline/gezel-inference'
+    : '@bendyline/gezel-service';
   try {
-    return (await import(opts.serviceEntry ?? '@bendyline/gezel-service')) as HostServiceModule;
+    return (await import(opts.serviceEntry ?? packageName)) as HostServiceModule;
   } catch (cause) {
     throw new GezelSdkError(
-      'hosting Gezel needs @bendyline/gezel-service installed alongside this SDK (it is an optional peer dependency), or host.serviceModule passed explicitly',
+      `hosting Gezel needs ${packageName} installed alongside this SDK (it is an optional peer dependency), or host.serviceModule passed explicitly`,
       { code: 'service_not_installed', cause },
     );
   }

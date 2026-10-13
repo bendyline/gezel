@@ -1902,6 +1902,7 @@ export function ChatComposer({
           </div>
         )}
         <EditorShell
+          ariaLabel="Message"
           // Squisq installs its placeholder on mount. Refresh it when the
           // recipient changes or the draft is reset, but never remount just
           // for new hint text: late crew metadata can change that hint during

@@ -61,7 +61,7 @@ immediate fields. Other nested values are replaced as a whole.
   property is the narrow `NativeInference` contract; it cannot resolve product sessions,
   run tools, or initiate product background work. ServiceContext extends it with the
   capabilities owned by the product daemon.
-- [LocalEngineRuntime](../packages/service/src/providers/native/local-engine-runtime.ts)
+- [LocalEngineRuntime](../packages/inference/src/providers/native/local-engine-runtime.ts)
   owns shared native provider construction, admission, residency, queues and cache control.
   Both EngineInference and ChatManager use it. Product cache prefill and session affinity
   are hooks supplied only by ChatManager.

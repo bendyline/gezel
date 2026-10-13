@@ -520,6 +520,7 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
 
         <div className="new-row" style={{ marginTop: '0.5rem' }}>
           <input
+            aria-label="Download model by name"
             placeholder="Or download by name: e.g. qwen2.5-coder:14b"
             value={customPull}
             onChange={(e) => setCustomPull(e.target.value)}

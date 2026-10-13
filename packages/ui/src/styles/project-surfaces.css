@@ -719,8 +719,8 @@
   padding: 0.4rem 1rem;
   border-radius: 6px;
   border: none;
-  background: var(--accent);
-  color: #fff;
+  background: var(--action-bg);
+  color: var(--action-ink);
   cursor: pointer;
   font-weight: 500;
 }
@@ -1339,7 +1339,7 @@
 
 .gz-npd-field {
   font-size: 0.85rem;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .gz-npd-field > .gz-github-repo-combobox {

@@ -1,7 +1,7 @@
+import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import { ProviderDisposedError } from '@bendyline/gezel-inference/internal/providers/provider-disposal';
 import { describe, expect, it, vi } from 'vitest';
-import { LlamaCppProvider } from './llama-cpp/provider.js';
-import { MlxProvider } from './mlx/provider.js';
-import { ProviderDisposedError } from './provider-disposal.js';
 
 describe.each([LlamaCppProvider, MlxProvider])('%s pre-start eviction', (Provider) => {
   it('exposes retirement to cached sessions and rejects before fetching or changing history', async () => {

@@ -1,9 +1,9 @@
+import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
 import { describe, expect, it, vi } from 'vitest';
-import { LlamaCppProvider } from './llama-cpp/provider.js';
 import type { McpBridgePool } from './mcp-bridge-pool.js';
 import { McpBridge } from './mcp-bridge.js';
-import { MlxProvider } from './mlx/provider.js';
-import { ProviderQueue } from './queue.js';
 import { RemoteSession } from './remote/session.js';
 
 function pendingBridge(tool = 'run_package_script', structured = true, isError = false) {

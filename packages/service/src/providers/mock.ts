@@ -11,13 +11,14 @@
  */
 import { randomUUID } from 'node:crypto';
 import { stripCurrentDateTimeLine, turnCancelledMessage } from '@bendyline/gezel';
-import { McpBridgePool } from './mcp-bridge-pool.js';
-import { ProviderQueue } from './queue.js';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
 import {
   type EnginePhaseEvent,
   StreamingSessionBase,
   type TurnStatsEvent,
-} from './streaming-session.js';
+} from '@bendyline/gezel-inference/internal/providers/streaming-session';
+import type { EmbeddingInput as InferenceEmbeddingInput } from '@bendyline/gezel-inference/internal/providers/types';
+import type { EmbeddingResult as InferenceEmbeddingResult } from '@bendyline/gezel-inference/internal/providers/types';
 import {
   type ExternalToolCall,
   type LLMProvider,
@@ -27,8 +28,9 @@ import {
   type SendAndWaitOpts,
   type SessionOpts,
   SessionResumeError,
-} from './types.js';
-import { buildTurnUsage } from './usage-builder.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
+import { buildTurnUsage } from '@bendyline/gezel-inference/internal/providers/usage-builder';
+import { McpBridgePool } from './mcp-bridge-pool.js';
 
 /** Scripted tool invocation: executed through the MCP bridge on the next turn. */
 export interface ScriptedToolCall {
@@ -412,9 +414,7 @@ export class MockProvider implements LLMProvider {
    * dimension is a small float derived from a stable hash of the input
    * — same input → same vector across runs.
    */
-  async createEmbedding(
-    input: import('./types.js').EmbeddingInput,
-  ): Promise<import('./types.js').EmbeddingResult> {
+  async createEmbedding(input: InferenceEmbeddingInput): Promise<InferenceEmbeddingResult> {
     const inputs = Array.isArray(input.input) ? input.input : [input.input];
     const vectors = inputs.map((text) => mockEmbedding(text));
     return {

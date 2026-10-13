@@ -1,5 +1,8 @@
+import {
+  classifyMlxFatalErrorLine,
+  classifyMlxStartupLine,
+} from '@bendyline/gezel-inference/internal/providers/mlx/stdout-parser';
 import { describe, expect, it } from 'vitest';
-import { classifyMlxFatalErrorLine, classifyMlxStartupLine } from './stdout-parser.js';
 
 describe('classifyMlxStartupLine', () => {
   it('recognizes process-start lines', () => {

@@ -1,10 +1,10 @@
+import { nativeVisionEnabledFor } from '@bendyline/gezel-inference/internal/chat/vision-capability';
+import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
+import { CapacityDeniedError } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { nativeVisionEnabledFor } from '../../chat/vision-capability.js';
-import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import type { EngineContext } from '../engine-context.js';
 import { subscribeToInstallSse } from './install-sse.js';
-import { machineEngineProxy } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
 
 /**

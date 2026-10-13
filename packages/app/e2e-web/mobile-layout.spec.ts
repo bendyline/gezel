@@ -73,8 +73,11 @@ test('the desktop app becomes the mobile workshop at phone width', async ({
   const editor = page.getByTestId('chat-composer').locator('[contenteditable="true"]').first();
   await expect(editor).toBeVisible();
   await editor.fill('Keep this draft while resizing the workshop.');
-  await expect(page.getByText('Hello from the web e2e seed', { exact: true })).toBeVisible();
-  const latestReply = page.getByText('Mock reply: Hello from the web e2e seed', { exact: true });
+  const timeline = page.getByTestId('chat-timeline');
+  await expect(timeline.getByText('Hello from the web e2e seed', { exact: true })).toBeVisible();
+  const latestReply = timeline.getByText('Mock reply: Hello from the web e2e seed', {
+    exact: true,
+  });
   await expect(latestReply).toBeInViewport({
     ratio: 1,
   });
@@ -123,6 +126,7 @@ test('the desktop app becomes the mobile workshop at phone width', async ({
   await expect(page.locator('.app-mobile-preview')).toHaveCount(0);
   await expect(page.getByTestId('project-tab-chat')).toBeVisible();
   await expect(sidebar).toBeVisible();
+  await expect(editor).toHaveText('Keep this draft while resizing the workshop.');
 
   // This worker's daemon is reused by later specs. The draft was only needed
   // to verify resizing, so clear it and wait for its autosave deletion.

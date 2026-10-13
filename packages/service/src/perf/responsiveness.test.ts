@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { PerfSnapshotSchema } from '@bendyline/gezel';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BEAT_MS,
   STALL_RECORD_MS,
@@ -18,7 +17,8 @@ import {
   startResponsivenessMonitor,
   syncPerfProfiling,
   workDuring,
-} from './responsiveness.js';
+} from '@bendyline/gezel-inference/internal/perf/responsiveness';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('node:perf_hooks', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:perf_hooks')>();

@@ -1,8 +1,11 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  lastArgValue,
+  readLlamaCppBuildMetadata,
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/build-metadata';
 import { afterEach, describe, expect, it } from 'vitest';
-import { lastArgValue, readLlamaCppBuildMetadata } from './build-metadata.js';
 
 const roots: string[] = [];
 

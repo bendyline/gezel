@@ -1,5 +1,8 @@
+import {
+  parseGezelModelRef,
+  translateMessagesWithPrefix,
+} from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
 import { describe, expect, it } from 'vitest';
-import { parseGezelModelRef, translateMessagesWithPrefix } from './translate.js';
 
 describe('parseGezelModelRef', () => {
   it('returns the bare ref after "gezel:"', () => {

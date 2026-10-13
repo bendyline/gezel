@@ -437,7 +437,14 @@ export function NewTaskDialog({
   useEffect(() => {
     // Wait for the interests too, and for this project's books: landing
     // before either arrived always picked All.
-    if (!open || !booksLoaded || booksLoadedFor !== projectId || railInitialized) return;
+    if (
+      !open ||
+      !booksLoaded ||
+      booksLoadedFor !== projectId ||
+      loadedCraftbookSequence.current !== craftbookLoadSequence.current ||
+      railInitialized
+    )
+      return;
     if (!interests.loaded) return;
     setRailInitialized(true);
     const hasFeatured =
@@ -1409,6 +1416,7 @@ export function NewTaskDialog({
                           <p className="gz-npd-give-eyebrow">Brief · your chat message</p>
                           {onComposerTextChange ? (
                             <MarkdownField
+                              accessibleName="Brief · your chat message"
                               value={composerText ?? ''}
                               placeholder="What should this be about?"
                               minHeight="96px"

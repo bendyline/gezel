@@ -348,6 +348,7 @@ export function CraftbookStepPanel({
         <div className="task-step-field full-width">
           <span className="task-step-field-label">Description</span>
           <MarkdownField
+            accessibleName="Step description"
             key={`desc-${key}`}
             value={step.description ?? ''}
             readOnly={readOnly}
@@ -364,6 +365,7 @@ export function CraftbookStepPanel({
             Prompt <span className="muted small">— step-specific guidance for the assignee</span>
           </span>
           <MarkdownField
+            accessibleName="Step prompt"
             key={`prompt-${key}`}
             value={step.prompt ?? ''}
             readOnly={readOnly}

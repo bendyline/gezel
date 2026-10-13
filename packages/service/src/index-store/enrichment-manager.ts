@@ -7,11 +7,11 @@ import {
   isTaskWorkAllowed,
   projectNightWorkEnabled,
 } from '@bendyline/gezel';
+import { embeddingsDisabledReason } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
-import { embeddingsDisabledReason } from '../memory/embeddings.js';
 import {
   audioVideoEmbedAvailability,
   faceEmbedAvailability,

@@ -18,11 +18,11 @@ import {
   prettifyToolName,
   toolActivityLabel,
 } from '@bendyline/gezel';
+import type { CodexReasoningEffort } from '@bendyline/gezel-inference/internal/providers/codex-cli/reasoning';
+import { SessionResumeError } from '@bendyline/gezel-inference/internal/providers/types';
+import type { ToolCallEvent, TurnUsage } from '@bendyline/gezel-inference/internal/providers/types';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { winShellSafe } from '../../packages/win-shell.js';
-import { SessionResumeError } from '../types.js';
-import type { ToolCallEvent, TurnUsage } from '../types.js';
-import type { CodexReasoningEffort } from './reasoning.js';
 import { salvageAgentMessage } from './salvage.js';
 import { type CodexStreamEvent, parseCodexLine } from './stream-parser.js';
 

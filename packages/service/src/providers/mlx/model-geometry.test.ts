@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { estimateExactPerSlotKvBytesF16 } from '@bendyline/gezel-inference/internal/providers/llama-cpp/offload-planner';
+import { readMlxModelGeometry } from '@bendyline/gezel-inference/internal/providers/mlx/model-geometry';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { estimateExactPerSlotKvBytesF16 } from '../llama-cpp/offload-planner.js';
-import { readMlxModelGeometry } from './model-geometry.js';
 
 let dir: string;
 beforeEach(() => {

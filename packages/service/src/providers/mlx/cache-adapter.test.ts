@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
 import {
   MlxCacheAdapter,
   gezelBandPrefixId,
   gezelLayerPrefixIds,
   gezelPrefixId,
-} from './cache-adapter.js';
+} from '@bendyline/gezel-inference/internal/providers/mlx/cache-adapter';
+import { describe, expect, it } from 'vitest';
 
 describe('MlxCacheAdapter — layered prefix caching', () => {
   it('gezelLayerPrefixIds: distinct gp/gezel namespaces, stable, gp rotates with project', () => {

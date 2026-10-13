@@ -1,6 +1,6 @@
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import type { LLMSession } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { LLMSession } from '../types.js';
-import { MlxProvider } from './provider.js';
 
 // qwen3.8-27b MLX Meester, 2026-09-23: a JSON-envelope `invoke_craftbook`
 // call, the call again, then `</function>` until max_tokens.

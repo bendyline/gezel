@@ -2,10 +2,10 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NativeEngineResolveEventSchema, NativeEngineStatusResponseSchema } from '@bendyline/gezel';
+import { NATIVE_ENGINE_RELEASE } from '@bendyline/gezel-inference/internal/engines/native-manifest';
+import { enginesRoutes } from '@bendyline/gezel-inference/internal/http/routes/engines';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
-import { NATIVE_ENGINE_RELEASE } from '../../engines/native-manifest.js';
-import { enginesRoutes } from './engines.js';
 
 function makeApp(
   chat: {

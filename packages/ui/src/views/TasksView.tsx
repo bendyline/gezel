@@ -17,6 +17,7 @@ import { api } from '../api.js';
 import { TASK_STATUS_KEY_ORDER, TaskStatusKeys } from '../components/TaskStatusKeys.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
 import { DropdownChevron, DropdownMenu, Select } from '../primitives/index.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { TaskTabContent } from './TaskTabContent.js';
 import { NewTaskDialog, type TaskCreationMode } from './tasks/NewTaskDialog.js';
@@ -232,6 +233,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
   const [creating, setCreating] = useState<TaskCreationMode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasLoadedTasks, setHasLoadedTasks] = useState(false);
+  const requestVersion = useRef(0);
   const [expandedParents, setExpandedParents] = useState<Set<string>>(() => new Set());
   const [selectedRef, setSelectedRef] = useState<string | null>(() => {
     try {
@@ -299,6 +301,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
   }, []);
 
   const refresh = useCallback(async () => {
+    const version = ++requestVersion.current;
     try {
       const filter: { status?: TaskStatus; assignee?: string } = {};
       if (statusFilter) filter.status = statusFilter;
@@ -306,17 +309,21 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
       const res = projectFilter
         ? await api.listProjectTasks(projectFilter, filter)
         : await api.listTasks(filter);
+      if (version !== requestVersion.current) return;
       setTasks(res.tasks);
       setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      if (version === requestVersion.current) setError((err as Error).message);
     } finally {
-      setHasLoadedTasks(true);
+      if (version === requestVersion.current) setHasLoadedTasks(true);
     }
   }, [projectFilter, statusFilter, assigneeFilter]);
 
   useEffect(() => {
     void refresh();
+    return () => {
+      requestVersion.current += 1;
+    };
   }, [refresh]);
 
   // Keep the list live without a manual Refresh button — poll on an
@@ -500,7 +507,12 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
         {/* A host without background work has one kind only, and a
             one-key tray is a choice that isn't one. */}
         {runtimeCapabilities().background && (
-          <div className="gz-tray tasks-kind-filter" role="radiogroup" aria-label="Task type">
+          <div
+            className="gz-tray tasks-kind-filter"
+            role="radiogroup"
+            onKeyDown={onRadioKeyDown}
+            aria-label="Task type"
+          >
             {TASK_KIND_OPTIONS.map((option) => (
               <button
                 key={option.value}
@@ -508,6 +520,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                 // biome-ignore lint/a11y/useSemanticElements: keys use the documented radio-group pattern; a native input would duplicate the pressable key surface.
                 role="radio"
                 aria-checked={kindFilter === option.value}
+                tabIndex={kindFilter === option.value ? 0 : -1}
                 className={`gz-key${kindFilter === option.value ? ' gz-key-active' : ''}`}
                 onClick={() => setKindFilter(option.value)}
               >

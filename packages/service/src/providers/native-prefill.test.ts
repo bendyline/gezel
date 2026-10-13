@@ -1,8 +1,8 @@
+import { LlamaCppCacheAdapter } from '@bendyline/gezel-inference/internal/providers/llama-cpp/cache-adapter';
+import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { MlxCacheAdapter } from '@bendyline/gezel-inference/internal/providers/mlx/cache-adapter';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
 import { describe, expect, it } from 'vitest';
-import { LlamaCppCacheAdapter } from './llama-cpp/cache-adapter.js';
-import { LlamaCppProvider } from './llama-cpp/provider.js';
-import { MlxCacheAdapter } from './mlx/cache-adapter.js';
-import { MlxProvider } from './mlx/provider.js';
 
 describe('native prepared cache prefill', () => {
   it('binds a broker-namespaced llama.cpp session to its cache slot', async () => {

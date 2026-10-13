@@ -1,5 +1,5 @@
+import { classifyDs4Line } from '@bendyline/gezel-inference/internal/providers/ds4/stdout-parser';
 import { describe, expect, it } from 'vitest';
-import { classifyDs4Line } from './stdout-parser.js';
 
 // Fixture lines mirror the exact format strings in the pinned upstream
 // (native/engines/ds4/VERSION): server_log() prepends `MMDD HH:MM:SS `,

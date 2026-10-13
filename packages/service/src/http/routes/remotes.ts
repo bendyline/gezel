@@ -6,6 +6,10 @@
  */
 
 import { HttpsOriginSchema } from '@bendyline/gezel';
+import {
+  closePairedRemoteFetches,
+  getPairedRemoteFetch,
+} from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -15,7 +19,6 @@ import {
   pairRemote,
   remoteBaseUrlMatches,
 } from '../../remotes/pairing.js';
-import { closePairedRemoteFetches, getPairedRemoteFetch } from '../../remotes/pinned-fetch.js';
 import type { PairedRemote } from '../../remotes/registry.js';
 import type { ServiceContext } from '../context.js';
 

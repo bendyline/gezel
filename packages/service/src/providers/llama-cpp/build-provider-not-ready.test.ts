@@ -1,5 +1,5 @@
+import { buildLlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/build-provider';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildLlamaCppProvider } from './build-provider.js';
 
 type Failure = Error & { code?: string; isActionable?: boolean };
 

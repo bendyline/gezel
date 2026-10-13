@@ -9,6 +9,7 @@ import {
   modelInventoryRevision,
 } from '../model-inventory.js';
 import { Select } from '../primitives/index.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 
 // Cache models per-provider for the lifetime of the page load so multiple
 // <ModelPicker /> instances don't each issue their own request.
@@ -503,9 +504,19 @@ export function EffortTray({
     [undefined, defaultLabel],
     ...options.map((effort) => [effort, EFFORT_LABELS[effort] ?? effort] as const),
   ];
+  // A saved effort can outlive a switch to a model that doesn't offer it.
+  // Keep the default key reachable even when no choice is selected.
+  const hasMatchingChoice = choices.some(
+    ([effort]) => value === effort || (!value && effort === undefined),
+  );
 
   return (
-    <div className="gz-tray reasoning-effort-tray" role="radiogroup" aria-label="Reasoning effort">
+    <div
+      className="gz-tray reasoning-effort-tray"
+      role="radiogroup"
+      onKeyDown={onRadioKeyDown}
+      aria-label="Reasoning effort"
+    >
       {choices.map(([effort, label]) => {
         const selected = value === effort || (!value && effort === undefined);
         return (
@@ -515,6 +526,7 @@ export function EffortTray({
             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
             role="radio"
             aria-checked={selected}
+            tabIndex={selected || (!hasMatchingChoice && effort === undefined) ? 0 : -1}
             className={`gz-key${selected ? ' gz-key-active' : ''}`}
             onClick={() => onChange(effort)}
           >

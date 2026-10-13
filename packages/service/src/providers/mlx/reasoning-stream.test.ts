@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
 import {
   StreamingReasoningSplit,
   requestOpensReasoning,
   templateTextOpensReasoning,
-} from './reasoning-stream.js';
+} from '@bendyline/gezel-inference/internal/providers/mlx/reasoning-stream';
+import { describe, expect, it } from 'vitest';
 
 /** Drive a split across arbitrary chunk boundaries and total the two channels. */
 function run(

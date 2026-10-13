@@ -4,6 +4,11 @@ import {
   type StorageClass,
   isSharedLibraryProject,
 } from '@bendyline/gezel';
+import { isPathInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import {
+  SHARED_ASSETS_ENV,
+  modelStorageRoots,
+} from '@bendyline/gezel-inference/internal/models/storage-roots';
 import {
   type ExternalFolders,
   aiAppsRoot,
@@ -48,9 +53,7 @@ import {
   toolsetConfigsDir,
   userScriptsDir,
 } from '@bendyline/gezel/paths';
-import { isPathInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
-import { SHARED_ASSETS_ENV, modelStorageRoots } from '../models/storage-roots.js';
 
 /**
  * The authoritative classification of everything under `~/.gezel`.

@@ -5,6 +5,7 @@ import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UpdateState } from '../api.js';
 import { api } from '../api.js';
+import { useFirstRun } from '../components/first-run-context.js';
 import { llamaEngineNeed } from '../components/first-run-engine.js';
 import { useFirstRunModel } from '../components/useFirstRunModel.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
@@ -84,6 +85,7 @@ export function HomeView({
   // probe landed, and (2) that same flip flickering repeatedly while things
   // churned on boot.
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const needsFirstSetup = useFirstRun();
 
   useEffect(() => {
     let cancelled = false;
@@ -254,17 +256,21 @@ export function HomeView({
   // A llama.cpp model on disk still needs the engine that runs it, which the
   // daemon fetches lazily. Settling "configured" before it arrived let the
   // welcome say "I'm ready" and the first message fail on the download.
-  const [engineMissing, setEngineMissing] = useState<boolean | null>(null);
+  const [engineCheck, setEngineCheck] = useState<{
+    probe: ProbeState;
+    provider: Provider;
+    missing: boolean;
+  } | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-ask only when the probe settles or the backend choice changes, not on every config read.
   useEffect(() => {
-    if (probe.kind !== 'ok' || provider !== 'llama-cpp' || localProviderNeedsModel) {
-      setEngineMissing(false);
+    if (probe.kind !== 'ok') return;
+    if (provider !== 'llama-cpp' || localProviderNeedsModel) {
+      setEngineCheck({ probe, provider, missing: false });
       return;
     }
     let cancelled = false;
-    setEngineMissing(null);
     void llamaEngineNeed(config).then((need) => {
-      if (!cancelled) setEngineMissing(Boolean(need));
+      if (!cancelled) setEngineCheck({ probe, provider, missing: Boolean(need) });
     });
     return () => {
       cancelled = true;
@@ -273,10 +279,10 @@ export function HomeView({
 
   useEffect(() => {
     if (probe.kind === 'ok') {
-      if (engineMissing === null) return;
-      setConfigured(!localProviderNeedsModel && !engineMissing);
+      if (engineCheck?.probe !== probe || engineCheck.provider !== provider) return;
+      setConfigured(!localProviderNeedsModel && !engineCheck.missing);
     } else if (probe.kind === 'fail') setConfigured(false);
-  }, [probe.kind, localProviderNeedsModel, engineMissing]);
+  }, [probe, provider, localProviderNeedsModel, engineCheck]);
 
   // Credential providers with no creds (OpenAI / Anthropic before a key is
   // saved) are never auto-probed — there's nothing to wait for, so resolve
@@ -322,7 +328,7 @@ export function HomeView({
 
   // First run, confirmed by a terminal probe. The welcome's tools beat waits
   // for this, so a configured install never flashes a download offer.
-  const firstRun = configured === false;
+  const firstRun = configured === false && needsFirstSetup;
   const hostModels = window.__GEZEL__?.renderModelSettings;
   const firstRunModel = useFirstRunModel({
     enabled: firstRun && !hostModels,
@@ -339,9 +345,9 @@ export function HomeView({
   const sawFirstRunRef = useRef(false);
   const [justReady, setJustReady] = useState(false);
   useEffect(() => {
-    if (configured === false) sawFirstRunRef.current = true;
+    if (firstRun) sawFirstRunRef.current = true;
     else if (configured === true && sawFirstRunRef.current) setJustReady(true);
-  }, [configured]);
+  }, [configured, firstRun]);
 
   // Hold the loading splash until the verdict has actually settled — never
   // guess first-run-vs-workshop while config is still loading or the probe is

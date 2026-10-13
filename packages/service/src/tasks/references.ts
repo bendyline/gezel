@@ -9,12 +9,12 @@ import {
   type UnifiedSearchResult,
   createLogger,
 } from '@bendyline/gezel';
+import { relevanceSummary } from '@bendyline/gezel-inference/internal/search/relevance-stage';
 import {
   proactiveRetrievalTerms,
   textMatchesAnyTerm,
   tokenizeText,
 } from '../index-store/query-terms.js';
-import { relevanceSummary } from '../search/relevance-stage.js';
 import { RetrievalTraceBuilder } from '../search/retrieval-trace.js';
 import type { SearchService } from '../search/search-service.js';
 

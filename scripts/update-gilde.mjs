@@ -63,12 +63,13 @@ export function readPinnedDependency(source) {
       new RegExp(`^([\\t ]*"${escapedName}"[\\t ]*:[\\t ]*")([^"]+)(",?[\\t ]*)$`, 'gm'),
     ),
   ];
-  if (matches.length !== 1) {
+  const pins = matches.filter((match) => match[2] !== '*');
+  if (pins.length !== 1) {
     throw new Error(
       `expected exactly one ${GILDE_PACKAGE} dependency in packages/catalog/package.json, found ${matches.length}`,
     );
   }
-  const version = matches[0][2];
+  const version = pins[0][2];
   if (!VERSION_PATTERN.test(version)) {
     throw new Error(`${GILDE_PACKAGE} must use an exact version, found ${version}`);
   }
@@ -82,11 +83,10 @@ export function updatePinnedDependency(source, version) {
   readPinnedDependency(source);
   const pattern = new RegExp(
     `^([\\t ]*"${escapeRegExp(GILDE_PACKAGE)}"[\\t ]*:[\\t ]*")([^"]+)(",?[\\t ]*)$`,
-    'm',
+    'gm',
   );
-  return source.replace(
-    pattern,
-    (_match, before, _current, after) => `${before}${version}${after}`,
+  return source.replace(pattern, (_match, before, _current, after) =>
+    _current === '*' ? _match : `${before}${version}${after}`,
   );
 }
 
@@ -229,6 +229,9 @@ async function main() {
         return false;
       }
 
+      const servicePackagePath = join(repoRoot, 'packages/service/package.json');
+      const serviceSource = await readFile(servicePackagePath, 'utf8');
+      await writeFile(servicePackagePath, updatePinnedDependency(serviceSource, latest));
       if (lockedCurrent === latest) {
         console.log(`[gilde:update] re-resolving ${GILDE_PACKAGE}@${latest} against the pin`);
       } else {

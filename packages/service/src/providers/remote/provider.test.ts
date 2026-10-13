@@ -1,5 +1,5 @@
+import { CapacityDeniedError } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 import { describe, expect, it, vi } from 'vitest';
-import { CapacityDeniedError } from '../native/capacity-broker.js';
 import {
   DEFAULT_REMOTE_CONCURRENCY,
   ModelNotLoadedRemotelyError,

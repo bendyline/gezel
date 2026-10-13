@@ -11,8 +11,8 @@
  * ever sees the written files.
  */
 
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import type { Store } from '../fs/store.js';
-import type { SecretStore } from '../secrets/types.js';
 
 /** Lightweight handle to one record — enough to sort/skip before fetching. */
 export interface RecordRef {

@@ -1,8 +1,8 @@
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative } from 'node:path';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { PROJECT_SHADOW_DIR_NAME } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
-import { realpathContained, safeJoin } from '../fs/safe-paths.js';
 import type { ChunkInput } from './index-store-types.js';
 import { convertInSandbox } from './sandbox-convert.js';
 

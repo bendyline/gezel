@@ -26,7 +26,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const SERVER_SRC = readFileSync(
-  fileURLToPath(new URL('./python/gezel_mlx_server.py', import.meta.url)),
+  fileURLToPath(
+    new URL('../../../../inference/src/providers/mlx/python/gezel_mlx_server.py', import.meta.url),
+  ),
   'utf8',
 );
 

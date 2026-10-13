@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { MlxProvider } from './provider.js';
-import { classifyMlxFatalErrorLine } from './stdout-parser.js';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import { classifyMlxFatalErrorLine } from '@bendyline/gezel-inference/internal/providers/mlx/stdout-parser';
 
 /**
  * The stdout classifier reads any `SomeError: <message>` leaf line as proof

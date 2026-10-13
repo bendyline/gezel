@@ -21,14 +21,14 @@ import {
   stageGildeVersion,
   validateGildeContentUpgrade,
 } from '@bendyline/gezel-catalog';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import type { ConfigStore } from '@bendyline/gezel-inference/internal/fs/config-store';
 import {
   gildeLiveStateFile,
   gildeLiveVersionDir,
   gildeLiveVersionsDir,
 } from '@bendyline/gezel/paths';
 import { z } from 'zod';
-import { writeFileAtomic } from '../fs/atomic.js';
-import type { ConfigStore } from '../fs/config-store.js';
 import type { HistoryManager } from '../history/manager.js';
 
 /**

@@ -10,6 +10,7 @@ import {
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 // Shared with the first-run picker so the posture copy never drifts.
 import { SECURITY_LEVEL_PRESETS as LEVELS } from '../security-levels.js';
 
@@ -120,6 +121,7 @@ export function SecurityComplianceSettings({
       <div
         className="engagement-mode-switch gz-tray gz-tray--described"
         role="radiogroup"
+        onKeyDown={onRadioKeyDown}
         aria-label="Security posture"
       >
         {LEVELS.map((l) => (
@@ -129,6 +131,7 @@ export function SecurityComplianceSettings({
             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
             role="radio"
             aria-checked={level === l.id}
+            tabIndex={level === l.id || (level === 'custom' && l === LEVELS[0]) ? 0 : -1}
             className={`gz-key${level === l.id ? ' gz-key-active' : ''}`}
             onClick={() => selectLevel(l.id)}
           >

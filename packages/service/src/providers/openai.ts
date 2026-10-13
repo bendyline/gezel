@@ -1,19 +1,15 @@
 import { AwakeBudget, createLogger } from '@bendyline/gezel';
-import type OpenAI from 'openai';
-import { OPENAI_TUNING_MAP, applyTuning } from '../model-profile/tuning.js';
-import { type ApiObservationContext, apiToolSurface, observeApiStream } from './api-observation.js';
-import { CLOUD_TOOL_ROUND_LIMIT } from './cloud-tool-limits.js';
-import { McpBridgePool } from './mcp-bridge-pool.js';
+import type { ResolvedTuning as InferenceResolvedTuning } from '@bendyline/gezel-inference/internal/model-profile/index';
 import {
-  applyOpenAIModelContract,
-  isOpenAIChatModel,
-  isOpenAIReasoningModel,
-  openAIDefaultReasoningEffort,
-  openAIReasoningEfforts,
-} from './openai-options.js';
-import { ProviderQueue, runInQueue } from './queue.js';
-import { StreamingSessionBase } from './streaming-session.js';
-import { TERMINAL_ACTION_SKIPPED_OUTPUT, terminalToolClosingText } from './terminal-tool-policy.js';
+  OPENAI_TUNING_MAP,
+  applyTuning,
+} from '@bendyline/gezel-inference/internal/model-profile/tuning';
+import { ProviderQueue, runInQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import { StreamingSessionBase } from '@bendyline/gezel-inference/internal/providers/streaming-session';
+import {
+  TERMINAL_ACTION_SKIPPED_OUTPUT,
+  terminalToolClosingText,
+} from '@bendyline/gezel-inference/internal/providers/terminal-tool-policy';
 import type {
   ExternalToolCall,
   ExternalToolSpec,
@@ -24,8 +20,19 @@ import type {
   ProviderSessionState,
   SendAndWaitOpts,
   SessionOpts,
-} from './types.js';
-import { buildTurnUsage } from './usage-builder.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
+import { buildTurnUsage } from '@bendyline/gezel-inference/internal/providers/usage-builder';
+import type OpenAI from 'openai';
+import { type ApiObservationContext, apiToolSurface, observeApiStream } from './api-observation.js';
+import { CLOUD_TOOL_ROUND_LIMIT } from './cloud-tool-limits.js';
+import { McpBridgePool } from './mcp-bridge-pool.js';
+import {
+  applyOpenAIModelContract,
+  isOpenAIChatModel,
+  isOpenAIReasoningModel,
+  openAIDefaultReasoningEffort,
+  openAIReasoningEfforts,
+} from './openai-options.js';
 
 const log = createLogger('openai');
 
@@ -199,7 +206,7 @@ export interface OpenAISessionDeps {
    * body via `OPENAI_TUNING_MAP`. Reasoning effort from the tuning
    * block overrides `this.deps.reasoningEffort` when both are set.
    */
-  tuning?: import('../model-profile/index.js').ResolvedTuning;
+  tuning?: InferenceResolvedTuning;
 }
 
 /**

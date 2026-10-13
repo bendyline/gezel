@@ -7,7 +7,7 @@ import { MemoryHealthMonitor } from './health.js';
 import { MemoryManager } from './manager.js';
 import { countIndexed } from './vector-index.js';
 
-vi.mock('./embeddings.js', () => {
+vi.mock('@bendyline/gezel-inference/internal/memory/embeddings', () => {
   const vectorFor = (text: string): number[] => {
     const vector = new Array<number>(16).fill(0);
     for (let i = 0; i < text.length; i++) {

@@ -1,11 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import type { MemoryProfile } from './memory.js';
+import type { MemoryProfile } from '@bendyline/gezel-inference/internal/system/memory';
 import {
   memoryProfileForLlamaGpu,
   parseNvidiaMemoryProbe,
   sampleMachineMemoryUsage,
   summarizeResidentModels,
-} from './memory.js';
+} from '@bendyline/gezel-inference/internal/system/memory';
+import { describe, expect, it } from 'vitest';
 
 const GiB = 1024 ** 3;
 

@@ -9,9 +9,13 @@ import type {
   GezelSummary,
   ProviderName,
 } from '@bendyline/gezel';
-import { writeFileAtomic } from '../fs/atomic.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import {
+  readSecurityJson,
+  writeSecurityJson,
+} from '@bendyline/gezel-inference/internal/fs/security-json';
+import type { ModelInfo } from '@bendyline/gezel-inference/internal/providers/types';
 import { createManagedMarker, setupOwnerId as managedFileOwnerId } from '../fs/managed-marker.js';
-import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
 import type { CodexBridgeController } from '../http/codex-bridge.js';
 import {
   CODEX_SETUP_RESERVED_APP_ID,
@@ -35,7 +39,6 @@ import {
   recommendedHarnessModel,
 } from '../local-harness/base.js';
 import { type CodexBinaryDetection, detectCodexBinary } from '../providers/codex-cli/binary.js';
-import type { ModelInfo } from '../providers/types.js';
 
 export const CODEX_SETUP_PROFILE_NAME = 'gezel-local';
 export const CODEX_SETUP_APP_ID = CODEX_SETUP_RESERVED_APP_ID;

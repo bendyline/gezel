@@ -32,6 +32,7 @@ export function TimeoutRow({
       <div className="new-row">
         <input
           type="number"
+          aria-label={`${label} (${unit})`}
           min={1}
           placeholder="default"
           value={value}

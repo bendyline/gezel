@@ -1,5 +1,6 @@
 import { appendFile, copyFile, mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   type ExternalFolders,
   gezelMemoriesDir,
@@ -15,7 +16,6 @@ import {
   type MemorySource,
   formatMemoryBlock,
 } from '../memory/daily-markdown.js';
-import { writeFileAtomic } from './atomic.js';
 
 export interface MemoryStoreOptions {
   home: string;

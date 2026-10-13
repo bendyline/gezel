@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SHARED_ASSETS_ENV } from '@bendyline/gezel-inference/internal/models/storage-roots';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SHARED_ASSETS_ENV } from '../models/storage-roots.js';
 import {
   UndeletablePathError,
   assertPathDeletable,

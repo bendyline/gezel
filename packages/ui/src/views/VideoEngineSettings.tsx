@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { VideoGeneratorGezelHint } from '../components/VideoGeneratorGezelHint.js';
 import { VideoModelManager } from '../components/VideoModelManager.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 
 interface Props {
   onModelsChanged?: () => void;
@@ -133,12 +134,18 @@ export function VideoEngineSettings({ onModelsChanged }: Props) {
           Video generation is long-running and monopolizes the GPU, pausing the chat model. Choose
           whether the agent should ask before each generation.
         </p>
-        <div className="gz-tray" role="radiogroup" aria-label="Video generation confirmation">
+        <div
+          className="gz-tray"
+          role="radiogroup"
+          onKeyDown={onRadioKeyDown}
+          aria-label="Video generation confirmation"
+        >
           <button
             type="button"
             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
             role="radio"
             aria-checked={confirmationMode === 'ask'}
+            tabIndex={confirmationMode === 'ask' ? 0 : -1}
             className={`gz-key${confirmationMode === 'ask' ? ' gz-key-active' : ''}`}
             onClick={() => void onConfirmationChange('ask')}
           >
@@ -149,6 +156,7 @@ export function VideoEngineSettings({ onModelsChanged }: Props) {
             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
             role="radio"
             aria-checked={confirmationMode === 'always-allow'}
+            tabIndex={confirmationMode === 'always-allow' ? 0 : -1}
             className={`gz-key${confirmationMode === 'always-allow' ? ' gz-key-active' : ''}`}
             onClick={() => void onConfirmationChange('always-allow')}
           >

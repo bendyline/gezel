@@ -10,14 +10,23 @@ import {
   stopSuspendMonitor,
 } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import { createEngineComponents } from '@bendyline/gezel-inference/internal/engine-components';
+import { ConfigStore } from '@bendyline/gezel-inference/internal/fs/config-store';
+import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
+import { migrateLegacySystemModels } from '@bendyline/gezel-inference/internal/models/storage-roots';
+import { resolveCatalogReasoningBudget } from '@bendyline/gezel-inference/internal/providers/catalog-model-config';
+import { EngineInference } from '@bendyline/gezel-inference/internal/providers/native/inference';
+import { MlxRuntimeStatusBus } from '@bendyline/gezel-inference/internal/python/mlx-runtime-status-bus';
+import { acquireSingleInstanceLock } from '@bendyline/gezel-inference/internal/runtime-lock';
+import {
+  detectMemoryProfile,
+  detectMemoryProfileCached,
+} from '@bendyline/gezel-inference/internal/system/memory';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { DebugFlag } from './debug/flag.js';
-import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
 import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
-import { ConfigStore } from './fs/config-store.js';
-import { ensurePrivateUserHome } from './fs/home-permissions.js';
 import { GildeUpdateManager } from './gilde-updates/manager.js';
 import { createGrantManager, parseAutoApproveAppIds } from './grants/manager.js';
 import { generateLoopbackCert } from './http/cert.js';
@@ -31,25 +40,19 @@ import {
   migrateInstalledModelIds,
   reclaimStaleModelDownloads,
 } from './models/startup-maintenance.js';
-import { migrateLegacySystemModels } from './models/storage-roots.js';
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
 import { TextToSpeechProviderManager } from './providers/audio/tts-manager.js';
-import { resolveCatalogReasoningBudget } from './providers/catalog-model-config.js';
 import { ImageProviderManager } from './providers/image/manager.js';
 import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
-import { EngineInference } from './providers/native/inference.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
 import { VideoProviderManager } from './providers/video/manager.js';
 import { VideoModelPullRegistry } from './providers/video/pull-registry.js';
-import { MlxRuntimeStatusBus } from './python/mlx-runtime-status-bus.js';
 import { loadEngineIdentity } from './remotes/engine-identity.js';
 import { createRemoteServingController } from './remotes/serving.js';
 import { createTenantLimiter } from './remotes/tenant-limits.js';
 import { writeRuntime } from './runtime-discovery.js';
-import { acquireSingleInstanceLock } from './runtime-lock.js';
 import { DEFAULT_PORT, type RunningService, type StartServiceOptions } from './service-options.js';
 import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
-import { detectMemoryProfile, detectMemoryProfileCached } from './system/memory.js';
 import { probeChildProcessSpawn } from './system/spawn-capability.js';
 
 const log = createLogger('engine-service');

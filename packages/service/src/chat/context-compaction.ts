@@ -1,8 +1,8 @@
 import { type ChatMessage, type ChatSession, createLogger, nowIso } from '@bendyline/gezel';
+import type { LLMSession, ProviderName } from '@bendyline/gezel-inference/internal/providers/types';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import { renderTranscript } from '../memory/summarizer.js';
-import type { LLMSession, ProviderName } from '../providers/types.js';
 import type { ChatEventBus } from './events.js';
 
 const log = createLogger('context-compaction');

@@ -1,11 +1,11 @@
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
 import {
   INVALID_MODEL_ID_CODE,
   InvalidModelIdError,
   isSafeModelId,
   resolveModelDirectory,
-} from './model-id.js';
+} from '@bendyline/gezel-inference/internal/models/model-id';
+import { describe, expect, it } from 'vitest';
 
 describe('model id safety', () => {
   it.each(['gemma4-e4b-q4', 'whisper-tiny.en', '@vendor_model-1'])(

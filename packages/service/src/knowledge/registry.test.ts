@@ -1,9 +1,9 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { KnowledgeRegistry } from '@bendyline/gezel-inference/internal/knowledge/registry';
 import { knowledgeRegistryFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { KnowledgeRegistry } from './registry.js';
 
 let home: string;
 let registry: KnowledgeRegistry;

@@ -7,6 +7,7 @@
 }
 .filemap-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -19,6 +20,10 @@
   align-items: baseline;
   gap: 10px;
   min-width: 0;
+  flex: 1 1 12rem;
+}
+.filemap-title > strong {
+  flex-shrink: 0;
 }
 .filemap-stats {
   font-size: 12px;
@@ -28,6 +33,7 @@
   text-overflow: ellipsis;
 }
 .filemap-refresh {
+  color: var(--text);
   flex: 0 0 auto;
   font-size: 12px;
   padding: 4px 10px;
@@ -577,6 +583,8 @@ button.filemap-review-issue:hover {
 
 .filemap-actions {
   display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
@@ -603,8 +611,8 @@ button.filemap-review-issue:hover {
   border-left: none;
 }
 .filemap-scope button.active {
-  background: var(--accent, #c9722e);
-  color: #fff;
+  background: var(--action-bg);
+  color: var(--action-ink);
 }
 
 .filemap-pr {

@@ -1,5 +1,5 @@
+import type { ImageAttachment } from '@bendyline/gezel-inference/internal/providers/types';
 import type { Store } from '../fs/store.js';
-import type { ImageAttachment } from '../providers/types.js';
 
 /**
  * Extract any image refs the user embedded in their message markdown and

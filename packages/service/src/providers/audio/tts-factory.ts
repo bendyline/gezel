@@ -18,11 +18,14 @@
 // over HTTP — there is no request for a fetch timeout to cut.
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { TextToSpeechProvider } from '@bendyline/gezel-inference/internal/providers/audio/types';
+import {
+  HF_CACHE_DIR_ENV,
+  transformersCacheDir,
+} from '@bendyline/gezel-inference/internal/transformers-cache';
 import { speechAssetOptions } from '@bendyline/gezel/speech-models';
-import { HF_CACHE_DIR_ENV, transformersCacheDir } from '../../transformers-cache.js';
 import { KokoroProvider } from './kokoro.js';
 import { MockTextToSpeechProvider } from './mock-tts.js';
-import type { TextToSpeechProvider } from './types.js';
 
 export interface TextToSpeechFactoryOptions {
   home: string;

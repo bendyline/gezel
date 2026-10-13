@@ -1,3 +1,4 @@
+import type { GezmodelScanOptions as InferenceGezmodelScanOptions } from '@bendyline/gezel-inference/internal/models/gezmodel';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServiceContext } from '../context.js';
@@ -7,14 +8,14 @@ const bundleMocks = vi.hoisted(() => ({
   cancelImport: vi.fn(async () => {}),
 }));
 
-vi.mock('../../models/gezmodel.js', () => ({
+vi.mock('@bendyline/gezel-inference/internal/models/gezmodel', () => ({
   GezmodelManager: class {
     scanUpload = bundleMocks.scanUpload;
     cancelImport = bundleMocks.cancelImport;
   },
 }));
 
-import { modelBundleRoutes } from './model-bundles.js';
+import { modelBundleRoutes } from '@bendyline/gezel-inference/internal/http/routes/model-bundles';
 
 const IMPORT_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -33,7 +34,7 @@ describe('model bundle scan jobs', () => {
   it('releases the upload request, then serves progress and the completed review', async () => {
     let finishScan!: (review: unknown) => void;
     bundleMocks.scanUpload.mockImplementation(
-      (_stream: unknown, options: import('../../models/gezmodel.js').GezmodelScanOptions) => {
+      (_stream: unknown, options: InferenceGezmodelScanOptions) => {
         options.onProgress?.({ phase: 'verifying', bytesCompleted: 40, bytesTotal: 100 });
         options.onUploadComplete?.();
         return new Promise((resolve) => {
@@ -75,7 +76,7 @@ describe('model bundle scan jobs', () => {
   it('aborts an active asynchronous scan', async () => {
     let scanSignal: AbortSignal | undefined;
     bundleMocks.scanUpload.mockImplementation(
-      (_stream: unknown, options: import('../../models/gezmodel.js').GezmodelScanOptions) => {
+      (_stream: unknown, options: InferenceGezmodelScanOptions) => {
         scanSignal = options.signal;
         options.onUploadComplete?.();
         return new Promise((_resolve, reject) => {

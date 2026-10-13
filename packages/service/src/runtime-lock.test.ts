@@ -2,8 +2,11 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  SingleInstanceError,
+  acquireSingleInstanceLock,
+} from '@bendyline/gezel-inference/internal/runtime-lock';
 import { afterEach, describe, expect, it } from 'vitest';
-import { SingleInstanceError, acquireSingleInstanceLock } from './runtime-lock.js';
 
 const dirs: string[] = [];
 async function freshRuntimeDir(): Promise<string> {

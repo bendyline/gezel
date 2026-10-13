@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { findRenamedModelId } from '@bendyline/gezel-inference/internal/models/storage-roots';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { migrateLegacyQuantSuffixIds, remapEngineScopedKeys } from './legacy-quant-suffix.js';
-import { findRenamedModelId } from './storage-roots.js';
 
 let root: string;
 let readOnlyRoot: string;

@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import type { ToolCallEvent } from './types.js';
+import type { ToolCallEvent } from '@bendyline/gezel-inference/internal/providers/types';
 
 /** Translate CLI evidence once, before runtime gates, history and evals see it.
  * Only Gezel's namespace is authoritative; a foreign tool named write_file

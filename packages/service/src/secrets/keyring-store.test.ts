@@ -1,10 +1,13 @@
+import type {
+  ProviderCredentialName,
+  SecretKey,
+} from '@bendyline/gezel-inference/internal/secrets/types';
 import { describe, expect, it } from 'vitest';
 import {
   type KeyringEntryFactory,
   KeyringSecretStore,
   probeKeyringAvailable,
 } from './keyring-store.js';
-import type { ProviderCredentialName, SecretKey } from './types.js';
 
 // The store's positive TTL is 5s; advancing just past it forces a refresh.
 const POSITIVE_TTL_MS_OVER = 6_000;

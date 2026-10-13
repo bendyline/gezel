@@ -30,7 +30,7 @@ import { StepTracker } from './StepTracker.js';
 import { taskStepStatus } from './TaskStepTracker.js';
 import type { ToolActivity } from './chat-bubbles.js';
 import type { OpenChatReference, OpenChatReferenceKind } from './chat-open-command.js';
-import { gezelChatTheme } from './chat-theme.js';
+import { gezelChatThemeForMode } from './chat-theme.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
 import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
 import { useCompactLayout } from './useCompactLayout.js';
@@ -1910,7 +1910,7 @@ function RenderedMarkdownPreview({
     <div className="chat-rail-viewer-markdown">
       <LinearDocView
         doc={doc}
-        theme={gezelChatTheme}
+        theme={gezelChatThemeForMode(effective)}
         surface={surface}
         fenceRenderers={fenceRenderers}
         thinMargins={compact}

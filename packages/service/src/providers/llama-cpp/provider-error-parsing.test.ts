@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
 import {
   mergeSystemMessagesIntoFirst,
   tryParseContextOverflow,
   tryParseSystemMessageOrderingError,
-} from './provider.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { describe, expect, it } from 'vitest';
 
 describe('tryParseContextOverflow', () => {
   it('extracts structured fields from the exceed_context_size_error body', () => {

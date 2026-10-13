@@ -12,13 +12,13 @@ import {
   createLogger,
   isSafeEntityId,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   gezelPaths,
   gezelSessionsDir,
   globalHistoryFile,
   projectHistoryFile,
 } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
 
 const log = createLogger('history');
 

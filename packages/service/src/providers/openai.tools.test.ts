@@ -1,9 +1,9 @@
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import type { ExternalToolSpec } from '@bendyline/gezel-inference/internal/providers/types';
 import type OpenAI from 'openai';
 import { describe, expect, it, vi } from 'vitest';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { OpenAISession, type OpenAISessionDeps } from './openai.js';
-import { ProviderQueue } from './queue.js';
-import type { ExternalToolSpec } from './types.js';
 
 /**
  * Build a stub OpenAI SDK whose `responses.stream(request)` returns the

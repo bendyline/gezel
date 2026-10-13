@@ -1,10 +1,10 @@
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import { TERMINAL_ACTION_SKIPPED_OUTPUT } from '@bendyline/gezel-inference/internal/providers/terminal-tool-policy';
 import type OpenAI from 'openai';
 import { describe, expect, it, vi } from 'vitest';
 import { CLOUD_TOOL_ROUND_LIMIT } from './cloud-tool-limits.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { OpenAISession, type OpenAISessionDeps } from './openai.js';
-import { ProviderQueue } from './queue.js';
-import { TERMINAL_ACTION_SKIPPED_OUTPUT } from './terminal-tool-policy.js';
 
 const call = (id: string, name = 'read_artifact', args = '{"path":"notes.md"}') => ({
   type: 'response.output_item.done',

@@ -1,5 +1,5 @@
+import { defaultCacheBudgetMb } from '@bendyline/gezel-inference/internal/cache/budget';
 import { describe, expect, it } from 'vitest';
-import { defaultCacheBudgetMb } from './budget.js';
 
 const GB = 1024 * 1024 * 1024;
 

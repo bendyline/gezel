@@ -87,9 +87,24 @@ function isTypeOnlyStatement(statement) {
   );
 }
 
-export async function resolveSourceImport(testFile, specifier) {
-  if (!specifier.startsWith('.')) return null;
-  const base = resolve(dirname(testFile), specifier);
+export async function resolveSourceImport(testFile, specifier, workspaceRoot = root) {
+  let base;
+  if (specifier.startsWith('.')) base = resolve(dirname(testFile), specifier);
+  else {
+    // Service tests follow the extracted package's exports. Resolve these to
+    // their source identities so moving a file cannot remove it from inventory.
+    const prefix = '@bendyline/gezel-inference';
+    const entry = {
+      [prefix]: 'index',
+      [`${prefix}/native-release`]: 'native-release-entry',
+      [`${prefix}/speech`]: 'speech',
+    }[specifier];
+    const internal = specifier.startsWith(`${prefix}/internal/`)
+      ? specifier.slice(`${prefix}/internal/`.length)
+      : null;
+    if (!entry && !internal) return null;
+    base = resolve(workspaceRoot, 'packages/inference/src', entry ?? internal);
+  }
   const extension = extname(base);
   const candidates = extension
     ? extension === '.js' || extension === '.jsx'
@@ -127,7 +142,12 @@ async function inspectPackage(name, minimumPercent) {
     return null;
   }
 
-  const files = await walk(sourceRoot);
+  // Keep the original service floor across both halves of the extraction.
+  // The service still owns most inference tests; treating the new package as
+  // absent would silently improve the reported rate by discarding runtime.
+  const sourceRoots =
+    name === 'service' ? [sourceRoot, join(root, 'packages/inference/src')] : [sourceRoot];
+  const files = (await Promise.all(sourceRoots.map(walk))).flat();
   const candidates = files.filter(
     (file) =>
       sourceExtensions.has(extname(file)) &&
@@ -160,8 +180,10 @@ async function inspectPackage(name, minimumPercent) {
     // of importing it. Attribute a literal dist/foo.js launch to src/foo.ts.
     for (const match of source.matchAll(/(?:^|[/'"])(?:\.\.\/)*dist\/([^'"`]+)\.js/g)) {
       for (const extension of ['.ts', '.tsx', '.js', '.jsx']) {
-        const sourceFile = join(sourceRoot, `${match[1]}${extension}`);
-        if (production.includes(sourceFile)) covered.add(sourceFile);
+        for (const candidateRoot of sourceRoots) {
+          const sourceFile = join(candidateRoot, `${match[1]}${extension}`);
+          if (production.includes(sourceFile)) covered.add(sourceFile);
+        }
       }
     }
   }

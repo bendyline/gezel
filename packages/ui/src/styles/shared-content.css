@@ -1,3 +1,23 @@
+/* Host actions (Export, narration, AI) cannot collapse into Squisq's format
+   menu. Give view tabs their own row when those actions would leave the pane. */
+.squisq-editor-shell:not([data-host-mode="chat"]) .squisq-editor-header {
+  container: gezel-editor-header / inline-size;
+}
+
+@container gezel-editor-header (max-width: 32rem) {
+  .squisq-editor-header > .squisq-toolbar {
+    flex-wrap: wrap;
+    padding-inline: 0;
+    row-gap: 4px;
+  }
+
+  .squisq-toolbar-view-tabs {
+    flex: 1 0 100%;
+    min-width: 0;
+    padding-inline: 8px;
+  }
+}
+
 /* ── Document Export — DocBlocks-style toolbar button + shared primitives ── */
 
 .gezel-export-trigger.squisq-toolbar-button {
@@ -156,11 +176,11 @@
 }
 
 .placeholder {
-  color: #888;
+  color: var(--text-muted);
 }
 
 .error {
-  color: #c0392b;
+  color: var(--danger-text);
 }
 
 .log {
@@ -218,7 +238,7 @@
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #888;
+  color: var(--text-muted);
   margin-bottom: 0.35rem;
 }
 
@@ -231,7 +251,7 @@
   display: flex;
   justify-content: space-between;
   font-size: 0.8rem;
-  color: #999;
+  color: var(--text-muted);
   margin-top: 0.25rem;
 }
 
@@ -344,8 +364,8 @@
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 .msg-action-button:hover {
-  background: var(--accent);
-  color: var(--titlebar-ink, #fff);
+  background: var(--action-bg);
+  color: var(--action-ink);
   border-color: var(--accent);
 }
 
@@ -392,7 +412,7 @@
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #888;
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -677,7 +697,7 @@
 }
 
 .msg-handoff-project {
-  color: #888;
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -686,7 +706,7 @@
   display: inline-block;
   margin-left: 2px;
   animation: blink 1s steps(2) infinite;
-  color: #888;
+  color: var(--text-muted);
 }
 
 /* Referenced-artifacts chip row — rendered under assistant bubbles
@@ -1990,7 +2010,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   .squisq-editor-shell[data-theme="dark"]
   .squisq-wysiwyg-editor
   p.is-editor-empty:first-child::before {
-  color: #888;
+  color: var(--text-muted);
 }
 
 /* Light-mode WYSIWYG surface — squisq's stock skin paints
@@ -2129,43 +2149,43 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar-view-tab--active,
 [data-theme="light"] .squisq-toolbar-view-tab--active {
-  color: #588a3f !important;
-  border-bottom-color: #588a3f !important;
+  color: var(--success-text) !important;
+  border-bottom-color: var(--success-text) !important;
 }
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar-button--active,
 [data-theme="light"] .squisq-toolbar-button--active {
-  color: #588a3f !important;
+  color: var(--success-text) !important;
   background: rgba(88, 138, 63, 0.16) !important;
 }
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar-button--active:hover,
 [data-theme="light"] .squisq-toolbar-button--active:hover {
-  color: #436a2e !important;
+  color: var(--success-text) !important;
   background: rgba(88, 138, 63, 0.26) !important;
 }
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar-overflow-item--active,
 [data-theme="light"] .squisq-toolbar-overflow-item--active {
-  color: #588a3f !important;
+  color: var(--success-text) !important;
   background: rgba(88, 138, 63, 0.16) !important;
 }
 .squisq-editor-shell[data-theme="light"] .squisq-view-tab--active,
 [data-theme="light"] .squisq-view-tab--active {
-  color: #588a3f !important;
-  border-bottom-color: #588a3f !important;
+  color: var(--success-text) !important;
+  border-bottom-color: var(--success-text) !important;
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) .squisq-toolbar-view-tab--active,
   :root:not([data-theme="dark"]) .squisq-view-tab--active {
-    color: #588a3f !important;
-    border-bottom-color: #588a3f !important;
+    color: var(--success-text) !important;
+    border-bottom-color: var(--success-text) !important;
   }
   :root:not([data-theme="dark"]) .squisq-toolbar-button--active,
   :root:not([data-theme="dark"]) .squisq-toolbar-overflow-item--active {
-    color: #588a3f !important;
+    color: var(--success-text) !important;
     background: rgba(88, 138, 63, 0.16) !important;
   }
   :root:not([data-theme="dark"]) .squisq-toolbar-button--active:hover {
-    color: #436a2e !important;
+    color: var(--success-text) !important;
     background: rgba(88, 138, 63, 0.26) !important;
   }
 }
@@ -2180,9 +2200,10 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   border-radius: var(--radius-md);
   background: linear-gradient(
     to bottom,
-    color-mix(in srgb, var(--accent) 86%, var(--surface)),
-    var(--accent)
+    color-mix(in srgb, var(--action-bg) 86%, var(--surface)),
+    var(--action-bg)
   );
+  color: var(--action-ink);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 42%, transparent), 0 1px 2px
     color-mix(in srgb, var(--text) 24%, transparent);
   transition: background 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out,
@@ -2193,8 +2214,8 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .terminal-fire-btn:hover:not(:disabled) {
   background: linear-gradient(
     to bottom,
-    color-mix(in srgb, var(--accent) 80%, var(--surface)),
-    color-mix(in srgb, var(--accent) 94%, var(--surface))
+    color-mix(in srgb, var(--action-bg) 80%, var(--surface)),
+    color-mix(in srgb, var(--action-bg) 94%, var(--surface))
   );
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 52%, transparent), 0 2px 3px
     color-mix(in srgb, var(--text) 28%, transparent);
@@ -2436,7 +2457,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   display: block;
   margin-bottom: 0.75rem;
   font-size: 0.85rem;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .gz-dialog label input,

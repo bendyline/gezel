@@ -48,6 +48,10 @@ pacing of a transition. If a first-time user can't quite put a finger on
   start a parallel palette. Hardcoded colors are reserved for domain visuals
   whose color carries data or content (diffs, terminal ANSI, Village artwork,
   poppetjes), not app chrome.
+  Secondary copy uses `--text-muted`, never a fixed gray. Filled action keys
+  pair `--action-bg` with `--action-ink`; links use `--accent-text`. These pairs
+  preserve normal-text contrast in both themes. The titlebar uses the deeper
+  sage so its small cream labels remain readable.
 - **Motion** is slow-ish and soft: ~120–160ms ease-out for overlay and
   dialog in/out. Nothing snaps or bounces. See the `gz-overlay` /
   `gz-dialog` keyframes for the canonical cadence; match it elsewhere.
@@ -189,6 +193,10 @@ Rules:
   (folder scopes, engine settings) — the round dot is a true circle and
   keeps its shape. Reach for keys when the choice is prominent enough to
   deserve a control with physical presence.
+- **Radio keys share one Tab stop.** The selected key is tabbable; arrow keys
+  select the next enabled choice and wrap within the group. Home and End select
+  the first and last choices. Button-based groups use `onRadioKeyDown` from
+  `primitives/radio-keyboard.ts` and set unselected keys to `tabIndex={-1}`.
 - **Legacy aliases:** `.provider-pill`, `.gz-type-chip`,
   `.pending-question-choice`, and `.catalog-category` (plus their wrappers)
   are aliased into the recipe pending markup migration. When touching one of
@@ -438,6 +446,14 @@ the 44px hit area. The composer's keys keep a 36px face and reach 44px through
 an invisible `::after` around it, since a 44px face turned the composer into a
 row of slabs; keys that do this stand at least 4px apart. The gezel header's
 Context and Sandbox chips do not take the hit area yet.
+Narrow forms wrap fields and actions before squeezing text inputs; step forms
+and catalog grids can fall to one column within their own pane. Task detail
+puts its view keys above a full-width step tracker below 480px. A non-chat
+editor below 32rem gives its view tabs a separate row so formatting and host
+actions such as Export stay reachable. Compact dialogs use the available phone
+width, and touch dropdown rows, dialog tabs, and dialog actions keep a 44px
+minimum height. Long paths and identifiers wrap within settings panels.
+
 The titlebar never wraps. The compact header shows the navigation button in
 place of the brand mark, because the navigation leads with Home and one
 place gets one key. Updates becomes a 44px bell key like the menu and search

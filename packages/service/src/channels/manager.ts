@@ -4,10 +4,10 @@ import {
   type ChannelsConfig,
   createLogger,
 } from '@bendyline/gezel';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import type { DebugFlag } from '../debug/flag.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
-import type { SecretStore } from '../secrets/types.js';
 import type { ChannelProvider, SendResult } from './types.js';
 import { WebhookChannel } from './webhook.js';
 

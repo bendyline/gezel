@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { writeFileAtomic } from '../../fs/atomic.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 
 /**
  * One MCP server entry the Claude CLI should spawn for the session. Mirrors

@@ -66,7 +66,7 @@ The Electron supervisor resolves the bundled binary via
 and exports `GEZEL_UV_BIN=<abs path>` before starting the service —
 same pattern as `GEZEL_LLAMA_SERVER_BIN` and `GEZEL_SD_SERVER_BIN`.
 
-The service's [`UvRuntime`](../../../packages/service/src/python/uv-runtime.ts)
+The service's [`UvRuntime`](../../../packages/inference/src/python/uv-runtime.ts)
 prefers `GEZEL_UV_BIN` over system `uv` and `python3`. This keeps packaged
 Gezel self-contained and avoids invoking macOS's developer-tools `python3`
 shim; system runtimes remain fallbacks for source/dev launches.

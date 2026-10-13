@@ -17,8 +17,7 @@ import {
   nowIso,
 } from '@bendyline/gezel';
 import type { RecognitionHealth } from '@bendyline/gezel';
-import { readImageStaticMeta } from '../../index-store/image-meta.js';
-import { resolveModelDirectory } from '../../models/model-id.js';
+import { resolveModelDirectory } from '@bendyline/gezel-inference/internal/models/model-id';
 import {
   type ModelStorageRoots,
   assertModelStorePathSafe,
@@ -29,10 +28,11 @@ import {
   modelExistsOnlyReadOnly,
   readOnlyModelError,
   verifyReadOnlyModelPayload,
-} from '../../models/storage-roots.js';
-import { downloadWithSha256 } from '../audio/whisper-cpp.js';
-import type { NativeEngineSupervisor } from '../native/supervisor.js';
-import { readSseEvents } from '../openai-compatible/sse.js';
+} from '@bendyline/gezel-inference/internal/models/storage-roots';
+import { downloadWithSha256 } from '@bendyline/gezel-inference/internal/providers/audio/whisper-cpp';
+import type { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
+import { readSseEvents } from '@bendyline/gezel-inference/internal/providers/openai-compatible/sse';
+import { readImageStaticMeta } from '../../index-store/image-meta.js';
 import { MODE_PROMPTS } from './prompts.js';
 import type {
   InstalledRecognitionModelInfo,

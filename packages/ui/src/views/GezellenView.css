@@ -87,7 +87,7 @@
 
 .gezel-row-role {
   overflow: hidden;
-  color: #888;
+  color: var(--text-muted);
   font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   type DownloadEvent,
   type DownloadResult,
   downloadWithRetry,
-} from './download-with-retry.js';
+} from '@bendyline/gezel-inference/internal/utils/download-with-retry';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 function sha256(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');

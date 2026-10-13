@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { Entry } from '@napi-rs/keyring';
 import {
   LEGACY_DEVICE_IDENTITY_ACCOUNT,
   SecretBackendUnavailableError,
@@ -9,7 +8,8 @@ import {
   SecretStoreCorruptError,
   stringifySecretKey,
   toolsetKeyPrefix,
-} from './types.js';
+} from '@bendyline/gezel-inference/internal/secrets/types';
+import { Entry } from '@napi-rs/keyring';
 
 const SERVICE_NAME = 'gezel';
 /** Account used to store the index of known secret keys so `listForToolset`

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { classifyDs4Line } from '../ds4/stdout-parser.js';
+import { classifyDs4Line } from '@bendyline/gezel-inference/internal/providers/ds4/stdout-parser';
 
 /**
  * Live decode telemetry travels as fields on the `generating` phase event
@@ -17,7 +17,10 @@ import { classifyDs4Line } from '../ds4/stdout-parser.js';
  * the counter that belongs in the dropdown. llama.cpp already emitted
  * counters-only; MLX and ds4 are aligned to it here.
  */
-const MLX_PROVIDER = readFileSync(join(import.meta.dirname, 'provider.ts'), 'utf8');
+const MLX_PROVIDER = readFileSync(
+  join(import.meta.dirname, '../../../../inference/src/providers/mlx/provider.ts'),
+  'utf8',
+);
 
 /** The `generating` emit that fires on the MLX decode ticker. */
 function mlxGeneratingEmit(): string {

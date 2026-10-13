@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import type { ChatModelManifest, GezmodelBundleManifest, GezmodelFile } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import type { ModelBundleSource } from '@bendyline/gezel-inference/internal/models/bundle-storage';
+import { GezmodelManager } from '@bendyline/gezel-inference/internal/models/gezmodel';
 import AdmZip from 'adm-zip';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ModelBundleSource } from './bundle-storage.js';
-import { GezmodelManager } from './gezmodel.js';
 
 let home: string;
 

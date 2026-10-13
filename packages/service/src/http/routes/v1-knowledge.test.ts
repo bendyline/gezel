@@ -1,12 +1,12 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { v1KnowledgeRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-knowledge';
 import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import { bearerAuth, requireScope } from '../auth.js';
 import type { ServiceContext } from '../context.js';
 import { createTokenStore } from '../token-store.js';
-import { v1KnowledgeRoutes } from './v1-knowledge.js';
 
 const catalog = {
   ref: { catalogId: 'science', version: '1' },

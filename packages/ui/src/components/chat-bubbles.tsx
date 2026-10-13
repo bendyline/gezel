@@ -70,7 +70,7 @@ import { ToolCraftbookCard } from './ToolCraftbookCard.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
 import { markdownToChatDoc, prepareChatMarkdown } from './chat-markdown.js';
 import type { OpenChatReference } from './chat-open-command.js';
-import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
+import { GEZEL_LIGHT_SURFACE, gezelChatThemeForMode } from './chat-theme.js';
 import { ToolAudioRow, ToolImageRow, ToolVideoRow } from './chat-tool-media.js';
 import { citationFromHref, evidenceTitle, linkifyCitations } from './citation-linkify.js';
 import { formatElapsedClock } from './elapsed-time.js';
@@ -3890,8 +3890,10 @@ export function RenderedMarkdown({
   // Override the squisq theme's body + title fonts with the gezel's font
   // when one is set. `resolveFontFamily` passes a string family through
   // verbatim, so the GEZEL_CHAT_FONTS family value drops straight in.
+  const effective = useEffectiveTheme();
   const theme = useMemo<Theme>(() => {
-    if (!fontFamily) return gezelChatTheme;
+    const readingTheme = gezelChatThemeForMode(effective);
+    if (!fontFamily) return readingTheme;
     // GEZEL_CHAT_FONTS families are ready-to-use CSS strings (e.g.
     // `'JetBrains Mono'`). `resolveFontFamily` passes a raw string family
     // through verbatim, which is exactly the CSS we want — but the
@@ -3900,11 +3902,10 @@ export function RenderedMarkdown({
     // Cast to keep the simple, correct string path.
     const font = fontFamily as unknown as FontFamily;
     return {
-      ...gezelChatTheme,
-      typography: { ...gezelChatTheme.typography, bodyFont: font, titleFont: font },
+      ...readingTheme,
+      typography: { ...readingTheme.typography, bodyFont: font, titleFont: font },
     };
-  }, [fontFamily]);
-  const effective = useEffectiveTheme();
+  }, [fontFamily, effective]);
   // Theme + font choices live in [chat-theme.ts](./chat-theme.ts) so
   // bubble bodies and the attachment previewer in
   // [ChatReferences.tsx](./ChatReferences.tsx) stay in lockstep.

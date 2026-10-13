@@ -1,11 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
-import { ProviderQueue } from '../queue.js';
 import {
   AppleFmError,
   type AppleFmGenerateHandlers,
   type AppleFmGenerateRequest,
-} from './helper.js';
-import { AppleFoundationModelsProvider, AppleFoundationSession } from './provider.js';
+} from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/helper';
+import {
+  AppleFoundationModelsProvider,
+  AppleFoundationSession,
+} from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/provider';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import { describe, expect, it, vi } from 'vitest';
 
 const readFile = {
   type: 'function' as const,

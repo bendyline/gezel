@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { findBundledHandboekArchive } from './handboek/bundled-archive.js';
 import {
   migrateInstalledModelIds,
   reclaimStaleModelDownloads,
@@ -45,6 +46,11 @@ import { AmbientDashboardGenerator } from './ambient/dashboard-generator.js';
 import { createAppServeController } from './app-serve/controller.js';
 import { AppToolRelayRegistry } from './app-tools/relay-registry.js';
 
+import { createEngineComponents } from '@bendyline/gezel-inference/internal/engine-components';
+import {
+  startResponsivenessMonitor,
+  syncPerfProfiling,
+} from '@bendyline/gezel-inference/internal/perf/responsiveness';
 import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
@@ -67,17 +73,18 @@ import {
 import { DiffpackManager } from './diffpack/manager.js';
 import { planProjectNightFixes, releaseStaleNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
-import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
 import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
-import { startResponsivenessMonitor, syncPerfProfiling } from './perf/responsiveness.js';
 
+import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
+import { KnowledgeManager } from '@bendyline/gezel-inference/internal/knowledge/manager';
+import { createWorkerCatalogHost } from '@bendyline/gezel-inference/internal/knowledge/worker-host';
+import { warmEmbeddings } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import { deferBootWork } from './boot-work.js';
 import { FirstUseIndexingHold, defaultProviderCanAnswer } from './first-run/indexing-hold.js';
 import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
 import { ActivityTracker } from './fs/activity-tracker.js';
-import { ensurePrivateUserHome } from './fs/home-permissions.js';
 import { mimeTypeForFilename } from './fs/media-types.js';
 import { Store } from './fs/store.js';
 import { ensureDefaultBoekwachter, resolveProjectBoekwachter } from './gezels/autonomous-roles.js';
@@ -124,9 +131,7 @@ import { toDecodableRaster } from './index-store/raster-normalize.js';
 import { ensureIndexFresh } from './index-store/readiness.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
-import { KnowledgeManager } from './knowledge/manager.js';
 import { createSharedKnowledgeInstaller } from './knowledge/shared-install.js';
-import { createWorkerCatalogHost } from './knowledge/worker-host.js';
 import { createLocalHarnessIntegrations } from './local-harness/integrations.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
 import {
@@ -136,14 +141,13 @@ import {
 } from './meester/night-shift-oversight.js';
 import { MeesterStatusGenerator } from './meester/status-generator.js';
 import { MemoryCompactor } from './memory/compaction.js';
-import { warmEmbeddings } from './memory/embeddings.js';
 import { MemoryHealthMonitor } from './memory/health.js';
 import { MemoryManager } from './memory/manager.js';
 import { openModelWorkers, shutdownModelWorkers } from './model-workers.js';
 
 import { buildChatModelInstallRegistries } from './models/install-jobs.js';
 
-import { migrateLegacySystemModels } from './models/storage-roots.js';
+import { migrateLegacySystemModels } from '@bendyline/gezel-inference/internal/models/storage-roots';
 import { DuckRunner } from './observations/duck.js';
 import { runProjectObservationNightly } from './observations/nightly.js';
 import {
@@ -163,28 +167,42 @@ import { InputStagingManager } from './tasks/inputs/staging.js';
 import { ImageProviderManager } from './providers/image/manager.js';
 import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
 
+import { ensureLlamaEngineStatus } from '@bendyline/gezel-inference/internal/providers/llama-cpp/build-provider';
+import type { LLMProvider } from '@bendyline/gezel-inference/internal/providers/types';
+import { MlxRuntimeStatusBus } from '@bendyline/gezel-inference/internal/python/mlx-runtime-status-bus';
+import { UvRuntime } from '@bendyline/gezel-inference/internal/python/uv-runtime';
+import { RelevanceModelManager } from '@bendyline/gezel-inference/internal/relevance/manager';
+import {
+  loadOrCreateDeviceIdentity,
+  signCertFingerprint,
+} from '@bendyline/gezel-inference/internal/remotes/identity';
+import { closePairedRemoteFetches } from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
+import {
+  type RuntimeLock,
+  acquireSingleInstanceLock,
+} from '@bendyline/gezel-inference/internal/runtime-lock';
+import {
+  detectMemoryProfile,
+  detectMemoryProfileCached,
+} from '@bendyline/gezel-inference/internal/system/memory';
+import {
+  HF_CACHE_DIR_ENV,
+  transformersCacheDir,
+} from '@bendyline/gezel-inference/internal/transformers-cache';
 import { MediaSearchManager, backgroundDownloadsAllowed } from './media-search/manager.js';
 import { createOfficeIntegrations } from './office-host/integrations.js';
 import { resolveCopilotAvailability } from './providers/copilot-availability.js';
 import { resolveDefaultProviderName } from './providers/default-provider.js';
-import { ensureLlamaEngineStatus } from './providers/llama-cpp/build-provider.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
 import { resolveAutoMode } from './providers/recognition/prompts.js';
-import type { LLMProvider } from './providers/types.js';
 import { VideoProviderManager } from './providers/video/manager.js';
 import { VideoModelPullRegistry } from './providers/video/pull-registry.js';
-import { MlxRuntimeStatusBus } from './python/mlx-runtime-status-bus.js';
-import { UvRuntime } from './python/uv-runtime.js';
-import { RelevanceModelManager } from './relevance/manager.js';
-import { loadOrCreateDeviceIdentity, signCertFingerprint } from './remotes/identity.js';
-import { closePairedRemoteFetches } from './remotes/pinned-fetch.js';
 import { createRemotesRegistry } from './remotes/registry.js';
 import { createRemoteServingController } from './remotes/serving.js';
 import { createTenantLimiter } from './remotes/tenant-limits.js';
 import { ImageRenderer } from './rendering/image-renderer.js';
 import { ReportActionManager } from './report-actions/report-action-manager.js';
 import { writeRuntime } from './runtime-discovery.js';
-import { type RuntimeLock, acquireSingleInstanceLock } from './runtime-lock.js';
 import {
   startWindowsScriptSandbox,
   windowsScriptSandboxStatus,
@@ -201,7 +219,6 @@ import { SystemToolsetInstallRegistry } from './system-toolsets/install-registry
 import { SystemStatusBus } from './system-toolsets/status-bus.js';
 import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
 import { SystemIdleState } from './system/idle-state.js';
-import { detectMemoryProfile, detectMemoryProfileCached } from './system/memory.js';
 import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-capability.js';
 import { loadTaskOutputs } from './tasks/completion-wrapup.js';
 import { reviewTaskFigures } from './tasks/figure-review.js';
@@ -222,7 +239,6 @@ import {
 import { isOwnerStep } from './tasks/step-runtime.js';
 import { TerminalEventBus } from './terminal/events.js';
 import { TerminalManager } from './terminal/manager.js';
-import { HF_CACHE_DIR_ENV, transformersCacheDir } from './transformers-cache.js';
 import { WorkspaceIndexManager } from './workspace/index-manager.js';
 import { ensureCommandApprovalQuestions } from './workspace/scripts.js';
 import { WorkspaceWatchManager } from './workspace/watch-manager.js';
@@ -1800,6 +1816,7 @@ export async function startProductService(
   // User daemons only — the machine broker installs shared bytes but never
   // mounts, searches, or holds a per-user registry.
   const knowledge = new KnowledgeManager({
+    bundledHandboekArchive: findBundledHandboekArchive(),
     home,
     host: createWorkerCatalogHost(),
     catalog,

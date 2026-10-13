@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
-import type { SecretStore } from '../secrets/types.js';
 import { ConnectorManager, resolveDeclaredOrigins } from './manager.js';
 import { registerNativeAdapter } from './registry.js';
 import type { ConnectorAdapter, NormalizedRecord, RecordRef } from './types.js';

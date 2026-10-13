@@ -45,8 +45,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const CANONICAL = 'packages/service/src/providers/patient-fetch.ts';
-const PROVIDERS_ROOT = 'packages/service/src/providers';
+const CANONICAL = 'packages/inference/src/providers/patient-fetch.ts';
+const PROVIDERS_ROOTS = ['packages/service/src/providers', 'packages/inference/src/providers'];
 
 /**
  * Modules allowed to build their own zero-timeout dispatcher because
@@ -54,7 +54,7 @@ const PROVIDERS_ROOT = 'packages/service/src/providers';
  */
 const AGENT_ALLOWLIST = new Map([
   [
-    'packages/service/src/remotes/pinned-fetch.ts',
+    'packages/inference/src/remotes/pinned-fetch.ts',
     'pins a self-signed LAN cert; needs its own Agent with a custom TLS verifier',
   ],
 ]);
@@ -75,7 +75,11 @@ const rel = (p) => relative(root, p).replaceAll('\\', '/');
 const failures = [];
 
 // Rule 1 — one owner for the zero-timeout dispatcher.
-for (const file of await walk(resolve(root, 'packages/service/src'))) {
+for (const file of (
+  await Promise.all(
+    ['packages/service/src', 'packages/inference/src'].map((dir) => walk(resolve(root, dir))),
+  )
+).flat()) {
   const path = rel(file);
   if (path === CANONICAL || AGENT_ALLOWLIST.has(path)) continue;
   const source = await readFile(file, 'utf8');
@@ -91,7 +95,9 @@ for (const file of await walk(resolve(root, 'packages/service/src'))) {
 }
 
 // Rule 2 — every engine builder injects a patient fetch.
-for (const file of await walk(resolve(root, PROVIDERS_ROOT))) {
+for (const file of (
+  await Promise.all(PROVIDERS_ROOTS.map((dir) => walk(resolve(root, dir))))
+).flat()) {
   const path = rel(file);
   if (!/(?:^|\/)(?:[a-z-]*factory|build-provider)\.ts$/.test(path)) continue;
   const source = await readFile(file, 'utf8');

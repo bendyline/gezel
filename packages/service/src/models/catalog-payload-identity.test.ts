@@ -2,13 +2,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatModelManifest } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   type CatalogPayload,
   catalogPayloadFingerprint,
   comparePayloadIdentity,
   describeCatalogPayload,
-} from './catalog-payload-identity.js';
+} from '@bendyline/gezel-inference/internal/models/catalog-payload-identity';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const SHA_A = 'a'.repeat(64);
 const SHA_B = 'b'.repeat(64);

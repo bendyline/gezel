@@ -18,10 +18,10 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLogger } from '@bendyline/gezel';
+import { findServiceWorkerEntry } from '@bendyline/gezel-inference/internal/utils/service-worker-entry';
 import { guardZipArchive } from '../safety/archive-guard.js';
 import { sniffContainer } from '../safety/sniff.js';
 import { runInSandbox } from '../sandbox/runner.js';
-import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 
 const log = createLogger('convert');
 

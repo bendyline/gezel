@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Store } from '../../fs/store.js';
-import type { SecretStore } from '../../secrets/types.js';
 import type { AdapterDeps, ConnectorBindingRef } from '../types.js';
 import {
   type BlueskyAgentApi,

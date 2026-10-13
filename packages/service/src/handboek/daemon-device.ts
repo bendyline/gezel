@@ -1,10 +1,10 @@
 import type { ProviderName } from '@bendyline/gezel';
 import { createLogger } from '@bendyline/gezel';
-import { classifyModelTier } from '../chat/local-model-tier.js';
+import { classifyModelTier } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
+import { detectMemoryProfile } from '@bendyline/gezel-inference/internal/system/memory';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import { describeCurrentHardware } from '../system/hardware-description.js';
-import { detectMemoryProfile } from '../system/memory.js';
 import type { HandboekDeviceInfo, HandboekHardwareInfo, HandboekModelInfo } from './device.js';
 
 const log = createLogger('handboek');

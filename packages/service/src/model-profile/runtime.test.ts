@@ -1,6 +1,12 @@
+import {
+  lookupBehavior,
+  resolveProfile,
+} from '@bendyline/gezel-inference/internal/model-profile/registry';
+import {
+  applyBehaviorEnvOverrides,
+  profileHasBehavior,
+} from '@bendyline/gezel-inference/internal/model-profile/runtime';
 import { afterEach, describe, expect, it } from 'vitest';
-import { lookupBehavior, resolveProfile } from './registry.js';
-import { applyBehaviorEnvOverrides, profileHasBehavior } from './runtime.js';
 
 const FORCE = 'GEZEL_FORCE_BEHAVIORS';
 const REMOVE = 'GEZEL_REMOVE_BEHAVIORS';

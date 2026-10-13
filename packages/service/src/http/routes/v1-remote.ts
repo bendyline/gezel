@@ -12,13 +12,26 @@
 
 import { randomUUID } from 'node:crypto';
 import { createLogger } from '@bendyline/gezel';
-import { type Context, Hono } from 'hono';
-import { streamSSE } from 'hono/streaming';
-import type { ResolvedTuning } from '../../model-profile/index.js';
+import { resolveModelTarget } from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
+import type { ResolvedTuning } from '@bendyline/gezel-inference/internal/model-profile/index';
 import {
   isCapacityDeniedError,
   isEngineBusyError,
-} from '../../providers/native/capacity-broker.js';
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import type {
+  EnginePhaseEvent,
+  EngineStatsEvent,
+  TurnStatsEvent,
+} from '@bendyline/gezel-inference/internal/providers/streaming-session';
+import {
+  ExternalToolsUnsupportedError,
+  type LLMProvider,
+  type LLMSession,
+  ModelNotInstalledError,
+  type TurnUsage,
+} from '@bendyline/gezel-inference/internal/providers/types';
+import { type Context, Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import {
   IMAGE_HISTORY_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
@@ -34,20 +47,7 @@ import {
   RemoteVideoGenRequestSchema,
   type WireQueueHints,
 } from '../../providers/remote/wire.js';
-import type {
-  EnginePhaseEvent,
-  EngineStatsEvent,
-  TurnStatsEvent,
-} from '../../providers/streaming-session.js';
-import {
-  ExternalToolsUnsupportedError,
-  type LLMProvider,
-  type LLMSession,
-  ModelNotInstalledError,
-  type TurnUsage,
-} from '../../providers/types.js';
 import type { EngineContext } from '../engine-context.js';
-import { resolveModelTarget } from '../openai-compat/translate.js';
 import { serializeSseWrites } from './chat-events.js';
 
 const log = createLogger('remote-cache');

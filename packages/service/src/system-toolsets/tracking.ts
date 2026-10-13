@@ -1,7 +1,7 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { systemToolsetsFile } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
 
 /**
  * Tracking record for what's been installed at the system scope.

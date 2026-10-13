@@ -71,7 +71,7 @@ exists to maximize it. Three problems follow:
    keep landing on that process, back-to-back, before it's evicted. So the queue, router, pool,
    and supervisor are all tuned for cache locality. → §5.
 
-> The opening comment in `packages/service/src/cache/controller.ts:1-25` states the bet directly:
+> The opening comment in `packages/inference/src/cache/controller.ts:1-25` states the bet directly:
 > *"the per-turn prefill cost drops from O(full prompt) to O(new tokens)."*
 
 ---
@@ -165,7 +165,7 @@ full caching-relevant argv:
 - **KV precision is memory-aware, f16-first (2026-08-28)** — the old flat `q8_0` default was
   priced on a 2B model; at 30B the q8_0 tax is ~6% decode flat and **−6% → −17% prefill as
   context grows 8k → 90k** (`reports/llama-kv-q8-longctx-20260828.md`).
-  `planLlamaCppKv` ([llama-cpp/kv-cache-type.ts](../packages/service/src/providers/llama-cpp/kv-cache-type.ts))
+  `planLlamaCppKv` ([llama-cpp/kv-cache-type.ts](../packages/inference/src/providers/llama-cpp/kv-cache-type.ts))
   now prefers **f16 whenever the memory plan fits it, sacrificing engine slots first and then
   context above `F16_PREFERRED_CTX_CAP_TOKENS = 65_536`**, and falls back to `q8_0` only when
   f16 cannot fit a single 64k slot (~50% KV-memory saving where it is genuinely needed).
@@ -513,7 +513,7 @@ the weights). This is what closed the layered layout for MLX (§3.6) and why
 rather than prompt structure.
 
 Three rules follow, all enforced in
-[mlx/cache-adapter.ts](../packages/service/src/providers/mlx/cache-adapter.ts) and pinned by its
+[mlx/cache-adapter.ts](../packages/inference/src/providers/mlx/cache-adapter.ts) and pinned by its
 tests:
 
 1. **The roster feeds every prefix id** (flat `gezelPrefixId` and layered `gezelLayerPrefixIds`,
@@ -1306,7 +1306,7 @@ workload this whole document exists because of.
 
 **What "on by default" means.** No configuration arms it; a drafter's
 *presence* does. The launcher looks for `<engines>/mlx/drafters/<modelDir>-mtp`
-([spec-drafter.ts](../packages/service/src/providers/mlx/spec-drafter.ts)) and a
+([spec-drafter.ts](../packages/inference/src/providers/mlx/spec-drafter.ts)) and a
 model without one serves exactly as before, with one `[spec] off` line naming
 the reason. The path is keyed on the model directory rather than a base-model
 guess, because string-surgering a quantization suffix is how a drafter ends up
@@ -1346,14 +1346,14 @@ an A/B arm without them is not evidence.
 ## 13. Key-file index
 
 **Policy / contract**
-- `packages/service/src/cache/controller.ts` — `SessionCacheController` (LRU, budgets, reconcile, pin, stats).
-- `packages/service/src/cache/adapter.ts` — `EngineCacheAdapter` interface (the policy/mechanism seam).
-- `packages/service/src/cache/budget.ts` — RAM-aware default budget tiers.
+- `packages/inference/src/cache/controller.ts` — `SessionCacheController` (LRU, budgets, reconcile, pin, stats).
+- `packages/inference/src/cache/adapter.ts` — `EngineCacheAdapter` interface (the policy/mechanism seam).
+- `packages/inference/src/cache/budget.ts` — RAM-aware default budget tiers.
 - `packages/service/src/http/routes/cache.ts` — `/api/cache/{stats,evict,clear,warm}`.
 
 **Mechanism (per engine)**
-- `packages/service/src/providers/llama-cpp/cache-adapter.ts` — slots, `cache_prompt`+`id_slot`, disk save/restore, 501 latch.
-- `packages/service/src/providers/mlx/cache-adapter.ts` — `cache_id`/`prefix_cache_id`, warm/prefix-warm, `flushAll`.
+- `packages/inference/src/providers/llama-cpp/cache-adapter.ts` — slots, `cache_prompt`+`id_slot`, disk save/restore, 501 latch.
+- `packages/inference/src/providers/mlx/cache-adapter.ts` — `cache_id`/`prefix_cache_id`, warm/prefix-warm, `flushAll`.
 - `packages/service/src/providers/mlx/python/gezel_mlx_server.py` — the cache-preserving fork; lookup cascade, warm, in-engine LRU.
 - `packages/service/src/providers/mlx/python/cache_persist.py` — safetensors disk persistence + fingerprint firewall.
 
@@ -1364,6 +1364,6 @@ an A/B arm without them is not evidence.
 
 **Turn management / serialization**
 - `packages/core/src/runtime/provider-queue.ts` — lanes + cache-affinity scheduler, `runInQueue` (the service re-exports it from `providers/queue.ts`).
-- `packages/service/src/providers/mlx/provider.ts` — `runExclusive` single-stream mutex; `providers/llama-cpp/provider.ts` — slot/lane wiring, shutdown flush.
+- `packages/inference/src/providers/mlx/provider.ts` — `runExclusive` single-stream mutex; `providers/llama-cpp/provider.ts` — slot/lane wiring, shutdown flush.
 - `packages/service/src/providers/native/{capacity-broker,provider-pool,engine-router,engine-key,supervisor,port}.ts` — admission, pooling, session-sticky routing, two-stage idle-freeze, orphan reaper.
-- `packages/service/src/providers/gpu-arbiter.ts` — LLM↔image GPU tenancy.
+- `packages/inference/src/providers/gpu-arbiter.ts` — LLM↔image GPU tenancy.

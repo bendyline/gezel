@@ -5,8 +5,8 @@ import {
   slugifyEntityName as slugify,
 } from '@bendyline/gezel/runtime';
 export { pickRoleBasedName } from '@bendyline/gezel/runtime';
-import { ConfigStore } from './config-store.js';
-export { ConfigCorruptionError } from './config-store.js';
+import { ConfigStore } from '@bendyline/gezel-inference/internal/fs/config-store';
+export { ConfigCorruptionError } from '@bendyline/gezel-inference/internal/fs/config-store';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFile,
@@ -116,6 +116,15 @@ import {
   seedCharacter,
   serializeGezelMarkdown,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
+import {
+  assertNoTemplatePlaceholderPath,
+  intoWorkspaceRelative,
+  realpathNearest,
+  resolveInside,
+  safeJoin,
+} from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import {
   type ExternalFolders,
   activeMachineSharedHome,
@@ -199,7 +208,6 @@ import {
 import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../workspace/errors.js';
 import { type JournalContext, appendJournalEntry } from '../workspace/journal.js';
 import { bootstrapWorkspace } from '../workspace/template.js';
-import { writeFileAtomic } from './atomic.js';
 import { CraftbookStore } from './craftbook-store.js';
 import {
   DEFAULT_PROJECT_ABOUT_MD,
@@ -210,7 +218,6 @@ import {
   SHARED_PROJECT_MISSION_MD,
 } from './default-project-docs.js';
 import { DocumentsStore } from './documents-store.js';
-import { ensurePrivateUserHome } from './home-permissions.js';
 import { extForMimeType, mimeTypeForFilename, safeBasename } from './media-types.js';
 import { MemoryStore } from './memory-store.js';
 import {
@@ -219,13 +226,6 @@ import {
   type ProjectArtifactSliceResult,
   ProjectArtifactsStore,
 } from './project-artifacts-store.js';
-import {
-  assertNoTemplatePlaceholderPath,
-  intoWorkspaceRelative,
-  realpathNearest,
-  resolveInside,
-  safeJoin,
-} from './safe-paths.js';
 import { TaskFilesStore } from './task-files-store.js';
 import {
   type WalkDirResult,

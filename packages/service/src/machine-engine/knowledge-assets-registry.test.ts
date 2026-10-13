@@ -14,11 +14,14 @@ import { type Server, createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BundledSource, CatalogService } from '@bendyline/gezel-catalog';
+import {
+  type BrokerInstallEvent,
+  createKnowledgeAssetsBroker,
+} from '@bendyline/gezel-inference/internal/machine-engine/knowledge-assets';
+import { SHARED_ASSETS_ENV } from '@bendyline/gezel-inference/internal/models/storage-roots';
 import { generateKnowledgeSigningKeyPair, signRegistryIndex } from '@bendyline/gezel-knowledge';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildTestCatalog } from '../knowledge/test-catalog-fixture.js';
-import { SHARED_ASSETS_ENV } from '../models/storage-roots.js';
-import { type BrokerInstallEvent, createKnowledgeAssetsBroker } from './knowledge-assets.js';
 
 let dir: string;
 let sharedRoot: string;

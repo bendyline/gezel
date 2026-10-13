@@ -1,13 +1,13 @@
 import { createLogger } from '@bendyline/gezel';
 import type { GezelConfig } from '@bendyline/gezel';
+import { v1ChatRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-chat';
+import { v1ModelsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-models';
 import { type ServerType, serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import type { ServiceContext } from './context.js';
 import { hostGuard } from './host-guard.js';
 import { ollamaCompatRoutes } from './routes/ollama-compat.js';
-import { v1ChatRoutes } from './routes/v1-chat.js';
 import { v1EmbeddingsRoutes } from './routes/v1-embeddings.js';
-import { v1ModelsRoutes } from './routes/v1-models.js';
 import { opaqueServerErrors } from './server.js';
 
 const log = createLogger('ollama-emulation');

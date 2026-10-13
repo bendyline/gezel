@@ -343,6 +343,7 @@
    desktop mobile preview, whose browser viewport may still be wide. */
 :root[data-layout="mobile"] .gz-dialog {
   min-width: 0;
+  width: min(366px, calc(100vw - 1.5rem));
   max-width: min(366px, calc(100vw - 1.5rem));
 }
 

@@ -19,14 +19,17 @@
 import { isIP } from 'node:net';
 import { hostname } from 'node:os';
 import { createLogger } from '@bendyline/gezel';
-import type { ServiceContext } from '../http/context.js';
 import {
   IdentityResponseSchema,
   certFingerprintFromPem,
   fingerprintOfPublicKeyPem,
   verifyIdentitySignature,
-} from './identity.js';
-import { createInsecureBootstrapFetch, createPinnedFetch } from './pinned-fetch.js';
+} from '@bendyline/gezel-inference/internal/remotes/identity';
+import {
+  createInsecureBootstrapFetch,
+  createPinnedFetch,
+} from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
+import type { ServiceContext } from '../http/context.js';
 import type { PairedRemote } from './registry.js';
 
 const log = createLogger('remote-pairing');

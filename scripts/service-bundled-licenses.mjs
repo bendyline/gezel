@@ -141,6 +141,21 @@ export async function bundledPackagesFromSourceMaps(roots, { extraPackageRoots =
   const seenMaps = new Set(pending.map((item) => item.mapPath));
   const packageRoots = new Map(extraPackageRoots.map((root) => [root, null]));
   const carrierMaps = new Map();
+  const linkedOwners = new Map();
+  async function linkedOwner(dir) {
+    if (dir === repoRoot || dir.startsWith(`${repoRoot}${sep}`)) return null;
+    if (linkedOwners.has(dir)) return linkedOwners.get(dir);
+    const manifest = join(dir, 'package.json');
+    let owner = null;
+    if (existsSync(manifest)) {
+      const pkg = JSON.parse(await readFile(manifest, 'utf8'));
+      if (pkg.name && pkg.version) owner = { name: pkg.name, root: dir };
+    } else if (dirname(dir) !== dir) {
+      owner = await linkedOwner(dirname(dir));
+    }
+    linkedOwners.set(dir, owner);
+    return owner;
+  }
 
   while (pending.length > 0) {
     const { mapPath, base } = pending.pop();
@@ -156,9 +171,15 @@ export async function bundledPackagesFromSourceMaps(roots, { extraPackageRoots =
           if (!carrierMaps.has(owner.root)) carrierMaps.set(owner.root, new Set());
           carrierMaps.get(owner.root).add(chained);
         }
-      } else if (!seenMaps.has(chained) && existsSync(chained)) {
-        seenMaps.add(chained);
-        pending.push({ mapPath: chained, base: dirname(chained) });
+      } else {
+        // Vite resolves local package links outside node_modules. Preserve
+        // their notices while following their maps to the bundled dependencies.
+        const linked = await linkedOwner(dirname(file));
+        if (linked && !packageRoots.has(linked.root)) packageRoots.set(linked.root, linked.name);
+        if (!seenMaps.has(chained) && existsSync(chained)) {
+          seenMaps.add(chained);
+          pending.push({ mapPath: chained, base: dirname(chained) });
+        }
       }
     }
   }
@@ -252,38 +273,44 @@ export async function loadEmbeddedLicenses(root = EMBEDDED_LICENSES_ROOT) {
   }
   const referenced = new Set();
   const carriers = new Map();
-  for (const [name, entry] of Object.entries(manifest.carriers)) {
-    if (typeof entry?.version !== 'string' || !Array.isArray(entry.components)) {
-      throw new Error(`embedded-licenses carrier ${name} needs a version and components`);
+  for (const [name, value] of Object.entries(manifest.carriers)) {
+    // A linked workspace can bundle a newer carrier alongside the app's direct pin.
+    for (const entry of Array.isArray(value) ? value : [value]) {
+      if (typeof entry?.version !== 'string' || !Array.isArray(entry.components)) {
+        throw new Error(`embedded-licenses carrier ${name} needs a version and components`);
+      }
+      for (const component of entry.components) {
+        const label = `${name}@${entry.version} component ${component?.name ?? '(unnamed)'}`;
+        for (const key of ['name', 'version', 'license']) {
+          if (typeof component?.[key] !== 'string') throw new Error(`${label} has no ${key}`);
+        }
+        if (!Array.isArray(component.texts) || component.texts.length === 0) {
+          throw new Error(`${label} names no texts`);
+        }
+        for (const file of component.texts) {
+          if (!texts.has(file)) throw new Error(`${label} names unknown text ${file}`);
+          referenced.add(file);
+        }
+      }
+      // Map-path artifacts that name no package, each with the reviewer's reason.
+      const unattributed = entry.unattributedReferences ?? {};
+      for (const [reference, reason] of Object.entries(unattributed)) {
+        if (typeof reason !== 'string' || reason.length === 0) {
+          throw new Error(
+            `${name}@${entry.version} must explain unattributed reference ${reference}`,
+          );
+        }
+      }
+      const identity = `${name}@${entry.version}`;
+      if (carriers.has(identity))
+        throw new Error(`duplicate embedded-licenses carrier ${identity}`);
+      carriers.set(identity, {
+        name,
+        version: entry.version,
+        components: entry.components,
+        unattributed: new Set(Object.keys(unattributed)),
+      });
     }
-    for (const component of entry.components) {
-      const label = `${name}@${entry.version} component ${component?.name ?? '(unnamed)'}`;
-      for (const key of ['name', 'version', 'license']) {
-        if (typeof component?.[key] !== 'string') throw new Error(`${label} has no ${key}`);
-      }
-      if (!Array.isArray(component.texts) || component.texts.length === 0) {
-        throw new Error(`${label} names no texts`);
-      }
-      for (const file of component.texts) {
-        if (!texts.has(file)) throw new Error(`${label} names unknown text ${file}`);
-        referenced.add(file);
-      }
-    }
-    // Map-path artifacts that name no package, each with the reviewer's reason.
-    const unattributed = entry.unattributedReferences ?? {};
-    for (const [reference, reason] of Object.entries(unattributed)) {
-      if (typeof reason !== 'string' || reason.length === 0) {
-        throw new Error(
-          `${name}@${entry.version} must explain unattributed reference ${reference}`,
-        );
-      }
-    }
-    carriers.set(name, {
-      name,
-      version: entry.version,
-      components: entry.components,
-      unattributed: new Set(Object.keys(unattributed)),
-    });
   }
   const present = (await readdir(root)).filter((name) => name !== 'manifest.json');
   const orphans = present.filter((name) => !referenced.has(name));
@@ -300,8 +327,9 @@ export function embeddedLicenseRecords(packages, embedded, registry) {
   const bundledCarriers = new Set();
   for (const [carrierPath, names] of embedded) {
     const carrier = packages.get(carrierPath);
-    bundledCarriers.add(carrier.name);
-    const entry = registry.carriers.get(carrier.name);
+    const identity = `${carrier.name}@${carrier.version}`;
+    bundledCarriers.add(identity);
+    const entry = registry.carriers.get(identity);
     const found = [...names].map(([name, version]) => (version ? `${name}@${version}` : name));
     if (!entry || entry.version !== carrier.version) {
       problems.push(

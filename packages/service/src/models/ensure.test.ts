@@ -1,13 +1,13 @@
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import { describe, expect, it } from 'vitest';
-import type { LlamaCppModelManager } from '../providers/llama-cpp/index.js';
-import type { MlxModelManager } from '../providers/mlx/index.js';
 import {
   type EnsureEvent,
   KnownEnsureError,
   createEnsureModelOrchestrator,
   parseQualifiedModelId,
-} from './ensure.js';
+} from '@bendyline/gezel-inference/internal/models/ensure';
+import type { LlamaCppModelManager } from '@bendyline/gezel-inference/internal/providers/llama-cpp/index';
+import type { MlxModelManager } from '@bendyline/gezel-inference/internal/providers/mlx/index';
+import { describe, expect, it } from 'vitest';
 
 /**
  * Build a tiny stub catalog that responds to chat-model lookups from a

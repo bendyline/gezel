@@ -4,8 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CatalogItemDetail, ChatModelManifest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import {
+  type InstallEvent,
+  LlamaCppModelManager,
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/models';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type InstallEvent, LlamaCppModelManager } from './models.js';
 
 /**
  * Build a synthetic GGUF blob with chosen metadata. Mirrors the

@@ -30,13 +30,19 @@ import {
   securityPolicyForLevel,
 } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import { classifyModelTier } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
+import { resolveProfile } from '@bendyline/gezel-inference/internal/model-profile/registry';
+import {
+  applyBehaviorEnvOverrides,
+  profileHasBehavior,
+} from '@bendyline/gezel-inference/internal/model-profile/runtime';
+import type {
+  ResolvedModelProfile,
+  TurnCtx,
+} from '@bendyline/gezel-inference/internal/model-profile/types';
 import { RESERVED_TOOL_NAMES, normalizeToolNameSpelling } from '@bendyline/gezel-mcp';
 import { loadBuiltinToolContractsForLint } from '@bendyline/gezel-mcp/lint-contracts';
-import { resolveProfile } from '../model-profile/registry.js';
-import { applyBehaviorEnvOverrides, profileHasBehavior } from '../model-profile/runtime.js';
-import type { ResolvedModelProfile, TurnCtx } from '../model-profile/types.js';
 import { type PromptTaskContext, buildInstructions } from './instructions.js';
-import { classifyModelTier } from './local-model-tier.js';
 import {
   type PromptToolContractFinding,
   type PromptToolContractReport,

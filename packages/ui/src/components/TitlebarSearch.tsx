@@ -1,5 +1,5 @@
 import type { UnifiedSearchResult } from '@bendyline/gezel';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Popover } from '../primitives/index.js';
 import { SearchPalette } from './SearchPalette.js';
@@ -51,6 +51,8 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
   const wellRef = useRef<HTMLDivElement>(null);
   const modeRef = useRef<SearchMode>('search');
   const quickOpenShortcut = quickOpenShortcutLabel();
+  const resultsId = useId();
+  const paletteOpen = open && query.trim().length > 0;
 
   const focusInput = useCallback(() => {
     const el = inputRef.current;
@@ -209,10 +211,7 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
   );
 
   return (
-    <Popover.Root
-      open={open && query.trim().length > 0}
-      onOpenChange={(next) => (next ? setOpen(true) : dismiss())}
-    >
+    <Popover.Root open={paletteOpen} onOpenChange={(next) => (next ? setOpen(true) : dismiss())}>
       <Popover.Anchor asChild>
         {compact && !compactSearchActive ? (
           <button
@@ -243,6 +242,13 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
               data-testid="titlebar-search-input"
               placeholder={`Search projects, files, docs…  ${quickOpenShortcut}`}
               aria-label="Search"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={paletteOpen}
+              aria-controls={paletteOpen && flat.length > 0 ? resultsId : undefined}
+              aria-activedescendant={
+                paletteOpen && flat[activeIndex] ? `${resultsId}-option-${activeIndex}` : undefined
+              }
               value={query}
               spellCheck={false}
               autoComplete="off"
@@ -285,6 +291,7 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
           }}
         >
           <SearchPalette
+            id={resultsId}
             groups={groups}
             query={resultsQuery}
             activeIndex={activeIndex}

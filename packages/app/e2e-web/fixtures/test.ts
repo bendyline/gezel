@@ -241,7 +241,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   // would have named the cause). Auto so every spec gets it without
   // opting in.
   browserDiagnostics: [
-    async ({ page, daemon }, use, testInfo) => {
+    async ({ page, daemon, browserName }, use, testInfo) => {
       const lines: string[] = [];
       const push = (line: string) => {
         if (lines.length < MAX_DIAGNOSTIC_LINES) lines.push(line);
@@ -261,8 +261,8 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       });
       // Enabled before the page runs: a renderer already spinning in JS never
       // services Debugger.enable, but an enabled debugger's pause interrupts it.
-      const cdp = await page.context().newCDPSession(page);
-      await cdp.send('Debugger.enable');
+      const cdp = browserName === 'chromium' ? await page.context().newCDPSession(page) : null;
+      await cdp?.send('Debugger.enable');
       await use(undefined);
       if (testInfo.status !== testInfo.expectedStatus) {
         // A blank page whose goto never reaches `load` recorded nothing above
@@ -271,7 +271,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         // reports responses from the renderer) or daemon requests that never
         // answer, holding Chrome's six connections per origin so the lazy
         // chunks behind `load` never go out. Ask each side directly.
-        for (const line of await probeRenderer(page, cdp)) push(line);
+        if (cdp) for (const line of await probeRenderer(page, cdp)) push(line);
         for (const line of await probeDaemon(daemon)) push(line);
       }
       if (testInfo.status !== testInfo.expectedStatus && lines.length > 0) {

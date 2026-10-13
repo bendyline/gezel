@@ -1,5 +1,5 @@
+import { Ds4CacheAdapter } from '@bendyline/gezel-inference/internal/providers/ds4/cache-adapter';
 import { describe, expect, it, vi } from 'vitest';
-import { Ds4CacheAdapter } from './cache-adapter.js';
 
 function makeAdapter(over: Partial<ConstructorParameters<typeof Ds4CacheAdapter>[0]> = {}) {
   const prefillSession = vi.fn(async () => true);

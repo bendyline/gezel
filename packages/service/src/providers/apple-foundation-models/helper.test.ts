@@ -1,7 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import {
+  AppleFmError,
+  AppleFmHelper,
+} from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/helper';
 import { describe, expect, it, vi } from 'vitest';
-import { AppleFmError, AppleFmHelper } from './helper.js';
 
 /** A stand-in for the gezel-apple-fm process: records requests, scripts replies. */
 class FakeChild extends EventEmitter {

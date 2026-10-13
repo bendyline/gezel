@@ -2,11 +2,11 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildToolReceipt } from '@bendyline/gezel';
+import type { ToolCallEvent } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { deliverableWrittenThisTurn } from '../chat/deliverable-gate.js';
 import { isExactLocalSourceRead } from '../tasks/research-evidence-match.js';
 import { normalizeCliToolEvent } from './cli-tool-event.js';
-import type { ToolCallEvent } from './types.js';
 
 let dir: string;
 let cwd: string;

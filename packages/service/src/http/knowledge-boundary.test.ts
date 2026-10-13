@@ -12,9 +12,9 @@ import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
+import { sharedKnowledgeVersionDir } from '@bendyline/gezel-inference/internal/machine-engine/knowledge-assets';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildTestCatalog } from '../knowledge/test-catalog-fixture.js';
-import { sharedKnowledgeVersionDir } from '../machine-engine/knowledge-assets.js';
 import { type RunningEngineService, type RunningService, startService } from '../service.js';
 
 const priorEnv = {

@@ -15,7 +15,7 @@
 
 import { readFile, stat } from 'node:fs/promises';
 import { isRateLimitStatus } from '@bendyline/gezel';
-import { realpathContained, safeJoin } from '../../fs/safe-paths.js';
+import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { connectorSecretKey, registerNativeAdapter } from '../registry.js';
 import type {
   AdapterDeps,

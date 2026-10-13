@@ -3,7 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { drafterDirFor, resolveSpecDrafter } from './spec-drafter.js';
+import {
+  drafterDirFor,
+  resolveSpecDrafter,
+} from '@bendyline/gezel-inference/internal/providers/mlx/spec-drafter';
 
 let root: string;
 let modelDir: string;

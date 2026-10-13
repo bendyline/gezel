@@ -8,8 +8,8 @@ import {
   initialPoppetjeForGezel,
   poppetjeFromSeed,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { type ExternalFolders, gezelPoppetjePath } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
 
 const log = createLogger('poppetje');
 

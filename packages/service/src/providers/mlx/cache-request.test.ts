@@ -1,7 +1,7 @@
+import { MlxCacheAdapter } from '@bendyline/gezel-inference/internal/providers/mlx/cache-adapter';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import { missingTopLevelRequiredToolArgs } from '@bendyline/gezel-inference/internal/providers/mlx/tool-call-protocol';
 import { describe, expect, it } from 'vitest';
-import { MlxCacheAdapter } from './cache-adapter.js';
-import { MlxProvider } from './provider.js';
-import { missingTopLevelRequiredToolArgs } from './tool-call-protocol.js';
 
 function completionResponse(
   content = 'ok',

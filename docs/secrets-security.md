@@ -11,7 +11,7 @@ anyone touching [packages/service/src/secrets/](../packages/service/src/secrets/
 
 ## Where secrets live today
 
-The `SecretStore` abstraction ([types.ts](../packages/service/src/secrets/types.ts))
+The `SecretStore` abstraction ([types.ts](../packages/inference/src/secrets/types.ts))
 has two backends; [openSecretStore](../packages/service/src/secrets/index.ts)
 picks one per process at boot.
 

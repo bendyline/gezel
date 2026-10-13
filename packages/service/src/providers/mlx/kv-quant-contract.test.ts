@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
  * the one setting that halves a 16 GiB KV cache took the engine down on use
  * instead. It was invisible because the flag is opt-in and defaults to off.
  */
-const HERE = join(import.meta.dirname, '.');
+const HERE = join(import.meta.dirname, '../../../../inference/src/providers/mlx');
 const BUILDER = readFileSync(join(HERE, 'build-provider.ts'), 'utf8');
 const SIDECAR = readFileSync(join(HERE, 'python', 'gezel_mlx_server.py'), 'utf8');
 

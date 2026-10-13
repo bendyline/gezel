@@ -1,5 +1,5 @@
 import type { GezelSummary, Project, Task } from '@bendyline/gezel';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -455,4 +455,33 @@ describe('TasksView', () => {
     });
     expect(api.listTasks).not.toHaveBeenCalled();
   });
+
+  it.each(['response', 'failure'])(
+    'ignores an old task filter %s after a new filter wins',
+    async (outcome) => {
+      let resolveOld!: (value: { tasks: Task[] }) => void;
+      let rejectOld!: (reason: Error) => void;
+      vi.mocked(api.listTasks).mockImplementation((filter) => {
+        if (!filter?.status)
+          return new Promise((resolve, reject) => {
+            resolveOld = resolve;
+            rejectOld = reject;
+          });
+        return Promise.resolve({ tasks: [makeTask({ title: 'Filtered task' })] });
+      });
+      render(<TasksView />);
+      await waitFor(() => expect(resolveOld).toBeTypeOf('function'));
+      const statusSelect = screen
+        .getAllByTestId('mock-select')
+        .find((el) => within(el).queryByText(/All statuses/))!;
+      fireEvent.change(statusSelect, { target: { value: 'active' } });
+      await screen.findByText('Filtered task');
+      await act(async () => {
+        if (outcome === 'response') resolveOld({ tasks: [makeTask({ title: 'Stale task' })] });
+        else rejectOld(new Error('Stale task failure'));
+      });
+      expect(screen.queryByText(/Stale task/)).not.toBeInTheDocument();
+      expect(screen.getByText('Filtered task')).toBeVisible();
+    },
+  );
 });

@@ -273,8 +273,8 @@
 }
 
 .gz-dialog-actions .primary {
-  background: var(--accent, #b0724c);
-  color: #fff;
+  background: var(--action-bg);
+  color: var(--action-ink);
   border-color: var(--accent, #b0724c);
 }
 
@@ -375,6 +375,9 @@
   font-family: inherit;
   cursor: pointer;
   line-height: 1.3;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .gz-select-trigger:hover {
@@ -411,6 +414,7 @@
   line-height: 1;
   opacity: 1;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .gz-select-content {
@@ -421,6 +425,7 @@
   z-index: 1100;
   overflow: hidden;
   min-width: var(--radix-select-trigger-width);
+  max-width: var(--radix-select-content-available-width);
   max-height: var(--radix-select-content-available-height);
   animation: gz-fade-in 120ms ease-out;
 }
@@ -452,11 +457,27 @@
   cursor: pointer;
   outline: none;
   user-select: none;
+  overflow-wrap: anywhere;
+}
+
+@media (any-pointer: coarse) {
+  .gz-dialog-actions button,
+  .gz-dialog .gz-tabs-trigger,
+  .gz-select-trigger,
+  .gz-select-item {
+    min-height: 44px;
+  }
+
+  .gz-select-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
 }
 
 .gz-select-item[data-highlighted] {
-  background: var(--accent, #b0724c);
-  color: #fff;
+  background: var(--action-bg);
+  color: var(--action-ink);
 }
 
 .gz-select-item[data-disabled] {

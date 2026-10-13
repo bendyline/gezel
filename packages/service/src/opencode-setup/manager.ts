@@ -11,9 +11,13 @@ import type {
   OpenCodeSetupStatusResponse,
   ProviderName,
 } from '@bendyline/gezel';
-import { writeFileAtomic } from '../fs/atomic.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import {
+  readSecurityJson,
+  writeSecurityJson,
+} from '@bendyline/gezel-inference/internal/fs/security-json';
+import type { ModelInfo } from '@bendyline/gezel-inference/internal/providers/types';
 import { setupOwnerId as managedFileOwnerId } from '../fs/managed-marker.js';
-import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
 import type { OpenCodeBridgeController } from '../http/opencode-bridge.js';
 import { OPENCODE_SETUP_RESERVED_APP_ID, type TokenStore } from '../http/token-store.js';
 import {
@@ -33,7 +37,6 @@ import {
   readOptionalFile,
   recommendedHarnessModel,
 } from '../local-harness/base.js';
-import type { ModelInfo } from '../providers/types.js';
 import { type OpenCodeBinaryDetection, detectOpenCodeBinary } from './binary.js';
 import { openCodePluginDir, openCodePluginPath, resolveOpenCodeConfigDir } from './config-dir.js';
 import { OPENCODE_PLUGIN_MARKER, buildOpenCodePluginSource } from './plugin-source.js';

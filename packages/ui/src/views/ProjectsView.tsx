@@ -1,5 +1,6 @@
-import './ProjectsView.css';
 import { EditorShell, useEditorContext } from '@bendyline/squisq-editor-react';
+import './ProjectsView.css';
+
 import '@bendyline/squisq-editor-react/styles';
 import type {
   BoekwachterIssue,
@@ -3785,7 +3786,7 @@ function HtmlFileViewer({
             colorScheme={editorTheme}
             showPlayTab={false}
             fullWidth
-            toolbarSlotRight={toolbarIndexToggle}
+            toolbarSlotRight={toolbarIndexToggle == null ? undefined : <>{toolbarIndexToggle}</>}
             statusBarSlotRight={
               !isReadOnly ? <AutosaveStatus autosave={sourceAutosave} /> : undefined
             }
@@ -3932,6 +3933,7 @@ function ProjectDocEditor({
       </p>
       <div className="editor-wrap">
         <EditorShell
+          ariaLabel={label}
           initialMarkdown={autosave.desiredValue()}
           onChange={handleDocChange}
           height="240px"

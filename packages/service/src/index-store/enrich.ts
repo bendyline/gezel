@@ -6,12 +6,15 @@ import {
   createLogger,
   isLocalProvider,
 } from '@bendyline/gezel';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import {
+  EngineBusyError,
+  isEngineBusyError,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 import { CompletionBlockedError } from '../chat/large-content.js';
 import type { ChatManager } from '../chat/manager.js';
-import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
-import { EngineBusyError, isEngineBusyError } from '../providers/native/capacity-broker.js';
 import { shadowDocFilesPaths } from './docs.js';
 import { type EnrichOutcome, classifyEnrichFailure } from './enrich-breaker.js';
 import {
@@ -351,7 +354,7 @@ export async function buildEnrichDeps(
     onOutcome?: (outcome: EnrichOutcome) => void;
   } = {},
 ): Promise<EnrichDeps> {
-  const { embedBatch } = await import('../memory/embeddings.js');
+  const { embedBatch } = await import('@bendyline/gezel-inference/internal/memory/embeddings');
   const embed = (texts: string[]) => embedBatch(texts);
 
   const target = await resolveEnrichTarget(store, opts);

@@ -29,9 +29,9 @@ import { type WriteStream, createWriteStream, existsSync } from 'node:fs';
 import { mkdir, rename, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { type ObservationTableManifest, createLogger, nowIso } from '@bendyline/gezel';
+import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { ObservationBatch } from '../connectors/types.js';
 import { slug } from '../connectors/writer.js';
-import { resolveInside } from '../fs/safe-paths.js';
 import {
   type ObservationTableState,
   UNPARTITIONED,

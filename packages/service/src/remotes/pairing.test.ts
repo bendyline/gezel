@@ -1,21 +1,21 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateLoopbackCert } from '../http/cert.js';
-import type { SecretKey, SecretStore } from '../secrets/types.js';
-import { stringifySecretKey } from '../secrets/types.js';
 import {
   certFingerprintFromPem,
   loadOrCreateDeviceIdentity,
   signCertFingerprint,
-} from './identity.js';
+} from '@bendyline/gezel-inference/internal/remotes/identity';
+import { createPairedRemoteFetch } from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
+import type { SecretKey, SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
+import { stringifySecretKey } from '@bendyline/gezel-inference/internal/secrets/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { generateLoopbackCert } from '../http/cert.js';
 import {
   inspectRemoteIdentity,
   normalizeRemoteBaseUrl,
   remoteIdForFingerprint,
 } from './pairing.js';
-import { createPairedRemoteFetch } from './pinned-fetch.js';
 import type { PairedRemote, RemotesRegistry } from './registry.js';
 
 function memSecrets(): SecretStore {

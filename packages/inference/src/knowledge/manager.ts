@@ -1,0 +1,1937 @@
+/**
+ * KnowledgeManager — the daemon-side owner of installed `.gezk` catalogs:
+ * registry + mount lifecycle (verify-before-mount → quarantine-with-reason),
+ * background install jobs (a client disconnect never abandons a download),
+ * the gilde join (what is available, what has a newer version), browse APIs
+ * for the routes, and the SearchService knowledge arm. Every SQLite touch
+ * goes through the KnowledgeCatalogHost (worker thread in production); this
+ * class never opens a catalog database itself.
+ */
+
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { readFile, readdir, rm, stat } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type {
+  GezelConfig,
+  IncompleteKnowledgeDownload,
+  KnowledgeActiveInstall,
+  KnowledgeAvailableCatalog,
+  KnowledgeCatalogItemManifest,
+  KnowledgeCatalogRef,
+  KnowledgeCatalogStatus,
+  KnowledgeEmbeddingProfile,
+  KnowledgeHistoryKind,
+  KnowledgeInstallEvent,
+  KnowledgeInstallJob,
+  KnowledgeInstallRequest,
+  KnowledgeInstallSourceKind,
+  KnowledgePassageRead,
+  KnowledgeSemanticSearchMode,
+  KnowledgeUpdateCandidate,
+  KnowledgeUri,
+  ProjectKnowledgeCatalogs,
+  TrustedKnowledgeCoordinate,
+  UnifiedSearchResult,
+} from '@bendyline/gezel';
+import {
+  KnowledgeMachineInventorySchema,
+  type KnowledgeNearbyDocument,
+  type KnowledgeNearbyRequest,
+  KnowledgeNearbyRequestSchema,
+  type KnowledgeNearbyResponse,
+  type KnowledgeRadius,
+  createLogger,
+  formatKnowledgeUri,
+  parseKnowledgeUri,
+  resolveSecurityPolicy,
+  sameVectorSpace,
+} from '@bendyline/gezel';
+import type { HistoryEvent } from '@bendyline/gezel';
+import type { CatalogService } from '@bendyline/gezel-catalog';
+import {
+  type ModelDownloadProgress,
+  compareCatalogVersions,
+  knowledgeEmbeddingProfile,
+  readGezkManifest,
+} from '@bendyline/gezel-knowledge';
+import {
+  knowledgeCatalogVersionDir,
+  knowledgeCatalogsDir,
+  knowledgeDownloadsDir,
+} from '@bendyline/gezel/paths';
+import { HANDBOEK_KNOWLEDGE_CATALOG, HANDBOEK_KNOWLEDGE_PUBLISHER } from './bundled-catalog.js';
+type HistoryManager = {
+  log(event: Omit<HistoryEvent, 'id' | 'at'> & { at?: string; id?: string }): Promise<void>;
+};
+import { scoreResult } from '@bendyline/gezel';
+import {
+  sharedKnowledgeRoot,
+  sharedKnowledgeVersionDir,
+} from '../machine-engine/knowledge-assets.js';
+import { embedKnowledgeQuery, sharesDaemonEmbedder } from '../memory/embeddings.js';
+import { ChatModelInstallRegistry } from '../models/install-registry.js';
+import { beginPerfWork } from '../perf/responsiveness.js';
+import type {
+  GlobalSearchHit,
+  GlobalSearchResponse,
+  KnowledgeCatalogHost,
+  KnowledgeChunk,
+} from './catalog-host.js';
+import { resolveKnowledgeCatalogSource } from './catalog-source.js';
+import {
+  KNOWLEDGE_DOWNLOAD_KEY_PATTERN,
+  type KnowledgeExpectedIdentity,
+  type KnowledgeInstallSource,
+  installKnowledgeCatalog,
+  knowledgeDownloadKey,
+  pruneOtherKnowledgeCatalogVersions,
+} from './install.js';
+import { KnowledgeRegistry, type KnowledgeRegistryEntry } from './registry.js';
+import type { SharedEnsureResult, SharedKnowledgeInstaller } from './shared-install-contract.js';
+import {
+  KnowledgeSpatialCursorError,
+  encodeNearbyCursor,
+  nearbyCursorOffset,
+  regionalDocumentIdentity,
+} from './spatial-query.js';
+import { type KnowledgeVectorFloors, resolveKnowledgeVectorFloors } from './vector-floors.js';
+
+type GlobalSearchDocumentHit = GlobalSearchResponse['documents'][number];
+
+export type { KnowledgeCatalogStatus, KnowledgeInstallJob, KnowledgeSemanticSearchMode };
+
+const log = createLogger('knowledge');
+
+/** Explicit-search shard budget (S) across every active catalog (§3.4). */
+const ROUTE_BUDGET_EXPLICIT = 6;
+/**
+ * Shards added beyond that budget for pages the query names by title (the
+ * catalog host's title-assisted routing): the centroids alone left the ABBA
+ * article unscanned for "Who were the members of ABBA?". Two, not one per
+ * catalog, so twenty mounted catalogs cannot add twenty scans.
+ */
+const TITLE_ROUTE_EXPLICIT = 2;
+const FINAL_K = 24;
+/** Same cadence as the catalog download's own progress (download-with-retry). */
+const EMBEDDER_PROGRESS_INTERVAL_MS = 250;
+const DEFAULT_EMBEDDER_PREWARM_TIMEOUT_MS = 5 * 60_000;
+/** Finished jobs stay pollable for a minute: the CLI and older cards poll `/jobs/:id`. */
+const JOB_TTL_MS = 60_000;
+const AUTO_UPDATE_STARTUP_DELAY_MS = 10 * 60_000;
+const AUTO_UPDATE_INTERVAL_MS = 24 * 60 * 60_000;
+
+/**
+ * A catalog's semantic mode. `shared` reuses the daemon's own query vectors,
+ * `profile` loads the registered profile's pinned model on demand, and a
+ * profile that matches neither — including a registered id whose pinned
+ * files or precision differ — is searched by keyword only rather than with
+ * vectors from another space.
+ */
+function semanticSearchModeFor(profile: KnowledgeEmbeddingProfile): KnowledgeSemanticSearchMode {
+  if (sharesDaemonEmbedder(profile)) return 'shared';
+  const registered = knowledgeEmbeddingProfile(profile.id);
+  if (registered && sameVectorSpace(registered, profile)) return 'profile';
+  return 'keyword-only';
+}
+
+/**
+ * Explicit search fuses three arms per catalog by reciprocal rank (k = 60):
+ * the vector chunks (best chunk per document, by rerank cosine), the
+ * doc-title FTS hits, and the chunk-body FTS hits. Rank fusion instead of
+ * score comparison because the arms' scores are not commensurable — e5
+ * cosines sit in a narrow 0.7–0.9 band for everything, so a cosine-first
+ * ordering buried an exact title match under any vaguely related passage
+ * ("Who painted the Mona Lisa?" listed three other Mona Lisa copies above
+ * the article whose title the question names). Two lexical arms agreeing
+ * on a document now outrank one vector arm; a document every arm names
+ * comes first.
+ */
+const RRF_K = 60;
+const ARM_WEIGHTS = { vector: 1, docFts: 1, chunkFts: 0.5 } as const;
+/**
+ * Media rows fuse per row, not per document: a document's own text chunk
+ * (cosine ≈ 0.9) would otherwise always stand in for its image (≈ 0.7). Each
+ * modality is ranked on its own scale, past its own measured floor.
+ */
+const MEDIA_ARM_WEIGHTS = { vector: 0.5, chunkFts: 0.25 } as const;
+/** Media rows asked of each catalog, per modality, on an explicit search. */
+const MEDIA_K = 2;
+/** Media results one search returns at most, and per document. */
+const MEDIA_RESULT_CAP = 4;
+const MEDIA_PER_DOCUMENT = 1;
+/**
+ * Fused documents per catalog when several are in scope: keeps one catalog
+ * from monopolizing the merged list. A search scoped to one catalog has
+ * nothing to share the list with, and the cap cut the Knowledge browser's
+ * search for "blob" in an Azure-docs catalog — 348 matching titles — to six.
+ */
+const PER_CATALOG_CAP = 6;
+/** Lexical candidates fetched per arm before fusion, at the least. */
+const DOC_FTS_MIN = 6;
+const CHUNK_FTS_MIN = 8;
+
+/** Rank-anchored relevance for a fused knowledge result: the best hit is a strong 1.0, decaying RRF-style. */
+function fusedRankRelevance(rank: number): number {
+  return 11 / (11 + rank);
+}
+
+/**
+ * The first prose paragraph of a document body, for a hit that no chunk
+ * carries (a title-only match): the model gets something to read, not just
+ * a summary line. Skips the title heading and a key-facts list.
+ */
+function leadExcerpt(markdown: string, max = 600): string {
+  const body = markdown.replace(/^#\s[^\n]*\n+/, '');
+  const paragraph =
+    body
+      .split(/\n\s*\n/)
+      .map((part) => part.trim())
+      .find((part) => part.length > 0 && !part.startsWith('#') && !part.startsWith('- ')) ??
+    body.trim();
+  return paragraph.length > max ? `${paragraph.slice(0, max - 1)}…` : paragraph;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+export type KnowledgeInstallRequestSource = KnowledgeInstallRequest['source'];
+
+interface MountedInfo {
+  ref: KnowledgeCatalogRef;
+  key: string;
+  rootDir: string;
+  name: string;
+  description?: string;
+  language: string;
+  license: string;
+  documents: number;
+  chunks: number;
+  sizeBytes: number;
+  vectorCompatible: boolean;
+  semanticSearch: KnowledgeSemanticSearchMode;
+  embedding: KnowledgeEmbeddingProfile;
+  /** topic id → display name, from the shipped TOC. */
+  topicNames: Map<string, string>;
+  sourceUrlByDoc: Map<string, string>;
+}
+
+interface InstallStart {
+  request: KnowledgeInstallRequestSource;
+}
+
+/** Which arm vouches for a fused knowledge hit — see the vector arm in `searchUnified`. */
+type KnowledgeEvidence = { arm: 'vector'; similarity: number } | { arm: 'fts' };
+
+interface InstallPlan {
+  source: KnowledgeInstallSource;
+  origin: KnowledgeInstallSourceKind;
+  archiveBytes?: number;
+  expectedIdentity?: KnowledgeExpectedIdentity;
+  /** Set for catalog installs: what the machine broker may be asked to share. */
+  coordinate?: TrustedKnowledgeCoordinate;
+  /** `auto` tries the machine-shared store first; `user` keeps the bytes private. */
+  placement: 'auto' | 'user';
+}
+
+type DoneEvent = Extract<KnowledgeInstallEvent, { type: 'done' }>;
+
+export interface KnowledgeManagerOptions {
+  home: string;
+  host: KnowledgeCatalogHost;
+  env?: NodeJS.ProcessEnv;
+  fetchImpl?: typeof fetch;
+  /** The gilde loader: `knowledge-catalog` entries are the download source and the update oracle. */
+  catalog?: CatalogService;
+  history?: HistoryManager;
+  /** The security policy (app network) and the auto-update default. */
+  readConfig?: () => Promise<GezelConfig | null>;
+  /** The machine broker's shared store, when a machine engine is adopted. */
+  sharedInstaller?: SharedKnowledgeInstaller;
+  /** Project policy lookup (Store.getProject wrapper); null = no policy. */
+  projectPolicy?: (projectId: string) => Promise<ProjectKnowledgeCatalogs | null>;
+  /** Test seam: embed a query in a catalog profile's space (default: the embed worker). */
+  embedQueryForProfile?: (
+    text: string,
+    profile: KnowledgeEmbeddingProfile,
+    opts?: {
+      onDownloadProgress?: (progress: ModelDownloadProgress) => void;
+      localFilesOnly?: boolean;
+    },
+  ) => Promise<number[]>;
+  /** Optional profile-model prewarm ceiling; keyword search remains usable on timeout. */
+  profilePrewarmTimeoutMs?: number;
+  /** Test seam; null turns off the bundled Handboek. */
+  bundledHandboekArchive?: string | null;
+  /** Test seam: per-profile cosine floors (default: the measured table + env override). */
+  vectorFloors?: KnowledgeVectorFloors;
+}
+
+export class KnowledgeManager {
+  readonly registry: KnowledgeRegistry;
+  private readonly mountedByKey = new Map<string, MountedInfo>();
+  private readonly installs: ChatModelInstallRegistry<KnowledgeInstallEvent, InstallStart>;
+  /** What each running job was asked to install, for the active-install listing. */
+  private readonly jobRequests = new Map<string, KnowledgeInstallRequestSource>();
+  /** Download temp keys of running jobs, so the incomplete listing skips live transfers. */
+  private readonly jobDownloadKeys = new Map<string, string>();
+  private readonly autoUpdateTimers: NodeJS.Timeout[] = [];
+  private jobCounter = 0;
+  private readonly vectorFloors: KnowledgeVectorFloors;
+
+  constructor(private readonly opts: KnowledgeManagerOptions) {
+    this.registry = new KnowledgeRegistry(opts.home);
+    this.vectorFloors = opts.vectorFloors ?? resolveKnowledgeVectorFloors(opts.env ?? process.env);
+    this.installs = new ChatModelInstallRegistry<KnowledgeInstallEvent, InstallStart>({
+      engine: 'knowledge',
+      run: (jobId, start) => this.runInstall(jobId, start.request),
+      finishedTtlMs: JOB_TTL_MS,
+    });
+  }
+
+  get host(): KnowledgeCatalogHost {
+    return this.opts.host;
+  }
+
+  /** The job registry, for the SSE subscriber shared with the model install routes. */
+  get installRegistry(): ChatModelInstallRegistry<KnowledgeInstallEvent, InstallStart> {
+    return this.installs;
+  }
+
+  private keyFor(ref: { publisherId: string; catalogId: string }): string {
+    return `${ref.publisherId}/${ref.catalogId}`;
+  }
+
+  private dirFor(ref: KnowledgeCatalogRef): string {
+    if (ref.storageScope === 'machine-shared') {
+      const root = sharedKnowledgeRoot(this.opts.env);
+      if (!root) {
+        throw new Error(
+          'catalog is stored in the machine-shared asset store, which is not configured on this device',
+        );
+      }
+      // Mounted read-only from the shared store; verify-before-mount runs
+      // the same per-file hash reconciliation as the private tier.
+      return sharedKnowledgeVersionDir(root, {
+        publisherId: ref.publisherId,
+        catalogId: ref.catalogId,
+        version: ref.version,
+        expectedDigest: ref.contentDigest,
+      });
+    }
+    return knowledgeCatalogVersionDir(
+      this.opts.home,
+      ref.publisherId,
+      ref.catalogId,
+      ref.version,
+      ref.contentDigest,
+    );
+  }
+
+  /** Mount every enabled registry entry. Failures quarantine, never throw. */
+  async start(): Promise<void> {
+    await this.ensureBundledHandboek().catch((err) => {
+      log.warn(`bundled Handboek catalog unavailable: ${errorMessage(err)}`);
+    });
+    for (const entry of this.registry.read().catalogs) {
+      if (!entry.enabled) continue;
+      await this.mountEntry(entry, { deferPrewarm: true }).catch((err) => {
+        const reason = errorMessage(err);
+        log.warn(`catalog ${entry.ref.catalogId} failed to mount: ${reason}`);
+        this.registry.quarantine(entry.ref.publisherId, entry.ref.catalogId, reason);
+      });
+    }
+    // After every mount, not between them: the worker runs one op at a time,
+    // and boot awaits start(), so a warm-up queued per mount would hold the
+    // next catalog's validation — and the service — behind it.
+    for (const key of this.mountedByKey.keys()) this.prewarmVectors(key);
+  }
+
+  private async ensureBundledHandboek(): Promise<void> {
+    const archive = this.opts.bundledHandboekArchive ?? null;
+    if (!archive) return;
+    const bytes = await readFile(archive);
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    const existing = this.registry.find(HANDBOEK_KNOWLEDGE_PUBLISHER, HANDBOEK_KNOWLEDGE_CATALOG);
+    if (existing && existing.source !== 'bundled') {
+      log.warn(
+        'Handboek catalog id is already used by a user-installed catalog; leaving it intact',
+      );
+      return;
+    }
+    if (existing?.ref.contentDigest === digest) return;
+    const enabled = existing?.enabled ?? true;
+    const manifest = await readGezkManifest(archive);
+    for await (const event of installKnowledgeCatalog({
+      home: this.opts.home,
+      source: { kind: 'file', path: archive },
+      origin: 'bundled',
+      expectedIdentity: {
+        publisherId: HANDBOEK_KNOWLEDGE_PUBLISHER,
+        catalogId: HANDBOEK_KNOWLEDGE_CATALOG,
+        version: manifest.version,
+      },
+      registry: this.registry,
+      validateCatalog: (rootDir, deep) => this.opts.host.validate(rootDir, deep),
+    })) {
+      if (event.type === 'error') throw new Error(event.error);
+      if (event.type === 'done') {
+        if (!enabled) this.registry.setEnabled(event.ref.publisherId, event.ref.catalogId, false);
+        await pruneOtherKnowledgeCatalogVersions(this.opts.home, event.ref);
+      }
+    }
+  }
+
+  private async mountEntry(
+    entry: KnowledgeRegistryEntry,
+    opts: { justVerified?: boolean; deferPrewarm?: boolean } = {},
+  ): Promise<void> {
+    const ref = entry.ref;
+    const key = this.keyFor(ref);
+    if (this.mountedByKey.has(key)) return;
+    const rootDir = this.dirFor(ref);
+
+    // Full verify before mount, including SQLite quick_check, vector-table
+    // alignment, self-KNN, and publisher smoke queries. This runs in the
+    // dedicated knowledge worker in production. An install that deep-validated
+    // these bytes moments ago re-checks hashes and counts only: repeating the
+    // deep pass doubled the tail of every update, during which the worker
+    // answered no other knowledge query.
+    const report = await this.opts.host.validate(rootDir, opts.justVerified !== true);
+    if (!report.ok || !report.manifest) {
+      const failed = report.checks.filter((c) => !c.ok);
+      throw new Error(
+        failed.length > 0
+          ? `verification failed: ${failed[0]?.name}${failed[0]?.detail ? ` (${failed[0]?.detail})` : ''}`
+          : 'verification failed',
+      );
+    }
+    const manifest = report.manifest;
+    if (manifest.id !== ref.catalogId || manifest.version !== ref.version) {
+      throw new Error(
+        `on-disk catalog is ${manifest.id}@${manifest.version}, registry expects ${ref.catalogId}@${ref.version}`,
+      );
+    }
+
+    await this.opts.host.mount({ key, rootDir, catalogId: ref.catalogId, version: ref.version });
+    const topics = await this.opts.host.topics(key);
+
+    // Queries must be embedded in the catalog's own space. A profile the
+    // daemon's model already implements shares its vectors; a registered
+    // profile gets its own model loaded on demand; anything else is keyword-only.
+    const semanticSearch = semanticSearchModeFor(manifest.embedding);
+    const vectorCompatible = semanticSearch !== 'keyword-only';
+
+    this.mountedByKey.set(key, {
+      ref,
+      key,
+      rootDir,
+      name: manifest.name,
+      ...(manifest.description ? { description: manifest.description } : {}),
+      language: manifest.language,
+      license: manifest.license.name,
+      documents: manifest.counts.documents,
+      chunks: manifest.counts.chunks,
+      sizeBytes: manifest.files.reduce((sum, f) => sum + f.sizeBytes, 0),
+      vectorCompatible,
+      semanticSearch,
+      embedding: manifest.embedding,
+      topicNames: new Map(topics.map((t) => [t.id, t.name])),
+      sourceUrlByDoc: new Map(),
+    });
+    log.info(
+      `mounted ${ref.catalogId}@${ref.version} (${manifest.counts.documents} documents, semantic search: ${semanticSearch})`,
+    );
+    if (!opts.deferPrewarm) this.prewarmVectors(key);
+  }
+
+  /**
+   * Load a catalog's vector bits in the worker now, in the background. The
+   * first semantic search otherwise loads them itself — ~300 ms for a
+   * 200k-chunk shard — inside its 600 ms scope budget, times out, and the
+   * knowledge arm answers nothing, keyword hits included. A failure here
+   * costs only that first search.
+   */
+  private prewarmVectors(key: string): void {
+    const info = this.mountedByKey.get(key);
+    if (!info?.vectorCompatible) return;
+    const started = performance.now();
+    this.opts.host.prewarm(key).then(
+      (shards) => {
+        if (shards === 0) return;
+        log.info(
+          `prewarmed ${info.ref.catalogId} vectors: ${shards} shard(s) in ${Math.round(performance.now() - started)}ms`,
+        );
+      },
+      (err) => log.warn(`vector prewarm for ${info.ref.catalogId} failed: ${errorMessage(err)}`),
+    );
+  }
+
+  async stop(): Promise<void> {
+    for (const timer of this.autoUpdateTimers.splice(0)) clearTimeout(timer);
+    this.installs.clear();
+    await this.opts.host.dispose();
+    this.mountedByKey.clear();
+  }
+
+  // ── the gilde join ────────────────────────────────────────────────────────
+
+  /**
+   * Every gilde `knowledge-catalog` entry (newest version), keyed by
+   * publisher/id, with the catalog route URL of its Reference Mark artwork.
+   */
+  private async gildeEntries(): Promise<
+    Map<string, { manifest: KnowledgeCatalogItemManifest; logoUrl?: string }>
+  > {
+    const out = new Map<string, { manifest: KnowledgeCatalogItemManifest; logoUrl?: string }>();
+    if (!this.opts.catalog) return out;
+    try {
+      for (const item of await this.opts.catalog.list('knowledge-catalog')) {
+        if (item.manifest.kind !== 'knowledge-catalog') continue;
+        out.set(
+          this.keyFor({ publisherId: item.manifest.publisherId, catalogId: item.manifest.id }),
+          { manifest: item.manifest, ...(item.logoUrl ? { logoUrl: item.logoUrl } : {}) },
+        );
+      }
+    } catch (err) {
+      log.debug(`knowledge catalog listing unavailable: ${errorMessage(err)}`);
+    }
+    return out;
+  }
+
+  /** Every gilde `knowledge-catalog` manifest (newest version), keyed by publisher/id. */
+  private async gildeItems(): Promise<Map<string, KnowledgeCatalogItemManifest>> {
+    const out = new Map<string, KnowledgeCatalogItemManifest>();
+    for (const [key, entry] of await this.gildeEntries()) out.set(key, entry.manifest);
+    return out;
+  }
+
+  /** Coordinates present in the machine-shared asset store (public inventory, read-only). */
+  private async sharedInventoryKeys(): Promise<Set<string>> {
+    const root = sharedKnowledgeRoot(this.opts.env);
+    if (!root) return new Set();
+    try {
+      const inventory = KnowledgeMachineInventorySchema.parse(
+        JSON.parse(await readFile(join(root, 'inventory.json'), 'utf8')),
+      );
+      return new Set(
+        inventory.catalogs.map(
+          (c) => `${c.publisherId}/${c.catalogId}/${c.version}/${c.contentDigest}`,
+        ),
+      );
+    } catch {
+      return new Set();
+    }
+  }
+
+  // ── listing ───────────────────────────────────────────────────────────────
+
+  async list(): Promise<KnowledgeCatalogStatus[]> {
+    const gilde = await this.gildeEntries();
+    return this.registry.read().catalogs.map((entry) => {
+      const key = this.keyFor(entry.ref);
+      const mounted = this.mountedByKey.get(key);
+      const listed = gilde.get(key);
+      const item = listed?.manifest;
+      const availableVersion =
+        item && compareCatalogVersions(item.version, entry.ref.version) > 0
+          ? item.version
+          : undefined;
+      return {
+        ref: entry.ref,
+        enabled: entry.enabled,
+        addedAt: entry.addedAt,
+        ...(entry.disabledReason ? { disabledReason: entry.disabledReason } : {}),
+        mounted: Boolean(mounted),
+        ...(mounted
+          ? {
+              name: mounted.name,
+              ...(mounted.description ? { description: mounted.description } : {}),
+              language: mounted.language,
+              license: mounted.license,
+              documents: mounted.documents,
+              chunks: mounted.chunks,
+              sizeBytes: mounted.sizeBytes,
+              vectorCompatible: mounted.vectorCompatible,
+              semanticSearch: mounted.semanticSearch,
+            }
+          : {}),
+        source: entry.source ?? (item ? 'gilde' : 'file'),
+        updateAvailable: availableVersion !== undefined,
+        ...(availableVersion ? { availableVersion } : {}),
+        ...(listed?.logoUrl ? { logoUrl: listed.logoUrl } : {}),
+      };
+    });
+  }
+
+  /** Installed catalogs for which the shipped gilde content carries a strictly newer version. */
+  async updates(): Promise<KnowledgeUpdateCandidate[]> {
+    const gilde = await this.gildeItems();
+    const out: KnowledgeUpdateCandidate[] = [];
+    for (const entry of this.registry.read().catalogs) {
+      const item = gilde.get(this.keyFor(entry.ref));
+      if (!item || compareCatalogVersions(item.version, entry.ref.version) <= 0) continue;
+      out.push({
+        publisherId: item.publisherId,
+        catalogId: item.id,
+        name: item.name,
+        installedVersion: entry.ref.version,
+        availableVersion: item.version,
+        releasedAt: item.releasedAt,
+        archiveBytes: item.archiveBytes,
+        contentDigest: item.sha256,
+        huggingface: item.huggingface,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Every gilde `knowledge-catalog` entry joined with this user's registry,
+   * the machine-shared inventory, running installs and partial downloads —
+   * what the Knowledge screen's browser renders. Offline-safe: gilde is local.
+   */
+  async available(): Promise<KnowledgeAvailableCatalog[]> {
+    const gilde = await this.gildeItems();
+    if (gilde.size === 0) return [];
+    const registry = this.registry.read().catalogs;
+    const shared = await this.sharedInventoryKeys();
+    const activeIds = new Set(this.installs.active().map((a) => a.id));
+    const partials = await this.partialDownloadKeys();
+    return [...gilde.values()]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((item) => {
+        const entry = registry.find(
+          (c) => c.ref.publisherId === item.publisherId && c.ref.catalogId === item.id,
+        );
+        return {
+          id: item.id,
+          publisherId: item.publisherId,
+          name: item.name,
+          description: item.description,
+          tags: item.tags,
+          language: item.language,
+          ...(item.category ? { category: item.category } : {}),
+          ...(item.license ? { license: item.license } : {}),
+          ...(item.licenseUrl ? { licenseUrl: item.licenseUrl } : {}),
+          version: item.version,
+          releasedAt: item.releasedAt,
+          formatVersion: item.formatVersion,
+          huggingface: item.huggingface,
+          ...(item.upstream ? { upstream: item.upstream } : {}),
+          ...(item.parquet ? { parquet: item.parquet } : {}),
+          sha256: item.sha256,
+          archiveBytes: item.archiveBytes,
+          uncompressedBytes: item.uncompressedBytes,
+          documents: item.documents,
+          chunks: item.chunks,
+          embeddingProfile: item.embeddingProfile,
+          topics: item.topics,
+          ...(item.minGezelVersion ? { minGezelVersion: item.minGezelVersion } : {}),
+          ...(entry
+            ? {
+                installed: {
+                  version: entry.ref.version,
+                  contentDigest: entry.ref.contentDigest,
+                  storageScope: entry.ref.storageScope,
+                  enabled: entry.enabled,
+                  updateAvailable: compareCatalogVersions(item.version, entry.ref.version) > 0,
+                },
+              }
+            : {}),
+          sharedOnDevice: shared.has(
+            `${item.publisherId}/${item.id}/${item.version}/${item.sha256}`,
+          ),
+          installing: activeIds.has(item.id),
+          incompleteDownload: partials.has(item.sha256.slice(0, 16)),
+        };
+      });
+  }
+
+  /** Resolve a catalogId (URI authority) to its mounted info, or null. */
+  mountedCatalog(catalogId: string): MountedInfo | null {
+    for (const info of this.mountedByKey.values()) {
+      if (info.ref.catalogId === catalogId) return info;
+    }
+    return null;
+  }
+
+  // ── install jobs ──────────────────────────────────────────────────────────
+
+  /**
+   * Start an install, or attach to the one already running. A catalog
+   * install's job id is the catalog id, so a second click, the auto-updater
+   * and a reconnecting client all land on the same job.
+   */
+  startInstall(request: KnowledgeInstallRequestSource): { jobId: string; alreadyRunning: boolean } {
+    const jobId =
+      request.kind === 'catalog'
+        ? request.id
+        : `knowledge-install-${++this.jobCounter}-${Date.now().toString(36)}`;
+    const { alreadyRunning } = this.installs.start(jobId, { request });
+    if (!alreadyRunning) this.jobRequests.set(jobId, request);
+    return { jobId, alreadyRunning };
+  }
+
+  private async planInstall(
+    request: KnowledgeInstallRequestSource,
+  ): Promise<InstallPlan | { error: string }> {
+    if (request.kind !== 'catalog') {
+      return { source: request, origin: request.kind, placement: 'user' };
+    }
+    if (!this.opts.catalog) return { error: 'the catalog is not available in this daemon' };
+    const resolved = await resolveKnowledgeCatalogSource(
+      this.opts.catalog,
+      request.id,
+      request.version,
+    );
+    if (!resolved) {
+      return {
+        error: `no knowledge catalog '${request.id}'${request.version ? `@${request.version}` : ''} in the catalog`,
+      };
+    }
+    return {
+      source: { kind: 'url', url: resolved.url, expectedSha256: resolved.sha256 },
+      origin: 'gilde',
+      archiveBytes: resolved.archiveBytes,
+      expectedIdentity: {
+        publisherId: resolved.coordinate.publisherId,
+        catalogId: resolved.coordinate.catalogId,
+        version: resolved.coordinate.version,
+      },
+      coordinate: resolved.coordinate,
+      placement: request.placement ?? 'auto',
+    };
+  }
+
+  /**
+   * Ask the machine broker to ensure the coordinate in the shared store,
+   * relaying its progress. Cancelling this job cancels the broker's too:
+   * this daemon asked for the download, so its cancel is the honest signal.
+   */
+  private async *installShared(
+    coordinate: TrustedKnowledgeCoordinate,
+    installer: SharedKnowledgeInstaller,
+    signal: AbortSignal,
+  ): AsyncGenerator<KnowledgeInstallEvent, SharedEnsureResult> {
+    const queue: KnowledgeInstallEvent[] = [];
+    let result: SharedEnsureResult | null = null;
+    let wake: (() => void) | null = null;
+    const notify = () => {
+      wake?.();
+      wake = null;
+    };
+    const run = installer
+      .ensure(
+        coordinate,
+        (event) => {
+          queue.push(event);
+          notify();
+        },
+        signal,
+      )
+      .then(
+        (outcome) => {
+          result = outcome;
+        },
+        (err) => {
+          result = { status: 'unavailable', reason: errorMessage(err) };
+        },
+      )
+      .finally(notify);
+    try {
+      while (true) {
+        const next = queue.shift();
+        if (next) {
+          yield next;
+          continue;
+        }
+        if (result) break;
+        await new Promise<void>((resolveWake) => {
+          wake = resolveWake;
+        });
+      }
+    } finally {
+      if (signal.aborted) void installer.cancel(coordinate);
+    }
+    await run;
+    return result ?? { status: 'unavailable', reason: 'the shared installer returned nothing' };
+  }
+
+  /** Bytes a private install of this catalog left behind, once a shared copy replaces it. */
+  private async deletePrivateBytes(ref: KnowledgeCatalogRef): Promise<void> {
+    const catalogDir = join(knowledgeCatalogsDir(this.opts.home), ref.publisherId, ref.catalogId);
+    await rm(catalogDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    }).catch((err) => {
+      log.warn(`could not delete ${catalogDir}: ${err}`);
+    });
+  }
+
+  private async *runInstall(
+    jobId: string,
+    request: KnowledgeInstallRequestSource,
+  ): AsyncGenerator<KnowledgeInstallEvent> {
+    // The registry cancels by unwinding this generator; the inner download
+    // only stops when its signal fires, so abort in `finally` rather than
+    // relying on the unwind alone.
+    const abort = new AbortController();
+    const installedBefore = new Map(
+      this.registry.read().catalogs.map((c) => [this.keyFor(c.ref), c.ref.version]),
+    );
+    const catalogId = request.kind === 'catalog' ? request.id : undefined;
+    const endPerfWork = beginPerfWork(`knowledge install ${catalogId ?? request.kind}`);
+    try {
+      const plan = await this.planInstall(request);
+      if ('error' in plan) {
+        await this.recordInstallFailure(jobId, catalogId, plan.error);
+        yield { type: 'error', error: plan.error };
+        return;
+      }
+      const installer = this.opts.sharedInstaller;
+      if (plan.coordinate && plan.placement === 'auto' && installer?.available()) {
+        const shared = yield* this.installShared(plan.coordinate, installer, abort.signal);
+        if (shared.status === 'ready') {
+          const ref: KnowledgeCatalogRef = {
+            publisherId: plan.coordinate.publisherId,
+            catalogId: plan.coordinate.catalogId,
+            version: plan.coordinate.version,
+            contentDigest: plan.coordinate.expectedDigest,
+            storageScope: 'machine-shared',
+          };
+          const previous = this.registry.find(ref.publisherId, ref.catalogId);
+          this.registry.upsert(ref, { enabled: true, source: plan.origin });
+          yield* this.finishInstall(
+            { type: 'done', ref, rootDir: this.dirFor(ref), storageScope: 'machine-shared' },
+            installedBefore,
+            plan.origin,
+            previous?.ref.storageScope === 'user',
+          );
+          return;
+        }
+        if (shared.status === 'failed') {
+          await this.recordInstallFailure(jobId, catalogId, shared.error);
+          yield { type: 'error', error: shared.error, mismatch: shared.mismatch };
+          return;
+        }
+        if (abort.signal.aborted) return;
+        log.info(
+          `shared placement unavailable for ${plan.coordinate.catalogId}@${plan.coordinate.version} (${shared.reason}); installing privately`,
+        );
+      }
+      if (plan.source.kind === 'url') {
+        this.jobDownloadKeys.set(jobId, knowledgeDownloadKey(plan.source));
+      }
+      const run = installKnowledgeCatalog({
+        home: this.opts.home,
+        source: plan.source,
+        origin: plan.origin,
+        ...(plan.archiveBytes !== undefined ? { archiveBytes: plan.archiveBytes } : {}),
+        ...(plan.expectedIdentity ? { expectedIdentity: plan.expectedIdentity } : {}),
+        registry: this.registry,
+        ...(this.opts.fetchImpl ? { fetchImpl: this.opts.fetchImpl } : {}),
+        signal: abort.signal,
+        validateCatalog: (rootDir, deep) => this.opts.host.validate(rootDir, deep),
+      });
+      for await (const event of run) {
+        if (event.type === 'done') {
+          yield* this.finishInstall(event, installedBefore, plan.origin);
+          return;
+        }
+        if (event.type === 'error') await this.recordInstallFailure(jobId, catalogId, event.error);
+        yield event;
+      }
+    } finally {
+      endPerfWork();
+      abort.abort();
+      this.jobDownloadKeys.delete(jobId);
+      this.jobRequests.delete(jobId);
+    }
+  }
+
+  /** Mount the fresh version, record it, and warm the query embedder before `done`. */
+  private async *finishInstall(
+    event: DoneEvent,
+    installedBefore: Map<string, string>,
+    origin: KnowledgeInstallSourceKind,
+    deletePrivateBytes = false,
+  ): AsyncGenerator<KnowledgeInstallEvent> {
+    const key = this.keyFor(event.ref);
+    await this.opts.host.unmount(key).catch(() => {});
+    this.mountedByKey.delete(key);
+    if (deletePrivateBytes) {
+      await this.deletePrivateBytes(event.ref);
+    } else if (event.ref.storageScope === 'user') {
+      await pruneOtherKnowledgeCatalogVersions(this.opts.home, event.ref);
+    }
+    const entry = this.registry.find(event.ref.publisherId, event.ref.catalogId);
+    if (entry) {
+      try {
+        await this.mountEntry(entry, { justVerified: true });
+      } catch (err) {
+        const reason = errorMessage(err);
+        this.registry.quarantine(event.ref.publisherId, event.ref.catalogId, reason);
+        await this.logHistory(
+          'knowledge.catalog.install_failed',
+          `Knowledge catalog ${event.ref.catalogId}@${event.ref.version} installed but failed to mount`,
+          {
+            publisherId: event.ref.publisherId,
+            catalogId: event.ref.catalogId,
+            version: event.ref.version,
+            source: origin,
+            storageScope: event.ref.storageScope,
+            error: reason,
+          },
+        );
+        yield { type: 'error', error: `installed but failed to mount: ${reason}` };
+        return;
+      }
+    }
+
+    const previousVersion = installedBefore.get(key);
+    const updated = previousVersion !== undefined && previousVersion !== event.ref.version;
+    await this.logHistory(
+      updated ? 'knowledge.catalog.updated' : 'knowledge.catalog.installed',
+      updated
+        ? `Knowledge catalog ${event.ref.catalogId} updated ${previousVersion} → ${event.ref.version}`
+        : `Knowledge catalog ${event.ref.catalogId}@${event.ref.version} installed`,
+      {
+        publisherId: event.ref.publisherId,
+        catalogId: event.ref.catalogId,
+        version: event.ref.version,
+        source: origin,
+        storageScope: event.ref.storageScope,
+        ...(updated ? { previousVersion } : {}),
+      },
+    );
+
+    let warning: string | undefined;
+    const mounted = this.mountedByKey.get(key);
+    if (mounted?.semanticSearch === 'profile') {
+      yield { type: 'progress', phase: 'embedder', bytesDone: 0, bytesTotal: 0 };
+      warning = yield* this.prewarmProfile(mounted.embedding);
+    }
+    yield { ...event, ...(warning ? { warning } : {}) };
+  }
+
+  /**
+   * Pull the catalog's query model now, while the user is watching the
+   * install, instead of on the first search. Never an install failure: the
+   * catalog is on disk and keyword search works without the model. The model
+   * can outweigh the catalog — multilingual-e5-small's full-precision graph
+   * is ~470 MB against a 160 MB Wikipedia catalog — so its download reports
+   * bytes the way the catalog's own does.
+   *
+   * Not gated on `allowAppNetwork`: every install is either a person's own
+   * download or an auto-update `checkAutoUpdates` already gated, and skipping
+   * the model here would leave an offline machine without semantic search.
+   */
+  private async *prewarmProfile(
+    profile: KnowledgeEmbeddingProfile,
+  ): AsyncGenerator<KnowledgeInstallEvent, string | undefined> {
+    const progress: {
+      latest: ModelDownloadProgress | null;
+      reported: ModelDownloadProgress | null;
+    } = { latest: null, reported: null };
+    let lastReportAt = 0;
+    let outcome: { warning: string | undefined } | null = null;
+    let wake: (() => void) | null = null;
+    let finished = false;
+    const notify = () => {
+      wake?.();
+      wake = null;
+    };
+    const configuredTimeout = Number.parseInt(
+      this.opts.env?.GEZEL_KNOWLEDGE_PREWARM_TIMEOUT_MS ??
+        process.env.GEZEL_KNOWLEDGE_PREWARM_TIMEOUT_MS ??
+        '',
+      10,
+    );
+    const timeoutMs =
+      this.opts.profilePrewarmTimeoutMs ??
+      (Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? configuredTimeout
+        : DEFAULT_EMBEDDER_PREWARM_TIMEOUT_MS);
+    const timeout = setTimeout(() => {
+      if (finished) return;
+      outcome = {
+        warning: `semantic search starts once the embedding model ${profile.model.repo} is available; prewarm exceeded ${timeoutMs}ms`,
+      };
+      notify();
+    }, timeoutMs);
+    void (this.opts.embedQueryForProfile ?? embedKnowledgeQuery)(
+      'knowledge catalog warm-up',
+      profile,
+      {
+        onDownloadProgress: (next) => {
+          progress.latest = next;
+          if (Date.now() - lastReportAt >= EMBEDDER_PROGRESS_INTERVAL_MS) notify();
+        },
+      },
+    ).then(
+      () => {
+        if (finished) return;
+        outcome = { warning: undefined };
+        notify();
+      },
+      (err) => {
+        if (finished) return;
+        outcome = {
+          warning: `semantic search starts once the embedding model ${profile.model.repo} is available: ${errorMessage(err)}`,
+        };
+        notify();
+      },
+    );
+    try {
+      while (true) {
+        const settled = outcome as { warning: string | undefined } | null;
+        const latest = progress.latest;
+        if (
+          latest &&
+          latest !== progress.reported &&
+          (settled || Date.now() - lastReportAt >= EMBEDDER_PROGRESS_INTERVAL_MS)
+        ) {
+          progress.reported = latest;
+          lastReportAt = Date.now();
+          yield { type: 'progress', phase: 'embedder', ...latest };
+          continue;
+        }
+        if (settled) return settled.warning;
+        await new Promise<void>((resolveWake) => {
+          wake = resolveWake;
+        });
+      }
+    } finally {
+      finished = true;
+      clearTimeout(timeout);
+    }
+  }
+
+  private async recordInstallFailure(
+    jobId: string,
+    catalogId: string | undefined,
+    error: string,
+  ): Promise<void> {
+    await this.logHistory(
+      'knowledge.catalog.install_failed',
+      `Knowledge catalog install ${catalogId ?? jobId} failed`,
+      { jobId, ...(catalogId ? { catalogId } : {}), error },
+    );
+  }
+
+  getJob(jobId: string): KnowledgeInstallJob | null {
+    const described = this.installs.describe(jobId);
+    if (!described) return null;
+    const events = [described.lastEvent, described.terminalEvent].filter(
+      (event): event is KnowledgeInstallEvent => event !== null,
+    );
+    return {
+      id: described.id,
+      startedAt: described.startedAt,
+      finished: described.finished,
+      ...(described.error ? { error: described.error } : {}),
+      events,
+    };
+  }
+
+  /** Live events for a job; replays the latest progress (and the terminal event) first. */
+  subscribeJob(
+    jobId: string,
+    listener: (event: KnowledgeInstallEvent) => void,
+  ): (() => void) | null {
+    return this.installs.subscribe(jobId, listener);
+  }
+
+  cancelJob(jobId: string): boolean {
+    return this.installs.cancel(jobId);
+  }
+
+  /** Every running install with its latest progress (the polled twin of the SSE). */
+  activeInstalls(): KnowledgeActiveInstall[] {
+    return this.installs.active().map(({ id, startedAt, lastEvent }) => {
+      const request = this.jobRequests.get(id);
+      const phase =
+        lastEvent?.type === 'progress'
+          ? lastEvent.phase
+          : lastEvent?.type === 'verifying'
+            ? 'verifying'
+            : lastEvent?.type === 'retrying'
+              ? 'retrying'
+              : 'download';
+      return {
+        jobId: id,
+        ...(request?.kind === 'catalog' ? { catalogId: request.id } : {}),
+        startedAt,
+        phase,
+        bytesDone: lastEvent?.type === 'progress' ? lastEvent.bytesDone : 0,
+        bytesTotal: lastEvent?.type === 'progress' ? lastEvent.bytesTotal : 0,
+      };
+    });
+  }
+
+  // ── incomplete downloads ──────────────────────────────────────────────────
+
+  private async partialDownloadKeys(): Promise<Set<string>> {
+    const keys = new Set<string>();
+    let names: string[];
+    try {
+      names = await readdir(knowledgeDownloadsDir(this.opts.home));
+    } catch {
+      return keys;
+    }
+    const live = new Set(this.jobDownloadKeys.values());
+    for (const name of names) {
+      if (!name.endsWith('.gezk.partial')) continue;
+      const key = name.slice(0, -'.gezk.partial'.length);
+      if (KNOWLEDGE_DOWNLOAD_KEY_PATTERN.test(key) && !live.has(key)) keys.add(key);
+    }
+    return keys;
+  }
+
+  /**
+   * Partial archives no job is writing. A key that still matches a gilde
+   * pin resumes on the next install of that catalog; anything else can only
+   * be deleted. Largest first: the most disk to reclaim.
+   */
+  async listIncompleteDownloads(): Promise<IncompleteKnowledgeDownload[]> {
+    const keys = await this.partialDownloadKeys();
+    if (keys.size === 0) return [];
+    const downloads = knowledgeDownloadsDir(this.opts.home);
+    const byDigestPrefix = new Map<string, KnowledgeCatalogItemManifest>();
+    for (const item of (await this.gildeItems()).values()) {
+      byDigestPrefix.set(item.sha256.slice(0, 16), item);
+    }
+    const out: IncompleteKnowledgeDownload[] = [];
+    for (const key of keys) {
+      const info = await stat(join(downloads, `${key}.gezk.partial`)).catch(() => null);
+      if (!info) continue;
+      const item = byDigestPrefix.get(key);
+      out.push({
+        key,
+        bytes: info.size,
+        updatedAt: info.mtime.toISOString(),
+        resumable: Boolean(item),
+        ...(item ? { catalogId: item.id, name: item.name, archiveBytes: item.archiveBytes } : {}),
+      });
+    }
+    return out.sort((a, b) => b.bytes - a.bytes);
+  }
+
+  /** Delete a partial download by key. Refuses a key a running job is writing. */
+  async deleteIncompleteDownload(key: string): Promise<boolean> {
+    if (!KNOWLEDGE_DOWNLOAD_KEY_PATTERN.test(key)) return false;
+    if (new Set(this.jobDownloadKeys.values()).has(key)) return false;
+    const downloads = knowledgeDownloadsDir(this.opts.home);
+    let removed = false;
+    for (const name of [`${key}.gezk.partial`, `${key}.gezk`]) {
+      const path = join(downloads, name);
+      if (!(await stat(path).catch(() => null))) continue;
+      await rm(path, { force: true });
+      removed = true;
+    }
+    return removed;
+  }
+
+  // ── auto-update ───────────────────────────────────────────────────────────
+
+  /**
+   * Start installs for catalogs whose registry entry (or the install-wide
+   * `config.knowledge.autoUpdate` default) opted into automatic updates.
+   * Returns the `catalog@version` pairs it started.
+   */
+  async checkAutoUpdates(): Promise<string[]> {
+    if (!(await this.networkAllowed())) return [];
+    const config = await this.readConfig();
+    const defaultAutoUpdate = config?.knowledge?.autoUpdate ?? false;
+    const started: string[] = [];
+    for (const update of await this.updates()) {
+      const entry = this.registry.find(update.publisherId, update.catalogId);
+      if (!(entry?.autoUpdate ?? defaultAutoUpdate)) continue;
+      const { alreadyRunning } = this.startInstall({
+        kind: 'catalog',
+        id: update.catalogId,
+        version: update.availableVersion,
+      });
+      if (!alreadyRunning) started.push(`${update.catalogId}@${update.availableVersion}`);
+    }
+    if (started.length > 0) log.info(`auto-updating knowledge catalogs: ${started.join(', ')}`);
+    return started;
+  }
+
+  /** Arm the daily auto-update check (a quiet start, then every 24 h); `stop()` disarms. */
+  startAutoUpdateTimer(): void {
+    const run = () => {
+      void this.checkAutoUpdates().catch((err) => {
+        log.warn(`knowledge auto-update check failed: ${errorMessage(err)}`);
+      });
+    };
+    const startup = setTimeout(run, AUTO_UPDATE_STARTUP_DELAY_MS);
+    startup.unref?.();
+    const interval = setInterval(run, AUTO_UPDATE_INTERVAL_MS);
+    interval.unref?.();
+    this.autoUpdateTimers.push(startup, interval);
+  }
+
+  private async readConfig(): Promise<GezelConfig | null> {
+    if (!this.opts.readConfig) return null;
+    try {
+      return await this.opts.readConfig();
+    } catch {
+      return null;
+    }
+  }
+
+  private async networkAllowed(): Promise<boolean> {
+    const config = await this.readConfig();
+    return config ? resolveSecurityPolicy(config).allowAppNetwork : true;
+  }
+
+  private async logHistory(
+    kind: KnowledgeHistoryKind,
+    summary: string,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.opts.history) return;
+    try {
+      await this.opts.history.log({ kind, summary, details });
+    } catch (err) {
+      log.warn(`history write failed for ${kind}: ${errorMessage(err)}`);
+    }
+  }
+
+  // ── lifecycle mutations ───────────────────────────────────────────────────
+
+  async setEnabled(catalogId: string, enabled: boolean): Promise<boolean> {
+    const entry = this.registry.read().catalogs.find((c) => c.ref.catalogId === catalogId);
+    if (!entry) return false;
+    const changed = this.registry.setEnabled(entry.ref.publisherId, catalogId, enabled);
+    if (!changed) return false;
+    const key = this.keyFor(entry.ref);
+    if (enabled) {
+      const fresh = this.registry.find(entry.ref.publisherId, catalogId);
+      if (fresh) {
+        await this.mountEntry(fresh).catch((err) => {
+          const reason = errorMessage(err);
+          this.registry.quarantine(entry.ref.publisherId, catalogId, reason);
+        });
+      }
+    } else {
+      await this.opts.host.unmount(key).catch(() => {});
+      this.mountedByKey.delete(key);
+    }
+    await this.logHistory(
+      enabled ? 'knowledge.catalog.enabled' : 'knowledge.catalog.disabled',
+      `Knowledge catalog ${catalogId} ${enabled ? 'enabled' : 'disabled'}`,
+      {
+        publisherId: entry.ref.publisherId,
+        catalogId,
+        version: entry.ref.version,
+        storageScope: entry.ref.storageScope,
+      },
+    );
+    return true;
+  }
+
+  /**
+   * Adopt a catalog that already exists in the machine-shared asset store:
+   * add this user's ref and mount read-only. The shared bytes belong to the
+   * machine installer — adoption and removal never touch them.
+   */
+  async adoptSharedCatalog(coordinate: {
+    publisherId: string;
+    catalogId: string;
+    version: string;
+    expectedDigest: string;
+  }): Promise<boolean> {
+    const ref: KnowledgeCatalogRef = {
+      publisherId: coordinate.publisherId,
+      catalogId: coordinate.catalogId,
+      version: coordinate.version,
+      contentDigest: coordinate.expectedDigest,
+      storageScope: 'machine-shared',
+    };
+    this.registry.upsert(ref, { enabled: true, source: 'gilde' });
+    const entry = this.registry.find(ref.publisherId, ref.catalogId);
+    if (!entry) return false;
+    try {
+      const key = this.keyFor(ref);
+      await this.opts.host.unmount(key).catch(() => {});
+      this.mountedByKey.delete(key);
+      await this.mountEntry(entry);
+      return true;
+    } catch (err) {
+      const reason = errorMessage(err);
+      this.registry.quarantine(ref.publisherId, ref.catalogId, reason);
+      return false;
+    }
+  }
+
+  /** Remove the ref and (for the private tier) delete the bytes. */
+  async remove(catalogId: string): Promise<boolean> {
+    const entry = this.registry.read().catalogs.find((c) => c.ref.catalogId === catalogId);
+    if (!entry) return false;
+    if (entry.source === 'bundled') return false;
+    const key = this.keyFor(entry.ref);
+    await this.opts.host.unmount(key).catch(() => {});
+    this.mountedByKey.delete(key);
+    this.registry.remove(entry.ref.publisherId, catalogId);
+    if (entry.ref.storageScope === 'user') {
+      const catalogDir = join(
+        knowledgeCatalogsDir(this.opts.home),
+        entry.ref.publisherId,
+        entry.ref.catalogId,
+      );
+      await rm(catalogDir, { recursive: true, force: true }).catch((err) => {
+        log.warn(`could not delete ${catalogDir}: ${err}`);
+      });
+    }
+    await this.logHistory(
+      'knowledge.catalog.removed',
+      `Knowledge catalog ${catalogId}@${entry.ref.version} removed`,
+      {
+        publisherId: entry.ref.publisherId,
+        catalogId,
+        version: entry.ref.version,
+        storageScope: entry.ref.storageScope,
+      },
+    );
+    return true;
+  }
+
+  // ── browsing (routes) ─────────────────────────────────────────────────────
+
+  private requireMounted(catalogId: string): MountedInfo {
+    const info = this.mountedCatalog(catalogId);
+    if (!info)
+      throw new KnowledgeNotFoundError(`catalog not installed or not enabled: ${catalogId}`);
+    return info;
+  }
+
+  async topics(catalogId: string): ReturnType<KnowledgeCatalogHost['topics']> {
+    return this.opts.host.topics(this.requireMounted(catalogId).key);
+  }
+
+  async documentsPage(
+    catalogId: string,
+    opts: { topicId?: string; offset?: number; limit?: number; descendants?: boolean },
+  ): ReturnType<KnowledgeCatalogHost['documentsPage']> {
+    return this.opts.host.documentsPage(this.requireMounted(catalogId).key, opts);
+  }
+
+  async getDocument(
+    catalogId: string,
+    documentId: string,
+  ): ReturnType<KnowledgeCatalogHost['getDocument']> {
+    return this.opts.host.getDocument(this.requireMounted(catalogId).key, documentId);
+  }
+
+  /** One passage by its citation id, with the document's title and origin. */
+  async getPassage(
+    catalogId: string,
+    documentId: string,
+    chunkUid: string,
+  ): Promise<KnowledgePassageRead | null> {
+    const info = this.requireMounted(catalogId);
+    const chunk = await this.opts.host.getChunk(info.key, documentId, chunkUid);
+    if (!chunk) return null;
+    const doc = await this.opts.host.getDocument(info.key, documentId).catch(() => null);
+    return {
+      catalogId,
+      catalogVersion: info.ref.version,
+      documentId,
+      chunkUid,
+      title: doc?.title ?? chunk.title,
+      headingPath: chunk.headingPath,
+      lineStart: chunk.lineStart,
+      lineEnd: chunk.lineEnd,
+      text: chunk.text,
+      ...(doc?.sourceUrl ? { sourceUrl: doc.sourceUrl } : {}),
+      ...(doc?.sourceUpdatedAt ? { sourceUpdatedAt: doc.sourceUpdatedAt } : {}),
+    };
+  }
+
+  /**
+   * Resolve a `knowledge://` citation: the catalog (publisher included) is
+   * installed and enabled, the document exists, and a `#chunk=` passage is in
+   * it. A citation is only evidence when it resolves; a model can write a
+   * well-formed URI for a passage that does not exist.
+   */
+  async resolveCitation(raw: string): Promise<KnowledgeCitation> {
+    const uri = parseKnowledgeUri(raw.trim());
+    if (!uri) return { ok: false, reason: 'malformed' };
+    const info = this.mountedCatalog(uri.catalogId);
+    if (!info || info.ref.publisherId !== uri.publisherId)
+      return { ok: false, reason: 'catalog-not-installed' };
+    const doc = await this.opts.host.getDocument(info.key, uri.documentId).catch(() => null);
+    if (!doc) return { ok: false, reason: 'no-document' };
+    const base = {
+      ok: true as const,
+      uri,
+      title: doc.title,
+      catalogVersion: info.ref.version,
+      ...(doc.sourceUrl ? { sourceUrl: doc.sourceUrl } : {}),
+    };
+    if (uri.fragment && 'chunk' in uri.fragment) {
+      const chunk = await this.opts.host
+        .getChunk(info.key, uri.documentId, uri.fragment.chunk)
+        .catch(() => null);
+      if (!chunk) return { ok: false, reason: 'no-passage' };
+      return { ...base, chunk };
+    }
+    return { ...base, markdown: doc.markdown };
+  }
+
+  async assets(catalogId: string): ReturnType<KnowledgeCatalogHost['assets']> {
+    return this.opts.host.assets(this.requireMounted(catalogId).key);
+  }
+
+  async readAsset(catalogId: string, path: string): ReturnType<KnowledgeCatalogHost['readAsset']> {
+    return this.opts.host.readAsset(this.requireMounted(catalogId).key, path);
+  }
+
+  async assetFile(catalogId: string, path: string): ReturnType<KnowledgeCatalogHost['assetFile']> {
+    return this.opts.host.assetFile(this.requireMounted(catalogId).key, path);
+  }
+
+  /** The mounted version of a catalog — what an asset URL binds to for caching. */
+  mountedVersion(catalogId: string): string {
+    return this.requireMounted(catalogId).ref.version;
+  }
+
+  // ── the SearchService knowledge arm ───────────────────────────────────────
+
+  /**
+   * Discover subject articles under the active catalog policy. Source replicas
+   * deduplicate before counts and cursor pages, and scope is checked again
+   * before returning the response if catalogs changed during worker scans.
+   */
+  async nearby(
+    request: KnowledgeNearbyRequest,
+    projectId?: string,
+  ): Promise<KnowledgeNearbyResponse> {
+    const body = KnowledgeNearbyRequestSchema.parse(request);
+    const keys = (await this.activeCatalogKeys(projectId, true))
+      .filter(
+        (key) =>
+          !body.catalogs || body.catalogs.includes(this.mountedByKey.get(key)!.ref.catalogId),
+      )
+      .sort();
+    const snapshot = createHash('sha256')
+      .update(
+        JSON.stringify({
+          spatial: body.spatial,
+          projectId,
+          refs: keys.map((key) => this.mountedByKey.get(key)!.ref),
+        }),
+      )
+      .digest('hex');
+    const offset = nearbyCursorOffset(body.cursor, snapshot);
+    const unique = new Map<string, KnowledgeNearbyDocument>();
+    for (const key of keys) {
+      const info = this.mountedByKey.get(key)!;
+      let start = 0;
+      for (;;) {
+        const page = await this.opts.host.nearbyDocuments(key, body.spatial, {
+          offset: start,
+          limit: 500,
+        });
+        for (const document of page.documents) {
+          const result: KnowledgeNearbyDocument = {
+            ...document,
+            publisherId: info.ref.publisherId,
+            catalogId: info.ref.catalogId,
+            catalogVersion: info.ref.version,
+            uri: formatKnowledgeUri({
+              publisherId: info.ref.publisherId,
+              catalogId: info.ref.catalogId,
+              documentId: document.id,
+            }),
+          };
+          const identity = regionalDocumentIdentity(
+            info.ref.publisherId,
+            info.ref.catalogId,
+            document.id,
+          );
+          const previous = unique.get(identity);
+          if (!previous || result.distanceMeters < previous.distanceMeters)
+            unique.set(identity, result);
+        }
+        start += page.documents.length;
+        if (start >= page.total || !page.documents.length) break;
+      }
+    }
+    const ordered = [...unique.values()].sort(
+      (a, b) =>
+        a.distanceMeters - b.distanceMeters ||
+        a.publisherId.localeCompare(b.publisherId) ||
+        a.catalogId.localeCompare(b.catalogId) ||
+        a.id.localeCompare(b.id),
+    );
+    const currentKeys = (await this.activeCatalogKeys(projectId, true))
+      .filter(
+        (key) =>
+          this.mountedByKey.has(key) &&
+          (!body.catalogs || body.catalogs.includes(this.mountedByKey.get(key)!.ref.catalogId)),
+      )
+      .sort();
+    const currentSnapshot = createHash('sha256')
+      .update(
+        JSON.stringify({
+          spatial: body.spatial,
+          projectId,
+          refs: currentKeys.map((key) => this.mountedByKey.get(key)!.ref),
+        }),
+      )
+      .digest('hex');
+    if (currentSnapshot !== snapshot)
+      throw new KnowledgeSpatialCursorError(
+        'Catalog scope changed during nearby query; restart the query.',
+      );
+    const documents = ordered.slice(offset, offset + body.limit);
+    const next = offset + documents.length;
+    return {
+      documents,
+      total: ordered.length,
+      ...(next < ordered.length ? { nextCursor: encodeNearbyCursor(snapshot, next) } : {}),
+    };
+  }
+
+  /**
+   * Search each catalog in its embedding space and fuse lexical/vector ranks.
+   * Spatial eligibility applies inside workers before candidate selection.
+   */
+  async searchUnified(
+    query: string,
+    opts: {
+      vector: number[] | null;
+      maxResults: number;
+      projectId?: string;
+      spatial?: KnowledgeRadius;
+      catalogs?: readonly string[];
+      /** Search a profile group keyword-only when its query model is not ready by then. */
+      queryEmbedBudgetMs?: number;
+      /** Query cached profile models only, falling back to keywords when absent. */
+      localModelsOnly?: boolean;
+      /**
+       * Include media rows (images, audio and video windows) as results of
+       * their own. Explicit search asks; proactive injection does not.
+       */
+      media?: boolean;
+    },
+  ): Promise<UnifiedSearchResult[]> {
+    const active = (await this.activeCatalogKeys(opts.projectId, Boolean(opts.spatial))).filter(
+      (key) => !opts.catalogs || opts.catalogs.includes(this.mountedByKey.get(key)!.ref.catalogId),
+    );
+    if (active.length === 0) return [];
+
+    const groups: Array<{ keys: string[]; vector?: Float32Array }> = [];
+    const shared: string[] = [];
+    const keyword: string[] = [];
+    const byProfile = new Map<string, { profile: KnowledgeEmbeddingProfile; keys: string[] }>();
+    for (const key of active) {
+      const info = this.mountedByKey.get(key);
+      if (!info) continue;
+      if (info.semanticSearch === 'shared' && !opts.localModelsOnly) shared.push(key);
+      else if (info.semanticSearch === 'profile' || info.semanticSearch === 'shared') {
+        const group = byProfile.get(info.embedding.id) ?? { profile: info.embedding, keys: [] };
+        group.keys.push(key);
+        byProfile.set(info.embedding.id, group);
+      } else keyword.push(key);
+    }
+    if (shared.length > 0) {
+      groups.push({
+        keys: shared,
+        ...(opts.vector ? { vector: Float32Array.from(opts.vector) } : {}),
+      });
+    }
+    for (const group of byProfile.values()) {
+      const vector = await this.embedForProfile(
+        query,
+        group.profile,
+        opts.queryEmbedBudgetMs,
+        opts.localModelsOnly,
+      );
+      groups.push({ keys: group.keys, ...(vector ? { vector } : {}) });
+    }
+    if (keyword.length > 0) groups.push({ keys: keyword });
+
+    const response = {
+      chunks: [] as GlobalSearchHit[],
+      documents: [] as GlobalSearchDocumentHit[],
+    };
+    for (const group of groups) {
+      const request = {
+        query,
+        shardBudget: ROUTE_BUDGET_EXPLICIT,
+        titleRouteShards: TITLE_ROUTE_EXPLICIT,
+        finalK: FINAL_K,
+        includeChunkFts: true,
+        catalogKeys: group.keys,
+        // A pool no deeper than the page asked for: six title hits could
+        // never fill a twenty-result browse search.
+        docFtsLimit: Math.max(DOC_FTS_MIN, opts.maxResults),
+        chunkFtsLimit: Math.max(CHUNK_FTS_MIN, opts.maxResults),
+        spatial: opts.spatial,
+      };
+      let part: Awaited<ReturnType<KnowledgeCatalogHost['search']>>;
+      try {
+        part = await this.opts.host.search(
+          group.vector
+            ? { ...request, vector: group.vector, ...(opts.media ? { mediaK: MEDIA_K } : {}) }
+            : request,
+        );
+      } catch (error) {
+        // A catalog that refuses the query vector (a width the catalog does
+        // not store, say) is an embedding failure, not a search failure: the
+        // worker forwards only the message, so any vector-arm error falls
+        // back to the keyword arms for this group.
+        if (!group.vector) throw error;
+        log.warn(
+          `[knowledge] semantic search failed for ${group.keys.join(', ')}; keyword-only: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        part = await this.opts.host.search(request);
+      }
+      response.chunks.push(...part.chunks);
+      response.documents.push(...part.documents);
+    }
+
+    // ── fuse the arms per document ──────────────────────────────────────
+    const fused = new Map<
+      string,
+      {
+        catalogKey: string;
+        documentId: string;
+        score: number;
+        chunk?: GlobalSearchHit;
+        /** Best vector cosine that cleared a MEASURED floor — what labels the hit `vector`. */
+        similarity?: number;
+      }
+    >();
+    const bump = (
+      catalogKey: string,
+      documentId: string,
+      weight: number,
+      rank: number,
+      chunk?: GlobalSearchHit,
+    ): void => {
+      const key = `${catalogKey}\u0000${documentId}`;
+      const entry = fused.get(key) ?? { catalogKey, documentId, score: 0 };
+      entry.score += weight / (RRF_K + rank);
+      // The document's representative chunk: its best vector chunk, else
+      // whichever chunk-FTS row named it.
+      if (chunk && (!entry.chunk || (chunk.cosine ?? -1) > (entry.chunk.cosine ?? -1))) {
+        entry.chunk = chunk;
+      }
+      fused.set(key, entry);
+    };
+
+    // Vector arm: one rank per document, in rerank-cosine order. A hit under
+    // its profile's floor is not evidence at all — KNN always returns its
+    // nearest rows, and a rank-0 row fuses to relevance 1.0 however far away
+    // it is (see vector-floors.ts).
+    const textChunks = response.chunks.filter((h) => !h.media);
+    const mediaChunks = response.chunks.filter((h) => h.media);
+    const seenVector = new Set<string>();
+    let vectorRank = 0;
+    for (const hit of textChunks
+      .filter((h) => h.cosine !== undefined)
+      .sort((a, b) => (b.cosine ?? 0) - (a.cosine ?? 0))) {
+      const key = `${hit.catalogKey}\u0000${hit.documentId}`;
+      if (seenVector.has(key)) continue;
+      const cosine = hit.cosine ?? 0;
+      const floor = this.vectorFloorFor(hit.catalogKey);
+      if (floor !== null && cosine < floor) continue;
+      seenVector.add(key);
+      bump(hit.catalogKey, hit.documentId, ARM_WEIGHTS.vector, vectorRank++, hit);
+      const entry = fused.get(key);
+      if (entry && floor !== null && cosine > (entry.similarity ?? Number.NEGATIVE_INFINITY)) {
+        entry.similarity = cosine;
+      }
+    }
+    // Chunk-body FTS arm: BM25 order as the shards returned it, ranked per catalog.
+    const chunkFtsRank = new Map<string, number>();
+    const seenChunkFts = new Set<string>();
+    for (const hit of textChunks.filter((h) => h.cosine === undefined)) {
+      const key = `${hit.catalogKey}\u0000${hit.documentId}`;
+      if (seenChunkFts.has(key)) continue;
+      seenChunkFts.add(key);
+      const rank = chunkFtsRank.get(hit.catalogKey) ?? 0;
+      chunkFtsRank.set(hit.catalogKey, rank + 1);
+      bump(hit.catalogKey, hit.documentId, ARM_WEIGHTS.chunkFts, rank, hit);
+    }
+    // Doc-title FTS arm: exact-name evidence, ranked per catalog by the host.
+    for (const doc of response.documents) {
+      bump(doc.catalogKey, doc.documentId, ARM_WEIGHTS.docFts, doc.rank);
+    }
+
+    // Media rows: their own vector arm per modality (a modality with no
+    // measured floor gives no vector evidence — nearest-neighbour search
+    // always returns some image, and a media row has no query words to be
+    // grounded in) and a caption FTS arm.
+    const mediaFused: typeof fused = new Map();
+    const bumpMedia = (hit: GlobalSearchHit, weight: number, rank: number): void => {
+      const key = `${hit.catalogKey}\u0000${hit.chunkUid}`;
+      const entry = mediaFused.get(key) ?? {
+        catalogKey: hit.catalogKey,
+        documentId: hit.documentId,
+        score: 0,
+        chunk: hit,
+      };
+      entry.score += weight / (RRF_K + rank);
+      if ((hit.cosine ?? -1) > (entry.chunk?.cosine ?? -1)) entry.chunk = hit;
+      mediaFused.set(key, entry);
+    };
+    const mediaVectorRank = new Map<string, number>();
+    for (const hit of mediaChunks
+      .filter((h) => h.cosine !== undefined)
+      .sort((a, b) => (b.cosine ?? 0) - (a.cosine ?? 0))) {
+      const modality = hit.media?.modality as 'image' | 'video' | 'audio';
+      const floor = this.vectorFloorFor(hit.catalogKey, modality);
+      if (floor === null || (hit.cosine ?? 0) < floor) continue;
+      const rank = mediaVectorRank.get(modality) ?? 0;
+      mediaVectorRank.set(modality, rank + 1);
+      bumpMedia(hit, MEDIA_ARM_WEIGHTS.vector, rank);
+      const entry = mediaFused.get(`${hit.catalogKey}\u0000${hit.chunkUid}`);
+      if (entry) entry.similarity = Math.max(entry.similarity ?? -1, hit.cosine ?? 0);
+    }
+    let mediaFtsRank = 0;
+    for (const hit of mediaChunks.filter((h) => h.cosine === undefined)) {
+      bumpMedia(hit, MEDIA_ARM_WEIGHTS.chunkFts, mediaFtsRank++);
+    }
+
+    const ordered = [...fused.values(), ...mediaFused.values()].sort(
+      (a, b) =>
+        b.score - a.score ||
+        (b.chunk?.cosine ?? -1) - (a.chunk?.cosine ?? -1) ||
+        a.documentId.localeCompare(b.documentId),
+    );
+    const matches = new Map(
+      [...response.documents, ...response.chunks]
+        .filter((hit) => hit.matchedLocation)
+        .map((hit) => [
+          `${hit.catalogKey}\u0000${hit.documentId}`,
+          { distanceMeters: hit.distanceMeters!, matchedLocation: hit.matchedLocation! },
+        ]),
+    );
+    const seenSpatial = new Set<string>();
+    const out: UnifiedSearchResult[] = [];
+    const perCatalogCount = new Map<string, number>();
+    const capPerCatalog = !opts.spatial && active.length > 1;
+    const mediaPerDocument = new Map<string, number>();
+    let mediaResults = 0;
+    for (const entry of ordered) {
+      const info = this.mountedByKey.get(entry.catalogKey);
+      if (!info) continue;
+      if (entry.chunk?.media) {
+        const docKey = `${entry.catalogKey}\u0000${entry.documentId}`;
+        const forDocument = mediaPerDocument.get(docKey) ?? 0;
+        if (mediaResults >= MEDIA_RESULT_CAP || forDocument >= MEDIA_PER_DOCUMENT) continue;
+        const evidence: KnowledgeEvidence =
+          entry.similarity !== undefined
+            ? { arm: 'vector', similarity: entry.similarity }
+            : { arm: 'fts' };
+        mediaPerDocument.set(docKey, forDocument + 1);
+        mediaResults++;
+        out.push(this.toResult(info, entry.chunk, fusedRankRelevance(out.length), evidence));
+        if (out.length >= Math.max(10, opts.maxResults)) break;
+        continue;
+      }
+      const count = perCatalogCount.get(entry.catalogKey) ?? 0;
+      if (capPerCatalog && count >= PER_CATALOG_CAP) continue;
+      const spatialIdentity = regionalDocumentIdentity(
+        info.ref.publisherId,
+        info.ref.catalogId,
+        entry.documentId,
+      );
+      if (opts.spatial && seenSpatial.has(spatialIdentity)) continue;
+      const relevance = fusedRankRelevance(out.length);
+      // `vector` only when the hit cleared a measured floor; everything else
+      // is lexical evidence, which proactive injection asks to be grounded.
+      const evidence: KnowledgeEvidence =
+        entry.similarity !== undefined
+          ? { arm: 'vector', similarity: entry.similarity }
+          : { arm: 'fts' };
+      const result = entry.chunk
+        ? this.toResult(info, entry.chunk, relevance, evidence)
+        : await this.toDocumentResult(info, entry.documentId, relevance, evidence);
+      if (!result) continue;
+      perCatalogCount.set(entry.catalogKey, count + 1);
+      seenSpatial.add(spatialIdentity);
+      out.push({ ...result, ...matches.get(`${entry.catalogKey}\u0000${entry.documentId}`) });
+      if (out.length >= Math.max(10, opts.maxResults)) break;
+    }
+    return out;
+  }
+
+  /** A document the lexical arms named but no chunk carries: cite it with its lead paragraph. */
+  private async toDocumentResult(
+    info: MountedInfo,
+    documentId: string,
+    relevance: number,
+    evidence: KnowledgeEvidence,
+  ): Promise<UnifiedSearchResult | null> {
+    const doc = await this.opts.host.getDocument(info.key, documentId).catch(() => null);
+    if (!doc) return null;
+    const snippet = leadExcerpt(doc.markdown) || doc.summary || '';
+    return {
+      kind: 'knowledge',
+      id: `knowledge:${info.ref.catalogId}:doc:${documentId}`,
+      title: doc.title,
+      subtitle: `${info.name} · ${info.topicNames.get(doc.topicId) ?? doc.topicId}`,
+      ...(snippet ? { snippet } : {}),
+      retrievalSource: 'knowledge',
+      catalogId: info.ref.catalogId,
+      catalogVersion: info.ref.version,
+      documentId,
+      topicPath: [info.topicNames.get(doc.topicId) ?? doc.topicId],
+      uri: formatKnowledgeUri({
+        publisherId: info.ref.publisherId,
+        catalogId: info.ref.catalogId,
+        documentId,
+      }),
+      ...(doc.sourceUrl ? { sourceUrl: doc.sourceUrl } : {}),
+      ...evidence,
+      ...scoreResult('knowledge', relevance),
+    };
+  }
+
+  /** A catalog's vector floor, or null when its hits are keyword-only or its scale unmeasured. */
+  private vectorFloorFor(
+    catalogKey: string,
+    modality?: 'image' | 'video' | 'audio',
+  ): number | null {
+    const info = this.mountedByKey.get(catalogKey);
+    if (!info) return null;
+    return this.vectorFloors.floorFor({
+      catalogKey,
+      profileId: info.embedding.id,
+      ...(modality ? { modality } : {}),
+    });
+  }
+
+  /**
+   * Load every mounted catalog's own query model now. A search waits for
+   * these only briefly, so a caller that needs the semantic path measured
+   * (the retrieval preview's `warm`) loads them first.
+   */
+  async warmQueryModels(): Promise<void> {
+    const profiles = new Map<string, KnowledgeEmbeddingProfile>();
+    for (const info of this.mountedByKey.values()) {
+      if (info.semanticSearch === 'profile') profiles.set(info.embedding.id, info.embedding);
+    }
+    for (const profile of profiles.values()) await this.embedForProfile('warm', profile);
+  }
+
+  /**
+   * A profile's query vector, or undefined when its model is unavailable or
+   * not ready within `budgetMs` (that group searches FTS). A load that misses
+   * the budget keeps running — loads are single-flight per profile — so the
+   * next query gets vectors.
+   */
+  private async embedForProfile(
+    query: string,
+    profile: KnowledgeEmbeddingProfile,
+    budgetMs?: number,
+    localFilesOnly = false,
+  ): Promise<Float32Array | undefined> {
+    const pending = (this.opts.embedQueryForProfile ?? embedKnowledgeQuery)(query, profile, {
+      localFilesOnly,
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const vector =
+        budgetMs === undefined
+          ? await pending
+          : await Promise.race([
+              pending,
+              new Promise<null>((resolveBudget) => {
+                timer = setTimeout(() => resolveBudget(null), budgetMs);
+              }),
+            ]);
+      if (vector === null) {
+        log.debug(
+          `knowledge query model for profile ${profile.id} not ready within ${budgetMs}ms; searching FTS only`,
+        );
+        return undefined;
+      }
+      return vector.length > 0 ? Float32Array.from(vector) : undefined;
+    } catch (err) {
+      log.debug(
+        `knowledge query embedding unavailable for profile ${profile.id}; searching FTS only: ${errorMessage(err)}`,
+      );
+      return undefined;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private toResult(
+    info: MountedInfo,
+    hit: GlobalSearchHit,
+    relevance: number,
+    evidence: KnowledgeEvidence,
+  ): UnifiedSearchResult {
+    return {
+      kind: 'knowledge',
+      id: `knowledge:${info.ref.catalogId}:${hit.chunkUid}`,
+      title:
+        hit.headingPath.length > 0 ? `${hit.title} › ${hit.headingPath.join(' › ')}` : hit.title,
+      subtitle: info.name,
+      snippet: hit.text,
+      retrievalSource: 'knowledge',
+      catalogId: info.ref.catalogId,
+      catalogVersion: info.ref.version,
+      documentId: hit.documentId,
+      uri: formatKnowledgeUri({
+        publisherId: info.ref.publisherId,
+        catalogId: info.ref.catalogId,
+        documentId: hit.documentId,
+        fragment: { chunk: hit.chunkUid },
+      }),
+      line: hit.lineStart,
+      lineEnd: hit.lineEnd,
+      ...(hit.media ? { media: hit.media } : {}),
+      ...evidence,
+      ...scoreResult('knowledge', relevance),
+    };
+  }
+
+  /** Enabled+mounted catalogs, intersected with the project policy. */
+  private async activeCatalogKeys(projectId?: string, failClosed = false): Promise<string[]> {
+    const mounted = [...this.mountedByKey.values()];
+    if (!projectId || !this.opts.projectPolicy) return mounted.map((m) => m.key);
+    const policy = await this.opts
+      .projectPolicy(projectId)
+      .catch(() => (failClosed ? { mode: 'off' as const } : null));
+    if (!policy || policy.mode === 'inherit') return mounted.map((m) => m.key);
+    if (policy.mode === 'off') return [];
+    const selected = new Set((policy.refs ?? []).map((r) => `${r.publisherId}/${r.catalogId}`));
+    return mounted.filter((m) => selected.has(m.key)).map((m) => m.key);
+  }
+}
+
+export type KnowledgeCitation =
+  | { ok: false; reason: 'malformed' | 'catalog-not-installed' | 'no-document' | 'no-passage' }
+  | {
+      ok: true;
+      uri: KnowledgeUri;
+      title: string;
+      catalogVersion: string;
+      sourceUrl?: string;
+      /** The cited passage, when the URI names one. */
+      chunk?: KnowledgeChunk;
+      /** The whole document, when the URI names no passage. */
+      markdown?: string;
+    };
+
+export class KnowledgeNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'KnowledgeNotFoundError';
+  }
+}

@@ -6,9 +6,9 @@ import {
   type ProviderName,
   externalGezelModelId,
 } from '@bendyline/gezel';
+import type { ModelInfo } from '@bendyline/gezel-inference/internal/providers/types';
 import type { LocalBridgeController } from '../http/local-bridge.js';
 import type { TokenRecord, TokenStore } from '../http/token-store.js';
-import type { ModelInfo } from '../providers/types.js';
 
 /**
  * The mechanical layer shared by every local-harness setup manager (Codex,

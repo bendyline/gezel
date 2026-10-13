@@ -1,8 +1,11 @@
 import { KNOWLEDGE_FILTER_MIN_RELEVANCE } from '@bendyline/gezel';
+import type { ResolvedRelevanceModel } from '@bendyline/gezel-inference/internal/relevance/relevance-core';
+import {
+  type RelevanceBackend,
+  createRelevanceScorer,
+} from '@bendyline/gezel-inference/internal/relevance/relevance-model';
+import { resolveRelevanceSetting } from '@bendyline/gezel-inference/internal/relevance/settings';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ResolvedRelevanceModel } from './relevance-core.js';
-import { type RelevanceBackend, createRelevanceScorer } from './relevance-model.js';
-import { resolveRelevanceSetting } from './settings.js';
 
 const MODEL: ResolvedRelevanceModel = {
   id: 'fake@1',

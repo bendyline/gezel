@@ -1,14 +1,14 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readGgufSummaryAsync } from './gguf-metadata-async.js';
 import {
   LLAMA_CPP_LAZY_AUTO_MIN_BYTES,
   effectiveLazyTensorBytes,
   ggufQuantizationTag,
   readGgufSummary,
-} from './gguf-metadata.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/gguf-metadata';
+import { readGgufSummaryAsync } from '@bendyline/gezel-inference/internal/providers/llama-cpp/gguf-metadata-async';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 /**
  * Build a synthetic GGUF binary in-memory so we can test the parser

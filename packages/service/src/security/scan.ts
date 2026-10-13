@@ -14,7 +14,7 @@
 import { readFile } from 'node:fs/promises';
 import { builtinModules } from 'node:module';
 import { type SecurityScanProvenance, createLogger, nowIso } from '@bendyline/gezel';
-import { safeJoin } from '../fs/safe-paths.js';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { DependencyInput } from '../index-store/index-store-types.js';
 import type { IndexStore } from '../index-store/index-store.js';
 import {

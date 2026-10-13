@@ -1,7 +1,7 @@
 import { ChatTurnErrorDetailSchema } from '@bendyline/gezel';
+import { notReadyError } from '@bendyline/gezel-inference/internal/providers/active-install-message';
+import { CapacityDeniedError } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 import { describe, expect, it } from 'vitest';
-import { notReadyError } from '../providers/active-install-message.js';
-import { CapacityDeniedError } from '../providers/native/capacity-broker.js';
 import { TurnAbortError } from '../providers/turn-abort-error.js';
 import { describeTurnError } from './turn-error.js';
 

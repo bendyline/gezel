@@ -6,9 +6,9 @@ import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { llamaEngineNeed } from './first-run-engine.js';
 
 /**
- * Whether the app is still in first-run onboarding — no working AI provider
- * set up yet. Drives relabeling the Meester home tab as "Get started" until
- * the user has downloaded a model / connected a provider.
+ * Whether an unused home still needs its first working AI provider. A later
+ * outage or provider change must never turn an established workshop back
+ * into onboarding (and hide the diagnostics needed to repair it).
  *
  * Two signals feed it:
  *   1. An initial estimate from config + installed models, so the sidebar
@@ -74,6 +74,22 @@ export function useIsFirstRun(enabled = true): boolean {
     let inFlight = false;
     let againAfter = false;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
+    let completed = false;
+    // The bootstrap flag is not evidence of use: the daemon sets it even
+    // when setup fails. This endpoint excludes the automatically created crew
+    // and projects. Read it once, shared by estimates and Home's probe events.
+    const usage = api
+      .getSystemHomeInfo()
+      .then((home) => home.usage.everUsed)
+      .catch(() => false);
+    const settle = async (needsSetup: boolean, current: number) => {
+      const used = await usage;
+      if (cancelled || current !== revision) return;
+      completed ||= used;
+      const next = needsSetup && !completed;
+      setFirstRun(next);
+      schedulePoll(next);
+    };
     const schedulePoll = (stillFirstRun: boolean) => {
       if (pollTimer) clearTimeout(pollTimer);
       pollTimer = null;
@@ -95,8 +111,7 @@ export function useIsFirstRun(enabled = true): boolean {
       void estimateFirstRun()
         .then((v) => {
           if (cancelled || current !== revision) return;
-          setFirstRun(v);
-          schedulePoll(v);
+          return settle(v, current);
         })
         .finally(() => {
           inFlight = false;
@@ -111,9 +126,10 @@ export function useIsFirstRun(enabled = true): boolean {
     const onFirstRun = (e: Event) => {
       const detail = (e as CustomEvent<{ firstRun?: boolean }>).detail;
       if (detail && typeof detail.firstRun === 'boolean') {
-        revision++;
-        setFirstRun(detail.firstRun);
-        schedulePoll(detail.firstRun);
+        // Once Home has observed a working provider, a later failed probe is
+        // a connection problem, even before the person's first saved chat.
+        if (!detail.firstRun) completed = true;
+        void settle(detail.firstRun, ++revision);
       }
     };
     window.addEventListener('gezel:first-run', onFirstRun);

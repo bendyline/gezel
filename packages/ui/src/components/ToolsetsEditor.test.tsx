@@ -62,6 +62,28 @@ describe('ToolsetsEditor community tier', () => {
     expect(await screen.findByText(COMMUNITY_SECRETS_WARNING)).toBeInTheDocument();
   });
 
+  it('does not reload the full catalog when a parent recreates the same scope', async () => {
+    const { rerender } = render(
+      <ToolsetsEditor scope={{ kind: 'project', projectId: 'workshop' }} subject="Workshop" />,
+    );
+    await waitFor(() => expect(api.listCatalogItems).toHaveBeenCalledTimes(1));
+    rerender(
+      <ToolsetsEditor scope={{ kind: 'project', projectId: 'workshop' }} subject="Renamed" />,
+    );
+    await waitFor(() => expect(screen.getByText('Additional project toolsets')).toBeVisible());
+    expect(api.listCatalogItems).toHaveBeenCalledTimes(1);
+    rerender(
+      <ToolsetsEditor scope={{ kind: 'project', projectId: 'another' }} subject="Another" />,
+    );
+    await waitFor(() =>
+      expect(api.listInstalledToolsets).toHaveBeenLastCalledWith({
+        kind: 'project',
+        projectId: 'another',
+      }),
+    );
+    expect(api.listCatalogItems).toHaveBeenCalledTimes(2);
+  });
+
   it('captions an installed community toolset as unreviewed', async () => {
     vi.mocked(api.listInstalledToolsets).mockResolvedValue({
       toolsets: [

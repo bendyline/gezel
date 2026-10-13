@@ -1,3 +1,13 @@
+import type {
+  ActiveHook,
+  HookRunner,
+  ToolGroundingHooks,
+} from '@bendyline/gezel-inference/internal/providers/session-hooks';
+export type {
+  ActiveHook,
+  HookRunner,
+  ToolGroundingHooks,
+} from '@bendyline/gezel-inference/internal/providers/session-hooks';
 /**
  * Small MCP client used by the OpenAI provider so that local stdio MCP
  * servers (like @bendyline/gezel-mcp) remain available when the agent is
@@ -25,23 +35,26 @@ import {
   createAwakeTimeout,
   createLogger,
 } from '@bendyline/gezel';
+import type {
+  ResolvedBehaviorEntry,
+  ResolvedModelProfile,
+} from '@bendyline/gezel-inference/internal/model-profile/types';
+import { coerceArgsToSchema } from '@bendyline/gezel-inference/internal/providers/tool-arg-schema-coercion';
+import type { ToolCallEvent } from '@bendyline/gezel-inference/internal/providers/types';
 import { resolveToolNameSpelling } from '@bendyline/gezel-mcp';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { ResolvedBehaviorEntry, ResolvedModelProfile } from '../model-profile/types.js';
 import { type McpServerSpec, isHttpSpec, isInMemorySpec } from './mcp-spec.js';
 import {
   type McpToolWrapper,
   type McpToolWrapperContext,
   selectWrappersFor,
 } from './mcp-wrappers/index.js';
-import { coerceArgsToSchema } from './tool-arg-schema-coercion.js';
 import type { ToolAudioPersister } from './tool-audio-persister.js';
 import type { ToolImagePersister } from './tool-image-persister.js';
-import type { ToolCallEvent } from './types.js';
 import type { UnresolvedToolFailureLedger } from './unresolved-tool-failure-ledger.js';
 
 /**
@@ -50,12 +63,6 @@ import type { UnresolvedToolFailureLedger } from './unresolved-tool-failure-ledg
  * can surface "which craftbook blocked this?" Multiple craftbooks may
  * be active simultaneously; their hook lists concatenate.
  */
-export interface ActiveHook {
-  spec: HookSpec;
-  craftbookId: string;
-  /** Compiled regex from `spec.matcher`. */
-  matcher: RegExp;
-}
 
 /**
  * Called by the bridge to actually run a hook script. Wired by
@@ -64,15 +71,6 @@ export interface ActiveHook {
  * the tool-call context (name + args, plus the post-call result for
  * PostToolUse).
  */
-export type HookRunner = (
-  hook: ActiveHook,
-  ctx: {
-    phase: HookPhase;
-    toolName: string;
-    args: Record<string, unknown>;
-    result?: { text: string; isError: boolean };
-  },
-) => Promise<HookResult>;
 
 /**
  * A factual-mode session's hold on its tool traffic (chat/evidence-ledger.ts).
@@ -80,13 +78,6 @@ export type HookRunner = (
  * facts no evidence shows, or rewrite its arguments; `labelEvidence` runs on
  * a successful result and returns the `[n]` header the model cites it by.
  */
-export interface ToolGroundingHooks {
-  checkWrite(
-    toolName: string,
-    args: Record<string, unknown>,
-  ): { kind: 'reject'; error: string } | { kind: 'allow'; args: Record<string, unknown> } | null;
-  labelEvidence(toolName: string, args: Record<string, unknown>, text: string): string | null;
-}
 
 const log = createLogger('mcp-bridge');
 

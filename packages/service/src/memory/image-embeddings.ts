@@ -15,9 +15,9 @@
 
 import { Worker } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
-import { retireModelWorker } from '../utils/retire-model-worker.js';
-import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
-import { PipelineLoadError } from './embed-core.js';
+import { PipelineLoadError } from '@bendyline/gezel-inference/internal/memory/embed-core';
+import { retireModelWorker } from '@bendyline/gezel-inference/internal/utils/retire-model-worker';
+import { findServiceWorkerEntry } from '@bendyline/gezel-inference/internal/utils/service-worker-entry';
 import { type FaceDetectOutcome, type FaceModelPaths, runFaceDetect } from './face-embed-core.js';
 import {
   type ImageEmbedJob,

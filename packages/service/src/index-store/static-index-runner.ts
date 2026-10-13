@@ -1,6 +1,6 @@
 import { Worker } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
-import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
+import { findServiceWorkerEntry } from '@bendyline/gezel-inference/internal/utils/service-worker-entry';
 import { type ContentIndexStats, indexWorkspaceContent } from './content-indexer.js';
 import { IndexStore } from './index-store.js';
 

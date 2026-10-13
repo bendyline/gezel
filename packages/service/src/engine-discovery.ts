@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
 import { createLogger } from '@bendyline/gezel';
 import { electronNativeBinCandidates } from '@bendyline/gezel-client/node';
+import { reuseVerifiedElectronNativeBinaries } from '@bendyline/gezel-inference/internal/engines/electron-native-reuse';
+import { effectiveEngineRelease } from '@bendyline/gezel-inference/internal/engines/native-manifest';
 import { discoverNativeBinaries } from '@bendyline/gezel/native';
-import { reuseVerifiedElectronNativeBinaries } from './engines/electron-native-reuse.js';
-import { effectiveEngineRelease } from './engines/native-manifest.js';
 const log = createLogger('engines');
 export async function prepareNativeEngines(home: string, bootConfig: GezelConfig): Promise<void> {
   // System-service launches (Windows GezelService NSSM-wrapped daemon,

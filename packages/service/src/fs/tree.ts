@@ -2,7 +2,7 @@ import type { Dirent } from 'node:fs';
 import { lstat, readFile, readdir, stat } from 'node:fs/promises';
 import { join, normalize } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
-import { realpathContained, safeJoin } from './safe-paths.js';
+import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { isOfficeLockName } from './sync-junk.js';
 
 export async function listDirEntries(

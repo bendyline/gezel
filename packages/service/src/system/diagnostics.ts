@@ -7,21 +7,24 @@ import {
   createLogger,
   nowIso,
 } from '@bendyline/gezel';
-import { resolvePlatformKey } from '@bendyline/gezel/native';
-import type { ChatManager } from '../chat/manager.js';
-import { effectiveEngineRelease, isEnginePinned } from '../engines/native-manifest.js';
-import { KNOWN_ENGINES } from '../engines/registry.js';
-import type { Store } from '../fs/store.js';
-import { resolveDefaultProviderName } from '../providers/default-provider.js';
-import { readLlamaCppBuildMetadata } from '../providers/llama-cpp/build-metadata.js';
+import {
+  effectiveEngineRelease,
+  isEnginePinned,
+} from '@bendyline/gezel-inference/internal/engines/native-manifest';
+import { KNOWN_ENGINES } from '@bendyline/gezel-inference/internal/engines/registry';
+import { readLlamaCppBuildMetadata } from '@bendyline/gezel-inference/internal/providers/llama-cpp/build-metadata';
 import {
   type LlamaDevice,
   matchNvidiaRuntimeDevice,
   probeLlamaDevices,
   probeNvidiaRuntimeDevices,
-} from '../providers/llama-cpp/devices.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/devices';
+import { detectMemoryProfileCached } from '@bendyline/gezel-inference/internal/system/memory';
+import { resolvePlatformKey } from '@bendyline/gezel/native';
+import type { ChatManager } from '../chat/manager.js';
+import type { Store } from '../fs/store.js';
+import { resolveDefaultProviderName } from '../providers/default-provider.js';
 import { describeCurrentHardware } from './hardware-description.js';
-import { detectMemoryProfileCached } from './memory.js';
 
 const log = createLogger('system');
 

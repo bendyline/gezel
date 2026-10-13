@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { z } from 'zod';
-import type { ExternalToolSpec } from '../../providers/types.js';
 import {
   type ChatCompletionRequest,
   type TranslatedSessionInput,
   translateMessages,
-} from './translate.js';
+} from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
+import type { ExternalToolSpec } from '@bendyline/gezel-inference/internal/providers/types';
+import { z } from 'zod';
 
 const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const MAX_LOCAL_TOOL_NAME_LENGTH = 64;

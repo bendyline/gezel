@@ -1,7 +1,10 @@
+import {
+  CapacityDeniedError,
+  EngineBusyError,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
 import { describe, expect, it } from 'vitest';
 import type { McpBridgePool } from '../mcp-bridge-pool.js';
-import { CapacityDeniedError, EngineBusyError } from '../native/capacity-broker.js';
-import { ProviderQueue } from '../queue.js';
 import { RemoteSession } from './session.js';
 
 /** Build a Response whose body streams the given frames as SSE `data:` events. */

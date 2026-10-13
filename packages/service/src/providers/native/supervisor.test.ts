@@ -1,12 +1,13 @@
 import { recordSuspensionForTests, resetSuspendClockForTests } from '@bendyline/gezel';
-import { beforeEach, describe, expect, it } from 'vitest';
+import type { NativeEngineExitSnapshot as InferenceNativeEngineExitSnapshot } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
 import {
   NativeEngineSupervisor,
   __resetLiveEnginePidsForTest,
   classifyNativeEnginePanic,
   normalizeNativeEngineLaunch,
   parseNativeProcessSnapshot,
-} from './supervisor.js';
+} from '@bendyline/gezel-inference/internal/providers/native/supervisor';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 /**
  * Drive the supervisor against an injected spawn + fetch so we never
@@ -170,7 +171,7 @@ describe('NativeEngineSupervisor', () => {
 
   it('retains reachedReady on an expected stop snapshot', async () => {
     const child = makeFakeChild(4243);
-    const exits: Array<import('./supervisor.js').NativeEngineExitSnapshot> = [];
+    const exits: Array<InferenceNativeEngineExitSnapshot> = [];
     const sup = new NativeEngineSupervisor({
       resolveLaunch: async () => ({
         command: 'fake-engine',
@@ -1293,7 +1294,7 @@ not a process row
         typeof import('node:child_process').spawn
       >) as unknown as typeof import('node:child_process').spawn;
     const logs: string[] = [];
-    const exits: Array<import('./supervisor.js').NativeEngineExitSnapshot> = [];
+    const exits: Array<InferenceNativeEngineExitSnapshot> = [];
     const sup = new NativeEngineSupervisor({
       resolveLaunch: async () => ({
         command: '/opt/gezel/gezel-llama-server',
@@ -1361,7 +1362,7 @@ not a process row
       queueMicrotask(() => markSpawned());
       return child;
     }) as unknown as typeof import('node:child_process').spawn;
-    const exits: Array<import('./supervisor.js').NativeEngineExitSnapshot> = [];
+    const exits: Array<InferenceNativeEngineExitSnapshot> = [];
     const sup = new NativeEngineSupervisor({
       resolveLaunch: async () => ({
         command: '/opt/Gezel/native-bin/linux-x64-cuda/gezel-llama-server',
@@ -1410,7 +1411,7 @@ not a process row
       child as unknown as ReturnType<
         typeof import('node:child_process').spawn
       >) as unknown as typeof import('node:child_process').spawn;
-    const exits: Array<import('./supervisor.js').NativeEngineExitSnapshot> = [];
+    const exits: Array<InferenceNativeEngineExitSnapshot> = [];
     const sup = new NativeEngineSupervisor({
       resolveLaunch: async () => ({
         command: '/opt/gezel/gezel-llama-server',

@@ -1,8 +1,8 @@
 import { chmod, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { copyFileAtomic, writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { copyFileAtomic, writeFileAtomic } from './atomic.js';
 
 describe('atomic file publishing', () => {
   let dir: string;

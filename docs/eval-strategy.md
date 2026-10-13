@@ -18,7 +18,7 @@ Three things follow from that frame:
 
 The anchored scenarios are deliberately scoped to be within reach of medium-tier local models — Gemma 4 in the 26B–31B range, Qwen at comparable size, etc. **The product target is "this works well on a medium local model on a typical developer Mac"**, not "this works well on the largest hosted model." Every eval finding feeds back into one of three lanes:
 
-1. **Catalog tuning** — temperature, repetition penalty, max-tokens, top-p, reasoning budget, and family-specific hints resolved by [model-profile/tuning.ts](../packages/service/src/model-profile/tuning.ts) from the chat-model manifests in the external
+1. **Catalog tuning** — temperature, repetition penalty, max-tokens, top-p, reasoning budget, and family-specific hints resolved by [model-profile/tuning.ts](../packages/inference/src/model-profile/tuning.ts) from the chat-model manifests in the external
 [@bendyline/gilde](https://github.com/bendyline/gilde) content package
 (`data/chat-models/`).
 2. **Framework changes** — team composition (fewer/multimodal gezels), toolset ergonomics (file I/O surface, validation tools, replace-section APIs), salvage layer, role-tool-filter coverage, planner/voorman behavior, craftbook (about.md) tightening for roles that struggle.

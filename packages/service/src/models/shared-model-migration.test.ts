@@ -4,10 +4,10 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GezmodelBundleManifest, SharedModelMigrationRequest } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import type { ModelBundleSource } from '@bendyline/gezel-inference/internal/models/bundle-storage';
 import AdmZip from 'adm-zip';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineEngineBridge } from '../machine-engine/bridge.js';
-import type { ModelBundleSource } from './bundle-storage.js';
 import {
   SharedModelMigrationManager,
   type SharedModelSourceHome,

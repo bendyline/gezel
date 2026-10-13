@@ -6,7 +6,6 @@ import { type Server, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ModelFileDownloadError,
   type PinnedModelFile,
@@ -20,7 +19,8 @@ import {
   removeTransformersModelCache,
   transformersCacheDir,
   withTransformersModelCacheLock,
-} from './transformers-cache.js';
+} from '@bendyline/gezel-inference/internal/transformers-cache';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const ABSENT = '@bendyline/definitely-not-installed';
 

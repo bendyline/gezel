@@ -3,12 +3,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
 import {
   SERVICE_WORKER_ENTRIES,
   type ServiceWorkerEntry,
   findServiceWorkerEntry,
-} from './service-worker-entry.js';
+} from '@bendyline/gezel-inference/internal/utils/service-worker-entry';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const workerNames = Object.keys(SERVICE_WORKER_ENTRIES) as ServiceWorkerEntry[];
 const tempRoots: string[] = [];
@@ -97,9 +97,19 @@ describe('service worker entry resolution', () => {
     'resolves every worker from the actual emitted daemon bundle',
     () => {
       for (const name of workerNames) {
-        const expected = join(serviceRoot, 'dist', SERVICE_WORKER_ENTRIES[name].built);
+        const inferenceWorker = [
+          'embeddings',
+          'gguf-metadata',
+          'knowledge',
+          'relevance-model',
+        ].includes(name);
+        const owner = inferenceWorker ? resolve(serviceRoot, '../inference') : serviceRoot;
+        const expected = join(owner, 'dist', SERVICE_WORKER_ENTRIES[name].built);
+        const entry = inferenceWorker
+          ? join(owner, 'dist/providers/native/inference.js')
+          : builtDaemonEntry;
         expect(existsSync(expected), `${name} worker should be emitted`).toBe(true);
-        expect(findServiceWorkerEntry(pathToFileURL(builtDaemonEntry).href, name)).toBe(expected);
+        expect(findServiceWorkerEntry(pathToFileURL(entry).href, name)).toBe(expected);
       }
     },
   );

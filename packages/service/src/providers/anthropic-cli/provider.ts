@@ -1,7 +1,16 @@
 import { createLogger } from '@bendyline/gezel';
-import { ProviderQueue } from '../queue.js';
-import { ExternalToolsUnsupportedError, SessionResumeError } from '../types.js';
-import type { LLMProvider, LLMSession, ModelInfo, ProviderName, SessionOpts } from '../types.js';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import {
+  ExternalToolsUnsupportedError,
+  SessionResumeError,
+} from '@bendyline/gezel-inference/internal/providers/types';
+import type {
+  LLMProvider,
+  LLMSession,
+  ModelInfo,
+  ProviderName,
+  SessionOpts,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { type ClaudeBinary, resolveClaudeBinary } from './binary.js';
 import { type ClaudeReasoningEffort, isClaudeReasoningEffort } from './reasoning.js';
 import { AnthropicCliSession, type SessionDeps } from './session.js';

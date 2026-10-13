@@ -6,8 +6,9 @@ import { type RunningService, startService } from '../service.js';
 
 // Deterministic, dependency-free embeddings so the memory manager doesn't
 // pull a real model (mirrors fanout.integration.test.ts).
-vi.mock('../memory/embeddings.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../memory/embeddings.js')>();
+vi.mock('@bendyline/gezel-inference/internal/memory/embeddings', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('@bendyline/gezel-inference/internal/memory/embeddings')>();
   const vectorFor = (text: string): number[] => {
     const vector = new Array<number>(16).fill(0);
     for (let i = 0; i < text.length; i++) vector[i % vector.length]! += text.charCodeAt(i) / 255;

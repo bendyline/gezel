@@ -1,5 +1,8 @@
+import {
+  KNOWLEDGE_VECTOR_FLOORS,
+  resolveKnowledgeVectorFloors,
+} from '@bendyline/gezel-inference/internal/knowledge/vector-floors';
 import { describe, expect, it } from 'vitest';
-import { KNOWLEDGE_VECTOR_FLOORS, resolveKnowledgeVectorFloors } from './vector-floors.js';
 
 const handboek = { catalogKey: 'bendyline/handboek', profileId: 'bge-small-en-v1.5@1' };
 const folderCatalog = { catalogKey: 'someone/notes', profileId: 'bge-small-en-v1.5@1' };

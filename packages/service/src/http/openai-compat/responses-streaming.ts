@@ -5,7 +5,7 @@ import type {
   LLMSession,
   SendAndWaitOpts,
   TurnUsage,
-} from '../../providers/types.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { unwrapCustomToolInput } from './responses-translate.js';
 
 export type ResponsesToolKind = 'function' | 'custom';

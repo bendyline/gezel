@@ -11,15 +11,15 @@ import {
   localContextFloorTokens,
   pickRecommendedModel,
 } from '@bendyline/gezel';
-import { detectMemoryProfile } from '../../system/memory.js';
+import { resolveLlamaCppKvCacheType } from '@bendyline/gezel-inference/internal/providers/llama-cpp/kv-cache-type';
 import {
   computeHeadroomFor,
   estimatePerSlotKvBytes,
   kvQuantScale,
   liveLaunchCapBytes,
-} from '../native/capacity-broker.js';
-import { measureAvailableGpuBytes } from '../native/device-capacity.js';
-import { resolveLlamaCppKvCacheType } from './kv-cache-type.js';
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { measureAvailableGpuBytes } from '@bendyline/gezel-inference/internal/providers/native/device-capacity';
+import { detectMemoryProfile } from '@bendyline/gezel-inference/internal/system/memory';
 
 /**
  * Pick the on-device model to install on first run.

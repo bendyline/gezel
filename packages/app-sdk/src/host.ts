@@ -44,7 +44,8 @@
  * }
  * ```
  *
- * Requires `@bendyline/gezel-service` to be installed alongside this SDK (an
+ * Requires `@bendyline/gezel-inference` for in-process inference hosting, or
+ * `@bendyline/gezel-service` for full/child hosting (an
  * optional peer dependency) only when you actually host.
  */
 export { Gezel, connectOrHost } from './gezel.js';

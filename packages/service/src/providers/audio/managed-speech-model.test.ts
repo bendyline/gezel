@@ -3,17 +3,17 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  ensureSpeechModel,
+  sharedSpeechModelInfo,
+  speechPullEvents,
+} from '@bendyline/gezel-inference/internal/providers/audio/managed-speech-model';
+import {
   KOKORO_TRANSFORMERS_FILES,
   KOKORO_TRANSFORMERS_METADATA,
   SpeechAssetStore,
   type SpeechModelEntry,
 } from '@bendyline/gezel/speech-models';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import {
-  ensureSpeechModel,
-  sharedSpeechModelInfo,
-  speechPullEvents,
-} from './managed-speech-model.js';
 
 const bytes = Buffer.from('verified model');
 const file = {

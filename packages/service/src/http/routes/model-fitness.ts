@@ -1,6 +1,6 @@
+import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import { Hono } from 'hono';
 import type { EngineContext } from '../engine-context.js';
-import { machineEngineProxy } from './machine-engine-proxy.js';
 
 /**
  * Model fitness (the proeve) — read persisted per-model fitness

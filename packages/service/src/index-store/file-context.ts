@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import type { FileContextFinding, FileContextResponse, SymbolContext } from '@bendyline/gezel';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { resolveImportEdgesDetailed, resolveSpecifier } from '../filemap/affinity.js';
-import { safeJoin } from '../fs/safe-paths.js';
 import { classifyFile } from './classify.js';
 import type { SecurityFindingRow, SymbolHit } from './index-store-types.js';
 import type { IndexStore } from './index-store.js';

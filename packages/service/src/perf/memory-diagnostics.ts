@@ -7,7 +7,7 @@
  */
 import { getHeapStatistics } from 'node:v8';
 import { createLogger } from '@bendyline/gezel';
-import { perfSnapshot } from './responsiveness.js';
+import { perfSnapshot } from '@bendyline/gezel-inference/internal/perf/responsiveness';
 
 const log = createLogger('memory-diagnostics');
 

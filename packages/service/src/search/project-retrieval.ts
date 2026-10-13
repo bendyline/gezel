@@ -1,3 +1,11 @@
+import {
+  admitsUnjudgedKnowledge,
+  clearsInjectionFloor,
+} from '@bendyline/gezel-inference/internal/knowledge/admission';
+export {
+  clearsInjectionFloor,
+  admitsUnjudgedKnowledge,
+} from '@bendyline/gezel-inference/internal/knowledge/admission';
 import { createHash } from 'node:crypto';
 import {
   type ChatSession,
@@ -22,6 +30,10 @@ import {
   retrievalDocKey,
   taskDeclaredFolders,
 } from '@bendyline/gezel';
+import {
+  RELEVANCE_WINDOW,
+  relevanceSummary,
+} from '@bendyline/gezel-inference/internal/search/relevance-stage';
 import { looksBinaryText } from '../fs/binary-text.js';
 import {
   SHARED_LIBRARY_STARTER_DOC,
@@ -35,7 +47,6 @@ import {
   textMatchesAnyTerm,
 } from '../index-store/query-terms.js';
 import { isUnmodifiedWorkspaceBootstrap } from '../workspace/template.js';
-import { RELEVANCE_WINDOW, relevanceSummary } from './relevance-stage.js';
 import { RetrievalTraceBuilder } from './retrieval-trace.js';
 import { MERGE_WEIGHTS, type SearchService } from './search-service.js';
 
@@ -220,25 +231,6 @@ export async function resolveSessionRetrievalPolicy(args: {
  * 0.45 cosine floor at the source dominates it) but kept for the record.
  * `default` covers future kinds (e.g. `knowledge`) until deliberately tuned.
  */
-const INJECTION_MIN_RELEVANCE: Partial<Record<UnifiedSearchResult['kind'], number>> = {
-  content: 120 / 420,
-  symbol: 120 / 520,
-  document: 120 / 680,
-  memory: 120 / 360,
-  session: 120 / 400,
-  // The behavior-preserving quotient over the knowledge merge weight; the
-  // knowledge-bench evals own tuning it from here.
-  knowledge: 120 / 370,
-};
-const INJECTION_MIN_RELEVANCE_DEFAULT = 0.25;
-
-function clearsInjectionFloor(result: UnifiedSearchResult): boolean {
-  const floor = INJECTION_MIN_RELEVANCE[result.kind] ?? INJECTION_MIN_RELEVANCE_DEFAULT;
-  // Results from older callers/stubs may lack `relevance`; derive it from the
-  // weighted score so the check stays exactly equivalent to the old floor.
-  const relevance = result.relevance ?? result.score / (MERGE_WEIGHTS[result.kind] || 1);
-  return relevance >= floor;
-}
 
 /**
  * The bar a catalog hit must clear when no relevance model judged it: the
@@ -246,9 +238,6 @@ function clearsInjectionFloor(result: UnifiedSearchResult): boolean {
  * `retrieveProjectContext` applies. Connected apps retrieving without the
  * model are held to the same bar as Gezel's own turns.
  */
-export function admitsUnjudgedKnowledge(result: UnifiedSearchResult): boolean {
-  return result.arm === 'vector' && clearsInjectionFloor(result);
-}
 
 /**
  * Does a keyword hit actually contain what was searched for?

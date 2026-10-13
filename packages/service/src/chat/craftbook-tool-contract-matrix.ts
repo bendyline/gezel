@@ -27,10 +27,13 @@ import {
   CatalogService,
   applyDefaultCraftbookStepPolicies,
 } from '@bendyline/gezel-catalog';
+import { classifyModelTier } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
+import { resolveProfile } from '@bendyline/gezel-inference/internal/model-profile/registry';
+import {
+  applyBehaviorEnvOverrides,
+  profileHasBehavior,
+} from '@bendyline/gezel-inference/internal/model-profile/runtime';
 import { loadBuiltinToolContractsForLint } from '@bendyline/gezel-mcp/lint-contracts';
-import { resolveProfile } from '../model-profile/registry.js';
-import { applyBehaviorEnvOverrides, profileHasBehavior } from '../model-profile/runtime.js';
-import { classifyModelTier } from './local-model-tier.js';
 import {
   lintPromptToolContract,
   promptConditionallyReferencedTools,

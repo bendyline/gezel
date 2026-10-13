@@ -22,7 +22,7 @@
  */
 
 import { parentPort } from 'node:worker_threads';
-import { PipelineLoadError } from './embed-core.js';
+import { PipelineLoadError } from '@bendyline/gezel-inference/internal/memory/embed-core';
 import { type FaceModelPaths, runFaceDetect } from './face-embed-core.js';
 import {
   type ImageEmbedJob,

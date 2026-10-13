@@ -18,6 +18,12 @@
  */
 
 import { join } from 'node:path';
+import { embedProfileId } from '@bendyline/gezel-inference/internal/memory/embed-core';
+import {
+  embed,
+  embedBatch,
+  embedQuery,
+} from '@bendyline/gezel-inference/internal/memory/embeddings';
 import {
   type SqliteDriver,
   isTransientIndexError,
@@ -32,8 +38,6 @@ import {
   type MemorySource,
   isMemoryKind,
 } from './daily-markdown.js';
-import { embedProfileId } from './embed-core.js';
-import { embed, embedBatch, embedQuery } from './embeddings.js';
 
 export interface MemoryEntry {
   text: string;

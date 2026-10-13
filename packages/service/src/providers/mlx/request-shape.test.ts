@@ -1,6 +1,9 @@
+import type { ResolvedModelProfile } from '@bendyline/gezel-inference/internal/model-profile/types';
+import {
+  applyMlxRequestShape,
+  mlxToolGrammarActive,
+} from '@bendyline/gezel-inference/internal/providers/mlx/request-shape';
 import { describe, expect, it } from 'vitest';
-import type { ResolvedModelProfile } from '../../model-profile/types.js';
-import { applyMlxRequestShape, mlxToolGrammarActive } from './request-shape.js';
 
 const qwen = (ids: string[], template?: string): ResolvedModelProfile =>
   ({

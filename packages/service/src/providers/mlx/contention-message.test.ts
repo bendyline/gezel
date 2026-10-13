@@ -1,5 +1,5 @@
+import { buildPreFirstByteAbortMessage } from '@bendyline/gezel-inference/internal/providers/mlx/runtime-diagnostics';
 import { describe, expect, it } from 'vitest';
-import { buildPreFirstByteAbortMessage } from './runtime-diagnostics.js';
 
 // Engine vocabulary a person cannot act on. The old messages read "no first
 // byte", "prefill stalled", "54,971 / 54,987 tokens", "mlx_vlm.server".

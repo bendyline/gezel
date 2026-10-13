@@ -2,10 +2,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VSCodeSetupStatusResponseSchema } from '@bendyline/gezel';
+import type { ModelInfo } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTokenStore } from '../http/token-store.js';
 import type { VSCodeBridgeController } from '../http/vscode-bridge.js';
-import type { ModelInfo } from '../providers/types.js';
 import { VSCODE_SETUP_APP_ID, createVSCodeSetupManager } from './manager.js';
 import { inspectVSCodeConfig } from './profile-config.js';
 

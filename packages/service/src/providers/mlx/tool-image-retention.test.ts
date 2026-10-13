@@ -1,5 +1,8 @@
+import {
+  TOOL_IMAGES_MESSAGE,
+  retireInspectedToolImages,
+} from '@bendyline/gezel-inference/internal/providers/mlx/tool-image-retention';
 import { describe, expect, it } from 'vitest';
-import { TOOL_IMAGES_MESSAGE, retireInspectedToolImages } from './tool-image-retention.js';
 
 describe('retireInspectedToolImages', () => {
   const images = { role: 'user', content: TOOL_IMAGES_MESSAGE, images: ['a', 'b'] };

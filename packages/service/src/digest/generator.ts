@@ -10,9 +10,9 @@ import {
   createLogger,
   isProactiveAllowed,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { projectPrivateDir } from '@bendyline/gezel/paths';
 import type { ChatEventBus } from '../chat/events.js';
-import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import { runGit } from '../git/git.js';

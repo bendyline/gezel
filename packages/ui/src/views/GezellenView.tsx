@@ -439,6 +439,7 @@ function ScratchTab({
         Name
         <div className="name-row">
           <input
+            aria-label="Name"
             value={name}
             onChange={(e) => setNameAndGender((prev) => ({ ...prev, name: e.target.value }))}
             placeholder="e.g. Ada"

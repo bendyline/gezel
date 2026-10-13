@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { SecretKey, SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { describe, expect, it } from 'vitest';
 import type { Store } from '../../fs/store.js';
-import type { SecretKey, SecretStore } from '../../secrets/types.js';
 import type { AdapterDeps, ConnectorBindingRef } from '../types.js';
 import { GitHubReleasesAdapter, type GitHubReleasesRuntime } from './github-releases.js';
 

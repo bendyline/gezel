@@ -1,9 +1,9 @@
+import type { ProviderCredentialName } from '@bendyline/gezel-inference/internal/secrets/types';
 import { Hono } from 'hono';
 import {
   type CredentialOriginSource,
   resolveCredentialOriginPolicy,
 } from '../../secrets/origins.js';
-import type { ProviderCredentialName } from '../../secrets/types.js';
 import type { ServiceContext } from '../context.js';
 
 /**

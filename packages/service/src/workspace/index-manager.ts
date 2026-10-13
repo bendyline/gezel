@@ -17,15 +17,15 @@ import {
   nowIso,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { embeddingsHealth } from '@bendyline/gezel-inference/internal/memory/embeddings';
+import { beginPerfWork } from '@bendyline/gezel-inference/internal/perf/responsiveness';
 import { projectIndexDir } from '@bendyline/gezel/paths';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
-import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import type { ContentIndex } from '../index-store/content-index.js';
-import { embeddingsHealth } from '../memory/embeddings.js';
-import { beginPerfWork } from '../perf/responsiveness.js';
 import { detectAndPersistProjectType } from '../project-type/detect.js';
 import {
   type EnsureProjectLeadResult,

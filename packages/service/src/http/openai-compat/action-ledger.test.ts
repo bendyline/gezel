@@ -1,6 +1,6 @@
+import { appendCallerOwnedActionLedger } from '@bendyline/gezel-inference/internal/http/openai-compat/action-ledger';
+import type { TranslatedSessionInput } from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
 import { describe, expect, it } from 'vitest';
-import { appendCallerOwnedActionLedger } from './action-ledger.js';
-import type { TranslatedSessionInput } from './translate.js';
 
 const input = (priorMessages: TranslatedSessionInput['priorMessages']): TranslatedSessionInput => ({
   systemMessage: 'system',

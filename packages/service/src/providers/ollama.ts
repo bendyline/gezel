@@ -5,6 +5,7 @@ import {
   leaksUntaggedReasoning,
   turnCancelledMessage,
 } from '@bendyline/gezel';
+import type { ResolvedTuning as InferenceResolvedTuning } from '@bendyline/gezel-inference/internal/model-profile/index';
 
 /**
  * Per-turn output cap (token count) Ollama applies via
@@ -18,20 +19,20 @@ import {
 const DEFAULT_OLLAMA_NUM_PREDICT = 16384;
 
 const log = createLogger('ollama');
-import type { TurnRambleDetectionConfig } from '../model-profile/behaviors/turn-ramble-detection.js';
+import type { TurnRambleDetectionConfig } from '@bendyline/gezel-inference/internal/model-profile/behaviors/turn-ramble-detection';
 import {
   extractReasoningWithProfile,
   profileBehaviorConfig,
   profileHasBehavior,
   profileNumPredict,
-} from '../model-profile/runtime.js';
+} from '@bendyline/gezel-inference/internal/model-profile/runtime';
 import {
   OLLAMA_BODY_TUNING_MAP,
   OLLAMA_OPTIONS_TUNING_MAP,
   applyTuning,
-} from '../model-profile/tuning.js';
-import type { ResolvedModelProfile } from '../model-profile/types.js';
-import { salvageCodeBlocks } from './code-block-salvage.js';
+} from '@bendyline/gezel-inference/internal/model-profile/tuning';
+import type { ResolvedModelProfile } from '@bendyline/gezel-inference/internal/model-profile/types';
+import { salvageCodeBlocks } from '@bendyline/gezel-inference/internal/providers/code-block-salvage';
 import {
   appendTruncationHintToToolResult,
   findClaudeInvokeToolCallSpans,
@@ -53,21 +54,27 @@ import {
   stripProseToolCallsFromText,
   stripShellToolCallsFromText,
   stripXmlTagToolCallsFromText,
-} from './local-tool-call-salvage.js';
-import { McpBridgePool } from './mcp-bridge-pool.js';
-import { computeToolBudgetChars } from './mcp-bridge.js';
-import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from './queue.js';
-import { buildRambleAbortMessage } from './ramble-abort-message.js';
-import { RambleDetector, inertRambleDetector, outputIsConstrained } from './ramble-detector.js';
-import { StreamingSessionBase } from './streaming-session.js';
+} from '@bendyline/gezel-inference/internal/providers/local-tool-call-salvage';
+import {
+  ProviderQueue,
+  defaultAmbientQuietMs,
+  runInQueue,
+} from '@bendyline/gezel-inference/internal/providers/queue';
+import { buildRambleAbortMessage } from '@bendyline/gezel-inference/internal/providers/ramble-abort-message';
+import {
+  RambleDetector,
+  inertRambleDetector,
+  outputIsConstrained,
+} from '@bendyline/gezel-inference/internal/providers/ramble-detector';
+import { StreamingSessionBase } from '@bendyline/gezel-inference/internal/providers/streaming-session';
 import {
   DeliverableReadySteer,
   TERMINAL_ACTION_SKIPPED_OUTPUT,
   terminalToolClosingText,
-} from './terminal-tool-policy.js';
-import { coerceArgsToSchema } from './tool-arg-schema-coercion.js';
-import { ToolFailureTracker } from './tool-failure-tracker.js';
-import { ToolRepeatTracker } from './tool-repeat-tracker.js';
+} from '@bendyline/gezel-inference/internal/providers/terminal-tool-policy';
+import { coerceArgsToSchema } from '@bendyline/gezel-inference/internal/providers/tool-arg-schema-coercion';
+import { ToolFailureTracker } from '@bendyline/gezel-inference/internal/providers/tool-failure-tracker';
+import { ToolRepeatTracker } from '@bendyline/gezel-inference/internal/providers/tool-repeat-tracker';
 import type {
   ExternalToolCall,
   ExternalToolSpec,
@@ -78,8 +85,10 @@ import type {
   ProviderSessionState,
   SendAndWaitOpts,
   SessionOpts,
-} from './types.js';
-import { buildTurnUsage } from './usage-builder.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
+import { buildTurnUsage } from '@bendyline/gezel-inference/internal/providers/usage-builder';
+import { McpBridgePool } from './mcp-bridge-pool.js';
+import { computeToolBudgetChars } from './mcp-bridge.js';
 
 const DEFAULT_BASE_URL = 'http://localhost:11434';
 const DEFAULT_MODEL = 'llama3.2';
@@ -440,7 +449,7 @@ interface OllamaSessionDeps {
    * as the top-level `think` body field, overriding the constructor's
    * `think` when both are present.
    */
-  tuning?: import('../model-profile/index.js').ResolvedTuning;
+  tuning?: InferenceResolvedTuning;
   terminalToolPolicy?: NonNullable<SessionOpts['terminalToolPolicy']>;
 }
 

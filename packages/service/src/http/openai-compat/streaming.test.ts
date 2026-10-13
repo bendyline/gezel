@@ -1,14 +1,20 @@
-import type { EnginePhaseEvent } from '@bendyline/gezel/local-loop';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  type SSEWriter,
+  runStreaming,
+} from '@bendyline/gezel-inference/internal/http/openai-compat/streaming';
+import {
+  createStreamingDiagnostics,
+  snapshotStreamingDiagnostics,
+} from '@bendyline/gezel-inference/internal/http/openai-compat/streaming-telemetry';
+import { ToolCallStreamFilter } from '@bendyline/gezel-inference/internal/http/openai-compat/tool-call-stream-filter';
 import type {
   ExternalToolCall,
   LLMSession,
   ToolArgsDeltaMeta,
   TurnUsage,
-} from '../../providers/types.js';
-import { createStreamingDiagnostics, snapshotStreamingDiagnostics } from './streaming-telemetry.js';
-import { type SSEWriter, runStreaming } from './streaming.js';
-import { ToolCallStreamFilter } from './tool-call-stream-filter.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
+import type { EnginePhaseEvent } from '@bendyline/gezel/local-loop';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 function fakeSession(input: {
   chunks: string[];

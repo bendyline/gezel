@@ -1,4 +1,5 @@
 import type { ProviderName } from '@bendyline/gezel';
+import type { RelevanceModelManager as InferenceRelevanceModelManager } from '@bendyline/gezel-inference/internal/relevance/manager';
 import type { AppToolRelayRegistry } from '../app-tools/relay-registry.js';
 
 import type { AmbientDashboardGenerator } from '../ambient/dashboard-generator.js';
@@ -19,6 +20,7 @@ import type { GitManager } from '../git/manager.js';
 import type { CodeReviewManager } from '../git/reviews.js';
 import type { GitHubPrs } from '../github/prs.js';
 
+import type { KnowledgeManager } from '@bendyline/gezel-inference/internal/knowledge/manager';
 import type { GrowthEngine } from '../growth/engine.js';
 import type { HandboekEngine } from '../handboek/engine.js';
 import type { HistoryManager } from '../history/manager.js';
@@ -26,7 +28,6 @@ import type { ContentIndex } from '../index-store/content-index.js';
 import type { IndexEnrichmentManager } from '../index-store/enrichment-manager.js';
 import type { GlobalIndex } from '../index-store/global-index.js';
 import type { IndexingJobControl } from '../index-store/indexing-job.js';
-import type { KnowledgeManager } from '../knowledge/manager.js';
 import type { MeesterStatusGenerator } from '../meester/status-generator.js';
 import type { MemoryManager } from '../memory/manager.js';
 
@@ -39,11 +40,11 @@ import type { InputStagingManager } from '../tasks/inputs/staging.js';
 
 import type { RemotesRegistry } from '../remotes/registry.js';
 
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import type { ImageRenderer } from '../rendering/image-renderer.js';
 import type { ReportActionManager } from '../report-actions/report-action-manager.js';
 import type { ScriptRunner } from '../scripts/runner.js';
 import type { SearchService } from '../search/search-service.js';
-import type { SecretStore } from '../secrets/types.js';
 import type { StorageJobManager } from '../storage/job-manager.js';
 import type { SystemToolsetInstallRegistry } from '../system-toolsets/install-registry.js';
 import type { SystemStatusBus } from '../system-toolsets/status-bus.js';
@@ -113,7 +114,7 @@ export interface ServiceContext extends EngineContext {
    */
   knowledge?: KnowledgeManager;
   /** The on-device relevance model (cross-encoder): lifecycle, status, scoring. */
-  relevance: import('../relevance/manager.js').RelevanceModelManager;
+  relevance: InferenceRelevanceModelManager;
   /** Searching photos, video and audio by meaning: setting, model install, status. */
   mediaSearch: import('../media-search/manager.js').MediaSearchManager;
   /**

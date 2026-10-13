@@ -17,13 +17,17 @@
 
 import type { KnowledgeEmbeddingProfile } from '@bendyline/gezel';
 import {
+  HF_CACHE_DIR_ENV,
+  TRANSFORMERS_MODULE,
+  isMissingModule,
+} from '@bendyline/gezel-inference/internal/transformers-cache';
+import {
   EmbedderUnavailableError,
   preparePinnedLoad,
   transformersGraphOptions,
   verifyMediaArtifacts,
   verifyProfileArtifacts,
 } from '@bendyline/gezel-knowledge';
-import { HF_CACHE_DIR_ENV, TRANSFORMERS_MODULE, isMissingModule } from '../transformers-cache.js';
 import {
   type RgbImage,
   gemmaVisionTargetSize,

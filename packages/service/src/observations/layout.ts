@@ -32,14 +32,14 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { type ObservationTableManifest, ObservationTableManifestSchema } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import {
   CONNECTOR_ROLLUPS_DIR_NAME,
   CONNECTOR_TABLES_DIR_NAME,
   OBSERVATION_TABLE_MANIFEST_FILE,
   OBSERVATION_TABLE_STATE_FILE,
 } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
-import { resolveInside } from '../fs/safe-paths.js';
 
 /** Partition directory value used when a table has no partition column. */
 export const UNPARTITIONED = 'all';

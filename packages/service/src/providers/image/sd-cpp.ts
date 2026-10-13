@@ -21,7 +21,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
-import { resolveModelDirectory } from '../../models/model-id.js';
+import { resolveModelDirectory } from '@bendyline/gezel-inference/internal/models/model-id';
 import {
   MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
@@ -33,10 +33,10 @@ import {
   modelExistsOnlyReadOnly,
   readOnlyModelError,
   verifyReadOnlyModelPayload,
-} from '../../models/storage-roots.js';
-import { downloadWithRetry } from '../../utils/download-with-retry.js';
-import type { GpuArbiter } from '../gpu-arbiter.js';
-import type { NativeEngineSupervisor } from '../native/supervisor.js';
+} from '@bendyline/gezel-inference/internal/models/storage-roots';
+import type { GpuArbiter } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
+import type { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
+import { downloadWithRetry } from '@bendyline/gezel-inference/internal/utils/download-with-retry';
 import { resolveImg2ImgSupport } from './img2img-support.js';
 import type {
   ImageEngineHealth,

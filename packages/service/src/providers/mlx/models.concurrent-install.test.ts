@@ -3,8 +3,11 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import {
+  type MlxInstallEvent,
+  MlxModelManager,
+} from '@bendyline/gezel-inference/internal/providers/mlx/models';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type MlxInstallEvent, MlxModelManager } from './models.js';
 
 /**
  * End-to-end coverage for the concurrent multi-file MLX install path

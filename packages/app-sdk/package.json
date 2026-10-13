@@ -63,13 +63,18 @@
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10",
-    "@bendyline/gezel-service": "workspace:*"
+    "@bendyline/gezel-service": "workspace:*",
+    "@bendyline/gezel-inference": "workspace:*"
   },
   "peerDependencies": {
-    "@bendyline/gezel-service": "workspace:*"
+    "@bendyline/gezel-service": "workspace:*",
+    "@bendyline/gezel-inference": "workspace:*"
   },
   "peerDependenciesMeta": {
     "@bendyline/gezel-service": {
+      "optional": true
+    },
+    "@bendyline/gezel-inference": {
       "optional": true
     }
   }
