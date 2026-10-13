@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,12 @@ let gezelHome: string;
 
 test.beforeAll(async () => {
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-prompt-drafts-e2e-'));
+  // A morning review opens its own tab and expands the band over the chat,
+  // racing the click that returns to it. This spec needs only the composer.
+  await writeFile(
+    join(gezelHome, 'config.json'),
+    JSON.stringify({ nightShift: { enabled: false } }),
+  );
 });
 
 test.afterAll(async () => {
