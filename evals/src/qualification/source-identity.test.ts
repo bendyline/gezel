@@ -60,10 +60,14 @@ describe('source content identity', () => {
     expect((await sourceIdentity(dir)).sha256).toBe(after.sha256);
   });
 
-  it('includes executable mode and hashes links without reading their targets', async () => {
+  // Windows keeps no executable bit on disk: chmod 0o755 leaves the mode at 0o666.
+  it.skipIf(process.platform === 'win32')('includes executable mode', async () => {
     const before = await sourceIdentity(dir);
     await chmod(join(dir, 'source.ts'), 0o755);
     expect((await sourceIdentity(dir)).sha256).not.toBe(before.sha256);
+  });
+
+  it('hashes links without reading their targets', async () => {
     await symlink('/a/nonexistent/private/file', join(dir, 'link'));
     const linked = await sourceIdentity(dir);
     expect(linked.manifest.link).toBeDefined();
