@@ -75,8 +75,9 @@ export async function postNightShiftReviewCard(
   );
   if (review.windowKey !== windowKey) return;
   const outcome = nightShift.windowOutcome(windowKey);
-  // A paused review never re-arms on its own (its pause is meant for the
-  // person), so the morning card is where they hear about it.
+  // A paused review is resumed at the next window (releasePausedReview in
+  // meester/night-shift-oversight.ts); the morning card tells the person it
+  // will retry, and nobody has to press Resume.
   const oversight = await findNightShiftOversightTask(store);
   const pausedReview =
     oversight?.status === 'paused' ? { projectId: 'default', num: oversight.num } : undefined;
@@ -105,14 +106,9 @@ export async function postNightShiftReviewCard(
     !swept;
   // A new install hears about the nights that produced something, never the
   // ones that didn't: on day one the "night before" predates the crew, and
-  // for a few days after there is rarely anything it was owed. A paused
-  // review is still news: it waits for the person and this card is where
-  // they hear about it.
-  if (
-    empty &&
-    !pausedReview &&
-    isWithinFirstUse(config.firstUseAt, settledAt.getTime(), QUIET_NIGHT_GRACE_MS)
-  ) {
+  // for a few days after there is rarely anything it was owed. That holds for
+  // a paused review too: the runtime resumes it itself each window.
+  if (empty && isWithinFirstUse(config.firstUseAt, settledAt.getTime(), QUIET_NIGHT_GRACE_MS)) {
     log.debug(`[night-shift] ${windowKey}: quiet night during first use; no card`);
     return;
   }
