@@ -261,6 +261,39 @@ describe('NewTaskDialog', () => {
     expect(screen.getByRole('radio', { name: 'Code Review' })).toBeInTheDocument();
   });
 
+  it('lands on For you when the dialog was mounted before the project list arrived', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      interests: { areas: ['data'], askedAt: '2026-10-12T10:00:00Z' },
+    } as never);
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('spreadsheet-findings', 'Spreadsheet Findings', {
+          category: 'research',
+          interests: ['data'],
+        }),
+        bookItem('code-review', 'Code Review', { category: 'code-review' }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    // The Tasks view: mounted closed with no project, opened once its list loads.
+    const props = {
+      projects: PROJECTS,
+      gezels: GEZELS,
+      projectLocked: false,
+      onClose: vi.fn(),
+      onCreated: vi.fn(),
+    };
+    const { rerender } = render(<NewTaskDialog open={false} defaultProjectId="" {...props} />);
+    rerender(<NewTaskDialog open defaultProjectId="pj-alpha" {...props} />);
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: /Spreadsheet/ })).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole('radio', { name: 'Code Review' })).not.toBeInTheDocument();
+  });
+
   it('shows a plan this host cannot run as a disabled card with its reason', async () => {
     vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
       items: [

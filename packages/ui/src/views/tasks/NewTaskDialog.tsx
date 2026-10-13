@@ -186,6 +186,10 @@ export function NewTaskDialog({
   // depend on the project's type and GitHub/branch state).
   const [books, setBooks] = useState<BookItem[]>([]);
   const [booksLoaded, setBooksLoaded] = useState(false);
+  // Which project the loaded books belong to. The Tasks view mounts this
+  // dialog before its project list arrives, so an open first loads for no
+  // project at all, and landing on that empty gallery picked All plans.
+  const [booksLoadedFor, setBooksLoadedFor] = useState<string | null>(null);
   const [starterIds, setStarterIds] = useState<string[]>([]);
   const [durationEstimates, setDurationEstimates] = useState<Record<string, number>>({});
   const submissionKey = useRef('');
@@ -342,6 +346,7 @@ export function NewTaskDialog({
       if (sequence !== craftbookLoadSequence.current) return;
       setBooks([]);
       loadedCraftbookSequence.current = sequence;
+      setBooksLoadedFor(projectId);
       setBooksLoaded(true);
       return;
     }
@@ -370,6 +375,7 @@ export function NewTaskDialog({
     } finally {
       if (sequence === craftbookLoadSequence.current) {
         loadedCraftbookSequence.current = sequence;
+        setBooksLoadedFor(projectId);
         setBooksLoaded(true);
       }
     }
@@ -429,8 +435,10 @@ export function NewTaskDialog({
   // Land on the project's recommended shelf when it has one (once per
   // open/project — user shelf picks stick after that).
   useEffect(() => {
-    // Wait for the interests too: landing before they load always picked All.
-    if (!open || !booksLoaded || railInitialized || !interests.loaded) return;
+    // Wait for the interests too, and for this project's books: landing
+    // before either arrived always picked All.
+    if (!open || !booksLoaded || booksLoadedFor !== projectId || railInitialized) return;
+    if (!interests.loaded) return;
     setRailInitialized(true);
     const hasFeatured =
       creationMode === 'one-time'
@@ -449,6 +457,7 @@ export function NewTaskDialog({
   }, [
     open,
     booksLoaded,
+    booksLoadedFor,
     railInitialized,
     suggestedIds,
     creationMode,
