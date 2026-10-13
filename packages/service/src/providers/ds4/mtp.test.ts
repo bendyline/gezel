@@ -1,5 +1,5 @@
+import { ds4MtpArgs, resolveDs4Mtp } from '@bendyline/gezel-inference/internal/providers/ds4/mtp';
 import { describe, expect, it } from 'vitest';
-import { ds4MtpArgs, resolveDs4Mtp } from './mtp.js';
 
 describe('DS4 embedded MTP policy', () => {
   it('enables a catalog-declared block under auto', () => {

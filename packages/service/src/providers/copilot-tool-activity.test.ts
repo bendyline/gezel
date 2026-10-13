@@ -1,6 +1,6 @@
+import type { ToolCallEvent } from '@bendyline/gezel-inference/internal/providers/types';
 import { describe, expect, it, vi } from 'vitest';
 import { CopilotProvider } from './copilot.js';
-import type { ToolCallEvent } from './types.js';
 
 function toolActivitySdk(): Record<string, unknown> {
   type Event = { data: Record<string, unknown> };

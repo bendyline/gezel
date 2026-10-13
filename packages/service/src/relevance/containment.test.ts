@@ -11,7 +11,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const srcRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const srcRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../inference/src');
 
 const ENTRY_MODULES = [
   'relevance/relevance-worker.ts',

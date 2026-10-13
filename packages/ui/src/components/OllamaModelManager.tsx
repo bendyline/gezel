@@ -35,8 +35,8 @@ const MEMORY_OVERHEAD_FACTOR = 1.2;
  */
 const OLLAMA_TAG_TOOLTIPS: Record<string, string> = {
   'mix of experts':
-    "Only a fraction of the model's parameters run per token, so it's faster than a dense model of the same nominal size. Gezels generally benefit from MoE models.",
-  moe: "Only a fraction of the model's parameters run per token, so it's faster than a dense model of the same nominal size. Gezels generally benefit from MoE models.",
+    "Only a fraction of the model's parameters run per token, so it's faster than a dense model of the same nominal size. Gezellen generally benefit from MoE models.",
+  moe: "Only a fraction of the model's parameters run per token, so it's faster than a dense model of the same nominal size. Gezellen generally benefit from MoE models.",
   thinking:
     'The model reasons through the problem step-by-step before answering. Slower, but generally more accurate on hard questions.',
   agentic:
@@ -520,6 +520,7 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
 
         <div className="new-row" style={{ marginTop: '0.5rem' }}>
           <input
+            aria-label="Download model by name"
             placeholder="Or download by name: e.g. qwen2.5-coder:14b"
             value={customPull}
             onChange={(e) => setCustomPull(e.target.value)}

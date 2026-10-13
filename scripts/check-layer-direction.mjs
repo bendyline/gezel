@@ -14,22 +14,37 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // imports are allowed — they are erased at runtime and a storage type
 // annotation referencing an orchestration interface is coupling of a much
 // weaker kind than executing its code.
+//
+// The storage primitives that moved to packages/inference/src/fs keep the same
+// rule, and the service reaches inference's layers through
+// `@bendyline/gezel-inference/internal/<dir>/` rather than `../<dir>/`, so that
+// specifier counts as the same layer — otherwise the move would have opened a
+// bypass around the guard.
 export const LAYER_RULES = [
   {
     sourceDir: 'packages/service/src/fs',
     forbidden: ['chat', 'http', 'providers'],
     hint: 'storage must not execute orchestration code; move shared helpers to a leaf module (e.g. src/references/)',
   },
+  {
+    sourceDir: 'packages/inference/src/fs',
+    forbidden: ['chat', 'http', 'providers'],
+    hint: 'storage must not execute orchestration code; move shared helpers to a leaf module',
+  },
 ];
 
 const IMPORT_PATTERN = /(?:^|\n)\s*(import|export)\s+([^;]*?)\bfrom\s+['"]([^'"]+)['"]/g;
+const INFERENCE_INTERNAL = '@bendyline/gezel-inference/internal/';
 
 export function findForbiddenImports(source, forbidden) {
   const failures = [];
   for (const match of source.matchAll(IMPORT_PATTERN)) {
     const [, , clause, specifier] = match;
     const target = forbidden.find(
-      (dir) => specifier === `../${dir}` || specifier.startsWith(`../${dir}/`),
+      (dir) =>
+        specifier === `../${dir}` ||
+        specifier.startsWith(`../${dir}/`) ||
+        specifier.startsWith(`${INFERENCE_INTERNAL}${dir}/`),
     );
     if (!target) continue;
     if (/^type\s/.test(clause.trim())) continue;

@@ -58,8 +58,19 @@ function atMs(at: string): number {
  * message the user had just sent, and the follow-to-bottom scroll then showed
  * the stale sub-threads instead of the reply.
  */
+export interface NestChildSessionOptions {
+  /**
+   * Replies the parent turn added after its children finished render below
+   * them. A task's wrap-up is a reply in the turn that launched it, posted
+   * when the worker is done, and the children used to be emitted after the
+   * whole turn, so the finished work sat above the transcript that made it.
+   */
+  splitAfterChildren?: boolean;
+}
+
 export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS, I = never>(
   items: Array<TimelineThreadItem<M, S, T, TS, I>>,
+  options: NestChildSessionOptions = {},
 ): NestedSessionThreads<M, S, T, TS, I> {
   const sessionItems = new Map<string, Array<TimelineThreadItem<M, S, T, TS, I>>>();
   const firstIndex = new Map<string, number>();
@@ -179,17 +190,64 @@ export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS, I
     });
   }
 
+  // The latest row anywhere in a session's subtree, for splitAfterChildren.
+  const lastAtBySubtree = new Map<string, number>();
+  const subtreeLastAt = (sessionId: string, trail = new Set<string>()): number => {
+    const cached = lastAtBySubtree.get(sessionId);
+    if (cached !== undefined) return cached;
+    if (trail.has(sessionId)) return 0;
+    const nextTrail = new Set(trail);
+    nextTrail.add(sessionId);
+    let last = 0;
+    for (const group of sessionItems.get(sessionId) ?? []) {
+      if (group.kind !== 'thread') continue;
+      const rows = group.root ? [group.root, ...group.replies] : group.replies;
+      for (const r of rows) last = Math.max(last, atMs(r.at));
+    }
+    for (const childId of childrenByParent.get(sessionId) ?? []) {
+      if (nestedSessions.has(childId)) last = Math.max(last, subtreeLastAt(childId, nextTrail));
+    }
+    lastAtBySubtree.set(sessionId, last);
+    return last;
+  };
+
   const output: Array<TimelineThreadItem<M, S, T, TS, I>> = [];
   const emitted = new Set<string>();
+  // Emit a parent turn, then its children, then (when splitting) the replies
+  // the turn added once they had finished, as a rootless continuation.
+  const emitWithChildren = (
+    item: ThreadItem<M, S, T, TS, I>,
+    emitChild: (childId: string) => void,
+  ) => {
+    const childIds = childrenByAnchor.get(item) ?? [];
+    if (!options.splitAfterChildren || childIds.length === 0) {
+      output.push(item);
+      for (const childId of childIds) emitChild(childId);
+      return;
+    }
+    const childrenEnd = Math.max(...childIds.map((id) => subtreeLastAt(id)));
+    const cut = item.replies.findIndex((r) => atMs(r.at) > childrenEnd);
+    if (cut < 0 || (cut === 0 && !item.root)) {
+      output.push(item);
+      for (const childId of childIds) emitChild(childId);
+      return;
+    }
+    const after = item.replies.slice(cut);
+    output.push({ ...item, replies: item.replies.slice(0, cut) });
+    for (const childId of childIds) emitChild(childId);
+    output.push({ kind: 'thread', sessionId: item.sessionId, at: after[0]!.at, replies: after });
+  };
   const emitSession = (sessionId: string, trail = new Set<string>()) => {
     if (emitted.has(sessionId) || trail.has(sessionId)) return;
     emitted.add(sessionId);
     const nextTrail = new Set(trail);
     nextTrail.add(sessionId);
     for (const item of sessionItems.get(sessionId) ?? []) {
-      output.push(item);
-      if (item.kind !== 'thread') continue;
-      for (const childId of childrenByAnchor.get(item) ?? []) emitSession(childId, nextTrail);
+      if (item.kind !== 'thread') {
+        output.push(item);
+        continue;
+      }
+      emitWithChildren(item, (childId) => emitSession(childId, nextTrail));
     }
   };
 
@@ -200,9 +258,8 @@ export function nestChildSessionThreads<M extends MessageWithParent, S, T, TS, I
       continue;
     }
     if (nestedSessions.has(item.sessionId)) continue;
-    output.push(item);
     emitted.add(item.sessionId);
-    for (const childId of childrenByAnchor.get(item) ?? []) emitSession(childId);
+    emitWithChildren(item, (childId) => emitSession(childId));
   }
 
   // A malformed cycle should never erase history. Append anything the guarded

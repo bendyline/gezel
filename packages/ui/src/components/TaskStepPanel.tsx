@@ -184,6 +184,7 @@ export function TaskStepPanel({
         <div className="task-step-field full-width">
           <span className="task-step-field-label">Description</span>
           <MarkdownField
+            accessibleName="Step description"
             key={`desc-${phaseKey}`}
             value={phase.description ?? ''}
             readOnly={!runtimeCapabilities().taskStructureEditing}
@@ -217,6 +218,7 @@ export function TaskStepPanel({
             <span className="muted small"> — step-specific context / instructions</span>
           </span>
           <MarkdownField
+            accessibleName="Step prompt"
             key={`prompt-${phaseKey}`}
             value={phase.prompt ?? ''}
             readOnly={!runtimeCapabilities().taskStructureEditing}

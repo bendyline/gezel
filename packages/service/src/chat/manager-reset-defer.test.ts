@@ -25,6 +25,11 @@ let events: ChatEventBus;
 let manager: ChatManager;
 let mock: MockProvider;
 
+// A turn's first send spawns the gezel-mcp stdio child before it reaches the
+// provider. That start-up usually takes about a second but has a tail past two
+// under a loaded suite, and none of these tests measure it.
+const TURN_START_MS = 15_000;
+
 const waitFor = async (pred: () => boolean, timeoutMs = 2000): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
   while (!pred()) {
@@ -120,7 +125,7 @@ describe('ChatManager.resetClient — deferred (model-preference) reset', () => 
     const sendPromise = manager.send(session.id, 'make a video');
 
     // Wait until the turn is actually running on the provider.
-    await waitFor(() => mock.calls.some((c) => c.kind === 'send'));
+    await waitFor(() => mock.calls.some((c) => c.kind === 'send'), TURN_START_MS);
     const liveSessionId = mock.calls.find((c) => c.kind === 'send')?.sessionId ?? '';
     expect(liveSessionId).not.toBe('');
 
@@ -177,7 +182,7 @@ describe('ChatManager.resetClient — deferred (model-preference) reset', () => 
     mock.scriptSendDelay(250);
 
     const send = manager.send(session.id, 'long local turn');
-    await waitFor(() => mock.calls.some((call) => call.kind === 'send'));
+    await waitFor(() => mock.calls.some((call) => call.kind === 'send'), TURN_START_MS);
     const liveSessionId = mock.calls.find((call) => call.kind === 'send')?.sessionId ?? '';
 
     const firstRetirement = manager.retireLocalEnginesForMachineBroker();

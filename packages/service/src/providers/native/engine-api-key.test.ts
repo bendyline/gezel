@@ -1,5 +1,9 @@
+import {
+  engineApiKey,
+  resetEngineApiKeyForTests,
+  withEngineApiKey,
+} from '@bendyline/gezel-inference/internal/providers/native/engine-api-key';
 import { afterEach, describe, expect, it } from 'vitest';
-import { engineApiKey, resetEngineApiKeyForTests, withEngineApiKey } from './engine-api-key.js';
 
 afterEach(() => resetEngineApiKeyForTests());
 

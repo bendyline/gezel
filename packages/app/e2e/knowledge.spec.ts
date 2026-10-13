@@ -36,22 +36,27 @@ const TEST_PNG = Buffer.from(
 );
 
 /**
- * A gilde data dir for the driven app: the pinned content plus one
+ * A gilde data dir for the driven app: the pinned first-party content plus one
  * `knowledge-catalog` entry whose sha256 and size are the fixture archive's.
  */
 function pinnedGildeDataDir(): string {
-  // The app depends on the service, the service on the catalog loader, and
-  // the loader on the pinned gilde package — follow that chain through the
-  // workspace's node_modules links instead of adding a test-only dependency
-  // (the loader is ESM-only, so require-based resolution cannot enter it).
+  // The product daemon owns the pinned content dependency. Resolve it through
+  // that package rather than the catalog loader's development dependencies.
   const fromApp = createRequire(import.meta.url);
   const serviceRoot = dirname(fromApp.resolve('@bendyline/gezel-service/package.json'));
-  const catalogRoot = join(serviceRoot, 'node_modules', '@bendyline', 'gezel-catalog');
-  return join(catalogRoot, 'node_modules', '@bendyline', 'gilde', 'data');
+  const fromService = createRequire(join(serviceRoot, 'package.json'));
+  return join(dirname(fromService.resolve('@bendyline/gilde/package.json')), 'data');
 }
 
 async function buildGildeData(root: string, archivePath: string): Promise<void> {
-  await cp(pinnedGildeDataDir(), root, { recursive: true });
+  const pinnedData = pinnedGildeDataDir();
+  // The optional community MCP registry contributes tens of thousands of
+  // unrelated files. Copying it made this knowledge fixture exceed its setup
+  // budget under full-suite I/O pressure, before Electron even launched.
+  await cp(pinnedData, root, {
+    recursive: true,
+    filter: (source) => source !== join(pinnedData, 'community'),
+  });
   // Pinned kind indexes list only the published items, and the loader trusts
   // them over the folders, so the fixture would never be seen. It reads
   // raw-index.json, then the legacy index.json, and without either walks the
@@ -238,16 +243,16 @@ test.describe('Knowledge catalogs', () => {
   let page: Page;
 
   test.beforeAll(async () => {
-    // The hook builds a real .gezk plus a gilde data dir before it ever
-    // launches Electron, so the suite-wide 30s default is not a lifecycle
-    // budget — it is barely the archive.
+    // Building the real .gezk and first-party catalog fixture precedes the
+    // Electron launch. Keep setup's lifecycle budget separate from UI actions.
     test.setTimeout(HOOK_TIMEOUT_MS);
     home = await mkdtemp(join(tmpdir(), 'gezel-knowledge-e2e-'));
     assets = await mkdtemp(join(tmpdir(), 'gezel-knowledge-e2e-assets-'));
     archivePath = join(assets, 'shop-notes-1.0.0.gezk');
-    await buildCatalog(archivePath, join(assets, 'work'));
+    await test.step('Build the fixture knowledge catalog', () =>
+      buildCatalog(archivePath, join(assets, 'work')));
     gildeData = join(assets, 'gilde-data');
-    await buildGildeData(gildeData, archivePath);
+    await test.step('Build the fixture Gilde data', () => buildGildeData(gildeData, archivePath));
     hub = await serveArchive(archivePath);
     app = await electron.launch({
       args: [appRoot],

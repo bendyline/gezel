@@ -1,7 +1,13 @@
+import {
+  CACHE_TTL_MS,
+  cache,
+  invalidateModelsCache,
+} from '@bendyline/gezel-inference/internal/http/model-inventory-cache';
+export { invalidateModelsCache } from '@bendyline/gezel-inference/internal/http/model-inventory-cache';
+import { appleFoundationModelsStatus } from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/status';
+import type { ModelInfo, ProviderName } from '@bendyline/gezel-inference/internal/providers/types';
 import { Hono } from 'hono';
-import { appleFoundationModelsStatus } from '../../providers/apple-foundation-models/status.js';
 import { startOllamaIfPossible } from '../../providers/ollama-launch.js';
-import type { ModelInfo, ProviderName } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
 
 const VALID_PROVIDERS: readonly ProviderName[] = [
@@ -29,14 +35,6 @@ function parseProvider(qp: string | undefined): ProviderName {
 }
 
 /** 5-minute in-memory cache so tab changes / reopening Settings don't hammer the upstream APIs. */
-const CACHE_TTL_MS = 5 * 60_000;
-
-interface CacheEntry {
-  at: number;
-  models: ModelInfo[];
-}
-
-const cache = new Map<ProviderName, CacheEntry>();
 
 /**
  * Wrap `chat.listModelsForProvider` with an Ollama auto-start fallback.
@@ -146,7 +144,3 @@ export function modelsRoutes(ctx: ServiceContext): Hono {
 }
 
 /** Allow the config route to invalidate the cache after credential changes. */
-export function invalidateModelsCache(provider?: ProviderName): void {
-  if (provider) cache.delete(provider);
-  else cache.clear();
-}

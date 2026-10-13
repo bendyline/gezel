@@ -1,5 +1,5 @@
+import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
 import { describe, expect, it, vi } from 'vitest';
-import { ensurePrivateUserHome } from './home-permissions.js';
 
 describe('ensurePrivateUserHome', () => {
   it('creates and repairs a Unix home with mode 0700', async () => {

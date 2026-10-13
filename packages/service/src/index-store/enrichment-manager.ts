@@ -7,11 +7,11 @@ import {
   isTaskWorkAllowed,
   projectNightWorkEnabled,
 } from '@bendyline/gezel';
+import { embeddingsDisabledReason } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
-import { embeddingsDisabledReason } from '../memory/embeddings.js';
 import {
   audioVideoEmbedAvailability,
   faceEmbedAvailability,
@@ -96,6 +96,11 @@ export interface IndexEnrichmentManagerOptions {
    * Defaults to never-paused.
    */
   isPaused?: () => Promise<boolean> | boolean;
+  /**
+   * Whether the background loop waits for now (a new install's first-use
+   * hold). Unlike `isPaused`, it never stops an explicit drive.
+   */
+  isBackgroundHeld?: () => Promise<boolean> | boolean;
   /** Chat event bus for `index_progress` heartbeats (optional in tests). */
   events?: Pick<ChatEventBus, 'publishGlobalEvent'>;
   /** Test seam; production resolves the role from each project's roster. */
@@ -200,6 +205,7 @@ export class IndexEnrichmentManager {
   private readonly osIdleThresholdMs: number;
   private readonly isNightShiftActive: () => boolean;
   private readonly isPaused: () => Promise<boolean> | boolean;
+  private readonly isBackgroundHeld: () => Promise<boolean> | boolean;
   private readonly events: Pick<ChatEventBus, 'publishGlobalEvent'> | undefined;
   private readonly resolveBoekwachter: (projectId: string) => Promise<GezelDetail | null>;
   private readonly shadowProducers: AiShadowProducers | undefined;
@@ -265,6 +271,7 @@ export class IndexEnrichmentManager {
     this.osIdleThresholdMs = opts.osIdleThresholdMs ?? OS_IDLE_THRESHOLD_MS;
     this.isNightShiftActive = opts.isNightShiftActive ?? (() => false);
     this.isPaused = opts.isPaused ?? (() => false);
+    this.isBackgroundHeld = opts.isBackgroundHeld ?? (() => false);
     this.events = opts.events;
     this.resolveBoekwachter =
       opts.resolveBoekwachter ??
@@ -1004,6 +1011,7 @@ export class IndexEnrichmentManager {
     // background loop stands down until it finishes.
     if (this.drives.size > 0) return;
     if (await this.isPaused()) return;
+    if (await this.isBackgroundHeld()) return;
     if (this.stopping) return;
     if (!this.isIdle()) return;
     this.running = true;

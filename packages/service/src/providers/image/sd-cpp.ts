@@ -21,7 +21,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
-import { resolveModelDirectory } from '../../models/model-id.js';
+import { resolveModelDirectory } from '@bendyline/gezel-inference/internal/models/model-id';
 import {
   MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
@@ -33,10 +33,10 @@ import {
   modelExistsOnlyReadOnly,
   readOnlyModelError,
   verifyReadOnlyModelPayload,
-} from '../../models/storage-roots.js';
-import { downloadWithRetry } from '../../utils/download-with-retry.js';
-import type { GpuArbiter } from '../gpu-arbiter.js';
-import type { NativeEngineSupervisor } from '../native/supervisor.js';
+} from '@bendyline/gezel-inference/internal/models/storage-roots';
+import type { GpuArbiter } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
+import type { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
+import { downloadWithRetry } from '@bendyline/gezel-inference/internal/utils/download-with-retry';
 import { resolveImg2ImgSupport } from './img2img-support.js';
 import type {
   ImageEngineHealth,
@@ -114,6 +114,8 @@ const DEFAULT_SAMPLE_STEPS = 20;
  * the same server launch default for endpoints that ignore request steps.
  */
 export const MODEL_SAMPLE_STEP_DEFAULTS = new Map<string, number>([
+  // FLUX.1 is still in the pinned catalog and on people's disks: keep its
+  // settings until no supported catalog offers it.
   ['flux-1-schnell-q4', 4],
   ['flux-2-klein-4b-q4', 4],
   ['sd-turbo', 4],
@@ -179,6 +181,38 @@ export const VAE_TILING_INCOMPATIBLE_MODELS = new Set<string>([
   'krea-2-turbo-q6',
   'krea-2-turbo-q8',
 ]);
+
+/**
+ * The launch choices that change what sd-server holds in memory for one
+ * model. Read by the launch argv and by memory pricing, so the price is for
+ * the process that actually starts.
+ */
+export interface SdServerLoadProfile {
+  vaeDecode: 'tiled' | 'untiled' | 'none';
+  /** A `--tensor-type-rules` pattern whose tensors load as bfloat16. */
+  bf16TensorPattern?: string;
+  diffusionFlashAttention: boolean;
+}
+
+export function sdServerLoadProfile(modelId: string): SdServerLoadProfile {
+  if (modelId === 'iris-3b-f32') {
+    // Iris generates pixels directly: no VAE to tile. Upstream's Iris recipe
+    // enables diffusion flash attention for the 1024px sequence. The
+    // publisher stores F32 but runs with BF16 autocast, so only the diffusion
+    // weights convert at load, preserving the quantized encoder.
+    return {
+      vaeDecode: 'none',
+      bf16TensorPattern: '^model\\.diffusion_model\\.',
+      diffusionFlashAttention: true,
+    };
+  }
+  // Tiling avoids VAE-decode OOM on large images, but produces visible
+  // tile-boundary seams with some VAEs — see VAE_TILING_INCOMPATIBLE_MODELS.
+  return {
+    vaeDecode: VAE_TILING_INCOMPATIBLE_MODELS.has(modelId) ? 'untiled' : 'tiled',
+    diffusionFlashAttention: false,
+  };
+}
 
 export class StableDiffusionCppProvider implements ImageProvider {
   readonly name = 'sd-cpp';

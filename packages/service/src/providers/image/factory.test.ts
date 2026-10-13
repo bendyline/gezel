@@ -2,8 +2,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
+import type { SecretKey, SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { SecretKey, SecretStore } from '../../secrets/types.js';
 import {
   type ResolvedInstalledModel,
   buildSdServerArgs,

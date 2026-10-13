@@ -1,8 +1,8 @@
-import type { SSEStreamingApi } from 'hono/streaming';
 import type {
   ChatInstallEventBase,
   ChatModelInstallRegistry,
-} from '../../models/install-registry.js';
+} from '@bendyline/gezel-inference/internal/models/install-registry';
+import type { SSEStreamingApi } from 'hono/streaming';
 
 /**
  * Subscribe to a chat-model install registry for `id` and stream its events

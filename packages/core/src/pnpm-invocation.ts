@@ -11,9 +11,38 @@
  * Later invocations against the same tree (`pnpm exec playwright …`) must
  * repeat the flag: when the current config disagrees with the linker
  * recorded in `node_modules/.modules.yaml`, pnpm silently rebuilds the
- * tree with the default isolated linker before running the command.
+ * tree with the default isolated linker before running the command. They
+ * also need {@link PNPM_SKIP_DEPS_CHECK}, so use
+ * {@link PNPM_MANAGED_TREE_EXEC_CONFIG} for every `exec` and `run`.
  */
 export const PNPM_HOISTED_NODE_LINKER = '--config.node-linker=hoisted';
+
+/**
+ * Turns off pnpm's dependency check before `exec` and `run`.
+ *
+ * pnpm 11 checks a tree's install state before running a command in it and,
+ * when it decides the tree is stale, first runs a nested `pnpm install`. That
+ * nested install does not inherit command-line config, so it never sees
+ * {@link PNPM_HOISTED_NODE_LINKER}: it wants to rebuild the hoisted tree with
+ * the isolated linker, has no TTY to confirm purging `node_modules`, and
+ * aborts with ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY. Every `exec` against
+ * a managed toolset tree failed that way, including the boot-time Chromium
+ * download, `run_playwright_script` and page checks.
+ *
+ * The daemon installs these trees itself and checks their health
+ * (`checkInstallTree`), so a command run inside one must never reinstall it.
+ */
+export const PNPM_SKIP_DEPS_CHECK = '--config.verify-deps-before-run=false';
+
+/**
+ * The config every `pnpm exec` or `pnpm run` against a managed toolset tree
+ * carries: the tree's own linker, and no reinstall before the command runs.
+ * Install commands keep using {@link PNPM_HOISTED_NODE_LINKER} alone.
+ */
+export const PNPM_MANAGED_TREE_EXEC_CONFIG: readonly string[] = [
+  PNPM_HOISTED_NODE_LINKER,
+  PNPM_SKIP_DEPS_CHECK,
+];
 
 export interface PnpmInvocationOptions {
   pnpmPath?: string;

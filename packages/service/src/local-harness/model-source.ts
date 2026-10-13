@@ -1,7 +1,7 @@
 import type { ProviderName } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import { resolveCatalogIdFromModelId } from '../providers/catalog-model-config.js';
-import type { ModelInfo } from '../providers/types.js';
+import { resolveCatalogIdFromModelId } from '@bendyline/gezel-inference/internal/providers/catalog-model-config';
+import type { ModelInfo } from '@bendyline/gezel-inference/internal/providers/types';
 
 export type LocalHarnessNativeProvider = 'llama-cpp' | 'mlx' | 'ds4';
 

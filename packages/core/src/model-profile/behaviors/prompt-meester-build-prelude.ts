@@ -22,7 +22,7 @@
 import type { Behavior } from '../types.js';
 
 /**
- * Verbs that imply a new substantive build in user prose. Narrow on
+ * Verbs that imply a new substantive goal in user prose. Narrow on
  * verbs and rely on the noun list for real disambiguation: "create"
  * can mean many things; "create a game" is a build request, "create
  * a memory" is not.
@@ -40,6 +40,25 @@ const BUILD_VERBS = [
   'whip\\s+up',
   'prototype',
   'scaffold',
+];
+
+/**
+ * A goal to organize is a kickoff too ("plan a family trip to Portugal" went
+ * unrouted, so the meester improvised a crew in chat), but only for an
+ * occasion. Paired with the build nouns these verbs read "plan a team
+ * meeting" and "organize the files in my workspace" as new projects.
+ */
+const PLAN_VERBS = ['plan', 'organi[sz]e', 'arrange'];
+const OCCASION_NOUNS = [
+  'trip',
+  'vacation',
+  'holiday',
+  'itinerary',
+  'getaway',
+  'event',
+  'party',
+  'wedding',
+  'reunion',
 ];
 
 /**
@@ -76,23 +95,37 @@ const BUILD_NOUNS = [
   'crew',
   'team',
   'workspace',
+  'trip',
+  'vacation',
+  'holiday',
+  'itinerary',
+  'getaway',
+  'event',
+  'party',
+  'wedding',
+  'reunion',
 ];
 
-const BUILD_REQUEST_RE = new RegExp(
-  String.raw`\b(?:can\s+(?:we|you)\s+(?:please\s+)?|let'?s\s+|please\s+|i\s+(?:want\s+to|need\s+to|'?d\s+like\s+to)\s+|i\s+wanna\s+|help\s+me\s+)?` +
-    String.raw`(?:` +
-    BUILD_VERBS.join('|') +
-    String.raw`)\s+(?:me\s+)?(?:a|an|the|some|my|our)?\s*` +
-    // Allow up to 5 qualifier words between the article and the noun
-    // ("a new Space Invaders game", "a small Stripe webhooks service",
-    // "an internal admin dashboard"). Lazy so the noun anchor wins
-    // over a greedy span.
-    String.raw`(?:[\w'-]+\s+){0,5}?` +
-    String.raw`(?:` +
-    BUILD_NOUNS.join('|') +
-    String.raw`)\b`,
-  'i',
-);
+function requestPattern(verbs: readonly string[], nouns: readonly string[]): RegExp {
+  return new RegExp(
+    String.raw`\b(?:can\s+(?:we|you)\s+(?:please\s+)?|let'?s\s+|please\s+|i\s+(?:want\s+to|need\s+to|'?d\s+like\s+to)\s+|i\s+wanna\s+|help\s+me\s+)?` +
+      String.raw`(?:` +
+      verbs.join('|') +
+      String.raw`)\s+(?:me\s+)?(?:a|an|the|some|my|our)?\s*` +
+      // Allow up to 5 qualifier words between the article and the noun
+      // ("a new Space Invaders game", "a small Stripe webhooks service",
+      // "an internal admin dashboard"). Lazy so the noun anchor wins
+      // over a greedy span.
+      String.raw`(?:[\w'-]+\s+){0,5}?` +
+      String.raw`(?:` +
+      nouns.join('|') +
+      String.raw`)\b`,
+    'i',
+  );
+}
+
+const BUILD_REQUEST_RE = requestPattern(BUILD_VERBS, BUILD_NOUNS);
+const PLAN_REQUEST_RE = requestPattern(PLAN_VERBS, OCCASION_NOUNS);
 
 /**
  * Detect a "build something substantive" request in user prose. The
@@ -102,7 +135,7 @@ const BUILD_REQUEST_RE = new RegExp(
  * task` is excluded by leaving `task` off the noun list.
  */
 export function looksLikeNewBuildRequest(text: string): boolean {
-  return BUILD_REQUEST_RE.test(text);
+  return BUILD_REQUEST_RE.test(text) || PLAN_REQUEST_RE.test(text);
 }
 
 /**
@@ -136,9 +169,9 @@ export function explicitlyRequestsSeparateProject(text: string): boolean {
 }
 
 const MEESTER_BUILD_PRELUDE =
-  '(System note for this turn: the user is asking for a new substantive build. Make ONE tool call:\n' +
-  ' • `start_project({ name, about, missionObjectives, taskDescription })`. Creates a fresh project, selects an appropriate lead/team for the effective execution mode, creates the kickoff task, and hands it off (the work starts in a task-scoped session). Use this for every "build me a website / game / app / dashboard" request, from a single-file prototype through multimodal work. `taskDescription` must ask the lead to ship the actual requested deliverable, not to create a plan. For browser games/sites, name `index.html` and the acceptance criteria (workspace-relative path; do not prefix `workspace/`).\n' +
-  'After the macro returns, your turn is done — tell the user the lead is on it. Do NOT call `create_gezel`, `update_project`, `create_task`, or `message_gezel` separately — the macro handles them. Do NOT reuse the existing "Default" project; the macro creates a fresh dedicated one.)';
+  '(System note for this turn: the user is asking to start something new. Make ONE tool call:\n' +
+  " • `start_project({ name, about, missionObjectives, taskDescription })`. Creates a fresh project, selects an appropriate lead/team for the goal (a trip gets a trip planner, a website a developer), creates the kickoff task, and hands it off (the work starts in a task-scoped session). Use this for every new goal — a website, game or app, a trip or an event, a plan to write up — from a single-file prototype through multimodal work. `taskDescription` must ask for the actual result, not a plan to make one, and keep the user's specifics (places, dates, names, numbers). Only for a browser game or site, name `index.html` and the acceptance criteria (workspace-relative path; do not prefix `workspace/`); for anything else name no file.\n" +
+  'After the macro returns, your turn is done — tell the user in a sentence who is on it. Do NOT call `create_gezel`, `update_project`, `create_task`, or `message_gezel` separately — the macro handles them. Do NOT reuse the existing "Default" project; the macro creates a fresh dedicated one.)';
 
 export const PromptMeesterBuildPrelude: Behavior = {
   id: 'prompt.meester-build-prelude',

@@ -763,6 +763,107 @@ fi
     expect(linuxPostremove).toContain('rm -f "$APPARMOR_PROFILE_TARGET"');
     expect(linuxPostremove).toContain('refresh_desktop_caches');
   });
+
+  // `systemctl` is installed but systemd is not PID 1 in WSL without systemd and
+  // in most containers. There daemon-reload and restart exit non-zero, which under
+  // `set -eu` left the package half-configured.
+  function serviceStartStep(): string {
+    const start = position(linuxPostinstall, '# 5. Enable + start.');
+    return linuxPostinstall.slice(
+      start,
+      position(linuxPostinstall, 'echo "[gezel after-install] done"'),
+    );
+  }
+
+  it('reloads and restarts the service only while systemd is running', () => {
+    const step = serviceStartStep();
+    const booted = position(step, 'if [ -d /run/systemd/system ]; then');
+    const offline = position(step, 'elif command -v systemctl');
+    expect(offline).toBeGreaterThan(booted);
+    for (const live of ['systemctl daemon-reload', 'systemctl restart gezeld.service']) {
+      const at = position(step, live);
+      expect(at, `${live} must run only while systemd is PID 1`).toBeGreaterThan(booted);
+      expect(at, `${live} must run only while systemd is PID 1`).toBeLessThan(offline);
+      expect(step.indexOf(live, at + 1), `${live} must not run outside that branch`).toBe(-1);
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'live probe: configures without a running systemd and keeps real hosts strict',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'gezel-postinst-systemd-'));
+      try {
+        const bin = join(root, 'bin');
+        const empty = join(root, 'empty');
+        const runDir = join(root, 'run-systemd-system');
+        mkdirSync(bin);
+        mkdirSync(empty);
+        // Stands in for systemctl. "offline" behaves like systemctl on a host
+        // where systemd is not PID 1: enable works client-side, the rest fail.
+        writeFileSync(
+          join(bin, 'systemctl'),
+          [
+            '#!/bin/sh',
+            'printf \'%s\\n\' "$*" >> "$STUB_LOG"',
+            'case "$STUB_MODE:$1" in',
+            '  ok:*) exit 0 ;;',
+            '  restart-fails:restart) exit 1 ;;',
+            '  restart-fails:*) exit 0 ;;',
+            '  offline:enable) exit 0 ;;',
+            '  *) echo "System has not been booted with systemd as init system (PID 1)." >&2; exit 1 ;;',
+            'esac',
+            '',
+          ].join('\n'),
+        );
+        chmodSync(join(bin, 'systemctl'), 0o755);
+        const block = serviceStartStep().replaceAll('/run/systemd/system', runDir);
+
+        const run = (opts: { booted: boolean; mode: string; withSystemctl?: boolean }) => {
+          rmSync(runDir, { recursive: true, force: true });
+          if (opts.booted) mkdirSync(runDir);
+          const log = join(root, `calls-${opts.mode}-${opts.booted}.log`);
+          writeFileSync(log, '');
+          const result = spawnSync('/bin/sh', ['-eu', '-c', block], {
+            encoding: 'utf8',
+            env: {
+              PATH: opts.withSystemctl === false ? empty : bin,
+              STUB_LOG: log,
+              STUB_MODE: opts.mode,
+            },
+          });
+          const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
+          return { status: result.status, calls, out: result.stdout, err: result.stderr };
+        };
+
+        const booted = run({ booted: true, mode: 'ok' });
+        expect(booted.status).toBe(0);
+        expect(booted.calls).toEqual([
+          'daemon-reload',
+          'enable gezeld.service',
+          'restart gezeld.service',
+        ]);
+
+        const wsl = run({ booted: false, mode: 'offline' });
+        expect(wsl.status, wsl.err).toBe(0);
+        expect(wsl.calls).toEqual(['enable gezeld.service']);
+        expect(wsl.out).toContain('start on the next boot under systemd');
+
+        const noEnable = run({ booted: false, mode: 'broken' });
+        expect(noEnable.status, noEnable.err).toBe(0);
+        expect(noEnable.err).toContain('could not be enabled');
+
+        const noSystemctl = run({ booted: false, mode: 'ok', withSystemctl: false });
+        expect(noSystemctl.status, noSystemctl.err).toBe(0);
+        expect(noSystemctl.out).toContain('installed but not enabled');
+
+        // A host that does run systemd still fails the install when the service
+        // will not start, exactly as before this change.
+        expect(run({ booted: true, mode: 'restart-fails' }).status).not.toBe(0);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 /**

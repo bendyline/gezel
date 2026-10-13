@@ -1,9 +1,9 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import type { ExternalToolSpec } from '@bendyline/gezel-inference/internal/providers/types';
 import { describe, expect, it, vi } from 'vitest';
 import { AnthropicSession, type AnthropicSessionDeps } from './anthropic.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
-import { ProviderQueue } from './queue.js';
-import type { ExternalToolSpec } from './types.js';
 
 /**
  * Stub the Anthropic SDK so the session test can script a stream of

@@ -41,6 +41,9 @@ const FULL_BOOK: Craftbook = {
   toolsets: [{ toolsetId: 'builtin.workspace-fs-read' }],
   commands: [{ scope: 'script', name: 'test' }],
   connectors: [{ typeId: 'github' }],
+  samples: [
+    { id: 'q3', title: 'a quarter of sales', param: 'region', files: ['samples/q3/sales.csv'] },
+  ],
   models: [{ id: '{{writerModel}}', provider: 'llama-cpp', reason: 'Writes the draft' }],
   services: [{ kind: 'web-search', reason: 'Checks facts against independent pages' }],
   paramSchema: { type: 'object', properties: { region: { type: 'string' } } },

@@ -4,7 +4,7 @@ import {
   craftbookInputParams,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
-import { type TaskInputError, previewTaskInput } from '../../tasks/inputs/resolve.js';
+import type { TaskInputError } from '../../tasks/inputs/resolve.js';
 import {
   InputStagingLimitError,
   InputStagingNotFoundError,
@@ -43,16 +43,13 @@ export function taskInputRoutes(ctx: ServiceContext): Hono {
     const body = TaskInputPreviewRequestSchema.parse(await c.req.json());
     const found = await inputSpec(projectId, body.craftbookId, body.param, body.craftbookVersion);
     if ('error' in found) return c.json({ error: found.error }, 404);
-    const preview = await previewTaskInput(
-      { store: ctx.store, staging: ctx.inputStaging },
-      {
-        projectId,
-        craftbookId: body.craftbookId,
-        paramSchema: found.schema,
-        param: body.param,
-        source: body.source,
-      },
-    );
+    const preview = await ctx.tasks.previewInput(projectId, {
+      craftbookId: body.craftbookId,
+      param: body.param,
+      source: body.source,
+      ...(body.craftbookVersion ? { version: body.craftbookVersion } : {}),
+    });
+    if (!preview) return c.json({ error: `craftbook "${body.craftbookId}" not found` }, 404);
     return c.json(preview);
   });
 

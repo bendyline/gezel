@@ -1,7 +1,7 @@
 import { turnCancelledMessage } from '@bendyline/gezel';
+import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
 import { describe, expect, it } from 'vitest';
-import { LlamaCppProvider } from './llama-cpp/provider.js';
-import { MlxProvider } from './mlx/provider.js';
 import { OllamaProvider } from './ollama.js';
 
 /**

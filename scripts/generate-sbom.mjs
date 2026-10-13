@@ -293,7 +293,7 @@ components.push({
 
 const nativeFileManifest = JSON.parse(
   await readFile(
-    join(repoRoot, 'packages', 'service', 'src', 'engines', 'native-file-manifest.json'),
+    join(repoRoot, 'packages', 'inference', 'src', 'engines', 'native-file-manifest.json'),
     'utf8',
   ),
 );

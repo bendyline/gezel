@@ -8,7 +8,7 @@ import { HistoryManager } from '../history/manager.js';
 import { MemoryManager } from '../memory/manager.js';
 import { GrowthEngine } from './engine.js';
 
-vi.mock('../memory/embeddings.js', () => {
+vi.mock('@bendyline/gezel-inference/internal/memory/embeddings', () => {
   const vectorFor = (text: string): number[] => {
     const vector = new Array<number>(16).fill(0);
     for (let i = 0; i < text.length; i++) {

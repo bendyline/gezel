@@ -11,8 +11,11 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
-import { type LoadTransformersEnv, pinTransformersCacheDir } from '../../transformers-cache.js';
-import { KokoroFrontend } from './kokoro-frontend.js';
+import { KokoroFrontend } from '@bendyline/gezel-inference/internal/providers/audio/kokoro-frontend';
+import {
+  type LoadTransformersEnv,
+  pinTransformersCacheDir,
+} from '@bendyline/gezel-inference/internal/transformers-cache';
 
 const log = createLogger('audio');
 

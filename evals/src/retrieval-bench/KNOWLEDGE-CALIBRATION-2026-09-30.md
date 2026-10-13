@@ -1,6 +1,6 @@
 # Knowledge calibration — real catalogs, 2026-09-30
 
-The values in `packages/service/src/knowledge/vector-floors.ts`
+The values in `packages/inference/src/knowledge/vector-floors.ts`
 (`KNOWLEDGE_VECTOR_FLOORS`) and `KNOWLEDGE_FILTER_MIN_RELEVANCE` in
 `packages/core/src/search-ranking.ts` come from this record. It is the
 real-catalog run the [2026-09-26 relevance calibration](RELEVANCE-CALIBRATION-2026-09-26.md)

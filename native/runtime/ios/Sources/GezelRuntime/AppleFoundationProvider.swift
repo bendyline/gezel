@@ -176,10 +176,13 @@ enum AppleFoundationProvider {
     /// `tools` run inside Apple's own tool loop and call back through `invoke`,
     /// where the app's shared tool loop records and executes each call. A tool
     /// ending the turn (a handoff, a question) stops generation as a normal stop.
+    /// `schema` (a `NativeToolSchema` node) constrains the reply with guided
+    /// generation; that reply is sent as one delta of JSON text at the end.
     @available(iOS 26.0, macOS 26.0, *)
     static func generate(
         turns: [MobileChatTurn], maxTokens: Int, contextSize: Int,
         tools toolSpecs: [[String: Any]] = [],
+        schema: [String: Any]? = nil,
         invoke: @escaping @Sendable (String, String) async throws -> NativeToolReply = { _, _ in throw CancellationError() },
         onUsage: ([String: Int]) -> Void = { _ in },
         onDelta: (String) throws -> Void
@@ -190,6 +193,16 @@ enum AppleFoundationProvider {
             throw MobileInferenceError(code: "CONTEXT_LIMIT", message: "This conversation is too long for Apple on-device AI. Start a new conversation.")
         }
         let (entries, final, tools) = try transcript(turns: turns, tools: toolSpecs, invoke: invoke)
+        // Built before admission, so a schema Apple cannot use fails before
+        // any prompt is spent.
+        var responseSchema: GenerationSchema?
+        if let schema {
+            do {
+                responseSchema = try GenerationSchema(root: try NativeToolNode(schema).dynamicSchema(name: "response"), dependencies: [])
+            } catch {
+                throw MobileInferenceError(code: "INVALID_ARGUMENT", message: "Apple on-device AI cannot follow this response format's schema.")
+            }
+        }
         let model = SystemLanguageModel.default
         let finalEntry = Transcript.Entry.prompt(.init(segments: [.text(.init(content: final.content))]))
         let promptTokens: Int
@@ -207,9 +220,10 @@ enum AppleFoundationProvider {
         // Fresh state on every turn. All prior messages come from the durable
         // app transcript; no hidden provider session can drift after restart.
         let session = LanguageModelSession(model: model, tools: tools, transcript: Transcript(entries: entries))
-        let stream = session.streamResponse(to: final.content, options: GenerationOptions(samplingMode: .greedy, maximumResponseTokens: maxTokens))
+        let options = GenerationOptions(samplingMode: .greedy, maximumResponseTokens: maxTokens)
         var text = ""
         var reachedTokenLimit = false
+        var guidedComplete = true
         func awaitProviderRelease() async {
             // A cancellation request is not a release barrier. Keep the plugin
             // busy until the SDK reports its session is no longer responding.
@@ -218,22 +232,41 @@ enum AppleFoundationProvider {
             }
         }
         do {
-            for try await snapshot in stream {
-                try Task.checkCancellation()
-                let next = snapshot.content
-                guard next.utf8.count <= 65_536 else {
-                    throw MobileInferenceError(code: "RESOURCE_LIMIT", message: "Apple on-device AI exceeded this app's response size limit.")
+            if let responseSchema {
+                // Partial structured content is not a prefix of the finished
+                // JSON (the SDK renders each snapshot whole), so it is not streamed.
+                for try await snapshot in session.streamResponse(to: final.content, schema: responseSchema, options: options) {
+                    try Task.checkCancellation()
+                    text = snapshot.content.jsonString
+                    guard text.utf8.count <= 65_536 else {
+                        throw MobileInferenceError(code: "RESOURCE_LIMIT", message: "Apple on-device AI exceeded this app's response size limit.")
+                    }
+                    guidedComplete = snapshot.content.isComplete
+                    if #available(iOS 27.0, macOS 27.0, *) {
+                        reachedTokenLimit = snapshot.usage.output.totalTokenCount >= maxTokens
+                        onUsage(["inputTokens": snapshot.usage.input.totalTokenCount,
+                                 "outputTokens": snapshot.usage.output.totalTokenCount])
+                    }
                 }
-                guard next.hasPrefix(text) else {
-                    throw MobileInferenceError(code: "INFERENCE_FAILED", message: "Apple on-device AI revised text that had already been streamed.")
-                }
-                let delta = String(next.dropFirst(text.count))
-                if !delta.isEmpty { try onDelta(delta) }
-                text = next
-                if #available(iOS 27.0, macOS 27.0, *) {
-                    reachedTokenLimit = snapshot.usage.output.totalTokenCount >= maxTokens
-                    onUsage(["inputTokens": snapshot.usage.input.totalTokenCount,
-                             "outputTokens": snapshot.usage.output.totalTokenCount])
+                if !text.isEmpty { try onDelta(text) }
+            } else {
+                for try await snapshot in session.streamResponse(to: final.content, options: options) {
+                    try Task.checkCancellation()
+                    let next = snapshot.content
+                    guard next.utf8.count <= 65_536 else {
+                        throw MobileInferenceError(code: "RESOURCE_LIMIT", message: "Apple on-device AI exceeded this app's response size limit.")
+                    }
+                    guard next.hasPrefix(text) else {
+                        throw MobileInferenceError(code: "INFERENCE_FAILED", message: "Apple on-device AI revised text that had already been streamed.")
+                    }
+                    let delta = String(next.dropFirst(text.count))
+                    if !delta.isEmpty { try onDelta(delta) }
+                    text = next
+                    if #available(iOS 27.0, macOS 27.0, *) {
+                        reachedTokenLimit = snapshot.usage.output.totalTokenCount >= maxTokens
+                        onUsage(["inputTokens": snapshot.usage.input.totalTokenCount,
+                                 "outputTokens": snapshot.usage.output.totalTokenCount])
+                    }
                 }
             }
         } catch let error as LanguageModelSession.ToolCallError where error.underlyingError is NativeToolTurnEnded {
@@ -253,6 +286,7 @@ enum AppleFoundationProvider {
         // iOS 26 exposes no terminal stop reason/token usage for a text stream.
         // Its normal completion is reported as stop; the SDK still enforces
         // maximumResponseTokens, and the host enforces the byte/time budgets.
-        return reachedTokenLimit ? "length" : "stop"
+        // A guided reply that stopped unfinished was cut off by that limit.
+        return reachedTokenLimit || !guidedComplete ? "length" : "stop"
     }
 }

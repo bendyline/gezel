@@ -7,9 +7,9 @@
  * UI can fall back to the user daemon's own serving controls.
  */
 
+import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import { Hono } from 'hono';
 import type { ServiceContext } from '../context.js';
-import { machineEngineProxy } from './machine-engine-proxy.js';
 
 export function machineServingRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();

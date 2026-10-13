@@ -383,7 +383,8 @@ describe('ProjectsView', () => {
     );
     expect(await screen.findByText('Archived')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restore project' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Active' }).closest('select')).toBeDisabled();
+    const controls = screen.getByRole('group', { name: 'Project controls overflow' });
+    expect(within(controls).getByRole('button', { name: 'Active' })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Restore project' }));
     await waitFor(() =>
@@ -1272,11 +1273,7 @@ describe('ProjectsView', () => {
     // Turning managed edits off does NOT take Fix away: a fix is drafted as a
     // change proposal the user applies, so it works on a workspace gezels may
     // not write — the case that needs it most.
-    const editsSelect = () =>
-      screen
-        .getAllByTestId('mock-select')
-        .find((select) => within(select).queryByRole('option', { name: 'Can edit' }));
-    fireEvent.change(editsSelect()!, { target: { value: 'off' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Stop workspace edits' }));
     await waitFor(() => {
       expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', {
         managedWorkspaceWritePolicy: 'deny',
@@ -1284,7 +1281,7 @@ describe('ProjectsView', () => {
     });
     expect(within(pane).getByRole('button', { name: 'Fix' })).toBeInTheDocument();
 
-    fireEvent.change(editsSelect()!, { target: { value: 'on' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow workspace edits' }));
     await waitFor(() => {
       expect(within(pane).getByRole('button', { name: 'Fix' })).toBeInTheDocument();
     });
@@ -2198,7 +2195,7 @@ describe('ProjectsView', () => {
     expect(within(gallery).queryByRole('radio', { name: 'General' })).not.toBeInTheDocument();
     expect(within(gallery).getByRole('radio', { name: 'Language Trainer' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /^All/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^All\b/ }));
     expect(within(gallery).getByRole('radio', { name: 'General' })).toBeInTheDocument();
   });
 

@@ -7,7 +7,12 @@ import {
   type HtmlPreviewSource,
   type PageScriptErrorDetails,
 } from './HtmlPreviewFrame.js';
-import { OUTPUT_PANE_RESTORE_EVENT, reportOutputPaneMaximized } from './output-pane-maximize.js';
+import {
+  OUTPUT_PANE_OPEN_FULL_EVENT,
+  OUTPUT_PANE_RESTORE_EVENT,
+  reportOutputPaneMaximized,
+  takeOutputPaneFullWindow,
+} from './output-pane-maximize.js';
 import { useCompactLayout } from './useCompactLayout.js';
 
 /**
@@ -239,7 +244,7 @@ export function ProjectOutputPane({
   const [autoTarget, setAutoTarget] = useState('');
   const [detecting, setDetecting] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [maximized, setMaximized] = useState(false);
+  const [maximized, setMaximized] = useState(() => takeOutputPaneFullWindow(projectId));
   const [capturing, setCapturing] = useState(false);
   const [captureError, setCaptureError] = useState('');
   const [debugMode, setDebugMode] = useState(false);
@@ -364,6 +369,14 @@ export function ProjectOutputPane({
   // Mirror this state into the titlebar so it can expose an always-visible
   // Restore button, and accept that button's restore request here. Cleanup
   // clears the titlebar affordance if this project/pane is unmounted.
+  useEffect(() => {
+    const openFull = () => {
+      if (takeOutputPaneFullWindow(projectId)) setMaximized(true);
+    };
+    window.addEventListener(OUTPUT_PANE_OPEN_FULL_EVENT, openFull);
+    return () => window.removeEventListener(OUTPUT_PANE_OPEN_FULL_EVENT, openFull);
+  }, [projectId]);
+
   useEffect(() => {
     const restore = () => setMaximized(false);
     window.addEventListener(OUTPUT_PANE_RESTORE_EVENT, restore);
@@ -508,7 +521,8 @@ export function ProjectOutputPane({
 
   const toolbar = (
     <div className="project-output-toolbar" ref={toolbarRef}>
-      {targets.length > 0 && (
+      {/* One page needs no picker: a board read "Dashboard ▾" over itself. */}
+      {targets.length > 1 && (
         <Select.Root value={selectedTarget?.id} onValueChange={(id) => setPickedPath(id)}>
           <Select.Trigger
             className={`project-output-picker${compactToolbar ? ' is-compact' : ''}`}

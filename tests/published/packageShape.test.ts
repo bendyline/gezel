@@ -63,6 +63,7 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   '@bendyline/gezel-plugin-sdk': 50_000, //              2 KB
   '@bendyline/gezel-catalog': 150_000, //               28 KB
   '@bendyline/gezel-knowledge': 150_000, //             ~25 KB
+  '@bendyline/gezel-inference': 9_000_000, //           5.8 MB
   '@bendyline/gezel-mcp': 300_000, //                  111 KB
   '@bendyline/gezel-connectors-spectral': 100_000, //    4 KB
   '@bendyline/gezel-script-stdlib': 100_000, //         14 KB
@@ -265,6 +266,12 @@ describe('published package payloads', () => {
     expect(packed.get(name)!.size).toBeLessThanOrEqual(budget);
   });
 
+  it('keeps the extracted inference runtime inside the original combined service budget', () => {
+    expect(
+      packed.get('@bendyline/gezel-service')!.size + packed.get('@bendyline/gezel-inference')!.size,
+    ).toBeLessThanOrEqual(PACKED_SIZE_BUDGETS['@bendyline/gezel-service']);
+  });
+
   it.each(packages.filter((p) => p.typed))(
     '$name ships no dangling relative imports in its declarations',
     ({ name, path }) => {
@@ -372,7 +379,7 @@ describe('published package payloads', () => {
       readFileSync(resolve(service.dist, 'licenses/npm/manifest.json'), 'utf8'),
     ) as { packages: { name: string; texts: { file: string }[] }[] };
     expect(files.has('dist/licenses/npm/manifest.json')).toBe(true);
-    expect(files.has('dist/kokoro-lexicon/LICENSE')).toBe(true);
+
     expect(manifest.packages.map((pkg) => pkg.name)).toEqual(
       expect.arrayContaining(['@bendyline/squisq-video-react', 'chevrotain', 'dompurify']),
     );
@@ -384,6 +391,33 @@ describe('published package payloads', () => {
         );
       }
     }
+  });
+
+  it('ships one inference runtime with generated model data and speech licenses, without product assets', () => {
+    const inference = packages.find((pkg) => pkg.name === '@bendyline/gezel-inference')!;
+    const files = new Set(
+      packed.get(inference.name)!.files.map((file) => file.path.replace(/\\/g, '/')),
+    );
+    for (const file of [
+      'dist/index.js',
+      'dist/catalog/LICENSE',
+      'dist/catalog/provenance.json',
+      'dist/kokoro-lexicon/LICENSE',
+      'dist/knowledge/search-worker.js',
+      'dist/memory/embed-worker.js',
+    ])
+      expect(files.has(file), file).toBe(true);
+    expect([...files].some((file) => /^dist\/(ui|office|libreoffice|evals)\//.test(file))).toBe(
+      false,
+    );
+    const manifest = JSON.parse(readFileSync(resolve(inference.dist, '../package.json'), 'utf8'));
+    for (const name of [
+      '@bendyline/gezel-service',
+      '@bendyline/gilde',
+      '@bendyline/gezel-ui',
+      '@bendyline/gezel-mcp',
+    ])
+      expect(manifest.dependencies).not.toHaveProperty(name);
   });
 
   it.each(packages)(

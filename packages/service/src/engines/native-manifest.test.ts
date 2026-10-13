@@ -1,11 +1,11 @@
-import { describe, expect, it } from 'vitest';
 import {
   NATIVE_ENGINE_ARCHIVE_SHA256,
   NATIVE_ENGINE_MACOS_NOTARIZED,
   NATIVE_ENGINE_RELEASE,
   SHA256SUMS_DIGEST,
   isEnginePinned,
-} from './native-manifest.js';
+} from '@bendyline/gezel-inference/internal/engines/native-manifest';
+import { describe, expect, it } from 'vitest';
 
 describe('native release trust manifest', () => {
   it('pins every published archive with an immutable SHA256', () => {

@@ -1,5 +1,9 @@
+import {
+  BENDYLINE_APPLE_TEAM_ID,
+  BENDYLINE_PUBLISHER,
+  verifyCodeSignature,
+} from '@bendyline/gezel-inference/internal/engines/signature';
 import { describe, expect, it, vi } from 'vitest';
-import { BENDYLINE_APPLE_TEAM_ID, BENDYLINE_PUBLISHER, verifyCodeSignature } from './signature.js';
 
 type RunResult = { code: number | string; stdout: string; stderr: string };
 type Runner = (cmd: string, args: string[]) => Promise<RunResult>;

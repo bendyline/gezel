@@ -1,6 +1,7 @@
 import type { CopilotAvailability } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 
 /**
  * Fired by the Copilot install card after an install (or removal) lands, so
@@ -13,6 +14,8 @@ let cache: CopilotAvailability | null = null;
 let inFlight: Promise<CopilotAvailability | null> | null = null;
 
 function load(force: boolean): Promise<CopilotAvailability | null> {
+  // A portable host has no daemon to install Copilot into and answers 501.
+  if (!runtimeCapabilities().daemonSettings) return Promise.resolve(null);
   if (!force && cache) return Promise.resolve(cache);
   if (!force && inFlight) return inFlight;
   inFlight = api

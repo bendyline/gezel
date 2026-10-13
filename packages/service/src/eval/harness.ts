@@ -24,10 +24,10 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isPathInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import { findServiceWorkerEntry } from '@bendyline/gezel-inference/internal/utils/service-worker-entry';
 import type { EvalHarnessMode } from '@bendyline/gezel/eval';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
-import { isPathInside } from '../fs/safe-paths.js';
-import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 
 export const EVAL_HARNESS_MODE_ENV = 'GEZEL_EVAL_HARNESS';
 

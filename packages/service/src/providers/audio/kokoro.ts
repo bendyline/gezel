@@ -21,6 +21,24 @@
 
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { resolveModelDirectory } from '@bendyline/gezel-inference/internal/models/model-id';
+import {
+  ensureSpeechModel,
+  sharedSpeechModelInfo,
+  speechPullEvents,
+  writeSpeechMetadata,
+} from '@bendyline/gezel-inference/internal/providers/audio/managed-speech-model';
+import type {
+  AudioEngineHealth,
+  AudioModelPullEvent,
+  AudioModelPullSpec,
+  AudioVoiceInfo,
+  InstalledAudioModelInfo,
+  SynthesizeInput,
+  SynthesizeOutput,
+  TextToSpeechProvider,
+} from '@bendyline/gezel-inference/internal/providers/audio/types';
+import type { LoadTransformersEnv } from '@bendyline/gezel-inference/internal/transformers-cache';
 import {
   KOKORO_MODEL_ID,
   KOKORO_TRANSFORMERS_METADATA,
@@ -28,8 +46,6 @@ import {
   SpeechAssetStore,
   catalogEntry,
 } from '@bendyline/gezel/speech-models';
-import { resolveModelDirectory } from '../../models/model-id.js';
-import type { LoadTransformersEnv } from '../../transformers-cache.js';
 import {
   InProcessKokoroBackend,
   KOKORO_HF_REPO,
@@ -40,22 +56,6 @@ import {
   type KokoroVoiceTable,
 } from './kokoro-engine.js';
 import { KokoroWorkerBackend } from './kokoro-worker-host.js';
-import {
-  ensureSpeechModel,
-  sharedSpeechModelInfo,
-  speechPullEvents,
-  writeSpeechMetadata,
-} from './managed-speech-model.js';
-import type {
-  AudioEngineHealth,
-  AudioModelPullEvent,
-  AudioModelPullSpec,
-  AudioVoiceInfo,
-  InstalledAudioModelInfo,
-  SynthesizeInput,
-  SynthesizeOutput,
-  TextToSpeechProvider,
-} from './types.js';
 
 export {
   type KokoroAudioOutput,

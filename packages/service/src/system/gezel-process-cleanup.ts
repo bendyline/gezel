@@ -1,5 +1,5 @@
 import { isGezelEngineCommand, listProcessSnapshots } from '@bendyline/gezel-client/node';
-import type { ProcessListEntry } from './gezel-process-memory.js';
+import type { ProcessListEntry } from '@bendyline/gezel-inference/internal/system/gezel-process-memory';
 
 const ORPHAN_REAP_WAIT_MS = 10_000;
 const ORPHAN_REAP_POLL_MS = 150;

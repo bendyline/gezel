@@ -12,9 +12,12 @@
 
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { downloadWithSha256 } from '@bendyline/gezel-inference/internal/providers/audio/whisper-cpp';
+import {
+  HF_CACHE_DIR_ENV,
+  transformersCacheDir,
+} from '@bendyline/gezel-inference/internal/transformers-cache';
 import { transformersCachePath } from '@bendyline/gezel-knowledge';
-import { downloadWithSha256 } from '../providers/audio/whisper-cpp.js';
-import { HF_CACHE_DIR_ENV, transformersCacheDir } from '../transformers-cache.js';
 
 import { MEDIA_SEARCH_PROFILE } from './profile.js';
 

@@ -24,6 +24,8 @@ import {
   type TaskCraftbookStep,
   type TaskExecutionMode,
   type TaskFanout,
+  type TaskInputPreviewResponse,
+  type TaskInputSource,
   type TaskNote,
   type TaskNoteAuthor,
   type TaskReferences,
@@ -108,11 +110,16 @@ import {
 import {
   type GateCheckOutcome,
   type GateWorkspaceReader,
-  gateCheckLabel,
   taskSuppliedCitationPaths,
 } from './gate-eval.js';
 import { type StepGatedEvent, gateHistoryEvidence, recordStepGateOutcome } from './gate-history.js';
-import { inputsHistoryDetails, planLaunchInputs, writeTaskWithInputs } from './inputs/resolve.js';
+import {
+  type CraftbookSampleReader,
+  inputsHistoryDetails,
+  planLaunchInputs,
+  previewTaskInput,
+  writeTaskWithInputs,
+} from './inputs/resolve.js';
 import type { InputStagingManager } from './inputs/staging.js';
 import { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from './launch-errors.js';
 import type {
@@ -148,6 +155,11 @@ import {
   shouldAutoAdvance,
   stepOwnerGezelId,
 } from './step-runtime.js';
+import {
+  allActiveStepsBlockedByWorkspaceWrites,
+  unsatisfiableStepWorkspaceFiles,
+  unsatisfiableWorkspaceGateFiles,
+} from './writes-off-deliverables.js';
 
 export { mainBookSource, stepOwnerGezelId };
 
@@ -392,6 +404,7 @@ export class TaskManager {
   private onTaskNeedsHelp?: TaskNeedsHelpHook;
   private onConnectorPrep?: ConnectorPrepHook;
   private inputStaging?: InputStagingManager;
+  private sampleReader?: CraftbookSampleReader;
   private readonly autoPreparedConnectorTypes = new Set<string>();
   private scriptRunner?: ScriptRunner;
   private craftbookResolver?: CraftbookResolver;
@@ -633,9 +646,43 @@ export class TaskManager {
     };
   }
 
+  /**
+   * A dry run of one input source, read with the same store, staging and
+   * samples a launch uses. Null when the book does not resolve here.
+   */
+  async previewInput(
+    projectId: string,
+    args: { craftbookId: string; param: string; source: TaskInputSource; version?: string },
+  ): Promise<TaskInputPreviewResponse | null> {
+    const resolved = await this.craftbookResolver?.resolve(args.craftbookId, {
+      ...(args.version ? { version: args.version } : {}),
+      projectId,
+    });
+    if (!resolved) return null;
+    const book = resolved.craftbook;
+    return previewTaskInput(
+      { store: this.store, staging: this.inputStaging, samples: this.sampleReader },
+      {
+        projectId,
+        craftbookId: args.craftbookId,
+        paramSchema: book.paramSchema ?? {},
+        param: args.param,
+        source: args.source,
+        ...(book.samples ? { samples: book.samples } : {}),
+        ...(book.version ? { version: book.version } : {}),
+        ...(resolved.sourceId ? { sourceId: resolved.sourceId } : {}),
+      },
+    );
+  }
+
   /** Where "from your computer" inputs are adopted from; unset → uploads are refused. */
   setInputStaging(staging: InputStagingManager): void {
     this.inputStaging = staging;
+  }
+
+  /** Where a book's samples are read from; unset → sample sources are refused. */
+  setSampleReader(reader: CraftbookSampleReader): void {
+    this.sampleReader = reader;
   }
 
   /**
@@ -858,6 +905,7 @@ export class TaskManager {
 
     // ── resolve main craftbook ──────────────────────────────────────
     let mainBook: Craftbook;
+    let mainBookSourceId: string | undefined;
     const sources: TaskCraftbookSource[] = [];
     if (input.craftbookId) {
       if (!this.craftbookResolver) {
@@ -874,6 +922,7 @@ export class TaskManager {
         throw new Error(`task ${projectId}/${num}: craftbook "${input.craftbookId}" not found`);
       }
       mainBook = resolved.craftbook;
+      mainBookSourceId = resolved.sourceId;
       const missingToolsets = unmetToolsets(
         mainBook.toolsets,
         await installedToolsetIds(this.store, projectId),
@@ -1093,8 +1142,15 @@ export class TaskManager {
     // number is known and interpolation is just below. Nothing is written
     // until the task write commits the plan.
     const inputsPlan = await planLaunchInputs(
-      { store: this.store, staging: this.inputStaging },
-      { projectId, num, book: mainBook, request: input, params: effectiveCraftbookParams },
+      { store: this.store, staging: this.inputStaging, samples: this.sampleReader },
+      {
+        projectId,
+        num,
+        book: mainBook,
+        ...(mainBookSourceId ? { bookSourceId: mainBookSourceId } : {}),
+        request: input,
+        params: effectiveCraftbookParams,
+      },
     );
     if (inputsPlan) Object.assign(craftbookParamOverrides, inputsPlan.params);
     Object.assign(
@@ -3264,7 +3320,8 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     // naming the real cause and the real fixes — instead of charging the
     // budget and then demanding `write_file` from a roster it was
     // stripped from.
-    const unsatFiles = await this.unsatisfiableWorkspaceGateFiles(
+    const unsatFiles = await unsatisfiableWorkspaceGateFiles(
+      this.store,
       projectId,
       task,
       step,
@@ -3633,79 +3690,9 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     };
   }
 
-  /**
-   * True when EVERY one of `tasks` is parked on a step that owes a
-   * workspace file managed writes can't produce. Lets the ambient nudger
-   * tell a genuinely stuck writes-off project from one doing artifact-only
-   * work — the drawer is exempt from the writes-off policy, so a nightly
-   * report or a review still completes there and its voorman still wants
-   * the check-in.
-   *
-   * Conservative by construction: an empty list, a task with no active
-   * step, or any step whose deliverable is satisfiable all answer `false`.
-   * We only claim "blocked" on positive evidence for every task.
-   */
-  async allActiveStepsBlockedByWorkspaceWrites(projectId: string, tasks: Task[]): Promise<boolean> {
-    if (tasks.length === 0) return false;
-    for (const task of tasks) {
-      const step = task.activeStepId
-        ? task.craftbook.steps.find((s) => s.id === task.activeStepId)
-        : undefined;
-      if (!step) return false;
-      if (!(await this.unsatisfiableStepWorkspaceFiles(projectId, task, step))) return false;
-    }
-    return true;
-  }
-
-  /**
-   * The workspace files a step must produce that no assignee is able to
-   * write. The proactive twin of {@link unsatisfiableWorkspaceGateFiles}:
-   * that one reads a gate REJECTION, this one reads the step's own
-   * deliverable declaration at ACTIVATION, before anyone is dispatched.
-   *
-   * Wild-caught (Pull Request Review on a writes-off project): the step
-   * mandated `write_file pr-review.md` from a roster the workspace-write
-   * ceiling had already stripped it from. Nothing could complete the
-   * step, so the gezel stalled on a clarifying question and the task sat
-   * active indefinitely — the reactive pause never fires because it needs
-   * an `advance_task_step` call that never comes.
-   */
-  private async unsatisfiableStepWorkspaceFiles(
-    projectId: string,
-    task: Pick<Task, 'diffpackId'>,
-    step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
-  ): Promise<string[] | null> {
-    // A drafting task's workspace writes are re-rooted into the diffpack
-    // overlay, and its gates read through that overlay — the writes-off
-    // policy cannot make its deliverable unwinnable. That is the point of
-    // proposing on a locked workspace.
-    if (task.diffpackId) return null;
-    const project = await this.store.getProject(projectId).catch(() => null);
-    if (!project || projectManagedWorkspaceWritable(project)) return null;
-    const files = new Set<string>();
-    if (step.advanceWhen?.file && step.advanceWhen.artifact !== true) {
-      files.add(step.advanceWhen.file);
-    }
-    for (const check of step.gate ? normalizeStepGate(step.gate).checks : []) {
-      if ((check as { artifact?: boolean }).artifact === true) continue;
-      const file = (check as { file?: string }).file;
-      if (file) files.add(file);
-    }
-    if (files.size === 0) return null;
-    // Only a deliverable that must be WRITTEN is unwinnable. A gate over
-    // a file that already exists may pass on its contents alone (a
-    // verify-only step), so leave that judgement to the gate itself —
-    // `requireChange` is the exception, since it demands an edit.
-    if (step.advanceWhen?.requireChange !== true) {
-      const missing = await Promise.all(
-        [...files].map(
-          async (file) =>
-            (await this.store.readProjectWorkspaceFile(projectId, file).catch(() => null)) === null,
-        ),
-      );
-      if (!missing.some(Boolean)) return null;
-    }
-    return [...files];
+  /** See the free function in writes-off-deliverables.ts; the scheduler reaches it here. */
+  allActiveStepsBlockedByWorkspaceWrites(projectId: string, tasks: Task[]): Promise<boolean> {
+    return allActiveStepsBlockedByWorkspaceWrites(this.store, projectId, tasks);
   }
 
   /**
@@ -3718,7 +3705,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     task: Task,
     step: Pick<TaskCraftbookStep, 'id' | 'name' | 'advanceWhen' | 'gate'>,
   ): Promise<boolean> {
-    const files = await this.unsatisfiableStepWorkspaceFiles(projectId, task, step);
+    const files = await unsatisfiableStepWorkspaceFiles(this.store, projectId, task, step);
     if (!files) return false;
     const fileList = files.map((f) => `\`${f}\``).join(', ');
     await this.setStatus(projectId, task.num, 'paused').catch(() => {});
@@ -3738,53 +3725,6 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       detail: `Step "${step.name}" must write workspace ${fileList}, but managed workspace writes are off for this project.`,
     });
     return true;
-  }
-
-  /**
-   * A rejected gate is unsatisfiable when a FAILING check reads the
-   * workspace tree while gezel workspace writes are off for the project.
-   * Returns the workspace files the failing checks name (possibly empty),
-   * or null when the gate is repairable. Drawer-only failures stay
-   * repairable — the artifacts drawer is deliberately exempt from the
-   * writes-off policy.
-   *
-   * A gate SCRIPT names no file, so it is judged by what the step itself
-   * owes: unwinnable only when the step's own deliverable is a workspace
-   * file nobody can write. Counting every script rejection as a
-   * workspace-write failure misread the note-only gate on Pull Request
-   * Review's scope step — the note was written correctly and the real
-   * fault was elsewhere, but the task paused telling the user to enable
-   * workspace writes, which would have changed nothing.
-   */
-  private async unsatisfiableWorkspaceGateFiles(
-    projectId: string,
-    task: Pick<Task, 'diffpackId'>,
-    step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
-    gate: NormalizedStepGate,
-    outcome: StepGateOutcome,
-  ): Promise<string[] | null> {
-    // Drafting tasks: see unsatisfiableStepWorkspaceFiles — the overlay
-    // makes workspace deliverables writable regardless of policy.
-    if (task.diffpackId) return null;
-    const project = await this.store.getProject(projectId).catch(() => null);
-    if (!project || projectManagedWorkspaceWritable(project)) return null;
-    const workspaceChecks = new Map<string, string | undefined>();
-    for (const c of gate.checks) {
-      // Read receipts are satisfied by reading existing artifacts, not by
-      // changing the workspace. corpusReadEvidence may read its batch manifest
-      // from the workspace, but that does not make a missing read a write.
-      if (c.kind === 'artifactReadEvidence' || c.kind === 'corpusReadEvidence') continue;
-      if ((c as { artifact?: boolean }).artifact === true) continue;
-      workspaceChecks.set(gateCheckLabel(c), (c as { file?: string }).file);
-    }
-    const failingWorkspace = (outcome.checkResults ?? []).filter(
-      (o) => !o.ok && workspaceChecks.has(o.label),
-    );
-    if (failingWorkspace.length > 0) {
-      return [...new Set(failingWorkspace.map((o) => o.file).filter((f): f is string => !!f))];
-    }
-    if (!outcome.runs.some((r) => r.decision === 'reject')) return null;
-    return await this.unsatisfiableStepWorkspaceFiles(projectId, task, step);
   }
 
   /**
@@ -4140,8 +4080,14 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     ref: ScriptRef,
     detail: string,
   ): Promise<Task> {
+    // Whether earlier steps ran tells a reader (and the eval classifier) if the
+    // script choked on runtime-owned setup or on work a model produced: a
+    // later step's hook can merge files fanout workers wrote.
+    const after = task.craftbook.steps.some((s) => s.id !== step.id && s.completedAt)
+      ? 'after completed steps'
+      : 'before any step completed';
     log.error(
-      `[tasks] step onEnter script failed for ${task.ref}/${step.id} (${ref.name}): ${detail}`,
+      `[tasks] step onEnter script failed for ${task.ref}/${step.id} (${ref.name}, ${after}): ${detail}`,
     );
     await this.appendNote(projectId, task.num, {
       text: `# Step setup failed — task paused\n\nThe \`onEnter\` script \`${ref.name}\` could not prepare step "${step.name}" (\`${step.id}\`). The assignee was not dispatched because the step's promised inputs may be missing.\n\n${detail}\n\nFix the script/runtime problem, then use Try again so setup runs before the next handoff.`,

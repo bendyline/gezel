@@ -7,13 +7,13 @@ import {
   type ListDiffpacksResponse,
   createLogger,
 } from '@bendyline/gezel';
+import { PathSafetyError } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { type Context, Hono } from 'hono';
 import {
   DiffpackDriftedError,
   DiffpackNotFoundError,
   DiffpackNotReviewableError,
 } from '../../diffpack/manager.js';
-import { PathSafetyError } from '../../fs/safe-paths.js';
 import { WorkspaceWriteDeniedError } from '../../workspace/errors.js';
 import type { ServiceContext } from '../context.js';
 import { buildDiffpackZip } from './diffpack-export.js';

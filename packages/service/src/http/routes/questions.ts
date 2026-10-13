@@ -14,6 +14,7 @@ import {
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../../chat/question-format.js';
+import { withQuestionFileReferences } from '../../references/question-files.js';
 import { normalizeNightShiftReportAttachment } from '../../tasks/night-review.js';
 import { answerOwnerStep } from '../../tasks/owner-step.js';
 import { retryPausedTask } from '../../tasks/retry.js';
@@ -161,7 +162,12 @@ export function questionRoutes(ctx: ServiceContext): Hono {
       // wants that today.
       questions = await ctx.store.listAllPendingQuestions();
     }
-    return c.json({ questions: questions.map(normalizeNightShiftReportAttachment) });
+    return c.json({
+      questions: await withQuestionFileReferences(
+        ctx.store,
+        questions.map(normalizeNightShiftReportAttachment),
+      ),
+    });
   });
 
   app.post('/:id/answer', async (c) => {

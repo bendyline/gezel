@@ -271,6 +271,7 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
           <div className="task-step-field full-width">
             <span className="task-step-field-label">Description</span>
             <MarkdownField
+              accessibleName="Craftbook description"
               key={`cbdesc-${book.id}`}
               value={book.description ?? ''}
               readOnly={readOnly}

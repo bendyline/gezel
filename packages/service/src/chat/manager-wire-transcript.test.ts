@@ -2,11 +2,15 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import type {
+  LLMSession,
+  SessionOpts,
+  WireTranscriptEntry,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
-import type { LLMSession, SessionOpts, WireTranscriptEntry } from '../providers/types.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ChatEventBus } from './events.js';
 import { ChatManager } from './manager.js';

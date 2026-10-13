@@ -1,7 +1,7 @@
 import { NativeCapacityCommandSchema } from '@bendyline/gezel';
+import { CapacityDeniedError } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { localDeviceCapacity } from '@bendyline/gezel-inference/internal/providers/native/device-capacity';
 import { Hono } from 'hono';
-import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
-import { localDeviceCapacity } from '../../providers/native/device-capacity.js';
 
 /** Mounted only behind the machine-models scope on the loopback broker. */
 export function nativeCapacityRoutes(home: string): Hono {

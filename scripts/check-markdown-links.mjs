@@ -27,6 +27,7 @@ const ignoredRepoDirectories = new Set([
   'runs',
   'ship-audit',
   '.release-audit',
+  'tmp',
 ]);
 
 async function markdownFiles(root) {

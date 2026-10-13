@@ -1,41 +1,22 @@
-import type { HealthResponse, Project, SecurityPresetLevel } from '@bendyline/gezel';
-import {
-  DEFAULT_SECURITY_LEVEL,
-  displayName,
-  isLocalProvider,
-  securityPolicyForLevel,
-} from '@bendyline/gezel';
+import type { Project } from '@bendyline/gezel';
+import { displayName, isLocalProvider } from '@bendyline/gezel';
 import type { ProviderName } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UpdateState } from '../api.js';
 import { api } from '../api.js';
-import { FirstRunInstallBanner } from '../components/FirstRunInstallBanner.js';
-import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloads.js';
-import { SocialModeToggle } from '../components/SocialModeToggle.js';
+import { useFirstRun } from '../components/first-run-context.js';
+import { llamaEngineNeed } from '../components/first-run-engine.js';
+import { useFirstRunModel } from '../components/useFirstRunModel.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
 import { releaseUrl } from '../github-urls.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
-import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
-import { requestSettingsSection } from '../settings-nav.js';
 import { useUpdateState } from '../update-state.js';
 import '../styles/home-view.css';
-import { Poppetje } from '../poppetje/index.js';
 import { HomeWorkshop } from './home/HomeWorkshop.js';
-import { IntroHandboekArticle } from './home/IntroHandboekArticle.js';
-import { FIRST_RUN_INTRO_ANCHOR_ID } from './home/first-run-intro-anchor.js';
+import type { WelcomeSetup } from './home/MeesterWelcome.js';
 
 type Provider = ProviderName;
-
-/**
- * The on-device engine differs by platform: Mac → MLX (Apple-native,
- * faster on Apple Silicon), Windows/Linux → llama.cpp. SettingsView has
- * a more elaborate version of this; the Home tab only ever shows the
- * one that's right for the current OS.
- */
-function onDeviceProviderForPlatform(platform: string | undefined): 'mlx' | 'llama-cpp' {
-  return platform === 'darwin' ? 'mlx' : 'llama-cpp';
-}
 
 type ProbeState =
   | { kind: 'idle' }
@@ -58,12 +39,10 @@ const OLLAMA_RETRY_INTERVAL_MS = 20_000;
 const OLLAMA_MAX_RETRIES = 720;
 
 /**
- * The first screen a user sees. Two states:
- *   - First run (unconfigured): setup in the left column — the one
- *     required model download, quiet optional links, security posture,
- *     preferences — with the "What is gezel?" tutorial (player + article)
- *     riding in a second column beside it.
- *   - Configured: the Meester workshop (HomeWorkshop) takes the surface.
+ * The first screen a user sees: the meester's workshop. During first run the
+ * workshop's conversation opens on the meester's welcome, which carries the
+ * one thing setup still needs (an AI model) in the meester's own voice; when
+ * the model lands the same surface carries on, with no change of page.
  */
 export function HomeView({
   platform,
@@ -83,7 +62,6 @@ export function HomeView({
   ) => void;
 }) {
   const [config, setConfig] = useState<ConfigResponse | null>(null);
-  const [health, setHealth] = useState<HealthResponse | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [meesterName, setMeesterName] = useState<string | undefined>(undefined);
   const [meesterRoleBasedName, setMeesterRoleBasedName] = useState<string | undefined>(undefined);
@@ -97,16 +75,17 @@ export function HomeView({
     ? displayName({ name: meesterName, roleBasedName: meesterRoleBasedName }, roleBasedNameOnlyMode)
     : undefined;
   const [probe, setProbe] = useState<ProbeState>({ kind: 'idle' });
-  // The settled verdict on whether setup is done — `true` → workshop, `false`
-  // → first-run onboarding. `null` while we're still determining it, which
+  // The settled verdict on whether setup is done — `false` means the welcome
+  // still asks for tools. `null` while we're still determining it, which
   // holds the loading splash. Made *sticky* on purpose: it only ever changes
   // on a *terminal* probe (ok/fail) or when we know a credential provider has
   // no creds. A background re-probe flips `probe` back to 'probing' but must
-  // NOT bounce the view first-run ↔ chat — the two bugs this fixes were
-  // (1) a slow cold boot showing "First run setup" for seconds before the
-  // llama.cpp probe landed and flipped to chat, and (2) that same flip
-  // flickering repeatedly while things churned on boot.
+  // NOT bounce the view between first run and chat — the two bugs this fixes
+  // were (1) a slow cold boot showing setup for seconds before the llama.cpp
+  // probe landed, and (2) that same flip flickering repeatedly while things
+  // churned on boot.
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const needsFirstSetup = useFirstRun();
 
   useEffect(() => {
     let cancelled = false;
@@ -129,10 +108,6 @@ export function HomeView({
         });
     };
     loadConfig();
-    api
-      .health()
-      .then(setHealth)
-      .catch(() => {});
     api
       .listProjects()
       .then((r) => setProjects(r.projects))
@@ -278,10 +253,36 @@ export function HomeView({
   // Settle the sticky verdict off *terminal* probes only. A re-probe flips
   // `probe` back to 'probing' (e.g. after a first-run model install), but we
   // leave the last verdict standing so the view doesn't bounce.
+  // A llama.cpp model on disk still needs the engine that runs it, which the
+  // daemon fetches lazily. Settling "configured" before it arrived let the
+  // welcome say "I'm ready" and the first message fail on the download.
+  const [engineCheck, setEngineCheck] = useState<{
+    probe: ProbeState;
+    provider: Provider;
+    missing: boolean;
+  } | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-ask only when the probe settles or the backend choice changes, not on every config read.
   useEffect(() => {
-    if (probe.kind === 'ok') setConfigured(!localProviderNeedsModel);
-    else if (probe.kind === 'fail') setConfigured(false);
-  }, [probe.kind, localProviderNeedsModel]);
+    if (probe.kind !== 'ok') return;
+    if (provider !== 'llama-cpp' || localProviderNeedsModel) {
+      setEngineCheck({ probe, provider, missing: false });
+      return;
+    }
+    let cancelled = false;
+    void llamaEngineNeed(config).then((need) => {
+      if (!cancelled) setEngineCheck({ probe, provider, missing: Boolean(need) });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [probe, provider, localProviderNeedsModel, config?.llamaCppBackendOverride]);
+
+  useEffect(() => {
+    if (probe.kind === 'ok') {
+      if (engineCheck?.probe !== probe || engineCheck.provider !== provider) return;
+      setConfigured(!localProviderNeedsModel && !engineCheck.missing);
+    } else if (probe.kind === 'fail') setConfigured(false);
+  }, [probe, provider, localProviderNeedsModel, engineCheck]);
 
   // Credential providers with no creds (OpenAI / Anthropic before a key is
   // saved) are never auto-probed — there's nothing to wait for, so resolve
@@ -315,41 +316,45 @@ export function HomeView({
     window.dispatchEvent(new CustomEvent('gezel:first-run', { detail: { firstRun: !configured } }));
   }, [configured]);
 
-  // Stable callback for the local-engine model managers'
-  // `onModelsChanged` prop. An inline arrow re-creates each render,
-  // which would push a new ref into LlamaCppModelManager whose own
-  // refresh useCallback then regenerates and re-fires its mount
-  // effect — a loop that hammers /api/llama-cpp/models 60×/s. The
-  // callback only depends on `provider`, so the identity stays stable
-  // for the life of a provider session.
+  // Re-probe once the first-run model lands. Kept stable: the download's
+  // inventory check depends on it, and a fresh identity every render would
+  // restart that check on every render.
   const reprobeCurrentProvider = useCallback(() => {
     void runProbe(provider);
   }, [runProbe, provider]);
 
   const updateState = useUpdateState();
-
-  // Built once and rendered by whichever branch below wins — first-run setup
-  // and the workshop are separate returns, and an installable update is worth
-  // showing on both.
   const banner = <UpdateBanner state={updateState} platform={platform} />;
+
+  // First run, confirmed by a terminal probe. The welcome's tools beat waits
+  // for this, so a configured install never flashes a download offer.
+  const firstRun = configured === false && needsFirstSetup;
+  const hostModels = window.__GEZEL__?.renderModelSettings;
+  const firstRunModel = useFirstRunModel({
+    enabled: firstRun && !hostModels,
+    config,
+    onConfigChanged: setConfig,
+    onModelInstalled: reprobeCurrentProvider,
+  });
+  const setup: WelcomeSetup | null = firstRun
+    ? { model: firstRunModel, ...(hostModels ? { hostModels } : {}) }
+    : null;
+
+  // The model landed while the person watched: the welcome says so, and
+  // Home keeps the welcome's quiet layout for the rest of this visit.
+  const sawFirstRunRef = useRef(false);
+  const [justReady, setJustReady] = useState(false);
+  useEffect(() => {
+    if (firstRun) sawFirstRunRef.current = true;
+    else if (configured === true && sawFirstRunRef.current) setJustReady(true);
+  }, [configured, firstRun]);
 
   // Hold the loading splash until the verdict has actually settled — never
   // guess first-run-vs-workshop while config is still loading or the probe is
-  // mid-flight. This is what keeps "First run setup" from flashing past on a
-  // slow cold boot before the probe confirms a model is already installed.
+  // mid-flight, or a configured install would flash a download offer. The
+  // placeholder fades in only after a delay (see .home-loading-placeholder)
+  // so a fast boot shows an empty surface rather than a spinner blink.
   if (!config || configured === null) {
-    // Nothing first-run-flavoured renders here — not the intro, not the
-    // "What is gezel?" Handboek article, not the banner. On a configured
-    // install this branch lives for a few hundred milliseconds before
-    // HomeWorkshop takes over, and anything with visual weight in it reads
-    // as a flash of the wrong screen. The banner has a second reason:
-    // handing the same element to a different parent a moment later tears
-    // the node down and rebuilds it, so it visibly flickers and a click
-    // landing in that window hits a detached button. Both are rendered by
-    // the settled branches below as soon as there is a screen worth putting
-    // them on. The placeholder itself fades in only after a delay (see
-    // .home-loading-placeholder) so a fast boot shows an empty surface
-    // rather than a spinner blink.
     return (
       <div className="home-view home-view-loading" aria-busy="true">
         <div className="home-loading-placeholder" aria-live="polite">
@@ -359,222 +364,20 @@ export function HomeView({
     );
   }
 
-  // Once configured, the front door becomes the workshop — greeting band
-  // and the meester conversation. The un-configured setup flow below is
-  // preserved untouched.
-  if (configured) {
-    return (
-      <HomeWorkshop
-        config={config}
-        projects={projects}
-        meesterGezelId={config?.meesterGezelId}
-        meesterName={meesterDisplayName ?? 'your meester'}
-        meesterIcon={meesterIcon}
-        meesterPoppetje={meesterPoppetje}
-        meesterIconOverride={meesterIconOverride}
-        banner={banner}
-        onNavigate={onNavigate}
-      />
-    );
-  }
-
-  const hostModels = window.__GEZEL__?.renderModelSettings;
-
   return (
-    <div className="home-view">
-      {banner}
-      {/* ── First run setup ──────────────────────────────────────── */}
-      {/* Setup leads; the "what is gezel?" tutorial rides in a second column
-          beside it when the window is wide enough (stacking beneath on
-          narrow windows), so the pitch is readable while the model
-          downloads without ever pushing setup below the fold. */}
-      <div className="home-firstrun-columns">
-        <div className="home-firstrun-main">
-          <h1 className="home-firstrun-heading">First run setup</h1>
-          <p className="home-firstrun-lede muted">
-            {hostModels
-              ? 'Choose a model to get started: one already on this device, or one to download. Your conversations stay on this device.'
-              : 'Gezel chats through a local AI model that runs privately on this device — download the recommended one to get started.'}
-          </p>
-          <div className="home-firstrun-body">
-            {/* First-run on-device install banner — the page's ONE primary action.
-          Visible only while the bootstrapped default model is still
-          downloading (or has failed). Hides itself once the model appears in
-          the installed list. Everything after it is deliberately quiet links:
-          the 2026-09-02 UX review found the old stack of terracotta media
-          buttons out-shouting this required step. */}
-            {hostModels
-              ? hostModels({ setup: true })
-              : config && (
-                  <FirstRunInstallBanner
-                    config={config}
-                    onConfigChanged={setConfig}
-                    onModelInstalled={reprobeCurrentProvider}
-                  />
-                )}
-
-            {/* Optional media sidecars — one desaturated link into a review
-          dialog; recommended picks that fit this device. */}
-            {!hostModels && <RecommendedMediaDownloads />}
-
-            {/* The one Settings link: the full on-device chat-engine page — MLX
-          on Mac, llama.cpp elsewhere. Cloud providers (Copilot, OpenAI, …)
-          live in Settings too; first run is intentionally local-only. */}
-            <section className="setup-section home-ondevice-link">
-              <button
-                type="button"
-                className="gz-link-button"
-                onClick={() => {
-                  const section = hostModels
-                    ? 'defaults'
-                    : onDeviceProviderForPlatform(health?.platform) === 'mlx'
-                      ? 'mlx'
-                      : 'llamaCpp';
-                  requestSettingsSection(section);
-                  window.dispatchEvent(
-                    new CustomEvent('gezel:navigate', { detail: { view: 'settings', section } }),
-                  );
-                }}
-              >
-                Manage AI models in Settings →
-              </button>
-              {!hostModels && (
-                <p className="muted small" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
-                  Browse other local models, or connect a cloud provider (GitHub Copilot, OpenAI,
-                  …).
-                </p>
-              )}
-            </section>
-
-            {/* ── 2. Security level ────────────────────────────────────── */}
-            {/* Persists immediately; adjustable later in Settings → Security &
-          Compliance. Super Lockdown keeps everything local-only. Ordered
-          above the display toggle on purpose: this is the one first-run
-          choice with real consequences (2026-09-02 UX review). */}
-            {!hostModels && (
-              <SecurityLevelSection
-                level={config?.securityPolicy?.level}
-                onChange={async (next) => {
-                  try {
-                    const res = await api.updateConfig({
-                      securityPolicy: securityPolicyForLevel(next),
-                    });
-                    setConfig(res);
-                  } catch {
-                    /* non-fatal — the user can set this later in Settings */
-                  }
-                }}
-              />
-            )}
-
-            {/* ── 3. Preferences ───────────────────────────────────────── */}
-            {/* One positive toggle over the two display flags: unchecking shows
-          role-based names (roleBasedNameOnlyMode) and plain letter avatars
-          (showPoppetjes=false). Same single-switch shape as Settings →
-          General. Dispatch config-updated so the live name/avatar hooks
-          update everywhere without a reload. The heading keeps the toggle
-          from reading as part of Security & compliance above it. */}
-            <section className="setup-section">
-              <h3>Preferences</h3>
-              {/* The example makes the toggle concrete before the user has
-                  met anyone: the real meester's name in the label and their
-                  actual poppetje beside it — the very things the switch
-                  shows or hides. Raw meesterName on purpose (not the
-                  role-based display name): the example must show what
-                  turning the toggle ON looks like. */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <label className="debug-toggle" style={{ marginTop: 0 }}>
-                  <input
-                    type="checkbox"
-                    checked={
-                      config?.roleBasedNameOnlyMode !== true && config?.showPoppetjes !== false
-                    }
-                    onChange={async (e) => {
-                      const show = e.target.checked;
-                      try {
-                        const res = await api.updateConfig({
-                          roleBasedNameOnlyMode: !show,
-                          showPoppetjes: show,
-                        });
-                        setConfig(res);
-                        window.dispatchEvent(
-                          new CustomEvent('gezel:config-updated', { detail: res }),
-                        );
-                      } catch {
-                        /* non-fatal — adjustable later in Settings */
-                      }
-                    }}
-                  />
-                  <span>
-                    Show gezel names and poppetjes
-                    {meesterName ? ` (e.g., ${meesterName}, your meester)` : ''}
-                  </span>
-                </label>
-                {meesterPoppetje && (
-                  <div
-                    className="gezel-icon"
-                    style={{ width: 36, height: 36 }}
-                    title={meesterName ? `${meesterName}'s poppetje` : 'example poppetje'}
-                  >
-                    <div className="gezel-icon-poppetje">
-                      <Poppetje poppetje={meesterPoppetje} variant="headshot" size={36} />
-                    </div>
-                  </div>
-                )}
-              </div>
-              {/* On for new installs (first run writes it); the ~24 MB model
-                  downloads in the background. Saving through updateConfig
-                  starts or skips that download the same way Settings does. */}
-              <label className="debug-toggle" style={{ marginTop: '0.75rem' }}>
-                <input
-                  type="checkbox"
-                  checked={config?.relevanceModel?.enabled === true}
-                  onChange={async (e) => {
-                    try {
-                      const res = await api.updateConfig({
-                        relevanceModel: { ...config?.relevanceModel, enabled: e.target.checked },
-                      });
-                      setConfig(res);
-                    } catch {
-                      /* non-fatal — adjustable later in Settings */
-                    }
-                  }}
-                />
-                <span>Check that reference material is on topic before a gezel uses it</span>
-              </label>
-              <p className="muted small" style={{ marginTop: '0.2rem', marginBottom: 0 }}>
-                A small model on this device (about 24 MB) keeps unrelated articles out of your
-                conversations.
-              </p>
-              <div style={{ marginTop: '0.6rem' }}>
-                <SocialModeToggle describe={false} />
-              </div>
-              <p className="muted small" style={{ marginTop: '0.2rem', marginBottom: 0 }}>
-                Gezels show their own character, and their growth is on display.
-              </p>
-              <p className="muted small" style={{ marginTop: '0.35rem', marginBottom: 0 }}>
-                Adjustable any time in Settings.
-              </p>
-            </section>
-          </div>
-        </div>
-
-        {/* ── Tutorial column ─────────────────────────────────────── */}
-        {/* The "What is gezel?" article, stacked: the DocPlayer (watch view)
-            on top and the readable page beneath, scrolling on its own
-            beside setup. Keeps the download banner's "read what gezel is"
-            scroll anchor. */}
-        {!hostModels && (
-          <aside
-            className="home-firstrun-tutorial"
-            id={FIRST_RUN_INTRO_ANCHOR_ID}
-            aria-label="What is gezel?"
-          >
-            <IntroHandboekArticle variant="stacked" />
-          </aside>
-        )}
-      </div>
-    </div>
+    <HomeWorkshop
+      config={config}
+      projects={projects}
+      meesterGezelId={config?.meesterGezelId}
+      meesterName={meesterDisplayName ?? 'your meester'}
+      meesterIcon={meesterIcon}
+      meesterPoppetje={meesterPoppetje}
+      meesterIconOverride={meesterIconOverride}
+      banner={banner}
+      setup={setup}
+      justReady={justReady}
+      onNavigate={onNavigate}
+    />
   );
 }
 
@@ -652,71 +455,5 @@ function UpdateBanner({ state, platform }: { state: UpdateState | null; platform
         </details>
       )}
     </output>
-  );
-}
-
-// Security level (first-run)
-//
-// A friendly first-run framing of the Security & Compliance policy. Picks
-// the overall posture before provider setup so a Super Lockdown choice
-// keeps the next step local-only. Full per-capability control lives in
-// Settings → Security & Compliance. The posture list + copy is shared with
-// that tab via SECURITY_LEVEL_PRESETS so the descriptions never drift.
-
-function SecurityLevelSection({
-  level,
-  onChange,
-}: {
-  level: SecurityPresetLevel | 'custom' | undefined;
-  onChange: (next: SecurityPresetLevel) => void | Promise<void>;
-}) {
-  // An unset policy already behaves as Lockdown (resolveSecurityPolicy falls
-  // back to DEFAULT_SECURITY_LEVEL), so show that key latched instead of a
-  // "no level chosen yet" placeholder — the tray reflects what is actually
-  // in force from the first paint.
-  const effective = level ?? DEFAULT_SECURITY_LEVEL;
-  const active = SECURITY_LEVEL_PRESETS.find((l) => l.id === effective);
-  return (
-    // The engagement-mode-<level> class carries the posture-semantic latch
-    // colors (sealed green / open amber) — same treatment as Settings.
-    <section className={`setup-section engagement-mode-${effective}`}>
-      <h3>Security &amp; compliance</h3>
-      <p className="muted" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
-        How much should gezellen be allowed to do? Pick a starting posture — you can fine-tune every
-        capability later in Settings → Security &amp; Compliance.
-      </p>
-      <div
-        className="engagement-mode-switch gz-tray gz-tray--described"
-        role="radiogroup"
-        aria-label="Security posture"
-      >
-        {SECURITY_LEVEL_PRESETS.map((l) => (
-          <button
-            key={l.id}
-            type="button"
-            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
-            role="radio"
-            aria-checked={effective === l.id}
-            className={`gz-key${effective === l.id ? ' gz-key-active' : ''}`}
-            onClick={() => void onChange(l.id)}
-          >
-            {l.label}
-            {l.recommended ? ' ★' : ''}
-          </button>
-        ))}
-      </div>
-      <p className="engagement-mode-description gz-tray-description" aria-live="polite">
-        {active ? (
-          <>
-            <strong>{active.label}</strong> — {active.description}
-          </>
-        ) : (
-          <>
-            <strong>Custom</strong> — capability switches were adjusted individually. Fine-tune in
-            Settings → Security &amp; Compliance.
-          </>
-        )}
-      </p>
-    </section>
   );
 }

@@ -21,8 +21,8 @@
  */
 import { createHash } from 'node:crypto';
 import type { ChatMessage, SessionWireTranscript } from '@bendyline/gezel';
-import { stripReasoningTags } from '../providers/local-tool-call-salvage.js';
-import type { WireTranscriptEntry } from '../providers/types.js';
+import { stripReasoningTags } from '@bendyline/gezel-inference/internal/providers/local-tool-call-salvage';
+import type { WireTranscriptEntry } from '@bendyline/gezel-inference/internal/providers/types';
 
 export interface WireTranscriptBasis {
   count: number;

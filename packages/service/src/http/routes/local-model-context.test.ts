@@ -1,5 +1,5 @@
+import { CapacityDeniedError } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 import { describe, expect, it, vi } from 'vitest';
-import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import type { ServiceContext } from '../context.js';
 import { ds4Routes } from './ds4.js';
 import { llamaCppRoutes } from './llama-cpp.js';

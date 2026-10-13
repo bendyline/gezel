@@ -5,8 +5,8 @@ import {
   slugifyEntityName as slugify,
 } from '@bendyline/gezel/runtime';
 export { pickRoleBasedName } from '@bendyline/gezel/runtime';
-import { ConfigStore } from './config-store.js';
-export { ConfigCorruptionError } from './config-store.js';
+import { ConfigStore } from '@bendyline/gezel-inference/internal/fs/config-store';
+export { ConfigCorruptionError } from '@bendyline/gezel-inference/internal/fs/config-store';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFile,
@@ -103,6 +103,7 @@ import {
   encodeProjectGezelId,
   inferGenderForName,
   isSafeEntityId,
+  isScheduledRunSession,
   isSharedLibraryProject,
   isValidKokoroVoice,
   legacyDensityToGeneralistMode,
@@ -115,6 +116,15 @@ import {
   seedCharacter,
   serializeGezelMarkdown,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
+import {
+  assertNoTemplatePlaceholderPath,
+  intoWorkspaceRelative,
+  realpathNearest,
+  resolveInside,
+  safeJoin,
+} from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import {
   type ExternalFolders,
   activeMachineSharedHome,
@@ -198,7 +208,6 @@ import {
 import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../workspace/errors.js';
 import { type JournalContext, appendJournalEntry } from '../workspace/journal.js';
 import { bootstrapWorkspace } from '../workspace/template.js';
-import { writeFileAtomic } from './atomic.js';
 import { CraftbookStore } from './craftbook-store.js';
 import {
   DEFAULT_PROJECT_ABOUT_MD,
@@ -209,7 +218,6 @@ import {
   SHARED_PROJECT_MISSION_MD,
 } from './default-project-docs.js';
 import { DocumentsStore } from './documents-store.js';
-import { ensurePrivateUserHome } from './home-permissions.js';
 import { extForMimeType, mimeTypeForFilename, safeBasename } from './media-types.js';
 import { MemoryStore } from './memory-store.js';
 import {
@@ -218,13 +226,6 @@ import {
   type ProjectArtifactSliceResult,
   ProjectArtifactsStore,
 } from './project-artifacts-store.js';
-import {
-  assertNoTemplatePlaceholderPath,
-  intoWorkspaceRelative,
-  realpathNearest,
-  resolveInside,
-  safeJoin,
-} from './safe-paths.js';
 import { TaskFilesStore } from './task-files-store.js';
 import {
   type WalkDirResult,
@@ -617,6 +618,12 @@ export class Store {
     } catch {
       /* best-effort */
     }
+    // Read before the mkdirs below, which make every home look started.
+    const [existingGezels, existingProjects] = await Promise.all([
+      safeReaddir(p.gezels),
+      safeReaddir(p.projects),
+    ]);
+    const emptyHome = existingGezels.length === 0 && existingProjects.length === 0;
     await Promise.all([
       mkdir(local.runtime.dir, { recursive: true }),
       mkdir(local.gezels, { recursive: true }),
@@ -629,6 +636,7 @@ export class Store {
       mkdir(p.projects, { recursive: true }),
       mkdir(p.documents, { recursive: true }),
     ]);
+    if (emptyHome) await this.stampFirstUse();
     await this.adoptMachineSharedGezelPrivateState();
     await this.ensureMachineSharedProjectPrivateState();
     await this.backfillRoleBasedNames();
@@ -956,6 +964,24 @@ export class Store {
     }
     if (backfilled > 0) {
       log.info(`[store] backfilled voice on ${backfilled} gezels`);
+    }
+  }
+
+  /**
+   * Stamp `firstUseAt` on a home booting for the first time. Never
+   * backfilled: an install without the stamp is established, and the
+   * first-use grace periods leave it alone. `GEZEL_DISABLE_FIRST_USE_GRACE=1`
+   * makes a harness's fresh home established from its first boot, so tests
+   * and evals see indexing and night reports at once.
+   */
+  private async stampFirstUse(): Promise<void> {
+    if (process.env.GEZEL_DISABLE_FIRST_USE_GRACE === '1') return;
+    try {
+      const config = await this.readConfig();
+      if (config.firstUseAt) return;
+      await this.writeConfig({ firstUseAt: nowIso() });
+    } catch (err) {
+      log.warn(`[store] could not stamp first use: ${String(err)}`);
     }
   }
 
@@ -1771,7 +1797,7 @@ export class Store {
     if (!existing) throw new Error(`agent ${id} not found`);
     if (existing.storageScope === 'machine-shared') {
       throw new Error(
-        'Machine-shared gezels cannot be removed from an individual account. Shared removal is not available yet.',
+        'Machine-shared gezellen cannot be removed from an individual account. Shared removal is not available yet.',
       );
     }
 
@@ -5794,6 +5820,11 @@ export class Store {
     before?: string;
     includeArchived?: boolean;
     /**
+     * Leave out scheduled runs' sessions (`isScheduledRunSession`) and every
+     * session opened beneath one. Home's conversation passes this.
+     */
+    excludeScheduledRuns?: boolean;
+    /**
      * Indexed workspace paths for a project, used to recognize workspace
      * files an assistant reply named in prose. Supplied by the caller
      * because the listing's owner (`WorkspaceIndexManager`) is built on top
@@ -5842,6 +5873,7 @@ export class Store {
         sessions.push(session);
       }
     }
+    if (opts.excludeScheduledRuns) dropScheduledRunSessions(sessions);
 
     // Older task entry sessions predate `task.launchSessionId`, but their
     // launcher often still carries the durable `craftbook-start` tool card.
@@ -6106,6 +6138,8 @@ export class Store {
             : {}),
           ...(m.synthetic ? { synthetic: m.synthetic } : {}),
           ...(m.contextCompaction ? { contextCompaction: m.contextCompaction } : {}),
+          ...(m.crewIntroduction ? { crewIntroduction: m.crewIntroduction } : {}),
+          ...(m.makerGezelId ? { makerGezelId: m.makerGezelId } : {}),
         });
       }
     }
@@ -7223,4 +7257,30 @@ You are a helpful agent. Describe how you should behave here.
 
 (Describe the expected output format here.)
 `;
+}
+
+/**
+ * Remove scheduled runs' sessions, and sessions opened beneath them, in place.
+ * A parent chain can be loaded in any order, so walk it rather than trusting
+ * that a parent was seen first.
+ */
+function dropScheduledRunSessions(sessions: ChatSession[]): void {
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const hidden = new Map<string, boolean>();
+  const isHidden = (session: ChatSession, seen: Set<string>): boolean => {
+    const known = hidden.get(session.id);
+    if (known !== undefined) return known;
+    let result = isScheduledRunSession(session);
+    const parentId = session.parentSession?.sessionId;
+    if (!result && parentId && !seen.has(parentId)) {
+      seen.add(parentId);
+      const parent = byId.get(parentId);
+      result = parent ? isHidden(parent, seen) : false;
+    }
+    hidden.set(session.id, result);
+    return result;
+  };
+  for (let i = sessions.length - 1; i >= 0; i--) {
+    if (isHidden(sessions[i]!, new Set([sessions[i]!.id]))) sessions.splice(i, 1);
+  }
 }

@@ -146,3 +146,44 @@ describe('nestChildSessionThreads', () => {
     expect(nested.depthBySession.get('visible-child')).toBe(0);
   });
 });
+
+describe('nestChildSessionThreads with splitAfterChildren', () => {
+  function reply(
+    sessionId: string,
+    at: string,
+    content: string,
+  ): Extract<Row, { kind: 'message' }> {
+    return { kind: 'message', at, msg: { sessionId, role: 'assistant', content, at } };
+  }
+
+  // A task's wrap-up is a reply in the turn that launched it, posted when the
+  // worker finished; it rendered above the work that made it.
+  const threads = () =>
+    buildTimelineThreads<Msg, never, { id: string }, never>([
+      row('meester', '2026-08-01T10:00:00Z'),
+      reply('meester', '2026-08-01T10:00:30Z', 'Mira is on it'),
+      row('worker', '2026-08-01T10:01:00Z', 'meester'),
+      reply('worker', '2026-08-01T10:05:00Z', 'drafted the itinerary'),
+      reply('meester', '2026-08-01T10:10:00Z', 'Mira finished your plan'),
+    ]);
+
+  it('puts what the turn said after its children finished below them', () => {
+    const nested = nestChildSessionThreads(threads(), { splitAfterChildren: true });
+    const order = nested.items.flatMap((item) =>
+      item.kind === 'thread'
+        ? [
+            `${item.sessionId}:${item.replies.map((r) => (r.kind === 'message' ? r.msg.content : '')).join('|')}`,
+          ]
+        : [],
+    );
+    expect(order).toEqual([
+      'meester:Mira is on it',
+      'worker:drafted the itinerary',
+      'meester:Mira finished your plan',
+    ]);
+  });
+
+  it('leaves the order alone without the option', () => {
+    expect(sessionOrder(nestChildSessionThreads(threads()).items)).toEqual(['meester', 'worker']);
+  });
+});

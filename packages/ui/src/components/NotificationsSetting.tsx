@@ -1,6 +1,7 @@
 import { DEFAULT_NOTIFICATION_DAILY_CAP } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 
 const CAPS = [0, 1, 3, 5, 10] as const;
 
@@ -43,7 +44,12 @@ export function NotificationsSetting() {
         review, or a reminder a project worked out from its own progress. Several at once arrive as
         one.
       </p>
-      <div className="gz-tray" role="radiogroup" aria-label="Notifications a day at most">
+      <div
+        className="gz-tray"
+        role="radiogroup"
+        onKeyDown={onRadioKeyDown}
+        aria-label="Notifications a day at most"
+      >
         {CAPS.map((value) => (
           <button
             key={value}
@@ -51,6 +57,7 @@ export function NotificationsSetting() {
             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
             role="radio"
             aria-checked={cap === value}
+            tabIndex={cap === value ? 0 : -1}
             disabled={cap === null}
             className={`gz-key${cap === value ? ' gz-key-active' : ''}`}
             onClick={() => void save(value)}

@@ -1,6 +1,6 @@
+import { GpuPanicGuard } from '@bendyline/gezel-inference/internal/providers/native/gpu-panic-guard';
 import type { GpuPanicRecord } from '@bendyline/gezel/native';
 import { describe, expect, it } from 'vitest';
-import { GpuPanicGuard } from './gpu-panic-guard.js';
 
 function panic(agoMs: number): GpuPanicRecord {
   return {

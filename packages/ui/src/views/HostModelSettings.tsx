@@ -12,6 +12,7 @@ import {
 } from '../settings-nav.js';
 import { AudioEngineSettings } from './AudioEngineSettings.js';
 import { SidebarSidePicker, ThemePicker } from './SettingsAppearance.js';
+import { SettingsInterests } from './SettingsInterests.js';
 import { SettingsLegalSection } from './SettingsLegal.js';
 import { SettingsSectionPicker } from './SettingsSectionPicker.js';
 
@@ -94,8 +95,8 @@ export function HostModelSettings() {
           <section>
             <h3>Keep a copy of your work</h3>
             <p>
-              Back up your projects, gezels, conversations, and documents to a file. You can review
-              a backup before restoring it.
+              Back up your projects, gezellen, conversations, and documents to a file. You can
+              review a backup before restoring it.
             </p>
             <button type="button" onClick={() => requestBackupRestore({ tab: 'backup' })}>
               Back up content…
@@ -106,6 +107,7 @@ export function HostModelSettings() {
           </section>
         ) : (
           <>
+            <SettingsInterests />
             <section>
               <h3>Appearance</h3>
               <ThemePicker />

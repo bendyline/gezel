@@ -17,9 +17,9 @@ import {
   spawnsChildren,
 } from '@bendyline/gezel';
 import type { NightShiftQuietReason } from '@bendyline/gezel';
+import type { ProviderName } from '@bendyline/gezel-inference/internal/providers/types';
 import type { ChatEventBus } from '../chat/events.js';
 import type { Store } from '../fs/store.js';
-import type { ProviderName } from '../providers/types.js';
 import { type TaskManager, stepOwnerGezelId } from './manager.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';
 import { isOwnerStep } from './step-runtime.js';
@@ -67,6 +67,13 @@ export interface NightShiftManagerOptions {
    * battery and resumes on mains. Absent or unknown never holds it.
    */
   power?: { onBatteryPower(): boolean | null };
+  /**
+   * The new-install hold (first-run/indexing-hold.ts). While it is active a
+   * scheduled shift stays off: an install minutes old has no engine to run
+   * on, and its first frame must be the Meester, not a failed overnight
+   * review. A manual shift is the person's own request and never waits.
+   */
+  firstUseHold?: { isActive(): Promise<boolean> };
 }
 
 export interface NightShiftAmbientWork {
@@ -165,6 +172,8 @@ export class NightShiftManager {
   ) => Promise<ProviderName>;
   private readonly ambientWork?: NightShiftAmbientWork;
   private readonly power?: { onBatteryPower(): boolean | null };
+  private readonly firstUseHold?: { isActive(): Promise<boolean> };
+  private announcedFirstUseHold = false;
   private heldOnBattery = false;
 
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -215,6 +224,7 @@ export class NightShiftManager {
     this.resolveProviderName = opts.resolveProviderName;
     this.ambientWork = opts.ambientWork;
     this.power = opts.power;
+    this.firstUseHold = opts.firstUseHold;
   }
 
   start(): void {
@@ -529,6 +539,9 @@ export class NightShiftManager {
           this.latchedOffForWindowKey = null; // outside window: clear latch
         } else if (this.latchedOffForWindowKey === windowKey) {
           // already drained this window — stay off
+        } else if (await this.firstUseHoldActive()) {
+          // A new install: off, and deliberately no latch, so the shift can
+          // still run tonight once a model has landed and the hold lifts.
         } else if (!work) {
           this.latchedOffForWindowKey = windowKey; // latch off for the rest of the window
         } else if (!runnable) {
@@ -748,6 +761,17 @@ export class NightShiftManager {
       return false;
     }
     return work.hasEligibleProject().catch(() => false);
+  }
+
+  private async firstUseHoldActive(): Promise<boolean> {
+    if (!this.firstUseHold) return false;
+    // An unreadable hold must not keep an established install's shift off.
+    const held = await this.firstUseHold.isActive().catch(() => false);
+    if (held && !this.announcedFirstUseHold) {
+      this.announcedFirstUseHold = true;
+      log.info('[night-shift] waits: this install is new and not ready yet');
+    }
+    return held;
   }
 
   /** Single transition chokepoint: diff, broadcast, log. */

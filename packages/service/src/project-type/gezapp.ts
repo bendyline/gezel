@@ -27,6 +27,8 @@ import {
 } from '@bendyline/gezel';
 import type { CatalogItemDetail } from '@bendyline/gezel';
 import { BundledSource, type CatalogService } from '@bendyline/gezel-catalog';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { isReservedWindowsName, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import {
   aiAppReceiptFile,
   aiAppVersionDir,
@@ -34,8 +36,6 @@ import {
   aiAppsRoot,
 } from '@bendyline/gezel/paths';
 import AdmZip from 'adm-zip';
-import { writeFileAtomic } from '../fs/atomic.js';
-import { isReservedWindowsName, safeJoin } from '../fs/safe-paths.js';
 
 const log = createLogger('gezapp');
 let installQueue: Promise<void> = Promise.resolve();

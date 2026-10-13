@@ -37,8 +37,8 @@ import {
   modelStorageRoots,
   readOnlyModelError,
   verifyReadOnlyModelPayload,
-} from '../../models/storage-roots.js';
-import { downloadWithRetry } from '../../utils/download-with-retry.js';
+} from '@bendyline/gezel-inference/internal/models/storage-roots';
+import { downloadWithRetry } from '@bendyline/gezel-inference/internal/utils/download-with-retry';
 import type { VideoModelPullEvent } from './types.js';
 
 const log = createLogger('video');

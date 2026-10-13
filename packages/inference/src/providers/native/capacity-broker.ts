@@ -1,0 +1,1511 @@
+/**
+ * CapacityBroker — single source of truth for "do we have headroom
+ * to load another local model?" Sums per-engine `residentBytes`
+ * reservations against a budget (auto-derived from system RAM, or
+ * explicitly set in config) and decides reserve / deny.
+ *
+ * The broker tracks reservations, not actual RSS. Treating
+ * `residentBytes` from the catalog as the source of truth keeps the
+ * logic deterministic and fast — a polling RSS reader would race the
+ * reserve→spawn window where committed > actual. The catalog number
+ * intentionally over-estimates (working set + buffers), so the broker
+ * is conservative in the right direction.
+ *
+ * Lifecycle: every supervisor spawn calls `reserve(key, bytes)`;
+ * every supervisor stop (idle, eviction, shutdown) calls
+ * `release(key)`. The pool decides what to do when `reserve` returns
+ * false — typically: pick LRU and evict, then retry.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { freemem, totalmem } from 'node:os';
+import {
+  CONSTRAINED_LOCAL_CONTEXT_FLOOR_TOKENS,
+  LLAMA_CPP_COMPUTE_HEADROOM,
+  LOCAL_CONTEXT_FLOOR_TOKENS,
+  type LlamaCppContextSizing,
+  MLX_COMPUTE_HEADROOM,
+  createLogger,
+  estimateLlamaCppResidentBytes,
+  estimateMlxResidentBytes,
+  localContextFloorTokens,
+} from '@bendyline/gezel';
+import {
+  type CapacityBudget,
+  autoAllowRamSpillover,
+  computeCapacityBudget,
+  fastMemoryBudgetBytes,
+  getDetectedGpuVramBytes,
+} from './capacity-budget.js';
+import type { LocalProviderName } from './engine-key.js';
+
+export {
+  autoAllowRamSpillover,
+  autoDetectBudgetBytes,
+  computeCapacityBudget,
+  getDetectedGpuVramBytes,
+  pressureIdleGraceMs,
+  setDetectedGpuVramBytes,
+  type CapacityBudget,
+} from './capacity-budget.js';
+
+export { fastMemoryBudgetBytes };
+
+const log = createLogger('capacity-broker');
+
+export type EngineKey = string;
+
+export interface CapacityBrokerOptions {
+  /**
+   * Total budget in bytes. Pass `undefined` to derive from system RAM
+   * via {@link autoDetectBudgetBytes}. Pass `0` (or any value <
+   * 1 GB) to disable enforcement — the broker still tracks
+   * reservations but `canReserve` always returns true. Useful for
+   * tests and for users who want to opt out of the budget entirely.
+   */
+  budgetBytes?: number;
+  /** Test seam — defaults to {@link totalmem}. */
+  systemRamBytes?: () => number;
+  /**
+   * Whether this host shares one memory pool between CPU and GPU, which
+   * changes the auto-derived budget. Defaults to detecting the running
+   * host; pass it explicitly in tests so the expected budget doesn't
+   * depend on which machine the suite runs on.
+   */
+  unifiedMemory?: boolean;
+  /**
+   * Measured discrete-GPU VRAM, or null for none. A card's memory is added
+   * to the RAM share rather than replacing it — see
+   * {@link computeCapacityBudget}. Omit to read the last published probe.
+   */
+  gpuVramBytes?: number | null;
+  /**
+   * May co-resident models spill into system RAM? `null`/omitted follows
+   * {@link autoAllowRamSpillover} for this host. See
+   * {@link CapacityBroker.coResidencyBytes}.
+   */
+  allowRamSpillover?: boolean | null;
+}
+
+export interface CapacityCommitted {
+  budgetBytes: number;
+  committedBytes: number;
+  enforced: boolean;
+  /** Total physical RAM the budget was derived from (for messaging). */
+  systemRamBytes: number;
+  /**
+   * What {@link autoDetectBudgetBytes} would pick for this host, whether or
+   * not an explicit budget is in force. The Settings slider marks it on the
+   * track so "Auto" stays a visible position rather than a hidden default.
+   */
+  autoBudgetBytes: number;
+  /** True when an explicit budget is overriding {@link autoBudgetBytes}. */
+  overridden: boolean;
+  /**
+   * Which pools the auto budget draws on, so the UI and the denial message
+   * can name the memory a person actually has instead of describing a 24 GB
+   * card's models as a percentage of system RAM.
+   */
+  pools: {
+    kind: CapacityBudget['kind'];
+    /** Usable VRAM on a discrete card; 0 on unified / CPU-only hosts. */
+    vramBytes: number;
+    /** The system-RAM share of the auto budget. */
+    ramShareBytes: number;
+    /** Fast (on-accelerator) memory — VRAM on a card, the budget otherwise. */
+    fastBytes: number;
+    /**
+     * {@link CapacityBudget.concurrencySizingBytes} — what slot COUNT is
+     * sized against. Lower than `fastBytes` on a big unified host, where
+     * admission capacity was raised without raising peak concurrency.
+     */
+    concurrencySizingBytes: number;
+  };
+  /** Whether co-resident models may spill into system RAM, and how that was decided. */
+  ramSpillover: {
+    allowed: boolean;
+    /** What this host would pick on its own; the toggle's "Auto" position. */
+    auto: boolean;
+    /** True when an explicit setting is overriding {@link auto}. */
+    overridden: boolean;
+    /**
+     * The ceiling the resident set must fit under while more than one model
+     * is loaded. Equals {@link budgetBytes} when spilling is allowed.
+     */
+    coResidencyBytes: number;
+  };
+  byKey: Array<{ key: EngineKey; bytes: number }>;
+}
+
+/** Format a byte count as GB with one decimal (e.g. `14.3 GB`). */
+function formatGb(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+/**
+ * Turn a raw capacity denial into a human-readable, actionable
+ * message. The raw broker reason (`budget exhausted: would commit
+ * 14326180192 against 10307921510`) is fine for logs but unreadable in
+ * a chat bubble — this is what the user actually sees when a model is
+ * too big to load.
+ */
+export function formatCapacityDenial(opts: {
+  /** Friendly model name, e.g. `gemma4-12b-q4` (not the engine key). */
+  modelLabel: string;
+  /** Bytes the model needs resident. */
+  requestedBytes: number;
+  /** Total model budget. */
+  budgetBytes: number;
+  /** Bytes already reserved by other resident models. */
+  committedBytes: number;
+  /** Physical RAM the budget was derived from; 0 when unknown. */
+  systemRamBytes: number;
+  /**
+   * Which pools the budget draws on. Omit on a RAM-only host. Without this
+   * the message describes a 24 GB card's budget as a percentage of system
+   * RAM — the number a person with a GPU is least likely to recognize.
+   */
+  pools?: CapacityCommitted['pools'];
+  /**
+   * The co-residency ceiling, when it is tighter than the budget — i.e. when
+   * this refusal is "keep models on the card", not "out of memory".
+   */
+  coResidencyBytes?: number;
+}): string {
+  const { modelLabel, requestedBytes, budgetBytes, committedBytes, systemRamBytes, pools } = opts;
+  // A co-residency refusal is a different problem with different advice: the
+  // machine has the memory, but keeping this model on the card means the
+  // others cannot stay. It only reaches a user when eviction couldn't clear
+  // the room (every other model busy), so "wait or close a chat" is the fix,
+  // not "buy a smaller model".
+  if (opts.coResidencyBytes !== undefined && opts.coResidencyBytes < budgetBytes) {
+    return [
+      `Not enough graphics memory to add ${modelLabel} (about ${formatGb(requestedBytes)}) `,
+      `next to the models already loaded (${formatGb(committedBytes)} of `,
+      `${formatGb(opts.coResidencyBytes)}). Gezel is set to keep models on the graphics card `,
+      'rather than let them spill into system memory, so it unloads one model to make room for ',
+      'another — but every loaded model is busy right now. Wait for a turn to finish, or allow ',
+      'system-memory spillover in Settings under the engine that runs it, which keeps them all ',
+      'loaded at reduced speed.',
+    ].join('');
+  }
+  const free = Math.max(0, budgetBytes - committedBytes);
+  const parts = [
+    `Not enough memory to run ${modelLabel}: it needs about ${formatGb(requestedBytes)}, ` +
+      `but only ${formatGb(free)} is available for models`,
+  ];
+  if (pools && pools.kind === 'discrete-gpu' && pools.vramBytes > 0) {
+    parts.push(
+      ` (the model budget is ${formatGb(budgetBytes)} — ${formatGb(pools.vramBytes)} of ` +
+        `graphics memory plus ${formatGb(pools.ramShareBytes)} of this machine's ` +
+        `${formatGb(systemRamBytes)} system memory, with the rest left for everything else)`,
+    );
+  } else if (systemRamBytes > 0) {
+    const pct = Math.round((budgetBytes / systemRamBytes) * 100);
+    parts.push(
+      ` (the model budget is ${formatGb(budgetBytes)} — about ${pct}% of your ` +
+        `${formatGb(systemRamBytes)} machine, with the rest left for everything else)`,
+    );
+  } else {
+    parts.push(` (model budget ${formatGb(budgetBytes)})`);
+  }
+  parts.push('. ');
+  if (committedBytes > 0) {
+    parts.push(
+      `Other models are currently using ${formatGb(committedBytes)}; closing one may free enough room. `,
+    );
+  }
+  parts.push(
+    'Try a smaller or more-quantized model, or raise the memory budget in ' +
+      'Settings under the engine that runs it — at your own risk, since a ' +
+      'budget the machine cannot back may make the app run out of memory.',
+  );
+  return parts.join('');
+}
+
+/**
+ * A model that could not be admitted for lack of memory. The message is
+ * unchanged from what `formatCapacityDenial` always produced — the class
+ * exists purely so `describeTurnError` can tell an out-of-memory refusal
+ * apart from an engine crash, since the two need very different advice in
+ * a bug report.
+ */
+export class CapacityDeniedError extends Error {
+  readonly code = 'capacity-denied';
+  /**
+   * Machine-readable cause when the human message alone would mislead a
+   * downstream surface. `resident-below-minimum` = the model is ALREADY
+   * running with a window smaller than the current policy requires — the
+   * remedy is an engine restart, not freeing memory, and the models list
+   * must not render it as a generic "won't fit".
+   */
+  readonly reason?: 'resident-below-minimum';
+
+  constructor(message: string, opts?: { reason?: 'resident-below-minimum' }) {
+    super(message);
+    this.name = 'CapacityDeniedError';
+    if (opts?.reason) this.reason = opts.reason;
+  }
+}
+
+/**
+ * A resident engine could not be evicted in time to make room because it
+ * was still serving requests. Unlike {@link CapacityDeniedError} this is a
+ * *transient* condition — nothing is wrong with the model that wanted room;
+ * the caller should retry once current turns drain. The `code` lets the
+ * fitness probe classify the failure as "did not run" rather than "failed".
+ */
+export class EngineBusyError extends Error {
+  readonly code = 'engine-busy';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'EngineBusyError';
+  }
+}
+
+/**
+ * Did this failure come from the pool refusing to make room, rather than from
+ * the model? Match the `code` first, and fall back to the stable message so a
+ * rewrapped error (the one-shot and provider layers both re-throw) still
+ * classifies right.
+ *
+ * Callers must not charge this to whatever they were working on: the request
+ * never reached a model, so it is evidence about neither the target nor the
+ * input. The fitness probe records `blocked` ("did not run"); index enrichment
+ * defers the file with its retry budget untouched.
+ */
+/**
+ * True for a refusal to load a model at all. Like {@link isEngineBusyError}
+ * this is a "never dispatched" signal: nothing reached a model, so it is
+ * evidence about neither the target's health nor the request's content.
+ */
+export function isCapacityDeniedError(err: unknown): boolean {
+  return !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'capacity-denied';
+}
+
+export function isEngineBusyError(err: unknown): boolean {
+  if (err && typeof err === 'object' && (err as { code?: unknown }).code === 'engine-busy') {
+    return true;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return /did not drain|busy serving requests/i.test(message);
+}
+
+export class CapacityBroker {
+  private budgetBytes: number;
+  private enforced: boolean;
+  private explicitBudgetBytes: number | null;
+  private readonly systemRamBytes: number;
+  private readonly unifiedMemory: boolean | undefined;
+  private readonly gpuVramBytes: number | null | undefined;
+  private explicitAllowRamSpillover: boolean | null;
+  private readonly reservations = new Map<EngineKey, number>();
+
+  constructor(opts: CapacityBrokerOptions = {}) {
+    this.systemRamBytes = (opts.systemRamBytes ?? totalmem)();
+    this.unifiedMemory = opts.unifiedMemory;
+    this.gpuVramBytes = opts.gpuVramBytes;
+    this.explicitAllowRamSpillover = opts.allowRamSpillover ?? null;
+    this.explicitBudgetBytes = opts.budgetBytes ?? null;
+    // Assigned by applyBudget; the definite-assignment dance TS wants for
+    // fields a constructor sets through a helper.
+    this.budgetBytes = 0;
+    this.enforced = false;
+    this.applyBudget();
+  }
+
+  /**
+   * The broker is built once and lives for the whole process, so the host
+   * shape it was handed at construction is the one every later admission is
+   * priced against. `gpuVramBytes: null` there means "the boot probe reported
+   * no accelerator" — which is also exactly what a probe that TIMED OUT
+   * reports, and `nvidia-smi` on a laptop dGPU parked in a low-power state
+   * routinely loses its 2s race. Pinning that answer turns one slow probe
+   * into a RAM-only budget for the life of the daemon.
+   *
+   * So a card measured SINCE construction wins, by deferring the whole host
+   * shape — VRAM and the unified flag together — to the published probe. A
+   * host that genuinely has no accelerator publishes `null` too, and nothing
+   * changes for it.
+   */
+  private autoBudget(): CapacityBudget {
+    const measuredSince =
+      (this.gpuVramBytes === undefined || this.gpuVramBytes === null) &&
+      getDetectedGpuVramBytes() !== null;
+    return computeCapacityBudget({
+      systemRamBytes: this.systemRamBytes,
+      ...(measuredSince
+        ? {}
+        : {
+            ...(this.unifiedMemory === undefined ? {} : { unifiedMemory: this.unifiedMemory }),
+            ...(this.gpuVramBytes === undefined ? {} : { gpuVramBytes: this.gpuVramBytes }),
+          }),
+    });
+  }
+
+  /**
+   * Re-derive the auto budget when the host measurement moved under it.
+   *
+   * {@link autoBudget} recomputes per call, but `budgetBytes` — the number
+   * admission actually gates on — is assigned once by {@link applyBudget}.
+   * Without this, a card measured after construction would show up in
+   * `pools` and in `fastBudgetBytes()` while the enforced ceiling stayed on
+   * the RAM-only curve, which is the half of the figure that denies models.
+   *
+   * Called from every public read; an explicit budget is the operator's
+   * number and is never re-derived.
+   */
+  private refreshAutoBudget(): void {
+    if (this.explicitBudgetBytes !== null) return;
+    const auto = this.autoBudget().budgetBytes;
+    if (auto === this.budgetBytes) return;
+    log.info(
+      `auto budget re-derived ${this.budgetBytes} → ${auto} (host memory measured after start)`,
+    );
+    this.budgetBytes = auto;
+  }
+
+  private applyBudget(): void {
+    const explicit = this.explicitBudgetBytes;
+    if (explicit === null) {
+      this.budgetBytes = this.autoBudget().budgetBytes;
+      this.enforced = true;
+    } else if (explicit < 1024 ** 3) {
+      this.budgetBytes = explicit;
+      this.enforced = false;
+    } else {
+      this.budgetBytes = explicit;
+      this.enforced = true;
+    }
+  }
+
+  /**
+   * Re-point the budget without rebuilding the broker. `null` reverts to
+   * {@link autoDetectBudgetBytes}. Existing reservations are untouched: a
+   * shrink below current commitments doesn't evict anything, it just makes
+   * the next `reserve` fail until the pool's LRU path frees room. That is
+   * the same shape as the cache controller's live budget, and it keeps the
+   * Settings slider from severing a mid-turn engine.
+   *
+   * Without this the budget was read once when the engine router was built
+   * and cached until shutdown, so changing the setting did nothing until
+   * the daemon restarted.
+   */
+  setBudgetBytes(bytes: number | null): void {
+    this.explicitBudgetBytes = bytes;
+    this.applyBudget();
+    log.info(
+      `budget set to ${this.budgetBytes} (${bytes === null ? 'auto' : 'explicit'}), ` +
+        `committed ${this.committedBytes()}`,
+    );
+  }
+
+  /**
+   * Live-update whether co-resident models may spill into system RAM.
+   * `null` reverts to {@link autoAllowRamSpillover}. Like
+   * {@link setBudgetBytes}, tightening never evicts anything itself — it
+   * makes the next reserve fail, and the pool's LRU path does the freeing.
+   */
+  setAllowRamSpillover(allow: boolean | null): void {
+    this.explicitAllowRamSpillover = allow;
+    log.info(
+      `ram spillover ${this.ramSpilloverAllowed() ? 'allowed' : 'denied'} ` +
+        `(${allow === null ? 'auto' : 'explicit'}), co-residency ceiling ${this.coResidencyBytes()}`,
+    );
+  }
+
+  /** Whether co-resident models may spill into system RAM right now. */
+  ramSpilloverAllowed(): boolean {
+    return this.explicitAllowRamSpillover ?? autoAllowRamSpillover(this.autoBudget());
+  }
+
+  /**
+   * The ceiling the resident set must fit under **while more than one model
+   * is loaded**. Equal to the budget when spilling is allowed; the card's
+   * usable VRAM when it isn't.
+   *
+   * The single-model carve-out is the whole point of expressing this as a
+   * co-residency rule rather than a smaller budget: one model may still use
+   * the full budget, so a MoE larger than the card keeps running by streaming
+   * its experts from system RAM. What the rule forbids is a *second* model
+   * pushing the resident set off the card, where every model in it gets slow
+   * at once. Capping the budget instead would have made that big MoE
+   * unloadable and quietly shrunk the catalog to what fits in VRAM.
+   */
+  coResidencyBytes(): number {
+    this.refreshAutoBudget();
+    if (this.ramSpilloverAllowed()) return this.budgetBytes;
+    return Math.min(this.budgetBytes, this.fastBudgetBytes());
+  }
+
+  /** True iff a fresh reservation of `bytes` would fit. */
+  canReserve(bytes: number): boolean {
+    return this.shortfallFor(bytes) <= 0;
+  }
+
+  /**
+   * Bytes of existing reservation that must be released before `bytes` fits
+   * — 0 when it already does. Both constraints in one number so the pool can
+   * size an eviction batch without knowing which rule bound it.
+   *
+   * `priorBytes` is an existing reservation for the same key being resized;
+   * it is not an obstacle to itself.
+   */
+  shortfallFor(bytes: number, priorBytes = 0): number {
+    this.refreshAutoBudget();
+    if (!this.enforced) return 0;
+    const others = Math.max(0, this.committedBytes() - priorBytes);
+    const budgetShort = others + bytes - this.budgetBytes;
+    // Co-residency binds only while something else is loaded. Releasing X
+    // satisfies it once `others - X + bytes <= ceiling` OR `others - X === 0`
+    // — hence the min: a model bigger than the ceiling needs the pool empty,
+    // never more than everything.
+    const ceiling = this.coResidencyBytes();
+    const coShort =
+      others > 0 ? Math.min(others, others + bytes - ceiling) : Number.NEGATIVE_INFINITY;
+    return Math.max(0, budgetShort, coShort);
+  }
+
+  /**
+   * Attempt to reserve `bytes` for `key`. Returns the result; on
+   * `granted: false` the caller is expected to evict and retry.
+   *
+   * Idempotent on `key`: a second reserve for the same key replaces
+   * the prior bytes value (useful when an engine's working set grows
+   * after first turn). The replacement is treated as "free old, add
+   * new" so an enlargement that no longer fits returns false and
+   * leaves the prior reservation intact.
+   */
+  reserve(key: EngineKey, bytes: number): { granted: boolean; reason?: string } {
+    const prior = this.reservations.get(key) ?? 0;
+    if (!this.enforced) {
+      this.reservations.set(key, bytes);
+      return { granted: true };
+    }
+    if (this.shortfallFor(bytes, prior) > 0) {
+      return {
+        granted: false,
+        reason: this.denialReason(bytes, prior),
+      };
+    }
+    this.reservations.set(key, bytes);
+    if (prior > 0 && prior !== bytes) {
+      log.debug(`reserve ${key} resized ${prior} → ${bytes}`);
+    } else if (prior === 0) {
+      log.debug(
+        `reserve ${key} = ${bytes} (committed ${this.committedBytes()}/${this.budgetBytes})`,
+      );
+    }
+    return { granted: true };
+  }
+
+  /**
+   * The raw machine-shaped reason for a denial of `bytes` (optionally
+   * replacing an existing `priorBytes` reservation). Single source of
+   * the `budget exhausted: would commit N against M` string — it feeds
+   * both `reserve()` results and the pool's `capacity broker denied`
+   * log line, whose shape is a contract with the eval harness (see
+   * provider-pool.ts). Do not reword. A co-residency denial keeps that
+   * exact prefix and only appends its own clause, so the harness's
+   * `capacity broker denied … budget exhausted` match still classifies it.
+   */
+  denialReason(bytes: number, priorBytes = 0): string {
+    const wouldCommit = this.committedBytes() - priorBytes + bytes;
+    const ceiling = this.coResidencyBytes();
+    if (this.enforced && ceiling < this.budgetBytes && wouldCommit > ceiling) {
+      const clause = '(co-residency ceiling — RAM spillover off)';
+      return `budget exhausted: would commit ${wouldCommit} against ${ceiling} ${clause}`;
+    }
+    return `budget exhausted: would commit ${wouldCommit} against ${this.budgetBytes}`;
+  }
+
+  release(key: EngineKey): void {
+    const prior = this.reservations.get(key);
+    if (prior === undefined) return;
+    this.reservations.delete(key);
+    log.debug(`release ${key} (-${prior}, committed ${this.committedBytes()}/${this.budgetBytes})`);
+  }
+
+  /** Sum of all current reservations. */
+  committedBytes(): number {
+    let sum = 0;
+    for (const v of this.reservations.values()) sum += v;
+    return sum;
+  }
+
+  /** Fast (on-accelerator) memory for this host — see {@link CapacityBudget.fastBytes}. */
+  fastBudgetBytes(): number {
+    this.refreshAutoBudget();
+    const auto = this.autoBudget();
+    // An explicit budget can only lower what we'll put on the accelerator,
+    // never raise the card's capacity.
+    return this.enforced ? Math.min(auto.fastBytes, this.budgetBytes) : auto.fastBytes;
+  }
+
+  /** Snapshot used by the UX status endpoint and tests. */
+  committed(): CapacityCommitted {
+    this.refreshAutoBudget();
+    const auto = this.autoBudget();
+    return {
+      budgetBytes: this.budgetBytes,
+      committedBytes: this.committedBytes(),
+      enforced: this.enforced,
+      systemRamBytes: this.systemRamBytes,
+      autoBudgetBytes: auto.budgetBytes,
+      overridden: this.explicitBudgetBytes !== null,
+      pools: {
+        kind: auto.kind,
+        vramBytes: auto.vramBytes,
+        ramShareBytes: auto.ramShareBytes,
+        fastBytes: auto.fastBytes,
+        concurrencySizingBytes: auto.concurrencySizingBytes,
+      },
+      ramSpillover: {
+        allowed: this.ramSpilloverAllowed(),
+        auto: autoAllowRamSpillover(auto),
+        overridden: this.explicitAllowRamSpillover !== null,
+        coResidencyBytes: this.coResidencyBytes(),
+      },
+      byKey: [...this.reservations.entries()]
+        .map(([key, bytes]) => ({ key, bytes }))
+        .sort((a, b) => b.bytes - a.bytes),
+    };
+  }
+
+  /**
+   * Fallback estimate when a catalog entry lacks `residentBytes`.
+   * Used by callers building reservation requests from
+   * `approxSizeBytes`. Reflects the working-set footprint vs. on-disk
+   * size WITHOUT any KV — every caller prices KV explicitly on top.
+   *
+   * llama.cpp: see {@link estimateLlamaCppResidentBytes}. Pass `mmprojBytes`
+   * for a multimodal model — `approxSizeBytes` counts the weights alone, and
+   * the projector plus its vision buffers is 1.7 GB on a 30B.
+   * MLX: see {@link estimateMlxResidentBytes}. MLX needs no equivalent — its
+   * vision tower is inside the same safetensors set `approxSizeBytes` sums.
+   *
+   * ds4 is special: it streams MoE experts from SSD, so its resident
+   * working set is bounded by the configured expert-cache budget + KV +
+   * non-routed weights — NOT the full on-disk weight size. The catalog
+   * `residentBytes` is authoritative for ds4; this fallback only caps at a
+   * conservative streaming working set so a 64GB box is never told an
+   * 87GB DeepSeek-V4 model "can't fit" (which is the whole point of ds4).
+   */
+  static estimateResidentBytes(
+    engine: LocalProviderName,
+    approxSizeBytes: number,
+    opts?: { mmprojBytes?: number },
+  ): number {
+    if (engine === 'ds4') {
+      const DS4_STREAMING_RESIDENT_FALLBACK = 48 * 1024 ** 3;
+      return Math.min(approxSizeBytes, DS4_STREAMING_RESIDENT_FALLBACK);
+    }
+    if (engine === 'mlx') return estimateMlxResidentBytes(approxSizeBytes);
+    return estimateLlamaCppResidentBytes(approxSizeBytes, {
+      mmprojBytes: opts?.mmprojBytes ?? 0,
+    });
+  }
+}
+
+const GIB = 1024 ** 3;
+
+/**
+ * RECLAIMABLE-aware free RAM. `os.freemem()` reports truly-free pages
+ * only: on macOS, file-backed cache and purgeable memory count as "used"
+ * even though the kernel hands them back on demand — and a just-exited
+ * llama engine's mmap'd weights ARE file-backed cache, so freemem()
+ * reads a few GB on a 64 GB box right after any model ran. Wild-caught
+ * 2026-08-04: the context memory-clamp saw "~6.6 GB available", floored
+ * gemma4-31b to 8,192 ctx, and all 11 trials died on context overflow —
+ * on a machine with >40 GB actually reclaimable. Linux freemem() has the
+ * same free-vs-MemAvailable trap.
+ *
+ * darwin: vm_stat free+inactive+speculative+purgeable+file-backed.
+ * linux: /proc/meminfo MemAvailable. Fallback: freemem().
+ */
+export function availableSystemRamBytes(): number {
+  // vm_stat categories overlap (file-backed pages span active+inactive),
+  // so the raw sum can exceed physical RAM; cap at 90% of totalmem — the
+  // consumers already hold back their own OS reserves on top.
+  const cap = totalmem() * 0.9;
+  try {
+    if (process.platform === 'darwin') {
+      const out = execFileSync('/usr/bin/vm_stat', { encoding: 'utf8', timeout: 3_000 });
+      const parsed = parseVmStatAvailableBytes(out);
+      if (parsed !== null) return Math.max(Math.min(parsed, cap), freemem());
+    } else if (process.platform === 'linux') {
+      const parsed = parseMeminfoAvailableBytes(readFileSync('/proc/meminfo', 'utf8'));
+      if (parsed !== null) return Math.max(Math.min(parsed, cap), freemem());
+    }
+  } catch {
+    // Probe failure falls through to the conservative number.
+  }
+  return freemem();
+}
+
+/** Pure vm_stat parser (exported for tests). Returns null when the output
+ *  doesn't look like vm_stat. */
+export function parseVmStatAvailableBytes(text: string): number | null {
+  const page = Number(/page size of (\d+) bytes/.exec(text)?.[1]);
+  if (!Number.isFinite(page) || page <= 0) return null;
+  const count = (label: string): number => {
+    const m = new RegExp(`${label}:\\s+(\\d+)`).exec(text);
+    return m ? Number(m[1]) : 0;
+  };
+  const pages =
+    count('Pages free') +
+    count('Pages inactive') +
+    count('Pages speculative') +
+    count('Pages purgeable') +
+    count('File-backed pages');
+  if (pages <= 0) return null;
+  return pages * page;
+}
+
+/** Pure /proc/meminfo parser (exported for tests). */
+export function parseMeminfoAvailableBytes(text: string): number | null {
+  const m = /MemAvailable:\s+(\d+)\s*kB/.exec(text);
+  return m ? Number(m[1]) * 1024 : null;
+}
+
+/**
+ * Demand-shaped default concurrent-slot count for a supervised local engine.
+ * The input is usable FAST memory: VRAM on a discrete GPU, the shared pool on
+ * UMA, and the engine RAM budget on CPU. System RAM beside a dGPU must never
+ * raise `--parallel` / `--max-concurrency`; it is only a single-large-model
+ * offload pool. Thresholds are expressed against the safety-discounted pool,
+ * so an 8 GiB card resolves to 1 and a 16 GiB card to 2.
+ *
+ * The exact model/KV ceiling clamps this further. An explicit
+ * `providerConcurrency[engine]` setting remains an operator override.
+ */
+export function defaultLocalEngineSlots(fastMemoryBytes: number = fastMemoryBudgetBytes()): number {
+  const gb = fastMemoryBytes / GIB;
+  if (gb < 12) return 1;
+  if (gb < 24) return 2;
+  if (gb < 48) return 3;
+  return 4;
+}
+
+/**
+ * Slots a launch would be admitted at before the context-admission ladder
+ * gets its say: an explicit operator setting, else the fast-memory tier default
+ * capped by what memory can actually hold.
+ *
+ * Exists so every caller resolves slots the same way. The launch-preview
+ * short-circuit once used the bare tier default while the main path clamped
+ * by the ceiling, so a resident model on a 32-48 GB host advertised a
+ * 3-slot reservation (~49 GB for a 17 GB model) the broker would never have
+ * admitted.
+ */
+export function plannedLocalEngineSlots(opts: {
+  configuredSlots?: number | undefined;
+  ceiling: number;
+  tierDefault?: number;
+}): number {
+  if (opts.configuredSlots !== undefined) return opts.configuredSlots;
+  return Math.max(1, Math.min(opts.tierDefault ?? defaultLocalEngineSlots(), opts.ceiling));
+}
+
+/**
+ * Conservative estimate of the KV-cache bytes ONE slot needs at a given
+ * per-turn context window. We have no model attention-architecture metadata
+ * (layers / KV-heads / head-dim) anywhere in the app, so we scale off the
+ * on-disk weights size — calibrated to a measured anchor (a 26B Q4_K_M
+ * Gemma uses ~2 GB of q8_0 KV at 65K ctx ≈ 30 KB/token) and biased ~1.3×
+ * high so we under-provision slots rather than risk OOM. Clamped to a sane
+ * per-token band so tiny models don't round to ~0 and giant MoE weights
+ * don't push the estimate far past reality.
+ */
+/** Approximate scale from an f16 KV baseline to the launcher's cache dtype. */
+export function kvQuantScale(kvCacheType: string | undefined): number {
+  const kvType = kvCacheType ?? 'q8_0';
+  return kvType.startsWith('q4') ? 0.3 : kvType.startsWith('q8') ? 0.55 : kvType === 'f32' ? 2 : 1;
+}
+
+export function estimatePerSlotKvBytes(opts: {
+  perTurnCtxTokens: number;
+  weightsBytes: number;
+  kvCacheType?: string;
+}): number {
+  const KB = 1024;
+  // f16 KV bytes/token per byte of (quantized) on-disk weights. ~1.3× the
+  // measured Gemma-26B anchor (~3.7e-6) → conservative. NOTE the anchor is
+  // a WINDOWED-cache measurement, and small dense models routinely exceed
+  // the 40 KB/token floor by 3× — this heuristic exists only for weights
+  // without a readable header (external paths, MLX safetensors). Callers
+  // with GGUF metadata pass `exactPerSlotKvBytesF16` to the slot ceilings
+  // instead (see estimateExactPerSlotKvBytesF16 in offload-planner).
+  const KV_RATIO_F16 = 5e-6;
+  const perTokenF16 = Math.min(400 * KB, Math.max(40 * KB, opts.weightsBytes * KV_RATIO_F16));
+  return Math.round(opts.perTurnCtxTokens * perTokenF16 * kvQuantScale(opts.kvCacheType));
+}
+
+/**
+ * Fraction of the post-weights budget held back from KV-slot accounting to
+ * cover what {@link estimatePerSlotKvBytes} doesn't: per-wave prefill/compute
+ * activation buffers (prefill_step_size × batch × model dims), the framework's
+ * own scratch, and estimator error. Without this reserve a model that "just
+ * fits" N KV slots aborts the moment N concurrent prefills allocate their
+ * compute buffers on top of resident KV — the qwen3.6-27b-q8 Metal OOM. It is
+ * deliberately blunt: the per-slot KV estimate is itself coarse, so precision
+ * here buys nothing; a margin that survives a bad guess does.
+ *
+ * MLX reserves more, and holds it in the open. Its share of this margin used
+ * to hide inside a 1.3x weights multiplier that no measurement supported (see
+ * {@link CapacityBroker.estimateResidentBytes}); correcting that figure to the
+ * measured 1.0 would otherwise have bought every MLX model an extra slot,
+ * which is the one purchase this whole reserve exists to prevent. What the
+ * larger number actually covers is real and MLX-specific: prefill activation
+ * buffers plus the framework's retained free-buffer pool, which is unbounded,
+ * invisible to `get_active_memory`, and tracked by nothing else.
+ */
+const LOCAL_ENGINE_COMPUTE_HEADROOM = LLAMA_CPP_COMPUTE_HEADROOM;
+
+export function computeHeadroomFor(engine: LocalProviderName): number {
+  return engine === 'mlx' ? MLX_COMPUTE_HEADROOM : LOCAL_ENGINE_COMPUTE_HEADROOM;
+}
+
+/**
+ * Bytes left for KV + compute after resident weights and any co-resident
+ * models. Negative when the model barely fits (or doesn't) — callers clamp.
+ * Shared so the slot COUNT ({@link localEngineSlotCeiling}) and the engine's
+ * own prompt-cache budget can be sized against the SAME number instead of
+ * drifting apart (a fat prompt cache holding idle-session KV was a
+ * co-conspirator in the 27B Metal OOM, not just the concurrent slots).
+ */
+export function localEngineKvBudgetBytes(opts: {
+  engine: LocalProviderName;
+  budgetBytes: number;
+  weightsBytes: number;
+  /** Fixed working set with KV excluded. When absent, derive it from weightsBytes. */
+  weightsResidentBytes?: number;
+  committedOtherBytes?: number;
+}): number {
+  const weightsResident =
+    opts.weightsResidentBytes ??
+    CapacityBroker.estimateResidentBytes(opts.engine, opts.weightsBytes);
+  return opts.budgetBytes - (opts.committedOtherBytes ?? 0) - weightsResident;
+}
+
+/**
+ * Max concurrent slots that fit the model budget: resident weights +
+ * N × per-slot KV + a compute-headroom reserve ≤ budget. Always ≥ 1 — if even
+ * one slot's KV doesn't fit, that's the broker's job to deny the whole spawn;
+ * our job is only the slot COUNT given the model loads. `committedOtherBytes`
+ * subtracts co-resident model reservations (default 0 = primary/only model).
+ *
+ * `engine` drives the resident-weights multiplier (MLX's f16 KV + working set
+ * runs heavier than llama.cpp's — see {@link CapacityBroker.estimateResidentBytes}).
+ * Pass the ACTUAL `kvCacheType` the engine will run: MLX defaults to f16 (no
+ * `--kv-bits`), so omitting it or passing a q8 type here silently under-counts
+ * KV by ~1.8× and over-slots — exactly the trap the MLX path fell into.
+ */
+export function localEngineSlotCeiling(opts: {
+  engine: LocalProviderName;
+  budgetBytes: number;
+  weightsBytes: number;
+  /** Fixed working set with KV excluded. When absent, derive it from weightsBytes. */
+  weightsResidentBytes?: number;
+  perTurnCtxTokens: number;
+  kvCacheType?: string;
+  committedOtherBytes?: number;
+  /**
+   * Header-exact per-slot KV at f16 (see estimateExactPerSlotKvBytesF16).
+   * When present it replaces the weights-scaled heuristic, scaled to the
+   * launcher's cache dtype by the same approximate quant ladder — the
+   * heuristic under-prices small dense models ~3× (over-slotting exactly
+   * the models that get multi-slot defaults) and over-prices MoE.
+   */
+  exactPerSlotKvBytesF16?: number;
+  /**
+   * {@link CapacityBudget.concurrencySizingBytes} — the ceiling slot COUNT is
+   * sized against when it is lower than the admission budget. Raising the
+   * budget must let more models fit, not silently hand one model more
+   * simultaneous KV slots. Omit to size against `budgetBytes` (the pre-split
+   * behavior, and correct for a discrete card where the two are the same).
+   */
+  sizingBudgetBytes?: number;
+}): number {
+  const perSlotKv =
+    opts.exactPerSlotKvBytesF16 !== undefined && opts.exactPerSlotKvBytesF16 > 0
+      ? Math.round(opts.exactPerSlotKvBytesF16 * kvQuantScale(opts.kvCacheType))
+      : estimatePerSlotKvBytes({
+          perTurnCtxTokens: opts.perTurnCtxTokens,
+          weightsBytes: opts.weightsBytes,
+          ...(opts.kvCacheType !== undefined ? { kvCacheType: opts.kvCacheType } : {}),
+        });
+  if (perSlotKv <= 0) return 1;
+  const freeForKv = localEngineKvBudgetBytes({
+    ...opts,
+    budgetBytes: Math.min(opts.budgetBytes, opts.sizingBudgetBytes ?? opts.budgetBytes),
+  });
+  const usableForKv = freeForKv * (1 - computeHeadroomFor(opts.engine));
+  return Math.max(1, Math.floor(usableForKv / perSlotKv));
+}
+
+/**
+ * llama.cpp slot ceiling — thin wrapper over {@link localEngineSlotCeiling}.
+ * Retained for existing callers/tests; new engine paths call the generic form
+ * with their own `engine` + `kvCacheType`.
+ */
+export function llamaCppSlotCeiling(opts: {
+  budgetBytes: number;
+  weightsBytes: number;
+  weightsResidentBytes?: number;
+  perTurnCtxTokens: number;
+  kvCacheType?: string;
+  committedOtherBytes?: number;
+  exactPerSlotKvBytesF16?: number;
+  sizingBudgetBytes?: number;
+}): number {
+  return localEngineSlotCeiling({ engine: 'llama-cpp', ...opts });
+}
+
+/**
+ * Physical memory held back from every live-availability decision: the OS,
+ * the desktop shell, and whatever the user is actually doing.
+ *
+ * ONE function because there used to be two, and they disagreed by gigabytes.
+ * The context clamp held back a flat 2 GiB from
+ * {@link availableSystemRamBytes}; the device admission ledger held back
+ * `min(4 GiB, 10% of RAM)` from a stricter darwin-only sample that counted
+ * neither inactive nor speculative pages. On a 16 GiB Mac the planner read
+ * 9.3 GiB available and the admitter 4.3 GiB from the same `vm_stat` seconds
+ * apart, so a launch the planner sized at 9.7 GiB sat in the admission queue
+ * for its full five-minute budget and then failed — on a host that was never
+ * going to free 5 GiB, because nothing was holding it but the estimate.
+ * Planning and admission must read one number.
+ */
+export function liveRamOsReserveBytes(totalRamBytes: number = totalmem()): number {
+  return Math.min(4 * GIB, Math.max(2 * GIB, totalRamBytes * 0.1));
+}
+
+/**
+ * Extra headroom the PLANNER holds back on top of
+ * {@link liveRamOsReserveBytes}, so a launch is never sized to the exact
+ * admission boundary. The two sample the host a moment apart; a plan that
+ * only just fit would spend the whole admission wait losing a race to
+ * whatever allocated in between.
+ */
+const CTX_PLANNING_MARGIN_BYTES = 512 * 1024 ** 2;
+
+/**
+ * The most a launch could hold right now, as {@link clampCtxTokensForMemory}
+ * reckons it with nothing else resident: the fast pool plus the system RAM
+ * free now, less the OS reserve and the planning margin, capped by the
+ * budget. First run picks against this so it never chooses a model the
+ * first chat turn refuses, and the failed-turn card names a model that will
+ * start.
+ *
+ * It holds back {@link FIT_NOW_DRIFT_BYTES} more: free RAM moves by hundreds
+ * of megabytes between this check and the launch, and a model priced inside
+ * that drift was suggested and then refused (2026-10-12).
+ */
+export function liveLaunchCapBytes(input: { budgetBytes: number; vramBytes: number }): number {
+  const freeRam = Math.max(
+    0,
+    availableSystemRamBytes() -
+      liveRamOsReserveBytes() -
+      CTX_PLANNING_MARGIN_BYTES -
+      FIT_NOW_DRIFT_BYTES,
+  );
+  return Math.min(input.budgetBytes, Math.max(0, input.vramBytes) + freeRam);
+}
+
+const FIT_NOW_DRIFT_BYTES = GIB;
+
+/**
+ * Minimum useful per-turn context for Gezel's standing prompt + tool surface
+ * on a host with memory to spare. Read {@link minViableLocalContextTokens}
+ * rather than this constant when the answer has to fit the running machine.
+ */
+export const MIN_VIABLE_LOCAL_CONTEXT_TOKENS = LOCAL_CONTEXT_FLOOR_TOKENS;
+
+/** The same minimum on a host that has to trade context for memory. */
+export const MIN_VIABLE_CONSTRAINED_CONTEXT_TOKENS = CONSTRAINED_LOCAL_CONTEXT_FLOOR_TOKENS;
+
+function envMinContextTokens(): number | null {
+  const raw = process.env.GEZEL_MIN_CONTEXT_TOKENS;
+  if (!raw) return null;
+  const tokens = Number.parseInt(raw, 10);
+  return Number.isFinite(tokens) && tokens > 0 ? tokens : null;
+}
+
+/**
+ * Operator/eval brake on adaptive context growth. Growth is uncapped by
+ * default — it already cannot exceed the model's native window or fast
+ * memory — but a fleet operator or an eval harness may want a deterministic
+ * ceiling independent of the machine it runs on.
+ */
+function envGrowthCeilingTokens(): number | null {
+  const raw = process.env.GEZEL_LLAMA_GROWTH_CEILING_TOKENS;
+  if (!raw) return null;
+  const tokens = Number.parseInt(raw, 10);
+  return Number.isFinite(tokens) && tokens > 0 ? tokens : null;
+}
+
+/**
+ * The context floor THIS host is held to. A 16 GB Mac or an 8 GB card cannot
+ * back a 64K window next to the weights, and the admission ladder's only
+ * remaining move there is to deny the launch — so those hosts run at
+ * {@link MIN_VIABLE_CONSTRAINED_CONTEXT_TOKENS} instead, and sessions compact
+ * sooner rather than the model being unusable.
+ *
+ * Reads the same host shape the budget does, so the two cannot disagree:
+ * a discrete card is judged on its usable VRAM, every other host on system
+ * RAM. `GEZEL_MIN_CONTEXT_TOKENS` overrides both, for operators and for tests
+ * that need a host-independent floor.
+ */
+export function minViableLocalContextTokens(opts?: {
+  systemRamBytes?: number;
+  budget?: CapacityBudget;
+}): number {
+  const override = envMinContextTokens();
+  if (override !== null) return override;
+  const systemRamBytes = opts?.systemRamBytes ?? totalmem();
+  const budget = opts?.budget ?? computeCapacityBudget({ systemRamBytes });
+  return localContextFloorTokens({
+    totalRamBytes: systemRamBytes,
+    gpuVramBytes: budget.kind === 'discrete-gpu' ? budget.vramBytes : null,
+  });
+}
+
+export interface LocalContextRequirement {
+  nativeContextWindow: number;
+  minimumPerTurnCtxTokens: number;
+  requestedPerTurnCtxTokens: number;
+}
+
+/**
+ * Resolve the model-aware context contract. Long-context models must retain
+ * at least the host's floor ({@link minViableLocalContextTokens} — 64K, or 32K
+ * on a memory-constrained machine); a model whose native window is genuinely
+ * smaller keeps that native limit instead of being asked to do something it
+ * cannot support.
+ *
+ * `minViableContextTokens` exists so callers that already know the host (and
+ * every test) pin the floor instead of re-probing the machine underneath them.
+ */
+export function resolveLocalContextRequirement(opts: {
+  modelContextWindow?: number;
+  requestedContextWindow?: number;
+  minViableContextTokens?: number;
+}): LocalContextRequirement {
+  const floor =
+    opts.minViableContextTokens && opts.minViableContextTokens > 0
+      ? Math.floor(opts.minViableContextTokens)
+      : minViableLocalContextTokens();
+  const preferred =
+    opts.requestedContextWindow && opts.requestedContextWindow > 0
+      ? Math.floor(opts.requestedContextWindow)
+      : floor;
+  const native =
+    opts.modelContextWindow && opts.modelContextWindow > 0
+      ? Math.floor(opts.modelContextWindow)
+      : floor;
+  const minimum = Math.min(native, floor);
+  return {
+    nativeContextWindow: native,
+    minimumPerTurnCtxTokens: minimum,
+    requestedPerTurnCtxTokens: Math.min(native, Math.max(preferred, minimum)),
+  };
+}
+
+export interface LlamaCppContextRequirement extends LocalContextRequirement {
+  /**
+   * True when strict model-max is in force (policy selected, no explicit
+   * numeric override): the requested native window is also the admission
+   * minimum. This flag is the SINGLE derivation of strictness — admission
+   * sites must consume `minimumPerTurnCtxTokens` (which already carries it)
+   * rather than re-deriving the predicate from config. Notably, strictness
+   * must NOT disable the SWA windowed re-plan: gemma's full-attention KV at
+   * its native window never fits any real host, while the windowed cache
+   * often holds the full native window cheaply (12b: 4.8 GB at 256K) — an
+   * early build gated the re-plan on `!strict` and thereby denied every
+   * Gemma model under model-max.
+   */
+  strict: boolean;
+  /**
+   * Adaptive growth target: the per-turn window the launch should try to
+   * grow toward AFTER the admission ladder settles slots and grants the
+   * un-grown request — never an admission requirement. Emitted only when
+   * every disable condition is absent (strict model-max, an explicit
+   * numeric override, an authored per-model tuning ceiling at or below the
+   * request, an unknown native window) so launch and preview cannot
+   * disagree about eligibility. Consumed by {@link planAdaptiveContextGrowth}.
+   */
+  growthTargetTokens?: number;
+}
+
+/**
+ * Apply llama.cpp's user-selectable sizing policy on top of the shared local
+ * context floor. Explicit numeric overrides keep their historical semantics
+ * and win over the selector. In strict model-max mode the requested native
+ * window is also the admission minimum, so the planner may reduce slots but
+ * cannot silently shorten the context window to make the model fit.
+ */
+export function resolveLlamaCppContextRequirement(opts: {
+  modelContextWindow?: number;
+  explicitContextWindow?: number;
+  adaptiveContextWindow?: number;
+  contextSizing?: LlamaCppContextSizing;
+  minViableContextTokens?: number;
+  /**
+   * Authored `tuning.engine.llamaCpp.contextSize` when the catalog carries
+   * one. Documented as a per-model launch CEILING, so adaptive growth must
+   * not exceed it. Pass it only when authored — the 65_536 fallback the
+   * caller substitutes for the adaptive request must not cap growth.
+   */
+  manifestContextSize?: number;
+  /** Test seam; defaults to `GEZEL_LLAMA_GROWTH_CEILING_TOKENS`, else uncapped. */
+  growthCeilingTokens?: number;
+}): LlamaCppContextRequirement {
+  const strictModelMax =
+    opts.contextSizing === 'model-max' && opts.explicitContextWindow === undefined;
+  const requestedContextWindow =
+    opts.explicitContextWindow ??
+    (strictModelMax ? opts.modelContextWindow : opts.adaptiveContextWindow);
+  const resolved = resolveLocalContextRequirement({
+    ...(opts.modelContextWindow !== undefined
+      ? { modelContextWindow: opts.modelContextWindow }
+      : {}),
+    ...(requestedContextWindow !== undefined ? { requestedContextWindow } : {}),
+    ...(opts.minViableContextTokens !== undefined
+      ? { minViableContextTokens: opts.minViableContextTokens }
+      : {}),
+  });
+  if (strictModelMax) {
+    return {
+      ...resolved,
+      minimumPerTurnCtxTokens: resolved.requestedPerTurnCtxTokens,
+      strict: true,
+    };
+  }
+  const base: LlamaCppContextRequirement = { ...resolved, strict: false };
+  // Growth eligibility: adaptive policy (not strict — handled above), no
+  // explicit numeric override (env, machine-wide, or per-model — the caller
+  // folds all three into explicitContextWindow), and a genuinely known
+  // native window to grow toward.
+  if (
+    opts.explicitContextWindow === undefined &&
+    opts.modelContextWindow !== undefined &&
+    opts.modelContextWindow > 0
+  ) {
+    const ceiling =
+      opts.growthCeilingTokens ?? envGrowthCeilingTokens() ?? Number.POSITIVE_INFINITY;
+    const cap = Math.min(
+      Math.floor(opts.modelContextWindow),
+      ceiling,
+      opts.manifestContextSize && opts.manifestContextSize > 0
+        ? Math.floor(opts.manifestContextSize)
+        : Number.POSITIVE_INFINITY,
+    );
+    const target = Number.isFinite(cap) ? Math.floor(cap / 1024) * 1024 : 0;
+    if (target > resolved.requestedPerTurnCtxTokens) {
+      return { ...base, growthTargetTokens: target };
+    }
+  }
+  return base;
+}
+
+/** Numerical floor for the low-level clamp calculation. Production admission
+ * applies the model-aware policy above and refuses a launch when that
+ * requirement cannot fit. */
+const CTX_CLAMP_FLOOR_TOKENS = 8_192;
+
+export interface CtxMemoryClampInput {
+  /** The per-turn context the launch wants (`effectiveNumCtx`). */
+  requestedPerTurnCtxTokens: number;
+  /** `--parallel` slot count; total KV is per-turn ctx × slots. */
+  slots: number;
+  /**
+   * KV bytes per token for ONE slot at the dtype the engine will actually
+   * run. Pass the exact GGUF-derived figure when the model header is
+   * readable (`estimateKvReserveBytes(...) / ctx`) — the weights-scaled
+   * heuristic underestimates models with outsized attention geometry by
+   * up to ~10× (a Gemma-12B at f16 KV is ~380 KB/token against the
+   * heuristic's 40 KB), and that gap is exactly how a 6.7 GB model became
+   * a 25 GB process on a 32 GB machine.
+   */
+  kvBytesPerToken: number;
+  /** Resident weight footprint (post-multiplier — see estimateResidentBytes). */
+  weightsResidentBytes: number;
+  /** Admission budget for the resident set (broker or auto-derived). */
+  budgetBytes: number;
+  /** Reservations other resident models already hold. */
+  committedOtherBytes?: number;
+  /**
+   * Live free physical RAM at launch time. Required for an actual launch —
+   * it is the half of the clamp that stops a spawn from paging the desktop.
+   *
+   * OMIT for a policy-only question ("what window would this model get?"),
+   * where live pressure is the wrong input and often a circular one: the
+   * models list asks it about every installed model while OUR OWN resident
+   * engine is what depressed free RAM, so a running model made every row —
+   * itself included — report "won't fit". Omitting evaluates against the
+   * capacity budget alone, which already accounts for co-resident models
+   * through `committedOtherBytes` and, unlike free RAM, knows that memory
+   * is reclaimable by eviction.
+   */
+  freeSystemRamBytes?: number;
+  /**
+   * Usable VRAM on a discrete card; MUST be 0 on unified/shared-pool
+   * hosts, where the "VRAM" is the same physical RAM `freeSystemRamBytes`
+   * measures and adding it would double-count. `computeCapacityBudget`
+   * already reports `vramBytes: 0` for those hosts — pass its value.
+   */
+  vramBytes: number;
+  minPerTurnCtxTokens?: number;
+  /**
+   * Held back from `freeSystemRamBytes`. Defaults to
+   * {@link liveRamOsReserveBytes} plus the planner's margin — i.e. always at
+   * least what device admission will hold back, so a plan this clamp accepts
+   * is one admission accepts too. Tests pass it explicitly; production does
+   * not, and must not lower it below the admission reserve.
+   */
+  osReserveBytes?: number;
+}
+
+export interface CtxMemoryClampResult {
+  perTurnCtxTokens: number;
+  clamped: boolean;
+  /** Human-readable rationale, set only when clamped. */
+  reason: string | null;
+}
+
+export interface CtxMemoryAdmissionPlanResult extends CtxMemoryClampResult {
+  /** Slot count that produced this admission result. */
+  slots: number;
+  /** The model/policy minimum this plan had to preserve. */
+  minimumPerTurnCtxTokens: number;
+  /** False means even one slot cannot fit the required working window. */
+  minimumSatisfied: boolean;
+}
+
+/**
+ * Clamp the per-turn context window so the engine's projected footprint —
+ * resident weights plus total KV plus the compute-headroom reserve — fits
+ * BOTH the capacity budget and what the machine can actually give right
+ * now (live free RAM + discrete VRAM).
+ *
+ * This is the missing admission check behind the 2026-08-03 incident: the
+ * slot ceiling sizes the slot COUNT and the broker admits WEIGHTS, but
+ * nothing asked whether one slot at the requested context fit at all.
+ * A 64K-token default on an f16-KV model sailed through both and put a
+ * ~19 GB KV cache into system RAM. Clamping context degrades gracefully
+ * (sessions compact sooner); paging does not degrade at all — it takes
+ * the whole desktop with it.
+ *
+ * Never returns below the caller's floor. Production launch admission wraps
+ * this primitive with {@link planCtxTokensForMemory}, which tests the actual
+ * safe value and refuses a launch that cannot retain the model-aware floor.
+ * Returns multiples of 1024 for tidy engine arguments.
+ */
+export function clampCtxTokensForMemory(input: CtxMemoryClampInput): CtxMemoryClampResult {
+  const requested = input.requestedPerTurnCtxTokens;
+  const floor = Math.max(1, input.minPerTurnCtxTokens ?? CTX_CLAMP_FLOOR_TOKENS);
+  const slots = Math.max(1, input.slots);
+  if (!(input.kvBytesPerToken > 0) || requested <= floor) {
+    return { perTurnCtxTokens: requested, clamped: false, reason: null };
+  }
+  const committedOther = Math.max(0, input.committedOtherBytes ?? 0);
+  const budgetCap = input.budgetBytes - committedOther;
+  const osReserve = input.osReserveBytes ?? liveRamOsReserveBytes() + CTX_PLANNING_MARGIN_BYTES;
+  const liveCap =
+    input.freeSystemRamBytes === undefined
+      ? null
+      : Math.max(0, input.vramBytes) + Math.max(0, input.freeSystemRamBytes - osReserve);
+  const cap = liveCap === null ? budgetCap : Math.min(budgetCap, liveCap);
+  const kvAllowance = (cap - input.weightsResidentBytes) * (1 - LOCAL_ENGINE_COMPUTE_HEADROOM);
+  const maxTotalTokens = kvAllowance > 0 ? kvAllowance / input.kvBytesPerToken : 0;
+  const maxPerTurn = Math.floor(maxTotalTokens / slots / 1024) * 1024;
+  const clampedTo = Math.max(floor, Math.min(requested, maxPerTurn));
+  if (clampedTo >= requested) {
+    return { perTurnCtxTokens: requested, clamped: false, reason: null };
+  }
+  const gb = (bytes: number) => `${(bytes / GIB).toFixed(1)} GB`;
+  const kvAtRequested = requested * slots * input.kvBytesPerToken;
+  const kvAtClamped = clampedTo * slots * input.kvBytesPerToken;
+  return {
+    perTurnCtxTokens: clampedTo,
+    clamped: true,
+    reason:
+      `context clamped ${requested} → ${clampedTo} tokens/turn (${slots} slot${slots === 1 ? '' : 's'}): ` +
+      `weights ~${gb(input.weightsResidentBytes)} + KV at the requested context ~${gb(kvAtRequested)} ` +
+      `exceeds available memory ~${gb(Math.max(0, cap))} ` +
+      `(budget ${gb(budgetCap)}` +
+      `${liveCap === null ? '' : `, live free RAM ${gb(Math.max(0, input.freeSystemRamBytes ?? 0))}`}` +
+      `${liveCap !== null && input.vramBytes > 0 ? ` + VRAM ${gb(input.vramBytes)}` : ''}` +
+      `${committedOther > 0 ? `, ${gb(committedOther)} held by other models` : ''}); ` +
+      `KV now ~${gb(kvAtClamped)}. Sessions compact sooner instead of the machine paging.`,
+  };
+}
+
+/**
+ * Preserve useful context by reducing concurrency before context. If even a
+ * single slot cannot fit the required per-turn window, report a denial rather
+ * than silently launching a tool-using model with an unusably small window.
+ */
+export function planCtxTokensForMemory(
+  input: CtxMemoryClampInput & { minimumPerTurnCtxTokens: number },
+): CtxMemoryAdmissionPlanResult {
+  const requestedSlots = Math.max(1, Math.floor(input.slots));
+  const minimum = Math.max(1, Math.floor(input.minimumPerTurnCtxTokens));
+  let last: CtxMemoryClampResult | undefined;
+  for (let slots = requestedSlots; slots >= 1; slots -= 1) {
+    const safe = clampCtxTokensForMemory({
+      ...input,
+      slots,
+      // Reveal the actually safe context instead of pinning the low-level
+      // clamp to the policy floor; admission compares it below.
+      minPerTurnCtxTokens: 1,
+    });
+    last = safe;
+    if (safe.perTurnCtxTokens >= minimum) {
+      return {
+        ...safe,
+        slots,
+        minimumPerTurnCtxTokens: minimum,
+        minimumSatisfied: true,
+      };
+    }
+  }
+  const denied = last ?? clampCtxTokensForMemory({ ...input, slots: 1, minPerTurnCtxTokens: 1 });
+  return {
+    ...denied,
+    slots: 1,
+    minimumPerTurnCtxTokens: minimum,
+    minimumSatisfied: false,
+  };
+}
+
+/**
+ * The concurrency floor automatic growth may trade down to. Growth may
+ * consolidate a 3- or 4-lane launch to two lanes when that buys a longer
+ * window, but the second lane is never traded away — a single busy slot
+ * turns every other chat on the machine into a queue, and SWA models with
+ * one slot re-prefill wholesale on session alternation (the same wall the
+ * q8_0 KV trade in {@link planLlamaCppKv} exists to avoid).
+ */
+export const ADAPTIVE_GROWTH_MIN_SLOTS = 2;
+
+/**
+ * A lane is only traded when the window it buys is at least this much
+ * longer than the no-trade grown window. Pure KV-bound consolidation from
+ * 3 → 2 lanes yields 1.5× by construction, so real trades clear this
+ * easily; what it filters out is spending a lane to close the last few
+ * percent toward a target the untraded launch nearly reaches anyway.
+ */
+export const ADAPTIVE_GROWTH_TRADE_MIN_GAIN = 1.25;
+
+export interface AdaptiveCtxGrowthInput {
+  /** The ladder-settled per-turn grant the launch would use without growth. */
+  basePerTurnCtxTokens: number;
+  /** `LlamaCppContextRequirement.growthTargetTokens` — native ∧ ceilings. */
+  targetPerTurnCtxTokens: number;
+  /** The ladder-settled slot count growth starts from. */
+  slots: number;
+  /**
+   * The SAME per-slot KV linearization the accepted admission plan used —
+   * windowed `bytesPerToken` when the SWA re-plan produced the plan, the
+   * full-attention figure otherwise. Feeding a different linearization here
+   * would let growth and admission disagree about the same launch.
+   */
+  kvBytesPerToken: number;
+  /**
+   * Fixed per-slot KV block (windowed models' window-capped SWA layers).
+   * Kept separate from `weightsResidentBytes` — it scales with the slot
+   * count growth itself may change.
+   */
+  kvFixedPerSlotBytes?: number;
+  /** Resident weights WITHOUT any per-slot KV folded in. */
+  weightsResidentBytes: number;
+  /** Fast pool the growth is confined to (broker fast budget or `fastBytes`). */
+  fastBudgetBytes: number;
+  committedOtherBytes?: number;
+  budgetKind: CapacityBudget['kind'];
+  /** Usable VRAM on a discrete card (`liveBudget.vramBytes`); 0 elsewhere. */
+  vramBytes: number;
+  /**
+   * Graphics memory free right now on a discrete card, as device admission
+   * measures it (`measureAvailableGpuBytes`). Growth never plans past it:
+   * `vramBytes` is a fraction of the card's TOTAL memory, and admission
+   * refuses a grown launch that other applications' VRAM no longer leaves
+   * room for. Ignored off discrete cards; omit for a policy-only preview.
+   */
+  measuredFreeVramBytes?: number;
+  /**
+   * Live free RAM — consulted only on shared-pool hosts. Omit for a
+   * policy-only preview; see {@link CtxMemoryClampInput.freeSystemRamBytes}.
+   */
+  freeSystemRamBytes?: number;
+  /** Routed-expert model? Growth on a discrete card is disabled for these. */
+  isMoE?: boolean;
+  /**
+   * May growth trade slots for a longer window (never below
+   * {@link ADAPTIVE_GROWTH_MIN_SLOTS})? Callers pass false when an explicit
+   * `providerConcurrency` pin exists — a user-chosen lane count is not
+   * growth's to spend.
+   */
+  allowSlotTrade?: boolean;
+}
+
+export interface AdaptiveCtxGrowthResult {
+  perTurnCtxTokens: number;
+  /**
+   * The slot count the grown launch should use. Equals the input count
+   * unless a slot trade bought a longer window; callers must apply it the
+   * same way they apply the admission ladder's slot reduction.
+   */
+  slots: number;
+  grown: boolean;
+  /** Info-level rationale, set only when grown. Not a warning. */
+  reason: string | null;
+}
+
+/**
+ * Grow an adaptive launch's per-turn context toward the model's native
+ * window using only the fast memory left over AFTER the admission ladder
+ * settled slots and granted the un-grown request.
+ *
+ * Deliberately a second clamp pass rather than a bigger first request:
+ * the first ladder pass sizes slot ceilings, the `--swa-full` fit verdict,
+ * and RAM-spillover admission, all of which must stay anchored on the
+ * practical 64K target — growing the request there would decline
+ * `--swa-full` for models whose full cache fits at 64K and grow KV into
+ * system-RAM spill on discrete cards.
+ *
+ * Slot trade: when `allowSlotTrade` is set and the target is out of reach
+ * at the settled slot count, growth walks the count down — taking the
+ * LARGEST count that reaches the target, else the longest window at
+ * {@link ADAPTIVE_GROWTH_MIN_SLOTS}. It never consolidates when the target
+ * is already reachable, never goes below two lanes, and never returns a
+ * smaller window than the un-traded grant.
+ *
+ * Confinement: on a discrete GPU the clamp sees only the fast budget and
+ * usable VRAM (`freeSystemRamBytes` zeroed) so grown KV never pages through
+ * system RAM, and — when the launch supplies `measuredFreeVramBytes` — only
+ * the VRAM other applications actually leave free, so a grown launch is one
+ * device admission will grant; on unified / system-ram hosts fast memory IS the budget, so
+ * the inputs match the base clamp. Inherits `VRAM_USABLE_FRACTION` and
+ * {@link LOCAL_ENGINE_COMPUTE_HEADROOM} through the shared clamp.
+ *
+ * MoE models never grow on a discrete card: `planMoeOffload` places routed
+ * experts around the KV reserve, and a grown reserve would silently evict
+ * experts from VRAM — trading decode speed for context behind the user's
+ * back. (Models whose resident weights exceed the fast pool get a zero
+ * allowance and don't grow regardless, which covers CPU-spilled MoE.)
+ */
+export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): AdaptiveCtxGrowthResult {
+  const base = Math.max(1, Math.floor(input.basePerTurnCtxTokens));
+  const startSlots = Math.max(1, Math.floor(input.slots));
+  const noGrowth: AdaptiveCtxGrowthResult = {
+    perTurnCtxTokens: base,
+    slots: startSlots,
+    grown: false,
+    reason: null,
+  };
+  const target = Math.floor(input.targetPerTurnCtxTokens);
+  if (!(target > base) || !(input.kvBytesPerToken > 0)) return noGrowth;
+  const discrete = input.budgetKind === 'discrete-gpu';
+  if (input.isMoE && discrete) return noGrowth;
+  const kvFixedPerSlot = Math.max(0, input.kvFixedPerSlotBytes ?? 0);
+  const measuredFreeVram =
+    discrete && input.measuredFreeVramBytes !== undefined
+      ? Math.max(0, input.measuredFreeVramBytes)
+      : undefined;
+  const cardBytes =
+    measuredFreeVram !== undefined ? Math.min(input.vramBytes, measuredFreeVram) : input.vramBytes;
+  const safeAt = (slots: number): number => {
+    const safe = clampCtxTokensForMemory({
+      requestedPerTurnCtxTokens: target,
+      slots,
+      kvBytesPerToken: input.kvBytesPerToken,
+      weightsResidentBytes: input.weightsResidentBytes + kvFixedPerSlot * slots,
+      budgetBytes: input.fastBudgetBytes,
+      ...(input.committedOtherBytes !== undefined
+        ? { committedOtherBytes: input.committedOtherBytes }
+        : {}),
+      // A discrete card pins the clamp to VRAM (0 free RAM) so grown KV never
+      // pages through system memory; a shared pool passes through, including
+      // the policy-only `undefined` a preview supplies.
+      ...(discrete
+        ? { freeSystemRamBytes: 0 }
+        : input.freeSystemRamBytes !== undefined
+          ? { freeSystemRamBytes: input.freeSystemRamBytes }
+          : {}),
+      vramBytes: discrete ? cardBytes : 0,
+      minPerTurnCtxTokens: 1,
+    });
+    return Math.min(target, safe.perTurnCtxTokens);
+  };
+  // Walk the slot count down only while the target stays out of reach:
+  // the first (largest) count that reaches it wins, else the floor count
+  // holds the longest achievable window.
+  const floorSlots = input.allowSlotTrade
+    ? Math.min(startSlots, ADAPTIVE_GROWTH_MIN_SLOTS)
+    : startSlots;
+  const noTradeCtx = safeAt(startSlots);
+  let chosenSlots = startSlots;
+  let chosenCtx = noTradeCtx;
+  for (let slots = startSlots - 1; slots >= floorSlots && chosenCtx < target; slots -= 1) {
+    const ctx = safeAt(slots);
+    if (ctx > chosenCtx) {
+      chosenSlots = slots;
+      chosenCtx = ctx;
+    }
+  }
+  // A lane costs real concurrency; don't spend one on a marginal gain.
+  if (chosenSlots < startSlots && chosenCtx < noTradeCtx * ADAPTIVE_GROWTH_TRADE_MIN_GAIN) {
+    chosenSlots = startSlots;
+    chosenCtx = noTradeCtx;
+  }
+  const grownTo = Math.max(base, chosenCtx);
+  if (grownTo <= base) return noGrowth;
+  const gb = (bytes: number) => `${(bytes / GIB).toFixed(1)} GB`;
+  const slotNote =
+    chosenSlots < startSlots ? `, consolidating ${startSlots} → ${chosenSlots} engine lanes` : '';
+  const fastLeft = Math.max(0, input.fastBudgetBytes - (input.committedOtherBytes ?? 0));
+  const measuredNote =
+    measuredFreeVram !== undefined && measuredFreeVram < Math.min(fastLeft, input.vramBytes)
+      ? ` (capped at the ~${gb(measuredFreeVram)} of graphics memory other applications leave free)`
+      : '';
+  return {
+    perTurnCtxTokens: grownTo,
+    slots: chosenSlots,
+    grown: true,
+    reason:
+      `growing context ${base} → ${grownTo} tokens/turn at ${chosenSlots} slot${chosenSlots === 1 ? '' : 's'}${slotNote} ` +
+      `(target ${target}): weights ~${gb(input.weightsResidentBytes)} + grown KV ` +
+      `~${gb(chosenSlots * (kvFixedPerSlot + grownTo * input.kvBytesPerToken))} fits fast memory ` +
+      `~${gb(fastLeft)}${measuredNote}`,
+  };
+}
+
+/**
+ * What a person sees when a model cannot retain its viable context. The
+ * arithmetic behind the refusal is ours, not theirs: launch paths log it via
+ * {@link formatContextCapacityDenial}.
+ */
+export const NOT_ENOUGH_MEMORY_MESSAGE =
+  'There is not enough memory to run this model. Please select another model or close some applications on this device.';
+
+/**
+ * Log-side diagnostic for a context refusal. Never the thrown message — see
+ * {@link NOT_ENOUGH_MEMORY_MESSAGE}. The eval harness reads the
+ * `with its required <n>-token working window` shape from daemon.log
+ * (evals/src/engine-context.ts), so keep that phrase intact.
+ */
+export function formatContextCapacityDenial(opts: {
+  modelLabel: string;
+  plan: CtxMemoryAdmissionPlanResult;
+}): string {
+  const minimum = opts.plan.minimumPerTurnCtxTokens.toLocaleString('en-US');
+  const safe = opts.plan.perTurnCtxTokens.toLocaleString('en-US');
+  return `Not enough memory to run ${opts.modelLabel} with its required ${minimum}-token working window. Even at one engine slot, this machine could safely admit only about ${safe} tokens per turn. ${opts.plan.reason ?? ''}`
+    .replace(/\s+/g, ' ')
+    .trim();
+}

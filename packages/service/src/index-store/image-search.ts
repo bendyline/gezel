@@ -1,5 +1,5 @@
 import type { FindSimilarImagesResponse, SearchImagesResponse } from '@bendyline/gezel';
-import { resolveKnowledgeVectorFloors } from '../knowledge/vector-floors.js';
+import { resolveKnowledgeVectorFloors } from '@bendyline/gezel-inference/internal/knowledge/vector-floors';
 import { MEDIA_SEARCH_PROFILE } from '../media-search/profile.js';
 import type { MediaVectorModality } from './index-store-types.js';
 import type { IndexStore } from './index-store.js';
@@ -160,7 +160,9 @@ export function findSimilarIndexedImages(
  */
 async function mediaQueryVector(query: string): Promise<number[] | null> {
   try {
-    const { embedKnowledgeQuery } = await import('../memory/embeddings.js');
+    const { embedKnowledgeQuery } = await import(
+      '@bendyline/gezel-inference/internal/memory/embeddings'
+    );
     return await embedKnowledgeQuery(query, MEDIA_SEARCH_PROFILE, { localFilesOnly: true });
   } catch {
     return null;

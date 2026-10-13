@@ -7,9 +7,9 @@
  */
 
 import type { ChatMessageToolCall, ProviderName } from '@bendyline/gezel';
+import type { TurnCtx } from '@bendyline/gezel-inference/internal/model-profile/types';
 import { describe, expect, it } from 'vitest';
 import { lintPromptToolContract } from '../../chat/prompt-tool-contract.js';
-import type { TurnCtx } from '../types.js';
 import {
   PromptMeesterBuildPrelude,
   explicitlyRequestsSeparateProject,
@@ -61,6 +61,28 @@ describe('PromptMeesterBuildPrelude', () => {
     expect(out).not.toContain('start_job');
     expect(out).toContain('name `index.html`');
     expect(out).toContain('do not prefix `workspace/`');
+  });
+
+  // The UX review's first request went unrouted: the meester improvised a
+  // crew in chat and the work started as a web page.
+  it('treats a trip or an event as a kickoff, and names index.html only for the web', () => {
+    for (const userText of [
+      'Plan a family trip to Portugal next spring. Can you set up a crew?',
+      'Help me organize our wedding',
+    ]) {
+      const out = PromptMeesterBuildPrelude.userPromptPrelude!(turnCtx({ userText }), undefined);
+      expect(out).toContain('`start_project({');
+      expect(out).toContain('Only for a browser game or site, name `index.html`');
+      expect(out).toContain('for anything else name no file');
+    }
+    expect(looksLikeNewBuildRequest('Can you plan a meeting for Tuesday?')).toBe(false);
+    // Planning verbs kick off occasions, never the build nouns.
+    expect(looksLikeNewBuildRequest('Can you plan a team meeting on Tuesday?')).toBe(false);
+    expect(looksLikeNewBuildRequest('Can you organize the files in my workspace?')).toBe(false);
+    expect(looksLikeNewBuildRequest('Plan the project timeline for next week')).toBe(false);
+    expect(looksLikeNewBuildRequest('Can you plan a team trip to Lisbon?')).toBe(true);
+    expect(looksLikeNewBuildRequest("Let's arrange a holiday party")).toBe(true);
+    expect(looksLikeNewBuildRequest('Set up a team workspace')).toBe(true);
   });
 
   it('matches its effective tool surface', () => {

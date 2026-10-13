@@ -87,11 +87,11 @@ the full roster rather than the router surface.
 Prompt text that exists *because of model limitations* does not live in `buildInstructions`
 conditionals — it lives in behaviors
 ([model-profile/behaviors/](../packages/service/src/model-profile/behaviors/), registry in
-[model-profile/registry.ts](../packages/service/src/model-profile/registry.ts)) selected by
+[model-profile/registry.ts](../packages/inference/src/model-profile/registry.ts)) selected by
 the model's catalog manifest, or by tier defaults
-([model-profile/defaults.ts](../packages/service/src/model-profile/defaults.ts)) when the
+([model-profile/defaults.ts](../packages/inference/src/model-profile/defaults.ts)) when the
 manifest declares none. Tier boundaries
-([chat/local-model-tier.ts](../packages/service/src/chat/local-model-tier.ts)): non-local
+([chat/local-model-tier.ts](../packages/inference/src/chat/local-model-tier.ts)): non-local
 provider → `cloud`; else by parameter count — <5B `tiny`, <12B `small`, <45B `medium`,
 ≥45B `large` (unknown local → `tiny`).
 
@@ -309,8 +309,12 @@ while they stream.
   This changes with the turn without rebuilding the system prompt; see
   [Project retrieval and indexed context](project-retrieval.md).
 - **Preludes** (`resolveUserPromptPrelude` — first non-null wins, prepended to the user's
-  text): `prompt.meester-build-prelude` (meester + build-shaped request → one
-  `start_project` kickoff; staffing is runtime-selected) and
+  text): `prompt.meester-build-prelude` (meester + a request to start something —
+  a build, or a goal to organize such as a trip or an event → one `start_project`
+  kickoff; `index.html` is named only for a browser game or site, and staffing is
+  runtime-selected: `start_project` routes a goal that names a project type's
+  distinctive tag to that type, a goal with nothing to build to a written
+  document and the role that writes it, and everything else to the build loop) and
   `prompt.meester-craftbook-prelude` (meester + procedure/recurrence-shaped
   request → suggest-then-invoke or craftbook_write authoring steer).
 - **Nudges** (synthetic continuation turns after stall detection): `CONTINUATION_NUDGE`
@@ -407,7 +411,7 @@ Two things this table makes visible:
    exists.)
 7. **Every prompt change is A/B-able without a rebuild.** `GEZEL_FORCE_BEHAVIORS` /
    `GEZEL_REMOVE_BEHAVIORS` (applied in
-   [model-profile/runtime.ts](../packages/service/src/model-profile/runtime.ts)) toggle any
+   [model-profile/runtime.ts](../packages/inference/src/model-profile/runtime.ts)) toggle any
    behavior per daemon; the eval harness exposes them per trial (`forceBehaviors` /
    `removeBehaviors`). New standing text should ship as a behavior first so it can be
    measured before it becomes default.

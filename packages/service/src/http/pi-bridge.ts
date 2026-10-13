@@ -1,10 +1,12 @@
 import { createLogger } from '@bendyline/gezel';
-import { Hono } from 'hono';
-import type { ServiceContext } from './context.js';
 import {
   EXTERNAL_PROJECT_HEADER,
   EXTERNAL_WORKING_DIRECTORY_HEADER,
-} from './external-conversation-headers.js';
+} from '@bendyline/gezel-inference/internal/http/external-conversation-headers';
+import { v1ChatRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-chat';
+import { v1ModelsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-models';
+import { Hono } from 'hono';
+import type { ServiceContext } from './context.js';
 import { hostGuard } from './host-guard.js';
 import {
   type LocalBridgeController,
@@ -15,8 +17,6 @@ import {
   mountAuthenticatedRoute,
 } from './local-bridge.js';
 import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
-import { v1ChatRoutes } from './routes/v1-chat.js';
-import { v1ModelsRoutes } from './routes/v1-models.js';
 import { opaqueServerErrors } from './server.js';
 
 /** Header used to identify an existing bridge during a port-conflict probe. */

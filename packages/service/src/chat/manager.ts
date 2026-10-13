@@ -1,9 +1,25 @@
+import type { SessionCacheController as InferenceSessionCacheController } from '@bendyline/gezel-inference/internal/cache/controller';
+import type { EngineBinaryRegistry as InferenceEngineBinaryRegistry } from '@bendyline/gezel-inference/internal/engines/registry';
+import type { GpuArbiter as InferenceGpuArbiter } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
+import type { LlamaCppModelManager as InferenceLlamaCppModelManager } from '@bendyline/gezel-inference/internal/providers/llama-cpp/index';
+import type { MlxModelManager as InferenceMlxModelManager } from '@bendyline/gezel-inference/internal/providers/mlx/index';
+import type { EngineRouter as InferenceEngineRouter } from '@bendyline/gezel-inference/internal/providers/native/engine-router';
+import { resolveModelSessionDefaults } from '@bendyline/gezel-inference/internal/providers/session-defaults';
+import type { EnginePhaseEvent as InferenceEnginePhaseEvent } from '@bendyline/gezel-inference/internal/providers/streaming-session';
+import type { TurnStatsEvent as InferenceTurnStatsEvent } from '@bendyline/gezel-inference/internal/providers/streaming-session';
+import type { EngineStatsEvent as InferenceEngineStatsEvent } from '@bendyline/gezel-inference/internal/providers/streaming-session';
+import { OLLAMA_TURN_TIMEOUT_MS } from '@bendyline/gezel-inference/internal/providers/turn-timeout';
+import type { MlxRuntimeStatusBus as InferenceMlxRuntimeStatusBus } from '@bendyline/gezel-inference/internal/python/mlx-runtime-status-bus';
+import type { UvRuntime as InferenceUvRuntime } from '@bendyline/gezel-inference/internal/python/uv-runtime';
+export { OLLAMA_TURN_TIMEOUT_MS } from '@bendyline/gezel-inference/internal/providers/turn-timeout';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
+  type CrewMember,
   MINIMAL_FOOTPRINT_MAX_WINDOW,
   PROMPT_FOOTPRINT_POLICY,
+  type TaskDeliverable,
   buildToolReceipt,
   estimateTokens,
   findAskCycleOrDepth,
@@ -16,8 +32,11 @@ import {
   resolveFactualWriting,
   resolvePromptFootprint,
   resolveSocialMode,
+  roleGloss,
   selectPersonNotes,
   stateAnswerTool,
+  stepDeliverableTarget,
+  stepOwnerGezelId,
   taskTranscriptCompatible,
   todayIso,
   turnStateWanted,
@@ -78,11 +97,11 @@ import {
   isLocalProvider,
   isOutsideInInternalPath,
   isProactiveAllowed,
+  isScheduledRunSession,
+  isScheduledTaskRun,
   isTaskWorkAllowed,
   leaksUntaggedReasoning,
   normalizeCodexPermissionMode,
-  normalizeScriptRefs,
-  normalizeStepGate,
   nowIso,
   oneShotSystemMessage,
   parseGezelMentionId,
@@ -98,9 +117,10 @@ import {
   resolveSecurityPolicy,
   roleDeliverableScripts,
   stepDeliverablePath,
-  stepOnEnterProducesAdvanceFile,
+  stepTurnSteering,
   taskEffectiveStatus,
   tierAtLeast,
+  tuningForStepAction,
   turnCancelledMessage,
   validateScriptInput,
   withEffectiveTaskStatuses,
@@ -108,6 +128,32 @@ import {
 } from '@bendyline/gezel';
 import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import { resolveProfileForCatalogId } from '@bendyline/gezel-inference/internal/model-profile/registry';
+import {
+  applyBehaviorEnvOverrides,
+  profileHasBehavior,
+} from '@bendyline/gezel-inference/internal/model-profile/runtime';
+import {
+  type ResolveTuningInput,
+  type ResolvedTuning,
+  resolveTuning,
+} from '@bendyline/gezel-inference/internal/model-profile/tuning';
+import type { ResolvedModelProfile } from '@bendyline/gezel-inference/internal/model-profile/types';
+import {
+  resolveCatalogIdFromModelId,
+  resolveCatalogReasoningBudget,
+} from '@bendyline/gezel-inference/internal/providers/catalog-model-config';
+import { extractDirectFileWorkTargetPath } from '@bendyline/gezel-inference/internal/providers/direct-file-work-prompt';
+import {
+  buildDs4Provider,
+  resolveDs4LaunchCtx,
+  resolveDs4VisionLaunch,
+} from '@bendyline/gezel-inference/internal/providers/ds4/build-provider';
+import {
+  buildLlamaCppProvider,
+  ensureLlamaEngineStatus,
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/build-provider';
 import { SCRIPT_DENY_NET_BOUNDARY_ENV, SCRIPT_NETWORK_ALLOWED_ENV } from '@bendyline/gezel-mcp';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import type { SessionQueueState } from '@bendyline/gezel/queue-status';
@@ -124,7 +170,6 @@ import {
   DEFAULT_PROJECT_ABOUT_MD,
   DEFAULT_PROJECT_MISSION_MD,
 } from '../fs/default-project-docs.js';
-import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { rankProjectsForGezel } from '../gezels/roster.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
@@ -139,14 +184,6 @@ import {
   renderTranscript,
   summarizeSessionForMemory,
 } from '../memory/summarizer.js';
-import { resolveProfileForCatalogId } from '../model-profile/registry.js';
-import { applyBehaviorEnvOverrides, profileHasBehavior } from '../model-profile/runtime.js';
-import {
-  type ResolveTuningInput,
-  type ResolvedTuning,
-  resolveTuning,
-} from '../model-profile/tuning.js';
-import type { ResolvedModelProfile } from '../model-profile/types.js';
 import { reconcileDefaultModel } from '../models/default-model-fallback.js';
 import { hasObservationTables } from '../observations/query.js';
 import { type PreviewLogBuffer, formatPreviewLogPrelude } from '../preview-log/buffer.js';
@@ -167,10 +204,6 @@ import {
   recordRuntimeIntervention,
 } from '../providers/api-observation.js';
 import {
-  resolveCatalogIdFromModelId,
-  resolveCatalogReasoningBudget,
-} from '../providers/catalog-model-config.js';
-import {
   CODEX_CLI_EXCLUDED_MCP_TOOLS,
   CodexCliProvider,
   isCodexReasoningEffort,
@@ -181,18 +214,16 @@ import {
   NON_SANDBOX_EXCLUDED_MCP_TOOLS,
 } from '../providers/copilot.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
-import { extractDirectFileWorkTargetPath } from '../providers/direct-file-work-prompt.js';
-import {
-  buildDs4Provider,
-  resolveDs4LaunchCtx,
-  resolveDs4VisionLaunch,
-} from '../providers/ds4/build-provider.js';
-import {
-  buildLlamaCppProvider,
-  ensureLlamaEngineStatus,
-} from '../providers/llama-cpp/build-provider.js';
 
-import { extractReasoning, stripReasoningTags } from '../providers/local-tool-call-salvage.js';
+import {
+  extractReasoning,
+  stripReasoningTags,
+} from '@bendyline/gezel-inference/internal/providers/local-tool-call-salvage';
+import {
+  buildMlxProvider,
+  resolveMlxEffectiveNumCtx,
+} from '@bendyline/gezel-inference/internal/providers/mlx/build-provider';
+import { mlxToolGrammarActive } from '@bendyline/gezel-inference/internal/providers/mlx/request-shape';
 import { McpBridgePool } from '../providers/mcp-bridge-pool.js';
 import type { OpenAIFunctionTool, StdioMcpServerSpec } from '../providers/mcp-bridge.js';
 import {
@@ -200,33 +231,27 @@ import {
   localPreviewBrowserLaunchArgs,
 } from '../providers/mcp-wrappers/playwright-arg-validator.js';
 import { isPlaywrightMcp } from '../providers/mcp-wrappers/playwright-snapshot.js';
-import { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
-import { mlxToolGrammarActive } from '../providers/mlx/request-shape.js';
 
-import { availableSystemRamBytes } from '../providers/native/capacity-broker.js';
+import { availableSystemRamBytes } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 
-import { AppleFoundationModelsProvider } from '../providers/apple-foundation-models/provider.js';
+import { AppleFoundationModelsProvider } from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/provider';
 import {
   type LocalProviderName,
   isLocalProvider as isNativeLocalProvider,
   makeEngineKey,
   parseEngineKey,
-} from '../providers/native/engine-key.js';
-import { installedModelInfos } from '../providers/native/inference.js';
+} from '@bendyline/gezel-inference/internal/providers/native/engine-key';
+import { installedModelInfos } from '@bendyline/gezel-inference/internal/providers/native/inference';
 import {
   type LocalEngineBindOpts,
   LocalEngineRuntime,
-} from '../providers/native/local-engine-runtime.js';
-import type { EngineDrainWait } from '../providers/native/provider-pool.js';
-import { OllamaProvider } from '../providers/ollama.js';
-import { OpenAIProvider } from '../providers/openai.js';
-import { ProviderDisposedError, ProviderDrainingError } from '../providers/provider-disposal.js';
-import type { Lane } from '../providers/queue.js';
-import { makeRemoteModelId, parseRemoteModelId } from '../providers/remote/model-id.js';
-import { RemoteGezelProvider } from '../providers/remote/provider.js';
-import { createToolAudioPersister } from '../providers/tool-audio-persister.js';
-import { createToolImagePersister } from '../providers/tool-image-persister.js';
-import { TurnAbortError } from '../providers/turn-abort-error.js';
+} from '@bendyline/gezel-inference/internal/providers/native/local-engine-runtime';
+import type { EngineDrainWait } from '@bendyline/gezel-inference/internal/providers/native/provider-pool';
+import {
+  ProviderDisposedError,
+  ProviderDrainingError,
+} from '@bendyline/gezel-inference/internal/providers/provider-disposal';
+import type { Lane } from '@bendyline/gezel-inference/internal/providers/queue';
 import {
   type ImageAttachment,
   type LLMProvider,
@@ -239,10 +264,19 @@ import {
   SessionResumeError,
   type TurnUsage,
   type WireTranscriptEntry,
-} from '../providers/types.js';
-import type { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
+import type { MlxRuntimeStatusBus } from '@bendyline/gezel-inference/internal/python/mlx-runtime-status-bus';
+import { getPairedRemoteFetch } from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
+import { normalizeCliToolEvent } from '../providers/cli-tool-event.js';
+import { OllamaProvider } from '../providers/ollama.js';
+import { OpenAIProvider } from '../providers/openai.js';
+import { makeRemoteModelId, parseRemoteModelId } from '../providers/remote/model-id.js';
+import { RemoteGezelProvider } from '../providers/remote/provider.js';
+import { createToolAudioPersister } from '../providers/tool-audio-persister.js';
+import { createToolImagePersister } from '../providers/tool-image-persister.js';
+import { TurnAbortError } from '../providers/turn-abort-error.js';
 import { artifactPathsOf, extractReferencedFiles } from '../references/file-references.js';
-import { getPairedRemoteFetch } from '../remotes/pinned-fetch.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
 import { windowsMxcState } from '../sandbox/windows-mxc.js';
 import { listStdlibScripts } from '../scripts/stdlib-source.js';
@@ -252,12 +286,12 @@ import {
 } from '../search/project-retrieval.js';
 import { retrievalTraceEnabled, traceHistoryDetails } from '../search/retrieval-trace.js';
 import type { SearchService } from '../search/search-service.js';
-import type { SecretStore } from '../secrets/types.js';
 import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
 import {
   WRAP_UP_MAX_FILES,
   composeTaskWrapUp,
   loadTaskResult,
+  placeTaskDeliverable,
   taskFinishedQuestion,
   wantsWrapUp,
 } from '../tasks/completion-wrapup.js';
@@ -312,14 +346,22 @@ function withForcedCliOption(args: readonly string[], option: string, value: str
 export interface WorkspaceFileSource {
   readFiles(projectId: string): Promise<Array<{ path: string }>>;
 }
+import {
+  resolveCatalogContextWindow,
+  resolveCatalogParameterSize,
+} from '@bendyline/gezel-inference/internal/chat/catalog-model-lookup';
+import {
+  type LocalModelTier,
+  classifyLocalModelTier,
+  parseBillionsFromModelId,
+  parseBillionsFromParameterSize,
+} from '@bendyline/gezel-inference/internal/chat/local-model-tier';
+import type { RecognitionMode } from '@bendyline/gezel-inference/internal/chat/vision-capability';
+import { nativeVisionEnabledFor } from '@bendyline/gezel-inference/internal/chat/vision-capability';
 import { extractReferencedTasks } from '../references/task-references.js';
 import { readTaskWithEffectiveStatus } from '../tasks/effective-status.js';
 import { artifactReadSlices } from './artifact-read-evidence.js';
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
-import {
-  resolveCatalogContextWindow,
-  resolveCatalogParameterSize,
-} from './catalog-model-lookup.js';
 import {
   buildChatCodedFileNudge,
   buildProseDeliverableNudge,
@@ -391,12 +433,6 @@ import {
   buildInstructions,
   formatTaskNotesDigest,
 } from './instructions.js';
-import {
-  type LocalModelTier,
-  classifyLocalModelTier,
-  parseBillionsFromModelId,
-  parseBillionsFromParameterSize,
-} from './local-model-tier.js';
 import {
   type GateEvidenceLookup,
   type RoutedModelDecision,
@@ -486,8 +522,6 @@ import {
 } from './turn-intent-plan.js';
 import { buildUnsavedFileClaimNudge, detectUnsavedFileClaim } from './unsaved-file-claim.js';
 import { UsageTracker } from './usage.js';
-import type { RecognitionMode } from './vision-capability.js';
-import { nativeVisionEnabledFor } from './vision-capability.js';
 import {
   buildWireTranscriptCheckpoint,
   restoreFromWireTranscript,
@@ -1060,7 +1094,7 @@ export interface ChatManagerOptions {
    * Lets users install models from the catalog and have them just
    * work without manually setting `llamaCppModelPath`.
    */
-  llamaCppModels?: import('../providers/llama-cpp/index.js').LlamaCppModelManager;
+  llamaCppModels?: InferenceLlamaCppModelManager;
   /**
    * Local image-recognition engine. When absent, images destined for a
    * model that can't see degrade to file details only — never to silence.
@@ -1071,20 +1105,20 @@ export interface ChatManagerOptions {
    * `LlamaCppModelManager` constructed with `engine: 'ds4'` so it installs/
    * resolves under `engines/ds4/models` from the catalog `ds4` source block.
    */
-  ds4Models?: import('../providers/llama-cpp/index.js').LlamaCppModelManager;
+  ds4Models?: InferenceLlamaCppModelManager;
   /**
    * MLX model store — same role as `llamaCppModels` for the MLX
    * provider. When set, ensureProvider asks it for an installed model
    * directory. Apple Silicon only; undefined on other platforms.
    */
-  mlxModels?: import('../providers/mlx/index.js').MlxModelManager;
+  mlxModels?: InferenceMlxModelManager;
   /**
    * Shared Python-runtime bootstrap. When set, the MLX provider asks
    * it to `ensureVenv('mlx', [mlxPackageSpec])` before spawning the
    * `mlx_lm.server`. The venv's `mlx_lm.server` binary is the command
    * the supervisor launches.
    */
-  uvRuntime?: import('../python/uv-runtime.js').UvRuntime;
+  uvRuntime?: InferenceUvRuntime;
   /**
    * Optional pub-sub channel that the MLX path publishes to as it moves
    * through `provisioning` → `ready` (or `error`). The HTTP `/api/mlx/
@@ -1092,7 +1126,7 @@ export interface ChatManagerOptions {
    * a "warming up" pill while uv installs torch / mlx-vlm wheels (1–5
    * min on first install).
    */
-  mlxRuntimeStatus?: import('../python/mlx-runtime-status-bus.js').MlxRuntimeStatusBus;
+  mlxRuntimeStatus?: InferenceMlxRuntimeStatusBus;
   /**
    * Shared process-wide verbose-diagnostics flag. When enabled, chat
    * sends log full user text + system prompts, and every MCP bridge
@@ -1105,13 +1139,13 @@ export interface ChatManagerOptions {
    * can evict a still-running image engine before they hit the GPU.
    * Optional: cloud-only installs and tests don't need it.
    */
-  gpuArbiter?: import('../providers/gpu-arbiter.js').GpuArbiter;
+  gpuArbiter?: InferenceGpuArbiter;
   /**
    * Resolves/downloads native engine binaries on demand. Wired so the
    * on-device chat path can lazily fetch a missing llama-server. Optional:
    * tests and cloud-only installs leave it unset.
    */
-  engineBinaries?: import('../engines/registry.js').EngineBinaryRegistry;
+  engineBinaries?: InferenceEngineBinaryRegistry;
   /**
    * Override the per-send compaction budget. Compactions beyond this
    * threshold within one user-initiated send halt the turn with a
@@ -1128,7 +1162,7 @@ export interface ChatManagerOptions {
    * Optional so existing tests that build ChatManager without one
    * keep working unchanged.
    */
-  cacheController?: import('../cache/controller.js').SessionCacheController;
+  cacheController?: InferenceSessionCacheController;
   /**
    * Multi-engine pool router override. When present, local-engine
    * turns route through this instead of the lazily-built default
@@ -1139,7 +1173,7 @@ export interface ChatManagerOptions {
    * (internal `/api` chat) and `getProviderForModel` (`/v1` +
    * Ollama-compat).
    */
-  engineRouter?: import('../providers/native/engine-router.js').EngineRouter;
+  engineRouter?: InferenceEngineRouter;
 }
 
 export type { UsageSummary } from './usage.js';
@@ -1147,7 +1181,7 @@ export {
   classifyLocalModelTier,
   parseBillionsFromModelId,
   type LocalModelTier,
-} from './local-model-tier.js';
+} from '@bendyline/gezel-inference/internal/chat/local-model-tier';
 export {
   type BuildInstructionsOptions,
   type BuiltInstructions,
@@ -1158,10 +1192,16 @@ export {
 export {
   resolveCatalogIdFromModelId,
   resolveCatalogReasoningBudget,
-} from '../providers/catalog-model-config.js';
-export { buildDs4Provider, resolveDs4LaunchCtx } from '../providers/ds4/build-provider.js';
-export { buildLlamaCppProvider } from '../providers/llama-cpp/build-provider.js';
-export { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
+} from '@bendyline/gezel-inference/internal/providers/catalog-model-config';
+export {
+  buildDs4Provider,
+  resolveDs4LaunchCtx,
+} from '@bendyline/gezel-inference/internal/providers/ds4/build-provider';
+export { buildLlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/build-provider';
+export {
+  buildMlxProvider,
+  resolveMlxEffectiveNumCtx,
+} from '@bendyline/gezel-inference/internal/providers/mlx/build-provider';
 export {
   claimsCompletion,
   isNoopConfirmationResponse,
@@ -2044,10 +2084,7 @@ export class ChatManager extends LocalEngineRuntime {
   /** The on-device model store backing a local provider, when one is wired. */
   private localModelStore(
     name: LocalProviderName,
-  ):
-    | import('../providers/llama-cpp/index.js').LlamaCppModelManager
-    | import('../providers/mlx/index.js').MlxModelManager
-    | undefined {
+  ): InferenceLlamaCppModelManager | InferenceMlxModelManager | undefined {
     return name === 'llama-cpp'
       ? this.llamaCppModels
       : name === 'mlx'
@@ -3253,6 +3290,8 @@ export class ChatManager extends LocalEngineRuntime {
     handoffFrom?: SessionLink;
     /** Resolve provider/model defaults from `config.nightShift.modelOverride`. */
     nightShift?: boolean;
+    /** The session works a scheduled task; see `ChatSession.scheduledRun`. */
+    scheduledRun?: boolean;
     /** Craftbook template this session edits (the explicit editor's AI assist). */
     craftbookRef?: string;
     /**
@@ -3315,6 +3354,13 @@ export class ChatManager extends LocalEngineRuntime {
         ? config.nightShift.modelOverride.model
         : undefined;
     const now = nowIso();
+    // A consultation or delegation opened by a scheduled run belongs to it.
+    const parentRecord = args.parentSession
+      ? (this.states.get(args.parentSession.sessionId)?.record ??
+        (await this.store.findSessionById(args.parentSession.sessionId).catch(() => null)))
+      : null;
+    const scheduledRun =
+      args.scheduledRun === true || (parentRecord ? isScheduledRunSession(parentRecord) : false);
     const numCtx = providerName === 'ollama' ? (fm.numCtx ?? config.ollamaNumCtx) : undefined;
     const frontmatterModel = evalProviderLocked ? undefined : fm.model;
     const routedModel =
@@ -3345,6 +3391,7 @@ export class ChatManager extends LocalEngineRuntime {
       providerState: {},
       aboutSnapshot: gezel.about,
       ...(args.nightShift ? { nightShift: true } : {}),
+      ...(scheduledRun ? { scheduledRun: true } : {}),
       ...(args.taskRef ? { taskRef: args.taskRef } : {}),
       ...(args.stepId ? { stepId: args.stepId } : {}),
       ...(args.stepId && args.stepActivationId ? { stepActivationId: args.stepActivationId } : {}),
@@ -3364,7 +3411,9 @@ export class ChatManager extends LocalEngineRuntime {
     // a non-fatal: the session still works, it just defers the bind
     // to first turn via ensureProviderForSession.
     try {
-      const { isLocalProvider } = await import('../providers/native/engine-key.js');
+      const { isLocalProvider } = await import(
+        '@bendyline/gezel-inference/internal/providers/native/engine-key'
+      );
       if (isLocalProvider(providerName)) {
         const router = await this.getEngineRouter();
         if (router) {
@@ -3383,7 +3432,9 @@ export class ChatManager extends LocalEngineRuntime {
             // cheap is important for the @-mention fan-out path that
             // can create 10 sessions in a single send.
             const idx = router.pool.pickReplicaForBind(providerName, modelId, loads);
-            const { makeEngineKey } = await import('../providers/native/engine-key.js');
+            const { makeEngineKey } = await import(
+              '@bendyline/gezel-inference/internal/providers/native/engine-key'
+            );
             record.engineKey = makeEngineKey(providerName, modelId, idx);
           }
         }
@@ -3394,6 +3445,7 @@ export class ChatManager extends LocalEngineRuntime {
       );
     }
     await this.store.writeSession(record);
+    if (isScheduledRunSession(record)) this.events.markScheduledRun(record.id);
     // Membership: opening a session for (gezel, project) implicitly pulls
     // the gezel onto the project's roster. Idempotent for repeat sessions
     // and fire-and-forget so a slow project.json write never blocks the
@@ -3718,6 +3770,16 @@ export class ChatManager extends LocalEngineRuntime {
    * workspace files, project about/mission). The seed just tells the gezel
    * "you've got it, start work."
    */
+  /** Whether a task (or the cron host that spawned it) runs on a schedule. */
+  private async isScheduledTaskRecord(task: Task | null): Promise<boolean> {
+    if (!task) return false;
+    if (isScheduledTaskRun(task)) return true;
+    const host = task.parentTaskRef ? parseTaskRef(task.parentTaskRef) : null;
+    if (!host) return false;
+    const hostTask = await this.store.readTask(host.projectId, host.num).catch(() => null);
+    return hostTask ? isScheduledTaskRun(task, hostTask) : false;
+  }
+
   async startHandoffSession(args: {
     gezelId: string;
     projectId: string;
@@ -4041,6 +4103,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(parentSession ? { parentSession } : {}),
       ...(handoffFrom ? { handoffFrom } : {}),
       ...(args.nightShift ? { nightShift: true } : {}),
+      ...((await this.isScheduledTaskRecord(taskRecord)) ? { scheduledRun: true } : {}),
       ...(routed && args.capabilityFloor
         ? {
             routedModel: {
@@ -7263,9 +7326,7 @@ export class ChatManager extends LocalEngineRuntime {
       // routing the turn.
       const unsubEnginePhase = (
         s as unknown as {
-          onEnginePhase?: (
-            handler: (ev: import('../providers/streaming-session.js').EnginePhaseEvent) => void,
-          ) => () => void;
+          onEnginePhase?: (handler: (ev: InferenceEnginePhaseEvent) => void) => () => void;
         }
       ).onEnginePhase?.((ev) => {
         // Guard against unexpected phase strings — the schema is a
@@ -7298,9 +7359,7 @@ export class ChatManager extends LocalEngineRuntime {
       // tokens/sec, for the UI engine-pill's stats dropdown.
       const unsubTurnStats = (
         s as unknown as {
-          onTurnStats?: (
-            handler: (ev: import('../providers/streaming-session.js').TurnStatsEvent) => void,
-          ) => () => void;
+          onTurnStats?: (handler: (ev: InferenceTurnStatsEvent) => void) => () => void;
         }
       ).onTurnStats?.((ev) => {
         const provider = state.record.providerName === 'ds4' ? 'ds4' : ev.provider;
@@ -7328,9 +7387,7 @@ export class ChatManager extends LocalEngineRuntime {
       // allocation) or MLX (child-process RSS at load-complete).
       const unsubEngineStats = (
         s as unknown as {
-          onEngineStats?: (
-            handler: (ev: import('../providers/streaming-session.js').EngineStatsEvent) => void,
-          ) => () => void;
+          onEngineStats?: (handler: (ev: InferenceEngineStatsEvent) => void) => () => void;
         }
       ).onEngineStats?.((ev) => {
         const provider = state.record.providerName === 'ds4' ? 'ds4' : ev.provider;
@@ -11276,12 +11333,8 @@ export class ChatManager extends LocalEngineRuntime {
     const oneShotModel = session.model ?? model;
     let publishedEngineTelemetry = false;
     const telemetrySession = session as unknown as {
-      onEnginePhase?: (
-        handler: (ev: import('../providers/streaming-session.js').EnginePhaseEvent) => void,
-      ) => () => void;
-      onTurnStats?: (
-        handler: (ev: import('../providers/streaming-session.js').TurnStatsEvent) => void,
-      ) => () => void;
+      onEnginePhase?: (handler: (ev: InferenceEnginePhaseEvent) => void) => () => void;
+      onTurnStats?: (handler: (ev: InferenceTurnStatsEvent) => void) => () => void;
     };
     const unsubEnginePhase = telemetrySession.onEnginePhase?.((ev) => {
       if (
@@ -11437,8 +11490,14 @@ export class ChatManager extends LocalEngineRuntime {
     thread: ChatSession,
     message: ChatMessage,
   ): Promise<{ record: ChatSession; scope: PublishScope }> {
-    // The live record, when the thread is open, so unsaved turn state survives.
-    const record = this.states.get(thread.id)?.record ?? thread;
+    // The live record, when the thread is open, so unsaved turn state survives;
+    // otherwise the stored one as it is now. Callers read `thread` before
+    // awaiting other work, and writing that copy back dropped whatever the
+    // thread gained meanwhile (a composer launch's message and receipt).
+    const record =
+      this.states.get(thread.id)?.record ??
+      (await this.store.findSessionById(thread.id).catch(() => null)) ??
+      thread;
     record.messages.push(message);
     record.lastActivityAt = message.at;
     await this.store.writeSession(record);
@@ -11452,31 +11511,100 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
-   * Introduce a gezel hired for a task in the thread the owner reads, before
-   * they start. The crew used to be recruited silently: a copywriter and an
-   * omroeper joined the roster mid-task without a word to the owner.
+   * Introduce a task's crew in the thread the owner reads. The crew used to
+   * be recruited silently: a copywriter and an omroeper joined the roster
+   * mid-task without a word, and the composer addressed a voorman nobody had
+   * introduced.
+   *
+   * `kickoff` introduces whoever starts the work and, when someone else
+   * leads the task, the lead too; `joined` introduces a gezel hired for a
+   * later step as they start. Each gezel is introduced once per thread, and
+   * never the thread's own gezel.
    */
   async postCrewIntroduction(
     task: Task,
     gezelId: string,
     step: TaskCraftbookStep,
+    moment: 'kickoff' | 'joined' = 'joined',
   ): Promise<string | null> {
     const thread = await findOwnerThread(this.store, task);
-    if (!thread || thread.gezelId === gezelId) return null;
-    const gezel = await this.store.getGezel(gezelId).catch(() => null);
-    if (!gezel) return null;
-    const role = gezel.role?.trim();
+    if (!thread) return null;
+    if (moment === 'kickoff') await this.settleBeforeKickoff(thread.id, task);
+    // Read the thread again: the record above predates the wait, and
+    // appending to it would write the launch's own messages out of the file.
+    const current = async () =>
+      this.states.get(thread.id)?.record ??
+      (await this.store.findSessionById(thread.id).catch(() => null)) ??
+      thread;
+    const introducedIn = (record: ChatSession) =>
+      new Set(
+        record.messages.flatMap((m) => m.crewIntroduction?.members.map((x) => x.gezelId) ?? []),
+      );
+    const introduced = introducedIn(await current());
+    const lead = task.assignee?.kind === 'gezel' ? task.assignee.gezelId : undefined;
+    const ids = moment === 'kickoff' && lead && lead !== gezelId ? [gezelId, lead] : [gezelId];
+    const members: CrewMember[] = [];
+    for (const id of ids) {
+      if (id === thread.gezelId || introduced.has(id)) continue;
+      const gezel = await this.store.getGezel(id).catch(() => null);
+      if (!gezel) continue;
+      const role = gezel.role?.trim();
+      const gloss = roleGloss(role);
+      const purpose = firstSentence(gezel.description);
+      members.push({
+        gezelId: id,
+        name: gezel.name,
+        ...(role ? { role } : {}),
+        ...(gloss ? { gloss } : {}),
+        ...(purpose ? { purpose } : {}),
+        ...(id === gezelId ? { stepName: step.name } : {}),
+      });
+    }
+    // The gezel lookups awaited; take the thread as it is now, and drop anyone
+    // a concurrent post introduced meanwhile.
+    const target = await current();
+    const already = introducedIn(target);
+    const fresh = members.filter((m) => !already.has(m.gezelId));
+    if (fresh.length === 0) return null;
     const message: ChatMessage = {
       role: 'assistant',
-      content:
-        `I've brought **${gezel.name}** onto the crew${role ? ` as your ${role}` : ''} ` +
-        `for **${task.title}**. ${gezel.name} starts with "${step.name}".`,
+      content: crewIntroductionText(task, fresh, moment),
       at: nowIso(),
       synthetic: 'crew-introduction',
       referencedTasks: [task.ref],
+      crewIntroduction: { taskRef: task.ref, moment, members: fresh },
     };
-    const { record } = await this.appendToThread(thread, message);
+    const { record } = await this.appendToThread(target, message);
     return record.id;
+  }
+
+  /**
+   * Hold a kickoff introduction until the thread has said what it asked
+   * for. The task exists before the launch is written down: a composer
+   * launch appends the person's message and its receipt after creating the
+   * task, and a meester turn that called start_project is still running.
+   * Posted at once, the crew card sat above the request it answered, and
+   * the model read an introduction before the message that caused it.
+   * Bounded: a thread that never settles gets its card anyway.
+   */
+  private async settleBeforeKickoff(threadId: string, task: Task): Promise<void> {
+    const started = Date.now();
+    const byPerson = task.createdBy?.kind === 'user';
+    while (Date.now() - started < KICKOFF_SETTLE_MAX_MS) {
+      if (!this.isSessionTurnPending(threadId)) {
+        if (!byPerson || Date.now() - started > KICKOFF_RECEIPT_WAIT_MS) return;
+        const record =
+          this.states.get(threadId)?.record ??
+          (await this.store.findSessionById(threadId).catch(() => null));
+        const written = record?.messages.some(
+          (m) =>
+            m.synthetic === 'craftbook-launch' &&
+            m.toolCalls?.some((call) => call.card?.taskRef === task.ref),
+        );
+        if (written) return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, KICKOFF_SETTLE_POLL_MS));
+    }
   }
 
   async postTaskWrapUp(task: Task, outcome: 'complete' | 'canceled'): Promise<string | null> {
@@ -11484,8 +11612,18 @@ export class ChatManager extends LocalEngineRuntime {
     const thread = await findOwnerThread(this.store, task);
     if (!thread) return null;
 
-    const { deliverable, outputs } = await loadTaskResult(this.store, task);
+    const result = await loadTaskResult(this.store, task);
+    const { outputs } = result;
+    const deliverable = result.deliverable
+      ? await placeTaskDeliverable(this.store, this.catalog, task, result.deliverable)
+      : null;
     const figures = await reviewTaskFigures(this.store, task, outputs).catch(() => null);
+    const maker = deliverable ? deliverableMaker(task, deliverable) : undefined;
+    // File references resolve against the thread's project. A kickoff from
+    // the meester's Default thread builds in a project of its own, and its
+    // file chips opened "trip.json was not found" there; the deliverable
+    // card carries its own project, so it is the way in.
+    const sameProject = thread.projectId === task.projectId;
 
     const message: ChatMessage = {
       role: 'assistant',
@@ -11493,10 +11631,13 @@ export class ChatManager extends LocalEngineRuntime {
       at: nowIso(),
       synthetic: 'task-wrapup',
       referencedTasks: [task.ref],
-      ...(outputs.length > 0 ? { referencedFiles: outputs.slice(0, WRAP_UP_MAX_FILES) } : {}),
+      ...(sameProject && outputs.length > 0
+        ? { referencedFiles: outputs.slice(0, WRAP_UP_MAX_FILES) }
+        : {}),
       ...(deliverable ? { deliverable } : {}),
+      ...(maker ? { makerGezelId: maker } : {}),
     };
-    const artifacts = artifactPathsOf(outputs.slice(0, WRAP_UP_MAX_FILES));
+    const artifacts = sameProject ? artifactPathsOf(outputs.slice(0, WRAP_UP_MAX_FILES)) : [];
     if (artifacts.length > 0) message.referencedArtifacts = artifacts;
 
     const { record, scope } = await this.appendToThread(thread, message);
@@ -12050,7 +12191,9 @@ export class ChatManager extends LocalEngineRuntime {
     if (name === 'remote') {
       return this.getRemoteProvider(modelId);
     }
-    const { isLocalProvider } = await import('../providers/native/engine-key.js');
+    const { isLocalProvider } = await import(
+      '@bendyline/gezel-inference/internal/providers/native/engine-key'
+    );
     if (!isLocalProvider(name)) return this.ensureProvider(name);
 
     const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
@@ -12170,7 +12313,9 @@ export class ChatManager extends LocalEngineRuntime {
   ): Promise<LLMProvider> {
     assertQualificationProvider(name);
     if (name === 'remote') return this.getRemoteProvider(modelId);
-    const { isLocalProvider } = await import('../providers/native/engine-key.js');
+    const { isLocalProvider } = await import(
+      '@bendyline/gezel-inference/internal/providers/native/engine-key'
+    );
     if (!isLocalProvider(name)) return this.ensureProvider(name);
 
     const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
@@ -12242,53 +12387,7 @@ export class ChatManager extends LocalEngineRuntime {
       reasoningEffort?: ResolveTuningInput['reasoningEffort'];
     } = {},
   ): Promise<{ profile: ResolvedModelProfile; tuning: ResolvedTuning }> {
-    const config = await this.store.readConfig();
-    const resolvedModelId = modelId ?? config.defaultModel?.[providerName];
-    const resolvedCatalogId =
-      (await resolveCatalogIdFromModelId(this.catalog, resolvedModelId)) ?? resolvedModelId;
-    const tier = classifyLocalModelTier({
-      providerName,
-      modelId: resolvedModelId,
-      parameterSize: await resolveCatalogParameterSize(this.catalog, resolvedCatalogId),
-    });
-    const profile = applyBehaviorEnvOverrides(
-      await resolveProfileForCatalogId({
-        catalog: this.catalog,
-        catalogId: resolvedCatalogId,
-        tier,
-        providerName,
-      }),
-    );
-    const catalogDetail = resolvedCatalogId
-      ? await this.catalog.get('chat-model', resolvedCatalogId).catch(() => null)
-      : null;
-    const catalogTuning =
-      catalogDetail && catalogDetail.manifest.kind === 'chat-model'
-        ? catalogDetail.manifest.tuning
-        : undefined;
-    const catalogStyle =
-      catalogDetail && catalogDetail.manifest.kind === 'chat-model'
-        ? catalogDetail.manifest.style
-        : undefined;
-    const installDefaultTuning = resolvedCatalogId
-      ? config.modelTuning?.[resolvedCatalogId]
-      : undefined;
-    const installDefaultProfileId = resolvedCatalogId
-      ? config.modelTuningProfile?.[resolvedCatalogId]
-      : undefined;
-    const tuning = resolveTuning({
-      ...(catalogTuning ? { catalog: catalogTuning } : {}),
-      ...(installDefaultTuning ? { installDefault: installDefaultTuning } : {}),
-      ...(overrides.tuning ? { override: overrides.tuning } : {}),
-      ...(overrides.tuningProfileId ? { tuningProfileId: overrides.tuningProfileId } : {}),
-      ...(installDefaultProfileId ? { installDefaultProfileId } : {}),
-      ...(overrides.suggestedProfileId ? { suggestedProfileId: overrides.suggestedProfileId } : {}),
-      ...(catalogStyle?.reasoningFormat
-        ? { styleReasoningFormat: catalogStyle.reasoningFormat }
-        : {}),
-      ...(overrides.reasoningEffort ? { reasoningEffort: overrides.reasoningEffort } : {}),
-    });
-    return { profile, tuning };
+    return resolveModelSessionDefaults(this.store, this.catalog, providerName, modelId, overrides);
   }
 
   /**
@@ -12393,7 +12492,9 @@ export class ChatManager extends LocalEngineRuntime {
     // Use the engine-key type guard (narrows to `'llama-cpp' | 'mlx' | 'ds4'`),
     // not the barrel `isLocalProvider` (boolean-only) — same reason
     // {@link getProviderForModel} imports it locally.
-    const { isLocalProvider } = await import('../providers/native/engine-key.js');
+    const { isLocalProvider } = await import(
+      '@bendyline/gezel-inference/internal/providers/native/engine-key'
+    );
     if (!isLocalProvider(name)) return null;
     const router = await this.getEngineRouter();
     if (!router) return null;
@@ -13416,6 +13517,7 @@ export class ChatManager extends LocalEngineRuntime {
         : {}),
     };
     this.states.set(sessionId, state);
+    if (isScheduledRunSession(state.record)) this.events.markScheduledRun(sessionId);
     return state;
   }
 
@@ -14914,109 +15016,28 @@ export class ChatManager extends LocalEngineRuntime {
     // guard and get pointed at `write_file` (wrong for a review step)
     // and either fabricate or stall again.
     if (taskContext?.step) {
-      const step = withInferredConsumes(taskContext.task, taskContext.step);
-      // Lists run in order; the LAST onExit ref's output drives branch
-      // routing, so that's the one the anti-spin corrective names.
-      const exitRefs = normalizeScriptRefs(step.onExit);
-      const lastExit = exitRefs[exitRefs.length - 1];
-      // Workspace deliverables only: an artifact checkpoint already ends
-      // the turn on its write (terminalToolPolicy below), and a file the
-      // step's onEnter hook wrote proves nothing about the model's work.
+      const steering = stepTurnSteering(taskContext.task, taskContext.step);
       const readyTask = taskContext.task;
-      const deliverableReady =
-        step.advanceWhen?.file &&
-        !step.advanceWhen.artifact &&
-        !stepOnEnterProducesAdvanceFile(step)
-          ? ({ writtenThisTurn }: { writtenThisTurn: boolean }) =>
-              workspaceDeliverableReady(
-                this.deliverableGateDeps(),
-                readyTask.projectId,
-                readyTask.num,
-                step.id,
-                record,
-                writtenThisTurn,
-              )
-          : undefined;
+      const readyStepId = taskContext.step.id;
       opts.activeCraftbookStep = {
-        name: step.name,
-        ...(lastExit?.name ? { onExitScriptName: lastExit.name } : {}),
-        ...(step.advanceWhen?.file ? { deliverableFile: step.advanceWhen.file } : {}),
-        ...(step.advanceWhen?.artifact ? { deliverableIsArtifact: true } : {}),
-        ...(step.consumes?.length
+        ...steering.activeStep,
+        ...(steering.workspaceDeliverable
           ? {
-              requiredInputs: step.consumes.map((input) => ({
-                path: input.file,
-                artifact: input.artifact === true,
-              })),
+              deliverableReady: ({ writtenThisTurn }: { writtenThisTurn: boolean }) =>
+                workspaceDeliverableReady(
+                  this.deliverableGateDeps(),
+                  readyTask.projectId,
+                  readyTask.num,
+                  readyStepId,
+                  record,
+                  writtenThisTurn,
+                ),
             }
           : {}),
-        ...(deliverableReady ? { deliverableReady } : {}),
       };
-      const normalizedGate = step.gate ? normalizeStepGate(step.gate) : undefined;
-      const fixedEvidenceAction =
-        step.toolPolicy?.outputMedium === 'none' &&
-        (step.toolPolicy.allowTools?.length ?? 0) > 0 &&
-        normalizedGate?.at === 'completion' &&
-        normalizedGate.checks.length > 0 &&
-        normalizedGate.checks.every(
-          (check) => check.kind === 'corpusReadEvidence' || check.kind === 'artifactReadEvidence',
-        ) &&
-        normalizedGate.scripts.length === 0;
-      const artifactCheckpointAction =
-        step.toolPolicy?.outputMedium === 'artifact' &&
-        step.advanceWhen?.artifact === true &&
-        normalizedGate?.at === 'completion';
-      if (fixedEvidenceAction || artifactCheckpointAction) {
-        // The completion gate, not another generation, decides whether the
-        // action was sufficient. Ending the provider's internal tool loop on
-        // its first successful exact action avoids five identical reads (and
-        // five full prefills) before ChatManager gets a chance to evaluate
-        // the durable History evidence.
-        opts.terminalToolPolicy = {
-          toolNames: fixedEvidenceAction ? [...step.toolPolicy!.allowTools!] : ['write_artifact'],
-          fallbackText: fixedEvidenceAction
-            ? 'Assigned records opened.'
-            : 'Checkpoint written for validation.',
-          maxClosingChars: 120,
-          ...(artifactCheckpointAction && step.advanceWhen?.file
-            ? { onlyWhenArgEquals: { arg: 'path', value: step.advanceWhen.file } }
-            : {}),
-        };
-        if (fixedEvidenceAction) {
-          // This is a mechanical capability invocation, not a reasoning
-          // task. Dual-mode local models otherwise occasionally spend their
-          // entire thinking budget explaining the required read and finish
-          // without calling it, leaving a large fanout stalled for the
-          // scheduler's retry window. Keep the model's ordinary reasoning
-          // profile for the review step; only the evidence action gets the
-          // compact instruct-shaped request.
-          opts.tuning = {
-            ...resolvedTuning,
-            sampling: {
-              ...resolvedTuning.sampling,
-              maxTokens: Math.min(resolvedTuning.sampling.maxTokens ?? 512, 512),
-            },
-            reasoning: {
-              ...resolvedTuning.reasoning,
-              enableThinking: false,
-              thinkingBudget: undefined,
-            },
-            toolChoice: 'required',
-          };
-        } else {
-          // A checkpoint step may need substantial private reasoning, but its
-          // public/durable outcome is the artifact write. Requiring at least
-          // one tool call prevents a local model from spending the whole
-          // generation budget narrating that analysis and returning at
-          // `finish_reason=length` without ever publishing the checkpoint.
-          // Unlike the evidence-only branch above, preserve the model's
-          // ordinary reasoning and token budget; only constrain the outcome
-          // shape.
-          opts.tuning = {
-            ...resolvedTuning,
-            toolChoice: 'required',
-          };
-        }
+      if (steering.action && steering.terminalToolPolicy) {
+        opts.terminalToolPolicy = steering.terminalToolPolicy;
+        opts.tuning = tuningForStepAction(resolvedTuning, steering.action);
       }
     }
     // Craftbook hooks: when this session's active task carries a
@@ -15268,7 +15289,12 @@ export class ChatManager extends LocalEngineRuntime {
     const events = this.events;
     const currentTurnTools = this.currentTurnTools;
     const telemetry = this.telemetry;
-    opts.onToolCall = async (info) => {
+    opts.onToolCall = async (providerInfo) => {
+      const info = normalizeCliToolEvent(
+        providerInfo,
+        record.providerName,
+        opts.claudeCliContext?.cwd ?? opts.codexCliContext?.cwd,
+      );
       // Push tool activity out over the chat event stream so the UI can show
       // what the assistant is doing during "thinking" time. Extract the
       // file path from well-known file tools so the References panel can
@@ -15403,6 +15429,7 @@ export class ChatManager extends LocalEngineRuntime {
       const startedAtMs = info.startedAtMs ?? Date.now() - info.durationMs;
       const at = new Date(startedAtMs).toISOString();
       const call: ChatMessageToolCall = {
+        ...(info.providerToolName ? { providerToolName: info.providerToolName } : {}),
         ...buildToolReceipt({
           name: info.name,
           args: info.args,
@@ -15443,6 +15470,7 @@ export class ChatManager extends LocalEngineRuntime {
         {
           type: 'tool',
           name: info.name,
+          ...(info.providerToolName ? { providerToolName: info.providerToolName } : {}),
           at,
           durationMs: info.durationMs,
           success: info.success,
@@ -15475,6 +15503,7 @@ export class ChatManager extends LocalEngineRuntime {
             : `Tool ${info.name} failed: ${info.errorMessage ?? 'unknown error'}`,
           details: {
             name: info.name,
+            ...(info.providerToolName ? { providerToolName: info.providerToolName } : {}),
             sessionId: record.id,
             ...(record.taskRef ? { taskRef: record.taskRef } : {}),
             ...(record.stepId ? { stepId: record.stepId } : {}),
@@ -16373,6 +16402,7 @@ export class ChatManager extends LocalEngineRuntime {
         });
     };
 
+    opts.toolExecutorFactory = (options, prefix) => McpBridgePool.fromSessionOpts(options, prefix);
     return opts;
   }
 
@@ -16616,7 +16646,6 @@ const CHAT_TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
  * a single turn may GENERATE, which `MAX_TOOL_LOOP_TURNS = 96` does not
  * provide at ~6 min/iteration.
  */
-export const OLLAMA_TURN_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 
 const CONTINUATION_NUDGE =
   'Continue. Your previous response described what you would do or what you read, ' +
@@ -17146,3 +17175,64 @@ export function growthSignature(gezel: GezelDetail, social = false): string {
     character: social ? (fm.character ?? null) : null,
   });
 }
+
+/** "Reisleider — trip planner", "Planner", or nothing. */
+function crewRoleLabel(member: CrewMember): string {
+  if (!member.role) return '';
+  return member.gloss ? `${member.role} — ${member.gloss}` : member.role;
+}
+
+/**
+ * The words a crew introduction says, for the model and for any surface
+ * that shows text rather than cards.
+ */
+export function crewIntroductionText(
+  task: Pick<Task, 'title'>,
+  members: readonly CrewMember[],
+  moment: 'kickoff' | 'joined',
+): string {
+  const describe = (m: CrewMember) => {
+    const label = crewRoleLabel(m);
+    return `**${m.name}**${label ? ` (${label})` : ''}`;
+  };
+  if (moment === 'joined') {
+    const m = members[0]!;
+    const label = crewRoleLabel(m);
+    return (
+      `I've brought **${m.name}** onto the crew${label ? ` as your ${label}` : ''} ` +
+      `for **${task.title}**.${m.stepName ? ` ${m.name} starts with "${m.stepName}".` : ''}`
+    );
+  }
+  const parts = members.map((m) =>
+    m.stepName ? `${describe(m)} starts with "${m.stepName}"` : `${describe(m)} leads it`,
+  );
+  return `Your crew for **${task.title}**: ${parts.join(', and ')}.`;
+}
+
+/** The first sentence of a description, short enough for a card. */
+function firstSentence(text: string | undefined): string | undefined {
+  const trimmed = text?.trim();
+  if (!trimmed) return undefined;
+  const sentence = trimmed.split(/(?<=[.!?])\s/)[0] ?? trimmed;
+  return sentence.length > 160 ? `${sentence.slice(0, 157).trimEnd()}…` : sentence;
+}
+
+/**
+ * Who made a task's deliverable: the owner of the step that targets it,
+ * else the task's assignee. The finished-work card credits them by face.
+ */
+function deliverableMaker(task: Task, deliverable: TaskDeliverable): string | undefined {
+  const target = deliverable.path.toLowerCase();
+  const step = [...(task.craftbook?.steps ?? [])]
+    .reverse()
+    .find((s) => stepDeliverableTarget(s)?.path.toLowerCase() === target);
+  const owner = step ? stepOwnerGezelId(task, step) : undefined;
+  if (owner) return owner;
+  return task.assignee?.kind === 'gezel' ? task.assignee.gezelId : undefined;
+}
+
+/** How long a kickoff introduction waits for its thread to settle. */
+const KICKOFF_SETTLE_MAX_MS = 120_000;
+/** How long it waits for a composer launch to write its receipt. */
+const KICKOFF_RECEIPT_WAIT_MS = 10_000;
+const KICKOFF_SETTLE_POLL_MS = 200;

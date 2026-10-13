@@ -3,6 +3,7 @@ import { PoppetjeSchema } from '../poppetje/schema.js';
 import { GezelCharacterSchema } from './character.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema } from './codex.js';
+import { CrewIntroductionSchema } from './crew-introduction.js';
 import { EntityIdSchema } from './entity-id.js';
 import { FileTurnIntentSchema } from './file-turn-intent.js';
 import { GezelGrowthSummarySchema } from './growth.js';
@@ -613,6 +614,8 @@ export type MessageGrounding = z.infer<typeof MessageGroundingSchema>;
 
 export const ChatMessageToolCallSchema = z.object({
   name: z.string(),
+  /** Original provider operation; `name` is the canonical runtime operation. */
+  providerToolName: z.string().optional(),
   /**
    * ISO timestamp of the call's START. Optional: absent on every message
    * persisted before this field existed, so readers must not assume it.
@@ -930,6 +933,18 @@ export const ChatMessageSchema = z.object({
    */
   contextCompaction: ContextCompactionSchema.optional(),
   /**
+   * Present on a synthetic `crew-introduction` message: the gezels it
+   * introduces, so the UI can show each as a card with their portrait. The
+   * message text carries the same facts for the model.
+   */
+  crewIntroduction: CrewIntroductionSchema.optional(),
+  /**
+   * On a `task-wrapup`: the gezel who made the deliverable (the owner of the
+   * step that produced it, else the task assignee), so the card can credit
+   * them by face.
+   */
+  makerGezelId: z.string().optional(),
+  /**
    * Display flag: the model sees this message as normal history, but the
    * chat transcript UI never renders a bubble for it. Set on
    * machine-authored facilitation seeds that would only be noise to the
@@ -1135,6 +1150,7 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('tool'),
     name: z.string(),
+    providerToolName: z.string().optional(),
     /** ISO start-of-call timestamp; see ChatMessageToolCallSchema.at. */
     at: z.string().optional(),
     durationMs: z.number(),
@@ -1784,6 +1800,8 @@ export const ChatEventEnvelopeSchema = z.object({
   handoffFrom: SessionLinkSchema.optional(),
   /** Present for externally-owned read-only threads, including live turns. */
   sessionSource: ChatSessionSourceSchema.optional(),
+  /** Present when the session works a scheduled task; Home's conversation drops these. */
+  scheduledRun: z.literal(true).optional(),
   event: ChatEventSchema,
 });
 export type ChatEventEnvelope = z.infer<typeof ChatEventEnvelopeSchema>;

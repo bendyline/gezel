@@ -1,19 +1,22 @@
-import {
-  type ActiveVideoPull,
-  type CatalogItemSummary,
-  type ImageModelHardwareTier,
-  type InstalledVideoModel,
-  type RecoDevice,
-  type VideoModelManifest,
-  type VideoModelPullEvent,
-  mediaModelFits,
-  videoMemoryBudgetBytes,
+import type {
+  ActiveVideoPull,
+  CatalogItemSummary,
+  InstalledVideoModel,
+  VideoModelManifest,
+  VideoModelPullEvent,
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { LicenseButton } from './LicenseButton.js';
+import {
+  HiddenModelsToggle,
+  MediaFitNote,
+  fitConfirmMessage,
+  hiddenByFit,
+  useMediaModelFit,
+} from './media-model-fit.js';
 
 /**
  * Install / pull / delete flow for `video-model` catalog entries.
@@ -27,37 +30,6 @@ function formatSize(bytes: number): string {
   if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(0)} MB`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${bytes} B`;
-}
-
-function hardwareTierLabel(tier: ImageModelHardwareTier, minVramGB: number): string {
-  switch (tier) {
-    case 'low':
-      return `Runs on ${minVramGB} GB`;
-    case 'mid':
-      return `${minVramGB} GB+`;
-    case 'high':
-      return `${minVramGB} GB+ recommended`;
-    case 'workstation':
-      return `${minVramGB} GB+ workstation`;
-  }
-}
-
-/** Bytes → whole GB for human-readable memory figures. */
-function gb(bytes: number): number {
-  return Math.round(bytes / 1024 ** 3);
-}
-
-/** Personalized "may not fit" copy for the install-confirm dialog. */
-function fitWarning(
-  device: RecoDevice,
-  m: { name: string; minVramGB: number; approxSizeBytes: number },
-): string {
-  return (
-    `${m.name} recommends about ${m.minVramGB} GB of fast (GPU / unified) memory, but this ` +
-    `machine has roughly ${gb(videoMemoryBudgetBytes(device))} GB usable for generation ` +
-    `(${gb(device.totalRamBytes)} GB total). It may run out of memory or fail to load. ` +
-    `Download this ${formatSize(m.approxSizeBytes)} model anyway?`
-  );
 }
 
 interface ActivePull {
@@ -108,30 +80,14 @@ export function VideoModelManager({
   const [installedError, setInstalledError] = useState<string | null>(null);
   const [pulls, setPulls] = useState<Map<string, ActivePull>>(new Map());
   const [toDelete, setToDelete] = useState<string | null>(null);
-  // Device memory, so a model whose `minVramGB` exceeds what this machine can
-  // run is flagged before a big download the user can't use (LTX-2/2.3 want
-  // ~80 GB). A failed probe leaves this null and never blocks an install.
-  const [device, setDevice] = useState<RecoDevice | null>(null);
+  // The daemon's verdict per catalog model, so a model this machine cannot
+  // run is hidden before a download the user can't use (LTX-2.x needs ~90 GB
+  // on a Mac). Unavailable verdicts hide nothing.
+  const fit = useMediaModelFit('video');
+  const [showAll, setShowAll] = useState(false);
   const [fitConfirm, setFitConfirm] = useState<{ id: string; message: string } | null>(null);
   const pullsRef = useRef(pulls);
   pullsRef.current = pulls;
-
-  useEffect(() => {
-    void api
-      .getMemoryProfile()
-      .then((mem) =>
-        setDevice({
-          platform: mem.platform,
-          gpuVramBytes: mem.gpuVramBytes,
-          totalRamBytes: mem.totalRamBytes,
-          usableBytes: mem.usableBytes,
-          ...(mem.budgetBytes !== undefined ? { budgetBytes: mem.budgetBytes } : {}),
-        }),
-      )
-      .catch(() => {
-        /* Fit hints are best-effort; without a profile we treat everything as fitting. */
-      });
-  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -315,6 +271,13 @@ export function VideoModelManager({
   }, [toDelete, refresh, onModelsChanged]);
 
   const installedIds = useMemo(() => new Set(installed.map((m) => m.id)), [installed]);
+  const hiddenCount = useMemo(
+    () =>
+      fit.byId
+        ? [...fit.byId.values()].filter((f) => hiddenByFit(f) && !installedIds.has(f.id)).length
+        : 0,
+    [fit.byId, installedIds],
+  );
 
   // The model the engine actually binds: the configured default when it's
   // still installed, else the first installed model (the server's own
@@ -423,9 +386,19 @@ export function VideoModelManager({
 
       <div className="ollama-section ollama-section--flat ollama-section--download">
         <h4>Download a model</h4>
+        <HiddenModelsToggle
+          hiddenCount={hiddenCount}
+          showAll={showAll}
+          onToggle={() => setShowAll((v) => !v)}
+        />
         <CatalogBrowser
           kind="video-model"
           emptyMessage="No video models in the catalog yet. Remote catalog sources can add entries without an app update."
+          filter={(item: CatalogItemSummary) =>
+            showAll ||
+            installedIds.has(item.manifest.id) ||
+            !hiddenByFit(fit.byId?.get(item.manifest.id))
+          }
           action={(item: CatalogItemSummary) => {
             if (item.manifest.kind !== 'video-model') return null;
             const m = item.manifest as VideoModelManifest;
@@ -436,8 +409,8 @@ export function VideoModelManager({
               active && active.totalBytes > 0
                 ? Math.min(100, Math.round((active.bytesWritten / active.totalBytes) * 100))
                 : null;
-            // Best-effort fit: unknown device (probe failed) is treated as fitting.
-            const fits = !device || mediaModelFits(device, { minVramGB: m.minVramGB });
+            const modelFit = fit.byId?.get(m.id);
+            const tooLarge = !already && hiddenByFit(modelFit);
             return (
               <div className="catalog-ollama-action">
                 <div className="catalog-ollama-meta">
@@ -447,19 +420,7 @@ export function VideoModelManager({
                     <span>{formatSize(m.approxSizeBytes)}</span>
                     <span>·</span>
                     <span>{m.family.toUpperCase()}</span>
-                    <span>·</span>
-                    <span>{hardwareTierLabel(m.hardwareTier, m.minVramGB)}</span>
-                    {device && !fits && (
-                      <>
-                        <span>·</span>
-                        <span
-                          className="catalog-ollama-warn"
-                          title={`Recommended ${m.minVramGB} GB · this machine ~${gb(videoMemoryBudgetBytes(device))} GB usable`}
-                        >
-                          may exceed this machine
-                        </span>
-                      </>
-                    )}
+                    <MediaFitNote fit={modelFit} />
                   </div>
                   <div className="catalog-ollama-pills">
                     <LicenseButton manifest={m} />
@@ -467,11 +428,12 @@ export function VideoModelManager({
                 </div>
                 <button
                   type="button"
-                  disabled={already || pulling || Boolean(disabledReason)}
-                  title={disabledReason ?? undefined}
+                  disabled={already || pulling || tooLarge || Boolean(disabledReason)}
+                  title={(tooLarge ? modelFit?.reason : disabledReason) ?? undefined}
                   onClick={() => {
-                    if (fits || !device) void startPull(m.id);
-                    else setFitConfirm({ id: m.id, message: fitWarning(device, m) });
+                    const message = fitConfirmMessage(m.name, modelFit, m.approxSizeBytes);
+                    if (message) setFitConfirm({ id: m.id, message });
+                    else void startPull(m.id);
                   }}
                 >
                   {already
@@ -480,7 +442,9 @@ export function VideoModelManager({
                       ? pct !== null
                         ? `Downloading… ${pct}%`
                         : 'Downloading…'
-                      : 'Download'}
+                      : tooLarge
+                        ? 'Too large'
+                        : 'Download'}
                 </button>
               </div>
             );

@@ -5,7 +5,7 @@
   padding: 0.2rem 0.6rem;
   border: 1px solid color-mix(in srgb, var(--titlebar-ink) 25%, transparent);
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--titlebar-ink) 5%, var(--titlebar));
+  background: var(--titlebar);
   color: var(--titlebar-ink);
   font: inherit;
   font-size: var(--text-2xs);
@@ -17,7 +17,7 @@
 .activity-control:hover,
 .activity-control[data-state="open"] {
   border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
-  background: color-mix(in srgb, var(--titlebar-ink) 10%, var(--titlebar));
+  background: color-mix(in srgb, black 10%, var(--titlebar));
 }
 .activity-control-dot {
   width: 7px;

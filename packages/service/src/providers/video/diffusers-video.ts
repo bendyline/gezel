@@ -17,8 +17,8 @@
 
 import { createLogger } from '@bendyline/gezel';
 import type { VideoAccelerator } from '@bendyline/gezel';
-import type { GpuArbiter } from '../gpu-arbiter.js';
-import type { NativeEngineSupervisor } from '../native/supervisor.js';
+import type { GpuArbiter } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
+import type { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
 import type { VideoModelManager, VideoModelSelector } from './models.js';
 import type {
   InstalledVideoModelInfo,

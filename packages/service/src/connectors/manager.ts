@@ -22,8 +22,9 @@ import type {
 } from '@bendyline/gezel';
 import { KeyedLock, backoffDelayMs, createLogger, retryTransient } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import { writeFileAtomic } from '../fs/atomic.js';
-import { resolveInside } from '../fs/safe-paths.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import type { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import {
@@ -36,7 +37,6 @@ import {
 } from '../observations/layout.js';
 import { type ObservationWriteSummary, ObservationWriter } from '../observations/writer.js';
 import { normalizeHttpsOrigin } from '../secrets/origins.js';
-import type { SecretStore } from '../secrets/types.js';
 import { validateConnectorConfig } from './config-validate.js';
 import { McpConnectorAdapter } from './drivers/mcp.js';
 import { ScriptConnectorAdapter } from './drivers/script.js';

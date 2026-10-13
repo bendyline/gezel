@@ -2,9 +2,9 @@
 
 llama.cpp and MLX share task classification, read provenance, repair tool surfaces,
 recovery allowances, and history compaction. The common owners are
-[constrained-turn.ts](../packages/service/src/providers/constrained-turn.ts),
-[file-repair-policy.ts](../packages/service/src/providers/file-repair-policy.ts), and
-[local-turn-policy.ts](../packages/service/src/providers/local-turn-policy.ts).
+[constrained-turn.ts](../packages/inference/src/providers/constrained-turn.ts),
+[file-repair-policy.ts](../packages/inference/src/providers/file-repair-policy.ts), and
+[local-turn-policy.ts](../packages/inference/src/providers/local-turn-policy.ts).
 DS4 inherits the llama.cpp adapter.
 
 Internal callers that know the file's state can attach `fileTurnIntent` to a

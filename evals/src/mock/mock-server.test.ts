@@ -244,3 +244,30 @@ describe('mock MCP file fixtures', () => {
     ).rejects.toThrow(/no bound trial project/i);
   });
 });
+
+// chapter-narration-run and three other media books declare only a `cli`
+// shim; a null runtime meant the shim was never installed (2026-10-10).
+describe('cli-only mock specs', () => {
+  it('still start a runtime so the shim scripts get seeded', async () => {
+    const { startMockServices } = await import('./mock-server.js');
+    const runtime = await startMockServices([
+      {
+        id: 'narrator',
+        kind: 'cli',
+        description: 'Fake narration engine.',
+        shim: { path: 'scripts/mock-probe.mjs', content: 'console.log("ok");' },
+      },
+    ] as never);
+    try {
+      expect(runtime).not.toBeNull();
+      expect(runtime?.servicesMarkdown()).toContain('run_installed_script({ name: "mock-probe" })');
+    } finally {
+      await runtime?.close();
+    }
+  });
+
+  it('return no runtime for a spec with no mocks at all', async () => {
+    const { startMockServices } = await import('./mock-server.js');
+    expect(await startMockServices([] as never)).toBeNull();
+  });
+});

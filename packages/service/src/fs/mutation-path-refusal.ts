@@ -1,5 +1,9 @@
+import {
+  type PathSafetyCode,
+  PathSafetyError,
+  resolveMutationPath,
+} from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { HttpStatusError } from '@bendyline/gezel/runtime';
-import { type PathSafetyCode, PathSafetyError, resolveMutationPath } from './safe-paths.js';
 
 /**
  * A change to the shared library or a project's artifacts, refused because of

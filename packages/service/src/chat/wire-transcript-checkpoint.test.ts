@@ -1,8 +1,8 @@
 import type { ChatMessage } from '@bendyline/gezel';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import { mlxWireTranscript } from '@bendyline/gezel-inference/internal/providers/mlx/wire-transcript';
+import type { WireTranscriptEntry } from '@bendyline/gezel-inference/internal/providers/types';
 import { describe, expect, it } from 'vitest';
-import { MlxProvider } from '../providers/mlx/provider.js';
-import { mlxWireTranscript } from '../providers/mlx/wire-transcript.js';
-import type { WireTranscriptEntry } from '../providers/types.js';
 import {
   buildWireTranscriptCheckpoint,
   restoreFromWireTranscript,

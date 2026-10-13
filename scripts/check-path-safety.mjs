@@ -5,10 +5,16 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
 
-const roots = ['packages/app/src', 'packages/service/src', 'packages/eval-viewer', 'scripts'];
+const roots = [
+  'packages/app/src',
+  'packages/inference/src',
+  'packages/service/src',
+  'packages/eval-viewer',
+  'scripts',
+];
 
 const allowlistedFiles = new Set([
-  'packages/service/src/fs/safe-paths.ts',
+  'packages/inference/src/fs/safe-paths.ts',
   'packages/service/src/fs/safe-paths.test.ts',
   'packages/service/src/folders/validation.ts',
   'scripts/check-path-safety.mjs',
@@ -29,12 +35,12 @@ const checks = [
   {
     name: 'normalize(join(...)) containment pattern',
     pattern: /normalize\s*\(\s*join\s*\(/,
-    detail: 'Use safeJoin/resolveInside from packages/service/src/fs/safe-paths.ts.',
+    detail: 'Use safeJoin/resolveInside from packages/inference/src/fs/safe-paths.ts.',
   },
   {
     name: 'normalize(resolve(...)) containment pattern',
     pattern: /normalize\s*\(\s*resolve\s*\(/,
-    detail: 'Use safeJoin/resolveInside from packages/service/src/fs/safe-paths.ts.',
+    detail: 'Use safeJoin/resolveInside from packages/inference/src/fs/safe-paths.ts.',
   },
   {
     name: 'local path containment helper',

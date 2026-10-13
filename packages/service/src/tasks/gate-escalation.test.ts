@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { GateAttemptRecord } from '@bendyline/gezel';
-import { afterEach, describe, expect, it } from 'vitest';
 import {
   isGateSurgicalEditTurn,
   isImmediateFileWriteTurn,
   isScenarioFileRepairTurn,
-} from '../providers/llama-cpp/provider.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   GATE_ATTEMPT_TRAIL_CAP,
   appendGateAttempt,

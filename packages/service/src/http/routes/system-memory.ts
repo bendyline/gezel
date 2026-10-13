@@ -1,12 +1,12 @@
 import { MachineMemoryUsageSchema } from '@bendyline/gezel';
-import { Hono } from 'hono';
-import { sampleDarwinSystemMemoryCached } from '../../system/darwin-memory.js';
-import { sampleDarwinGezelProcessMemoryCached } from '../../system/gezel-process-memory.js';
+import { sampleDarwinSystemMemoryCached } from '@bendyline/gezel-inference/internal/system/darwin-memory';
+import { sampleDarwinGezelProcessMemoryCached } from '@bendyline/gezel-inference/internal/system/gezel-process-memory';
 import {
   detectMemoryProfileCached,
   sampleMachineMemoryUsage,
   summarizeResidentModels,
-} from '../../system/memory.js';
+} from '@bendyline/gezel-inference/internal/system/memory';
+import { Hono } from 'hono';
 import type { EngineContext } from '../engine-context.js';
 export function systemMemoryRoutes(ctx: EngineContext): Hono {
   const app = new Hono();

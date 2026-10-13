@@ -1,6 +1,9 @@
 import { createLogger } from '@bendyline/gezel';
-import { type ProviderQueue, runInQueue } from '../queue.js';
-import { StreamingSessionBase } from '../streaming-session.js';
+import {
+  type ProviderQueue,
+  runInQueue,
+} from '@bendyline/gezel-inference/internal/providers/queue';
+import { StreamingSessionBase } from '@bendyline/gezel-inference/internal/providers/streaming-session';
 
 const log = createLogger('anthropic-cli');
 import type {
@@ -11,7 +14,7 @@ import type {
   ToolArgsDeltaMeta,
   ToolCallEvent,
   TurnUsage,
-} from '../types.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
 import type { ClaudePermissionMode } from './provider.js';
 import type { ClaudeReasoningEffort } from './reasoning.js';
 import type { ClaudeWorkerPool, ClaudeWorkerSpec } from './worker-pool.js';

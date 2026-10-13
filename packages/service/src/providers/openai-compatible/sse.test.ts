@@ -1,5 +1,8 @@
+import {
+  isSseComment,
+  readSseEvents,
+} from '@bendyline/gezel-inference/internal/providers/openai-compatible/sse';
 import { describe, expect, it } from 'vitest';
-import { isSseComment, readSseEvents } from './sse.js';
 
 describe('readSseEvents', () => {
   function streamOf(text: string): ReadableStream<Uint8Array> {

@@ -19,6 +19,7 @@ import { DeliverableCard } from '../components/DeliverableCard.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { PromptDialog } from '../components/PromptDialog.js';
 import { TaskChatPane } from '../components/TaskChatPane.js';
+import { TaskOutputsList } from '../components/TaskOutputsList.js';
 import { TaskStatusKeys } from '../components/TaskStatusKeys.js';
 import { TaskStepPanel } from '../components/TaskStepPanel.js';
 import { TaskStepTracker } from '../components/TaskStepTracker.js';
@@ -716,6 +717,7 @@ export function TaskDetail({
             </div>
             <div className="task-description-editor">
               <EditorShell
+                ariaLabel="Task description"
                 key={`description-${task.ref}-${descriptionKey}`}
                 initialMarkdown={task.description ?? ''}
                 onChange={(source) => descriptionAutosave.update(source)}
@@ -752,6 +754,13 @@ export function TaskDetail({
               <pre className="task-plan-body">{task.plan}</pre>
             </section>
           )}
+          {result && (
+            <TaskOutputsList
+              projectId={task.projectId}
+              outputs={result.outputs}
+              deliverable={result.deliverable}
+            />
+          )}
           {error && <p className="error">{error}</p>}
 
           <section className="task-notes">
@@ -763,6 +772,7 @@ export function TaskDetail({
                 from the user's vantage point, no scrolling required. */}
             <div className="task-notes-composer">
               <EditorShell
+                ariaLabel="Task note"
                 key={`composer-${composerKey}`}
                 initialMarkdown=""
                 placeholder="Write a note — paste markdown, drag in media, or just start typing."
@@ -853,6 +863,7 @@ export function TaskDetail({
                     </header>
                     <div className="task-note-body">
                       <EditorShell
+                        ariaLabel="Task note"
                         key={editing ? `edit-${n.id}` : n.id}
                         initialMarkdown={n.text}
                         readOnly={!editing}

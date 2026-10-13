@@ -2,9 +2,15 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatModelManifest } from '@bendyline/gezel';
+import {
+  evaluateCatalogDrift,
+  resetPayloadFingerprintHealsForTest,
+} from '@bendyline/gezel-inference/internal/models/catalog-drift';
+import {
+  catalogPayloadFingerprint,
+  describeCatalogPayload,
+} from '@bendyline/gezel-inference/internal/models/catalog-payload-identity';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { evaluateCatalogDrift, resetPayloadFingerprintHealsForTest } from './catalog-drift.js';
-import { catalogPayloadFingerprint, describeCatalogPayload } from './catalog-payload-identity.js';
 
 const WEIGHTS_SHA = 'a'.repeat(64);
 const REBUILT_SHA = 'b'.repeat(64);

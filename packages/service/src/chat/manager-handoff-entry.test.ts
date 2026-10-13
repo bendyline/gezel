@@ -3,13 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseTaskHandoffNote } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import type { LlamaCppModelManager } from '@bendyline/gezel-inference/internal/providers/llama-cpp/index';
+import type { EngineRouter as InferenceEngineRouter } from '@bendyline/gezel-inference/internal/providers/native/engine-router';
+import type { LLMProvider } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import type { MemoryManager } from '../memory/manager.js';
-import type { LlamaCppModelManager } from '../providers/llama-cpp/index.js';
 import { MockProvider } from '../providers/mock.js';
-import type { LLMProvider } from '../providers/types.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { dispatchTaskEntry } from '../tasks/entry-dispatch.js';
 import { TaskManager } from '../tasks/manager.js';
@@ -55,7 +56,7 @@ function fakeRouter(provider: LLMProvider) {
       engineKey: `${name}:${modelId}:0`,
       provider,
     }),
-  } as unknown as import('../providers/native/engine-router.js').EngineRouter;
+  } as unknown as InferenceEngineRouter;
 }
 
 let home: string;

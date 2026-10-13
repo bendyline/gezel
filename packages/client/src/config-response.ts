@@ -426,6 +426,10 @@ export interface ConfigResponse {
   homeGreetingCollapsed?: boolean;
   /** First-run onboarding steps finished or skipped; see `GezelConfig.onboarding`. */
   onboarding?: { foldersStepDoneAt?: string; overnightStepDoneAt?: string };
+  /** What the person wants help with; see `GezelConfig.interests` and `resolveInterestAreas`. */
+  interests?: { areas: string[]; askedAt?: string };
+  /** When this home was first used; absent on an established install. */
+  firstUseAt?: string;
   /**
    * Workshop tempo — how frenetic proactive behavior feels. Only
    * meaningful when `aiEngagementMode === 'proactive'`. Default

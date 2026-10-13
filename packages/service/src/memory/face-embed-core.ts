@@ -17,10 +17,10 @@
  */
 
 import { createRequire } from 'node:module';
+import { PipelineLoadError } from '@bendyline/gezel-inference/internal/memory/embed-core';
 import { ARCFACE_SIZE, alignToArcFace } from '../index-store/face/align.js';
 import { FACE_MIN_PX } from '../index-store/face/constants.js';
 import { YUNET_INPUT, type YunetOutputs, postprocessYunet } from '../index-store/face/yunet.js';
-import { PipelineLoadError } from './embed-core.js';
 import {
   ImageDecodeError,
   type RgbImage,

@@ -1,5 +1,6 @@
 import type { TaskStatus } from '@bendyline/gezel';
 import type { JSX } from 'react';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 
 /* One 14×14 viewBox, stroke width, and cap/join across the glyphs so all four
    read at the same weight inside a key. Play and pause take a solid fill the
@@ -49,7 +50,7 @@ const STATUS_KEYS: Record<
 > = {
   active: {
     label: 'Active',
-    hint: 'Active — work runs and gezels pick it up.',
+    hint: 'Active — work runs and gezellen pick it up.',
     icon: ActiveIcon,
   },
   paused: {
@@ -96,7 +97,12 @@ export function TaskStatusKeys({
   onChange: (status: TaskStatus) => void;
 }) {
   return (
-    <div className="gz-tray task-status-tray" role="radiogroup" aria-label={ariaLabel}>
+    <div
+      className="gz-tray task-status-tray"
+      role="radiogroup"
+      onKeyDown={onRadioKeyDown}
+      aria-label={ariaLabel}
+    >
       {options.map((status) => {
         const meta = STATUS_KEYS[status];
         const Icon = meta.icon;
@@ -108,6 +114,12 @@ export function TaskStatusKeys({
             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
             role="radio"
             aria-checked={selected}
+            tabIndex={
+              selected ||
+              (!options.includes(value as Exclude<TaskStatus, 'draft'>) && status === options[0])
+                ? 0
+                : -1
+            }
             data-status={status}
             disabled={disabled}
             className={`gz-key task-status-key${selected ? ' gz-key-active' : ''}`}

@@ -1,11 +1,11 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { NativeEngineStatusResponseSchema } from '@bendyline/gezel';
+import { NativeEngineResolveEventSchema, NativeEngineStatusResponseSchema } from '@bendyline/gezel';
+import { NATIVE_ENGINE_RELEASE } from '@bendyline/gezel-inference/internal/engines/native-manifest';
+import { enginesRoutes } from '@bendyline/gezel-inference/internal/http/routes/engines';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
-import { NATIVE_ENGINE_RELEASE } from '../../engines/native-manifest.js';
-import { enginesRoutes } from './engines.js';
 
 function makeApp(
   chat: {
@@ -102,6 +102,38 @@ describe('engines routes', () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('"type":"done"');
     expect(recognitionResets).toBe(1);
+  });
+
+  // Older CLIs parse the install stream strictly; an unknown event fails them
+  // mid-install. Unpacking reaches the wire only as a heartbeat comment.
+  it('keeps unpacking progress off the install stream', async () => {
+    const app = makeApp(
+      { engineStatus: async () => null, reconcileEnginePool: async () => {} },
+      {
+        engineBinaries: {
+          ensure: () => ({ key: 'uv:default', snapshot: {}, alreadyRunning: false }),
+          get: () => ({ engine: 'uv' }),
+          subscribe: (_key: string, listener: (event: unknown) => void) => {
+            queueMicrotask(() => {
+              listener({ type: 'verifying', what: 'sha256' });
+              listener({ type: 'extracting', bytesWritten: 5, totalBytes: 10 });
+              listener({ type: 'done', binPath: '/engines/uv', cached: false });
+            });
+            return () => {};
+          },
+        },
+      },
+    );
+
+    const res = await app.request('/api/engines/binaries/uv/ensure', { method: 'POST' });
+    const body = await res.text();
+
+    expect(body).toContain(': extracting');
+    const events = body
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => NativeEngineResolveEventSchema.parse(JSON.parse(line.slice(5))));
+    expect(events.map((e) => e.type)).toEqual(['verifying', 'done']);
   });
 
   it('GET /status returns the chat manager snapshot', async () => {

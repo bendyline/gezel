@@ -6,6 +6,7 @@ import type {
   AppChatProgress,
   ChatCompletionResponse,
   ChatMessage,
+  ChatRequest,
   RequestOptions,
 } from './types.js';
 
@@ -15,6 +16,8 @@ export interface TextRequest {
   maxTokens?: number;
   temperature?: number;
   reasoningEffort?: string;
+  /** Structured output; see {@link ChatRequest.response_format}. */
+  responseFormat?: ChatRequest['response_format'];
   knowledge?: Omit<KnowledgeContextOptions, 'signal'>;
 }
 export type TextEvent =
@@ -27,6 +30,12 @@ export type TextEvent =
       finishReason: string | null;
       model: string;
       usage: ChatCompletionResponse['usage'] | null;
+      /**
+       * The reply cap the model applied when it was lower than `maxTokens`
+       * (Apple's on-device model allows 1,024), else null. With
+       * `finishReason: 'length'` it explains the cut.
+       */
+      appliedMaxTokens: number | null;
     }
   | { type: 'error'; error: GezelSdkError };
 export interface TextOptions extends RequestOptions {
@@ -47,6 +56,7 @@ export async function streamEmbeddingText(
   let finishReason: string | null = null;
   let model = request.model;
   let usage: ChatCompletionResponse['usage'] | null = null;
+  let appliedMaxTokens: number | null = null;
   const done = (cancelled: boolean): Extract<TextEvent, { type: 'done' }> => ({
     type: 'done',
     text,
@@ -54,6 +64,7 @@ export async function streamEmbeddingText(
     finishReason,
     model,
     usage,
+    appliedMaxTokens,
   });
   try {
     const limit = options.maxCharacters ?? 4 * 1024 * 1024;
@@ -95,6 +106,9 @@ export async function streamEmbeddingText(
           ...(request.reasoningEffort === undefined
             ? {}
             : { reasoning_effort: request.reasoningEffort }),
+          ...(request.responseFormat === undefined
+            ? {}
+            : { response_format: request.responseFormat }),
         },
         { signal },
       );
@@ -104,6 +118,8 @@ export async function streamEmbeddingText(
           notify(options.onEvent, { type: 'progress', progress: chunk.gezel_progress });
         if (typeof chunk.model === 'string' && chunk.model) model = chunk.model;
         if (chunk.usage) usage = chunk.usage;
+        if (Number.isSafeInteger(chunk.gezel_max_tokens) && chunk.gezel_max_tokens! > 0)
+          appliedMaxTokens = chunk.gezel_max_tokens!;
         const choice = chunk.choices[0];
         const delta = choice?.delta.content;
         if (delta) {

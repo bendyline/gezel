@@ -18,8 +18,8 @@ import {
   skillToCraftbookDoc,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { ChatManager } from '../chat/manager.js';
-import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { resolveGildeTemplateForRole } from '../gezels/ensure.js';
 import { pickRosterVoorman } from '../gezels/roster.js';

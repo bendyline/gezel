@@ -7,11 +7,19 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
+import {
+  CapacityDeniedError,
+  MIN_VIABLE_LOCAL_CONTEXT_TOKENS,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import type {
+  LLMProvider,
+  LLMSession,
+  ModelInfo,
+  SessionOpts,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { DEFAULT_TENANT_MAX_CONCURRENT } from '../../remotes/tenant-limits.js';
 import { McpBridgePool } from '../mcp-bridge-pool.js';
-import { CapacityDeniedError, MIN_VIABLE_LOCAL_CONTEXT_TOKENS } from '../native/capacity-broker.js';
-import { ProviderQueue } from '../queue.js';
-import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
 import {
   isEngineBusyResponse,
   isTenantConcurrencyResponse,

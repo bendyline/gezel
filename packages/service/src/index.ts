@@ -1,5 +1,10 @@
 export { startService } from './service.js';
-export type { RunningService, RunningEngineService, StartServiceOptions } from './service.js';
+export type {
+  RunningService,
+  RunningEngineService,
+  RunningInferenceOnlyService,
+  StartServiceOptions,
+} from './service.js';
 export type {
   UnexpectedHttpErrorEvent,
   UnexpectedHttpErrorHandler,
@@ -14,8 +19,13 @@ export { MemoryCompactor } from './memory/compaction.js';
 // Embedding utilities — the same pipeline every index/memory vector rides.
 // Exported for tooling (the evals embed-calibration harness) and embedders;
 // query-side callers must use embedQuery (asymmetric instruction prefix).
-export { embed, embedBatch, embedQuery, warmEmbeddings } from './memory/embeddings.js';
-export { embedModelId } from './memory/embed-core.js';
+export {
+  embed,
+  embedBatch,
+  embedQuery,
+  warmEmbeddings,
+} from '@bendyline/gezel-inference/internal/memory/embeddings';
+export { embedModelId } from '@bendyline/gezel-inference/internal/memory/embed-core';
 export { evaluateGate, gateCheckLabel, taskSuppliedCitationPaths } from './tasks/gate-eval.js';
 export type { GateCheckOutcome, GateCheckResult, GateEvalDeps } from './tasks/gate-eval.js';
 export { parseScriptMeta } from './scripts/meta.js';
@@ -27,6 +37,6 @@ export {
   verifyNativeBinaries,
   type ElectronNativeReuseOptions,
   type ElectronNativeReuseResult,
-} from './engines/electron-native-reuse.js';
+} from '@bendyline/gezel-inference/internal/engines/electron-native-reuse';
 
 export type { EngineContext } from './http/engine-context.js';

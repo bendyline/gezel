@@ -7,8 +7,8 @@ import {
   DiffpackDraftOperationSchema,
   createLogger,
 } from '@bendyline/gezel';
-import { writeFileAtomic } from '../fs/atomic.js';
-import { resolveInside, safeJoin } from '../fs/safe-paths.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { resolveInside, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { Store } from '../fs/store.js';
 import {
   type WorkspaceEditResult,

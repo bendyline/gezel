@@ -1,5 +1,5 @@
+import { redactPathSecrets } from '@bendyline/gezel-inference/internal/perf/redact-path';
 import { describe, expect, it } from 'vitest';
-import { redactPathSecrets } from './redact-path.js';
 
 const CAPABILITY = 'Zm9vYmFyYmF6cXV4cXV1eHF1dXhxdXV4cXV1eHF1dXg';
 

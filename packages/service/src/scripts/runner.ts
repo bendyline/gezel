@@ -1,5 +1,6 @@
 import { type ScriptRun, createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import {
   PortableScriptRunner,
   type RunPortableScriptOptions,
@@ -9,7 +10,6 @@ import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { type CredentialRegistry, DefaultCredentialRegistry } from '../secrets/registry.js';
-import type { SecretStore } from '../secrets/types.js';
 import type { TaskManager } from '../tasks/manager.js';
 import { type DispatcherDeps, buildDispatcher } from './dispatcher.js';
 import { NodeScriptExecutor } from './node-executor.js';

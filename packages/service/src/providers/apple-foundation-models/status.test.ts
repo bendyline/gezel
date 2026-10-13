@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { appleFmBinaryPath } from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/binary';
+import { appleFoundationModelsStatus } from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/status';
 import { describe, expect, it, vi } from 'vitest';
-import { appleFmBinaryPath } from './binary.js';
-import { appleFoundationModelsStatus } from './status.js';
 
 describe('Apple model readiness', () => {
   it('does not spawn on unsupported hosts or when the helper is missing', async () => {

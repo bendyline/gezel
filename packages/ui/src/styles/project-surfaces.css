@@ -719,8 +719,8 @@
   padding: 0.4rem 1rem;
   border-radius: 6px;
   border: none;
-  background: var(--accent);
-  color: #fff;
+  background: var(--action-bg);
+  color: var(--action-ink);
   cursor: pointer;
   font-weight: 500;
 }
@@ -956,7 +956,7 @@
    restore button joins it only while that pane is maximized. Both mirror
    `.app-nav-hamburger`'s transparent square with a hover halo so the cluster
    reads as one unified control row. Restore gets a 36×36 escape hit target
-   that fills nearly the whole titlebar. Off mode tints play/pause red so the
+   that fills nearly the whole titlebar. Off mode tints the crew glyph red so the
    user can spot at a glance that AI is fully paused. */
 .app-engagement-trigger,
 .app-output-restore {
@@ -1002,6 +1002,14 @@
   opacity: 1;
   background: rgba(255, 255, 255, 0.12);
 }
+/* The global ring (a --bg gap plus an accent ring outside the element)
+   reads as a dark band on the sage titlebar and runs past the titlebar's
+   edge, which clips it. Keep the ring inside the key, in the titlebar ink. */
+.app-engagement-trigger:focus-visible {
+  opacity: 1;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--titlebar-ink) 75%, transparent);
+}
 .app-engagement-trigger-off {
   color: #e6776a;
 }
@@ -1018,29 +1026,58 @@
   color: var(--titlebar-ink);
 }
 .app-task-speed-menu {
-  width: 19rem;
+  width: 24rem;
   max-width: calc(100vw - 1rem);
+}
+.app-engagement-heading {
+  padding: 0.55rem 0.75rem 0.15rem;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.app-engagement-intro {
+  margin: 0;
+  padding: 0 0.75rem 0.45rem;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+/* Crew activity: four keys read left to right as the crew coming to the
+   bench. The latched key explains itself in the readout beneath, through
+   the described-tray stem (docs/ux.md → "Crew activity: one tray"). */
+.app-engagement-tray.gz-tray--described {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: auto;
+  margin: 0 0.3rem 0.5rem;
+}
+.app-engagement-key.gz-key {
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.55rem 0.2rem 0.45rem;
+  font-size: var(--text-xs);
+  line-height: 1.15;
+  text-align: center;
+  user-select: none;
+}
+.app-engagement-key .app-engagement-mode-icon {
+  width: 34px;
+  height: 34px;
+}
+.app-engagement-key.gz-key:where([data-highlighted]:not([aria-checked="true"])) {
+  background: var(--key-bg-hover);
+}
+.app-engagement-readout.gz-tray-description {
+  margin: 0 0.3rem 0.2rem;
+  padding: 0.55rem 0.75rem;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
 }
 .app-task-speed-separator {
   height: 1px;
   margin: 0.35rem 0.35rem 0.25rem;
   background: var(--border);
   opacity: 0.7;
-}
-.app-nightshift-section-label {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.25rem 0.6rem 0.1rem;
-  color: var(--text);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  user-select: none;
-}
-.app-nightshift-section-label .app-nightshift-glyph {
-  width: 20px;
-  height: 15px;
-  color: var(--text-muted);
 }
 .app-nightshift-glyph {
   display: block;
@@ -1098,117 +1135,229 @@
     animation: none;
   }
 }
-.app-nightshift-status {
-  padding: 0.35rem 0.6rem 0.45rem;
-  font-size: 0.74rem;
-  opacity: 0.7;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  margin-bottom: 0.25rem;
+/* Night Shift: a sage night tile (the titlebar key's look while a shift
+   runs), then one left edge for everything after it — title and status
+   line, the window track, tallies, and the lists, whose dots sit in the
+   tile's column. */
+.app-nightshift {
+  --ns-tile: 34px;
+  --ns-gap: 0.65rem;
+  --ns-gutter: calc(var(--ns-tile) + var(--ns-gap));
+  --ns-live: color-mix(in srgb, var(--titlebar) 60%, var(--text));
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.3rem 0.55rem 0.35rem;
 }
-
-/* When the period started and when it ends — the second line of the status
-   strip, above any quota-hold explanation. */
-.app-nightshift-period {
+.app-nightshift-head {
+  display: grid;
+  grid-template-columns: var(--ns-tile) minmax(0, 1fr) auto;
+  gap: var(--ns-gap);
+  align-items: center;
+}
+.app-nightshift-sky {
+  display: grid;
+  place-items: center;
+  width: var(--ns-tile);
+  height: var(--ns-tile);
+  border-radius: var(--radius-md);
+  background: var(--titlebar);
+  color: var(--titlebar-ink);
+}
+.app-nightshift-sky svg {
   display: block;
-  margin-top: 0.2rem;
-  max-width: 18rem;
+  width: 18px;
+  height: 18px;
+}
+.app-nightshift-sky.is-live {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--titlebar) 35%, transparent), 0 0 14px
+    color-mix(in srgb, var(--titlebar-ink) 18%, transparent);
+}
+.app-nightshift-heading {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.app-nightshift-title {
+  padding: 0;
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  user-select: none;
+}
+.app-nightshift-line {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+/* A read-only status badge, so a true capsule (docs/ux.md → Corners). */
+.app-nightshift-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--titlebar) 22%, transparent);
+  color: var(--ns-live);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.app-nightshift-badge.is-paused,
+.app-nightshift-badge.is-held {
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
   color: var(--text-muted);
 }
-
-/* Second line of the status strip while the cloud quota reserve is holding
-   queued night work — explains why "queued" isn't moving. */
-.app-nightshift-quota-hold {
-  display: block;
-  margin-top: 0.2rem;
-  max-width: 18rem;
-  color: var(--text-muted);
+.app-nightshift-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: app-nightshift-breathe 2.4s ease-in-out infinite;
+}
+@keyframes app-nightshift-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
-/* What the shift got through, counted over the period the status strip
+/* Why queued night work is not moving while the quota reserve holds it. */
+.app-nightshift-note {
+  margin: 0;
+  padding-left: var(--ns-gutter);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* The night window as a track: empty until it opens, then filling to now. */
+.app-nightshift-track {
+  display: grid;
+  gap: 0.2rem;
+  padding-left: var(--ns-gutter);
+}
+.app-nightshift-track-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+}
+.app-nightshift-track-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--ns-live);
+}
+.app-nightshift-track-now {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--ns-live);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ns-live) 30%, transparent);
+}
+.app-nightshift-track-ticks {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-nightshift-group {
+  display: grid;
+  gap: 0.05rem;
+}
+.app-nightshift-task-heading {
+  padding: 0.1rem 0 0.15rem var(--ns-gutter);
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* What the shift got through, counted over the period the status line
    names. Chips rather than a table: most nights only a few counters are
    non-zero, and the row should shrink to them. */
-.app-nightshift-tally {
-  padding: 0.1rem 0.2rem 0.35rem;
-  max-width: 18rem;
-}
 .app-nightshift-tally-items {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
-  padding: 0.1rem 0.5rem;
+  padding-left: var(--ns-gutter);
 }
 .app-nightshift-tally-item {
-  padding: 0.12rem 0.35rem;
-  border: 1px solid var(--border);
+  padding: 0.12rem 0.4rem;
+  border: 1px solid var(--tray-border);
   border-radius: var(--radius-sm);
-  background: var(--surface-2, rgba(127, 127, 127, 0.08));
-  font-size: var(--text-2xs);
+  background: var(--tray-bg);
   color: var(--text-muted);
+  font-size: var(--text-2xs);
   white-space: nowrap;
 }
 .app-nightshift-tally-count {
-  font-weight: 600;
   color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
-/* "What the shift is doing" panel: working-on + up-next task lists, shown
-   between the status line and the start/stop action while a shift runs. */
-.app-nightshift-tasks {
-  padding: 0.1rem 0.2rem 0.35rem;
-  max-width: 18rem;
-}
-.app-nightshift-task-group + .app-nightshift-task-group {
-  margin-top: 0.3rem;
-}
-.app-nightshift-task-heading {
-  padding: 0.1rem 0.5rem;
-  font-size: 0.66rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.55;
-}
 .app-nightshift-task {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.45rem;
-  padding: 0.22rem 0.5rem;
+  display: grid;
+  grid-template-columns: var(--ns-tile) minmax(0, 1fr);
+  gap: var(--ns-gap);
+  align-items: start;
+  padding: 0.22rem 0;
+  border-radius: var(--radius-sm);
 }
 .app-nightshift-task-dot {
-  flex: 0 0 auto;
+  justify-self: center;
   width: 0.45rem;
   height: 0.45rem;
-  margin-top: 0.32rem;
+  margin-top: 0.35rem;
   border-radius: 50%;
-  background: var(--border, rgba(255, 255, 255, 0.25));
+  background: var(--text-muted);
+  opacity: 0.6;
+}
+.app-nightshift-task-dot.is-active,
+.app-nightshift-task-dot.is-done {
+  background: var(--ns-live);
+  opacity: 1;
 }
 .app-nightshift-task-dot.is-active {
-  background: var(--accent);
-  animation: project-index-pulse 1.4s ease-in-out infinite;
+  animation: app-nightshift-breathe 2.4s ease-in-out infinite;
 }
 .app-nightshift-task-text {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  line-height: 1.25;
+  line-height: 1.3;
 }
 .app-nightshift-task-title {
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .app-nightshift-task-meta {
-  font-size: 0.7rem;
-  opacity: 0.6;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .app-nightshift-empty {
-  max-width: 18rem;
-  padding: 0.25rem 0.7rem 0.55rem;
+  padding-left: var(--ns-gutter);
   color: var(--text-muted);
   font-size: var(--text-xs);
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-nightshift-badge-dot,
+  .app-nightshift-task-dot.is-active {
+    animation: none;
+  }
 }
 
 /* The start/stop command is the menu's one primary action. Set it into the
@@ -1229,8 +1378,12 @@
 .app-nightshift-action:hover {
   background: var(--key-bg-hover);
 }
+.app-nightshift-action .app-engagement-menu-label {
+  font-weight: 600;
+}
 .app-nightshift-action .app-engagement-menu-hint {
   margin-left: 0;
+  font-weight: 400;
 }
 
 /* Two-line menu items: label on top, secondary hint below. The base
@@ -1243,39 +1396,9 @@
   padding-top: 0.4rem;
   padding-bottom: 0.4rem;
 }
-.app-engagement-menu-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  width: 100%;
-}
-.app-engagement-menu-icon {
-  flex: 0 0 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  opacity: 0.82;
-}
 .app-engagement-mode-icon {
   display: block;
-}
-.app-engagement-menu-check {
-  flex: 0 0 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-left: auto;
-  border-radius: var(--radius-sm);
-}
-.app-nav-menu-item.active .app-engagement-menu-check {
-  color: var(--accent-selection-ink);
-  background: var(--success);
-  border: 1px solid color-mix(in srgb, var(--success) 72%, var(--text));
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--success) 45%, transparent);
+  flex-shrink: 0;
 }
 .app-engagement-menu-label {
   font-weight: 500;
@@ -1284,8 +1407,6 @@
   font-size: 0.78em;
   opacity: 0.72;
   line-height: 1.3;
-  /* align under the label, clearing the mode-glyph column */
-  margin-left: calc(18px + 0.4rem);
 }
 
 .chat-composer-disabled-banner {
@@ -1312,6 +1433,22 @@
   font-size: 0.82rem;
 }
 
+/* A chat waiting on its first model. Not an error, so none of the alarm
+   red above: the panel's own ground, one key to the setup on Home. */
+.chat-composer-waiting {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.5rem 0.5rem 0.8rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--text);
+  font-size: var(--text-sm);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 /* ── GitHub sign-in chip + device-code modal ────────────────────── */
 
 .gz-new-project-github-label {
@@ -1323,7 +1460,7 @@
 
 .gz-npd-field {
   font-size: 0.85rem;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .gz-npd-field > .gz-github-repo-combobox {

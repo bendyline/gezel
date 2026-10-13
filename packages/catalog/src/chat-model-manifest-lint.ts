@@ -121,7 +121,7 @@ const QAT_MATTERS_MAX_BITS = 5;
 
 /**
  * Tier-default behavior lists, mirrored from
- * `packages/service/src/model-profile/defaults.ts`. Duplicated rather than
+ * `packages/inference/src/model-profile/defaults.ts`. Duplicated rather than
  * imported because the catalog package must not depend on the service; the
  * `tier-defaults-in-sync` test pins them together.
  */

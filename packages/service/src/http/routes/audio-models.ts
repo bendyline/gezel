@@ -1,22 +1,25 @@
-import { Hono } from 'hono';
-import { streamSSE } from 'hono/streaming';
-import { ChatModelInstallRegistry } from '../../models/install-registry.js';
+import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
+import { ChatModelInstallRegistry } from '@bendyline/gezel-inference/internal/models/install-registry';
 import {
   INVALID_MODEL_ID_CODE,
   INVALID_MODEL_ID_MESSAGE,
   isSafeModelId,
-} from '../../models/model-id.js';
-import { ReadOnlyModelError } from '../../models/storage-roots.js';
+} from '@bendyline/gezel-inference/internal/models/model-id';
+import { ReadOnlyModelError } from '@bendyline/gezel-inference/internal/models/storage-roots';
+import type {
+  AudioModelPullEvent,
+  AudioModelPullSpec,
+} from '@bendyline/gezel-inference/internal/providers/audio/types';
+import { WHISPER_MODEL_CATALOG } from '@bendyline/gezel-inference/internal/providers/audio/whisper-cpp';
+import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import {
   KOKORO_DEFAULT_MODEL_ID,
   KOKORO_DEFAULT_VOICES,
   isKokoroRuntimeAvailable,
 } from '../../providers/audio/kokoro.js';
-import type { AudioModelPullEvent, AudioModelPullSpec } from '../../providers/audio/types.js';
-import { WHISPER_MODEL_CATALOG } from '../../providers/audio/whisper-cpp.js';
 import type { EngineContext } from '../engine-context.js';
 import { subscribeToInstallSse } from './install-sse.js';
-import { machineEngineProxy } from './machine-engine-proxy.js';
 
 export function audioModelRoutes(ctx: EngineContext): Hono {
   const app = new Hono();

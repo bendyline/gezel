@@ -5,7 +5,7 @@ import type { InferencePlatform } from './types.js';
  * Platform-explicit path primitives. Never use the host `node:path` here:
  * the daemon decides the platform, and tests exercise all three from any
  * host. Comparison is case-insensitive on Windows and macOS (matching
- * `packages/service/src/fs/safe-paths.ts`), exact on Linux.
+ * `packages/inference/src/fs/safe-paths.ts`), exact on Linux.
  */
 
 export function toInferencePlatform(platform: string): InferencePlatform {

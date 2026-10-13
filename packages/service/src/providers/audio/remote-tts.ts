@@ -4,7 +4,6 @@
  * the WAV streams back and A persists it. `listVoices()` proxies B's voices.
  */
 
-import { parseRemoteModelId } from '../remote/model-id.js';
 import type {
   AudioEngineHealth,
   AudioModelPullEvent,
@@ -15,7 +14,8 @@ import type {
   SynthesizeOutput,
   SynthesizeProgress,
   TextToSpeechProvider,
-} from './types.js';
+} from '@bendyline/gezel-inference/internal/providers/audio/types';
+import { parseRemoteModelId } from '../remote/model-id.js';
 
 export interface RemoteTtsProviderOpts {
   remoteId: string;

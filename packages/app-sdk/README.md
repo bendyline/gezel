@@ -193,7 +193,7 @@ const gezel = await connectOrHost({
   appId: 'acme.travel',
   appName: 'Acme Travel',
   // Hosting is opt-in. Without `host`, a missing gezel is still an error.
-  host: { mode: 'in-process', inferenceOnly: true },
+  host: { mode: 'in-process' },
 });
 
 // Engine binary, weights, and the default-model pin, in one call.
@@ -224,12 +224,12 @@ await gezel.close();
 - **No Chromium.** The system bootstrap (Playwright plus a ~280 MB browser) is off unless you pass `host: { systemBootstrap: true }`.
 - **One per process.** The daemon reads its settings from the environment, so a second hosted daemon in the same process is refused. A second *instance of your app* adopts the daemon the first one started.
 - **Its own port.** A hosted daemon always listens on an ephemeral port, never the canonical 6228 that the machine broker or the user's own Gezel expects to own.
-- **An inference-only profile.** `host: { mode: 'in-process', inferenceOnly: true }` keeps on-device model listing, installation, and OpenAI-compatible inference, but does not start the standalone product's schedulers, channels, editor bridges, machine-service discovery, indexing, or maintenance jobs. Nor does it set up remote connectivity: no secret store (nothing in the OS keychain), no device identity, and no pairing or LAN-serving endpoints. The SDK calls the service through its direct in-process Fetch handler, so Electron needs neither a separate Node executable nor a loopback client connection.
+- **An inference-only profile.** `host: { inferenceOnly: true }` serves on-device model listing and installation, OpenAI-compatible chat and Responses, embeddings (`model: 'gezel:embeddings'` runs the on-device text embedder) and knowledge search — and nothing of the product: no projects, chats or app tools, so `ensureProject` and `openChat` need a full host. It starts no schedulers, channels, editor bridges, machine-service discovery, indexing or maintenance jobs, and sets up no remote connectivity: no secret store (nothing in the OS keychain), no device identity, and no pairing or LAN-serving endpoints. Both host modes serve the same surface. In-process, the SDK calls `@bendyline/gezel-inference` through its direct Fetch handler, so Electron needs neither a separate Node executable nor a loopback client connection.
 
-Install `@bendyline/gezel-service` alongside this SDK to host — it is an optional peer dependency, so apps that only connect never download it.
-Keep the SDK and service on compatible releases. Inference-only hosting verifies
-that the service actually started the embedded profile and supplied its direct
-Fetch transport; an older service fails immediately with
+Install `@bendyline/gezel-inference` alongside this SDK for inference-only in-process hosting, or `@bendyline/gezel-service` for full or child-process hosting. Both are optional peer dependencies, so apps that only connect never download either.
+Keep the SDK and the hosting package on compatible releases. Inference-only hosting verifies
+that the host actually started the embedded profile and supplied its direct
+Fetch transport; an older one fails immediately with
 `service_inference_only_unsupported` instead of silently starting the full
 product or falling back to loopback networking.
 

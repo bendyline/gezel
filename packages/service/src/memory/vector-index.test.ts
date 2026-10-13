@@ -19,7 +19,7 @@ afterEach(async () => {
 
 async function embeddingsWork(): Promise<boolean> {
   try {
-    const { embed } = await import('./embeddings.js');
+    const { embed } = await import('@bendyline/gezel-inference/internal/memory/embeddings');
     await embed('warmup');
     return true;
   } catch {

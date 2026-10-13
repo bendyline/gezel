@@ -16,7 +16,7 @@ import {
   isReservedTabularArtifactPath,
   normalizeInputPath,
 } from '@bendyline/gezel';
-import { PathSafetyError, resolveInside } from '../../fs/safe-paths.js';
+import { PathSafetyError, resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { discoverWorkspaceFiles } from '../../workspace/file-walk.js';
 
 /** The file set one input resolves to, before anything is written. */

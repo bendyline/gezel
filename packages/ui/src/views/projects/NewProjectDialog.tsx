@@ -5,6 +5,10 @@ import {
   type ProjectDetail,
   type ProjectTypeCategory,
   connectorCraftbookIds,
+  interestAreasForProjectType,
+  interestAreasForProjectTypeCategory,
+  orderByInterests,
+  servesInterests,
   visibleCatalogItems,
 } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
@@ -19,6 +23,7 @@ import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
 import { GitHubSignInChip } from '../../components/GithubSignInChip.js';
 import { connectMailboxOAuth, linkImapMailbox } from '../../components/mail-link.js';
 import { useKlerkInfo } from '../../components/transform/useKlerkInfo.js';
+import { useInterests } from '../../components/useInterests.js';
 import { useShowWorkInProgressFeatures } from '../../components/useShowWorkInProgressFeatures.js';
 import { Dialog, DropdownChevron } from '../../primitives/index.js';
 import { runtimeCapabilities } from '../../runtime-capabilities.js';
@@ -553,14 +558,38 @@ export function NewProjectDialog({
   // new catalog content lights categories up with no dialog changes. An
   // active search overrides the rail filter (results span all categories).
   const searching = normalizedProjectTypeQuery.length > 0;
+  // The person's interest areas put their shelves, and their types within a
+  // shelf, first. Ordering only: every category and type stays.
+  const interests = useInterests();
+  const categoriesInOrder = useMemo(
+    () =>
+      orderByInterests(
+        PROJECT_CATEGORIES,
+        (cat) => interestAreasForProjectTypeCategory(cat.id),
+        interests.areas,
+      ),
+    [interests.areas],
+  );
   const sections = useMemo(
     () =>
-      PROJECT_CATEGORIES.map((cat) => ({
-        cat,
-        builtins: filteredProjectKinds.filter((k) => k.category === cat.id),
-        types: filteredProjectTypes.filter((t) => categorizeCatalogType(t) === cat.id),
-      })).filter((s) => s.builtins.length + s.types.length > 0),
-    [filteredProjectKinds, filteredProjectTypes],
+      categoriesInOrder
+        .map((cat) => ({
+          cat,
+          builtins: filteredProjectKinds.filter((k) => k.category === cat.id),
+          types: orderByInterests(
+            filteredProjectTypes.filter((t) => categorizeCatalogType(t) === cat.id),
+            (t) =>
+              t.manifest.kind === 'project-type'
+                ? interestAreasForProjectType({
+                    ...(t.manifest.interests ? { interests: t.manifest.interests } : {}),
+                    category: categorizeCatalogType(t),
+                  })
+                : [],
+            interests.areas,
+          ),
+        }))
+        .filter((s) => s.builtins.length + s.types.length > 0),
+    [categoriesInOrder, filteredProjectKinds, filteredProjectTypes, interests.areas],
   );
   const visibleSections =
     searching || activeCategory === 'all'
@@ -568,14 +597,35 @@ export function NewProjectDialog({
       : sections.filter((s) => s.cat.id === activeCategory);
   const railEntries = useMemo(
     () =>
-      PROJECT_CATEGORIES.map((cat) => ({
-        cat,
-        count:
-          availableProjectKinds.filter((k) => k.category === cat.id).length +
-          projectTypes.filter((t) => categorizeCatalogType(t) === cat.id).length,
-      })).filter((entry) => entry.count > 0),
-    [availableProjectKinds, projectTypes],
+      categoriesInOrder
+        .map((cat) => ({
+          cat,
+          count:
+            availableProjectKinds.filter((k) => k.category === cat.id).length +
+            projectTypes.filter((t) => categorizeCatalogType(t) === cat.id).length,
+        }))
+        .filter((entry) => entry.count > 0),
+    [availableProjectKinds, projectTypes, categoriesInOrder],
   );
+  // Land on the person's first shelf once per open; All stays one click away.
+  const landedRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      landedRef.current = false;
+      return;
+    }
+    if (landedRef.current || !interests.loaded || projectTypes.length === 0) return;
+    landedRef.current = true;
+    // A shelf that holds only "soon" placeholders or types this host cannot
+    // run is no place to land; the next matching one is.
+    const first = sections.find(
+      (section) =>
+        servesInterests(interestAreasForProjectTypeCategory(section.cat.id), interests.areas) &&
+        (section.builtins.some((kind) => !kind.soon) ||
+          section.types.some((type) => !type.unavailableReason)),
+    );
+    if (first) setActiveCategory(first.cat.id);
+  }, [open, interests.loaded, interests.areas, projectTypes.length, sections]);
   const paneSelection: PaneSelection = selectedType
     ? { source: 'catalog', item: selectedType }
     : {
@@ -1032,7 +1082,7 @@ export function NewProjectDialog({
                             )}
                           </div>
                           <small className="muted">
-                            Read-only: gezels read this folder and change nothing in it unless you
+                            Read-only: gezellen read this folder and change nothing in it unless you
                             allow it in the project's settings.
                           </small>
                         </label>

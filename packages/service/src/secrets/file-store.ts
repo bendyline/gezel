@@ -1,8 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { chmod, mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { secretsFile, secretsKeyFile } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   type SecretKey,
   type SecretStore,
@@ -10,7 +9,8 @@ import {
   SecretStoreCorruptError,
   stringifySecretKey,
   toolsetKeyPrefix,
-} from './types.js';
+} from '@bendyline/gezel-inference/internal/secrets/types';
+import { secretsFile, secretsKeyFile } from '@bendyline/gezel/paths';
 
 /**
  * Encrypted-file SecretStore. Not as strong as the OS keyring — assumes

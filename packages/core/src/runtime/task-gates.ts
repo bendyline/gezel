@@ -6,16 +6,19 @@ import {
   type GateScriptRef,
   normalizeStepGate,
 } from '../schemas/gate.js';
-import type { Task, TaskCraftbookStep } from '../schemas/task.js';
+import { type Task, type TaskCraftbookStep, taskEffectiveStatus } from '../schemas/task.js';
+import { stepOwnerGezelId } from '../task-execution.js';
 import {
   type GateWorkspaceReader,
   SHARED_GATE_CHECK_KINDS,
+  type SharedGateCheck,
   evaluateDeclarativeCheck,
   formatGateVerdict,
   isSharedGateCheck,
   locateMissingGateFiles,
 } from '../tasks/gate-checks.js';
 import { evaluateGateScripts } from '../tasks/gate-scripts.js';
+import { completionGateWorkspaceFiles } from '../tasks/gate-workspace-files.js';
 import type { PortableStore } from './store.js';
 import type { PortableTaskGateResult } from './tasks.js';
 
@@ -169,4 +172,41 @@ export async function evaluatePortableTaskGate(
       message: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+/**
+ * Mid-turn twin of the step's end-of-turn advance: true once the active
+ * step's workspace `advanceWhen` file passes the same floor the runner
+ * applies after the turn, for the step this session's gezel still owns,
+ * and every other workspace file the completion gate reads exists. The
+ * local loop reads it to stop a finished step before the iteration cap.
+ */
+export async function portableDeliverableReady(
+  store: PortableStore,
+  ref: string,
+  stepId: string,
+  gezelId: string,
+): Promise<boolean> {
+  const task = await store.getTask(ref);
+  if (!task || taskEffectiveStatus(task) !== 'active' || task.activeStepId !== stepId) return false;
+  const step = task.craftbook.steps.find((item) => item.id === stepId);
+  const advance = step?.advanceWhen;
+  if (!step || !advance || advance.artifact || advance.requireChange) return false;
+  if (stepOwnerGezelId(task, step) !== gezelId) return false;
+  const ws = reader(store, task.projectId);
+  const checks: SharedGateCheck[] = [
+    { kind: 'minBytes', file: advance.file, bytes: advance.minBytes ?? 1 },
+    ...(advance.sniff
+      ? [{ kind: 'sniff' as const, file: advance.file, sniff: advance.sniff }]
+      : []),
+  ];
+  for (const check of checks) {
+    if (!(await evaluateDeclarativeCheck(check, ws)).ok) return false;
+  }
+  const gate = step.gate ? normalizeStepGate(step.gate) : undefined;
+  if (gate?.at !== 'completion') return true;
+  for (const file of completionGateWorkspaceFiles(gate.checks, advance.file)) {
+    if ((await store.readFile('workspace', task.projectId, file)) === null) return false;
+  }
+  return true;
 }

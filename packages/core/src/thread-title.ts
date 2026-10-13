@@ -5,12 +5,9 @@ export const NEW_THREAD_TITLE = 'New session';
 
 export const THREAD_TITLE_MAX_LENGTH = 60;
 
-const MAX_TITLE_WORDS = 7;
-
 /**
- * Glue and conversational framing that rarely help distinguish one thread
- * from another. The extractor remains deliberately small and deterministic:
- * it is a title heuristic, not a natural-language model hidden in the daemon.
+ * Glue and conversational framing. A sentence made only of these is no
+ * topic, so the title keeps the person's words as they wrote them.
  */
 const STOP_WORDS = new Set([
   'a',
@@ -200,9 +197,9 @@ function meaningfulTokens(input: string): TitleToken[] {
   return tokens;
 }
 
-function selectTopicText(input: string): string {
+function selectTopic(input: string): { prefix: string; sentence: string } {
   const normalized = stripMarkup(input);
-  if (!normalized) return '';
+  if (!normalized) return { prefix: '', sentence: '' };
 
   // Project-type reactions use "[Checkers page]: …". The surface name is
   // valuable context, while the literal word "page" is chrome rather than
@@ -216,7 +213,7 @@ function selectTopicText(input: string): string {
     .filter(Boolean);
   const sentence =
     sentences.find((part) => meaningfulTokens(part).length > 0) ?? sentences[0] ?? body;
-  return [prefix, sentence].filter(Boolean).join(' ');
+  return { prefix, sentence };
 }
 
 function capitalizeFirstWord(title: string): string {
@@ -227,64 +224,55 @@ function capitalizeFirstWord(title: string): string {
   return `${title.slice(0, firstLetter)}${letter.toLocaleUpperCase()}${title.slice(firstLetter + 1)}`;
 }
 
-function fitTitle(tokens: TitleToken[]): string {
-  let title = '';
-  for (const token of tokens) {
-    const next = title ? `${title} ${token.raw}` : token.raw;
-    if (next.length > THREAD_TITLE_MAX_LENGTH) continue;
-    title = next;
-  }
-  if (title) return capitalizeFirstWord(title);
+/**
+ * Requests open with framing that names no topic. Peeled off so the title
+ * starts where the person's request does.
+ */
+const LEAD_IN_RE =
+  /^(?:(?:hi|hey|hello)[,!.]?\s+(?=\S+\s+\S))?(?:(?:could|can|would|will) you\s+|please\s+|kindly\s+|i(?:'d| would) like (?:you )?to\s+|i want (?:you )?to\s+|help me(?: to)?\s+)+/i;
 
-  const first = tokens[0]?.raw ?? '';
-  return capitalizeFirstWord(first.slice(0, THREAD_TITLE_MAX_LENGTH).trim());
+/** Clause breaks a long sentence may be cut at without losing its sense. */
+const CLAUSE_BREAK_RE = /\s*(?:[,;:]|\s[-–—]\s)\s*/g;
+
+/** Glue a title should not end on once it has been cut short. */
+const TRAILING_GLUE_RE = /(?:\s+(?:a|an|and|at|by|for|from|in|of|on|or|the|to|with))+$/i;
+
+/**
+ * Cut a sentence to the title limit: at the last clause break that keeps
+ * most of it, else at a word, with an ellipsis to say there is more.
+ */
+function fitSentence(sentence: string): string {
+  if (sentence.length <= THREAD_TITLE_MAX_LENGTH) return sentence;
+  let clause = '';
+  for (const match of sentence.matchAll(CLAUSE_BREAK_RE)) {
+    const head = sentence.slice(0, match.index).trim();
+    if (head.length > THREAD_TITLE_MAX_LENGTH) break;
+    clause = head;
+  }
+  if (clause.length >= THREAD_TITLE_MAX_LENGTH * 0.6) return clause;
+  const room = sentence.slice(0, THREAD_TITLE_MAX_LENGTH - 1);
+  const boundary = room.lastIndexOf(' ');
+  const head = (boundary > 0 ? room.slice(0, boundary) : room)
+    .replace(/[\s,;:.-]+$/, '')
+    .replace(TRAILING_GLUE_RE, '');
+  return `${head || room.trim()}…`;
 }
 
 /**
- * Build a compact, extractive title from a thread starter. Repeated subject
- * words, technical tokens, and longer specific words receive a small score;
- * the winners are rendered in their original order so the result remains
- * recognizable as text the user actually wrote.
+ * Title a thread with the person's own sentence: the first one that says
+ * something, without its conversational lead-in, cut to the limit at a
+ * clause or a word. Keyword extraction made "Plan a trip to Lisbon next
+ * spring for the four of us" read "Plan trip Lisbon next spring four week".
  */
 export function deriveThreadTitle(input: string): string {
-  const topicText = selectTopicText(input);
-  const tokens = meaningfulTokens(topicText);
-  if (tokens.length === 0) {
-    const fallback = stripMarkup(topicText || input)
-      .replace(/[.!?,;:]+$/g, '')
-      .trim();
-    if (!fallback) return 'Untitled';
-    const clipped = fallback.slice(0, THREAD_TITLE_MAX_LENGTH);
-    const boundary = clipped.length < fallback.length ? clipped.lastIndexOf(' ') : -1;
-    return capitalizeFirstWord((boundary > 10 ? clipped.slice(0, boundary) : clipped).trim());
-  }
-
-  const unique = new Map<string, TitleToken>();
-  const frequency = new Map<string, number>();
-  for (const token of tokens) {
-    frequency.set(token.key, (frequency.get(token.key) ?? 0) + 1);
-    if (!unique.has(token.key)) unique.set(token.key, token);
-  }
-
-  const candidates = [...unique.values()];
-  const selected =
-    candidates.length <= MAX_TITLE_WORDS
-      ? candidates
-      : candidates
-          .map((token) => ({
-            token,
-            score:
-              (frequency.get(token.key) ?? 1) * 3 +
-              Math.min(token.raw.length, 14) / 7 +
-              (/\d|[._+#:/@-]/.test(token.raw) ? 2 : 0) +
-              Math.max(0, 0.5 - token.position * 0.03),
-          }))
-          .sort((a, b) => b.score - a.score || a.token.position - b.token.position)
-          .slice(0, MAX_TITLE_WORDS)
-          .map(({ token }) => token)
-          .sort((a, b) => a.position - b.position);
-
-  return fitTitle(selected) || 'Untitled';
+  const { prefix, sentence: topic } = selectTopic(input);
+  const sentence = topic.replace(/[.!?,;:]+$/g, '').trim();
+  const peeled = sentence.replace(LEAD_IN_RE, '').trim();
+  // A request that is all framing ("Can you help?") keeps its own words.
+  const words = peeled && meaningfulTokens(peeled).length > 0 ? peeled : sentence;
+  if (!words) return 'Untitled';
+  const titled = capitalizeFirstWord(words);
+  return fitSentence(prefix ? `${prefix}: ${titled}` : titled) || 'Untitled';
 }
 
 export type ThreadTitleMessage = Pick<

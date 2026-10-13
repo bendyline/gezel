@@ -8,9 +8,9 @@ import {
   resolvePreviewImport,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
+import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { compilePreviewModule } from '@bendyline/gezel-script-runtime/preview-module';
 import { Hono } from 'hono';
-import { realpathContained, safeJoin } from '../../fs/safe-paths.js';
 import { resolvePageTools } from '../../project-type/script-tools.js';
 import type { ServiceContext } from '../context.js';
 import { mimeTypeForPath } from '../mime.js';

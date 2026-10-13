@@ -8,6 +8,7 @@ import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import { GlobalIndexManager, chunkTranscript } from './global-index-manager.js';
 import { GlobalIndex, openGlobalCollection } from './global-index.js';
+import { openIndexDatabase } from './sqlite-driver.js';
 
 let home: string;
 let store: Store;
@@ -295,5 +296,43 @@ describe('GlobalIndexManager history mirror', () => {
     const events = await history.listEvents({ q: 'Ada', limit: 5 });
     expect(events).toHaveLength(2);
     expect(events[0]?.kind).toBe('gezel.renamed');
+  });
+});
+
+describe('GlobalIndexManager contention recovery', () => {
+  it('retains session and history updates while a writer holds the database', async () => {
+    if (!ftsAvailable) return;
+    history.subscribe((ev) => manager.enqueueHistory(ev));
+    await store.writeSession(makeSession());
+    const eventId = 'contention-event';
+    await history.log({
+      id: eventId,
+      kind: 'gezel.created',
+      gezelId: 'ada',
+      summary: 'Contention recovery marker',
+    });
+    const writer = await openIndexDatabase(globalIndexDbFile(home));
+    expect(writer).not.toBeNull();
+    try {
+      writer!.exec('BEGIN IMMEDIATE');
+      const start = performance.now();
+      await manager.flush();
+      expect(performance.now() - start).toBeLessThan(1_000);
+      // Read callers degrade transiently; queued writes must remain intact.
+      expect(await openGlobalCollection(home, 'sessions')).toBeNull();
+      writer!.exec('COMMIT');
+      await manager.flush();
+      expect(await globalIndex.searchSessions('frobnicate')).toHaveLength(1);
+      const index = await openGlobalCollection(home, 'history');
+      expect(index).not.toBeNull();
+      try {
+        expect(index!.historyCount()).toBe(1);
+        expect(index!.searchHistory({ q: 'Contention' })?.[0]?.id).toBe(eventId);
+      } finally {
+        index?.close();
+      }
+    } finally {
+      writer!.close();
+    }
   });
 });

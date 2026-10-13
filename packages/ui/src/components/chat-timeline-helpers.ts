@@ -86,7 +86,13 @@ export function isModelUnavailableError(message: string): boolean {
 }
 
 export function isExpectedAvailabilityError(detail?: ChatTurnErrorDetail): boolean {
-  return detail?.code === 'capacity-denied' || detail?.code === 'engine-busy';
+  return (
+    detail?.code === 'capacity-denied' ||
+    detail?.code === 'engine-busy' ||
+    // Waiting on a first download is not a defect to report.
+    detail?.code === 'model-not-ready' ||
+    detail?.code === 'engine-not-ready'
+  );
 }
 
 /**
@@ -100,6 +106,10 @@ export function isRetryableFailedTurn(message: string, detail?: ChatTurnErrorDet
   if (/\bdo not retry\b|\bcannot run on this machine\b/i.test(message)) return false;
   if (detail?.code === 'engine-busy' || detail?.code === 'capacity-denied') return true;
   if (detail?.code === 'native-engine-crash') return true;
+  if (detail?.code === 'engine-not-ready') return true;
+  // A download under way will finish; with nothing downloading, Retry would
+  // only fail the same way and the setup key is the answer.
+  if (detail?.code === 'model-not-ready') return !/no model is installed/i.test(message);
   return /\bretry the turn\b|\bsend (?:the )?message again\b|\bretry \(the cache is warm now\)|\btry a shorter prompt, retry\b/i.test(
     message,
   );
@@ -113,6 +123,37 @@ const NO_FILES: readonly ReferencedFile[] = [];
  * shape on read, so this fallback is for live SSE rows written by an older
  * daemon — a stable empty array otherwise, to keep the bubble's memos warm.
  */
+/**
+ * Where a turn that failed before it began is already told, so its salvage
+ * record need not tell it again. A first message said the engine was
+ * downloading three times over: a placeholder bubble, an amber warning, and
+ * the live slot's red "Turn stopped" card with Retry.
+ *
+ * - `'live'`: the session's live slot is showing the failure; the record
+ *   adds nothing, so it is not drawn until the slot retires.
+ * - `'card'`: the session's "Last turn failed" card is showing it; the
+ *   record keeps only its placeholder line.
+ * - `null`: nowhere else; the record is where the reason stays readable.
+ */
+export function turnFailureShownElsewhere(
+  message: Pick<
+    TimelineMessage,
+    'synthetic' | 'content' | 'warnings' | 'sessionLastTurnError' | 'projectId'
+  >,
+  opts: { liveError?: string; cardAcknowledged: boolean },
+): 'live' | 'card' | null {
+  if (message.synthetic !== 'turn-aborted') return null;
+  const warnings = message.warnings ?? [];
+  const same = (a: string, b: string) => a.slice(0, 500) === b.slice(0, 500);
+  if (opts.liveError !== undefined) {
+    const liveError = opts.liveError;
+    return !message.content.trim() && warnings.every((w) => same(w, liveError)) ? 'live' : null;
+  }
+  const card = message.sessionLastTurnError;
+  if (!card || opts.cardAcknowledged) return null;
+  return warnings.every((w) => same(w, card)) ? 'card' : null;
+}
+
 export function referencedFilesOf(message: TimelineMessage): readonly ReferencedFile[] {
   if (message.referencedFiles?.length) return message.referencedFiles;
   if (!message.referencedArtifacts?.length) return NO_FILES;
@@ -156,4 +197,15 @@ export function formatProviderLabel(p: ProviderName): string {
     case 'remote':
       return 'Remote';
   }
+}
+
+/** The row id of the newest task wrap-up in a timeline, or null. */
+export function latestWrapUpKey(
+  messages: readonly Pick<TimelineMessage, 'sessionId' | 'at' | 'role' | 'synthetic'>[],
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.synthetic === 'task-wrapup') return `msg:${m.sessionId}:${m.at}:${m.role}`;
+  }
+  return null;
 }

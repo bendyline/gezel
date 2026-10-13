@@ -122,8 +122,8 @@
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background: var(--accent, #b0724c);
-  color: #fff;
+  background: var(--action-bg);
+  color: var(--action-ink);
   padding: 0.08rem 0.45rem;
   border-radius: 3px;
   font-weight: 600;
@@ -717,8 +717,8 @@
 }
 
 .meester-new-form .primary {
-  background: var(--accent, #b0724c);
-  color: #fff;
+  background: var(--action-bg);
+  color: var(--action-ink);
   border: none;
   border-radius: 4px;
   padding: 0.35rem 0.85rem;

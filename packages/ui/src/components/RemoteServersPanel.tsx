@@ -7,6 +7,7 @@ import type {
 } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 
@@ -450,6 +451,7 @@ export function RemoteServersPanel() {
               min={1}
               max={65535}
               placeholder="6229"
+              aria-label="Server port"
               value={draft.port}
               onChange={(e) => editDraft({ port: e.target.value })}
             />
@@ -459,6 +461,7 @@ export function RemoteServersPanel() {
             <input
               type="text"
               placeholder="all networks (0.0.0.0)"
+              aria-label="Bind address"
               value={draft.bindAddress}
               onChange={(e) => editDraft({ bindAddress: e.target.value })}
             />
@@ -469,6 +472,7 @@ export function RemoteServersPanel() {
               type="number"
               min={1}
               placeholder="4"
+              aria-label="Max concurrent per device"
               value={draft.maxConcurrentPerDevice}
               onChange={(e) => editDraft({ maxConcurrentPerDevice: e.target.value })}
             />
@@ -479,6 +483,7 @@ export function RemoteServersPanel() {
               type="number"
               min={1}
               placeholder="same as concurrent"
+              aria-label="Max chat per device"
               value={draft.maxChatPerDevice}
               onChange={(e) => editDraft({ maxChatPerDevice: e.target.value })}
             />
@@ -489,6 +494,7 @@ export function RemoteServersPanel() {
               type="number"
               min={1}
               placeholder="unlimited"
+              aria-label="Requests per minute per device"
               value={draft.requestsPerMinute}
               onChange={(e) => editDraft({ requestsPerMinute: e.target.value })}
             />
@@ -501,13 +507,19 @@ export function RemoteServersPanel() {
             <input
               type="text"
               placeholder="all installed models"
+              aria-label="Allowed models"
               value={draft.allowModels}
               onChange={(e) => editDraft({ allowModels: e.target.value })}
             />
           </div>
           <div className="remote-serving-field remote-serving-field-wide">
             <span className="muted small">When remote and local work compete</span>
-            <div className="gz-tray" role="radiogroup" aria-label="Remote work priority">
+            <div
+              className="gz-tray"
+              role="radiogroup"
+              onKeyDown={onRadioKeyDown}
+              aria-label="Remote work priority"
+            >
               {PRIORITY_CHOICES.map((choice) => (
                 <button
                   key={choice.id}
@@ -515,6 +527,7 @@ export function RemoteServersPanel() {
                   // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
                   role="radio"
                   aria-checked={draft.priority === choice.id}
+                  tabIndex={draft.priority === choice.id ? 0 : -1}
                   className={`gz-key${draft.priority === choice.id ? ' gz-key-active' : ''}`}
                   title={choice.title}
                   onClick={() => editDraft({ priority: choice.id })}
@@ -611,12 +624,14 @@ export function RemoteServersPanel() {
           <input
             type="text"
             placeholder="https://192.168.1.50:6229"
+            aria-label="Server URL"
             value={pairUrl}
             onChange={(e) => setPairUrl(e.target.value)}
           />
           <input
             type="text"
             placeholder="Name (optional)"
+            aria-label="Server name (optional)"
             value={pairName}
             onChange={(e) => setPairName(e.target.value)}
           />

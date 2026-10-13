@@ -13,27 +13,30 @@
 
 import { autoCompactedNotice, createLogger } from '@bendyline/gezel';
 import {
-  isLlamaCppGrammarParseError,
-  simplifyJsonSchemaForLlamaCpp,
-} from '../llama-cpp/tool-grammar.js';
-import type { McpBridgePool } from '../mcp-bridge-pool.js';
-import { computeToolBudgetChars } from '../mcp-bridge.js';
-import { TOOL_IMAGES_MESSAGE, retireInspectedToolImages } from '../mlx/tool-image-retention.js';
-import { unseenToolImagesNote, withoutImages } from '../mlx/vision-mode.js';
-import { CapacityDeniedError, EngineBusyError } from '../native/capacity-broker.js';
+  TOOL_IMAGES_MESSAGE,
+  retireInspectedToolImages,
+} from '@bendyline/gezel-inference/internal/providers/mlx/tool-image-retention';
+import {
+  unseenToolImagesNote,
+  withoutImages,
+} from '@bendyline/gezel-inference/internal/providers/mlx/vision-mode';
+import {
+  CapacityDeniedError,
+  EngineBusyError,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 import {
   PROJECT_MACRO_FAILURE_CAP,
   deriveProjectMacroClosing,
-} from '../project-macro-loop-bail.js';
-import type { ProviderQueue } from '../queue.js';
-import { runInQueue } from '../queue.js';
-import { StreamingSessionBase } from '../streaming-session.js';
+} from '@bendyline/gezel-inference/internal/providers/project-macro-loop-bail';
+import type { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import { runInQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import { StreamingSessionBase } from '@bendyline/gezel-inference/internal/providers/streaming-session';
 import {
   TERMINAL_ACTION_SKIPPED_OUTPUT,
   terminalToolClosingText,
-} from '../terminal-tool-policy.js';
-import { ToolFailureTracker } from '../tool-failure-tracker.js';
-import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
+} from '@bendyline/gezel-inference/internal/providers/terminal-tool-policy';
+import { ToolFailureTracker } from '@bendyline/gezel-inference/internal/providers/tool-failure-tracker';
+import { ToolRepeatTracker } from '@bendyline/gezel-inference/internal/providers/tool-repeat-tracker';
 import type {
   ExternalToolCall,
   ExternalToolSpec,
@@ -42,8 +45,14 @@ import type {
   ProviderSessionState,
   SendAndWaitOpts,
   SessionOpts,
-} from '../types.js';
-import { buildTurnUsage } from '../usage-builder.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
+import { buildTurnUsage } from '@bendyline/gezel-inference/internal/providers/usage-builder';
+import {
+  isLlamaCppGrammarParseError,
+  simplifyJsonSchemaForLlamaCpp,
+} from '../llama-cpp/tool-grammar.js';
+import type { McpBridgePool } from '../mcp-bridge-pool.js';
+import { computeToolBudgetChars } from '../mcp-bridge.js';
 import {
   isEngineBusyResponse,
   isTenantConcurrencyResponse,

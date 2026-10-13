@@ -9,7 +9,7 @@ import {
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 
-import type { SynthesizeChunk } from '../../providers/audio/types.js';
+import type { SynthesizeChunk } from '@bendyline/gezel-inference/internal/providers/audio/types';
 
 import type { ServiceContext } from '../context.js';
 import { audioModelRoutes } from './audio-models.js';

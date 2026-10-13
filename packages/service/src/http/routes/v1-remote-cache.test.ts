@@ -1,6 +1,6 @@
+import type { LLMProvider, SessionOpts } from '@bendyline/gezel-inference/internal/providers/types';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
-import type { LLMProvider, SessionOpts } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
 import { v1RemoteRoutes } from './v1-remote.js';
 

@@ -48,6 +48,7 @@ function createGezelChatTheme(): Theme {
 
   return {
     ...themeWithoutLayers,
+    colors: { ...baseTheme.colors, primary: '#ce966f' },
     ...(pageStyle
       ? {
           pageStyle: {
@@ -60,3 +61,13 @@ function createGezelChatTheme(): Theme {
 }
 
 export const gezelChatTheme: Theme = createGezelChatTheme();
+
+const lightChatTheme: Theme = {
+  ...gezelChatTheme,
+  colors: { ...gezelChatTheme.colors, primary: '#924e2a' },
+};
+
+/** The default reading palette needs different link ink on light paper. */
+export function gezelChatThemeForMode(mode: 'light' | 'dark'): Theme {
+  return mode === 'light' ? lightChatTheme : gezelChatTheme;
+}

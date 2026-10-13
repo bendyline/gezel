@@ -27,6 +27,7 @@ import {
   useReasoningSupport,
 } from '../components/ModelPicker.js';
 import { NotificationsSetting } from '../components/NotificationsSetting.js';
+import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloads.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
 import { SocialModeToggle } from '../components/SocialModeToggle.js';
 import { StartAtLoginToggle } from '../components/StartAtLoginToggle.js';
@@ -36,6 +37,7 @@ import { useCopilotAvailability } from '../components/useCopilotAvailability.js'
 import { useTotalRamBytes } from '../components/useTotalRamBytes.js';
 import { Poppetje } from '../poppetje/index.js';
 import { Select } from '../primitives/index.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
 import { clearPendingSettingsSection, peekPendingSettingsSection } from '../settings-nav.js';
@@ -49,6 +51,7 @@ import { HostModelSettings } from './HostModelSettings.js';
 import { MemorySection } from './MemorySection.js';
 import { ProviderUsagePanel } from './ProviderUsagePanel.js';
 import { SidebarSidePicker, ThemePicker } from './SettingsAppearance.js';
+import { SettingsInterests } from './SettingsInterests.js';
 import { SettingsLegalSection } from './SettingsLegal.js';
 import { SettingsSectionPicker } from './SettingsSectionPicker.js';
 import {
@@ -798,7 +801,7 @@ function DaemonSettingsView() {
     try {
       const res = await api.resetGezelTemplates();
       const n = res.reset.length;
-      setStatus(`reset ${n} gezel${n === 1 ? '' : 's'} to template defaults`);
+      setStatus(`reset ${n} ${n === 1 ? 'gezel' : 'gezellen'} to template defaults`);
     } catch (err) {
       setStatus(`reset failed: ${(err as Error).message}`);
     }
@@ -943,8 +946,8 @@ function DaemonSettingsView() {
       window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setStatus(
         show
-          ? 'gezels show their names and poppetjes'
-          : 'gezels show role-based names and plain letter avatars',
+          ? 'gezellen show their names and poppetjes'
+          : 'gezellen show role-based names and plain letter avatars',
       );
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
@@ -1313,7 +1316,7 @@ function DaemonSettingsView() {
   const codexCliReasoningSupported = useReasoningSupport(
     'codex-cli',
     config?.defaultModel?.['codex-cli'],
-    'gpt-5.5',
+    'gpt-6.1-sol',
     codexCliControlsShown && codexCliProbe.kind === 'ok',
   );
 
@@ -1490,7 +1493,7 @@ function DaemonSettingsView() {
   // installed-model listing — the generic /api/models route reaches out to the
   // provider (and can auto-start Ollama), which is too much to spend on a nav
   // label. Cloud providers show the configured id, which is already the name
-  // people use for those models ("gpt-5.5").
+  // people use for those models ("gpt-6.1-sol").
   const configuredDefaultModel = config?.defaultModel?.[provider];
   const [defaultModelName, setDefaultModelName] = useState<string | undefined>(undefined);
   useEffect(() => {
@@ -1719,6 +1722,7 @@ function DaemonSettingsView() {
                 </p>
                 <HealthStrip />
               </section>
+              <SettingsInterests />
               <section style={{ marginBottom: '2rem' }}>
                 <h3>Appearance</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
@@ -2031,7 +2035,7 @@ function DaemonSettingsView() {
                 <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
                   The daily reserve scales with the time left: 10% a day with 4 days until reset
                   keeps the last 40% for you. Work already running finishes; held work resumes when
-                  your quota frees up. Gezels on local models are never held.
+                  your quota frees up. Gezellen on local models are never held.
                 </p>
               </section>
               <section style={{ marginTop: '2rem' }}>
@@ -2039,7 +2043,7 @@ function DaemonSettingsView() {
                 <p className="muted" style={{ marginTop: 0 }}>
                   Restore every gezel created from a template back to the <code>about.md</code>{' '}
                   their template ships, discarding any edits you’ve made to their instructions.
-                  Bespoke gezels (written from scratch) are left untouched.
+                  Bespoke gezellen (written from scratch) are left untouched.
                 </p>
                 <button type="button" className="subtle" onClick={() => void resetTemplatesNow()}>
                   Reset to defaults
@@ -2866,7 +2870,7 @@ function DaemonSettingsView() {
                             <EffortTray
                               provider="codex-cli"
                               model={config?.defaultModel?.['codex-cli']}
-                              defaultModel="gpt-5.5"
+                              defaultModel="gpt-6.1-sol"
                               value={config?.codexCli?.defaultReasoningEffort ?? ''}
                               onChange={(value) =>
                                 void saveCodexCli({
@@ -3086,7 +3090,12 @@ function DaemonSettingsView() {
 
                   {nightShiftModelOverride?.enabled === true && (
                     <div style={{ marginTop: '0.8rem' }}>
-                      <div className="gz-tray" role="radiogroup" aria-label="Night Shift provider">
+                      <div
+                        className="gz-tray"
+                        role="radiogroup"
+                        onKeyDown={onRadioKeyDown}
+                        aria-label="Night Shift provider"
+                      >
                         {nightShiftProviderChoices.map((choice) => (
                           <button
                             key={choice.id}
@@ -3094,6 +3103,16 @@ function DaemonSettingsView() {
                             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
                             role="radio"
                             aria-checked={nightShiftProvider === choice.id}
+                            tabIndex={
+                              nightShiftProvider === choice.id ||
+                              (providerBlocked(nightShiftProvider) &&
+                                choice ===
+                                  nightShiftProviderChoices.find(
+                                    (candidate) => !providerBlocked(candidate.id),
+                                  ))
+                                ? 0
+                                : -1
+                            }
                             className={`gz-key${
                               nightShiftProvider === choice.id ? ' gz-key-active' : ''
                             }`}
@@ -3131,6 +3150,18 @@ function DaemonSettingsView() {
                     </div>
                   )}
                 </div>
+              </section>
+
+              {/* The optional media models (images, image reading, speech) used to
+                  sit on first-run setup. First run now asks only for the chat
+                  model, so the recommended set that fits this device lives here. */}
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Media models</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Optional models that let gezellen make images, read them, and speak and listen —
+                  the ones that fit this device.
+                </p>
+                <RecommendedMediaDownloads />
               </section>
 
               <GeneralistModeSection
@@ -3314,7 +3345,7 @@ function DaemonSettingsView() {
                         href="https://github.com/settings/tokens"
                         target="_blank"
                         rel="noreferrer"
-                        style={{ color: 'var(--accent)' }}
+                        style={{ color: 'var(--accent-text)' }}
                       >
                         GitHub personal access token
                       </a>{' '}
@@ -3423,7 +3454,7 @@ function DaemonSettingsView() {
                       href="https://platform.openai.com/api-keys"
                       target="_blank"
                       rel="noreferrer"
-                      style={{ color: 'var(--accent)' }}
+                      style={{ color: 'var(--accent-text)' }}
                     >
                       platform.openai.com/api-keys
                     </a>{' '}
@@ -3452,6 +3483,7 @@ function DaemonSettingsView() {
                   <input
                     type="password"
                     placeholder={hasOpenaiKey ? 'Replace key…' : 'Paste OpenAI API key (sk-…)'}
+                    aria-label="OpenAI API key"
                     value={openaiKeyDraft}
                     onChange={(e) => setOpenaiKeyDraft(e.target.value)}
                     style={{ flex: 1 }}
@@ -3459,6 +3491,7 @@ function DaemonSettingsView() {
                   <input
                     type="text"
                     placeholder="Organization (optional)"
+                    aria-label="Organization (optional)"
                     value={openaiOrgDraft}
                     onChange={(e) => setOpenaiOrgDraft(e.target.value)}
                     style={{ width: 200 }}
@@ -3503,7 +3536,7 @@ function DaemonSettingsView() {
                   href="https://github.com/openai/codex"
                   target="_blank"
                   rel="noreferrer"
-                  style={{ color: 'var(--accent)' }}
+                  style={{ color: 'var(--accent-text)' }}
                 >
                   Codex CLI
                 </a>{' '}
@@ -3514,7 +3547,7 @@ function DaemonSettingsView() {
                   Connection
                 </label>
                 {codexCliProbe.kind === 'ok' && (
-                  <span style={{ color: 'var(--success)', fontSize: '0.9rem' }}>
+                  <span style={{ color: 'var(--success-text)', fontSize: '0.9rem' }}>
                     ✓ Codex CLI ready ({codexCliProbe.modelCount} models)
                   </span>
                 )}
@@ -3566,6 +3599,7 @@ function DaemonSettingsView() {
                   <div
                     className="gz-tray gz-tray--described"
                     role="radiogroup"
+                    onKeyDown={onRadioKeyDown}
                     aria-label="Default Codex access"
                   >
                     {CODEX_PERMISSION_CHOICES.map((choice) => {
@@ -3577,6 +3611,7 @@ function DaemonSettingsView() {
                           // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
                           role="radio"
                           aria-checked={selected}
+                          tabIndex={selected ? 0 : -1}
                           className={`gz-key${selected ? ' gz-key-active' : ''}`}
                           onClick={() => void saveCodexCli({ defaultPermissionMode: choice.id })}
                         >
@@ -3593,7 +3628,7 @@ function DaemonSettingsView() {
               </div>
               <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
                 Gezel’s narrow destructive-command guard stays on in every mode. Projects and
-                individual gezels can override this default.
+                individual gezellen can override this default.
               </p>
 
               {codexCliProbe.kind === 'ok' && (
@@ -3617,7 +3652,7 @@ function DaemonSettingsView() {
                       <EffortTray
                         provider="codex-cli"
                         model={config?.defaultModel?.['codex-cli']}
-                        defaultModel="gpt-5.5"
+                        defaultModel="gpt-6.1-sol"
                         value={config?.codexCli?.defaultReasoningEffort ?? ''}
                         onChange={(value) =>
                           void saveCodexCli({
@@ -3642,6 +3677,7 @@ function DaemonSettingsView() {
                   <input
                     type="text"
                     placeholder="(auto — found on PATH)"
+                    aria-label="Codex CLI binary path"
                     value={codexCliBinaryDraft}
                     onChange={(e) => setCodexCliBinaryDraft(e.target.value)}
                     style={{ flex: 1 }}
@@ -3692,7 +3728,7 @@ function DaemonSettingsView() {
                     href="https://platform.claude.com/settings/keys"
                     target="_blank"
                     rel="noreferrer"
-                    style={{ color: 'var(--accent)' }}
+                    style={{ color: 'var(--accent-text)' }}
                   >
                     platform.claude.com/settings/keys
                   </a>{' '}
@@ -3721,6 +3757,7 @@ function DaemonSettingsView() {
                   placeholder={
                     hasAnthropicKey ? 'Replace key…' : 'Paste Anthropic API key (sk-ant-…)'
                   }
+                  aria-label="Anthropic API key"
                   value={anthropicKeyDraft}
                   onChange={(e) => setAnthropicKeyDraft(e.target.value)}
                   style={{ flex: 1 }}
@@ -3767,7 +3804,7 @@ function DaemonSettingsView() {
                   href="https://docs.claude.com/en/docs/claude-code/overview"
                   target="_blank"
                   rel="noreferrer"
-                  style={{ color: 'var(--accent)' }}
+                  style={{ color: 'var(--accent-text)' }}
                 >
                   Claude Code CLI
                 </a>{' '}
@@ -3778,7 +3815,7 @@ function DaemonSettingsView() {
                   Connection
                 </label>
                 {anthropicCliProbe.kind === 'ok' && (
-                  <span style={{ color: 'var(--success)', fontSize: '0.9rem' }}>
+                  <span style={{ color: 'var(--success-text)', fontSize: '0.9rem' }}>
                     ✓ Claude CLI ready ({anthropicCliProbe.modelCount} models)
                   </span>
                 )}
@@ -3830,6 +3867,7 @@ function DaemonSettingsView() {
                   <div
                     className="gz-tray gz-tray--described"
                     role="radiogroup"
+                    onKeyDown={onRadioKeyDown}
                     aria-label="Default permission"
                   >
                     {CLAUDE_PERMISSION_CHOICES.map((choice) => {
@@ -3841,6 +3879,7 @@ function DaemonSettingsView() {
                           // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons is the shared keys-in-trays pattern.
                           role="radio"
                           aria-checked={selected}
+                          tabIndex={selected ? 0 : -1}
                           className={`gz-key${selected ? ' gz-key-active' : ''}`}
                           onClick={() =>
                             void saveAnthropicCli({ defaultPermissionMode: choice.id })
@@ -3858,7 +3897,7 @@ function DaemonSettingsView() {
                 </div>
               </div>
               <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
-                Projects and individual gezels can override this default.
+                Projects and individual gezellen can override this default.
               </p>
 
               {anthropicCliProbe.kind === 'ok' && (
@@ -3903,6 +3942,7 @@ function DaemonSettingsView() {
                   <input
                     type="text"
                     placeholder="(auto — found on PATH)"
+                    aria-label="Claude CLI binary path"
                     value={anthropicCliBinaryDraft}
                     onChange={(e) => setAnthropicCliBinaryDraft(e.target.value)}
                     style={{ flex: 1 }}
@@ -3946,6 +3986,7 @@ function DaemonSettingsView() {
                     type="number"
                     min={1}
                     max={32}
+                    aria-label="Pool size"
                     value={config?.anthropicCli?.poolSize ?? 4}
                     onChange={(e) => {
                       const n = Number.parseInt(e.target.value, 10);
@@ -3961,7 +4002,7 @@ function DaemonSettingsView() {
                 </div>
                 <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
                   Each ready process stays with one chat thread, so later turns skip the start-up
-                  wait. More processes mean faster replies when several gezels work at once, and
+                  wait. More processes mean faster replies when several gezellen work at once, and
                   more memory (about 100–200 MB each). When the pool is full, the idle process that
                   was used longest ago is closed.
                 </p>
@@ -3974,6 +4015,7 @@ function DaemonSettingsView() {
                     type="number"
                     min={1}
                     max={32}
+                    aria-label="Concurrency"
                     value={
                       config?.providerConcurrency?.['anthropic-cli'] ??
                       config?.anthropicCli?.poolSize ??
@@ -4006,6 +4048,7 @@ function DaemonSettingsView() {
                     min={60}
                     max={3600}
                     step={60}
+                    aria-label="Idle timeout (seconds)"
                     value={config?.anthropicCli?.workerIdleSec ?? 600}
                     onChange={(e) => {
                       const n = Number.parseInt(e.target.value, 10);
@@ -4142,7 +4185,7 @@ function DaemonSettingsView() {
                   href="https://api.search.brave.com/app/keys"
                   target="_blank"
                   rel="noreferrer"
-                  style={{ color: 'var(--accent)' }}
+                  style={{ color: 'var(--accent-text)' }}
                 >
                   api.search.brave.com/app/keys
                 </a>
@@ -4165,6 +4208,7 @@ function DaemonSettingsView() {
                   placeholder={
                     config?.hasBraveSearchApiKey ? 'Replace key…' : 'Paste Brave Search API key…'
                   }
+                  aria-label="Brave Search API key"
                   value={braveKeyDraft}
                   onChange={(e) => setBraveKeyDraft(e.target.value)}
                   style={{ flex: 1 }}
@@ -4463,7 +4507,7 @@ function CopilotConnectionStatus({
     <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center', gap: '0.5rem' }}>
       {probe.kind === 'probing' && <span className="muted small">checking connection…</span>}
       {probe.kind === 'ok' && (
-        <span className="small" style={{ color: 'var(--accent)' }}>
+        <span className="small" style={{ color: 'var(--accent-text)' }}>
           ● Connected {label}
         </span>
       )}

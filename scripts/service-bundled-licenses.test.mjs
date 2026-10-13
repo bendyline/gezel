@@ -185,6 +185,27 @@ test('staging carries third-party notice files and reviewed texts, and verificat
   );
 });
 
+test('linked workspace packages retain their own license notices and transitive inventory', async (t) => {
+  const dir = await tempDir(t, 'gezel-bundled-linked-licenses-');
+  const { surfaces, serviceDist } = await fixture(dir);
+  await writeFiles(dir, {
+    'workspace/core/package.json': { name: '@linked/core', version: '1.0.0', license: 'MIT' },
+    'workspace/core/LICENSE': 'MIT License\n\nCopyright linked authors\n',
+    'workspace/core/THIRD_PARTY_LICENSES.txt': 'Prebundled dependency notice\n',
+  });
+  const embeddedRoot = await registry(dir, betaCarrier());
+  const options = { serviceDist, surfaces, extraPackageRoots: [], embeddedRoot };
+  const result = await stageServiceBundledLicenses(options);
+  assert.equal(result.packages, 4);
+  const { packages } = await verifyServiceBundledLicenses(options);
+  const linked = packages.find((pkg) => pkg.name === '@linked/core');
+  assert.deepEqual(linked.texts.map((text) => text.source).sort(), [
+    'LICENSE',
+    'THIRD_PARTY_LICENSES.txt',
+  ]);
+  assert.ok(packages.some((pkg) => pkg.name === 'gamma'));
+});
+
 test('an inlined package needs a reviewed text for the exact carrier version', async (t) => {
   const dir = await tempDir(t, 'gezel-bundled-licenses-');
   const { surfaces } = await fixture(dir);
@@ -202,6 +223,32 @@ test('an inlined package needs a reviewed text for the exact carrier version', a
   assert.throws(
     () => embeddedLicenseRecords(packages, embedded, strict),
     /inlines src, which legal\/embedded-licenses\/manifest\.json does not list/,
+  );
+});
+
+test('two bundled versions of a carrier each require their exact reviewed record', async (t) => {
+  const dir = await tempDir(t, 'gezel-bundled-license-versions-');
+  const { surfaces } = await fixture(dir);
+  const { packages, embedded } = await bundledPackagesFromSourceMaps(surfaces);
+  const original = [...packages.values()].find((pkg) => pkg.name === '@scope/beta');
+  const newer = { ...original, version: '2.1.0', path: `${original.path}-newer` };
+  packages.set(newer.path, newer);
+  embedded.set(newer.path, embedded.get(original.path));
+  const entries = [betaCarrier()['@scope/beta'], betaCarrier('2.1.0')['@scope/beta']];
+  const reviewed = await loadEmbeddedLicenses(await registry(dir, { '@scope/beta': entries }));
+  assert.deepEqual(
+    embeddedLicenseRecords(packages, embedded, reviewed).map((record) => record.embeddedIn),
+    ['@scope/beta@2.0.0', '@scope/beta@2.1.0'],
+  );
+  newer.version = '2.2.0';
+  assert.throws(
+    () => embeddedLicenseRecords(packages, embedded, reviewed),
+    /@scope\/beta@2\.2\.0 inlines .*; review them/,
+  );
+  entries.push(entries[0]);
+  await assert.rejects(
+    () => registry(dir, { '@scope/beta': entries }).then(loadEmbeddedLicenses),
+    /duplicate embedded-licenses carrier @scope\/beta@2\.0\.0/,
   );
 });
 

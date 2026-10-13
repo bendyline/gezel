@@ -115,7 +115,7 @@
 }
 
 .muted {
-  color: #888;
+  color: var(--text-muted);
   font-weight: normal;
 }
 
@@ -197,5 +197,5 @@
   font-size: var(--text-md);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #888;
+  color: var(--text-muted);
 }

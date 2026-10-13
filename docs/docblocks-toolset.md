@@ -20,12 +20,15 @@ pre-authorized tool set from `tools[].name`
 the server when bumping versions (`docblocks mcp` publishes exactly 19 tools, no
 aliases; verify with a `tools/list` against the new tarball).
 
-The current authored release is **`@bendyline/docblocks-cli@2.6.1`**, pinned to
+The current authored release is **`@bendyline/docblocks-cli@2.7.0`**, pinned to
 tarball SHA-256
-`fe150dfc7e966edfdae9fe4b35f5279f7efb94c827306dd35ba2b7faafd8dbd0`.
-(The gezel install serves whatever the pinned `@bendyline/gilde` release
-carries — check `docblocks-catalog-contract.test.ts` for the version the
-current pin actually ships.) Compared with the old 2.0.0 inventory,
+`51b3568929b305f60b52e6d407d5e9e05742e886e2301d6c5589dde5479b5f40`.
+The CLI and MCP server come from this same package; its 19-tool inventory was
+verified against the npm release. Gezel's current `@bendyline/gilde@0.1.95`
+pin still ships DocBlocks 2.6.2. Shipping the authored update requires a new
+Gilde release and then a Gezel Gilde pin update. The catalog contract test
+verifies both releases and their exact hashes during this transition.
+Compared with the old 2.0.0 inventory,
 `validate_document` is gone and `get_authoring_context` is present. Plain
 Markdown needs no validation preflight; conversion reports and previews carry
 the useful diagnostics.
@@ -41,9 +44,10 @@ Gezel's own ambient dashboard (see [ADR 0007](decisions/0007-ambient-display-app
 renders through `@bendyline/squisq-cli` directly and does not depend on this
 toolset — the `png` target is the agentic, on-demand surface.
 
-To bump: add a new `versions/<ver>/manifest.json` with the new tarball's SHA-256
-(`Get-FileHash` the `.tgz` from the npm registry) and re-run
-`pnpm --filter @bendyline/gezel-catalog build-index`.
+To bump: add a new `versions/<ver>/manifest.json` in Gilde with the new npm
+tarball's SHA-256 and verified MCP tool inventory. Run Gilde's validation and
+`npm run build` to regenerate its indexes. Once the Gilde release is published,
+run `pnpm gilde:update` in Gezel to update the package pins and lockfile.
 
 ## 2. Project-scoped filesystem authority (ChatManager)
 

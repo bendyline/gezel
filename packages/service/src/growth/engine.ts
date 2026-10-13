@@ -18,12 +18,12 @@ import {
   createLogger,
   xpForLevel,
 } from '@bendyline/gezel';
+import { beginPerfWork } from '@bendyline/gezel-inference/internal/perf/responsiveness';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { CompactOneShot } from '../memory/compaction.js';
 import { isMemoryKind } from '../memory/daily-markdown.js';
 import type { MemoryManager } from '../memory/manager.js';
-import { beginPerfWork } from '../perf/responsiveness.js';
 import { generateProposals } from './proposals.js';
 import { computeSignals, countTaskWork, ratchetSignals, totalXp } from './xp.js';
 

@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
 import {
   PROJECT_MACRO_INTERCEPT_CAP,
   deriveProjectMacroClosing,
-} from '../project-macro-loop-bail.js';
+} from '@bendyline/gezel-inference/internal/providers/project-macro-loop-bail';
+import { describe, expect, it } from 'vitest';
 
 describe('deriveProjectMacroClosing', () => {
   it('parses a start_project success result into a voorman closing', () => {

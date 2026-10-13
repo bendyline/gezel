@@ -19,6 +19,7 @@ export function NeedsInputPanel({
   onOpenInChat,
   projectId,
   onEmpty,
+  onNavigate,
 }: {
   /** Focus the thread a question came from, then close the host surface. */
   onOpenInChat?: (question: Question) => void;
@@ -28,6 +29,8 @@ export function NeedsInputPanel({
   /** Fired once the (scoped) list drains to zero — lets a host dialog close
    *  itself after the last question is answered. */
   onEmpty?: () => void;
+  /** After a card opens a file, its task or its document. */
+  onNavigate?: () => void;
 }) {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [gezels, setGezels] = useState<Map<string, GezelSummary>>(new Map());
@@ -233,6 +236,7 @@ export function NeedsInputPanel({
           question={active}
           onAnswered={advancePast}
           onOpenInChat={onOpenInChat}
+          {...(onNavigate ? { onNavigate } : {})}
         />
       </div>
     </section>

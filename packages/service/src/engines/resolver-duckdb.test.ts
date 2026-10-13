@@ -15,6 +15,11 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  EngineUnavailableError,
+  type ResolveEngineOptions,
+  resolveEngine,
+} from '@bendyline/gezel-inference/internal/engines/resolver';
+import {
   DUCKDB_ASSET,
   duckdbBinaryName,
   duckdbInstallDir,
@@ -22,7 +27,6 @@ import {
 } from '@bendyline/gezel/native';
 import AdmZip from 'adm-zip';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EngineUnavailableError, type ResolveEngineOptions, resolveEngine } from './resolver.js';
 
 let home: string;
 const priorBin = process.env.GEZEL_DUCKDB_BIN;

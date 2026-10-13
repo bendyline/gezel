@@ -1,15 +1,18 @@
 import { createPrivateKey } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { deviceIdentityFile, secretsFile } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
-import { readSecurityJson } from '../fs/security-json.js';
-import { type SecretKey, deviceIdentityScope } from '../secrets/types.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { readSecurityJson } from '@bendyline/gezel-inference/internal/fs/security-json';
 import {
   type IdentityKeyStore,
   loadOrCreateDeviceIdentity,
   signCertFingerprint,
-} from './identity.js';
+} from '@bendyline/gezel-inference/internal/remotes/identity';
+import {
+  type SecretKey,
+  deviceIdentityScope,
+} from '@bendyline/gezel-inference/internal/secrets/types';
+import { deviceIdentityFile, secretsFile } from '@bendyline/gezel/paths';
 
 type IdentityKey = Extract<SecretKey, { kind: 'deviceIdentity' }>;
 

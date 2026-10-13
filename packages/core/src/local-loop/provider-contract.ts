@@ -244,6 +244,17 @@ export interface LLMSession {
    */
   readonly lastTurnBail?: 'immediate-write' | null;
   /**
+   * How the last `sendAndWait` ended, for an engine that reports it.
+   * `maxTokens` is the reply cap the engine applied, which can be lower than
+   * the caller asked for: Apple's on-device model stops every reply at 1,024
+   * tokens whatever the request says. Absent means unknown, and callers fall
+   * back to inferring truncation from usage.
+   */
+  readonly lastTurnFinish?: {
+    readonly reason: 'stop' | 'length';
+    readonly maxTokens?: number;
+  } | null;
+  /**
    * Cheap estimate of the complete prompt currently held by this session,
    * including system bands, prior messages, and tool schemas.
    */

@@ -1,6 +1,6 @@
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { describe, expect, it } from 'vitest';
 import type { Store } from '../../fs/store.js';
-import type { SecretStore } from '../../secrets/types.js';
 import type { OAuthTokens, RefreshTokenParams } from '../oauth.js';
 import type { AdapterDeps, ConnectorBindingRef } from '../types.js';
 import { XApiError, XPostsAdapter, type XRuntime } from './x-posts.js';

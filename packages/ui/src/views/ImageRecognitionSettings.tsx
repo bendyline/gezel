@@ -6,6 +6,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 
 /**
  * Settings subsection for the image-recognition workload.
@@ -189,9 +190,14 @@ export function ImageRecognitionSettings() {
         <p className="muted small" style={{ marginTop: 0 }}>
           "Always" keeps images on this device even when the chat model could see them itself —
           cheaper than sending pictures to a paid model, and nothing leaves the machine. Individual
-          gezels can override this.
+          gezellen can override this.
         </p>
-        <div className="gz-tray" role="radiogroup" aria-label="When to read images locally">
+        <div
+          className="gz-tray"
+          role="radiogroup"
+          onKeyDown={onRadioKeyDown}
+          aria-label="When to read images locally"
+        >
           {MODE_OPTIONS.map((opt) => (
             <button
               key={opt.value}
@@ -199,6 +205,7 @@ export function ImageRecognitionSettings() {
               // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
               role="radio"
               aria-checked={mode === opt.value}
+              tabIndex={mode === opt.value ? 0 : -1}
               disabled={savingMode}
               className={`gz-key gz-key--stacked${mode === opt.value ? ' gz-key-active' : ''}`}
               onClick={() => void onSetMode(opt.value)}

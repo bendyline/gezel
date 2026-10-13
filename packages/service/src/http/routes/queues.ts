@@ -24,8 +24,11 @@ export { sanitizeBrokerCacheStats } from './engine-queues.js';
 import { QueueProviderNameSchema, type QueueStatusResponse } from '@bendyline/gezel/queue-status';
 import { Hono } from 'hono';
 
+import {
+  MACHINE_ENGINE_PROVIDER_NAMES,
+  usesMachineEngine,
+} from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import type { ServiceContext } from '../context.js';
-import { MACHINE_ENGINE_PROVIDER_NAMES, usesMachineEngine } from './machine-engine-proxy.js';
 
 export function queueRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();

@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
 import {
   F16_PREFERRED_CTX_CAP_TOKENS,
   planLlamaCppKv,
   resolveLlamaCppKvCacheType,
-} from './kv-cache-type.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/kv-cache-type';
+import { describe, expect, it } from 'vitest';
 
 describe('resolveLlamaCppKvCacheType', () => {
   it('defaults the Gemma family to f16 (q8_0 corrupts its KV cache)', () => {

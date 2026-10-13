@@ -83,7 +83,9 @@ function readStoredListFraction(): number {
 export function HistoryView({ projectId }: { projectId?: string } = {}) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const requestVersion = useRef(0);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [gezelFilter, setGezelFilter] = useState('');
@@ -115,6 +117,11 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
   }, [projects]);
 
   const refresh = useCallback(async () => {
+    if (searchTimer.current !== null) {
+      clearTimeout(searchTimer.current);
+      searchTimer.current = null;
+    }
+    const version = ++requestVersion.current;
     setLoading(true);
     setError(null);
     try {
@@ -146,7 +153,7 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
             .catch(() => [])
         : Promise.resolve([]);
       const res = await api.listHistory(filter);
-      setTranscriptHits(await transcriptPromise);
+      if (version !== requestVersion.current) return;
       // If 'session' is the kind filter, keep only session entries client-side.
       const filtered =
         kindFilter === 'session'
@@ -161,10 +168,12 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
         const first = filtered[0];
         return first ? idOf(first) : null;
       });
+      const hits = await transcriptPromise;
+      if (version === requestVersion.current) setTranscriptHits(hits);
     } catch (err) {
-      setError((err as Error).message);
+      if (version === requestVersion.current) setError((err as Error).message);
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }, [projectFilter, gezelFilter, kindFilter, q]);
 
@@ -180,8 +189,16 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
   }, []);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    setLoading(true);
+    setError(null);
+    setTranscriptHits([]);
+    searchTimer.current = setTimeout(() => void refresh(), q.trim() ? 200 : 0);
+    return () => {
+      if (searchTimer.current !== null) clearTimeout(searchTimer.current);
+      // Invalidate on the keystroke, before the next debounced request starts.
+      requestVersion.current += 1;
+    };
+  }, [refresh, q]);
 
   // Resizable splitter between the entry list and the detail pane. The
   // list is the LEFT column, so dragging the grip right grows it. Reuses
@@ -251,6 +268,7 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
       ref={viewRef}
       className={`history-view${compact ? ' history-view-compact' : ''}`}
       data-testid="history-view"
+      aria-busy={loading}
     >
       {compact && showCompactDetail && (
         <button
@@ -269,7 +287,7 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
               value={projectFilter || '__ALL__'}
               onValueChange={(v) => setProjectFilter(v === '__ALL__' ? '' : v)}
             >
-              <Select.Trigger>
+              <Select.Trigger aria-label="Filter history by project">
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
@@ -286,11 +304,11 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
             value={gezelFilter || '__ALL__'}
             onValueChange={(v) => setGezelFilter(v === '__ALL__' ? '' : v)}
           >
-            <Select.Trigger>
+            <Select.Trigger aria-label="Filter history by gezel">
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
-              <Select.Item value="__ALL__">All gezels</Select.Item>
+              <Select.Item value="__ALL__">All gezellen</Select.Item>
               {gezels.map((g) => (
                 <Select.Item key={g.id} value={g.id}>
                   {g.name}
@@ -303,7 +321,7 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
             value={kindFilter || '__ALL__'}
             onValueChange={(v) => setKindFilter(v === '__ALL__' ? '' : v)}
           >
-            <Select.Trigger>
+            <Select.Trigger aria-label="Filter history by kind">
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
@@ -327,10 +345,16 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
         </div>
       </header>
 
-      {error && <p className="error">{error}</p>}
-      {!loading && entries.length === 0 && !error && (
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      {!loading && entries.length === 0 && transcriptHits.length === 0 && !error && (
         <p className="muted">
-          No entries yet. Create a gezel, edit a project, or have a chat — events will show up here.
+          {q.trim() || projectFilter || gezelFilter || kindFilter
+            ? 'No matching entries. Try another search or change the filters.'
+            : 'No entries yet. Create a gezel, edit a project, or have a chat — events will show up here.'}
         </p>
       )}
 

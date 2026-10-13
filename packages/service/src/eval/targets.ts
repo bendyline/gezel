@@ -13,6 +13,14 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type GezelConfig, resolveSecurityPolicy } from '@bendyline/gezel';
+import type { EngineBinaryRegistry } from '@bendyline/gezel-inference/internal/engines/registry';
+import { impliedEngineVariant } from '@bendyline/gezel-inference/internal/engines/resolver';
+import {
+  listOverlayModelIds,
+  modelSearchRoots,
+  modelStorageRoots,
+} from '@bendyline/gezel-inference/internal/models/storage-roots';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import type {
   EvalCatalog,
   EvalEnvironment,
@@ -24,17 +32,9 @@ import type {
   EvalTarget,
 } from '@bendyline/gezel/eval';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
-import type { EngineBinaryRegistry } from '../engines/registry.js';
-import { impliedEngineVariant } from '../engines/resolver.js';
-import {
-  listOverlayModelIds,
-  modelSearchRoots,
-  modelStorageRoots,
-} from '../models/storage-roots.js';
 import { getCliPresence } from '../providers/cli-detection.js';
 import { resolveCopilotAvailability } from '../providers/copilot-availability.js';
 import { resolveManagedChromiumBinary } from '../rendering/managed-chromium.js';
-import type { SecretStore } from '../secrets/types.js';
 import type { EvalHarness } from './harness.js';
 import type { PreparedEvalTarget } from './jobs.js';
 

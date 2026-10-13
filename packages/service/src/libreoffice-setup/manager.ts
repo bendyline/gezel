@@ -6,12 +6,12 @@ import {
   type LibreOfficeHostReport,
   type LibreOfficeSetupStatusResponse,
 } from '@bendyline/gezel';
-import { writeFileAtomic } from '../fs/atomic.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   SecurityStateCorruptionError,
   readSecurityJson,
   writeSecurityJson,
-} from '../fs/security-json.js';
+} from '@bendyline/gezel-inference/internal/fs/security-json';
 import type { FirstPartyAppTokens } from '../grants/first-party-apps.js';
 import { HarnessSetupError, createMutationQueue, ensurePrivateDir } from '../local-harness/base.js';
 import { type LibreOfficeDetection, detectLibreOffice } from './detect.js';

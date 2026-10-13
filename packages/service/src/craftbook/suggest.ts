@@ -1,12 +1,12 @@
 import { type CraftbookBasedOn, type CraftbookSuggestion, createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import type { Store } from '../fs/store.js';
-import { scoreCandidate } from '../gezels/match.js';
 import {
   EmbeddingsDisabledError,
   embed as defaultEmbed,
   embedBatch as defaultEmbedBatch,
-} from '../memory/embeddings.js';
+} from '@bendyline/gezel-inference/internal/memory/embeddings';
+import type { Store } from '../fs/store.js';
+import { scoreCandidate } from '../gezels/match.js';
 import { type ProjectGitStatusReader, listApplicableCraftbooks } from './applicable.js';
 
 const log = createLogger('craftbook');

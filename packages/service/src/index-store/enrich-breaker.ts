@@ -1,5 +1,8 @@
 import { awakeNow, formatSuspension } from '@bendyline/gezel';
-import { isCapacityDeniedError, isEngineBusyError } from '../providers/native/capacity-broker.js';
+import {
+  isCapacityDeniedError,
+  isEngineBusyError,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 
 /**
  * Consecutive-timeout circuit breaker for the enrichment summarizer.

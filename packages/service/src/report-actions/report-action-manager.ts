@@ -14,9 +14,9 @@ import {
   parseReportActions,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { projectReportActionsFile } from '@bendyline/gezel/paths';
 import type { ChatManager } from '../chat/manager.js';
-import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
 import { ensureGezel } from '../gezels/ensure.js';
 import type { HistoryManager } from '../history/manager.js';

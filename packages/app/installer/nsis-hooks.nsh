@@ -338,6 +338,15 @@ FunctionEnd
 ; this service with one stale child ACE.  The controls that actually bound
 ; the blast radius are the container's owner and DACL, and both of those
 ; still fail closed.
+;
+; The recursive /setowner and /reset below follow a descendant junction to
+; its target under elevation (the /L flag protects only the link object, not
+; traversal through it), so a planted child junction turns this sweep into an
+; arbitrary-location owner/DACL rewrite.  Every call site MUST therefore
+; precede this with RejectReparseDescendants on the same PATH.  The guard is
+; deliberately external: it fails the machine-service install closed when a
+; reparse point is planted, while this macro stays best-effort so a single
+; MAX_PATH file never aborts the install.
 !macro SanitizeDescendants PATH SUBJECT
   ; /Q keeps a per-file success line out of the log, but a big preserved home
   ; still takes a while with real-time scanning on, so say what is happening.
@@ -585,6 +594,13 @@ FunctionEnd
   ; that fails closed.  /L operates on links themselves rather than
   ; traversing their targets.
   !insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}" "its machine-service data directory" SkipNssm
+  ; Exact-path checks on the container are not enough before a recursive sweep.
+  ; A standard user can pre-create children under ProgramData, so a planted
+  ; descendant junction would make the elevated /setowner /T and /reset /T in
+  ; SanitizeDescendants act on its target, outside ProgramData, even though the
+  ; data root itself is a normal directory. Refuse the machine broker before any
+  ; recursive icacls, exactly as the asset store does below.
+  !insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}" "Gezel machine-service data" SkipNssm
   !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}" "existing machine-service data"
 
   ; Private root: SYSTEM + Administrators only until the per-service SID exists.
@@ -632,6 +648,12 @@ FunctionEnd
   ; so users can read but cannot replace it. Product scope directories receive
   ; inherited Modify access and are operated on only by per-user daemons.
   !insertmacro TakeTrustedOwnership "${GEZEL_SHARED_DIR}" "its machine-shared product directory" SkipNssm
+  ; Same no-follow rule as the data root and the asset store. The shared tree is
+  ; world-writable by design (Users get Modify on projects/ and gezels/ below),
+  ; so a standard user can plant a descendant junction between installs, and the
+  ; migration just above may have moved one in. Reject before the recursive
+  ; sweep rather than letting /setowner /T and /reset /T act on its target.
+  !insertmacro RejectReparseDescendants "${GEZEL_SHARED_DIR}" "Gezel machine-shared product" SkipNssm
   !insertmacro SanitizeDescendants "${GEZEL_SHARED_DIR}" "machine-shared product"
   nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SHARED_DIR}" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /L'
   Pop $0
@@ -857,7 +879,7 @@ FunctionEnd
   ; area (or from the pre-asset-store private model tree) arrives carrying its
   ; old private ACL and stays invisible to every other account.  gezeld fixes
   ; that with `icacls <model> /reset /T` — see makeSharedModelReadable in
-  ; packages/service/src/models/storage-roots.ts.
+  ; packages/inference/src/models/storage-roots.ts.
   ;
   ; `/reset` REWRITES A DACL, so it needs WRITE_DAC, and Modify does not
   ; include WRITE_DAC.  With (M) alone the broker could not publish any bundle

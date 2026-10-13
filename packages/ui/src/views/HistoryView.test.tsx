@@ -1,5 +1,5 @@
 import type { GezelSummary, HistoryEntry, Project } from '@bendyline/gezel';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -65,6 +65,7 @@ describe('HistoryView', () => {
     vi.mocked(api.listGezels).mockResolvedValue({ gezels: FAKE_GEZELS });
     vi.mocked(api.listProjects).mockResolvedValue({ projects: FAKE_PROJECTS });
     vi.mocked(api.listHistory).mockResolvedValue({ entries: [] });
+    vi.mocked(api.searchSessions).mockResolvedValue({ engine: 'fts', results: [] });
   });
 
   afterEach(() => {
@@ -237,6 +238,66 @@ describe('HistoryView', () => {
     await waitFor(() => {
       expect(api.listHistory).toHaveBeenCalledWith(expect.objectContaining({ q: 'maya' }));
     });
+  });
+
+  it('coalesces rapid typing into one history and transcript search', async () => {
+    render(<HistoryView />);
+    await screen.findByText(/No entries yet/i);
+    vi.mocked(api.listHistory).mockClear();
+    const input = screen.getByRole('textbox', { name: 'Search history' });
+    fireEvent.change(input, { target: { value: 'm' } });
+    fireEvent.change(input, { target: { value: 'ma' } });
+    fireEvent.change(input, { target: { value: 'maya' } });
+    await waitFor(() => expect(api.listHistory).toHaveBeenCalledWith({ limit: 200, q: 'maya' }));
+    expect(api.listHistory).toHaveBeenCalledTimes(1);
+    expect(api.searchSessions).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/No entries yet/i)).not.toBeInTheDocument();
+    expect(await screen.findByText(/No matching entries/i)).toBeVisible();
+  });
+
+  it('ignores a superseded search even when its response arrives last', async () => {
+    let resolveOlder!: (value: { entries: HistoryEntry[] }) => void;
+    vi.mocked(api.listHistory).mockImplementation((filter) => {
+      if (filter?.q === 'old')
+        return new Promise((resolve) => {
+          resolveOlder = resolve;
+        });
+      return Promise.resolve({
+        entries: filter?.q ? [makeEvent({ summary: 'Newest match' })] : [],
+      });
+    });
+    render(<HistoryView />);
+    await screen.findByText(/No entries yet/i);
+    const input = screen.getByRole('textbox', { name: 'Search history' });
+    fireEvent.change(input, { target: { value: 'old' } });
+    await waitFor(() => expect(resolveOlder).toBeTypeOf('function'));
+    fireEvent.change(input, { target: { value: 'new' } });
+    await screen.findAllByText('Newest match');
+    await act(async () => resolveOlder({ entries: [makeEvent({ summary: 'Stale match' })] }));
+    expect(screen.queryByText('Stale match')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Newest match').length).toBeGreaterThan(0);
+  });
+
+  it('does not let a superseded failure replace the current results', async () => {
+    let rejectOlder!: (reason: Error) => void;
+    vi.mocked(api.listHistory).mockImplementation((filter) => {
+      if (filter?.q === 'old')
+        return new Promise((_, reject) => {
+          rejectOlder = reject;
+        });
+      return Promise.resolve({
+        entries: filter?.q ? [makeEvent({ summary: 'Current match' })] : [],
+      });
+    });
+    render(<HistoryView />);
+    await screen.findByText(/No entries yet/i);
+    const input = screen.getByRole('textbox', { name: 'Search history' });
+    fireEvent.change(input, { target: { value: 'old' } });
+    await waitFor(() => expect(rejectOlder).toBeTypeOf('function'));
+    fireEvent.change(input, { target: { value: 'new' } });
+    await screen.findAllByText('Current match');
+    await act(async () => rejectOlder(new Error('Stale failure')));
+    expect(screen.queryByText('Stale failure')).not.toBeInTheDocument();
   });
 
   it('selecting a kind filter triggers a refetch with that kind', async () => {

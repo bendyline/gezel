@@ -1,7 +1,13 @@
-import { openEmbeddings, shutdownEmbeddings } from './memory/embeddings.js';
+import {
+  openEmbeddings,
+  shutdownEmbeddings,
+} from '@bendyline/gezel-inference/internal/memory/embeddings';
+import {
+  openRelevanceScorer,
+  shutdownRelevanceScorer,
+} from '@bendyline/gezel-inference/internal/relevance/relevance-model';
+import { MODEL_WORKER_DRAIN_MS } from '@bendyline/gezel-inference/internal/utils/retire-model-worker';
 import { openImageEmbeddings, shutdownImageEmbeddings } from './memory/image-embeddings.js';
-import { openRelevanceScorer, shutdownRelevanceScorer } from './relevance/relevance-model.js';
-import { MODEL_WORKER_DRAIN_MS } from './utils/retire-model-worker.js';
 
 /**
  * The process-wide onnxruntime worker hosts: text embeddings, image and media

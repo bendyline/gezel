@@ -20,6 +20,7 @@ import { attachableDeliverable, describeSendFailure } from './handoff.ts';
 import { summarizeKeurmeesterCases } from './keurmeester-metrics.ts';
 import { TrialLogger } from './logging.ts';
 import { startMockServices } from './mock/mock-server.ts';
+import { writeMockTrustBundle } from './mock/trust.ts';
 import {
   assertMlxSourceComplete,
   cloneModelDirIntoTrial,
@@ -872,7 +873,11 @@ export async function runTrial(
   let mockRuntime: Awaited<ReturnType<typeof startMockServices>> = null;
   if (
     scenario.mockServices?.some(
-      (mock) => mock.kind === 'http' || mock.kind === 'webhook' || mock.kind === 'mcp',
+      (mock) =>
+        mock.kind === 'http' ||
+        mock.kind === 'webhook' ||
+        mock.kind === 'mcp' ||
+        mock.kind === 'cli',
     )
   ) {
     try {
@@ -905,26 +910,39 @@ export async function runTrial(
     }
   }
   if (mockRuntime) {
-    const caPath = join(runDir, 'mock-ca.pem');
-    const seedPath = join(runDir, 'mock-seed.json');
-    await writeFile(caPath, mockRuntime.caPem, 'utf8');
-    await writeFile(seedPath, JSON.stringify(mockRuntime.seedEntries()), 'utf8');
-    mergedExtraEnv.NODE_EXTRA_CA_CERTS = caPath;
-    mergedExtraEnv.GEZEL_SEED_SECRETS_FILE = seedPath;
-    // Fake-MCP toolsets: catalog-valid ids go into the trial home's local
-    // catalog and install through the ordinary rail. Runtime-managed scoped
-    // ids such as @playwright/mcp are seeded into the fresh system roster so
-    // a craftbook's required-toolset check sees the hermetic replacement.
-    // The runner writes both because only it knows the trial home —
-    // EvalContext deliberately has no home path.
-    for (const file of mockRuntime.mcpToolsetFiles()) {
-      const target = join(trialHome, file.path);
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, file.content, 'utf8');
-      log(`[mock] wrote local-catalog toolset file ${file.path}`);
-    }
-    for (const service of mockRuntime.services.values()) {
-      log(`[mock] ${service.id} (${service.kind}) listening at ${service.baseUrl}`);
+    // Every other setup failure below closes the mock servers before it
+    // returns; a throw here left them listening.
+    try {
+      const caPath = join(runDir, 'mock-ca.pem');
+      const seedPath = join(runDir, 'mock-seed.json');
+      await writeFile(caPath, mockRuntime.caPem, 'utf8');
+      await writeFile(seedPath, JSON.stringify(mockRuntime.seedEntries()), 'utf8');
+      Object.assign(
+        mergedExtraEnv,
+        await writeMockTrustBundle(runDir, mockRuntime.caPem, {
+          ...process.env,
+          ...mergedExtraEnv,
+        }),
+      );
+      mergedExtraEnv.GEZEL_SEED_SECRETS_FILE = seedPath;
+      // Fake-MCP toolsets: catalog-valid ids go into the trial home's local
+      // catalog and install through the ordinary rail. Runtime-managed scoped
+      // ids such as @playwright/mcp are seeded into the fresh system roster so
+      // a craftbook's required-toolset check sees the hermetic replacement.
+      // The runner writes both because only it knows the trial home —
+      // EvalContext deliberately has no home path.
+      for (const file of mockRuntime.mcpToolsetFiles()) {
+        const target = join(trialHome, file.path);
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(target, file.content, 'utf8');
+        log(`[mock] wrote local-catalog toolset file ${file.path}`);
+      }
+      for (const service of mockRuntime.services.values()) {
+        log(`[mock] ${service.id} (${service.kind}) listening at ${service.baseUrl}`);
+      }
+    } catch (error) {
+      await mockRuntime.close().catch(() => {});
+      throw error;
     }
   }
   const fetchUrlMockIds = scenario.allowFetchUrlMockServiceIds ?? [];
@@ -2368,7 +2386,7 @@ export function readCapacityDenialFromLog(daemonLogPath?: string): string | null
   // Strictest of the three denial regexes (see also failure-class.ts and
   // preflight.ts): matches the full raw reason from CapacityBroker.denialReason,
   // logged via capacityDenialLogLine in
-  // packages/service/src/providers/native/provider-pool.ts. Do not reword either side.
+  // packages/inference/src/providers/native/provider-pool.ts. Do not reword either side.
   const match = text.match(
     /capacity broker denied [^\n]+: budget exhausted: would commit \d+ against \d+/,
   );

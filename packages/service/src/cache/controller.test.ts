@@ -1,6 +1,10 @@
+import type {
+  CacheWarmMessage,
+  EngineCacheAdapter,
+  EngineCacheUsage,
+} from '@bendyline/gezel-inference/internal/cache/adapter';
+import { SessionCacheController } from '@bendyline/gezel-inference/internal/cache/controller';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CacheWarmMessage, EngineCacheAdapter, EngineCacheUsage } from './adapter.js';
-import { SessionCacheController } from './controller.js';
 
 /**
  * Mock adapter recording every interaction, with hooks for controlled

@@ -109,6 +109,8 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const loopbackCertificatePin = createLoopbackCertificatePin();
+/** The renderer's `--titlebar`; the native window-control overlay must match it exactly. */
+const BRAND_SAGE = '#5c6a4a';
 
 let connection: Connection | null = null;
 let mainWindow: Electron.BrowserWindow | null = null;
@@ -608,7 +610,7 @@ async function createWindow(): Promise<void> {
     width: 1280,
     height: 820,
     title: 'Gezel',
-    backgroundColor: '#667f62',
+    backgroundColor: BRAND_SAGE,
     // Auto-show activates the window on creation (→ focus theft). In E2E we
     // suppress it and call `showInactive()` after construction instead. A
     // login launch stays hidden until the person opens it from the tray.
@@ -624,7 +626,7 @@ async function createWindow(): Promise<void> {
     ...(process.platform !== 'darwin'
       ? {
           titleBarOverlay: {
-            color: '#667f62',
+            color: BRAND_SAGE,
             symbolColor: '#f3ede0',
             height: 39,
           },
@@ -997,7 +999,7 @@ async function showStartupError(
 <style>
   :root { color-scheme: dark; }
   html, body { height: 100%; margin: 0; }
-  body { background: #667f62; color: #f3ede0; display: flex; align-items: center;
+  body { background: ${BRAND_SAGE}; color: #f3ede0; display: flex; align-items: center;
     justify-content: center; font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     -webkit-user-select: none; -webkit-app-region: drag; }
   main { max-width: 460px; padding: 32px; text-align: center; }
@@ -1078,7 +1080,7 @@ async function showConnectionError(
 <style>
   :root { color-scheme: dark; }
   html, body { height: 100%; margin: 0; }
-  body { background: #667f62; color: #f3ede0; display: flex; align-items: center;
+  body { background: ${BRAND_SAGE}; color: #f3ede0; display: flex; align-items: center;
     justify-content: center; font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     -webkit-user-select: none; }
   main { max-width: 460px; padding: 32px; text-align: center; }

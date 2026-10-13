@@ -72,7 +72,10 @@ export async function writeSession(
     const draft = await repo.record(path, PromptDraftMetaSchema);
     if (!draft || !draftMatchesSession(draft, session) || draft.status !== 'draft')
       throw new Error('This draft is not available to send in this conversation');
-    const message = session.messages.at(-1);
+    // A chat-launched task writes the person's message and its launch
+    // receipt together, so the receipt may follow the sent message.
+    const last = session.messages.at(-1);
+    const message = last?.synthetic === 'craftbook-launch' ? session.messages.at(-2) : last;
     if (message?.role !== 'user' || message.draftId !== draft.id)
       throw new Error('The sent message must reference its draft');
     writes.set(

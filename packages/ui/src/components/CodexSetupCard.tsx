@@ -1,4 +1,4 @@
-import type { CodexSetupStatusResponse } from '@bendyline/gezel';
+import type { CodexSetupStatusResponse, LocalHarnessSetupState } from '@bendyline/gezel';
 import { useCallback } from 'react';
 import { api } from '../api.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
@@ -10,9 +10,11 @@ type Confirmation = 'configure' | 'repair' | 'remove';
 export function CodexSetupCard({
   endpointsEnabled,
   onChanged,
+  onStateChange,
 }: {
   endpointsEnabled: boolean;
   onChanged?: () => void | Promise<void>;
+  onStateChange?: (state: LocalHarnessSetupState) => void;
 }) {
   const runAction = useCallback(
     (confirmation: Confirmation, model: string): Promise<CodexSetupStatusResponse> =>
@@ -34,6 +36,7 @@ export function CodexSetupCard({
     backupNotice: (next) =>
       next.profileBackupPath ? `The previous file was saved as ${next.profileBackupPath}.` : null,
     ...(onChanged ? { onChanged } : {}),
+    ...(onStateChange ? { onStateChange } : {}),
   });
 
   const { status, confirmation, setConfirmation, setError, busy, copied } = card;
@@ -59,7 +62,7 @@ export function CodexSetupCard({
       notice={card.notice}
       error={card.error}
       reasonsIntro="The managed setup needs an update:"
-      emptyModelsNote="No gezels or inference models compatible with the Codex tool loop are available yet."
+      emptyModelsNote="No gezellen or inference models compatible with the Codex tool loop are available yet."
       intro={
         <>
           Codex keeps its coding tools, sandbox, approvals, and conversation loop while a gezel

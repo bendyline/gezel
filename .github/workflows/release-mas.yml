@@ -33,7 +33,7 @@
 name: Release MAS (Mac App Store)
 
 # No native-tag input: the package bundles the native release the source pins
-# in packages/service/src/engines/native-manifest.ts, like release-electron.yml.
+# in packages/inference/src/engines/native-manifest.ts, like release-electron.yml.
 on:
   workflow_dispatch:
 
@@ -68,10 +68,10 @@ jobs:
           set -euo pipefail
           pinned_release="$(
             sed -n "s/^export const NATIVE_ENGINE_RELEASE = '\([^']*\)';/\1/p" \
-              packages/service/src/engines/native-manifest.ts
+              packages/inference/src/engines/native-manifest.ts
           )"
           if [[ ! "$pinned_release" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]]; then
-            echo "::error::Could not read a versioned NATIVE_ENGINE_RELEASE from packages/service/src/engines/native-manifest.ts (got '${pinned_release}')"
+            echo "::error::Could not read a versioned NATIVE_ENGINE_RELEASE from packages/inference/src/engines/native-manifest.ts (got '${pinned_release}')"
             exit 1
           fi
           echo "tag=native-v${pinned_release}" >> "$GITHUB_OUTPUT"
@@ -127,7 +127,7 @@ jobs:
           if (( missing )); then exit 1; fi
 
           node scripts/verify-native-file-manifest.mjs \
-            --manifest packages/service/src/engines/native-file-manifest.json \
+            --manifest packages/inference/src/engines/native-file-manifest.json \
             --release "$version"
 
       - name: Determine package version
@@ -204,7 +204,7 @@ jobs:
           node scripts/check-native-payload.mjs --root packages/app/native-bin
           node scripts/verify-native-file-manifest.mjs \
             --root packages/app/native-bin \
-            --manifest packages/service/src/engines/native-file-manifest.json \
+            --manifest packages/inference/src/engines/native-file-manifest.json \
             --release "$version"
 
       - name: Import Apple Distribution signing certificate

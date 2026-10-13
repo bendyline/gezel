@@ -1,5 +1,8 @@
+import {
+  parseDarwinVmStat,
+  sampleDarwinSystemMemory,
+} from '@bendyline/gezel-inference/internal/system/darwin-memory';
 import { describe, expect, it, vi } from 'vitest';
-import { parseDarwinVmStat, sampleDarwinSystemMemory } from './darwin-memory.js';
 
 const MiB = 1024 ** 2;
 

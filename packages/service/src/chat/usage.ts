@@ -5,8 +5,8 @@
  * per-provider cards.
  */
 
+import type { ProviderName, TurnUsage } from '@bendyline/gezel-inference/internal/providers/types';
 import type { QuotaBucket } from '@bendyline/gezel/local-loop';
-import type { ProviderName, TurnUsage } from '../providers/types.js';
 
 export type { QuotaBucket } from '@bendyline/gezel/local-loop';
 

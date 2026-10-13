@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
 import {
   EmbeddingsDisabledError,
   EmbeddingsUnavailableError,
   embed,
   openEmbeddings,
   shutdownEmbeddings,
-} from './embeddings.js';
+} from '@bendyline/gezel-inference/internal/memory/embeddings';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   ImageEmbeddingsUnavailableError,
   embedImageFiles,

@@ -75,8 +75,7 @@ These are the authored primitives. Everything else derives from them.
 | `--gezel-ink-warm` | `#2a2520` | Warm ink on parchment |
 | `--gezel-ink-warm-muted` | `#5a4f42` | Warm secondary |
 | `--gezel-ink-warm-quiet` | `#8b7e6b` | Warm tertiary |
-| `--gezel-sage` | `#667f62` | **Brand green.** The titlebar / masthead. |
-| `--gezel-sage-deep` | `#5c6a4a` | Deeper sage |
+| `--gezel-sage` | `#5c6a4a` | **Brand green.** The titlebar / masthead. |
 | `--gezel-sage-forest` | `#3d4d3a` | Darkest sage — logotype on light |
 | `--gezel-sage-soft` | `#d6dec6` | Sage tint |
 | `--gezel-terra` | `#b0724c` | **Accent.** Terracotta. Interactive + selected. |
@@ -87,8 +86,9 @@ These are the authored primitives. Everything else derives from them.
 
 ### The two brand colors
 
-- **Sage green **`#667f62` is the *identity* color: the masthead, the logotype,
-  the thing you see first. It is a place, not a control.
+- **Sage green **`#5c6a4a` is the *identity* color: the masthead, the logotype,
+  the thing you see first. It is a place, not a control. It is deep enough for
+  small cream (`#f3ede0`) text to clear 4.5:1; don't lighten it.
 - **Terracotta **`#b0724c` is the *action* color: links, selected state, focus
   rings, the pressed key. It is never used as a large field.
 
@@ -383,7 +383,7 @@ self-host both.
   --gezel-paper-inset: #ddd3bd;
   --gezel-ink: #1c1c1c;
   --gezel-ink-muted: #666;
-  --gezel-sage: #667f62;
+  --gezel-sage: #5c6a4a;
   --gezel-sage-forest: #3d4d3a;
   --gezel-sage-soft: #d6dec6;
   --gezel-terra: #b0724c;

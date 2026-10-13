@@ -1,10 +1,10 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { SecretKey } from '@bendyline/gezel-inference/internal/secrets/types';
 import { secretsFile, secretsKeyFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FileSecretStore } from './file-store.js';
-import type { SecretKey } from './types.js';
 
 describe('FileSecretStore', () => {
   let home: string;

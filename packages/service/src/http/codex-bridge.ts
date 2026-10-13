@@ -1,4 +1,5 @@
 import { createLogger } from '@bendyline/gezel';
+import { v1ResponsesRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-responses';
 import { Hono } from 'hono';
 import { bearerAuth, requireScope } from './auth.js';
 import type { ServiceContext } from './context.js';
@@ -14,7 +15,6 @@ import {
 } from './local-bridge.js';
 import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
 import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
-import { v1ResponsesRoutes } from './routes/v1-responses.js';
 import { opaqueServerErrors } from './server.js';
 
 /**

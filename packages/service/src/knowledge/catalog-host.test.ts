@@ -11,9 +11,12 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  type KnowledgeCatalogHost,
+  createInProcessCatalogHost,
+} from '@bendyline/gezel-inference/internal/knowledge/catalog-host';
 import { extractGezkVerified } from '@bendyline/gezel-knowledge';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { type KnowledgeCatalogHost, createInProcessCatalogHost } from './catalog-host.js';
 import { buildTestCatalog, testHashVector } from './test-catalog-fixture.js';
 
 let dir: string;

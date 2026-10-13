@@ -1,11 +1,11 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   backfillGgufQuantization,
   resetGgufQuantizationMemo,
-} from './gguf-quantization-backfill.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/gguf-quantization-backfill';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { writeSyntheticGguf } from './gguf-test-fixture.js';
 
 let dir: string;

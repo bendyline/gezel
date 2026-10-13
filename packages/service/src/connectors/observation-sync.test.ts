@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { compactCorpus } from '../observations/compactor.js';
@@ -15,7 +16,6 @@ import {
 } from '../observations/layout.js';
 import { findRealDuckdb, hasRealDuckdb } from '../observations/testing/duck-fixture.js';
 import { synthRequestsManifest } from '../observations/testing/synth.js';
-import type { SecretStore } from '../secrets/types.js';
 import { ConnectorManager } from './manager.js';
 import {
   MOCK_OBSERVATIONS_ADAPTER_ID,

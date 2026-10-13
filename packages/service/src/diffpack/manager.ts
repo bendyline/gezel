@@ -14,9 +14,9 @@ import {
   isDiffpackFileOperation,
   nowIso,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { projectDiffpacksFile } from '@bendyline/gezel/paths';
 import { applyPatch, parsePatch } from 'diff';
-import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { TaskManager } from '../tasks/manager.js';

@@ -1,12 +1,15 @@
 import { AwakeBudget, createLogger } from '@bendyline/gezel';
-import type OpenAI from 'openai';
-import { OPENAI_TUNING_MAP, applyTuning } from '../model-profile/tuning.js';
-import { type ApiObservationContext, apiToolSurface, observeApiStream } from './api-observation.js';
-import { CLOUD_TOOL_ROUND_LIMIT } from './cloud-tool-limits.js';
-import { McpBridgePool } from './mcp-bridge-pool.js';
-import { ProviderQueue, runInQueue } from './queue.js';
-import { StreamingSessionBase } from './streaming-session.js';
-import { TERMINAL_ACTION_SKIPPED_OUTPUT, terminalToolClosingText } from './terminal-tool-policy.js';
+import type { ResolvedTuning as InferenceResolvedTuning } from '@bendyline/gezel-inference/internal/model-profile/index';
+import {
+  OPENAI_TUNING_MAP,
+  applyTuning,
+} from '@bendyline/gezel-inference/internal/model-profile/tuning';
+import { ProviderQueue, runInQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import { StreamingSessionBase } from '@bendyline/gezel-inference/internal/providers/streaming-session';
+import {
+  TERMINAL_ACTION_SKIPPED_OUTPUT,
+  terminalToolClosingText,
+} from '@bendyline/gezel-inference/internal/providers/terminal-tool-policy';
 import type {
   ExternalToolCall,
   ExternalToolSpec,
@@ -17,29 +20,21 @@ import type {
   ProviderSessionState,
   SendAndWaitOpts,
   SessionOpts,
-} from './types.js';
-import { buildTurnUsage } from './usage-builder.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
+import { buildTurnUsage } from '@bendyline/gezel-inference/internal/providers/usage-builder';
+import type OpenAI from 'openai';
+import { type ApiObservationContext, apiToolSurface, observeApiStream } from './api-observation.js';
+import { CLOUD_TOOL_ROUND_LIMIT } from './cloud-tool-limits.js';
+import { McpBridgePool } from './mcp-bridge-pool.js';
+import {
+  applyOpenAIModelContract,
+  isOpenAIChatModel,
+  isOpenAIReasoningModel,
+  openAIDefaultReasoningEffort,
+  openAIReasoningEfforts,
+} from './openai-options.js';
 
 const log = createLogger('openai');
-
-/**
- * OpenAI's /v1/models endpoint doesn't report which models support the
- * `reasoning.effort` parameter. We whitelist families that do. If OpenAI
- * adds a new reasoning family, add its prefix here.
- */
-const REASONING_MODEL_PREFIXES = ['gpt-5', 'o1', 'o3', 'o4'];
-const OPENAI_REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high'];
-
-/** Filter OpenAI's full model list down to ones useful for chat. */
-const CHAT_MODEL_PREFIXES = ['gpt-', 'o1', 'o3', 'o4', 'chatgpt'];
-
-function isReasoningModel(id: string): boolean {
-  return REASONING_MODEL_PREFIXES.some((p) => id.startsWith(p));
-}
-
-function isChatModel(id: string): boolean {
-  return CHAT_MODEL_PREFIXES.some((p) => id.startsWith(p));
-}
 
 /**
  * Build the `input` field for the Responses API.
@@ -96,7 +91,7 @@ export class OpenAIProvider implements LLMProvider {
   }) {
     this.apiKey = opts.apiKey;
     this.organization = opts.organization;
-    this.defaultModel = opts.defaultModel ?? 'gpt-5';
+    this.defaultModel = opts.defaultModel ?? 'gpt-6.1-sol';
     this.queue = new ProviderQueue({
       concurrency: opts.concurrency ?? 10,
       ...(opts.affinity !== undefined ? { affinity: opts.affinity } : {}),
@@ -153,14 +148,13 @@ export class OpenAIProvider implements LLMProvider {
     ).models.list();
     const models: ModelInfo[] = [];
     for (const m of listing.data) {
-      if (!isChatModel(m.id)) continue;
-      const reasoning = isReasoningModel(m.id);
+      if (!isOpenAIChatModel(m.id)) continue;
       models.push({
         id: m.id,
         name: m.id,
-        supportsReasoning: reasoning,
-        reasoningEfforts: reasoning ? OPENAI_REASONING_EFFORTS : undefined,
-        defaultReasoningEffort: reasoning ? 'medium' : undefined,
+        supportsReasoning: isOpenAIReasoningModel(m.id),
+        reasoningEfforts: openAIReasoningEfforts(m.id),
+        defaultReasoningEffort: openAIDefaultReasoningEffort(m.id),
       });
     }
     // Sort alphabetically so the dropdown is stable run-to-run.
@@ -212,7 +206,7 @@ export interface OpenAISessionDeps {
    * body via `OPENAI_TUNING_MAP`. Reasoning effort from the tuning
    * block overrides `this.deps.reasoningEffort` when both are set.
    */
-  tuning?: import('../model-profile/index.js').ResolvedTuning;
+  tuning?: InferenceResolvedTuning;
 }
 
 /**
@@ -340,7 +334,7 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
           request.previous_response_id = this.previousResponseId;
         }
         if (tools && tools.length > 0) request.tools = tools;
-        if (this.deps.reasoningEffort && isReasoningModel(this.deps.model)) {
+        if (this.deps.reasoningEffort && isOpenAIReasoningModel(this.deps.model)) {
           request.reasoning = { effort: this.deps.reasoningEffort };
         }
         // Per-model tuning. Sampling (temperature/top_p/max_tokens/seed/
@@ -351,6 +345,7 @@ export class OpenAISession extends StreamingSessionBase implements LLMSession {
         if (this.deps.tuning) {
           applyTuning(request, this.deps.tuning, OPENAI_TUNING_MAP);
         }
+        applyOpenAIModelContract(request, this.deps.model);
 
         this.toolSurface = apiToolSurface(tools ?? []);
         const stream = observeApiStream(

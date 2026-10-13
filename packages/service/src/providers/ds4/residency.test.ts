@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   DS4_FULL_RESIDENCY_HEADROOM_BYTES,
   DS4_FULL_RESIDENCY_RESERVATION_BYTES,
@@ -12,7 +11,8 @@ import {
   ds4VisionResidentBytes,
   planDs4ExpertCache,
   shouldUseDs4SsdStreaming,
-} from './residency.js';
+} from '@bendyline/gezel-inference/internal/providers/ds4/residency';
+import { describe, expect, it } from 'vitest';
 
 const GB = 1024 ** 3;
 

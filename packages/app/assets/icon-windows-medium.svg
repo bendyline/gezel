@@ -1,68 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
-  <!--
-    Medium-detail Windows artwork for 40–48 px ICO frames. At these sizes
-    Windows has enough physical pixels for the vise, bolts, and restrained
-    grain that are intentionally omitted from the 16/20 px pictogram.
-  -->
-  <defs>
-    <clipPath id="tabletop-clip">
-      <rect x="24" y="20" width="64" height="16" rx="2" />
-    </clipPath>
-    <clipPath id="brace-clip">
-      <rect x="43" y="59" width="26" height="9" rx="1.5" />
-    </clipPath>
-    <clipPath id="left-leg-clip">
-      <path d="M30 42h12l-4 40H26z" />
-    </clipPath>
-    <mask id="vise-jaw">
-      <rect width="96" height="96" fill="#fff" />
-      <circle cx="13.5" cy="28" r="3" fill="#000" />
-    </mask>
-    <path id="leg" d="M30 42h12l-4 40H26z" />
-    <g id="leg-openings">
-      <circle cx="35.4" cy="50" r="2.25" />
-      <circle cx="31.8" cy="73" r="2.25" />
-    </g>
-    <g id="leg-grain" clip-path="url(#left-leg-clip)">
-      <path d="M31 45c7 5 1 10 7 15s-2 11-7 15" />
-      <path d="M35 45c5 6 0 10 4 15" />
-    </g>
-  </defs>
-
-  <rect width="96" height="96" fill="#849577" />
-
-  <g fill="#faf9f3">
-    <!-- Vise with a clean cut before the tabletop. -->
-    <rect x="7" y="21" width="13" height="14" rx="2" mask="url(#vise-jaw)" />
-    <rect x="12.25" y="11" width="2.5" height="38" rx="1.25" />
-    <circle cx="13.5" cy="11" r="4" />
-    <circle cx="13.5" cy="49" r="4" />
-
-    <!-- Bench body. Equal-width legs mirror around x=56. -->
-    <rect x="24" y="20" width="64" height="16" rx="2" />
-    <use href="#leg" />
-    <use href="#leg" transform="translate(112 0) scale(-1 1)" />
-    <rect x="43" y="59" width="26" height="9" rx="1.5" />
-  </g>
-
-  <!-- Bolt holes remain simple circles so they survive intermediate DPIs. -->
-  <g fill="#849577">
-    <use href="#leg-openings" />
-    <use href="#leg-openings" transform="translate(112 0) scale(-1 1)" />
-  </g>
-
-  <!-- A few low-contrast strokes suggest the approved wood grain. -->
-  <g fill="none" stroke="#d8d8d1" stroke-linecap="round" stroke-width="1.1" opacity="0.82">
-    <g clip-path="url(#tabletop-clip)">
-      <path d="M26 26c13-2 25 2 38 0s17-1 24 0" />
-      <path d="M27 31c10 1 17-2 27-1s20 2 33-1" />
-      <path d="M54 27c2-3 7-2 7 0s-5 3-7 1" />
-    </g>
-    <g clip-path="url(#brace-clip)">
-      <path d="M44 63c8-2 15 2 24-1" />
-      <path d="M54 65c2-2 5-1 5 0s-3 2-5 1" />
-    </g>
-    <use href="#leg-grain" />
-    <use href="#leg-grain" transform="translate(112 0) scale(-1 1)" />
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 64 64">
+<defs><linearGradient id="sage" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#526346"/><stop offset="1" stop-color="#3e4e34"/></linearGradient></defs>
+<rect x="2" y="2" width="60" height="60" rx="13" fill="url(#sage)"/>
+<path d="M18 25L25 25L21 50L14 50Z" fill="#f3ede0"/>
+<path d="M43 25L50 25L54 50L47 50Z" fill="#f3ede0"/>
+<rect x="20" y="39" width="28" height="5" rx="1" fill="#f3ede0"/>
+<rect x="13" y="19" width="42" height="8" rx="1.5" fill="#f3ede0"/>
+<rect x="14" y="19" width="40" height="1.1999999999999993" rx="0.6" fill="#fff6e5"/>
+<rect x="9" y="21" width="4" height="6" rx="1" fill="#f3ede0"/>
+<rect x="7" y="24" width="3" height="2" rx="0.6" fill="#f3ede0"/>
+<path d="M7 22V31" fill="none" stroke="#f3ede0" stroke-width="2" stroke-linecap="round"/>
 </svg>

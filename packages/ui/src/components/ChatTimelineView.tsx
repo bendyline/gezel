@@ -30,10 +30,8 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { api } from '../api.js';
-import { isUserCancelledTurnError } from '../error-report.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
-import { requestSettingsSection } from '../settings-nav.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { ChatStickyHeader } from './ChatStickyHeader.js';
 import { getReadonlyGezelMediaProvider } from './GezelMediaProvider.js';
@@ -46,9 +44,9 @@ import {
   writeIndexingReceipts,
 } from './IndexingReceipt.js';
 import { QueuedTaskBubble } from './QueuedTaskBubble.js';
-import { ReportErrorLink } from './ReportErrorLink.js';
 import { TerminalBubble } from './TerminalBubble.js';
 import { TerminalStreamingBubble } from './TerminalStreamingBubble.js';
+import { WorkingNotes } from './WorkingNotes.js';
 import { pinActiveThreadLast } from './active-thread-pin.js';
 import {
   GhostQueuedBubble,
@@ -58,6 +56,7 @@ import {
   type ToolActivity,
 } from './chat-bubbles.js';
 import { humanizeChatError } from './chat-error-copy.js';
+import { type FailedTurnActionState, renderFailedTurnActions } from './chat-failed-turn-actions.js';
 import type { LiveSegment, LiveSlot, TerminalLiveSlot } from './chat-live-slot.js';
 import {
   erroredSlotsWithPersistedTwin,
@@ -79,17 +78,15 @@ import {
   cssAttrValue,
   findLastForSession,
   formatProviderLabel,
-  isExpectedAvailabilityError,
-  isModelUnavailableError,
-  isRetryableFailedTurn,
+  latestWrapUpKey,
   mergeTerminalEntries,
   mergeTimelineMessages,
   referencedFilesOf,
+  turnFailureShownElsewhere,
   withinHours,
 } from './chat-timeline-helpers.js';
 import { FrameCoalescedItem, FrameCoalescedLiveStickyHeader } from './frame-coalesced-item.js';
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
-import { modelSetupAction } from './model-setup-action.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
 import type { QueuedTaskEntry } from './queued-task-entries.js';
 import { nestChildSessionThreads } from './session-thread-nesting.js';
@@ -141,8 +138,6 @@ const TERMINAL_SESSION_GAP_MS = 2 * 60 * 60 * 1000;
  * the conversation they annotate.
  */
 const MAX_QUEUED_TASK_CARDS = 4;
-/** A local metadata reset should settle promptly, even if an HTTP socket stalls. */
-const FAILED_TURN_ACTION_TIMEOUT_MS = 10_000;
 
 function messageAskedUserQuestion(message: TimelineMessage): boolean {
   return (
@@ -216,7 +211,10 @@ export interface ChatTimelineViewProps {
    * pinned) and any `referencedTasks` the parser recognized in a reply
    * body (`scoped: false`). Dedupe + ordering live in the rail.
    */
-  onTaskReference?: (ref: string, opts?: { scoped?: boolean; focus?: boolean }) => void;
+  onTaskReference?: (
+    ref: string,
+    opts?: { scoped?: boolean; focus?: boolean; wrappedUp?: boolean },
+  ) => void;
   /**
    * Tasks the TaskRunner is holding, paired with the queue state that
    * explains the hold. Rendered as receipt cards in the final lane —
@@ -234,6 +232,37 @@ export interface ChatTimelineViewProps {
    * itself rather than opening as a blank panel.
    */
   emptyContent?: import('react').ReactNode;
+  /**
+   * Shown after the last message of a conversation that has any, where the
+   * pinned scroll keeps it in view above the composer. An empty conversation
+   * has {@link emptyContent} instead.
+   */
+  trailingContent?: import('react').ReactNode;
+  /**
+   * Hold {@link trailingContent} until the conversation holds a finished
+   * task's wrap-up: the meester's folder invitation follows the first thing
+   * the crew made, not the first thing the person said.
+   */
+  trailingContentAfterWrapUp?: boolean;
+  /**
+   * Fold the sessions a turn launched (a task's workers, a consultation)
+   * into one Working notes line under it. For the meester's Home
+   * conversation, where the person reads the ask and the result rather
+   * than the crew's transcript. Debug mode shows the full tree.
+   */
+  foldWorkingNotes?: boolean;
+  /**
+   * Drop live events from scheduled runs (`ChatEventEnvelope.scheduledRun`).
+   * Home's loader already leaves those sessions out; this keeps a run that
+   * starts while Home is open from streaming in.
+   */
+  hideScheduledRuns?: boolean;
+  /**
+   * What in this conversation is waiting on the person: a failed turn whose
+   * card is showing, and when the latest reply arrived. Home keeps its
+   * greeting band out of the way while either needs them.
+   */
+  onAttentionChange?: (attention: { failedTurn: boolean; latestReplyAt: string | null }) => void;
   /**
    * Backend fetcher — `ProjectTimeline` calls `listProjectTimeline`,
    * `GlobalTimeline` calls `listGlobalTimeline`.
@@ -373,6 +402,11 @@ export function ChatTimelineView({
   queuedTasks,
   emptyPlaceholder,
   emptyContent,
+  trailingContent,
+  trailingContentAfterWrapUp = false,
+  foldWorkingNotes = false,
+  hideScheduledRuns = false,
+  onAttentionChange,
   loadTimeline,
   streamUrl,
   terminalStreamUrl,
@@ -396,6 +430,8 @@ export function ChatTimelineView({
   scopedSessionIdsRef.current = scopedSessionIds;
   const onUnknownSessionRef = useRef(onUnknownSession);
   onUnknownSessionRef.current = onUnknownSession;
+  const hideScheduledRunsRef = useRef(hideScheduledRuns);
+  hideScheduledRunsRef.current = hideScheduledRuns;
   const narrationMode = useChatNarrationMode();
   // Live ref so the envelope handler reads the current mode without the
   // streaming `useEffect` re-subscribing whenever the setting flips.
@@ -426,6 +462,13 @@ export function ChatTimelineView({
     if (previous !== 'off' && narrationMode === 'off') chatNarrationQueue.stop();
   }, [narrationMode]);
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
+  const onAttentionChangeRef = useRef(onAttentionChange);
+  onAttentionChangeRef.current = onAttentionChange;
+  const failedTurn = messages.some((m) => Boolean(m.sessionLastTurnError));
+  const latestReplyAt = [...messages].reverse().find((m) => m.role === 'assistant')?.at ?? null;
+  useEffect(() => {
+    onAttentionChangeRef.current?.({ failedTurn, latestReplyAt });
+  }, [failedTurn, latestReplyAt]);
   const messagesRef = useRef<TimelineMessage[]>([]);
   // Timeline snapshots are reconciled often while any thread starts, streams,
   // or completes. Remember which persisted file sightings have already been
@@ -456,7 +499,11 @@ export function ChatTimelineView({
         onTaskReference(m.taskRef, { scoped });
       }
       if (m.referencedTasks) {
-        for (const ref of m.referencedTasks) onTaskReference(ref);
+        // A wrap-up shows the finished thing in the thread itself.
+        const wrappedUp = m.synthetic === 'task-wrapup';
+        for (const ref of m.referencedTasks) {
+          onTaskReference(ref, wrappedUp ? { wrappedUp } : undefined);
+        }
       }
     }
   }, [messages, activeSessionId, onTaskReference]);
@@ -554,7 +601,7 @@ export function ChatTimelineView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sessionErrorActions, setSessionErrorActions] = useState<
-    Map<string, { busy?: 'acknowledge' | 'retry'; error?: string }>
+    Map<string, FailedTurnActionState>
   >(new Map());
   // A timeline fetch already in flight when Acknowledge completes can still
   // return the pre-clear row. Suppress that stale snapshot until a genuinely
@@ -744,6 +791,11 @@ export function ChatTimelineView({
    * response gets taller than the viewport.
    */
   const lastScrollHeightRef = useRef(0);
+  /**
+   * The newest task wrap-up already on screen; undefined until the first
+   * load, so only one that arrives afterwards is scrolled to.
+   */
+  const wrapUpSeenRef = useRef<string | null | undefined>(undefined);
   /** Coalesces growth from multiple independently streaming bubbles. */
   const liveFollowRafRef = useRef<number | null>(null);
 
@@ -791,6 +843,7 @@ export function ChatTimelineView({
     setAlignedSubmissionKey(null);
     lastRowCountRef.current = 0;
     lastScrollHeightRef.current = 0;
+    wrapUpSeenRef.current = undefined;
     void (async () => {
       try {
         const res = await loadTimeline({ limit: PAGE_SIZE });
@@ -1042,6 +1095,22 @@ export function ChatTimelineView({
     void refetchGezels();
   }, [refetchGezels]);
 
+  // A crew introduction names gezels hired moments ago, after the roster was
+  // read. Look again once per unknown id, so a portrait fills in rather than
+  // a letter, and a gezel deleted since never sets off a refetch loop.
+  const crewLookedUpRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const unknown = messages.flatMap(
+      (m) =>
+        m.crewIntroduction?.members
+          .map((member) => member.gezelId)
+          .filter((id) => !gezels.has(id) && !crewLookedUpRef.current.has(id)) ?? [],
+    );
+    if (unknown.length === 0) return;
+    for (const id of unknown) crewLookedUpRef.current.add(id);
+    void refetchGezels();
+  }, [messages, gezels, refetchGezels]);
+
   // Keep cached gezels live so identity changes made elsewhere (font,
   // name, model, icon) reflect in already-rendered bubbles without a
   // remount. GezelDetail / GezellenView broadcast the full updated gezel,
@@ -1061,9 +1130,22 @@ export function ChatTimelineView({
   }, []);
 
   // Project list — only loaded when we need to label cross-project rows
-  // (the global Meester surface). Cheap one-shot.
+  // (the global Meester surface). Cheap, and read again once when a finished
+  // task names a project created after it was read (a kickoff's own).
+  const [projectsReadFor, setProjectsReadFor] = useState(0);
+  const projectLookedUpRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!showProjectName) return;
+    const unknown = messages
+      .map((m) => m.deliverable?.projectId)
+      .filter(
+        (id): id is string => !!id && !projects.has(id) && !projectLookedUpRef.current.has(id),
+      );
+    if (unknown.length === 0) return;
+    for (const id of unknown) projectLookedUpRef.current.add(id);
+    setProjectsReadFor((n) => n + 1);
+  }, [messages, projects]);
+  useEffect(() => {
+    if (!showProjectName && projectsReadFor === 0) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -1079,7 +1161,7 @@ export function ChatTimelineView({
     return () => {
       cancelled = true;
     };
-  }, [showProjectName]);
+  }, [showProjectName, projectsReadFor]);
 
   // Build the question lookup. We always pull *all* questions (pending +
   // answered) so message-attached cards can collapse to their answered
@@ -1522,6 +1604,7 @@ export function ChatTimelineView({
       // live, and any future delivery path.
       if (inflightProjectId !== undefined && projectId !== inflightProjectId) return;
       if (inflightGezelId !== undefined && gezelId !== inflightGezelId) return;
+      if (hideScheduledRunsRef.current && env.scheduledRun) return;
       // Session allowlist (task-scoped surfaces). An unknown session is
       // reported up so the owner can refetch — a handoff session created
       // mid-turn is legitimately in scope and just isn't in the set yet.
@@ -2265,7 +2348,12 @@ export function ChatTimelineView({
           }
           return next;
         });
-        if (event.type === 'question_asked') void refreshLatest();
+        // The event carries the question as filed; the list read adds the
+        // files its prompt names, so the inline card's paths become links.
+        if (event.type === 'question_asked') {
+          void refreshLatest();
+          void refreshQuestions();
+        }
       }
 
       function createSlot(gid: string, pid: string, sid: string): LiveSlot {
@@ -2307,6 +2395,7 @@ export function ChatTimelineView({
       messages,
       onToolActivity,
       refreshLatest,
+      refreshQuestions,
       refetchGezels,
       defaultProvider,
       inflightProjectId,
@@ -2409,6 +2498,7 @@ export function ChatTimelineView({
   // The thread the composer points at settles at the bottom, so the last
   // thing above the draft is what the next message answers. See
   // `active-thread-pin.ts` for why the move is deliberately narrow.
+  const foldNested = foldWorkingNotes && !debugMode;
   // biome-ignore lint/correctness/useExhaustiveDependencies: terminalOrderTick deliberately re-runs the Date.now()-dependent lane checks.
   const nestedThreadItems = useMemo(
     () =>
@@ -2424,8 +2514,9 @@ export function ChatTimelineView({
           activeSessionId,
           Date.now(),
         ),
+        { splitAfterChildren: foldNested },
       ),
-    [rows, activeSessionId, terminalOrderTick],
+    [rows, activeSessionId, terminalOrderTick, foldNested],
   );
   const threadItems = nestedThreadItems.items;
   const sessionDepthById = nestedThreadItems.depthBySession;
@@ -2501,9 +2592,27 @@ export function ChatTimelineView({
     // from the top: pinned, a phone opened on the meester's openers with the
     // greeting that explains them scrolled away.
     if (rows.length === 0) return;
+    // A task that just finished lands its wrap-up, and on Home an invitation
+    // follows it. Pinned to the bottom, the thread scrolled past the finished
+    // card to the invitation (2026-10-11), so the card comes to the top.
+    const wrapUp = latestWrapUpKey(messages);
+    const freshWrapUp =
+      wrapUpSeenRef.current !== undefined && wrapUp !== null && wrapUp !== wrapUpSeenRef.current;
+    wrapUpSeenRef.current = wrapUp;
     if (!pinnedToBottom) return;
+    if (freshWrapUp && wrapUp) {
+      const card = el.querySelector<HTMLElement>(`[data-msg-id="${cssAttrValue(wrapUp)}"]`);
+      if (card) {
+        const top =
+          el.scrollTop + card.getBoundingClientRect().top - el.getBoundingClientRect().top;
+        pinnedToBottomRef.current = false;
+        setPinnedToBottom(false);
+        el.scrollTo({ top: Math.max(0, top - 12), behavior: 'instant' as ScrollBehavior });
+        return;
+      }
+    }
     el.scrollTo({ top: el.scrollHeight, behavior: 'instant' as ScrollBehavior });
-  }, [rows, pinnedToBottom]);
+  }, [rows, pinnedToBottom, messages]);
 
   /**
    * Live item subscribers render independently of this component. Follow
@@ -3174,10 +3283,7 @@ export function ChatTimelineView({
     </>
   );
 
-  const setSessionAction = (
-    sessionId: string,
-    state: { busy?: 'acknowledge' | 'retry'; error?: string } | null,
-  ) => {
+  const setSessionAction = (sessionId: string, state: FailedTurnActionState | null) => {
     setSessionErrorActions((prev) => {
       const next = new Map(prev);
       if (state) next.set(sessionId, state);
@@ -3186,130 +3292,22 @@ export function ChatTimelineView({
     });
   };
 
-  const acknowledgeFailedTurn = async (sessionId: string, projectId: string) => {
-    setSessionAction(sessionId, { busy: 'acknowledge' });
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), FAILED_TURN_ACTION_TIMEOUT_MS);
-    try {
-      await api.clearProjectErrors(projectId, controller.signal);
-      window.dispatchEvent(
-        new CustomEvent('gezel:session-error-cleared', { detail: { projectId } }),
-      );
-    } catch {
-      setSessionAction(sessionId, {
-        error: controller.signal.aborted
-          ? 'Clearing the alert took too long. Check the connection and try again.'
-          : 'Could not clear the alert. Check the connection and try again.',
-      });
-    } finally {
-      window.clearTimeout(timeout);
-    }
-  };
-
-  const retryFailedTurn = async (sessionId: string) => {
-    setSessionAction(sessionId, { busy: 'retry' });
-    try {
-      await api.retryChatSessionTurn(sessionId);
-      // Keep the action disabled until the normal complete/error event settles
-      // the attempt. A hidden retry seed will replace a preserved failed live
-      // slot with the new thinking bubble as soon as the daemon starts it.
-    } catch {
-      setSessionAction(sessionId, {
-        error: 'Retry could not start. Check the connection or settings, then try again.',
-      });
-    }
-  };
-
   const failedTurnActions = (
     sessionId: string,
     errorMessage: string,
     errorDetail: ChatTurnErrorDetail | undefined,
     projectId: string | null,
     reportSurface: 'session-error' | 'chat-turn',
-  ) => {
-    const action = sessionErrorActions.get(sessionId);
-    const busy = action?.busy;
-    const retryable = isRetryableFailedTurn(errorMessage, errorDetail);
-    const setup = modelSetupAction(errorMessage);
-    return (
-      <>
-        <div className="timeline-session-error-actions" aria-label="Failed turn actions">
-          {retryable && (
-            <button
-              type="button"
-              className="timeline-session-error-action timeline-session-error-action-primary"
-              disabled={busy !== undefined}
-              onClick={() => void retryFailedTurn(sessionId)}
-            >
-              {busy === 'retry' ? 'Retrying…' : 'Retry'}
-            </button>
-          )}
-          {setup && (
-            <button
-              type="button"
-              className="timeline-session-error-action secondary"
-              disabled={busy !== undefined}
-              onClick={() => {
-                const { target } = setup;
-                if (target.kind === 'home') {
-                  window.dispatchEvent(
-                    new CustomEvent('gezel:navigate', { detail: { view: 'home' } }),
-                  );
-                  return;
-                }
-                requestSettingsSection(target.section);
-                window.dispatchEvent(
-                  new CustomEvent('gezel:navigate', {
-                    detail: { view: 'settings', section: target.section },
-                  }),
-                );
-              }}
-            >
-              {setup.label}
-            </button>
-          )}
-          {!setup && isModelUnavailableError(errorMessage) && (
-            <button
-              type="button"
-              className="timeline-session-error-action secondary"
-              disabled={busy !== undefined}
-              onClick={() =>
-                window.dispatchEvent(
-                  new CustomEvent('gezel:navigate', {
-                    detail: { view: 'settings', section: 'defaults' },
-                  }),
-                )
-              }
-            >
-              Open Settings
-            </button>
-          )}
-          {projectId && (
-            <button
-              type="button"
-              className="timeline-session-error-action secondary"
-              title="Clear this project's failed-turn alerts without rerunning the work"
-              disabled={busy !== undefined}
-              onClick={() => void acknowledgeFailedTurn(sessionId, projectId)}
-            >
-              {busy === 'acknowledge' ? 'Acknowledging…' : 'Acknowledge'}
-            </button>
-          )}
-          {!isUserCancelledTurnError(errorMessage) && !isExpectedAvailabilityError(errorDetail) && (
-            <ReportErrorLink
-              className="timeline-session-error-link"
-              report={{ surface: reportSurface, message: errorMessage, detail: errorDetail }}
-            />
-          )}
-        </div>
-        {action?.error && (
-          <p className="timeline-session-error-action-error" role="alert">
-            {action.error}
-          </p>
-        )}
-      </>
-    );
-  };
+  ) =>
+    renderFailedTurnActions({
+      sessionId,
+      errorMessage,
+      errorDetail,
+      projectId,
+      reportSurface,
+      action: sessionErrorActions.get(sessionId),
+      setSessionAction,
+    });
 
   if (loading && messages.length === 0) {
     return <div className="chat-timeline chat-timeline-loading" aria-busy="true" />;
@@ -3417,13 +3415,39 @@ export function ChatTimelineView({
     else if (!question.answer) liveQuestionsBySession.set(sessionId, question);
   }
   const els: React.ReactNode[] = [];
+  // The open Working notes fold, collecting the nested sessions under the
+  // turn that launched them (see foldWorkingNotes).
+  let fold: {
+    key: string;
+    nodes: React.ReactNode[];
+    sessions: string[];
+    names: string[];
+    error?: string;
+  } | null = null;
+  const flushFold = () => {
+    if (!fold) return;
+    const done = fold;
+    fold = null;
+    els.push(
+      <WorkingNotes
+        key={done.key}
+        names={done.names}
+        live={done.sessions.some((sid) => liveRef.current.has(sid))}
+        {...(done.error ? { error: done.error } : {})}
+      >
+        {done.nodes}
+      </WorkingNotes>,
+    );
+  };
   const emitSessionErrorBanner = (
     sid: string,
     error: string,
     errorDetail: ChatTurnErrorDetail | undefined,
     projectId: string | null,
   ) => {
-    els.push(
+    const inFold = fold?.sessions.includes(sid) === true;
+    if (inFold && fold) fold.error = humanizeChatError(error);
+    (inFold && fold ? fold.nodes : els).push(
       <div
         key={`session-error:${sid}`}
         className="timeline-session-error-banner"
@@ -3492,6 +3516,20 @@ export function ChatTimelineView({
     const attachedQuestion =
       explicitQuestion ??
       fallbackQuestionsByMessage.get(`${m.sessionId}\u0000${m.at}\u0000${m.role}`);
+    // A turn that failed before it began is told on its session's "Last turn
+    // failed" card, and its salvage bubble carried the same sentence word for
+    // word. While that card shows, the bubble keeps only its placeholder line;
+    // once acknowledged, the bubble is where the reason stays readable.
+    const live = liveRef.current.get(m.sessionId);
+    const shownElsewhere = live
+      ? live.error !== undefined
+        ? turnFailureShownElsewhere(m, { liveError: live.error, cardAcknowledged: false })
+        : null
+      : turnFailureShownElsewhere(m, {
+          cardAcknowledged: acknowledgedErrorProjects.has(m.projectId),
+        });
+    if (shownElsewhere === 'live') return null;
+    const bubbleWarnings = shownElsewhere === 'card' ? undefined : m.warnings;
     return (
       <MessageBubble
         key={`msg:${m.sessionId}:${m.at}:${m.role}`}
@@ -3554,9 +3592,32 @@ export function ChatTimelineView({
         {...(opts?.suppressHeader ? { suppressHeader: true } : {})}
         {...(opts?.timestampLabel ? { timestampLabel: opts.timestampLabel } : {})}
         {...(m.intents && m.intents.length > 0 ? { intents: m.intents } : {})}
-        {...(m.warnings && m.warnings.length > 0 ? { warnings: m.warnings } : {})}
+        {...(bubbleWarnings && bubbleWarnings.length > 0 ? { warnings: bubbleWarnings } : {})}
         {...(m.synthetic ? { synthetic: m.synthetic } : {})}
         {...(m.contextCompaction ? { contextCompaction: m.contextCompaction } : {})}
+        {...(m.crewIntroduction
+          ? { crewIntroduction: m.crewIntroduction, crewGezels: gezels }
+          : {})}
+        {...(() => {
+          const maker = m.makerGezelId ? gezels.get(m.makerGezelId) : undefined;
+          return maker
+            ? {
+                makerGezel: {
+                  id: maker.id,
+                  name: displayName(
+                    { name: maker.name, roleBasedName: maker.roleBasedName },
+                    roleBasedNameOnlyMode,
+                  ),
+                  icon: maker.icon ?? null,
+                  poppetje: maker.poppetje ?? null,
+                  iconOverride: maker.iconOverride === true,
+                },
+              }
+            : {};
+        })()}
+        {...(m.deliverable?.projectId && projects.get(m.deliverable.projectId)
+          ? { deliverableProjectName: projects.get(m.deliverable.projectId)!.name }
+          : {})}
         {...(attachedQuestion
           ? {
               question: attachedQuestion,
@@ -3772,6 +3833,7 @@ export function ChatTimelineView({
     return nodes;
   };
   for (const item of threadItems) {
+    if (item.kind !== 'thread') flushFold();
     if (item.kind === 'indexing') {
       els.push(
         <IndexingReceiptRow
@@ -3878,6 +3940,7 @@ export function ChatTimelineView({
     const sessionBranch = sessionBranchById.get(sid);
     const anchorRow = item.root ?? item.replies[0];
     if (!anchorRow) continue;
+    const nestedHere = foldNested && sessionDepth > 0;
     if (sid !== prevSessionId) {
       if (prevSessionId && prevSessionError && !liveRef.current.has(prevSessionId)) {
         emitSessionErrorBanner(
@@ -3887,8 +3950,26 @@ export function ChatTimelineView({
           prevSessionProjectId,
         );
       }
+    }
+    if (!nestedHere) flushFold();
+    if (nestedHere && !fold) {
+      fold = { key: `working-notes:${sid}:${item.at}`, nodes: [], sessions: [], names: [] };
+    }
+    const out = nestedHere && fold ? fold.nodes : els;
+    if (nestedHere && fold && !fold.sessions.includes(sid)) {
+      fold.sessions.push(sid);
+      const author = gezels.get(anchorRow.kind === 'message' ? anchorRow.msg.gezelId : '');
+      const name = author
+        ? displayName(
+            { name: author.name, roleBasedName: author.roleBasedName },
+            roleBasedNameOnlyMode,
+          )
+        : undefined;
+      if (name && !fold.names.includes(name)) fold.names.push(name);
+    }
+    if (sid !== prevSessionId) {
       const isContinuing = seenSessionIds.has(sid);
-      els.push(
+      out.push(
         renderDivider({
           row: anchorRow,
           gezels,
@@ -4003,7 +4084,7 @@ export function ChatTimelineView({
     const railed =
       sessionBranch?.hasChildren === true ||
       (sessionDepth === 0 && item.replies.length > 0 && (!item.root || !item.root.msg.from));
-    els.push(
+    out.push(
       <div
         key={`thread:${sid}:${item.at}`}
         className={`timeline-thread${
@@ -4030,6 +4111,7 @@ export function ChatTimelineView({
       prevSessionProjectId,
     );
   }
+  flushFold();
 
   return (
     <div className="chat-timeline-viewport">
@@ -4070,6 +4152,9 @@ export function ChatTimelineView({
             (emptyPlaceholder ? <p className="placeholder">{emptyPlaceholder}</p> : null))
           : els}
         {queuedTaskEls}
+        {els.length > 0 &&
+          (!trailingContentAfterWrapUp || messages.some((m) => m.synthetic === 'task-wrapup')) &&
+          trailingContent}
         <div ref={responseRunwayRef} className="timeline-response-runway" aria-hidden="true" />
       </div>
       {!pinnedToBottom && (

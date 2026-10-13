@@ -2,13 +2,13 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { createAwakeTimeout } from '@bendyline/gezel';
+import { findServiceWorkerEntry } from '@bendyline/gezel-inference/internal/utils/service-worker-entry';
 import type {
   ScriptExecutionOptions,
   ScriptExecutionResult,
   ScriptExecutor,
 } from '@bendyline/gezel-script-runtime';
 import ts from 'typescript';
-import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import {
   QUICKJS_MAX_CALLS,
   QUICKJS_MAX_MESSAGE_CHARS,

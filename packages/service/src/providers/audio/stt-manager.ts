@@ -5,13 +5,13 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
-import type { ConfigStore } from '../../fs/config-store.js';
+import type { ConfigStore } from '@bendyline/gezel-inference/internal/fs/config-store';
+import type { SpeechToTextProvider } from '@bendyline/gezel-inference/internal/providers/audio/types';
 import type { RemotesRegistry } from '../../remotes/registry.js';
 import { ProviderLifecycle } from '../provider-lifecycle.js';
 import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
 import { RemoteSttProvider } from './remote-stt.js';
 import { createSpeechToTextProvider } from './stt-factory.js';
-import type { SpeechToTextProvider } from './types.js';
 
 const log = createLogger('audio');
 

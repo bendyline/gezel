@@ -42,6 +42,7 @@ export const PUBLISHED_PACKAGES = [
   { dir: 'catalog', typed: true },
   { dir: 'knowledge', typed: true },
   { dir: 'mcp', typed: true },
+  { dir: 'inference', typed: true },
   { dir: 'service', typed: true },
   // Spawn-only: the service resolves `run-action` and executes it as a
   // subprocess, never imports it, so it emits no declarations.

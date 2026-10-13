@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, rm, truncate, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { writeCloudPlaceholder } from '../test-support/cloud-placeholder.js';
 import { censusFolder, findCodeFolders } from './folder-census.js';
 
 let dir: string;
@@ -20,8 +21,7 @@ describe('censusFolder', () => {
     await writeFile(join(dir, '2026', 'June', 'b.png'), 'x');
     await writeFile(join(dir, '2026', 'clip.mov'), 'x');
     await writeFile(join(dir, 'notes.docx'), 'x');
-    await writeFile(join(dir, 'in-icloud.jpg'), '');
-    await truncate(join(dir, 'in-icloud.jpg'), 64 * 1024);
+    await writeCloudPlaceholder(join(dir, 'in-icloud.jpg'), 64 * 1024);
     await mkdir(join(dir, 'Photos Library.photoslibrary'), { recursive: true });
     await writeFile(join(dir, 'Photos Library.photoslibrary', 'db.jpg'), 'x');
     await writeFile(join(dir, '.DS_Store'), 'x');

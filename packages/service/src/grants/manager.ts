@@ -1,7 +1,10 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { chmod } from 'node:fs/promises';
+import {
+  readSecurityJson,
+  writeSecurityJson,
+} from '@bendyline/gezel-inference/internal/fs/security-json';
 import { pendingGrantsFile as defaultPendingGrantsFile } from '@bendyline/gezel/paths';
-import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
 import {
   type TokenStore,
   assertGrantableAppToken,

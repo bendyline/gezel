@@ -1,5 +1,6 @@
 import type { UnifiedSearchResult } from '@bendyline/gezel';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -103,6 +104,37 @@ describe('TitlebarSearch', () => {
       .map((e) => e.type);
     expect(types).toContain('gezel:open-tab');
     expect(types).toContain('gezel:open-file');
+  });
+
+  it('exposes the highlighted suggestion to assistive technology', async () => {
+    render(<TitlebarSearch />);
+    const input = screen.getByRole('combobox', { name: 'Search' });
+    expect(input).toHaveAttribute('aria-expanded', 'false');
+    await typeQuery('space');
+    const listbox = await screen.findByRole('listbox');
+    const options = screen.getAllByRole('option');
+    expect(input).toHaveAttribute('aria-expanded', 'true');
+    expect(input).toHaveAttribute('aria-controls', listbox.id);
+    expect(input).toHaveAttribute('aria-activedescendant', options[0]!.id);
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(input).toHaveAttribute('aria-activedescendant', options[1]!.id);
+    expect(options.every((option) => option.tabIndex === -1)).toBe(true);
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(input).toHaveAttribute('aria-expanded', 'false');
+    expect(input).not.toHaveAttribute('aria-activedescendant');
+  });
+
+  it('opens all search results with keyboard activation', async () => {
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    const user = userEvent.setup();
+    render(<TitlebarSearch />);
+    await typeQuery('space');
+    const seeAll = await screen.findByRole('button', { name: 'See all results' });
+    seeAll.focus();
+    await user.keyboard('{Enter}');
+    expect(dispatch.mock.calls.some(([event]) => event.type === 'gezel:open-search-results')).toBe(
+      true,
+    );
   });
 
   it('selecting the first (project) result opens that project', async () => {
@@ -295,7 +327,7 @@ describe('TitlebarSearch', () => {
     const options = screen.getAllByTestId('search-option');
     expect(options).toHaveLength(6); // 1 document + 5 of 9 files
     expect(options[0]?.textContent).toContain('Lesson Plan.docx');
-    expect(screen.getByText('+4 more')).toBeInTheDocument();
+    expect(screen.getByText('+4 more files')).toBeInTheDocument();
   });
 
   it('still reports an honest empty result when nothing matches', async () => {

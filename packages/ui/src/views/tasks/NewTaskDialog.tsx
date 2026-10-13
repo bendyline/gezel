@@ -10,12 +10,15 @@ import {
   type TaskInputSource,
   composeCraftbookLaunch,
   craftbookInputParams,
+  interestAreasForCraftbook,
   mainContentParamKey,
+  orderByInterests,
   planBriefLabel,
   planDisplayName,
   planLaunchFormSchema,
   planOutputSummary,
   prioritizePullsForCurrentBranch,
+  servesInterests,
   starterCraftbookIds,
   unmetParamAlternatives,
   visibleCatalogItems,
@@ -40,6 +43,7 @@ import {
   type CraftbookInputValue,
   EMPTY_INPUT_VALUE,
 } from '../../components/craftbook-input/CraftbookInputField.js';
+import { useInterests } from '../../components/useInterests.js';
 import { useShowWorkInProgressFeatures } from '../../components/useShowWorkInProgressFeatures.js';
 import { Dialog, Select } from '../../primitives/index.js';
 import { runtimeCapabilities } from '../../runtime-capabilities.js';
@@ -182,6 +186,10 @@ export function NewTaskDialog({
   // depend on the project's type and GitHub/branch state).
   const [books, setBooks] = useState<BookItem[]>([]);
   const [booksLoaded, setBooksLoaded] = useState(false);
+  // Which project the loaded books belong to. The Tasks view mounts this
+  // dialog before its project list arrives, so an open first loads for no
+  // project at all, and landing on that empty gallery picked All plans.
+  const [booksLoadedFor, setBooksLoadedFor] = useState<string | null>(null);
   const [starterIds, setStarterIds] = useState<string[]>([]);
   const [durationEstimates, setDurationEstimates] = useState<Record<string, number>>({});
   const submissionKey = useRef('');
@@ -338,6 +346,7 @@ export function NewTaskDialog({
       if (sequence !== craftbookLoadSequence.current) return;
       setBooks([]);
       loadedCraftbookSequence.current = sequence;
+      setBooksLoadedFor(projectId);
       setBooksLoaded(true);
       return;
     }
@@ -366,6 +375,7 @@ export function NewTaskDialog({
     } finally {
       if (sequence === craftbookLoadSequence.current) {
         loadedCraftbookSequence.current = sequence;
+        setBooksLoadedFor(projectId);
         setBooksLoaded(true);
       }
     }
@@ -404,10 +414,38 @@ export function NewTaskDialog({
     setParams((prev) => ({ ...seedParamDefaults(book.manifest.paramSchema), ...prev }));
   }, [open, booksLoaded, books, projectId, defaultProjectId]);
 
+  // The person's interest areas order the gallery: their shelf comes first
+  // and the dialog lands on it. Nothing leaves All plans because of it.
+  const interests = useInterests();
+  const forYouBooks = useMemo(
+    () =>
+      interests.areas.length === 0
+        ? []
+        : orderByInterests(
+            books.filter(
+              (b) =>
+                !b.item.unavailableReason &&
+                servesInterests(interestAreasForCraftbook(b.manifest), interests.areas),
+            ),
+            (b) => interestAreasForCraftbook(b.manifest),
+            interests.areas,
+          ),
+    [books, interests.areas],
+  );
   // Land on the project's recommended shelf when it has one (once per
   // open/project — user shelf picks stick after that).
   useEffect(() => {
-    if (!open || !booksLoaded || railInitialized) return;
+    // Wait for the interests too, and for this project's books: landing
+    // before either arrived always picked All.
+    if (
+      !open ||
+      !booksLoaded ||
+      booksLoadedFor !== projectId ||
+      loadedCraftbookSequence.current !== craftbookLoadSequence.current ||
+      railInitialized
+    )
+      return;
+    if (!interests.loaded) return;
     setRailInitialized(true);
     const hasFeatured =
       creationMode === 'one-time'
@@ -417,9 +455,25 @@ export function NewTaskDialog({
               ? book.manifest.runModes?.scheduled
               : book.manifest.runModes?.nightShift,
           );
-    if (creationMode === 'one-time' && starterIds.length) setActiveRail('starters');
+    // Inside a project with its own recommendations, those still win.
+    const projectShelf = Boolean(projectId) && projectId !== 'default' && suggestedIds.size > 0;
+    if (creationMode === 'one-time' && forYouBooks.length > 0 && !projectShelf) {
+      setActiveRail('for-you');
+    } else if (creationMode === 'one-time' && starterIds.length) setActiveRail('starters');
     else if (hasFeatured) setActiveRail('recommended');
-  }, [open, booksLoaded, railInitialized, suggestedIds, creationMode, books, starterIds]);
+  }, [
+    open,
+    booksLoaded,
+    booksLoadedFor,
+    railInitialized,
+    suggestedIds,
+    creationMode,
+    books,
+    starterIds,
+    forYouBooks,
+    projectId,
+    interests.loaded,
+  ]);
 
   const selectedBook = selectedBookId
     ? (books.find((b) => b.manifest.id === selectedBookId) ?? null)
@@ -614,6 +668,15 @@ export function NewTaskDialog({
         },
       ];
     }
+    if (activeRail === 'for-you' && forYouBooks.length > 0)
+      return [
+        {
+          id: 'for-you',
+          title: 'For you',
+          tagline: 'From what you said you use gezel for',
+          books: forYouBooks,
+        },
+      ];
     if (activeRail === 'starters')
       return [
         {
@@ -654,6 +717,7 @@ export function NewTaskDialog({
     filteredBooks,
     activeRail,
     suggestedBooks,
+    forYouBooks,
     projectType,
     lenses,
     books,
@@ -1098,6 +1162,17 @@ export function NewTaskDialog({
                 </header>
                 <div className="gz-npd-body">
                   <nav className="gz-npd-rail" aria-label="Plan shelves">
+                    {forYouBooks.length > 0 && (
+                      <button
+                        type="button"
+                        className={`gz-npd-rail-item${!searching && activeRail === 'for-you' ? ' active' : ''}`}
+                        onClick={() => setActiveRail('for-you')}
+                      >
+                        <ProjectGlyph glyph="sprout" size={16} />
+                        <span className="gz-npd-rail-label">For you</span>
+                        <span className="gz-npd-rail-count">{forYouBooks.length}</span>
+                      </button>
+                    )}
                     {starterIds.length > 0 && creationMode === 'one-time' && (
                       <button
                         type="button"
@@ -1189,6 +1264,9 @@ export function NewTaskDialog({
                                 {...(b.item.iconSvg ? { iconSvg: b.item.iconSvg } : {})}
                                 {...(b.item.logoUrl ? { logoUrl: b.item.logoUrl } : {})}
                                 suggested={isRecommended(b)}
+                                {...(b.item.unavailableReason
+                                  ? { disabledReason: b.item.unavailableReason }
+                                  : {})}
                                 index={index + 1}
                                 active={b.manifest.id === selectedBookId}
                                 onSelect={() => selectBook(b)}
@@ -1338,6 +1416,7 @@ export function NewTaskDialog({
                           <p className="gz-npd-give-eyebrow">Brief · your chat message</p>
                           {onComposerTextChange ? (
                             <MarkdownField
+                              accessibleName="Brief · your chat message"
                               value={composerText ?? ''}
                               placeholder="What should this be about?"
                               minHeight="96px"
@@ -1619,6 +1698,7 @@ function GalleryCard({
   logoUrl,
   glyph,
   suggested = false,
+  disabledReason,
   index,
   onSelect,
 }: {
@@ -1629,6 +1709,8 @@ function GalleryCard({
   logoUrl?: string;
   glyph: Parameters<typeof ProjectGlyph>[0]['glyph'];
   suggested?: boolean;
+  /** Why this host cannot run the plan; replaces the description, and the card cannot be picked. */
+  disabledReason?: string;
   index: number;
   onSelect: () => void;
 }) {
@@ -1638,8 +1720,9 @@ function GalleryCard({
       // biome-ignore lint/a11y/useSemanticElements: cards form one visual radio group; native inputs would duplicate the interactive surface.
       role="radio"
       aria-checked={active}
-      aria-label={label}
+      aria-label={disabledReason ? `${label} (${disabledReason})` : label}
       className={`gz-npd-card${active ? ' active' : ''}${suggested ? ' gz-ntd-card-suggested' : ''}`}
+      disabled={Boolean(disabledReason)}
       onClick={onSelect}
       style={{ '--card-i': Math.min(index, 11) } as React.CSSProperties}
     >
@@ -1652,7 +1735,7 @@ function GalleryCard({
         />
       </span>
       <span className="gz-npd-card-name">{label}</span>
-      <span className="gz-npd-card-description">{description}</span>
+      <span className="gz-npd-card-description">{disabledReason ?? description}</span>
     </button>
   );
 }

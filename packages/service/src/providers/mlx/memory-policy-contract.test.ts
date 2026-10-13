@@ -11,7 +11,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const SERVER_SRC = readFileSync(
-  fileURLToPath(new URL('./python/gezel_mlx_server.py', import.meta.url)),
+  fileURLToPath(
+    new URL('../../../../inference/src/providers/mlx/python/gezel_mlx_server.py', import.meta.url),
+  ),
   'utf8',
 );
 
@@ -67,7 +69,9 @@ describe('MLX sidecar memory policy', () => {
       /batch, self\._pending = wave_policy\.select_wave\(self\._pending, self\._admit_count\)/,
     );
     const policy = readFileSync(
-      fileURLToPath(new URL('./python/wave_policy.py', import.meta.url)),
+      fileURLToPath(
+        new URL('../../../../inference/src/providers/mlx/python/wave_policy.py', import.meta.url),
+      ),
       'utf8',
     );
     expect(policy).toMatch(/batch = candidates\[: max\(0, min\(len\(candidates\), n\)\)\]/);

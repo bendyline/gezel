@@ -49,16 +49,19 @@
   --gezel-paper-control: #ece8e5;
   --gezel-paper-control-deep: #e4dfdc;
   --gezel-paper-inset: #ddd3bd;
+  /* The rag paper Workshop Marks are drawn on. Theme-stable on purpose: a
+     surface that hosts the artwork sits on this ground in both themes. */
+  --gezel-paper-mark: #e6d5bc;
   /* True black, for surfaces that must meet the phone's own system bars. */
   --gezel-paper-night: #000;
   --gezel-ink: #1c1c1c;
-  --gezel-ink-muted: #666;
+  --gezel-ink-muted: #595959;
   --gezel-ink-warm: #2a2520;
   --gezel-ink-warm-muted: #5a4f42;
-  --gezel-ink-warm-quiet: #8b7e6b;
-  --gezel-sage: #667f62;
+  --gezel-ink-warm-quiet: #6b6152;
+  /* Deep enough that the cream titlebar labels clear 4.5:1 (~5:1). */
+  --gezel-sage: #5c6a4a;
   --gezel-sage-muted: #8a9a76;
-  --gezel-sage-deep: #5c6a4a;
   --gezel-sage-forest: #3d4d3a;
   --gezel-sage-soft: #d6dec6;
   --gezel-terra: #b0724c;
@@ -120,6 +123,8 @@
      not reach 4.5:1 as normal-size text on every paper surface. */
   --accent-text: #8c4428;
   --accent-text-hover: #78381f;
+  --action-bg: var(--accent-text);
+  --action-ink: var(--gezel-cream-ink);
   /* Dark ink keeps selected text legible on both themes' medium-orange
      accent fills. */
   --accent-selection-ink: #231207;
@@ -130,7 +135,9 @@
      active-state colors keep their existing treatments. */
   --toolbar-icon-ink: var(--gezel-toolbar-ink);
 
-  /* Brand palette */
+  /* Brand palette. The titlebar must stay the brand sage: the Windows/Linux
+     window-control overlay, the window background and the splash paint it
+     outside the renderer (titlebar-color.test.ts). */
   --titlebar: var(--gezel-sage);
   --titlebar-ink: var(--gezel-cream-ink);
   /* Fill colour the home-tab gezel logotype flips to when active.
@@ -149,7 +156,7 @@
      `--sage-ink` is the text tone that sits legibly on a low-alpha sage
      fill in each theme. */
   --sage: var(--gezel-sage-muted);
-  --sage-deep: var(--gezel-sage-deep);
+  --sage-deep: var(--gezel-sage);
   --sage-ink: #38512e;
   --sage-soft: var(--gezel-sage-soft);
 
@@ -207,7 +214,7 @@
   --key-border: rgba(92, 74, 55, 0.3);
   --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(60, 45, 30, 0.18), 0 2px 3px
     rgba(60, 45, 30, 0.08);
-  --key-pressed-bg: linear-gradient(to bottom, var(--gezel-terra-raised), var(--gezel-terra));
+  --key-pressed-bg: linear-gradient(to bottom, var(--accent-text-hover), var(--accent-text));
   --key-pressed-border: #8f5a3a;
   --key-pressed-ink: #fff6ea;
   --key-pressed-shadow: inset 0 1px 2px rgba(60, 30, 10, 0.28);
@@ -241,12 +248,14 @@
     --gezel-paper-control-deep: #1f2124;
     --gezel-paper-inset: #1f2124;
     --gezel-ink: #f0f0f0;
-    --gezel-ink-muted: #999;
+    --gezel-ink-muted: #a1a1a1;
     --gezel-terra: #c0875d;
     --gezel-terra-hover: #d5a07a;
     --gezel-terra-raised: #b07a50;
     --accent-text: #d5a07a;
     --accent-text-hover: #e0b897;
+    --action-bg: var(--gezel-terra);
+    --action-ink: var(--accent-selection-ink);
     --chat-handoff-bg: rgba(176, 114, 76, 0.08);
     --chat-handoff-border: rgba(176, 114, 76, 0.45);
     --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -312,12 +321,14 @@
   --gezel-paper-control-deep: #1f2124;
   --gezel-paper-inset: #1f2124;
   --gezel-ink: #f0f0f0;
-  --gezel-ink-muted: #999;
+  --gezel-ink-muted: #a1a1a1;
   --gezel-terra: #c0875d;
   --gezel-terra-hover: #d5a07a;
   --gezel-terra-raised: #b07a50;
   --accent-text: #d5a07a;
   --accent-text-hover: #e0b897;
+  --action-bg: var(--gezel-terra);
+  --action-ink: var(--accent-selection-ink);
   --chat-handoff-bg: rgba(176, 114, 76, 0.08);
   --chat-handoff-border: rgba(176, 114, 76, 0.45);
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);

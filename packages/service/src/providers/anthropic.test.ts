@@ -105,6 +105,12 @@ describe('anthropic — isReasoningModel', () => {
     expect(isReasoningModel('claude-sonnet-5-5')).toBe(true);
   });
 
+  it('recognizes the current Opus, Fable and Haiku API ids', () => {
+    for (const id of ['claude-opus-5-5', 'claude-opus-5', 'claude-fable-5-1', 'claude-haiku-5-5']) {
+      expect(isReasoningModel(id)).toBe(true);
+    }
+  });
+
   it('marks claude-opus and claude-sonnet 4.x as reasoning-capable', () => {
     expect(isReasoningModel('claude-opus-4-7')).toBe(true);
     expect(isReasoningModel('claude-opus-4-6')).toBe(true);

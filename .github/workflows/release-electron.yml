@@ -32,7 +32,7 @@ name: Release Electron App
 run-name: Draft Electron release from ${{ github.ref_name }}
 
 # No native-tag input: the installers bundle the native release the source
-# pins in packages/service/src/engines/native-manifest.ts, the same one the npm
+# pins in packages/inference/src/engines/native-manifest.ts, the same one the npm
 # packages download. To ship newer engines, commit the output of
 # scripts/pin-native-release.mjs first.
 on:
@@ -75,10 +75,10 @@ jobs:
           set -euo pipefail
           pinned_release="$(
             sed -n "s/^export const NATIVE_ENGINE_RELEASE = '\\([^']*\\)';/\\1/p" \
-              packages/service/src/engines/native-manifest.ts
+              packages/inference/src/engines/native-manifest.ts
           )"
           if [[ ! "$pinned_release" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]]; then
-            echo "::error::Could not read a versioned NATIVE_ENGINE_RELEASE from packages/service/src/engines/native-manifest.ts (got '${pinned_release}')"
+            echo "::error::Could not read a versioned NATIVE_ENGINE_RELEASE from packages/inference/src/engines/native-manifest.ts (got '${pinned_release}')"
             exit 1
           fi
           echo "tag=native-v${pinned_release}" >> "$GITHUB_OUTPUT"
@@ -158,7 +158,7 @@ jobs:
           # pin-native-release.mjs updates both files together; catch a
           # half-applied pin before downloading or signing any installers.
           node scripts/verify-native-file-manifest.mjs \
-            --manifest packages/service/src/engines/native-file-manifest.json \
+            --manifest packages/inference/src/engines/native-file-manifest.json \
             --release "$version"
 
       - name: Determine release version
@@ -226,9 +226,9 @@ jobs:
             --version "${{ needs.release-preflight.outputs.version }}" \
             --sbom artifacts/gezel.cdx.json
       - name: Production dependency vulnerability gate
-        # high matches the PR-time gate in quality.yml — the two must
+        # critical matches the PR-time gate in quality.yml — the two must
         # stay in lockstep so a release never fails on something CI passed.
-        run: pnpm audit:vulnerabilities --audit-level=high
+        run: pnpm audit:vulnerabilities --audit-level=critical
       - name: Dependency license policy gate
         run: pnpm audit:licenses
       - name: Preserve supply-chain inventory
@@ -295,7 +295,7 @@ jobs:
           node scripts/check-native-payload.mjs --root packages/app/native-bin
           node scripts/verify-native-file-manifest.mjs \
             --root packages/app/native-bin \
-            --manifest packages/service/src/engines/native-file-manifest.json \
+            --manifest packages/inference/src/engines/native-file-manifest.json \
             --release "$version"
 
       - name: Verify Authenticode on staged native binaries
@@ -728,7 +728,7 @@ jobs:
           $nativeVersion = '${{ needs.release-preflight.outputs.nativeTag }}' -replace '^native-v', ''
           node scripts/verify-installer-licenses.mjs $installer.FullName `
             --native-source packages/app/native-bin `
-            --native-manifest packages/service/src/engines/native-file-manifest.json `
+            --native-manifest packages/inference/src/engines/native-file-manifest.json `
             --native-release $nativeVersion
           if ($LASTEXITCODE -ne 0) { throw 'Windows installer payload verification failed' }
 
@@ -822,7 +822,7 @@ jobs:
           node scripts/check-native-payload.mjs --root packages/app/native-bin
           node scripts/verify-native-file-manifest.mjs \
             --root packages/app/native-bin \
-            --manifest packages/service/src/engines/native-file-manifest.json \
+            --manifest packages/inference/src/engines/native-file-manifest.json \
             --release "$version"
 
       - name: Verify Developer ID signatures on staged native binaries
@@ -1239,7 +1239,7 @@ jobs:
           version="${version#native-v}"
           node scripts/verify-installer-licenses.mjs "$pkg" \
             --native-source packages/app/native-bin \
-            --native-manifest packages/service/src/engines/native-file-manifest.json \
+            --native-manifest packages/inference/src/engines/native-file-manifest.json \
             --native-release "$version"
 
       - name: Tear down keychain
@@ -1320,7 +1320,7 @@ jobs:
           node scripts/check-native-payload.mjs --root packages/app/native-bin
           node scripts/verify-native-file-manifest.mjs \
             --root packages/app/native-bin \
-            --manifest packages/service/src/engines/native-file-manifest.json \
+            --manifest packages/inference/src/engines/native-file-manifest.json \
             --release "$version"
 
       - name: Build + produce service bundle
@@ -1430,7 +1430,7 @@ jobs:
             version="${version#native-v}"
             node scripts/verify-installer-licenses.mjs "$installer" \
               --native-source packages/app/native-bin \
-              --native-manifest packages/service/src/engines/native-file-manifest.json \
+              --native-manifest packages/inference/src/engines/native-file-manifest.json \
               --native-release "$version"
           done
           [[ "$found" == "1" ]]

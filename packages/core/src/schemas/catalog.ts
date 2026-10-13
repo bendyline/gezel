@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CraftbookCategorySchema } from '../craftbook-categories.js';
+import { InterestAreaIdSchema } from '../interests/areas.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
 import { TaskAssigneeSchema } from './assignee.js';
 import { IdRegex } from './catalog-id.js';
@@ -12,6 +13,7 @@ import {
   CraftbookRecommendationSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
+  CraftbookSampleSchema,
   CraftbookScriptsSchema,
   CraftbookServiceNeedSchema,
   CraftbookSpawnSchema,
@@ -662,6 +664,12 @@ export const CraftbookTemplateIdentitySchema = IdentityCommonSchema.extend({
    */
   category: CraftbookCategorySchema.optional(),
   /**
+   * Interest areas this item serves, when its category alone would say wrong
+   * (a career book under business, a study drill under personal). Absent, the
+   * category decides: see interestAreasForCraftbook / interestAreasForProjectType.
+   */
+  interests: z.array(InterestAreaIdSchema).optional(),
+  /**
    * Optional workflow tag for filtering / Gilde browser facets
    * (e.g. "review-loop", "publish-pipeline"). Free-form.
    */
@@ -697,6 +705,8 @@ export const CraftbookTemplateVersionManifestSchema = z.object({
   spawn: CraftbookSpawnSchema.optional(),
   /** User-speech phrases that route to this craftbook from chat. */
   triggers: z.array(z.string()).optional(),
+  /** Samples for the book's inputs, under `samples/` in this version folder. */
+  samples: z.array(CraftbookSampleSchema).optional(),
   /** Pre/PostToolUse hooks installed while this craftbook is active. */
   hooks: z.array(HookSpecSchema).optional(),
   /**
@@ -770,6 +780,12 @@ export const CraftbookTemplateManifestSchema = z.object({
   role: CraftbookRoleSchema.default('general'),
   /** Mirrored from the identity — see CraftbookTemplateIdentitySchema. */
   category: CraftbookCategorySchema.optional(),
+  /**
+   * Interest areas this item serves, when its category alone would say wrong
+   * (a career book under business, a study drill under personal). Absent, the
+   * category decides: see interestAreasForCraftbook / interestAreasForProjectType.
+   */
+  interests: z.array(InterestAreaIdSchema).optional(),
   workflow: z.string().optional(),
   about: z.string(),
   steps: z.array(CraftbookStepSchema).min(1),
@@ -784,6 +800,8 @@ export const CraftbookTemplateManifestSchema = z.object({
   availableVersions: z.array(z.string()).default([]),
   /** User-speech triggers (mirrored from the version manifest). */
   triggers: z.array(z.string()).optional(),
+  /** Samples (mirrored from the version manifest). */
+  samples: z.array(CraftbookSampleSchema).optional(),
   /** Hooks installed while active (mirrored from the version manifest). */
   hooks: z.array(HookSpecSchema).optional(),
   /**
@@ -1165,6 +1183,12 @@ const ProjectTypeCompositionShape = {
 export const ProjectTypeIdentitySchema = IdentityCommonSchema.extend({
   kind: z.literal('project-type'),
   category: ProjectTypeCategorySchema.optional(),
+  /**
+   * Interest areas this item serves, when its category alone would say wrong
+   * (a career book under business, a study drill under personal). Absent, the
+   * category decides: see interestAreasForCraftbook / interestAreasForProjectType.
+   */
+  interests: z.array(InterestAreaIdSchema).optional(),
   /** Small monochrome maker's mark inherited by project instances. */
   icon: ProjectIconIdSchema.optional(),
 });
@@ -1190,6 +1214,12 @@ export const ProjectTypeManifestSchema = z.object({
   description: z.string(),
   tags: z.array(z.string()).default([]),
   category: ProjectTypeCategorySchema.optional(),
+  /**
+   * Interest areas this item serves, when its category alone would say wrong
+   * (a career book under business, a study drill under personal). Absent, the
+   * category decides: see interestAreasForCraftbook / interestAreasForProjectType.
+   */
+  interests: z.array(InterestAreaIdSchema).optional(),
   /** Small monochrome maker's mark inherited by project instances. */
   icon: ProjectIconIdSchema.optional(),
   maintainer: z.object({
@@ -2075,10 +2105,9 @@ export const ImageModelCategorySchema = z.enum(['general', 'artistic', 'photogra
 export type ImageModelCategory = z.infer<typeof ImageModelCategorySchema>;
 
 /**
- * Coarse hardware tier for the model. Drives a "Runs on … memory" pill in
- * the catalog UI and (later) RAM-budget filtering analogous to
- * `LlamaCppModelManager`. The numeric `minRamGB` carried alongside is the
- * actual machine-readable signal; the tier is the human-friendly bucket.
+ * Coarse hardware tier the catalog used to hand-author for media models.
+ * Deprecated with `minRamGB` / `minVramGB`: what a model needs is computed
+ * from its weight files (core `media-memory.ts`).
  */
 export const ImageModelHardwareTierSchema = z.enum(['low', 'mid', 'high', 'workstation']);
 export type ImageModelHardwareTier = z.infer<typeof ImageModelHardwareTierSchema>;
@@ -2107,11 +2136,27 @@ export const ImageModelAuxiliaryRoleSchema = z.enum([
 ]);
 export type ImageModelAuxiliaryRole = z.infer<typeof ImageModelAuxiliaryRoleSchema>;
 
+/**
+ * What a safetensors weight file holds, read from its header: the element
+ * count at every stored float precision, plus the bytes of everything that
+ * is not a float. A fact about the pinned file, like its sha256 — gilde's
+ * `pin-weight-tensors` tool writes it when a model is authored, so the app
+ * can price the model's memory (core `media-memory.ts`) without touching the
+ * network. Absent on GGUF files, which load at their size.
+ */
+export const WeightTensorsSchema = z.object({
+  floatElements: z.record(z.string(), z.number().int().nonnegative()),
+  otherBytes: z.number().int().nonnegative(),
+});
+export type WeightTensors = z.infer<typeof WeightTensorsSchema>;
+
 export const ImageModelAuxiliaryFileSchema = z.object({
   role: ImageModelAuxiliaryRoleSchema,
   downloadUrl: z.string().url(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   approxSizeBytes: z.number().int().positive(),
+  /** Present on a safetensors file. See {@link WeightTensorsSchema}. */
+  tensors: WeightTensorsSchema.optional(),
 });
 export type ImageModelAuxiliaryFile = z.infer<typeof ImageModelAuxiliaryFileSchema>;
 
@@ -2143,14 +2188,18 @@ export const ImageModelIdentitySchema = IdentityCommonSchema.extend({
    * See `resolveImg2ImgSupport` in the service's image provider layer.
    */
   supportsImg2Img: z.boolean().optional(),
-  /** Coarse hardware tier — drives the "runs on …" pill. */
-  hardwareTier: ImageModelHardwareTierSchema,
-  /** Minimum recommended unified-memory / VRAM in gigabytes. */
-  minRamGB: z.number().positive(),
+  /**
+   * @deprecated Hand-authored, and no longer read: the daemon prices every
+   * media model from its weight files (core `media-memory.ts`). Optional so
+   * the catalog can drop it; remove it at the next gilde minor line.
+   */
+  hardwareTier: ImageModelHardwareTierSchema.optional(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  minRamGB: z.number().positive().optional(),
   /**
    * Whether the upstream license permits commercial use. When false, the
    * UI shows a prominent "Non-commercial" badge so the user makes an
-   * informed choice (e.g. SDXL Turbo, FLUX.1-dev).
+   * informed choice (e.g. SDXL Turbo).
    */
   commercialUse: z.boolean(),
 });
@@ -2166,6 +2215,8 @@ export const ImageModelVersionManifestSchema = z.object({
   /** SHA-256 of the weights file; verified after download. */
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   approxSizeBytes: z.number().int().positive(),
+  /** Present when the weights file is safetensors. See {@link WeightTensorsSchema}. */
+  tensors: WeightTensorsSchema.optional(),
   /** e.g. 'Q4_K_M', 'Q8_0', 'F16'. Informational. */
   quantization: z.string().optional(),
   /**
@@ -2199,6 +2250,7 @@ export const ImageModelManifestSchema = z.object({
   downloadUrl: z.string().url(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   approxSizeBytes: z.number().int().positive(),
+  tensors: WeightTensorsSchema.optional(),
   quantization: z.string().optional(),
   recommendedSteps: z.number().int().positive().default(20),
   widthRange: z
@@ -2213,8 +2265,10 @@ export const ImageModelManifestSchema = z.object({
   /** Mirrors {@link ImageModelIdentitySchema.supportsImg2Img}. */
   supportsImg2Img: z.boolean().optional(),
   auxiliaryFiles: z.array(ImageModelAuxiliaryFileSchema).default([]),
-  hardwareTier: ImageModelHardwareTierSchema,
-  minRamGB: z.number().positive(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  hardwareTier: ImageModelHardwareTierSchema.optional(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  minRamGB: z.number().positive().optional(),
   commercialUse: z.boolean(),
   notes: z.string().optional(),
   availableVersions: z.array(z.string()).default([]),
@@ -2324,6 +2378,8 @@ export const VideoModelSourceSchema = z.object({
         name: z.string(),
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
         sizeBytes: z.number().int().positive(),
+        /** Present on a safetensors file. See {@link WeightTensorsSchema}. */
+        tensors: WeightTensorsSchema.optional(),
         /**
          * Override the source-level `huggingfaceRepo`/`revision` for this
          * one file. Lets a single install assemble files from more than one
@@ -2389,10 +2445,10 @@ export const VideoModelIdentitySchema = IdentityCommonSchema.extend({
   /** Whether this model accepts an input image for image-to-video. */
   supportsImageToVideo: z.boolean().default(false),
   upstream: z.string().url().optional(),
-  /** Reuses the image-model tier vocabulary for the "runs on …" pill. */
-  hardwareTier: ImageModelHardwareTierSchema,
-  /** Minimum recommended unified-memory / VRAM in gigabytes. */
-  minVramGB: z.number().positive(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  hardwareTier: ImageModelHardwareTierSchema.optional(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  minVramGB: z.number().positive().optional(),
   /** Whether the upstream license permits commercial use. */
   commercialUse: z.boolean(),
 });
@@ -2445,8 +2501,10 @@ export const VideoModelManifestSchema = z.object({
   defaultHeight: z.number().int().positive().optional(),
   supportsImageToVideo: z.boolean().default(false),
   upstream: z.string().url().optional(),
-  hardwareTier: ImageModelHardwareTierSchema,
-  minVramGB: z.number().positive(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  hardwareTier: ImageModelHardwareTierSchema.optional(),
+  /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
+  minVramGB: z.number().positive().optional(),
   commercialUse: z.boolean(),
   notes: z.string().optional(),
   availableVersions: z.array(z.string()).default([]),

@@ -1,4 +1,4 @@
-import type { VSCodeSetupStatusResponse } from '@bendyline/gezel';
+import type { LocalHarnessSetupState, VSCodeSetupStatusResponse } from '@bendyline/gezel';
 import { useCallback, useEffect, useId, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
@@ -11,9 +11,11 @@ type Confirmation = 'configure' | 'repair' | 'remove';
 export function VSCodeSetupCard({
   endpointsEnabled,
   onChanged,
+  onStateChange,
 }: {
   endpointsEnabled: boolean;
   onChanged?: () => void | Promise<void>;
+  onStateChange?: (state: LocalHarnessSetupState) => void;
 }) {
   const [profileId, setProfileId] = useState('');
   const profileLabelId = useId();
@@ -37,6 +39,7 @@ export function VSCodeSetupCard({
     backupNotice: (next) =>
       next.configBackupPath ? `The previous file was saved as ${next.configBackupPath}.` : null,
     ...(onChanged ? { onChanged } : {}),
+    ...(onStateChange ? { onStateChange } : {}),
   });
 
   const { status, confirmation, setConfirmation, setError, busy } = card;
@@ -69,7 +72,7 @@ export function VSCodeSetupCard({
       notice={card.notice}
       error={card.error}
       reasonsIntro="The managed setup needs an update:"
-      emptyModelsNote="No gezels or inference models compatible with VS Code's agent tool loop are available yet."
+      emptyModelsNote="No gezellen or inference models compatible with VS Code's agent tool loop are available yet."
       intro={
         <>
           VS Code keeps its native agent tools, permissions, and conversation loop. Gezel adds your

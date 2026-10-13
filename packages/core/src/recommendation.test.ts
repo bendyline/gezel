@@ -124,6 +124,114 @@ describe('pickRecommendedModel', () => {
     expect(pick?.id).toBe('qwen3.6-35b-a3b-q4');
   });
 
+  // A 12 GB laptop with 7.7 GB of RAM free picked the 35B MoE, and the first
+  // chat turn was refused with "not enough memory" (2026-10-11).
+  it('12 GB card: passes over the offloaded MoE when the RAM it needs is not free now', () => {
+    const pick = pickRecommendedModel(CANDIDATES, {
+      platform: 'win32',
+      gpuVramBytes: 12 * GB,
+      gpuMemoryKind: 'discrete',
+      totalRamBytes: 31 * GB,
+      usableBytes: 11.34 * GB,
+      budgetBytes: 30 * GB,
+      // 11.34 GB of card plus 7.7 GB free RAM, less the OS reserve and margin.
+      launchCapBytes: 15.4 * GB,
+    });
+    expect(pick?.id).not.toBe('qwen3.6-35b-a3b-q4');
+    expect(pick?.reason).toMatch(/passed over .*qwen3\.6-35b-a3b-q4.*would not start/);
+    const chosen = CANDIDATES.find((c) => c.id === pick?.id);
+    expect(chosen!.residentBytes).toBeLessThanOrEqual(15.4 * GB);
+  });
+
+  it('12 GB card: still offloads the MoE on a card other programs share', () => {
+    const pick = pickRecommendedModel(CANDIDATES, {
+      platform: 'win32',
+      gpuVramBytes: 12 * GB,
+      gpuMemoryKind: 'discrete',
+      totalRamBytes: 64 * GB,
+      usableBytes: 11.34 * GB,
+      budgetBytes: 49 * GB,
+      launchCapBytes: 40 * GB,
+      // A browser and the desktop hold about 2 GB; the experts stream from RAM.
+      freeGpuBytes: 9.5 * GB,
+    });
+    expect(pick?.id).toBe('qwen3.6-35b-a3b-q4');
+  });
+
+  it('12 GB card: passes over models larger than the card when it is nearly full', () => {
+    const pick = pickRecommendedModel(CANDIDATES, {
+      platform: 'win32',
+      gpuVramBytes: 12 * GB,
+      gpuMemoryKind: 'discrete',
+      totalRamBytes: 64 * GB,
+      usableBytes: 11.34 * GB,
+      budgetBytes: 49 * GB,
+      launchCapBytes: 40 * GB,
+      // Another program holds most of the card: not even the always-active
+      // layers of a 25 GB MoE (about 3.8 GB) plus their reserves fit.
+      freeGpuBytes: 4 * GB,
+    });
+    const chosen = CANDIDATES.find((c) => c.id === pick?.id);
+    expect(chosen!.residentBytes).toBeLessThanOrEqual(11.34 * GB);
+  });
+
+  it('12 GB card: still offloads the MoE when the RAM is free and the card is idle', () => {
+    const pick = pickRecommendedModel(CANDIDATES, {
+      platform: 'win32',
+      gpuVramBytes: 12 * GB,
+      gpuMemoryKind: 'discrete',
+      totalRamBytes: 32 * GB,
+      usableBytes: 11.4 * GB,
+      budgetBytes: 30 * GB,
+      launchCapBytes: 28 * GB,
+      freeGpuBytes: 11.6 * GB,
+    });
+    expect(pick?.id).toBe('qwen3.6-35b-a3b-q4');
+  });
+
+  // A 1-bit Qwen 3.8 27B, scored level with the 35B, became the first-run
+  // pick on a 12 GB laptop once the 35B could not start (2026-10-12).
+  it('ranks a 1-bit quant at half its score and a 2-bit one at four fifths', () => {
+    const device = {
+      platform: 'win32',
+      gpuVramBytes: 12 * GB,
+      gpuMemoryKind: 'discrete' as const,
+      totalRamBytes: 31 * GB,
+      usableBytes: 11.34 * GB,
+      budgetBytes: 30 * GB,
+    };
+    const open = { licenseClass: 'open' as const, tags: [] };
+    const gemma = {
+      id: 'gemma4-12b-q4',
+      recoScore: 15,
+      quantization: 'UD-Q4_K_XL',
+      residentBytes: 7 * GB,
+      ...open,
+    };
+    const oneBit = {
+      id: 'qwen3.8-27b-iq1-s',
+      recoScore: 20,
+      quantization: 'UD-IQ1_S',
+      residentBytes: 6.6 * GB,
+      ...open,
+    };
+    const twoBit = {
+      id: 'qwen3.8-27b-q2',
+      recoScore: 21,
+      quantization: 'UD-Q2_K_XL',
+      residentBytes: 10.4 * GB,
+      ...open,
+    };
+
+    const withOneBit = pickRecommendedModel([gemma, oneBit], device);
+    expect(withOneBit?.id).toBe('gemma4-12b-q4');
+
+    // 21 × 0.8 = 16.8 still outranks Gemma's 15.
+    const withTwoBit = pickRecommendedModel([gemma, oneBit, twoBit], device);
+    expect(withTwoBit?.id).toBe('qwen3.8-27b-q2');
+    expect(withTwoBit?.reason).toContain('recoScore 21 → 16.8 (UD-Q2_K_XL)');
+  });
+
   it('GTX 1650 class host (4 GB VRAM + 32 GB RAM): recommends Gemma E2B, not an offloaded MoE', () => {
     const pick = pickRecommendedModel(CANDIDATES, {
       platform: 'win32',
@@ -387,6 +495,41 @@ describe('hardware hints (C2 — advisory only)', () => {
         residentBytes: 6 * GB,
       }),
     ).toBeNull();
+  });
+
+  // Settings called the 35B that had just been refused a "good match for this
+  // machine", and Gemma 4 12B, which had finished the task, "may respond
+  // slowly" (2026-10-11).
+  it('says a model will not start right now when the launch check would refuse it', () => {
+    const laptop: RecoDevice = {
+      platform: 'win32',
+      gpuVramBytes: 12 * GB,
+      gpuMemoryKind: 'discrete',
+      totalRamBytes: 31 * GB,
+      usableBytes: 11.34 * GB,
+    };
+    expect(
+      hardwareHint(laptop, { isMoE: true, fitTier: 'fits-offload', startsNow: false })?.kind,
+    ).toBe('wont-start-now');
+    expect(
+      hardwareHint(laptop, { isMoE: true, fitTier: 'fits-offload', startsNow: true })?.kind,
+    ).toBe('moe-good-match');
+  });
+
+  it('does not call a dense model that fits the card slow', () => {
+    const laptop: RecoDevice = {
+      platform: 'win32',
+      gpuVramBytes: 12 * GB,
+      gpuMemoryKind: 'discrete',
+      totalRamBytes: 31 * GB,
+      usableBytes: 11.34 * GB,
+    };
+    expect(
+      hardwareHint(laptop, { isMoE: false, fitTier: 'fits', residentBytes: 10.7 * GB }),
+    ).toBeNull();
+    expect(
+      hardwareHint(laptop, { isMoE: false, fitTier: 'tight', residentBytes: 14.5 * GB })?.kind,
+    ).toBe('large-dense-caution');
   });
 
   it('scope guard: prefersMoE/excludesMoE are untouched by the hint work', () => {

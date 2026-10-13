@@ -11,10 +11,10 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { resolveEngine } from '@bendyline/gezel-inference/internal/engines/resolver';
+import { UvRuntime } from '@bendyline/gezel-inference/internal/python/uv-runtime';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveEngine } from './engines/resolver.js';
 import { createOllamaEmulationController } from './http/ollama-emulation.js';
-import { UvRuntime } from './python/uv-runtime.js';
 import { SystemToolsetInstallRegistry } from './system-toolsets/install-registry.js';
 import type { PinnedSystemToolset } from './system-toolsets/manifest.js';
 

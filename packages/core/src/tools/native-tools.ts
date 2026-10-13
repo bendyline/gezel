@@ -172,6 +172,67 @@ export function nativeToolParameters(
   return node.kind === 'object' ? node : { kind: 'object', properties: [] };
 }
 
+/**
+ * A reply's JSON Schema in the ordered native shape guided generation is
+ * built from. Unlike tool parameters, a reply may be any shape at its root:
+ * an app asking for a list of findings wants an array back, not an object.
+ */
+export function nativeResponseSchema(schema: unknown): NativeToolSchema {
+  return convert(schema, true).node;
+}
+
+function isNullable(schema: Json): boolean {
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+  if (types.includes('null')) return true;
+  const union = Array.isArray(schema.anyOf) ? schema.anyOf : schema.oneOf;
+  return (
+    Array.isArray(union) && union.some((variant) => isObject(variant) && variant.type === 'null')
+  );
+}
+
+/**
+ * Puts back the required keys whose value was null. A native decoder has no
+ * null, so a nullable property is generated as optional and simply left out
+ * when it has no value; the app asked for the key to be present.
+ */
+function restoreNulls(raw: unknown, value: unknown): unknown {
+  const schema = isObject(raw) ? raw : {};
+  const union = Array.isArray(schema.anyOf) ? schema.anyOf : schema.oneOf;
+  if (Array.isArray(union)) {
+    const kind = Array.isArray(value) ? 'array' : isObject(value) ? 'object' : null;
+    const variant = kind && union.find((choice) => isObject(choice) && choice.type === kind);
+    return variant ? restoreNulls(variant, value) : value;
+  }
+  if (Array.isArray(value)) return value.map((item) => restoreNulls(schema.items, item));
+  if (!isObject(value)) return value;
+  const properties = isObject(schema.properties) ? schema.properties : {};
+  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  // Rebuilt in the schema's property order, so a restored key sits where
+  // the app's schema put it rather than at the end.
+  const restored: Json = {};
+  for (const [name, property] of Object.entries(properties)) {
+    if (Object.hasOwn(value, name)) restored[name] = restoreNulls(property, value[name]);
+    else if (required.has(name) && isObject(property) && isNullable(property))
+      restored[name] = null;
+  }
+  for (const [name, item] of Object.entries(value))
+    if (!Object.hasOwn(restored, name)) restored[name] = item;
+  return restored;
+}
+
+/**
+ * A guided-generation reply in the shape its JSON Schema asked for: values
+ * the native decoder could only write as JSON text are parsed back, and
+ * required nullable keys it had to leave out are restored as null.
+ */
+export function decodeNativeResponse(
+  schema: unknown,
+  native: NativeToolSchema,
+  value: unknown,
+): unknown {
+  return restoreNulls(schema, decodeNativeToolArguments(native, value));
+}
+
 /** Restores the values a native decoder could only produce as JSON text. */
 export function decodeNativeToolArguments(schema: NativeToolSchema, value: unknown): unknown {
   switch (schema.kind) {

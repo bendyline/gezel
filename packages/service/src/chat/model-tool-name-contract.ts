@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -71,20 +72,23 @@ const SOURCE_PATTERN_GROUPS: SourcePatternGroup[] = [
     patterns: [
       'packages/mcp/src/**/*.ts',
       'packages/core/src/skills/to-craftbook.ts',
+      'packages/core/src/local-loop/**/*.ts',
+      'packages/inference/src/chat/**/*.ts',
+      'packages/inference/src/providers/llama-cpp/provider.ts',
+      'packages/inference/src/providers/mlx/provider.ts',
       'packages/service/src/chat/**/*.ts',
       'packages/service/src/fs/store.ts',
       'packages/service/src/prompts/**/*.ts',
-      'packages/service/src/providers/tool-repeat-tracker.ts',
-      'packages/service/src/providers/local-tool-call-salvage.ts',
       'packages/service/src/providers/ollama.ts',
-      'packages/service/src/providers/llama-cpp/provider.ts',
-      'packages/service/src/providers/mlx/provider.ts',
       'packages/service/src/providers/mcp-wrappers/**/*.ts',
     ],
   },
   {
     category: 'behavior-source',
-    patterns: ['packages/service/src/model-profile/behaviors/**/*.ts'],
+    patterns: [
+      'packages/inference/src/model-profile/behaviors/**/*.ts',
+      'packages/service/src/model-profile/behaviors/**/*.ts',
+    ],
   },
   {
     category: 'craftbook-authoring',
@@ -307,6 +311,13 @@ async function sourceEntries(
   const entries: ModelToolNameCorpusEntry[] = [];
   const files = new Set<string>();
   for (const group of SOURCE_PATTERN_GROUPS) {
+    // A named file that moved would otherwise just drop out of the corpus and
+    // the contract would keep passing; four did when the inference package split.
+    for (const pattern of group.patterns) {
+      if (!fg.isDynamicPattern(pattern) && !existsSync(resolve(rootDir, pattern))) {
+        throw new Error(`model tool-name corpus names a missing file: ${pattern}`);
+      }
+    }
     const paths = await fg(group.patterns, {
       cwd: rootDir,
       absolute: true,

@@ -712,7 +712,7 @@ test('the closure walk skips a sibling-checkout link but not a missing workspace
 test('every native payload file carries the digest the installer verifier checks', async () => {
   const manifest = JSON.parse(
     await readFile(
-      join(root, 'packages', 'service', 'src', 'engines', 'native-file-manifest.json'),
+      join(root, 'packages', 'inference', 'src', 'engines', 'native-file-manifest.json'),
       'utf8',
     ),
   );

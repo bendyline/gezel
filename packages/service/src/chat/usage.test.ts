@@ -1,5 +1,5 @@
+import type { TurnUsage } from '@bendyline/gezel-inference/internal/providers/types';
 import { describe, expect, it } from 'vitest';
-import type { TurnUsage } from '../providers/types.js';
 import { UsageTracker, medianOf } from './usage.js';
 
 const turn = (over: Partial<TurnUsage> = {}): TurnUsage => ({

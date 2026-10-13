@@ -2,9 +2,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelFitnessRecord } from '@bendyline/gezel';
+import type { PoolSnapshot } from '@bendyline/gezel-inference/internal/providers/native/provider-pool';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
-import type { PoolSnapshot } from '../providers/native/provider-pool.js';
 import { ModelFitnessManager, type ModelFitnessManagerOptions } from './manager.js';
 
 const GB = 1024 ** 3;

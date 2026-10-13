@@ -1,9 +1,9 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
+import * as atomic from '@bendyline/gezel-inference/internal/fs/atomic';
+import { ConfigStore } from '@bendyline/gezel-inference/internal/fs/config-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as atomic from './atomic.js';
-import { ConfigStore } from './config-store.js';
 import { Store } from './store.js';
 
 let home: string;

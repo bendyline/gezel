@@ -1,11 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
-import { ProviderQueue } from '../queue.js';
 import {
   AppleFmError,
   type AppleFmGenerateHandlers,
   type AppleFmGenerateRequest,
-} from './helper.js';
-import { AppleFoundationModelsProvider, AppleFoundationSession } from './provider.js';
+} from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/helper';
+import {
+  AppleFoundationModelsProvider,
+  AppleFoundationSession,
+} from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/provider';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import { describe, expect, it, vi } from 'vitest';
 
 const readFile = {
   type: 'function' as const,
@@ -59,7 +62,10 @@ type Script = (
 
 function session(
   script: Script,
-  opts: { history?: Array<{ role: 'user' | 'assistant'; content: string }> } = {},
+  opts: {
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    responseSchema?: unknown;
+  } = {},
 ) {
   const requests: AppleFmGenerateRequest[] = [];
   const helper = {
@@ -78,9 +84,24 @@ function session(
     history: opts.history ?? [],
     contextTokens: 4096,
     maxTokens: 1024,
+    ...(opts.responseSchema === undefined ? {} : { responseSchema: opts.responseSchema }),
   });
   return { s, helper, requests, callToolRich };
 }
+
+const REVIEW_SCHEMA = {
+  type: 'array',
+  maxItems: 6,
+  items: {
+    type: 'object',
+    properties: {
+      quote: { type: 'string' },
+      replacement: { type: ['string', 'null'] },
+      severity: { type: 'string', enum: ['info', 'suggestion', 'warning'] },
+    },
+    required: ['quote', 'replacement', 'severity'],
+  },
+};
 
 describe('Apple on-device sessions', () => {
   it('uses native usage when present without an extra tokenizer request', async () => {
@@ -196,6 +217,87 @@ describe('Apple on-device sessions', () => {
       /^Stopped: the same read_file call failed three times/,
     );
     expect(callToolRich).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('Apple on-device replies', () => {
+  it('follows a response schema with guided generation and returns the shape it asked for', async () => {
+    const { s, requests } = session(
+      async (_request, handlers) => {
+        // The helper sends a guided reply whole; nullable keys come back absent.
+        handlers.onDelta('[{"quote":"very unique","severity":"suggestion"}]');
+        return 'stop';
+      },
+      { responseSchema: REVIEW_SCHEMA },
+    );
+    const deltas: string[] = [];
+    s.onDelta((chunk) => deltas.push(chunk));
+    const expected = JSON.stringify([
+      { quote: 'very unique', replacement: null, severity: 'suggestion' },
+    ]);
+    await expect(s.sendAndWait('Review this.')).resolves.toBe(expected);
+    expect(deltas).toEqual([expected]);
+    expect(requests[0]?.schema).toMatchObject({
+      kind: 'array',
+      maxItems: 6,
+      items: { kind: 'object' },
+    });
+    expect(s.lastTurnFinish).toEqual({ reason: 'stop', maxTokens: 1024 });
+  });
+
+  it("reports a reply cut off at Apple's cap as length, with the cap it applied", async () => {
+    const { s } = session(async (_request, handlers) => {
+      handlers.onDelta('[{"quote":"cut');
+      return 'length';
+    });
+    await expect(s.sendAndWait('Review this.')).resolves.toBe('[{"quote":"cut');
+    expect(s.lastTurnFinish).toEqual({ reason: 'length', maxTokens: 1024 });
+
+    const guided = session(
+      async (_request, handlers) => {
+        // Apple closes an unfinished guided reply: valid JSON, keys missing.
+        handlers.onDelta('[{"quote":"cut"}]');
+        return 'length';
+      },
+      { responseSchema: REVIEW_SCHEMA },
+    );
+    // Passed on as generated: no restored nulls dressing it up as complete.
+    await expect(guided.s.sendAndWait('Review this.')).resolves.toBe('[{"quote":"cut"}]');
+    expect(guided.s.lastTurnFinish).toEqual({ reason: 'length', maxTokens: 1024 });
+  });
+
+  it("holds an app's larger max_tokens to Apple's cap and passes its schema through", async () => {
+    const generate = vi.fn(
+      async (request: AppleFmGenerateRequest, handlers: AppleFmGenerateHandlers) => {
+        handlers.onDelta('[]');
+        return 'stop' as const;
+      },
+    );
+    const provider = new AppleFoundationModelsProvider({
+      helper: {
+        ready: async () => ({
+          version: '1',
+          os: 'Version 27.0',
+          available: true,
+          contextTokens: 8192,
+          maxOutputTokens: 1024,
+        }),
+        generate,
+        countTokens: async () => 100,
+      } as never,
+      platform: 'darwin',
+      arch: 'arm64',
+    });
+    const s = await provider.createSession({
+      systemMessage: 'Review documents.',
+      tuning: { sampling: { maxTokens: 8192 }, output: { jsonSchema: REVIEW_SCHEMA } },
+    } as never);
+    await s.sendAndWait('Review this.');
+    expect(generate.mock.calls[0]?.[0]).toMatchObject({
+      maxTokens: 1024,
+      schema: { kind: 'array' },
+    });
+    expect(s.lastTurnFinish).toEqual({ reason: 'stop', maxTokens: 1024 });
   });
 });
 

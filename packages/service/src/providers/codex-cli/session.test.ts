@@ -1,8 +1,8 @@
 import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ProviderQueue } from '../queue.js';
 import { CodexCliSession, type CodexSessionDeps } from './session.js';
 
 let dir: string;

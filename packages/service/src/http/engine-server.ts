@@ -5,6 +5,9 @@ import {
   GEZEL_VERSION,
   createLogger,
 } from '@bendyline/gezel';
+import { enginesRoutes } from '@bendyline/gezel-inference/internal/http/routes/engines';
+import { modelBundleRoutes } from '@bendyline/gezel-inference/internal/http/routes/model-bundles';
+import { v1ModelsEnsureRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-models-ensure';
 import { Hono } from 'hono';
 import { ZodError } from 'zod';
 import {
@@ -25,18 +28,15 @@ import { audioModelRoutes } from './routes/audio-models.js';
 import { ds4Routes } from './routes/ds4.js';
 import { engineCacheRoutes } from './routes/engine-cache.js';
 import { engineQueueRoutes } from './routes/engine-queues.js';
-import { enginesRoutes } from './routes/engines.js';
 import { imageModelRoutes } from './routes/image-models.js';
 import { llamaCppRoutes } from './routes/llama-cpp.js';
 import { mlxRoutes } from './routes/mlx.js';
-import { modelBundleRoutes } from './routes/model-bundles.js';
 import { modelFitnessRoutes } from './routes/model-fitness.js';
 import { nativeCapacityRoutes } from './routes/native-capacity.js';
 import { remoteServingManageRoutes } from './routes/remote-serving-manage.js';
 import { systemMemoryRoutes } from './routes/system-memory.js';
 import { v1IdentityRoutes } from './routes/v1-identity.js';
 import { v1KnowledgeAssetsRoutes } from './routes/v1-knowledge-assets.js';
-import { v1ModelsEnsureRoutes } from './routes/v1-models-ensure.js';
 import { v1RemoteRoutes } from './routes/v1-remote.js';
 import { videoModelRoutes } from './routes/video-models.js';
 /** Deliberately explicit capability table. Product routers are never imported here. */

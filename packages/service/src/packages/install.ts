@@ -1,8 +1,8 @@
 import { mkdir, stat } from 'node:fs/promises';
 import { join, normalize } from 'node:path';
 import { formatNpmRegistrySpec } from '@bendyline/gezel';
+import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { projectMetaFile, projectPrivateDir } from '@bendyline/gezel/paths';
-import { realpathContained, safeJoin } from '../fs/safe-paths.js';
 import { runPnpm } from './pnpm.js';
 
 export interface InstallPackageOptions {

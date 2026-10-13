@@ -70,7 +70,7 @@ afterEach(async () => {
 
 async function realEmbed(): Promise<((texts: string[]) => Promise<number[][]>) | null> {
   try {
-    const { embedBatch } = await import('../memory/embeddings.js');
+    const { embedBatch } = await import('@bendyline/gezel-inference/internal/memory/embeddings');
     await embedBatch(['warmup']);
     return embedBatch;
   } catch {

@@ -47,6 +47,7 @@ import {
   COMPOSER_PREFILL_EVENT,
   mergeComposerPrefill,
   takeComposerPrefill,
+  takeComposerTaskLaunch,
 } from './composer-prefill.js';
 import { launchRequestBody } from './composer-task-launch.js';
 import { ComposerToolbarContext } from './composer-toolbar-context.js';
@@ -56,6 +57,7 @@ import { COMPACT_LAYOUT_THRESHOLD_PX, useCompactLayout } from './useCompactLayou
 import { useComposerTaskLaunch } from './useComposerTaskLaunch.js';
 import { usePromptDraft } from './usePromptDraft.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
+import { useWaitingForModel } from './useWaitingForModel.js';
 
 export type ComposerTurnState = 'idle' | 'streaming' | 'queued' | 'error';
 
@@ -275,6 +277,12 @@ export interface ChatComposerProps {
    * there. Surfaces that cannot create project tasks leave it undefined.
    */
   taskLaunch?: ComposerTaskLaunchProps;
+  /**
+   * Leave out the "can start talking once a model is downloaded" notice. For
+   * a surface that already says so in its own words (the meester's welcome).
+   * Send stays held either way.
+   */
+  hideWaitingNotice?: boolean;
 }
 
 interface ComposerNarrateButtonProps {
@@ -366,6 +374,7 @@ export function ChatComposer({
   draftId: selectedDraftId,
   onDraftIdChange,
   taskLaunch: taskLaunchProps,
+  hideWaitingNotice = false,
 }: ChatComposerProps) {
   const composerRef = useRef<HTMLDivElement>(null);
   // Hysteresis because a split grip can drag the width across the line, and
@@ -505,7 +514,9 @@ export function ChatComposer({
     // behavior: when the composer already has text, append the payload
     // below it (blank-line separated); when it's empty, the payload
     // becomes the whole draft.
-    const merged = mergeComposerPrefill(draftRef.current, queued);
+    const merged = queued.replace
+      ? queued.markdown
+      : mergeComposerPrefill(draftRef.current, queued.markdown);
     if (merged === null) return;
     draftRef.current = merged;
     draftUpdateRef.current(merged);
@@ -564,8 +575,13 @@ export function ChatComposer({
   draftFreshThreadRef.current = draft.isFreshThread;
   // The attached task: what Send starts instead of a chat turn. Off inside a
   // task thread or a craftbook-editing thread, where a launch makes no sense.
+  const capabilities = runtimeCapabilities();
   const taskLaunchEnabled =
-    Boolean(taskLaunchProps) && runtimeCapabilities().tasks && !taskRef && !craftbookRef;
+    Boolean(taskLaunchProps) &&
+    capabilities.tasks &&
+    capabilities.chatTaskLaunch !== false &&
+    !taskRef &&
+    !craftbookRef;
   const taskLaunch = useComposerTaskLaunch({
     enabled: taskLaunchEnabled,
     projectId,
@@ -575,6 +591,27 @@ export function ChatComposer({
     planText: intentPreviewText,
   });
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  // A prefill can arrive with its task attached (a welcome first project that
+  // runs a craftbook); attach it beside the sentence it came with.
+  const attachTaskRef = useRef(taskLaunch.attach);
+  attachTaskRef.current = taskLaunch.attach;
+  const dismissTaskRef = useRef(taskLaunch.dismiss);
+  dismissTaskRef.current = taskLaunch.dismiss;
+  useEffect(() => {
+    if (!taskLaunchEnabled) return;
+    const drain = () => {
+      const launch = takeComposerTaskLaunch(projectId);
+      if (launch) void attachTaskRef.current(launch);
+      else if (launch === null) void dismissTaskRef.current();
+    };
+    drain();
+    const onPrefill = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { projectId?: string } | undefined;
+      if (detail?.projectId === projectId) drain();
+    };
+    window.addEventListener(COMPOSER_PREFILL_EVENT, onPrefill);
+    return () => window.removeEventListener(COMPOSER_PREFILL_EVENT, onPrefill);
+  }, [projectId, taskLaunchEnabled]);
   // Recipients chosen from the To-line picker are independent of inline
   // @-mentions. They use the same server fan-out field at send time, but stay
   // visible across turns until the user removes one or replaces the primary.
@@ -610,6 +647,8 @@ export function ChatComposer({
     return () => window.removeEventListener('gezel:config-updated', onConfigUpdated);
   }, []);
   const engagementOff = engagementMode === 'off';
+  // The draft can still be written; it just can't go anywhere yet.
+  const waitingForModel = useWaitingForModel(gezelId, recipientGezels);
   const localTurnRef = useRef<LocalTurnStream | null>(null);
   const localTurnSequenceRef = useRef(0);
   // Live session id — initialized from the prop and updated the first time
@@ -1137,7 +1176,7 @@ export function ChatComposer({
       return;
     }
     if (!gezelId || turnActive) return;
-    if (engagementOff) return;
+    if (engagementOff || waitingForModel) return;
     // The attachment effect may not yet have cleared an obsolete suggestion.
     // User-picked tasks survive edits; inferred tasks need a matching preview.
     const attachedLaunch =
@@ -1409,6 +1448,7 @@ export function ChatComposer({
     projectId,
     turnActive,
     engagementOff,
+    waitingForModel,
     beginDraftSubmission,
     clearAcceptedDraft,
     ensureSessionId,
@@ -1629,6 +1669,24 @@ export function ChatComposer({
           </button>
         </div>
       )}
+      {waitingForModel && !engagementOff && !hideWaitingNotice && (
+        <div
+          className="chat-composer-waiting"
+          aria-live="polite"
+          data-testid="chat-waiting-for-model"
+        >
+          <span>{gezelName} can start talking once a model is downloaded.</span>
+          <button
+            type="button"
+            className="gz-key"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent('gezel:navigate', { detail: { view: 'home' } }))
+            }
+          >
+            Get started
+          </button>
+        </div>
+      )}
       {wedged && (
         <div className="chat-composer-wedged">
           <div className="chat-composer-wedged-head">
@@ -1844,6 +1902,7 @@ export function ChatComposer({
           </div>
         )}
         <EditorShell
+          ariaLabel="Message"
           // Squisq installs its placeholder on mount. Refresh it when the
           // recipient changes or the draft is reset, but never remount just
           // for new hint text: late crew metadata can change that hint during
@@ -1917,7 +1976,7 @@ export function ChatComposer({
                     className="chat-task-btn"
                     data-testid="chat-task"
                     onClick={() => setTaskDialogOpen(true)}
-                    disabled={engagementOff || draftSubmissionPending}
+                    disabled={engagementOff || waitingForModel || draftSubmissionPending}
                     aria-label={taskLaunch.attached ? 'Change the attached task' : 'Attach a task'}
                     title="Attach a plan to this message"
                   >
@@ -1980,6 +2039,7 @@ export function ChatComposer({
                   disabled={
                     !gezelId ||
                     engagementOff ||
+                    waitingForModel ||
                     draftSubmissionPending ||
                     (taskLaunch.attached !== null && !taskLaunch.readiness.ready)
                   }
@@ -1999,11 +2059,13 @@ export function ChatComposer({
                   title={
                     engagementOff
                       ? 'AI is disabled in Settings → General'
-                      : taskLaunch.attached && !taskLaunch.readiness.ready
-                        ? taskLaunch.readiness.reason
-                        : taskLaunch.attached
-                          ? 'Enter to start the task with this message as its brief'
-                          : 'Enter to send, Shift+Enter for newline'
+                      : waitingForModel
+                        ? `${gezelName} can start talking once a model is downloaded`
+                        : taskLaunch.attached && !taskLaunch.readiness.ready
+                          ? taskLaunch.readiness.reason
+                          : taskLaunch.attached
+                            ? 'Enter to start the task with this message as its brief'
+                            : 'Enter to send, Shift+Enter for newline'
                   }
                 >
                   <SubmitArrow />

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 64 64">
+<defs><linearGradient id="sage" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#526346"/><stop offset="1" stop-color="#3e4e34"/></linearGradient></defs>
+<rect x="2" y="2" width="60" height="60" rx="13" fill="url(#sage)"/>
+<path d="M18 25L25 25L21 50L14 50Z" fill="#f3ede0"/>
+<path d="M43 25L50 25L54 50L47 50Z" fill="#f3ede0"/>
+<rect x="20" y="39" width="28" height="5" rx="1" fill="#f3ede0"/>
+<rect x="13" y="19" width="42" height="8" rx="1.5" fill="#f3ede0"/>
+<rect x="14" y="19" width="40" height="1.1999999999999993" rx="0.6" fill="#fff6e5"/>
+<rect x="9" y="21" width="4" height="6" rx="1" fill="#f3ede0"/>
+<rect x="7" y="24" width="3" height="2" rx="0.6" fill="#f3ede0"/>
+<path d="M7 22V31" fill="none" stroke="#f3ede0" stroke-width="2" stroke-linecap="round"/>
+</svg>

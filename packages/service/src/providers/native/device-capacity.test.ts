@@ -28,16 +28,18 @@ vi.mock('@bendyline/gezel-client/node', async (original) => ({
   systemServiceHome: () => mocks.home,
   readSystemServiceRuntime: mocks.runtime,
 }));
-vi.mock('../../machine-engine/bridge.js', () => ({ inspectMachineRuntime: mocks.inspect }));
-vi.mock('../../remotes/pinned-fetch.js', () => ({
+vi.mock('@bendyline/gezel-inference/internal/machine-engine/inspect-runtime', () => ({
+  inspectMachineRuntime: mocks.inspect,
+}));
+vi.mock('@bendyline/gezel-inference/internal/remotes/pinned-fetch', () => ({
   createPinnedFetch: () => Object.assign(mocks.fetch, { close: async () => {} }),
 }));
-vi.mock('./device-capacity-ledger.js', () => ({
+vi.mock('@bendyline/gezel-inference/internal/providers/native/device-capacity-ledger', () => ({
   DeviceCapacityLedger: class {
     execute = mocks.local;
   },
 }));
-vi.mock('./measured-budget.js', () => ({
+vi.mock('@bendyline/gezel-inference/internal/providers/native/measured-budget', () => ({
   measuredCapacityBudget: async () => ({ kind: 'unified', fastBytes: 96 * 1024 ** 3 }),
 }));
 
@@ -46,7 +48,7 @@ import {
   acquireNativeCapacity,
   assessBrokerVersionSkew,
   estimateNativeLaunchMemory,
-} from './device-capacity.js';
+} from '@bendyline/gezel-inference/internal/providers/native/device-capacity';
 
 const dirs: string[] = [];
 beforeEach(() => {

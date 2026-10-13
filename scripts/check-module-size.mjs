@@ -33,7 +33,7 @@ export const GRANDFATHERED = new Map([
   ['packages/ui/src/views/ProjectsView.tsx', 4_114],
   ['packages/ui/src/components/ChatTimelineView.tsx', 4_102],
   ['packages/ui/src/components/chat-bubbles.tsx', 3_802],
-  ['packages/service/src/providers/mlx/provider.ts', 3_604],
+  ['packages/inference/src/providers/mlx/provider.ts', 3_604],
   // Moved from service/providers/local-tool-call-salvage.ts (3_643) with the loop.
   ['packages/core/src/local-loop/local-tool-call-salvage.ts', 3_585],
   ['packages/service/src/index-store/index-store.ts', 3_473],

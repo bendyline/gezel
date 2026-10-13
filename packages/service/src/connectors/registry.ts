@@ -10,7 +10,7 @@
  * separately.
  */
 
-import type { SecretStore } from '../secrets/types.js';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import type { OAuthTokens } from './oauth.js';
 import type { AdapterFactory } from './types.js';
 

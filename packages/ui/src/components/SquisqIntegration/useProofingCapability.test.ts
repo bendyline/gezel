@@ -69,6 +69,25 @@ describe('useProofingCapability', () => {
     await waitFor(() => expect(result.current).not.toBeNull());
   });
 
+  it('ignores config broadcasts that do not mention proofing', async () => {
+    getConfig.mockResolvedValue({ inlineSpellChecking: false, inlineGrammarChecking: false });
+    const { useProofingCapability } = await load();
+    const { getProofingPreferences } = await import('./proofing.js');
+    const { result } = renderHook(() => useProofingCapability());
+    await waitFor(() =>
+      expect(getProofingPreferences()).toEqual({ spelling: false, grammar: false }),
+    );
+
+    // Saving an interest area broadcasts only `interests`.
+    configUpdated({ interests: { areas: ['writing'], askedAt: '2026-10-13T00:00:00.000Z' } });
+    expect(getProofingPreferences()).toEqual({ spelling: false, grammar: false });
+    expect(result.current).toBeNull();
+
+    // One key changes one preference; the other keeps its value.
+    configUpdated({ inlineGrammarChecking: true });
+    expect(getProofingPreferences()).toEqual({ spelling: false, grammar: true });
+  });
+
   it('applies a Settings change to the provider filter without a refetch', async () => {
     const { useProofingCapability } = await load();
     const { getProofingPreferences } = await import('./proofing.js');

@@ -1,7 +1,7 @@
+import type { SessionOpts } from '@bendyline/gezel-inference/internal/providers/types';
 import { describe, expect, it, vi } from 'vitest';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { McpBridge, type OpenAIFunctionTool } from './mcp-bridge.js';
-import type { SessionOpts } from './types.js';
 
 function poolWithFakeBridge(
   toolAllowlist: Set<string> | null,

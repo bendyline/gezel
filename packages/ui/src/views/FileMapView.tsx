@@ -14,6 +14,7 @@ import {
   formatReviewProvenance,
   parseGezelHref,
 } from '@bendyline/gezel';
+
 import { EditorShell, useEditorContext } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';

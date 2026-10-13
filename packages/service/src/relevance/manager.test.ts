@@ -2,9 +2,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type GezelConfig, securityPolicyForLevel } from '@bendyline/gezel';
+import { RelevanceModelManager } from '@bendyline/gezel-inference/internal/relevance/manager';
+import type { RelevanceScorer } from '@bendyline/gezel-inference/internal/relevance/relevance-model';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { RelevanceModelManager } from './manager.js';
-import type { RelevanceScorer } from './relevance-model.js';
 
 let home: string;
 

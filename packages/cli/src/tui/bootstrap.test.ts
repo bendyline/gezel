@@ -66,7 +66,6 @@ function mediaModel(
   id: string,
   score: number,
   bytes: number,
-  min: number,
 ): CatalogItemSummary {
   return {
     sourceId: 'test',
@@ -78,7 +77,6 @@ function mediaModel(
       recoScore: score,
       licenseClass: 'open',
       approxSizeBytes: bytes,
-      ...(kind === 'image-model' ? { minRamGB: min } : { minVramGB: min }),
     },
   } as unknown as CatalogItemSummary;
 }
@@ -154,45 +152,51 @@ describe('rankChatModels', () => {
 
 describe('pickAccessoryModels', () => {
   it('picks the best fitting open helper in every modality and skips installed ones', () => {
-    const picked = pickAccessoryModels(
-      {
-        imageItems: [
-          mediaModel('image-model', 'image-too-big', 100, 8 * GB, 64),
-          mediaModel('image-model', 'image-fit', 80, 3 * GB, 16),
-        ],
-        videoItems: [mediaModel('video-model', 'video-fit', 90, 5 * GB, 8)],
-        audio: {
-          stt: [
-            {
-              id: 'stt',
-              name: 'STT',
-              approxSizeBytes: 100,
-              recoScore: 20,
-              licenseClass: 'open',
-            },
-          ],
-          tts: [
-            {
-              id: 'tts',
-              name: 'TTS',
-              approxSizeBytes: 100,
-              recoScore: 20,
-              licenseClass: 'open',
-            },
-          ],
-        },
-        recognition: [
+    const picked = pickAccessoryModels({
+      imageItems: [
+        mediaModel('image-model', 'image-too-big', 100, 8 * GB),
+        mediaModel('image-model', 'image-tight', 95, 6 * GB),
+        mediaModel('image-model', 'image-fit', 80, 3 * GB),
+      ],
+      videoItems: [mediaModel('video-model', 'video-fit', 90, 5 * GB)],
+      audio: {
+        stt: [
           {
-            id: 'reader',
-            name: 'Reader',
+            id: 'stt',
+            name: 'STT',
             approxSizeBytes: 100,
-            recoScore: 90,
+            recoScore: 20,
+            licenseClass: 'open',
           },
         ],
-        installed: { tts: new Set(['tts']) },
+        tts: [
+          {
+            id: 'tts',
+            name: 'TTS',
+            approxSizeBytes: 100,
+            recoScore: 20,
+            licenseClass: 'open',
+          },
+        ],
       },
-      DEVICE,
-    );
+      recognition: [
+        {
+          id: 'reader',
+          name: 'Reader',
+          approxSizeBytes: 100,
+          recoScore: 90,
+        },
+      ],
+      installed: { tts: new Set(['tts']) },
+      fit: {
+        image: new Map([
+          ['image-too-big', 'wont-run'],
+          ['image-tight', 'tight'],
+          ['image-fit', 'fits'],
+        ]),
+        video: new Map([['video-fit', 'fits']]),
+      },
+    });
 
     expect(picked.map((model) => model.id)).toEqual(['image-fit', 'reader', 'stt', 'video-fit']);
     expect(picked.map((model) => model.requiredEngine)).toEqual([
@@ -201,6 +205,18 @@ describe('pickAccessoryModels', () => {
       'whisper-server',
       'uv',
     ]);
+  });
+
+  it('recommends no image or video model when the daemon cannot say what fits', () => {
+    const picked = pickAccessoryModels({
+      imageItems: [mediaModel('image-model', 'image', 80, 3 * GB)],
+      videoItems: [mediaModel('video-model', 'video', 90, 5 * GB)],
+      audio: { stt: [], tts: [] },
+      recognition: [],
+      installed: {},
+      fit: { image: null, video: null },
+    });
+    expect(picked).toEqual([]);
   });
 });
 

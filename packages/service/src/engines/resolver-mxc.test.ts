@@ -13,11 +13,14 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  type ResolveVendoredMxcOptions,
+  resolveVendoredMxc,
+} from '@bendyline/gezel-inference/internal/engines/resolver';
+import type { verifyCodeSignature } from '@bendyline/gezel-inference/internal/engines/signature';
 import { MXC_VERSION, mxcInstallDir } from '@bendyline/gezel/native';
 import * as tar from 'tar';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type ResolveVendoredMxcOptions, resolveVendoredMxc } from './resolver.js';
-import type { verifyCodeSignature } from './signature.js';
 
 let home: string;
 let scratch: string;

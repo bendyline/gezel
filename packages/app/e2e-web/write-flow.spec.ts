@@ -18,7 +18,8 @@ test.describe('write flow', () => {
     const composer = chat.getByTestId('chat-composer');
     await expect(composer).toBeVisible();
 
-    const editor = composer.locator('.squisq-wysiwyg-editor').first();
+    const editor = composer.getByRole('textbox', { name: 'Message', exact: true });
+    await expect(editor).toHaveAttribute('aria-multiline', 'true');
     const msg = 'Ping from the write-flow spec';
     await editor.fill(msg);
     await editor.press('Enter');

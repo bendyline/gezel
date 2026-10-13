@@ -1847,6 +1847,21 @@ export const GezelConfigSchema = z.object({
    */
   firstRunCompleted: z.boolean().optional(),
   /**
+   * ISO time this home was first used, stamped once by `Store.ensureLayout`
+   * when it boots an empty home. Absent on every install that predates the
+   * stamp, which is what marks an established install: the first-use grace
+   * periods in `first-use.ts` (deferred background indexing, no quiet-night
+   * reports yet) apply only to a home that has it.
+   */
+  firstUseAt: z.string().optional(),
+  /**
+   * ISO time the first-use indexing hold released: half an hour in and a chat
+   * model ready. Latched so a later state without a model (one removed, the
+   * inventory briefly unreadable) never holds an established home's indexing
+   * again.
+   */
+  firstUseIndexingReleasedAt: z.string().optional(),
+  /**
    * Centralized security & compliance posture. See
    * {@link SecurityPolicySchema}. Absent → resolves fail-safe to `lockdown`.
    * The first-run migration writes `free` for a configured legacy install
@@ -2518,6 +2533,20 @@ export const GezelConfigSchema = z.object({
     .object({
       foldersStepDoneAt: z.string().optional(),
       overnightStepDoneAt: z.string().optional(),
+    })
+    .optional(),
+  /**
+   * What the person said they want help with, as interest-area ids in the
+   * order they were picked. It orders what the welcome, Make something and
+   * the galleries offer; it never hides anything and never enters a prompt.
+   * Raw strings so a build that does not know an id keeps it on the next
+   * save; read it through `resolveInterestAreas`. `askedAt` is stamped on an
+   * answer or a skip, so the question is never asked twice.
+   */
+  interests: z
+    .object({
+      areas: z.array(z.string()).default([]),
+      askedAt: z.string().optional(),
     })
     .optional(),
   /**
@@ -7025,3 +7054,43 @@ export const ListGithubWorkflowRunsResponseSchema = ListGitHubWorkflowRunsRespon
 export type ListGithubWorkflowRunsResponse = ListGitHubWorkflowRunsResponse;
 /** @deprecated Use {@link GitHubCredentialSource}. */
 export type GithubCredentialSource = GitHubCredentialSource;
+
+/**
+ * Whether a session's model would start with the memory free now, and one
+ * model already on this computer that would. The failed-turn card reads it
+ * after a capacity denial: it offers Retry only when the answer is yes, and
+ * otherwise one key to the alternative.
+ */
+export const SessionModelFitSchema = z.object({
+  provider: ProviderNameSchema,
+  model: z.string().optional(),
+  /** Null when the provider is not on-device or the catalog does not know the model. */
+  startsNow: z.boolean().nullable(),
+  /** The session follows the install's default model, so changing that default changes it. */
+  followsDefault: z.boolean(),
+  /** The best installed model that would start now, when the current one would not. */
+  alternative: z.object({ model: z.string(), name: z.string() }).optional(),
+});
+export type SessionModelFit = z.infer<typeof SessionModelFitSchema>;
+
+/**
+ * Whether each installed on-device model would start with the memory free
+ * now, by the arithmetic the launch check uses. Settings reads it so its
+ * labels agree with what a chat turn will meet.
+ */
+export const ModelsFitNowResponseSchema = z.object({
+  provider: ProviderNameSchema,
+  /** What a launch could hold right now; see `RecoDevice.launchCapBytes`. */
+  launchCapBytes: z.number().nonnegative(),
+  /** A discrete card's free memory now; see `RecoDevice.freeGpuBytes`. */
+  freeGpuBytes: z.number().nonnegative().optional(),
+  models: z.array(
+    z.object({
+      id: z.string(),
+      startsNow: z.boolean(),
+      /** Weights plus the context-floor KV cache, inside the compute headroom. */
+      launchBytes: z.number().nonnegative(),
+    }),
+  ),
+});
+export type ModelsFitNowResponse = z.infer<typeof ModelsFitNowResponseSchema>;

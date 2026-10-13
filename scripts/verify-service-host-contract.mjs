@@ -8,7 +8,7 @@
  * `GEZEL_SYSTEM_SCOPE` and friends are compiled into the binary rather than
  * configured by the installer. But the binary is not built from this
  * checkout: it arrives from a separately-tagged `native-v*` release, pinned
- * in `packages/service/src/engines/native-file-manifest.json`. So a change to
+ * in `packages/inference/src/engines/native-file-manifest.json`. So a change to
  * `main.cpp` and the binary that actually ships can silently disagree
  * whenever the pin is not bumped.
  *

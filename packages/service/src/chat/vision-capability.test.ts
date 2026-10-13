@@ -1,12 +1,12 @@
 import { ProviderNameSchema } from '@bendyline/gezel';
-import { describe, expect, it } from 'vitest';
 import {
   applyRecognitionPolicy,
   mmprojBudgetBytes,
   nativeVisionEnabledFor,
   resolveImageStrategy,
   resolveVisionCapability,
-} from './vision-capability.js';
+} from '@bendyline/gezel-inference/internal/chat/vision-capability';
+import { describe, expect, it } from 'vitest';
 
 const AVAILABLE = { mode: 'auto', recognitionAvailable: true } as const;
 const NOTHING_INSTALLED = { mode: 'auto', recognitionAvailable: false } as const;

@@ -68,7 +68,7 @@ describe('MacUninstallDialog', () => {
 
     act(() => shell.showFromMenu());
     fireEvent.click(screen.getByLabelText(/Downloaded models and machine-engine data/));
-    fireEvent.click(screen.getByLabelText(/Machine-shared projects and gezels/));
+    fireEvent.click(screen.getByLabelText(/Machine-shared projects and gezellen/));
     fireEvent.click(screen.getByLabelText(/My projects, chats, credentials, and settings/));
     fireEvent.click(screen.getByRole('button', { name: 'Uninstall and delete selected data' }));
 

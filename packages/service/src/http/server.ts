@@ -19,12 +19,12 @@ import {
   createLogger,
   isSafeEntityId,
 } from '@bendyline/gezel';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import { embeddingsHealth } from '@bendyline/gezel-inference/internal/memory/embeddings';
+import { redactPathSecrets } from '@bendyline/gezel-inference/internal/perf/redact-path';
+import { beginPerfRequest } from '@bendyline/gezel-inference/internal/perf/responsiveness';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { ZodError } from 'zod';
-import { safeJoin } from '../fs/safe-paths.js';
-import { embeddingsHealth } from '../memory/embeddings.js';
-import { redactPathSecrets } from '../perf/redact-path.js';
-import { beginPerfRequest } from '../perf/responsiveness.js';
 import { staleStepSessionRefusal } from '../tasks/stale-step-session.js';
 import {
   bearerAuth,
@@ -36,6 +36,10 @@ import type { ServiceContext } from './context.js';
 import { v1Cors } from './cors.js';
 import { hostGuard } from './host-guard.js';
 
+import { enginesRoutes } from '@bendyline/gezel-inference/internal/http/routes/engines';
+import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
+import { modelBundleRoutes } from '@bendyline/gezel-inference/internal/http/routes/model-bundles';
+import { v1KnowledgeRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-knowledge';
 import { mimeTypeForPath } from './mime.js';
 import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
 import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
@@ -63,7 +67,6 @@ import { diffpackRoutes } from './routes/diffpacks.js';
 import { documentMediaExportRoutes } from './routes/document-media-export.js';
 import { documentRoutes } from './routes/documents.js';
 import { ds4Routes } from './routes/ds4.js';
-import { enginesRoutes } from './routes/engines.js';
 import { evalRoutes } from './routes/eval.js';
 import { folderRoutes } from './routes/folders.js';
 import { gezelRoutes } from './routes/gezels.js';
@@ -77,13 +80,11 @@ import { imageGenRoutes } from './routes/image-gen.js';
 import { imagesRoutes } from './routes/images.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { llamaCppRoutes } from './routes/llama-cpp.js';
-import { machineEngineProxy } from './routes/machine-engine-proxy.js';
 import { machineServingRoutes } from './routes/machine-serving.js';
 import { mcpToolRoutes } from './routes/mcp-tools.js';
 import { meesterStatusRoutes } from './routes/meester-status.js';
 import { memoryRoutes } from './routes/memory.js';
 import { mlxRoutes } from './routes/mlx.js';
-import { modelBundleRoutes } from './routes/model-bundles.js';
 import { modelFitnessRoutes } from './routes/model-fitness.js';
 import { modelMigrationRoutes } from './routes/model-migrations.js';
 import { modelsRoutes } from './routes/models.js';
@@ -112,8 +113,9 @@ import { recognitionRoutes } from './routes/recognition.js';
 import { referencePreviewRoutes } from './routes/reference-preview.js';
 import { reminderRoutes } from './routes/reminders.js';
 import { taskInputRoutes } from './routes/task-inputs.js';
-import { v1KnowledgeRoutes } from './routes/v1-knowledge.js';
 
+import { v1ChatRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-chat';
+import { v1EmbeddingsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-embeddings';
 import { remotesRoutes } from './routes/remotes.js';
 import { renderRoutes } from './routes/render.js';
 import { reportActionRoutes } from './routes/report-actions.js';
@@ -132,11 +134,12 @@ import { toolRoutes } from './routes/tools.js';
 import { toolsetConfigRoutes } from './routes/toolset-config.js';
 import { usageRoutes } from './routes/usage.js';
 import { v1AppsRoutes } from './routes/v1-apps.js';
-import { v1ChatRoutes } from './routes/v1-chat.js';
-import { v1EmbeddingsRoutes } from './routes/v1-embeddings.js';
 import { v1GezelsRoutes } from './routes/v1-gezels.js';
 import { v1IdentityRoutes } from './routes/v1-identity.js';
 
+import { v1ModelsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-models';
+import { v1ModelsEnsureRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-models-ensure';
+import { v1ResponsesRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-responses';
 import {
   OFFICE_PANE_CSP,
   isOfficeListenerRequest,
@@ -146,11 +149,8 @@ import { mediaSearchRoutes } from './routes/media-search.js';
 import { libreofficeSetupRoutes, officeSetupRoutes } from './routes/office-setup.js';
 import { relevanceModelRoutes } from './routes/relevance-model.js';
 import { retrievalPreviewRoutes } from './routes/retrieval-preview.js';
-import { v1ModelsEnsureRoutes } from './routes/v1-models-ensure.js';
-import { v1ModelsRoutes } from './routes/v1-models.js';
 import { v1OpenApiRoutes } from './routes/v1-openapi.js';
 import { v1RemoteRoutes } from './routes/v1-remote.js';
-import { v1ResponsesRoutes } from './routes/v1-responses.js';
 import { videoGenRoutes } from './routes/video-gen.js';
 import { vscodeSetupRoutes } from './routes/vscode-setup.js';
 import {
@@ -166,8 +166,6 @@ import { shouldServeUiShell, staticUiCacheControl } from './static-ui.js';
 
 interface BuildAppOptions {
   onUnexpectedHttpError?: UnexpectedHttpErrorHandler;
-  /** Mount inference/model routes in the narrow embedded-app profile. */
-  embeddedInferenceOnly?: boolean;
   /**
    * Preview-capability store to share with a separate plain-HTTP preview
    * listener (see `buildPreviewApp`). Both the minting endpoint (here) and
@@ -582,9 +580,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/storage', storageRoutes(ctx));
   app.route('/api/models', modelsRoutes(ctx));
   // Remote model execution: A's paired-server admin surface (list/pair/unpair).
-  // Like every remote surface below, absent from the embedded inference
-  // profile, which has no device identity and offers no remote connectivity.
-  if (!options.embeddedInferenceOnly) app.route('/api/remotes', remotesRoutes(ctx));
+  app.route('/api/remotes', remotesRoutes(ctx));
   // Machine-broker LAN-serving administration, proxied to
   // /v1/remote/manage/serving with the bridge credential; 503 without a broker.
   app.route('/api/machine-serving', machineServingRoutes(ctx));
@@ -658,7 +654,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
 
   // `/v1/identity` — unauth device-identity handshake for remote model
   // execution pairing (public material only; no token exists yet at pairing).
-  if (!options.embeddedInferenceOnly) app.route('/v1/identity', v1IdentityRoutes(ctx));
+  app.route('/v1/identity', v1IdentityRoutes(ctx));
 
   // `/ollama/v1/*` — Ollama-compatible facade (tags + chat). Auth +
   // openai scope match `/v1/*`. CORS is also enabled so browser apps
@@ -702,11 +698,9 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // `/v1/remote/*` — inference-only surface for paired client devices. Gated by
   // the `remote-inference` scope, so a remote token reaches ONLY inference and
   // gets 403 on every project/fs `/api/*` route.
-  if (!options.embeddedInferenceOnly) {
-    app.use('/v1/remote/*', bearerAuth(ctx.tokenStore));
-    app.use('/v1/remote/*', requireScope('remote-inference'));
-    app.route('/v1/remote', v1RemoteRoutes(ctx));
-  }
+  app.use('/v1/remote/*', bearerAuth(ctx.tokenStore));
+  app.use('/v1/remote/*', requireScope('remote-inference'));
+  app.route('/v1/remote', v1RemoteRoutes(ctx));
 
   app.use('/v1/embeddings', openAiErrorEnvelope());
   app.use('/v1/embeddings', openaiEndpointsGate);
@@ -748,10 +742,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // so its more specific paths win — Hono's nested routers don't
   // intercept extensions otherwise.
   app.route('/v1/models/ensure', v1ModelsEnsureRoutes(ctx));
-  app.route(
-    '/v1/models',
-    v1ModelsRoutes(ctx, { localOnly: options.embeddedInferenceOnly === true }),
-  );
+  app.route('/v1/models', v1ModelsRoutes(ctx));
   // Header-less iframe requests authenticate with a short-lived capability
   // minted by the first-party project endpoint. A path segment carries it so
   // relative assets inherit authority without exposing a UI/root credential.

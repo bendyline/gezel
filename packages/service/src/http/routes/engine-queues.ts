@@ -1,3 +1,11 @@
+import {
+  MACHINE_ENGINE_PROVIDER_NAMES,
+  isMachineEngineProvider,
+  userOwnedIdFromBroker,
+  usesMachineEngine,
+} from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
+import { liveProviderConcurrency } from '@bendyline/gezel-inference/internal/providers/native/provider-pool';
+import type { ProviderName } from '@bendyline/gezel-inference/internal/providers/types';
 import type {
   ProviderQueueActiveItem,
   ProviderQueueState,
@@ -5,15 +13,7 @@ import type {
   QueueStatusResponse,
 } from '@bendyline/gezel/queue-status';
 import { Hono } from 'hono';
-import { liveProviderConcurrency } from '../../providers/native/provider-pool.js';
-import type { ProviderName } from '../../providers/types.js';
 import type { EngineContext } from '../engine-context.js';
-import {
-  MACHINE_ENGINE_PROVIDER_NAMES,
-  isMachineEngineProvider,
-  userOwnedIdFromBroker,
-  usesMachineEngine,
-} from './machine-engine-proxy.js';
 export function providerQueueControls(ctx: EngineContext, names: readonly ProviderName[]): Hono {
   const app = new Hono();
   const PROVIDER_SET = new Set<string>(names);

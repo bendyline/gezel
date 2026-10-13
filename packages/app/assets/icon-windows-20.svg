@@ -1,15 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
-  <!-- Native 20 px artwork for Windows at 125% display scaling. -->
-  <rect width="20" height="20" fill="#849577" />
-
-  <defs>
-    <path id="leg" d="M4 7h4L6 18H2z" />
-  </defs>
-
-  <g fill="#faf9f3" shape-rendering="crispEdges">
-    <rect x="2" y="2" width="16" height="4" />
-    <use href="#leg" />
-    <use href="#leg" transform="translate(20 0) scale(-1 1)" />
-    <rect x="6" y="12" width="8" height="3" />
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 64 64">
+<defs><linearGradient id="sage" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#526346"/><stop offset="1" stop-color="#3e4e34"/></linearGradient></defs>
+<rect x="2" y="2" width="60" height="60" rx="13" fill="#48583c"/>
+<path d="M19.200000000000003 25.6L25.6 25.6L22.400000000000002 51.2L12.8 51.2Z" fill="#f3ede0"/>
+<path d="M41.6 25.6L51.2 25.6L54.400000000000006 51.2L48 51.2Z" fill="#f3ede0"/>
+<rect x="19.200000000000003" y="38.400000000000006" width="28.799999999999997" height="6.399999999999999" rx="1" fill="#f3ede0"/>
+<rect x="12.8" y="19.200000000000003" width="41.60000000000001" height="6.399999999999999" rx="1.5" fill="#f3ede0"/>
+<rect x="9.600000000000001" y="22.400000000000002" width="3.1999999999999993" height="3.1999999999999993" rx="1" fill="#f3ede0"/>
+<rect x="6.4" y="25.6" width="3.200000000000001" height="0" rx="0.6" fill="#f3ede0"/>
+<path d="M8 20.8V30.400000000000002" fill="none" stroke="#f3ede0" stroke-width="3.2" stroke-linecap="round"/>
 </svg>

@@ -8,7 +8,7 @@
  * into the same compact `🔧 name (key: value)` line the tool rows use.
  *
  * Dialects mirror the salvage layer's inventory
- * (packages/service/src/providers/local-tool-call-salvage.ts):
+ * (packages/inference/src/providers/local-tool-call-salvage.ts):
  *   - qwen-xml:   `<tool_call>{"name":"x","arguments":{…}}</tool_call>`
  *   - hermes:     `<function=x><parameter=k>v</parameter></function>`,
  *                 bare or wrapped in a qwen envelope (the common leak)

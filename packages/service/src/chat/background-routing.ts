@@ -23,8 +23,11 @@
 
 import type { ProviderName } from '@bendyline/gezel';
 import { isLocalProvider } from '@bendyline/gezel';
-import type { GpuPolicy } from '../providers/gpu-arbiter.js';
-import { type ModelTier, classifyModelTier } from './local-model-tier.js';
+import {
+  type ModelTier,
+  classifyModelTier,
+} from '@bendyline/gezel-inference/internal/chat/local-model-tier';
+import type { GpuPolicy } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
 
 export type LocalProviderName = 'llama-cpp' | 'mlx' | 'ds4';
 

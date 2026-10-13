@@ -53,10 +53,13 @@ import {
   projectAllowsAmbientWork,
   taskEffectiveStatus,
 } from '@bendyline/gezel';
+import { isLocalProvider as isPooledLocalProvider } from '@bendyline/gezel-inference/internal/providers/native/engine-key';
+import type {
+  LLMProvider,
+  ProviderName,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import type { TaskHandoffHoldReason } from '@bendyline/gezel/queue-status';
 import type { Store } from '../fs/store.js';
-import { isLocalProvider as isPooledLocalProvider } from '../providers/native/engine-key.js';
-import type { LLMProvider, ProviderName } from '../providers/types.js';
 import { readTaskWithEffectiveStatus } from './effective-status.js';
 import { mainBookSource, stepOwnerGezelId } from './manager.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';

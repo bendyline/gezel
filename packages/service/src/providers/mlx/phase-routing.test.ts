@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { EnginePhaseEvent } from '@bendyline/gezel-inference/internal/providers/streaming-session';
 import { describe, expect, it } from 'vitest';
-import type { EnginePhaseEvent } from '../streaming-session.js';
 
-import { MlxProvider } from './provider.js';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
 
 /**
  * A supervised engine has ONE stdout shared by every session running on it, so
@@ -116,7 +116,10 @@ describe('the sidecar/parser format contract', () => {
     // as the tag — the old marker summed the whole wave, so even correctly
     // routed it would have shown one session the other's token count.
     const sidecar = readFileSync(
-      join(import.meta.dirname, 'python', 'gezel_mlx_server.py'),
+      join(
+        import.meta.dirname,
+        '../../../../inference/src/providers/mlx/python/gezel_mlx_server.py',
+      ),
       'utf8',
     );
     const emitter = sidecar.slice(sidecar.indexOf('def _emit_prefill_liveness'));

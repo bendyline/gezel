@@ -1,6 +1,7 @@
 import type { MediaSearchStatusResponse } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 
 type ImageTokenBudget = 70 | 140 | 280 | 560 | 1120;
 
@@ -122,6 +123,7 @@ export function MediaSearchCard() {
           <div
             className="gz-tray gz-tray--described"
             role="radiogroup"
+            onKeyDown={onRadioKeyDown}
             aria-label="Photo detail"
             style={{ marginTop: '0.75rem' }}
           >
@@ -134,6 +136,7 @@ export function MediaSearchCard() {
                   // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
                   role="radio"
                   aria-checked={active}
+                  tabIndex={active || (!level && l === DETAIL_LEVELS[0]) ? 0 : -1}
                   className={`gz-key${active ? ' gz-key-active' : ''}`}
                   disabled={saving}
                   onClick={() => void save({ imageTokenBudget: l.budget })}

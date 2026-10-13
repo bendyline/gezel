@@ -4,8 +4,10 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import {
+  MAX_STAT_TOKENS_PER_TEXT,
   artifactPathsOf,
   buildFileInventoryIndex,
+  createFileStatResolver,
   createWorkspaceFileProbe,
   extractReferencedFiles,
   matchReferencedFilesInContent,
@@ -359,5 +361,80 @@ describe('createWorkspaceFileProbe', () => {
     expect(budget.remaining).toBe(0);
     expect(await probe(['a/real.md'], budget)).toEqual([workspace('a/real.md')]);
     expect(statted).toEqual(['a/real.md', 'b/none.md']);
+  });
+});
+
+describe('createFileStatResolver', () => {
+  /** A fake store holding `project:kind:path` keys; records every stat. */
+  function fakeStore(files: string[]) {
+    const real = new Set(files);
+    const statted: string[] = [];
+    const stat = (kind: string) => async (projectId: string, path: string) => {
+      statted.push(`${projectId}:${kind}:${path}`);
+      return real.has(`${projectId}:${kind}:${path}`)
+        ? { kind: 'file' as const }
+        : { kind: 'missing' as const };
+    };
+    return {
+      statted,
+      store: {
+        statProjectArtifactPath: stat('artifact'),
+        statProjectWorkspacePath: stat('workspace'),
+      },
+    };
+  }
+
+  it('finds the files a card names in either store', async () => {
+    const { store } = fakeStore([
+      'default:artifact:tasks/12/report.pdf',
+      'default:workspace:pdf/task-12/report.md',
+    ]);
+    const resolve = createFileStatResolver(store);
+    expect(
+      await resolve(
+        '**Report** is finished.\n\n- `tasks/12/report.pdf`\n- `pdf/task-12/report.md`\n- `tasks/12/gone.md`',
+        ['default'],
+      ),
+    ).toEqual([
+      { ...artifact('tasks/12/report.pdf'), projectId: 'default' },
+      { ...workspace('pdf/task-12/report.md'), projectId: 'default' },
+    ]);
+  });
+
+  it('takes the first project that has the file', async () => {
+    const { store } = fakeStore([
+      'trip:artifact:tasks/2/plan.md',
+      'default:artifact:tasks/2/plan.md',
+    ]);
+    const resolve = createFileStatResolver(store);
+    expect(await resolve('`tasks/2/plan.md`', ['trip', 'default'])).toEqual([
+      { ...artifact('tasks/2/plan.md'), projectId: 'trip' },
+    ]);
+  });
+
+  it('reads a drawer prefix as the only store to check', async () => {
+    const { store, statted } = fakeStore(['default:workspace:decks/q3.pptx']);
+    const resolve = createFileStatResolver(store);
+    expect(await resolve('`workspace/decks/q3.pptx`', ['default'])).toEqual([
+      { ...workspace('decks/q3.pptx'), projectId: 'default' },
+    ]);
+    expect(statted).toEqual(['default:workspace:decks/q3.pptx']);
+  });
+
+  it('never stats a word, and never the same path twice', async () => {
+    const { store, statted } = fakeStore(['default:artifact:notes.md']);
+    const resolve = createFileStatResolver(store);
+    await resolve('Review the notes in `notes.md` and notes.md again.', ['default']);
+    await resolve('Also `notes.md`.', ['default']);
+    expect(statted).toEqual(['default:artifact:notes.md']);
+  });
+
+  it('checks folder-qualified paths before running out of budget', async () => {
+    const { store } = fakeStore(['default:artifact:out/final.md']);
+    const resolve = createFileStatResolver(store);
+    const versions = Array.from({ length: MAX_STAT_TOKENS_PER_TEXT }, (_, i) => `v1.${i}`);
+    expect(await resolve(`${versions.join(' ')} then \`out/final.md\``, ['default'])).toEqual([
+      { ...artifact('out/final.md'), projectId: 'default' },
+    ]);
   });
 });

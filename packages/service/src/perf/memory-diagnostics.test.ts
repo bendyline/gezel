@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ used: 100, log: vi.fn() }));
 vi.mock('node:v8', () => ({ getHeapStatistics: () => ({ heap_size_limit: 1000 }) }));
 vi.mock('@bendyline/gezel', () => ({ createLogger: () => ({ info: state.log }) }));
-vi.mock('./responsiveness.js', () => ({
+vi.mock('@bendyline/gezel-inference/internal/perf/responsiveness', () => ({
   perfSnapshot: () => ({
     inflight: Array.from({ length: 20 }, () => ({ label: 'growth signals', durationMs: 100 })),
   }),

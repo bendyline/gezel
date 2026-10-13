@@ -27,8 +27,10 @@
  * decision is unit-testable in isolation from the chat loop.
  */
 
-import type { GateCheck } from '@bendyline/gezel';
+import { completionGateWorkspaceFiles, normalizeWorkspacePath } from '@bendyline/gezel';
 import { type StepSniffName, runStepSniff } from './step-sniff.js';
+
+export { completionGateWorkspaceFiles, normalizeWorkspacePath };
 
 /** The subset of `AdvanceWhen` this gate reads (structural, not imported). */
 export interface DeliverableGateSpec {
@@ -75,25 +77,11 @@ export interface DeliverableGateResult {
 const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'write_file',
   'replace_in_file',
+  'replace_lines',
   'append_to_file',
   'apply_patch',
   'insert_at_marker',
 ]);
-
-/**
- * Normalize a workspace-relative path for comparison: forward slashes,
- * no `./` or `workspace/` prefix, no doubled or leading slashes. Paths
- * stay case-sensitive (Linux workspaces).
- */
-export function normalizeWorkspacePath(p: string): string {
-  return p
-    .trim()
-    .replace(/\\/g, '/')
-    .replace(/\/{2,}/g, '/')
-    .replace(/^\.\//, '')
-    .replace(/^workspace\//, '')
-    .replace(/^\/+/, '');
-}
 
 /**
  * Did a successful write-shaped tool target `file` among this turn's
@@ -199,38 +187,4 @@ export function evaluateDeliverableGate(input: {
       spec.requireChange ? ', edited this turn' : ''
     }`,
   };
-}
-
-/** Completion-gate checks that fail outright when their `file` is absent. */
-const FILE_PRESENCE_CHECK_KINDS: ReadonlySet<GateCheck['kind']> = new Set([
-  'minBytes',
-  'sniff',
-  'contains',
-  'htmlLint',
-  'jsonPathEquals',
-  'csvShape',
-]);
-
-/**
- * Other workspace files a step's completion gate reads, which must exist
- * before the mid-turn "deliverable is ready" steer may fire. `advanceWhen`
- * names one file, but a multi-file build step gates the rest: pwa-offline
- * advances on `index.html` and also checks `sw.js`, which its procedure
- * writes afterwards. Telling the model to stop there would spend a gate
- * attempt on a file it was about to write.
- */
-export function completionGateWorkspaceFiles(
-  checks: readonly GateCheck[],
-  deliverableFile: string,
-): string[] {
-  const deliverable = normalizeWorkspacePath(deliverableFile);
-  const files = new Set<string>();
-  for (const check of checks) {
-    if (!FILE_PRESENCE_CHECK_KINDS.has(check.kind)) continue;
-    if (!('file' in check) || typeof check.file !== 'string') continue;
-    if ('artifact' in check && check.artifact) continue;
-    const file = normalizeWorkspacePath(check.file);
-    if (file && file !== deliverable) files.add(file);
-  }
-  return [...files];
 }

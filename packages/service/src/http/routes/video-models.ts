@@ -1,15 +1,17 @@
-import { Hono } from 'hono';
-import { streamSSE } from 'hono/streaming';
-import type { SSEStreamingApi } from 'hono/streaming';
+import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import {
   INVALID_MODEL_ID_CODE,
   INVALID_MODEL_ID_MESSAGE,
   isSafeModelId,
-} from '../../models/model-id.js';
-import { ReadOnlyModelError } from '../../models/storage-roots.js';
+} from '@bendyline/gezel-inference/internal/models/model-id';
+import { ReadOnlyModelError } from '@bendyline/gezel-inference/internal/models/storage-roots';
+import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
+import type { SSEStreamingApi } from 'hono/streaming';
+import { videoCatalogFits, videoModelFit, wontRunRefusal } from '../../models/media-fit.js';
 import { UnknownVideoModelError } from '../../providers/video/pull-registry.js';
 import type { EngineContext } from '../engine-context.js';
-import { machineEngineProxy } from './machine-engine-proxy.js';
+import { mediaFitContext } from './media-fit-context.js';
 
 export function videoModelRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
@@ -35,8 +37,19 @@ export function videoModelRoutes(ctx: EngineContext): Hono {
     });
   });
 
+  /**
+   * Whether this machine can run each catalog video model, priced from the
+   * models' weight files against the capacity the launch path admits. The
+   * download page hides `wont-run` entries; see docs/media-model-memory.md.
+   */
+  app.get('/models/fit', proxy, async (c) => {
+    return c.json(await videoCatalogFits(mediaFitContext(ctx)));
+  });
+
   app.post('/models/:id/pull', proxy, async (c) => {
     const id = c.req.param('id');
+    const refusal = await wontRunRefusal(() => videoModelFit(mediaFitContext(ctx), id));
+    if (refusal) return c.json(refusal, 409);
     try {
       await ctx.videoPulls.start(id);
     } catch (err) {

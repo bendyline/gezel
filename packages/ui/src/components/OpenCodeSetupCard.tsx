@@ -1,4 +1,4 @@
-import type { OpenCodeSetupStatusResponse } from '@bendyline/gezel';
+import type { LocalHarnessSetupState, OpenCodeSetupStatusResponse } from '@bendyline/gezel';
 import { useCallback } from 'react';
 import { api } from '../api.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
@@ -16,9 +16,11 @@ type Confirmation =
 export function OpenCodeSetupCard({
   endpointsEnabled,
   onChanged,
+  onStateChange,
 }: {
   endpointsEnabled: boolean;
   onChanged?: () => void | Promise<void>;
+  onStateChange?: (state: LocalHarnessSetupState) => void;
 }) {
   const runAction = useCallback(
     (confirmation: Confirmation, model: string): Promise<OpenCodeSetupStatusResponse> => {
@@ -54,6 +56,7 @@ export function OpenCodeSetupCard({
           ? `The previous file was saved as ${next.configBackupPath}.`
           : null,
     ...(onChanged ? { onChanged } : {}),
+    ...(onStateChange ? { onStateChange } : {}),
   });
 
   const { status, confirmation, setConfirmation, setError, busy, copied } = card;
@@ -87,7 +90,7 @@ export function OpenCodeSetupCard({
       notice={card.notice}
       error={card.error}
       reasonsIntro="The managed setup needs an update:"
-      emptyModelsNote="No gezels or inference models compatible with the OpenCode tool loop are available yet."
+      emptyModelsNote="No gezellen or inference models compatible with the OpenCode tool loop are available yet."
       intro={
         <>
           OpenCode keeps its own tools, permissions, and conversation loop while a gezel supplies

@@ -127,6 +127,26 @@ describe('WorkspaceWatchManager', () => {
     expect(recursiveCalls).toEqual([dir]);
   });
 
+  it('keeps a held project’s file changes out of the index', async () => {
+    const refresh = vi.fn(async () => ({}) as never);
+    manager = new WorkspaceWatchManager({
+      store,
+      indexManager: { refresh },
+      debounceMs: 20,
+      holdsRefresh: async (projectId) => projectId === 'held',
+    });
+    const onEvent = (
+      manager as unknown as {
+        onEvent(projectId: string, filename: string): void;
+      }
+    ).onEvent.bind(manager);
+    onEvent('held', 'note.md');
+    onEvent('open', 'note.md');
+    await waitFor(() => refresh.mock.calls.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(refresh.mock.calls).toEqual([['open']]);
+  });
+
   it('treats canonical MCP config changes specially without suppressing index refreshes', async () => {
     const refresh = vi.fn(async () => ({}) as never);
     const onProjectMcpConfigChanged = vi.fn(async () => undefined);

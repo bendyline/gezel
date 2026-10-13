@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   degradeDenseFfnOffloadDecision,
   degradeMoeOffloadDecision,
@@ -8,7 +7,8 @@ import {
   fitsSwaFullInFastMemory,
   planDenseFfnOffload,
   planMoeOffload,
-} from './offload-planner.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/offload-planner';
+import { describe, expect, it } from 'vitest';
 
 const GiB = 1024 ** 3;
 
@@ -116,6 +116,30 @@ describe('planMoeOffload — exact tensor split (graduated)', () => {
     const d = planMoeOffload({ ...base, vramBytes: 12 * GiB });
     expect(d.nCpuMoe).toBe(23);
     void compute;
+  });
+
+  // Admission charged an offloaded MoE the whole card, so it was refused
+  // whenever another program held graphics memory (2026-10-11).
+  it('reports what the plan puts on the card, for admission to charge', () => {
+    // 16 layers × 0.5 + residue 2 + margin 1 + compute 0.5 + kv 0.5 = 12 GiB.
+    const split = planMoeOffload({ ...base, vramBytes: 12 * GiB, kvReserveBytes: 0.5 * GiB });
+    expect(split.gpuBytes).toBe(12 * GiB);
+    // A card with 7 GiB free keeps 6 layers there instead: 3 + 2 + 2 GiB.
+    const busyCard = planMoeOffload({ ...base, vramBytes: 7 * GiB, kvReserveBytes: 0.5 * GiB });
+    expect(busyCard.nCpuMoe).toBe(34);
+    expect(busyCard.gpuBytes).toBe(7 * GiB);
+    // All experts in RAM: the residue and reserves stay.
+    const residueOnly = planMoeOffload({
+      ...base,
+      vramBytes: 4 * GiB,
+      kvReserveBytes: 0.25 * GiB,
+    });
+    expect(residueOnly.gpuBytes).toBe(2 * GiB + 1 * GiB + compute + 0.25 * GiB);
+  });
+
+  it('leaves the charge alone when the engine places the layers', () => {
+    expect(planMoeOffload({ ...base, vramBytes: 3 * GiB }).gpuBytes).toBeUndefined();
+    expect(planMoeOffload({ ...base, vramBytes: 26 * GiB }).gpuBytes).toBeUndefined();
   });
 });
 

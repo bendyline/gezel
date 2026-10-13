@@ -1,8 +1,6 @@
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, parse, relative, resolve, sep } from 'node:path';
-import { validatePortablePath } from '@bendyline/gezel/runtime';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   PathSafetyError,
   assertNoTemplatePlaceholderPath,
@@ -12,7 +10,9 @@ import {
   realpathContained,
   resolveInside,
   safeJoin,
-} from './safe-paths.js';
+} from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import { validatePortablePath } from '@bendyline/gezel/runtime';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 describe('safeJoin', () => {
   const base = process.platform === 'win32' ? 'C:\\gezel-test\\base' : '/gezel-test/base';

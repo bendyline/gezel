@@ -9,6 +9,7 @@ interface MarkdownFieldProps {
   /** Renders the content as non-editable rendered markdown when true. */
   readOnly?: boolean;
   placeholder?: string;
+  accessibleName?: string;
   /** Auto-grow bounds for the editor surface. */
   minHeight?: string;
   maxHeight?: string;
@@ -43,6 +44,7 @@ export function MarkdownField({
   value,
   readOnly,
   placeholder,
+  accessibleName,
   minHeight = '80px',
   maxHeight = '40vh',
   onCommit,
@@ -90,6 +92,7 @@ export function MarkdownField({
   return (
     <div className="markdown-field" onBlur={handleBlur}>
       <EditorShell
+        ariaLabel={accessibleName ?? placeholder ?? 'Markdown'}
         initialMarkdown={value}
         initialView="wysiwyg"
         onChange={handleChange}

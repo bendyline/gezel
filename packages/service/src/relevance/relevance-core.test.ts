@@ -2,15 +2,15 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PipelineLoadError } from '../memory/embed-core.js';
+import { PipelineLoadError } from '@bendyline/gezel-inference/internal/memory/embed-core';
 import {
   type RelevanceTransformers,
   type ResolvedRelevanceModel,
   activate,
   disposeRelevanceModels,
   scoreRelevancePairs,
-} from './relevance-core.js';
+} from '@bendyline/gezel-inference/internal/relevance/relevance-core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const words = (text: string) => text.toLowerCase().match(/[a-z]+/g) ?? [];
 

@@ -17,7 +17,7 @@ import {
   type WorkspaceReadFileResult,
   type WorkspaceReadFileSuccess,
 } from '@bendyline/gezel';
-import { PathSafetyError, resolveInside } from '../fs/safe-paths.js';
+import { PathSafetyError, resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 
 const READ_CHUNK_BYTES = 64 * 1024;
 const ERROR_PREVIEW_CHARS = 500;

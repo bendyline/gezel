@@ -15,10 +15,10 @@
  */
 
 import { type GezelConfig, createLogger } from '@bendyline/gezel';
-import type { ConfigStore } from '../../fs/config-store.js';
+import type { ConfigStore } from '@bendyline/gezel-inference/internal/fs/config-store';
+import type { GpuArbiter } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import type { RemotesRegistry } from '../../remotes/registry.js';
-import type { SecretStore } from '../../secrets/types.js';
-import type { GpuArbiter } from '../gpu-arbiter.js';
 import { ProviderLifecycle } from '../provider-lifecycle.js';
 import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
 import { createImageProvider } from './factory.js';

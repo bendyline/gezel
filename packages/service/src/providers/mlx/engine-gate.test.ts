@@ -1,5 +1,5 @@
+import { MlxEngineGate } from '@bendyline/gezel-inference/internal/providers/mlx/engine-gate';
 import { describe, expect, it } from 'vitest';
-import { MlxEngineGate } from './engine-gate.js';
 
 async function settled<T>(promise: Promise<T>): Promise<boolean> {
   let done = false;

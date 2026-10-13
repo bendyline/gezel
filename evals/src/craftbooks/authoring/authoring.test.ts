@@ -366,6 +366,30 @@ describe('checkPressRelease (craftbook-route-multi)', () => {
   // The whole point of seeding drafts/old-teaser.md: a release assembled
   // from the nearest convenient draft rather than the approved fact sheet
   // is well-formed and wrong, and only the grounding check separates them.
+  it.each(['Oct. 14, 2026', '14 Oct 2026', 'October 14th, 2026', '2026-10-14'])(
+    'accepts the same approved opening date written as %s',
+    (date) => {
+      expect(checkPressRelease(reference.replace('14 October 2026', date)).ok).toBe(true);
+    },
+  );
+
+  it('distinguishes an earlier publication dateline from the announced opening date', () => {
+    const release = reference.replace(
+      '14 October 2026 — Fieldstone Goods today opened',
+      'Oct. 11, 2026 — Fieldstone Goods will open on Oct. 14',
+    );
+    expect(checkPressRelease(release).ok).toBe(true);
+    expect(checkPressRelease(release.replace('on Oct. 14', 'on Oct. 15')).ok).toBe(false);
+  });
+
+  it.each(['Sept. 30, 2026', '30 Sep 2026', '2026-09-30'])(
+    'rejects a stale opening date even when abbreviated as %s',
+    (date) => {
+      expect(checkPressRelease(reference.replace('14 October 2026', date)).ok).toBe(false);
+      expect(checkPressRelease(`${reference}\nOpening date: ${date}`).ok).toBe(false);
+    },
+  );
+
   it('fails a release grounded in the stale teaser rather than the approved facts', () => {
     const stale = reference
       .replace('14 October 2026', '30 September 2026')

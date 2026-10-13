@@ -7,7 +7,7 @@
 
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { resolveModelDirectory } from '../../models/model-id.js';
+import { resolveModelDirectory } from '@bendyline/gezel-inference/internal/models/model-id';
 import type {
   AudioEngineHealth,
   AudioModelPullEvent,
@@ -17,7 +17,7 @@ import type {
   SynthesizeInput,
   SynthesizeOutput,
   TextToSpeechProvider,
-} from './types.js';
+} from '@bendyline/gezel-inference/internal/providers/audio/types';
 
 const MOCK_VOICES: ReadonlyArray<AudioVoiceInfo> = [
   {

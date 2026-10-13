@@ -21,10 +21,14 @@
 
 import type { ModelFitnessRecord, ModelFitnessTrigger } from '@bendyline/gezel';
 import { createLogger } from '@bendyline/gezel';
-import { isEngineBusyError } from '../providers/native/capacity-broker.js';
-import { isEngineLaunchError } from '../providers/native/supervisor.js';
-import type { TurnStatsEvent } from '../providers/streaming-session.js';
-import type { ExternalToolCall, ExternalToolSpec, LLMProvider } from '../providers/types.js';
+import { isEngineBusyError } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { isEngineLaunchError } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
+import type { TurnStatsEvent } from '@bendyline/gezel-inference/internal/providers/streaming-session';
+import type {
+  ExternalToolCall,
+  ExternalToolSpec,
+  LLMProvider,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import {
   FITNESS_MIN_CONTEXT_TOKENS,
   type FitnessEvidence,

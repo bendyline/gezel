@@ -1,0 +1,1219 @@
+import { createHash } from 'node:crypto';
+import { createReadStream, existsSync, readdirSync } from 'node:fs';
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import {
+  HttpStatusError,
+  type NativeEngineResolveEvent,
+  createLogger,
+  nowIso,
+  resolveDistributionProfile,
+  retryTransient,
+} from '@bendyline/gezel';
+import {
+  DUCKDB_APPLE_TEAM_ID,
+  DUCKDB_ARCHIVE_SHA256,
+  DUCKDB_ASSET,
+  DUCKDB_BINARY_SHA256,
+  DUCKDB_VERSION,
+  DUCKDB_WINDOWS_PUBLISHER,
+  MXC_EXECUTOR_NAME,
+  MXC_EXECUTOR_SHA256,
+  MXC_LICENSE_SHA256,
+  MXC_TARBALL_INTEGRITY,
+  MXC_TARBALL_LICENSE_ENTRY,
+  MXC_TARBALL_SHA256,
+  MXC_TARBALL_URL,
+  MXC_VERIFIED_SENTINEL,
+  MXC_VERSION,
+  MXC_WINDOWS_PUBLISHER,
+  type MxcArch,
+  type MxcVerifiedSentinel,
+  type NativeBinaryName,
+  duckdbAssetUrl,
+  duckdbBinaryName,
+  duckdbInstallDir,
+  duckdbPlatformKey,
+  mxcArch,
+  mxcInstallDir,
+  mxcTarballEntry,
+  resolvePlatformKey,
+  windowsHeadlessSpawnOptions,
+} from '@bendyline/gezel/native';
+import * as tar from 'tar';
+import {
+  type DownloadResult,
+  downloadWithRetry,
+  friendlyErrors,
+} from '../utils/download-with-retry.js';
+import { extractZip } from '../utils/extract-zip.js';
+import {
+  NATIVE_ENGINE_ARCHIVE_SHA256,
+  SHA256SUMS_DIGEST,
+  effectiveEngineRelease,
+  isPlaceholderDigest,
+} from './native-manifest.js';
+import {
+  BENDYLINE_APPLE_TEAM_ID,
+  BENDYLINE_PUBLISHER,
+  type SignaturePolicy,
+  type SignatureResult,
+  stripQuarantine,
+  verifyCodeSignature,
+} from './signature.js';
+
+const log = createLogger('engine-resolver');
+
+const REPO = 'bendyline/gezel';
+const GITHUB_API = 'https://api.github.com';
+
+/** Map each engine to the env var the providers read (mirrors discover.ts). */
+/**
+ * Engines we redistribute exactly as their upstream published them. They keep
+ * the upstream file name (no `gezel-` prefix) and, on Windows, ship unsigned —
+ * so the signature policy softens to `prefer` and no publisher is asserted.
+ * Kept in lockstep with `UNPREFIXED_BINARIES` in core's native/discover.ts and
+ * the Windows allowlist in packages/app/scripts/third-party-binaries.cjs.
+ */
+const VENDORED_UNMODIFIED_ENGINES = new Set<string>(['uv', 'duckdb']);
+
+function isVendoredUnmodifiedEngine(engine: string): boolean {
+  return VENDORED_UNMODIFIED_ENGINES.has(engine);
+}
+
+const ENGINE_ENV_VAR: Record<NativeBinaryName, string> = {
+  'llama-server': 'GEZEL_LLAMA_SERVER_BIN',
+  'ds4-server': 'GEZEL_DS4_SERVER_BIN',
+  'sd-server': 'GEZEL_SD_SERVER_BIN',
+  'whisper-server': 'GEZEL_WHISPER_SERVER_BIN',
+  'device-health': 'GEZEL_DEVICE_HEALTH_BIN',
+  uv: 'GEZEL_UV_BIN',
+  duckdb: 'GEZEL_DUCKDB_BIN',
+  'apple-fm': 'GEZEL_APPLE_FM_BIN',
+};
+
+/**
+ * Thrown for the "can't resolve, and that's expected/actionable" cases:
+ * no pinned release, asset missing, verification failed. Callers surface
+ * the message; they don't retry blindly.
+ */
+export class EngineUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EngineUnavailableError';
+  }
+}
+
+/**
+ * Unpacking progress. Deliberately not in NativeEngineResolveEventSchema: the
+ * install stream's clients parse that schema strictly, so a new event type on
+ * the wire would fail an older CLI mid-install. The registry snapshot carries
+ * it instead, and the stream route sends only a heartbeat for it.
+ */
+export interface EngineExtractingEvent {
+  type: 'extracting';
+  bytesWritten: number;
+  totalBytes: number;
+}
+
+export type EngineResolveEvent = NativeEngineResolveEvent | EngineExtractingEvent;
+
+export interface ResolveEngineOptions {
+  engine: NativeBinaryName;
+  home: string;
+  /** GPU backend for llama-server (`cuda`/`vulkan`/`metal`/`cpu`); omit for single-variant engines. */
+  variant?: string;
+  /** Native release version; defaults to the source pin / `GEZEL_NATIVE_ENGINE_VERSION`. */
+  version?: string;
+  /** Signature enforcement; defaults to `require` for first-party binaries. */
+  signaturePolicy?: SignaturePolicy;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+  // ── test / dev seams ──
+  /** Pre-resolved token: `undefined` = auto-resolve; `null` = explicitly none. */
+  token?: string | null;
+  /** Override the source-pinned SHA256SUMS digest (tests). */
+  expectedSha256sumsDigest?: string;
+  /** Override the source-bundled per-archive hashes (tests). */
+  expectedArchiveSha256?: Readonly<Record<string, string>>;
+  /** Override the pinned executable digest for a vendored engine (tests). */
+  expectedBinarySha256?: string;
+  /** Override the vendored engine's download URL (tests). */
+  vendoredUrlOverride?: string;
+  /** Override the GitHub API base (tests point this at a local fixture). */
+  githubApiBase?: string;
+  /** Override signature verification (tests — avoids spawning powershell/codesign). */
+  verifyOverride?: typeof verifyCodeSignature;
+}
+
+export interface EngineResolveResult {
+  binPath: string;
+  cached: boolean;
+  signature: SignatureResult;
+  version: string;
+  assetPlatformKey: string;
+}
+
+interface GhAsset {
+  name: string;
+  url: string;
+  size?: number;
+}
+interface GhRelease {
+  tag_name?: string;
+  assets?: GhAsset[];
+}
+
+/**
+ * Resolve an engine binary: return a cached one if present, else download
+ * the right platform+variant archive from the pinned `native-v<version>`
+ * release, verify (SHA256SUMS digest → archive sha → code signature),
+ * extract atomically into `~/.gezel/engines/native-bin/<version>/<key>/`,
+ * and stamp the provider env var.
+ *
+ * macOS release notarization happens in CI against the signed archive before
+ * its hashes are pinned here. Bare command-line binaries cannot be stapled or
+ * assessed as app bundles, so runtime verification deliberately checks the
+ * source-pinned bytes and Developer ID identity without invoking `spctl`.
+ *
+ * Yields `progress`/`retrying`/`verifying`/`done`/`error`; the generator's
+ * RETURN value carries the resolved result. On a handled failure it yields
+ * a terminal `error` then throws {@link EngineUnavailableError} on the next
+ * pull (so registry consumers break on the event and direct drainers see
+ * the throw — see `resolveEngineToCompletion`).
+ */
+/**
+ * Resolve a **vendored** engine — one Gezel redistributes exactly as its
+ * upstream published it, rather than building.
+ *
+ * Today that is DuckDB alone. It does not go through the flow below because
+ * almost none of that flow applies: there is no `native-v*` release to look
+ * up, no `SHA256SUMS` manifest to digest-pin, no `gezel-` prefixed artifact
+ * name, and no Bendyline signature to assert. What replaces them is a
+ * stronger, simpler chain — the archive digest and the executable digest are
+ * both baked into this build (`packages/core/src/native/duckdb-pin.ts`), so
+ * the bytes are pinned twice over without trusting any intermediary manifest.
+ *
+ * The signature check asserts the **vendor's** identity, not ours: the
+ * DuckDB Foundation's Apple team on macOS, their Authenticode subject on
+ * Windows. That is deliberately stricter than the Windows precedent for
+ * vendored binaries, which asserts no publisher at all — the point of
+ * shipping the vendor's bytes is that the vendor's attestation travels with
+ * them, so we should be checking it.
+ *
+ * Landing directory is {@link duckdbInstallDir}, keyed by DuckDB's own
+ * version rather than the Gezel native-release version, and shared with the
+ * Electron bundle installer. One machine gets one verified copy no matter
+ * which install path produced it.
+ */
+async function* resolveVendoredDuckdb(
+  opts: ResolveEngineOptions,
+): AsyncGenerator<EngineResolveEvent, EngineResolveResult, void> {
+  const key = duckdbPlatformKey(process.platform, process.arch);
+  if (!key) {
+    yield* fail(
+      `DuckDB publishes no build for ${process.platform}/${process.arch}. Install DuckDB with your package manager (https://install.duckdb.org) and set GEZEL_DUCKDB_BIN to its path.`,
+    );
+  }
+  const platformKey = key as NonNullable<ReturnType<typeof duckdbPlatformKey>>;
+  const isWin = process.platform === 'win32';
+  const binaryName = duckdbBinaryName(process.platform);
+  const cacheDir = duckdbInstallDir(opts.home);
+  const binPath = join(cacheDir, binaryName);
+  const sentinelPath = join(cacheDir, '.verified.json');
+  const archiveName = DUCKDB_ASSET[platformKey];
+  const expectedArchiveSha = (
+    opts.expectedArchiveSha256?.[archiveName] ?? DUCKDB_ARCHIVE_SHA256[platformKey]
+  ).toLowerCase();
+  const expectedBinarySha = (
+    opts.expectedBinarySha256 ?? DUCKDB_BINARY_SHA256[platformKey]
+  ).toLowerCase();
+  const verifyAuthenticity = opts.verifyOverride ?? verifyCodeSignature;
+
+  // Vendor identity, per platform. Linux ELF carries no signature at all, so
+  // the digests are the whole check there — which is also true of every other
+  // Linux engine we ship.
+  const verifyOptions =
+    process.platform === 'darwin'
+      ? ({
+          policy: 'require' as SignaturePolicy,
+          expectedAppleTeamId: DUCKDB_APPLE_TEAM_ID,
+        } as const)
+      : isWin
+        ? ({
+            policy: 'prefer' as SignaturePolicy,
+            expectedPublisher: DUCKDB_WINDOWS_PUBLISHER,
+          } as const)
+        : ({ policy: 'skip' as SignaturePolicy } as const);
+
+  // Warm cache: the sentinel records the digest this build expects, so a pin
+  // bump invalidates it without a version-string comparison.
+  if (existsSync(binPath) && existsSync(sentinelPath)) {
+    const sentinel = await readSentinel(sentinelPath);
+    if (sentinel.archiveSha?.toLowerCase() === expectedArchiveSha) {
+      const { result: signature, accepted } = await verifyAuthenticity(binPath, verifyOptions);
+      if (!accepted) {
+        yield* fail(
+          `cached DuckDB failed signature policy '${verifyOptions.policy}': ${signature.status}${signature.detail ? ` (${signature.detail})` : ''}`,
+        );
+      }
+      process.env[ENGINE_ENV_VAR.duckdb] = binPath;
+      yield { type: 'done', binPath, cached: true };
+      return {
+        binPath,
+        cached: true,
+        signature,
+        version: DUCKDB_VERSION,
+        assetPlatformKey: platformKey,
+      };
+    }
+  }
+
+  // Same placement rationale as the native-engine gate: after the warm cache,
+  // before the first byte of network.
+  const duckdbDistribution = resolveDistributionProfile();
+  if (!duckdbDistribution.allowEngineBinaryDownloads) {
+    yield* fail(duckdbDistribution.refusalReason('engine-download'));
+  }
+
+  await mkdir(cacheDir, { recursive: true });
+  const tmpExtractDir = `${cacheDir}.tmp`;
+  await rm(tmpExtractDir, { recursive: true, force: true });
+  const archivePath = join(cacheDir, `${archiveName}.download`);
+
+  // No auth header and no GitHub API call: these are public release assets
+  // fetched by direct URL, so the 60-request/hour unauthenticated API limit
+  // that constrains the native-release path does not apply here at all.
+  const dl = downloadWithRetry({
+    url: opts.vendoredUrlOverride ?? duckdbAssetUrl(platformKey),
+    destPath: archivePath,
+    approxSizeBytes: 0,
+    fetchImpl: opts.fetchImpl ?? globalThis.fetch,
+    ...(opts.signal ? { signal: opts.signal } : {}),
+  });
+  let outcome: DownloadResult | undefined;
+  while (true) {
+    const step = await dl.next();
+    if (step.done) {
+      outcome = step.value;
+      break;
+    }
+    const ev = step.value;
+    if (ev.type === 'progress') {
+      yield { type: 'progress', bytesWritten: ev.bytesWritten, totalBytes: ev.totalBytes };
+    } else {
+      yield {
+        type: 'retrying',
+        attempt: ev.attempt,
+        maxAttempts: ev.maxAttempts,
+        delayMs: ev.delayMs,
+        reason: ev.reason,
+      };
+    }
+  }
+  const partialPath = `${archivePath}.partial`;
+  if (!outcome || outcome.kind === 'aborted') yield* fail('DuckDB download was cancelled');
+  if (outcome && outcome.kind === 'error') yield* fail(outcome.error);
+
+  yield { type: 'verifying', what: 'sha256' };
+  const actualSha = (await sha256File(partialPath)).toLowerCase();
+  if (actualSha !== expectedArchiveSha) {
+    await rm(partialPath, { force: true });
+    yield* fail(
+      `${archiveName} failed integrity check: expected ${expectedArchiveSha.slice(0, 16)}…, got ${actualSha.slice(0, 16)}…`,
+    );
+  }
+
+  await mkdir(tmpExtractDir, { recursive: true });
+  try {
+    yield* extractWithProgress((onProgress) =>
+      extractZip(partialPath, tmpExtractDir, { ...signalOpt(opts.signal), onProgress }),
+    );
+  } finally {
+    await rm(partialPath, { force: true });
+  }
+
+  // The CLI archive holds a single `duckdb` at its root, but locate it by
+  // walk so an upstream layout change fails loudly instead of publishing an
+  // empty directory.
+  const tmpBin = findNamedFile(tmpExtractDir, binaryName);
+  if (!tmpBin) {
+    await rm(tmpExtractDir, { recursive: true, force: true });
+    yield* fail(`extracted ${archiveName} but no '${binaryName}' was inside it`);
+  }
+  if (!isWin) await chmod(tmpBin as string, 0o755).catch(() => {});
+
+  // Second digest: the archive check above proves we downloaded the published
+  // asset; this proves the executable inside it is the one the Electron
+  // bundle also ships, which is what makes the two install paths equivalent.
+  const binarySha = (await sha256File(tmpBin as string)).toLowerCase();
+  if (binarySha !== expectedBinarySha) {
+    await rm(tmpExtractDir, { recursive: true, force: true });
+    yield* fail(
+      `${binaryName} inside ${archiveName} failed integrity check: expected ${expectedBinarySha.slice(0, 16)}…, got ${binarySha.slice(0, 16)}…`,
+    );
+  }
+
+  yield { type: 'verifying', what: 'signature' };
+  await stripQuarantine(tmpBin as string);
+  const { result: signature, accepted } = await verifyAuthenticity(tmpBin as string, verifyOptions);
+  if (!accepted) {
+    await rm(tmpExtractDir, { recursive: true, force: true });
+    yield* fail(
+      `DuckDB failed signature policy '${verifyOptions.policy}': ${signature.status}${signature.detail ? ` (${signature.detail})` : ''}`,
+    );
+  }
+
+  await rm(cacheDir, { recursive: true, force: true });
+  await rename(tmpExtractDir, cacheDir);
+  await writeFile(
+    sentinelPath,
+    `${JSON.stringify(
+      {
+        engine: 'duckdb',
+        version: DUCKDB_VERSION,
+        assetPlatformKey: platformKey,
+        archiveName,
+        archiveSha: actualSha,
+        binarySha,
+        signature,
+        verifiedAt: nowIso(),
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
+
+  // Deliberately NOT stampEnv: that also repoints GEZEL_NATIVE_BIN_DIR, which
+  // is the root the other engines resolve their siblings from. DuckDB lives in
+  // its own version-keyed tree and has no siblings there, so pointing the
+  // native-bin root at it would break llama/sd/whisper discovery on next boot.
+  process.env[ENGINE_ENV_VAR.duckdb] = binPath;
+  log.info(
+    `[engine-resolver] resolved duckdb ${DUCKDB_VERSION} → ${binPath} [sig=${signature.status}]`,
+  );
+  yield { type: 'done', binPath, cached: false };
+  return {
+    binPath,
+    cached: false,
+    signature,
+    version: DUCKDB_VERSION,
+    assetPlatformKey: platformKey,
+  };
+}
+
+export interface ResolveVendoredMxcOptions {
+  /**
+   * `false` returns only an install that is already verified and never touches
+   * the network — what a caller passes when the security policy forbids app
+   * network access. Defaults to `true`.
+   */
+  allowDownload?: boolean;
+  signal?: AbortSignal;
+  // ── test seams ──
+  platform?: NodeJS.Platform;
+  arch?: MxcArch | null;
+  fetchImpl?: typeof fetch;
+  tarballUrl?: string;
+  expectedIntegrity?: string;
+  expectedTarballSha256?: string;
+  expectedExecutorSha256?: string;
+  expectedLicenseSha256?: string;
+  verifyOverride?: typeof verifyCodeSignature;
+}
+
+/** Ceiling on the tarball download; the pinned 1.0.0 tarball is ~38 MB. */
+const MXC_TARBALL_MAX_BYTES = 128 * 1024 * 1024;
+
+const mxcResolutions = new Map<string, Promise<string | null>>();
+
+/**
+ * Resolve Microsoft's MXC launcher (`wxc-exec.exe`) for an npm / CLI install,
+ * which has no Electron bundle to install it from. Windows only.
+ *
+ * Returns the verified launcher path, or `null` when there is none: another
+ * platform, an arch MXC ships nothing for, a store build, `allowDownload:
+ * false` with nothing installed, or any failed check. Never throws — without a
+ * launcher, sandboxed scripts run uncontained and the sandbox status says so.
+ *
+ * Unlike {@link resolveVendoredDuckdb} it does not stamp an environment
+ * variable: whether the launcher is used is the caller's decision, and the
+ * sandbox's lookup finds a verified install through `readVerifiedMxcExecutor`.
+ *
+ * The chain is entirely pinned in this build (`core/src/native/mxc-pin.ts`):
+ * npm's sha512 integrity and the sha256 of the tarball, the per-arch
+ * executable digest, the license digest, and Microsoft's Authenticode
+ * signature under policy `require`. Only the launcher and the license leave
+ * the tarball. The result lands in the directory the Electron installer also
+ * uses, with the same sentinel, so either installer satisfies the other.
+ */
+export function resolveVendoredMxc(
+  home: string,
+  opts: ResolveVendoredMxcOptions = {},
+): Promise<string | null> {
+  // Concurrent callers share one download; a no-download probe never waits on
+  // or rides a download it did not ask for.
+  const key = `${home}\0${opts.allowDownload !== false}`;
+  const pending = mxcResolutions.get(key);
+  if (pending) return pending;
+  const run = resolveVendoredMxcOnce(home, opts)
+    .catch((err: unknown) => {
+      log.warn(`[engine-resolver] mxc launcher unavailable: ${String(err)}`);
+      return null;
+    })
+    .finally(() => mxcResolutions.delete(key));
+  mxcResolutions.set(key, run);
+  return run;
+}
+
+async function resolveVendoredMxcOnce(
+  home: string,
+  opts: ResolveVendoredMxcOptions,
+): Promise<string | null> {
+  if ((opts.platform ?? process.platform) !== 'win32') return null;
+  const arch = opts.arch !== undefined ? opts.arch : mxcArch();
+  if (!arch) {
+    log.info('[engine-resolver] MXC ships no launcher for this machine architecture');
+    return null;
+  }
+  const expectedExecutorSha = (
+    opts.expectedExecutorSha256 ?? MXC_EXECUTOR_SHA256[arch]
+  ).toLowerCase();
+  const verifyAuthenticity = opts.verifyOverride ?? verifyCodeSignature;
+  const verifyOptions = {
+    policy: 'require' as SignaturePolicy,
+    expectedPublisher: MXC_WINDOWS_PUBLISHER,
+  } as const;
+
+  const installDir = mxcInstallDir(home);
+  const executor = join(installDir, MXC_EXECUTOR_NAME);
+  const sentinelPath = join(installDir, MXC_VERIFIED_SENTINEL);
+
+  if (existsSync(executor) && existsSync(sentinelPath)) {
+    const sentinel = await readMxcSentinel(sentinelPath);
+    if (
+      sentinel?.version === MXC_VERSION &&
+      sentinel.sha256?.toLowerCase() === expectedExecutorSha &&
+      (await sha256File(executor)) === expectedExecutorSha
+    ) {
+      const { result, accepted } = await verifyAuthenticity(executor, verifyOptions);
+      if (accepted) return executor;
+      // The bytes are already the pinned ones, so downloading them again
+      // would meet the same verdict.
+      log.warn(
+        `[engine-resolver] installed mxc launcher failed signature policy 'require': ${result.status}${result.detail ? ` (${result.detail})` : ''}`,
+      );
+      return null;
+    }
+  }
+
+  if (opts.allowDownload === false) return null;
+  const distribution = resolveDistributionProfile();
+  if (!distribution.allowEngineBinaryDownloads) {
+    log.info(`[engine-resolver] ${distribution.refusalReason('engine-download')}`);
+    return null;
+  }
+
+  const expectedIntegrity = opts.expectedIntegrity ?? MXC_TARBALL_INTEGRITY;
+  const expectedTarballSha = (opts.expectedTarballSha256 ?? MXC_TARBALL_SHA256).toLowerCase();
+  const expectedLicenseSha = (opts.expectedLicenseSha256 ?? MXC_LICENSE_SHA256).toLowerCase();
+  const enginesDir = dirname(installDir);
+  await mkdir(enginesDir, { recursive: true });
+  const tarballPath = join(enginesDir, `mxc-sdk-${MXC_VERSION}.tgz.download`);
+  const partialPath = `${tarballPath}.partial`;
+  const stagingDir = `${installDir}.tmp-${process.pid}-${Date.now()}`;
+
+  try {
+    const dl = downloadWithRetry({
+      url: opts.tarballUrl ?? MXC_TARBALL_URL,
+      destPath: tarballPath,
+      approxSizeBytes: 0,
+      maxBytes: MXC_TARBALL_MAX_BYTES,
+      fetchImpl: opts.fetchImpl ?? globalThis.fetch,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+    let outcome: DownloadResult | undefined;
+    while (true) {
+      const step = await dl.next();
+      if (step.done) {
+        outcome = step.value;
+        break;
+      }
+    }
+    if (!outcome || outcome.kind === 'aborted') return null;
+    if (outcome.kind === 'error') throw new Error(`download failed: ${outcome.error}`);
+
+    const digests = await tarballDigests(partialPath);
+    if (digests.integrity !== expectedIntegrity || digests.sha256 !== expectedTarballSha) {
+      await rm(partialPath, { force: true });
+      throw new Error(
+        `mxc-sdk ${MXC_VERSION} tarball failed integrity check: expected ${expectedIntegrity}, got ${digests.integrity}`,
+      );
+    }
+
+    const executorEntry = mxcTarballEntry(arch);
+    await mkdir(stagingDir, { recursive: true });
+    try {
+      await tar.extract({ file: partialPath, cwd: stagingDir, strict: true }, [
+        executorEntry,
+        MXC_TARBALL_LICENSE_ENTRY,
+      ]);
+    } finally {
+      await rm(partialPath, { force: true });
+    }
+
+    const stagedExecutor = join(stagingDir, MXC_EXECUTOR_NAME);
+    const stagedLicense = join(stagingDir, 'LICENSE.txt');
+    const extractedExecutor = join(stagingDir, ...executorEntry.split('/'));
+    const extractedLicense = join(stagingDir, ...MXC_TARBALL_LICENSE_ENTRY.split('/'));
+    if (!existsSync(extractedExecutor) || !existsSync(extractedLicense)) {
+      throw new Error(`mxc-sdk ${MXC_VERSION} tarball lacks ${executorEntry} or its license`);
+    }
+    await rename(extractedExecutor, stagedExecutor);
+    await rename(extractedLicense, stagedLicense);
+    await rm(join(stagingDir, 'package'), { recursive: true, force: true });
+
+    const executorSha = await sha256File(stagedExecutor);
+    if (executorSha !== expectedExecutorSha) {
+      throw new Error(
+        `${executorEntry} failed integrity check: expected ${expectedExecutorSha.slice(0, 16)}…, got ${executorSha.slice(0, 16)}…`,
+      );
+    }
+    const licenseSha = await sha256File(stagedLicense);
+    if (licenseSha !== expectedLicenseSha) {
+      throw new Error(`mxc-sdk ${MXC_VERSION} license differs from the pinned text`);
+    }
+
+    await stripQuarantine(stagedExecutor);
+    const { result: signature, accepted } = await verifyAuthenticity(stagedExecutor, verifyOptions);
+    if (!accepted) {
+      throw new Error(
+        `mxc launcher failed signature policy 'require': ${signature.status}${signature.detail ? ` (${signature.detail})` : ''}`,
+      );
+    }
+
+    const sentinel: MxcVerifiedSentinel = {
+      engine: 'mxc',
+      version: MXC_VERSION,
+      arch,
+      sha256: executorSha,
+      source: 'npm-download',
+      verifiedAt: nowIso(),
+    };
+    await writeFile(
+      join(stagingDir, MXC_VERIFIED_SENTINEL),
+      `${JSON.stringify({ ...sentinel, integrity: digests.integrity, signature }, null, 2)}\n`,
+      'utf8',
+    );
+    // The staged directory already holds the launcher, its license and its
+    // sentinel, so one rename publishes all three together.
+    await rm(installDir, { recursive: true, force: true });
+    await rename(stagingDir, installDir);
+    log.info(
+      `[engine-resolver] resolved mxc launcher ${MXC_VERSION} (${arch}) → ${executor} [sig=${signature.status}]`,
+    );
+    return executor;
+  } finally {
+    await rm(stagingDir, { recursive: true, force: true });
+  }
+}
+
+async function readMxcSentinel(path: string): Promise<Partial<MxcVerifiedSentinel> | null> {
+  try {
+    return JSON.parse(await readFile(path, 'utf8')) as Partial<MxcVerifiedSentinel>;
+  } catch {
+    return null;
+  }
+}
+
+/** npm's `sha512-<base64>` integrity and the hex sha256, in one read. */
+async function tarballDigests(path: string): Promise<{ integrity: string; sha256: string }> {
+  const sha512 = createHash('sha512');
+  const sha256 = createHash('sha256');
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(path, { highWaterMark: HASH_READ_BUFFER_BYTES });
+    stream.on('data', (chunk) => {
+      sha512.update(chunk);
+      sha256.update(chunk);
+    });
+    stream.on('end', () => resolve());
+    stream.on('error', reject);
+  });
+  return { integrity: `sha512-${sha512.digest('base64')}`, sha256: sha256.digest('hex') };
+}
+
+export async function* resolveEngine(
+  opts: ResolveEngineOptions,
+): AsyncGenerator<EngineResolveEvent, EngineResolveResult, void> {
+  // DuckDB is vendored, not built — it has no artifact in our native release.
+  if (opts.engine === 'duckdb') return yield* resolveVendoredDuckdb(opts);
+  const platformKey = resolvePlatformKey();
+  if (!platformKey) {
+    yield* fail(
+      `unsupported platform ${process.platform}/${process.arch} — no native engine build exists`,
+    );
+  }
+  const engine = opts.engine;
+  const version = stripVer(opts.version ?? effectiveEngineRelease());
+  const variant = opts.variant ?? impliedEngineVariant(engine, process.platform);
+  const assetPlatformKey = variant ? `${platformKey}-${variant}` : (platformKey as string);
+  const isWin = process.platform === 'win32';
+  const ext = isWin ? 'zip' : 'tar.gz';
+  const exeExt = isWin ? '.exe' : '';
+  // Build scripts emit the server under a `gezel-` prefix (so the running
+  // process reads as `gezel-llama-server` for attribution while keeping the
+  // upstream lineage in the suffix). Prefer that name, but fall back to the
+  // bare upstream name so releases cut BEFORE the rename still resolve.
+  // Vendored-unmodified engines are never prefixed. `engine` stays the
+  // logical id.
+  const vendored = isVendoredUnmodifiedEngine(engine);
+  const primaryBinaryFile = vendored ? `${engine}${exeExt}` : `gezel-${engine}${exeExt}`;
+  const binaryFileCandidates = vendored
+    ? [primaryBinaryFile]
+    : [primaryBinaryFile, `${engine}${exeExt}`];
+  const requestedPolicy = opts.signaturePolicy ?? 'require';
+  // Astral ships uv.exe and the DuckDB Foundation ships duckdb.exe unsigned.
+  // A narrow, explicit exception: the source-bundled archive SHA plus the
+  // upstream bytes are authoritative, while an actually invalid Authenticode
+  // signature is still rejected by `prefer`. macOS is NOT exempt — the native
+  // build re-signs every Mach-O there because notarization demands it.
+  const policy =
+    process.platform === 'win32' && vendored && requestedPolicy === 'require'
+      ? 'prefer'
+      : requestedPolicy;
+  const archiveName = `gezel-native-${version}-${assetPlatformKey}.${ext}`;
+  const usesSourcePin =
+    opts.version === undefined &&
+    opts.expectedSha256sumsDigest === undefined &&
+    opts.expectedArchiveSha256 === undefined &&
+    !process.env.GEZEL_NATIVE_ENGINE_VERSION;
+  const archivePins =
+    opts.expectedArchiveSha256 ?? (usesSourcePin ? NATIVE_ENGINE_ARCHIVE_SHA256 : undefined);
+  const bundledArchiveSha = archivePins?.[archiveName]?.toLowerCase();
+  if (archivePins && !bundledArchiveSha) {
+    yield* fail(
+      `'${archiveName}' is missing from this build's bundled native checksum map — refusing to install an unpinned archive`,
+    );
+  }
+  const verifyAuthenticity = opts.verifyOverride ?? verifyCodeSignature;
+  const verifyOptions = {
+    policy,
+    ...(vendored && process.platform === 'win32'
+      ? {}
+      : { expectedPublisher: BENDYLINE_PUBLISHER, expectedAppleTeamId: BENDYLINE_APPLE_TEAM_ID }),
+  } as const;
+
+  const versionDir = join(opts.home, 'engines', 'native-bin', version);
+  const cacheDir = join(versionDir, assetPlatformKey);
+  const sentinelPath = join(cacheDir, '.verified.json');
+  // Pick whichever candidate is actually on disk (gezel- preferred). binPath is
+  // reassigned after extraction once we see what the downloaded archive holds.
+  let binPath = join(cacheDir, primaryBinaryFile);
+  for (const cand of binaryFileCandidates) {
+    if (existsSync(join(cacheDir, cand))) {
+      binPath = join(cacheDir, cand);
+      break;
+    }
+  }
+
+  // ── Fast path: already resolved + verified ──
+  if (existsSync(binPath) && existsSync(sentinelPath)) {
+    const sentinel = await readSentinel(sentinelPath);
+    if (!bundledArchiveSha || sentinel.archiveSha?.toLowerCase() === bundledArchiveSha) {
+      const { result: signature, accepted } = await verifyAuthenticity(binPath, verifyOptions);
+      if (!accepted) {
+        yield* fail(
+          `cached engine binary failed signature policy '${policy}': ${signature.status}${signature.detail ? ` (${signature.detail})` : ''}`,
+        );
+      }
+      stampEnv(engine, binPath, variant, versionDir);
+      yield { type: 'done', binPath, cached: true };
+      return {
+        binPath,
+        cached: true,
+        signature,
+        version,
+        assetPlatformKey,
+      };
+    }
+    log.warn(
+      `[engine-resolver] cached ${archiveName} was verified against ${sentinel.archiveSha ?? 'no archive hash'}, but this build pins ${bundledArchiveSha}; replacing it`,
+    );
+  }
+
+  // ── Availability gates ──
+  // Placed after the warm-cache path above on purpose: a store build resolves
+  // an engine it already has exactly like any other build, and refuses only
+  // the download. Refusing in `ensure` instead would have broken resolution
+  // of the binaries such a build ships with.
+  const distribution = resolveDistributionProfile();
+  if (!distribution.allowEngineBinaryDownloads) {
+    yield* fail(distribution.refusalReason('engine-download'));
+  }
+  const expectedDigest = (
+    opts.expectedSha256sumsDigest ?? (usesSourcePin ? SHA256SUMS_DIGEST : '0'.repeat(64))
+  ).toLowerCase();
+  const unpinned = isPlaceholderDigest(expectedDigest);
+  const hasOverride =
+    opts.version !== undefined ||
+    opts.expectedSha256sumsDigest !== undefined ||
+    opts.expectedArchiveSha256 !== undefined ||
+    !!process.env.GEZEL_NATIVE_ENGINE_VERSION;
+  if (unpinned && !hasOverride) {
+    yield* fail(
+      'on-device engine auto-download is not available in this build yet (no native release pinned). Point GEZEL_LLAMA_SERVER_BIN / the External engine URL at a llama-server, or use a build that bundles the engine.',
+    );
+  }
+
+  const apiBase = opts.githubApiBase ?? GITHUB_API;
+  // `bendyline/gezel` is public, so release metadata and assets are readable
+  // anonymously. A token stays OPTIONAL and is used when present purely to
+  // lift GitHub's 60-request/hour unauthenticated API rate limit. Do not
+  // reinstate a hard gate here: users who install from npm have no `gh`
+  // login, and requiring one would make on-device engines unreachable for
+  // every consumer outside this repo.
+  const token = opts.token !== undefined ? opts.token : await resolveGitHubToken();
+
+  const baseFetch = opts.fetchImpl ?? globalThis.fetch;
+  const tag = `native-v${version}`;
+
+  // ── 1. Resolve release + assets ──
+  const release = await ghJson(`${apiBase}/repos/${REPO}/releases/tags/${tag}`, baseFetch, token);
+  const archiveAsset = release.assets?.find((a) => a.name === archiveName);
+  const sumsAsset = release.assets?.find((a) => a.name === 'SHA256SUMS');
+  if (!archiveAsset) {
+    yield* fail(
+      `release ${tag} has no asset '${archiveName}' (this platform/variant isn't built for that release)`,
+    );
+  }
+  if (!sumsAsset) {
+    yield* fail(
+      `release ${tag} is missing its SHA256SUMS manifest — refusing to install unverified`,
+    );
+  }
+
+  // ── 2. SHA256SUMS: verify own digest against the source pin, then parse ──
+  const sumsBytes = await ghBytes((sumsAsset as GhAsset).url, baseFetch, token);
+  const sumsDigest = createHash('sha256').update(sumsBytes).digest('hex');
+  if (!unpinned && sumsDigest !== expectedDigest) {
+    yield* fail(
+      `SHA256SUMS digest mismatch for ${tag}: this build pins ${expectedDigest.slice(0, 16)}… but the release served ${sumsDigest.slice(0, 16)}…. Refusing — the release may have been tampered with or re-cut.`,
+    );
+  }
+  if (unpinned) {
+    log.warn(
+      `[engine-resolver] ${tag} resolved UNPINNED (no baked digest) — verifying the archive against the release's own SHA256SUMS only`,
+    );
+  }
+  const sums = parseSums(sumsBytes.toString('utf8'));
+  const manifestArchiveSha = sums.get(archiveName) ?? '';
+  if (!manifestArchiveSha) {
+    yield* fail(
+      `'${archiveName}' is not listed in ${tag}'s SHA256SUMS — refusing to install unverified`,
+    );
+  }
+  if (bundledArchiveSha && manifestArchiveSha !== bundledArchiveSha) {
+    yield* fail(
+      `archive checksum mismatch for '${archiveName}': this build pins ${bundledArchiveSha.slice(0, 16)}… but ${tag}'s SHA256SUMS lists ${manifestArchiveSha.slice(0, 16)}…. Refusing — the release may have been tampered with or re-cut.`,
+    );
+  }
+  const expectedArchiveSha = bundledArchiveSha ?? manifestArchiveSha;
+
+  // ── 3. Download the archive (auth headers injected into the fetch) ──
+  await mkdir(versionDir, { recursive: true });
+  const tmpExtractDir = `${cacheDir}.tmp`;
+  await rm(tmpExtractDir, { recursive: true, force: true });
+  const archivePath = join(versionDir, `${archiveName}.download`);
+  const dl = downloadWithRetry({
+    url: (archiveAsset as GhAsset).url,
+    destPath: archivePath,
+    approxSizeBytes: (archiveAsset as GhAsset).size ?? 0,
+    fetchImpl: makeAuthedFetch(baseFetch, token),
+    ...(opts.signal ? { signal: opts.signal } : {}),
+  });
+  let outcome: DownloadResult | undefined;
+  while (true) {
+    const step = await dl.next();
+    if (step.done) {
+      outcome = step.value;
+      break;
+    }
+    const ev = step.value;
+    if (ev.type === 'progress') {
+      yield { type: 'progress', bytesWritten: ev.bytesWritten, totalBytes: ev.totalBytes };
+    } else {
+      yield {
+        type: 'retrying',
+        attempt: ev.attempt,
+        maxAttempts: ev.maxAttempts,
+        delayMs: ev.delayMs,
+        reason: ev.reason,
+      };
+    }
+  }
+  const partialPath = `${archivePath}.partial`;
+  if (!outcome || outcome.kind === 'aborted') {
+    yield* fail('engine download was cancelled');
+  }
+  if (outcome && outcome.kind === 'error') {
+    yield* fail(outcome.error);
+  }
+
+  // ── 4. Verify archive sha256 against SHA256SUMS ──
+  yield { type: 'verifying', what: 'sha256' };
+  const actualSha = (await sha256File(partialPath)).toLowerCase();
+  if (actualSha !== (expectedArchiveSha as string).toLowerCase()) {
+    await rm(partialPath, { force: true });
+    yield* fail(
+      `${archiveName} failed integrity check: expected ${(expectedArchiveSha as string).slice(0, 16)}…, got ${actualSha.slice(0, 16)}…`,
+    );
+  }
+
+  // ── 5. Extract into a temp dir ──
+  await mkdir(tmpExtractDir, { recursive: true });
+  try {
+    yield* extractWithProgress((onProgress) =>
+      ext === 'zip'
+        ? extractZip(partialPath, tmpExtractDir, { ...signalOpt(opts.signal), onProgress })
+        : tar.extract({ file: partialPath, cwd: tmpExtractDir }),
+    );
+  } finally {
+    await rm(partialPath, { force: true });
+  }
+  // Find the binary inside the extracted archive — gezel- prefixed name
+  // (current releases) preferred, bare upstream name for pre-rename releases.
+  // Reassign binPath so the publish + env stamp below use the real name.
+  let tmpBin = '';
+  for (const cand of binaryFileCandidates) {
+    const p = join(tmpExtractDir, cand);
+    if (existsSync(p)) {
+      tmpBin = p;
+      binPath = join(cacheDir, cand);
+      break;
+    }
+  }
+  if (!tmpBin) {
+    await rm(tmpExtractDir, { recursive: true, force: true });
+    yield* fail(
+      `extracted ${archiveName} but none of [${binaryFileCandidates.join(', ')}] were inside it`,
+    );
+  }
+  if (!isWin) await chmod(tmpBin, 0o755).catch(() => {});
+
+  // ── 6. Code-signature ──
+  yield { type: 'verifying', what: 'signature' };
+  await stripQuarantine(tmpBin);
+  const { result: signature, accepted } = await verifyAuthenticity(tmpBin, verifyOptions);
+  if (!accepted) {
+    await rm(tmpExtractDir, { recursive: true, force: true });
+    yield* fail(
+      `engine binary failed signature policy '${policy}': ${signature.status}${signature.detail ? ` (${signature.detail})` : ''}`,
+    );
+  }
+
+  // ── 7. Atomic publish + sentinel ──
+  await rm(cacheDir, { recursive: true, force: true });
+  await rename(tmpExtractDir, cacheDir);
+  await writeFile(
+    sentinelPath,
+    `${JSON.stringify(
+      {
+        engine,
+        version,
+        assetPlatformKey,
+        archiveName,
+        archiveSha: actualSha,
+        signature,
+        verifiedAt: nowIso(),
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
+
+  // ── 8. Stamp env so the providers (and discoverNativeBinaries) find it ──
+  stampEnv(engine, binPath, variant, versionDir);
+  log.info(
+    `[engine-resolver] resolved ${engine} (${assetPlatformKey}) → ${binPath} [sig=${signature.status}]`,
+  );
+  yield { type: 'done', binPath, cached: false };
+  return { binPath, cached: false, signature, version, assetPlatformKey };
+}
+
+/**
+ * Drain {@link resolveEngine} to its terminal result. Forwards each event
+ * to `onEvent`; throws {@link EngineUnavailableError} on a handled failure.
+ */
+export async function resolveEngineToCompletion(
+  opts: ResolveEngineOptions,
+  onEvent?: (e: EngineResolveEvent) => void,
+): Promise<EngineResolveResult> {
+  const gen = resolveEngine(opts);
+  while (true) {
+    const step = await gen.next();
+    if (step.done) return step.value;
+    onEvent?.(step.value);
+  }
+}
+
+// ── helpers ──
+
+const EXTRACT_PROGRESS_INTERVAL_MS = 500;
+
+/**
+ * Run an archive extraction, yielding `extracting` progress until it settles.
+ * A tar extraction reports no byte counts, so its events carry zeros and the
+ * person sees the phase without a percentage.
+ */
+async function* extractWithProgress(
+  run: (onProgress: (bytesWritten: number, totalBytes: number) => void) => Promise<void>,
+): AsyncGenerator<EngineResolveEvent, void, void> {
+  let progress = { bytesWritten: 0, totalBytes: 0 };
+  const work = run((bytesWritten, totalBytes) => {
+    progress = { bytesWritten, totalBytes };
+  });
+  const settled = work.then(
+    () => true,
+    () => true,
+  );
+  const tick = () =>
+    new Promise<false>((resolve) => {
+      setTimeout(() => resolve(false), EXTRACT_PROGRESS_INTERVAL_MS).unref?.();
+    });
+  yield { type: 'extracting', ...progress };
+  while (!(await Promise.race([settled, tick()]))) {
+    yield { type: 'extracting', ...progress };
+  }
+  await work;
+}
+
+function signalOpt(signal: AbortSignal | undefined): { signal?: AbortSignal } {
+  return signal ? { signal } : {};
+}
+
+/** Yield a terminal error event, then throw on the next pull. */
+async function* fail(message: string): AsyncGenerator<EngineResolveEvent, never, void> {
+  yield { type: 'error', error: message };
+  throw new EngineUnavailableError(message);
+}
+
+function stripVer(v: string): string {
+  return v.replace(/^native-v/, '').replace(/^v/, '');
+}
+
+/**
+ * The archive variant an engine lives in when the caller names none.
+ *
+ * These are facts about *where the archive is*, not backend choices:
+ *
+ *  - **ds4-server on Linux** ships only in the `-cuda` archive, sharing one
+ *    copy of the NVIDIA redistributables with llama-server's CUDA build
+ *    instead of shipping them twice (see scripts/native-payload.mjs).
+ *  - **llama-server on macOS** ships only in the `-metal` archive; there is no
+ *    `darwin-arm64-cpu` asset, and the bare `darwin-arm64` key holds
+ *    ds4/sd/whisper/uv but no llama-server. Omitting the variant there fails
+ *    the extract with "none of [gezel-llama-server, llama-server] were inside
+ *    it" — a loud error, but an avoidable one.
+ *
+ * Deriving both here is the point: every call site would otherwise have to
+ * remember, and one eventually won't. Where the variant is a genuine choice
+ * (llama-server on Linux/Windows: cuda / vulkan / cpu) this returns undefined
+ * and the decision stays with the caller.
+ */
+export function impliedEngineVariant(
+  engine: NativeBinaryName,
+  platform: NodeJS.Platform,
+): string | undefined {
+  if (engine === 'ds4-server' && platform === 'linux') return 'cuda';
+  if (engine === 'llama-server' && platform === 'darwin') return 'metal';
+  return undefined;
+}
+
+function stampEnv(
+  engine: NativeBinaryName,
+  binPath: string,
+  variant: string | undefined,
+  versionDir: string,
+): void {
+  process.env[ENGINE_ENV_VAR[engine]] = binPath;
+  // Also point discoverNativeBinaries at the cache root so sibling engines
+  // resolve from the same place on a later boot.
+  process.env.GEZEL_NATIVE_BIN_DIR = versionDir;
+  if (engine === 'llama-server' && variant) process.env.GEZEL_LLAMA_SERVER_BACKEND = variant;
+}
+
+async function resolveGitHubToken(): Promise<string | null> {
+  if (process.env.GEZEL_GITHUB_TOKEN) return process.env.GEZEL_GITHUB_TOKEN;
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  try {
+    const { execFileSync } = await import('node:child_process');
+    const out = execFileSync('gh', ['auth', 'token'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      ...windowsHeadlessSpawnOptions(),
+    });
+    return out.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function makeAuthedFetch(base: typeof fetch, token: string | null): typeof fetch {
+  return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+    base(input, {
+      ...init,
+      headers: {
+        ...(init?.headers as Record<string, string> | undefined),
+        Accept: 'application/octet-stream',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    })) as typeof fetch;
+}
+
+/**
+ * The archive itself goes through `downloadWithRetry`, but the two small
+ * requests in front of it — the release metadata and the SHA256SUMS manifest —
+ * used to be single-shot. One dropped packet against api.github.com during
+ * first-run setup aborted the whole engine install, which is a miserable
+ * outcome for a request that would have succeeded a second later.
+ */
+const GH_METADATA_ATTEMPTS = 3;
+
+function ghRetryLog(what: string) {
+  return (info: {
+    attempt: number;
+    maxAttempts: number;
+    delayMs: number;
+    reason: string;
+  }): void => {
+    log.warn(
+      `[engine-resolver] ${what} failed (${info.reason}); retrying in ${info.delayMs}ms (attempt ${info.attempt}/${info.maxAttempts})`,
+    );
+  };
+}
+
+async function ghJson(
+  url: string,
+  fetchImpl: typeof fetch,
+  token: string | null,
+): Promise<GhRelease> {
+  return retryTransient(
+    async () => {
+      const res = await fetchImpl(url, {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) {
+        await res.body?.cancel().catch(() => {});
+        // A transient status is thrown as HttpStatusError so retryTransient
+        // takes another pass; 4xx becomes the terminal EngineUnavailableError.
+        throw new HttpStatusError(
+          res.status,
+          `GitHub API returned ${res.status} for ${url}${res.status === 404 ? ' (release not found — or no access while private)' : ''}`,
+        );
+      }
+      return (await res.json()) as GhRelease;
+    },
+    { attempts: GH_METADATA_ATTEMPTS, onRetry: ghRetryLog('GitHub release lookup') },
+  ).catch(rethrowAsEngineUnavailable);
+}
+
+async function ghBytes(
+  assetApiUrl: string,
+  fetchImpl: typeof fetch,
+  token: string | null,
+): Promise<Buffer> {
+  return retryTransient(
+    async () => {
+      const res = await fetchImpl(assetApiUrl, {
+        headers: {
+          Accept: 'application/octet-stream',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) {
+        await res.body?.cancel().catch(() => {});
+        throw new HttpStatusError(
+          res.status,
+          `asset download returned ${res.status} for ${assetApiUrl}`,
+        );
+      }
+      return Buffer.from(await res.arrayBuffer());
+    },
+    { attempts: GH_METADATA_ATTEMPTS, onRetry: ghRetryLog('GitHub asset fetch') },
+  ).catch(rethrowAsEngineUnavailable);
+}
+
+function rethrowAsEngineUnavailable(err: unknown): never {
+  if (err instanceof EngineUnavailableError) throw err;
+  if (err instanceof HttpStatusError) throw new EngineUnavailableError(err.message);
+  // Raw `TypeError: fetch failed` reads as a gezel bug rather than a bad link.
+  throw new EngineUnavailableError(
+    `${friendlyErrors.fetch(err)} while contacting GitHub for the engine download (after ${GH_METADATA_ATTEMPTS} attempts)`,
+  );
+}
+
+/** Parse `sha256sum`-style lines: `<64-hex>␠␠[*]<filename>`. */
+function parseSums(text: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const line of text.split('\n')) {
+    const m = /^([0-9a-fA-F]{64})\s+\*?(.+)$/.exec(line.trim());
+    const sha = m?.[1];
+    const name = m?.[2];
+    if (sha && name) map.set(name.trim(), sha.toLowerCase());
+  }
+  return map;
+}
+
+// Big read buffer so hashing a multi-hundred-MB engine archive doesn't starve
+// inside the busy daemon event loop — a 64 KB stream yields to the loop ~100k
+// times and the hash queues behind chat/scheduler/index work. Engines is a
+// lower layer than models, so this mirrors models' MODEL_HASH_READ_BUFFER_BYTES
+// rather than importing it.
+const HASH_READ_BUFFER_BYTES = 16 * 1024 * 1024;
+
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash('sha256');
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(path, { highWaterMark: HASH_READ_BUFFER_BYTES });
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolve());
+    stream.on('error', reject);
+  });
+  return hash.digest('hex');
+}
+
+async function readSentinel(
+  path: string,
+): Promise<{ signature: SignatureResult; archiveSha?: string }> {
+  try {
+    const j = JSON.parse(await readFile(path, 'utf8')) as {
+      signature?: SignatureResult;
+      archiveSha?: string;
+    };
+    return {
+      signature: j.signature ?? { status: 'unsupported' },
+      ...(j.archiveSha ? { archiveSha: j.archiveSha } : {}),
+    };
+  } catch {
+    return { signature: { status: 'unsupported' } };
+  }
+}
+
+/** First file named `name` anywhere under `root`, or null. */
+function findNamedFile(root: string, name: string): string | null {
+  const stack = [root];
+  while (stack.length > 0) {
+    const dir = stack.pop() as string;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(full);
+      else if (entry.isFile() && entry.name === name) return full;
+    }
+  }
+  return null;
+}

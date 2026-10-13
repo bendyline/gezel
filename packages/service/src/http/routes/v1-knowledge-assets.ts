@@ -19,13 +19,13 @@
 
 import { TrustedKnowledgeCoordinateSchema } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import { Hono } from 'hono';
-import { streamSSE } from 'hono/streaming';
-import { z } from 'zod';
 import {
   type EnsureErrorCode,
   createKnowledgeAssetsBroker,
-} from '../../machine-engine/knowledge-assets.js';
+} from '@bendyline/gezel-inference/internal/machine-engine/knowledge-assets';
+import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
+import { z } from 'zod';
 import { subscribeToInstallSse } from './install-sse.js';
 
 const CoordinateBodySchema = z.object({ coordinate: TrustedKnowledgeCoordinateSchema });

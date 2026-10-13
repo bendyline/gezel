@@ -149,6 +149,55 @@ describe('PendingQuestionCard navigation', () => {
     ]);
   });
 
+  // A finished card is filed in the wrap-up thread's project but lists the
+  // task's files. Each path the daemon verified opens in the task's project,
+  // and a host floating over the app (Activity) is told to step aside.
+  it("opens a finished card's files from the card itself", async () => {
+    const events: Array<{ type: string; detail: unknown }> = [];
+    const record = (e: Event) => events.push({ type: e.type, detail: (e as CustomEvent).detail });
+    window.addEventListener('gezel:open-tab', record);
+    window.addEventListener('gezel:open-file', record);
+    const onNavigate = vi.fn();
+    render(
+      <PendingQuestionCard
+        question={question({
+          projectId: 'default',
+          sessionId: 'wrap-1',
+          prompt:
+            '**Formatted Report** is finished.\n\n- **`tasks/12/report.pdf`**\n- `tasks/12/outline.md`',
+          choices: ['Dismiss'],
+          allowWriteIn: false,
+          taskRef: 'learning/12',
+          intent: { kind: 'task-finished', taskRef: 'learning/12' },
+          referencedFiles: [
+            { kind: 'artifact', path: 'tasks/12/report.pdf', projectId: 'learning' },
+          ],
+        })}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('link', { name: 'tasks/12/report.pdf' }));
+    window.removeEventListener('gezel:open-tab', record);
+    window.removeEventListener('gezel:open-file', record);
+
+    expect(events).toEqual([
+      { type: 'gezel:open-tab', detail: { kind: 'project', id: 'learning' } },
+      {
+        type: 'gezel:open-file',
+        detail: {
+          projectId: 'learning',
+          path: 'tasks/12/report.pdf',
+          source: 'artifacts',
+          fromQuestion: true,
+        },
+      },
+    ]);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    // A path the daemon did not verify is never a link to nothing.
+    expect(screen.queryByRole('link', { name: 'tasks/12/outline.md' })).toBeNull();
+  });
+
   // The collapsed one-line "Answered" form has nothing to sit beside.
   it('keeps an answered card single-column', async () => {
     const { container } = render(

@@ -4131,14 +4131,19 @@ button.timeline-session-divider-child::before {
   font-weight: 600;
 }
 
+/* Mixed from the theme's own status colours toward the text colour, so the
+   chip reads in both themes. The fixed pale blue and gold were tuned for a
+   dark rail and all but vanished on the light one. */
 .chat-rail-task-status-draft {
-  background: rgba(255, 199, 100, 0.12);
-  color: #d7b86b;
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  color: color-mix(in srgb, var(--warning) 45%, var(--text));
+  border-color: color-mix(in srgb, var(--warning) 32%, transparent);
 }
 
 .chat-rail-task-status-complete {
-  background: rgba(79, 125, 255, 0.15);
-  color: #a8bcff;
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: color-mix(in srgb, var(--success) 40%, var(--text));
+  border-color: color-mix(in srgb, var(--success) 32%, transparent);
 }
 
 .chat-rail-task-status-paused,
@@ -4529,4 +4534,134 @@ button.timeline-session-divider-child::before {
 .chat-rail-viewer-markdown h4 {
   overflow-wrap: break-word;
   word-break: break-word;
+}
+
+/* ── Crew introduction ───────────────────────────────────────────────
+   The crew a task brought, introduced in the thread that launched it:
+   a card per gezel with a portrait, the guild role beside its plain
+   words, and a Say hello key. See docs/ux.md, "The welcome". */
+.msg-crew-intro {
+  width: min(44rem, calc(100% - 1rem));
+  margin: 0.65rem 0 0.65rem 0.5rem;
+}
+.msg-crew-intro-lead {
+  margin: 0 0 0.4rem;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.msg-crew-intro-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.msg-crew-card {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.7rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.msg-crew-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1;
+}
+.msg-crew-card-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--text-lg);
+  color: var(--text);
+}
+.msg-crew-card-role {
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+.msg-crew-card-purpose {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.msg-crew-card-hello {
+  flex: none;
+  font-size: var(--text-sm);
+}
+
+/* ── Working notes ───────────────────────────────────────────────────
+   The sessions a turn launched (a task's workers), folded into one quiet
+   line in the meester's Home conversation. The transcript is inside. */
+.timeline-working-notes {
+  margin: 0.35rem 0 0.35rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+.timeline-working-notes-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.timeline-working-notes-summary::-webkit-details-marker {
+  display: none;
+}
+.timeline-working-notes-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sage);
+}
+.timeline-working-notes-live .timeline-working-notes-dot {
+  background: var(--accent);
+  animation: timeline-working-notes-breathe 1.8s ease-in-out infinite;
+}
+.timeline-working-notes-stopped .timeline-working-notes-dot {
+  background: var(--warning);
+}
+.timeline-working-notes-stopped .timeline-working-notes-line {
+  color: color-mix(in srgb, var(--warning) 70%, var(--text));
+}
+.timeline-working-notes-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-working-notes-toggle {
+  flex: none;
+  font-size: var(--text-xs);
+  text-decoration: underline;
+}
+.timeline-working-notes[open] > .timeline-working-notes-summary {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+.timeline-working-notes-body {
+  padding: 0.25rem 0.5rem 0.5rem;
+}
+@keyframes timeline-working-notes-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .timeline-working-notes-live .timeline-working-notes-dot {
+    animation: none;
+  }
 }

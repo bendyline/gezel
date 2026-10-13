@@ -1,5 +1,5 @@
+import { huggingfaceDatasetResolveUrl } from '@bendyline/gezel-inference/internal/knowledge/catalog-source';
 import { describe, expect, it } from 'vitest';
-import { huggingfaceDatasetResolveUrl } from './catalog-source.js';
 
 describe('huggingfaceDatasetResolveUrl', () => {
   it('builds a commit-pinned dataset resolve URL with an encoded path', () => {

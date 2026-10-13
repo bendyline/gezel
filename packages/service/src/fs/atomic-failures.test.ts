@@ -1,8 +1,8 @@
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { writeFileAtomic } from './atomic.js';
 
 const fault = vi.hoisted(() => ({ stage: '' as '' | 'write' | 'publish' }));
 vi.mock('node:fs/promises', async (importOriginal) => {

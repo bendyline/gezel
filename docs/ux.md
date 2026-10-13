@@ -24,7 +24,10 @@ Three words that should describe any screen:
 3. **Historic** — Gezel is a guild. The vocabulary (gezel, meester, voorman)
    is Dutch apprenticeship terminology; the visuals should echo the world
    those words come from. A guild hall, an apprentice's bench, a master's
-   ledger — not a SaaS dashboard.
+   ledger — not a SaaS dashboard. The plural follows the Dutch: **gezellen**
+   (possessive "gezellen's") in anything a person reads. Technical names keep
+   **gezels** — the `gezels/` folder, routes, ids, API and tool names — and so
+   does text written only for a model.
 
 What this *doesn't* mean: kitsch, pastiche, or literal skeuomorphism. The one place a
 *vaguely* skeuomorphic cue is welcome is physicality on things you press:
@@ -48,6 +51,14 @@ pacing of a transition. If a first-time user can't quite put a finger on
   start a parallel palette. Hardcoded colors are reserved for domain visuals
   whose color carries data or content (diffs, terminal ANSI, Village artwork,
   poppetjes), not app chrome.
+  Secondary copy uses `--text-muted`, never a fixed gray. Filled action keys
+  pair `--action-bg` with `--action-ink`; links use `--accent-text`. These pairs
+  preserve normal-text contrast in both themes. The brand sage
+  (`--gezel-sage`, #5c6a4a) is deep enough that the titlebar's small cream
+  labels clear 4.5:1. The titlebar uses it exactly: the native Windows/Linux
+  window controls, the window background and the splash paint that color
+  outside the renderer (`BRAND_SAGE` in the Electron main process), so any
+  other tone shows as a seam at the controls.
 - **Motion** is slow-ish and soft: ~120–160ms ease-out for overlay and
   dialog in/out. Nothing snaps or bounces. See the `gz-overlay` /
   `gz-dialog` keyframes for the canonical cadence; match it elsewhere.
@@ -185,10 +196,21 @@ Rules:
   tell them apart. And when one action is more consequential than its
   neighbours (Fix creates a task), give it the accent ink — never a second
   latched-looking fill.
+- **One tray can hold a choice and its actions.** When a view switch has an
+  action that belongs with it, put both in one tray instead of a key tray
+  plus a stray text link. The tray is a `role="group"` named after its
+  subject, the choice keys keep their own inner `role="radiogroup"` (one Tab
+  stop, arrows move), and a 1px `--tray-border` divider separates them from
+  the action keys so an action never reads as one more choice. The Home
+  Handboek tab's *Read · Watch | Open in Handboek* is the reference.
 - **Native `<input type="radio">` stays native** in dense config forms
   (folder scopes, engine settings) — the round dot is a true circle and
   keeps its shape. Reach for keys when the choice is prominent enough to
   deserve a control with physical presence.
+- **Radio keys share one Tab stop.** The selected key is tabbable; arrow keys
+  select the next enabled choice and wrap within the group. Home and End select
+  the first and last choices. Button-based groups use `onRadioKeyDown` from
+  `primitives/radio-keyboard.ts` and set unselected keys to `tabIndex={-1}`.
 - **Legacy aliases:** `.provider-pill`, `.gz-type-chip`,
   `.pending-question-choice`, and `.catalog-category` (plus their wrappers)
   are aliased into the recipe pending markup migration. When touching one of
@@ -206,7 +228,7 @@ Rules:
   `<strong>{label}</strong> — description`. The description is a readout of
   the tray, so it sits directly beneath with the recipe's 0.5rem gap; don't
   wedge other content between them. The Security & Compliance posture
-  switch (first run + Settings) is the reference implementation.
+  switch in Settings is the reference implementation.
   label on top, a smaller muted hint beneath, left-aligned, wrapping
   allowed. Put the two lines in `.gz-key-label` and `.gz-key-hint` — the
   recipe styles both, so a new surface never needs its own pair (the
@@ -221,6 +243,59 @@ Rules:
 - **No new fully-rounded controls.** If you're reaching for
   `border-radius: 999px` on anything with a text label, it should almost
   certainly be a key or a small-radius chip instead.
+
+### Crew activity: one tray, read left to right
+
+The titlebar's **Crew activity** menu is the product's most-used dropdown,
+so it stays simple: a heading, one line ("How much your gezellen do on their
+own."), and one described tray of four keys ordered from paused to most
+independent: **Off → Chat only → Tasks + chat → Proactive**. Each key is the
+mode's icon over its label, so the row reads as one story, the crew coming
+to the bench. The latched key explains itself in the readout beneath, through
+the described-tray stem; Off latches danger-red. Settings shows the same
+tray in the same order with the same copy (`engagement-modes.ts`).
+
+These are discrete menu radio choices, not a continuous range. Left and
+right arrows walk the tray (Radix menus only move up and down, so the tray
+adds them); Enter, Space, or a click commits one mode and closes the menu.
+Chat only and Off can stop a running Night Shift. Night Shift stays below
+the tray as its own section, never as a fifth key.
+
+The icon family is the crew at the workbench: one bench that never moves,
+with up to three poppetje figures standing behind it in fixed places, the
+lead in the middle a little taller. Off leaves the bench empty with the
+hammer lying on it; Chat only brings the lead to the bench; Tasks + chat
+brings the whole crew; Proactive has the lead raise the hammer unasked. The
+figures stand for a crew, not a literal count of active gezellen. Three shapes
+are deliberate. The H-frame legs make it a workbench; a plain table reads as
+a desk or a meeting table. The hammer has a flat face and a rounded peen and
+is held upright in the lead's fist: a symmetric mallet raised behind a bench
+reads as a gavel, and a hooked claw tilted over a neighbour reads as an axe.
+And initiative is a raised tool, never a raised hand, which reads as waiting
+to be called on. Labels and descriptions always explain the mode; color alone
+never does. Reuse `EngagementModeIcon` and the shared mode copy in the
+titlebar, menu, and Settings so this vocabulary remains consistent.
+
+### Night Shift: a tile, a badge, and the night as a track
+
+The menu's second section answers "when?" before anything else. A sage night
+tile holds the moon (the titlebar key's own look while a shift runs), then
+the title with one status line, and a read-only status badge: the night it
+next runs (Tonight, Tomorrow, a weekday), Running, Idle, On hold, or Paused.
+Everything after the tile shares one left edge; list dots sit in the tile's
+column. A thin track draws the window from its start to its end and fills to
+now while a scheduled shift runs, so the line never has to spell out "3h 46m
+left" twice. A manual shift draws no track: it runs until the queue is
+empty, so it promises no end.
+
+The section must say when the shift cannot run. Chat only and Off hold all
+task work, so the badge reads Paused, the line says which mode is holding
+it, and there is no Start key (a Start that does nothing is worse than none).
+All of this wording is decided in one place, `nightShiftSummary` in
+[App.tsx](../packages/ui/src/App.tsx); add a state there, not in the markup.
+Name times plainly ("Instead of waiting until 10:00 PM", "It starts again
+tomorrow at 10:00 PM") and never the machinery ("deferred indexing",
+"scheduled window").
 
 ## Controls: budget sliders
 
@@ -375,12 +450,16 @@ through `--app-main-pad-inline` on `.app-main` (0.75rem instead of 1.25rem).
 Full-bleed views cancel that gutter with the same `--app-main-pad-block` /
 `--app-main-pad-inline` tokens, never with literal negative margins. A view
 that adds its own inset on top of the gutter drops it in compact, so every
-compact view's content edge lines up. Page-level panes, such as first-run
-setup, span that full width without a second indent. Home's greeting band
+compact view's content edge lines up. Page-level panes, such as Settings,
+span that full width without a second indent. Home's greeting band
 steps aside for the visit, without saving that, while the meester's
 introduction fills the empty conversation, just as it does once the person
-sends. A tab the person chose, including the one already open, holds it open
-through that. Collapsed, its tab bar stays visible; selecting any tab reopens its
+sends. During first run there is no band at all (see [The welcome](#the-welcome)). A tab the person chose, including the one already open, holds it open
+through that. The band greets once per launch: shown expanded once, it stays
+rolled up on every return to Home in that run. It also steps aside whenever
+the meester's thread holds a failed turn or a reply that arrived while the
+person was away, because the conversation, with its Retry, is what they came
+back to, not the tip of the day. Collapsed, its tab bar stays visible; selecting any tab reopens its
 content. Labels wrap on narrow screens so every destination remains visible.
 The introduction reads from its
 top, because an empty timeline does not pin to the bottom. In compact, its
@@ -434,6 +513,14 @@ the 44px hit area. The composer's keys keep a 36px face and reach 44px through
 an invisible `::after` around it, since a 44px face turned the composer into a
 row of slabs; keys that do this stand at least 4px apart. The gezel header's
 Context and Sandbox chips do not take the hit area yet.
+Narrow forms wrap fields and actions before squeezing text inputs; step forms
+and catalog grids can fall to one column within their own pane. Task detail
+puts its view keys above a full-width step tracker below 480px. A non-chat
+editor below 32rem gives its view tabs a separate row so formatting and host
+actions such as Export stay reachable. Compact dialogs use the available phone
+width, and touch dropdown rows, dialog tabs, and dialog actions keep a 44px
+minimum height. Long paths and identifiers wrap within settings panels.
+
 The titlebar never wraps. The compact header shows the navigation button in
 place of the brand mark, because the navigation leads with Home and one
 place gets one key. Updates becomes a 44px bell key like the menu and search
@@ -497,6 +584,140 @@ What lives where:
 
 ## Patterns
 
+### The welcome
+
+The first thing a new person meets is the meester, not a setup page. Home
+renders the workshop from the first settled frame; the meester's empty
+conversation opens on `MeesterWelcome`: the meester full-figure on the
+plank (`MeesterFigure`, the same figure the greeting band stages), a serif
+time-of-day line ("Good afternoon. I'm Florian — I run this workshop."),
+and the meester's lines in the chat register (serif body). Rules:
+
+- **Setup is the meester asking for tools.** The one thing the app cannot
+  run without, an AI model, is asked for in the meester's voice ("Before we
+  start, I need my tools…") with one accent key, **Fetch my tools · 3.9 GB ·
+  about 5 minutes**. Nothing downloads before that tap. Quiet muted links sit
+  beneath it: "Use one already on this computer" (opens a small tray of the
+  models on disk) and "Connect a cloud account instead". A cloud provider
+  that is not connected gets one key, **Connect an AI**, into Settings. A
+  phone draws its own model list in the same place.
+- **Everything else is a default, with one muted line.** No posture tray,
+  no preference switches, no media downloads. The security posture, names
+  and poppetjes, the relevance check and social mode keep their first-run
+  defaults; one `--text-xs` line says what that means and links to Settings
+  → Security & Compliance ("Change what I'm allowed to do"). Optional media
+  models live in Settings → Artificial Intelligence.
+- **One surface per message.** While the tools arrive, progress is one
+  quiet line under the meester (a thin bar, then "Fetching my tools · 42% ·
+  about 3 min left"), not a banner. The composer is open for a draft with
+  Send held, and its own "can start talking once a model is downloaded"
+  notice is suppressed in the meester's thread, because the welcome already
+  says so. A failure is one plain sentence with **Try again** and quiet
+  escape links; a report link only for real failures.
+- **No page swap.** When the model lands the same surface says "I'm ready.
+  What shall we make?" The greeting band and the folder step stay away for
+  the rest of that visit; they arrive on the next.
+- **The title bar is quiet during first run.** Brand and search only;
+  Activity, the engine, indexing, quota and tempo controls describe a
+  running workshop and join once there is one.
+- **Static, never a model turn.** The welcome is written copy, so it is on
+  screen before anything can answer and never puts words in the meester's
+  mouth. The helpers made at boot (the Klerk, the Boekwachter) are
+  introduced by name in one small line, so no name in the sidebar is a
+  stranger. The tour ("Take the 1-minute tour") opens in place.
+- A conversation that already has history when the model goes missing keeps
+  it, and the meester's ask for tools sits at its foot as a bordered note
+  (`MeesterSetupNote`), above the composer.
+- **First run lasts until the work can run.** On llama.cpp the engine is
+  fetched lazily, so a model already on disk is not enough: the welcome
+  shows "Setting up my workbench · N%" until the engine is in place, and
+  only then says it is ready. Tapping **Fetch my tools** fetches the engine
+  beside the model.
+- **The model offered is one that will start.** First run picks against the
+  memory free when it runs, as the launch check will, not against the
+  machine's size alone: a 21 GB model offered to a 12 GB laptop with 8 GB of
+  RAM free was refused on the first chat turn. A 1-bit quant ranks at half
+  its curated score and a 2-bit one at four fifths, so a newcomer is not
+  handed a model that only fits because most of its precision is gone.
+- **Nothing scheduled runs on a new install.** The night shift waits under
+  the same hold as background indexing (first half hour, and until a model
+  can answer), and Home's conversation leaves out scheduled runs' sessions
+  altogether, so an install after 22:00 still opens on the welcome rather
+  than a failed overnight review.
+- **First projects, not openers.** Up to four stacked keys (`gz-key--stacked`,
+  title over a one-line hint), chosen by `firstProjectsFor` from
+  `FIRST_PROJECTS` in core. A typed one is a goal a project type carries end
+  to end with one lead and a board (a trip, a celebration); a craftbook one
+  arrives in the composer with its book attached, and with the book's
+  bundled sample when it has one, so Send starts it with no meester turn
+  and nothing of the person's own. A key prefills an editable sentence and
+  never sends it. "Or tell me in your own words" sits beneath. A first
+  project joins the pool only after it passes its evals (`first-project-*`
+  scenarios: 2 of 3 on Gemma 4 E4B, 3 of 3 on Gemma 4 12B, Lockdown); a
+  phone offers only the ones that also passed on the phone (`phone: true`).
+- **The welcome asks what the person wants help with.** A new install (a
+  `firstUseAt` within the week) that has not answered sees the interest
+  tray under the meester's question, "While I fetch my tools: what would
+  you like help with? Pick any." (`InterestTray`, plain keys, several can be
+  latched, none required). When the model is already on the machine the same
+  tray sits inline above the first projects. Each press saves at once and the
+  first projects re-order under it; the tray stays for the visit rather than
+  vanishing on the first press, and "Not now" (or "Done") puts it away. An
+  established install is never interrupted to ask; Settings → General → What
+  you use gezel for holds the same tray, with each area's hint.
+
+### The first request: crew, working notes, the finished thing
+
+What the meester's thread shows after the person asks for something:
+
+- **The crew arrives as cards** (`CrewIntroCard`, a `crew-introduction`
+  message carrying `crewIntroduction`): a headshot, the name in the serif,
+  the guild role beside its plain words from `roleWithGloss` ("Reisleider —
+  trip planner", "Voorman — crew lead"; a plain role carries no gloss), what
+  they start with, and **Say hello**, which opens their chat. The lead and
+  whoever starts the work are introduced as the task begins; a gezel hired
+  for a later step is introduced when they start. Each gezel is introduced
+  once per thread.
+- **The crew's work folds into one line** (`WorkingNotes`) in the meester's
+  Home conversation: "Mira is working…" with a breathing dot, then "Mira's
+  working notes". The worker's transcript, thinking, tool calls and any
+  failure banners are inside; a stopped worker shows "Mira stopped: …" on
+  the line in the warning tone, never as a red banner in the person's
+  conversation. Debug mode shows the full session tree instead.
+- **The finished thing is last.** The wrap-up renders after the fold, not
+  above the work that made it, and closes on the finished-work card
+  (`DeliverableCard` with `maker`): "Mira made this for you" with a small
+  portrait, a cover of a written document's first lines in the serif, then
+  **Open · Make changes · Show in folder**. Make changes opens a chat with
+  the maker. When the deliverable is the data a project type's Output page
+  reads (`view: 'output-page'`), the card names the project and opens it:
+  the board is the thing to look at, never the JSON behind it.
+- **The finished card owns the screen when it lands.** A fresh wrap-up
+  scrolls to the top of the view (the thread stops following the bottom),
+  so the folder question beneath it is read second, not first. While the
+  thread shows a task's finished card, the chat rail leaves the deliverable
+  off that task's card, so the board does not appear twice side by side.
+- **Open opens the board, full window.** Opening a project-type deliverable
+  takes the project's Output page to full window (`requestOutputPaneFullWindow`),
+  not a half pane beside the chat. A project with one page shows no page
+  picker: a select with one choice is a label pretending to be a control.
+- **The board reads like the plan, not like the tool.** A type page labels
+  what the person would: "Day 1" when there is no date yet (and the date
+  beneath once there is one), each day as plain lines with no
+  "Anchor: / Options: / Slack:" scaffolding, counts in words ("1 day", "7
+  days", never "day(s)"), and who is going when the person said ("4
+  travellers"). The trip planner (gilde `trip-planner` 1.0.3) is the
+  reference.
+- **The task says what the person asked, and no more.** A typed kickoff's
+  description is the person's own request, not the meester's expanded brief,
+  so a lead running in the default posture is not handed hotels, dining and
+  a budget it cannot research. The lead makes what was asked and offers the
+  extras in its reply.
+- **Then, once, the folder question.** After the first wrap-up the meester
+  asks at the foot of the thread whether to look after a folder
+  (`FolderOnboardingStep`). Nothing is ticked and neither overnight key is
+  latched: the person chooses, or skips.
+
 ### Pick a plan from Home
 
 Home's intro starts with the greeting tab, named for the time of day like the
@@ -526,9 +747,20 @@ output. **See all** opens the full plan gallery, whose **Start here** shelf
 uses the same starter set. Use the existing tray and radius tokens; these
 are square-ish keys, never pills.
 
-The starters live only inside the intro tab. First-run folder setup keeps its
-own bounded area above the conversation and yields to the draft on short
-touchscreens. The intro tabs remain reachable while the native keyboard is open.
+Each Make something key is a **paper card**: it takes the paper its artwork is
+drawn on, in both themes, so the 64px mark bleeds into the card instead of
+sitting on it as a pasted square. `sampleArtworkPaper`
+([artwork-paper.ts](../packages/ui/src/components/artwork-paper.ts)) reads the
+dominant tone along the artwork's border once it loads; until then, or when the
+border has no single light ground, the card uses `--gezel-paper-mark`. The name
+and description are set in warm ink, the artwork's edge is feathered so a prop
+that runs off it fades out, and hover changes only the border, because a
+background change would expose the artwork's edge.
+
+The starters live inside the intro tab. The folder step waits until the
+welcome is over: on a later visit it keeps its own bounded area above the
+conversation and yields to the draft on short touchscreens. The intro tabs
+remain reachable while the native keyboard is open.
 
 A Home key opens a compact launch sheet with the main field focused.
 The person adds a topic, then chooses **Start now** or **Tonight**. Use the
@@ -688,6 +920,25 @@ the trigger's `data-face`, never the list's `data-fit`. Glyphs come from
 one concept keeps one picture. To keep every section on a phone, an
 iconified project tab may narrow below 44px wide, down to WCAG's 24px
 minimum. It keeps the 44px height.
+
+**A settings page of several integrations gives each its own tab.**
+Settings → Connected Apps opens on **Overview** (the master switch and the
+apps already approved), then one tab per integration. Each tab shows that
+integration's setup without a card frame, because the tab is already the
+container (as on the flat provider pages). Anything waiting on the person,
+such as a pending approval or a load error, sits above the tab row so every
+tab shows it. Hiding
+a warning behind an unselected tab is the regression tabs invite, so every
+panel stays mounted and a tab whose setup needs action carries a small warning
+dot (a true circle), with the state in its accessible name ("Codex, needs
+attention"). Each tab leads with the product's own mark
+(`ConnectedAppTabIcon`): in its brand color where it has one, and in the tab's
+ink where the mark is black. A product with no published mark gets a plain
+drawn glyph, never someone else's. The row wraps rather than shedding labels,
+because several marks (OpenCode's block, pi's π) don't name their product on
+their own.
+Copy that points at another tab names it ("on the Overview tab"), never
+"above" or "below".
 
 **Split buttons.** Use a split button when one creation action is the clear,
 frequent default and two or three closely-related variants should remain
@@ -932,6 +1183,34 @@ eyebrow (`.gz-npd-rail-group`) between groups; a shelf with no matching book
 is not drawn, so the same rail reads as a codebase's rail on a codebase and a
 household rail on a household project. The eyebrow is suppressed where the
 rail turns into a horizontal scroller — a stacked heading has no row to head.
+
+**Interests order; they never hide.** The person's interest areas
+(`config.interests`, read through `useInterests`, mapped by
+`interestAreasForCraftbook` / `interestAreasForProjectType`) put their work
+first wherever work is offered, and every item stays reachable:
+
+- New Task leads its rail with **For you** (the books serving the person's
+  areas, in the order the areas were picked) and opens on it, except inside a
+  project whose type recommends its own shelf. All plans stays one click away.
+- New Project orders its category rail and its sections by area, orders the
+  types inside each section, and lands on the first category that serves the
+  person. **All** is the first key of the rail.
+- Home's Make something draws its cards from the starters and the
+  `first-project` books, the person's areas first, with one place kept for
+  another area (`pickWithRange`) so a single pick never makes gezel look like
+  it does one thing.
+- Knowledge offers **Suggested for you**: up to two catalogs per area, smallest
+  first, each with its size and an **Add** key. Nothing downloads before the
+  tap, catalogs about one place (a region's travel guide, one state's case
+  law) are left to the full list, and the row is absent while the security
+  policy keeps the app offline.
+
+**A plan this host cannot run is shown with its reason.** New Task lists a
+craftbook the phone cannot run as a disabled card whose description is the
+reason (`craftbookHostGap`: "Splits into many smaller tasks, which needs the
+desktop."), the way New Project already treats a type. It never becomes a
+launch that fails, and it is never one of Home's suggestions or the For you
+shelf.
 
 **Questions with an attached document.** When a pending question carries a
 document — a night-shift report, a draft plan — the document is not a
@@ -1184,7 +1463,10 @@ the two tabs' combined width, with a smaller format tile and file name; the
 location, size, timestamp, and repeated extension label are hidden. Open keeps
 its label; Show in folder and Save a copy use icon buttons with tooltips and
 accessible names. On a receipt that finished its task, it shrinks to a one-line
-chip beside the task chip. Three rules keep it honest:
+chip beside the task chip. The task page's overview lists every other file the
+task made under **Other files** (**Files** when there is no deliverable), one
+row each that opens it, folded after eight: the wrap-up's and the Ready card's
+"…and 3 more" send the person there. Three rules keep it honest:
 
 - **The daemon decides what the deliverable is, and only a file that exists
   gets a card.** The resolver lives in
@@ -1195,9 +1477,13 @@ chip beside the task chip. Three rules keep it honest:
   "PowerPoint deck · in progress", because the tracker may point at the product
   before the last step signs it off.
 - **A path in prose links only when the daemon has verified it.** The same holds
-  in chat replies and in task notes. When a reply names a file the workspace
-  index has not caught up with, the daemon checks it directly on disk, within a
-  fixed limit. It never guesses from a same-named file.
+  in chat replies, in task notes, and in question cards (Activity, Home, chat).
+  When a reply names a file the workspace index has not caught up with, the
+  daemon checks it directly on disk, within a fixed limit; a card's paths are
+  always checked that way. It never guesses from a same-named file. A file
+  opened from a card opens in its own project (a finished card filed in the
+  meester's thread lists the task's files), and a host floating over the app,
+  Activity or the project questions dialog, closes so the file is in view.
 
 **A cited fact shows its source; an unsourced one is said out loud.** A
 gezel writing in factual mode (see [factual-writing.md](factual-writing.md))
@@ -1211,6 +1497,25 @@ excerpts. Statements no source showed sit at the top of it in a quiet
 warning tray with the missing detail named, never in red. They are a
 reason to check, not an error. A marker whose number is not a source stays
 plain text, because a link to nothing is worse than no link.
+
+**A reply's machinery waits behind Details.** Outside debug mode, the step
+count, step timings, thinking and attempted-call expanders do not head a
+reply: the reply's action row carries a **Details** key that shows them, and
+**Hide details** puts them back. What the person needs stays in view without
+the key: media, cards, and a failure the turn never recovered from. Debug
+mode shows everything, as before. A task's id (`lisbon-trip-planning/1`) is
+debug-mode text too: the hand-off card's key reads **Open task**, the chat
+rail's task card leads with its title, and a wrap-up carries no "Tasks:"
+row because its finished card already opens the work. Status chips that remain (a task's
+**Complete**, **Draft**) take their colour from `--success` / `--warning`
+mixed into the surface, never a pale grey that reads as disabled.
+
+**A thread is titled from the sentence.** A thread's title is the person's
+first sentence with its lead-in ("Can you", "Please", "I'd like you to")
+dropped, cut at a clause or a word boundary with an ellipsis: "Plan a trip
+to Lisbon next spring for the four of us", never "Lisbon spring four trip".
+A page reaction keeps its page's name as a prefix ("Checkers: Your opponent
+played c3-d4"). See [thread-title.ts](../packages/core/src/thread-title.ts).
 
 **Machine syntax never reaches a summary line.** A message body is not
 prose. It is markdown; it may carry reasoning the bubble hides; and when the
@@ -1525,6 +1830,16 @@ the compact four-state `Plan / Edit / Reviewed / Full` control: this is an
 ambient project posture, so changing it belongs here rather than in the chat
 composer or a modal.
 
+**A project's settings fold into one menu; only an exception shows.** The
+project status bar does not show the project's status ("Stable") or its
+write grant ("Can edit") as standing selects: a person who has not asked
+about either should not have to read them. Both live in the bar's **…** menu
+(`ProjectControlsOverflow`), with their explanations as tooltips, and the
+write grant is a plain toggle there ("Stop workspace edits" / "Allow
+workspace edits"). The one exception stays inline: a read-only project keeps
+its writes control in the bar, because "gezels cannot edit here" is the
+state that explains why nothing changed.
+
 **Save state is ambient, so it lives in the status bar.** An editor's
 saved/unsaved indicator goes in the shell's status bar
 ([AutosaveStatus](../packages/ui/src/components/AutosaveStatus.tsx) into
@@ -1575,6 +1890,27 @@ retry” conditions do not get it. Keep both actions in a distinct row beneath
 the explanation, disable them while one is running, and surface a failed
 action inline instead of swallowing it. The failed-turn banner and its live
 streaming twin are the reference.
+
+**"Not enough memory" offers the model that would start.** A capacity denial
+asks the daemon (`GET /api/sessions/:id/model-fit`) whether the session's
+model would start with the memory free now. Retry appears only when the
+answer is yes, because the person closed something or chose another model;
+until then it could only fail the same way. When a model already on this
+computer would start and the session follows the install default, the
+primary key switches to it and runs the turn again: "Use Gemma 4 12B instead
+· already on this computer". The name drops the quant ("Gemma 4 (12B, Q4)"
+reads "Gemma 4 12B"), and the note in the key says why this one will work.
+The card asks again when the window regains focus or the config changes.
+[CapacityDeniedActions](../packages/ui/src/components/CapacityDeniedActions.tsx)
+is the reference.
+
+**A model's label agrees with whether it will start.** Settings' model rows
+judge a model with the same arithmetic the launch check uses, against the
+memory free now (`GET /api/system/models-fit-now`, `launchFitsNow` in
+[recommendation.ts](../packages/core/src/recommendation.ts)). A model the
+launch would refuse reads "won't start right now" with what to do, never
+"good match for this machine"; a dense model that fits on the graphics card
+gets no "may respond slowly" caution, because nothing about it is slow.
 
 **A failed tool says why, in the thread.** A red ✗ on a tool row is a
 status, not an explanation, and burying the reason in a tooltip or behind
@@ -1718,7 +2054,8 @@ resolves itself, an engagement switch set to Off does not.
 
 **Adding a folder says what will happen before anything does.** A folder a
 person hands the crew is the product's main promise, so every door to it —
-first-run onboarding (`FolderOnboardingStep`), the add-folder sheet
+the meester's folder question after the first finished task
+(`FolderOnboardingStep`), the add-folder sheet
 (`AddFolderSheet`, opened by `openAddFolder()` from the New Project dialog's
 Existing Folder card, the File menu and the Home tip) — shows the same three
 things first: what the folder holds ("12,480 photos · 1,204 only in iCloud",
@@ -1726,9 +2063,10 @@ counted without reading a file), the read-only promise in plain words, and
 the night work from `describeFolderNightWork`. In the add-folder sheet, a native
 checkbox sits to the left of "Work on this folder during the night shift",
 above the work preview. Show "During the nightshift, Gezel will" and the work
-list only while that checkbox is checked. First-run folder choices are
-checkbox cards, not keys, because several may be picked at once; its
-overnight question is a two-key tray. A folder gezel refuses (a home folder,
+list only while that checkbox is checked. The folder question's choices are
+checkbox cards, not keys, because several may be picked at once, and none
+starts ticked; its overnight question is a two-key tray with neither key
+latched until the person answers. A folder gezel refuses (a home folder,
 a drive root) is explained with `forbiddenFolderPlainName`, never an error
 code, and the add key stays disabled.
 
@@ -1783,8 +2121,8 @@ header that says they apply after the edits and never replace a file. Past a
 dozen, the rows group by destination folder, each a disclosure row with its
 count, so a tidy-up of a thousand photos reads as a handful of folders.
 
-**Social mode is one switch, and off means today.** Settings → General (and
-the phone's first-run Preferences) carry a single *Social mode* checkbox,
+**Social mode is one switch, and off means today.** Settings → General
+carries a single *Social mode* checkbox,
 beside — never merged with — *Show gezel names and poppetjes*. On, gezels
 speak with their character, growth (the Growth tab and level badges) is on
 display, and opening a chat shows what is waiting. Off reproduces the plain

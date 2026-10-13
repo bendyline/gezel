@@ -38,7 +38,7 @@ export const GEZEL_SITE_THEME: Theme = {
   description: 'The gezel.com Handboek palette: parchment canvas, warm ink, terracotta accent.',
   colors: {
     primary: '#b0724c',
-    secondary: '#667f62',
+    secondary: '#5c6a4a',
     background: '#eae5d6',
     backgroundLight: '#f3eddf',
     text: '#1c1c1c',
@@ -61,7 +61,7 @@ export const GEZEL_SITE_THEME: Theme = {
   },
   colorSchemes: {
     orange: { bg: '#f3eddf', text: '#1c1c1c', accent: '#b0724c' },
-    green: { bg: '#f3eddf', text: '#1c1c1c', accent: '#667f62' },
+    green: { bg: '#f3eddf', text: '#1c1c1c', accent: '#5c6a4a' },
   },
 };
 

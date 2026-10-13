@@ -22,7 +22,7 @@ GPU/Vulkan variants and `whisper-stream` are not currently shipped.
   with `text` plus optional `segments`.
 - `GET /health` — what the supervisor polls.
 
-See `packages/service/src/providers/audio/whisper-cpp.ts` for the
+See `packages/inference/src/providers/audio/whisper-cpp.ts` for the
 client side.
 
 ## Platform backends

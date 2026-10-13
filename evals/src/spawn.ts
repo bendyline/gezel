@@ -292,6 +292,9 @@ export async function spawnTrialDaemon(opts: SpawnTrialDaemonOptions): Promise<T
     // is both a hermeticity leak and a flake source (registry outages
     // would read as model failures).
     GEZEL_NPM_INSTALL_OFFLINE: '1',
+    // A trial home is fresh, and a new install holds its background indexing
+    // for half an hour. Scenarios measure an established install.
+    GEZEL_DISABLE_FIRST_USE_GRACE: '1',
     // Force file-backed secret store. The default
     // `OS keychain` path tries to write the per-launch eval auth
     // token into the user's macOS keychain, which on a locked /

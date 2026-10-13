@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { TurnIntentPlan } from '@bendyline/gezel';
+import type { GezelSummary, TurnIntentPlan } from '@bendyline/gezel';
 import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import { GezelApiError, streamChatEvents } from '@bendyline/gezel-client';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api.js';
 import { takePendingSettingsSection } from '../settings-nav.js';
 import { ChatComposer } from './ChatComposer.js';
+import { FirstRunProvider } from './first-run-context.js';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -1896,5 +1897,66 @@ describe('ChatComposer expand toggle', () => {
 
     expect(screen.getByTestId('chat-composer').getAttribute('data-composer-expanded')).toBe('true');
     expect(screen.getByTestId('chat-composer-expand')).toBeTruthy();
+  });
+});
+
+describe('ChatComposer before a model arrives', () => {
+  const tomas = { id: 'tomas', name: 'Tomas' } as GezelSummary;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+  });
+
+  it('holds the message and points at setup while no model can answer', async () => {
+    vi.mocked(api.sendToChatSession).mockResolvedValue(undefined as never);
+    const navigate = vi.fn();
+    const onNavigate = (event: Event) => navigate((event as CustomEvent).detail);
+    window.addEventListener('gezel:navigate', onNavigate);
+    try {
+      render(
+        <FirstRunProvider value={true}>
+          <ChatComposer
+            gezelId="tomas"
+            gezelName="Tomas"
+            projectId="default"
+            sessionId="session-1"
+            recipientGezels={[tomas]}
+          />
+        </FirstRunProvider>,
+      );
+
+      expect(screen.getByTestId('chat-waiting-for-model')).toHaveTextContent(
+        'Tomas can start talking once a model is downloaded.',
+      );
+      expect(screen.getByRole('button', { name: /^send$/i })).toBeDisabled();
+      // The draft can still be written; Enter does not send it.
+      fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+      pressSendShortcut();
+      await act(async () => {});
+      expect(api.sendToChatSession).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Get started' }));
+      expect(navigate).toHaveBeenCalledWith({ view: 'home' });
+    } finally {
+      window.removeEventListener('gezel:navigate', onNavigate);
+    }
+  });
+
+  it('does not hold a gezel with a provider of its own', () => {
+    render(
+      <FirstRunProvider value={true}>
+        <ChatComposer
+          gezelId="tomas"
+          gezelName="Tomas"
+          projectId="default"
+          sessionId="session-1"
+          recipientGezels={[{ ...tomas, provider: 'anthropic' }]}
+        />
+      </FirstRunProvider>,
+    );
+
+    expect(screen.queryByTestId('chat-waiting-for-model')).toBeNull();
+    expect(screen.getByRole('button', { name: /^send$/i })).not.toBeDisabled();
   });
 });

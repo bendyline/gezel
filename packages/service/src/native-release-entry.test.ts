@@ -1,6 +1,6 @@
+import * as manifest from '@bendyline/gezel-inference/internal/engines/native-manifest';
+import * as nativeRelease from '@bendyline/gezel-inference/native-release';
 import { describe, expect, it } from 'vitest';
-import * as manifest from './engines/native-manifest.js';
-import * as nativeRelease from './native-release-entry.js';
 
 describe('native-release entry', () => {
   it('publishes exactly the pin the daemon downloads against', () => {

@@ -1,9 +1,12 @@
 import { join } from 'node:path';
-import { modelStorageRoots } from '../../models/storage-roots.js';
-import { engineApiKey, withEngineApiKey } from '../native/engine-api-key.js';
-import { pickFreePort } from '../native/port.js';
-import { NativeEngineSupervisor } from '../native/supervisor.js';
-import { patientFetch } from '../patient-fetch.js';
+import { modelStorageRoots } from '@bendyline/gezel-inference/internal/models/storage-roots';
+import {
+  engineApiKey,
+  withEngineApiKey,
+} from '@bendyline/gezel-inference/internal/providers/native/engine-api-key';
+import { pickFreePort } from '@bendyline/gezel-inference/internal/providers/native/port';
+import { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
+import { patientFetch } from '@bendyline/gezel-inference/internal/providers/patient-fetch';
 import { DEFAULT_RECOGNITION_MODEL_ID } from './catalog.js';
 import { LlamaVisionProvider } from './llama-vision.js';
 import { MockRecognitionProvider } from './mock.js';

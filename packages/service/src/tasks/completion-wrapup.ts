@@ -10,6 +10,7 @@ import {
   outputsWithDeliverableFirst,
   taskDeliverableCandidates,
 } from '@bendyline/gezel';
+import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../fs/store.js';
 import { type FigureReview, renderFigureReview } from './figure-review.js';
 
@@ -187,6 +188,35 @@ export async function resolveTaskDeliverable(
   return null;
 }
 
+/**
+ * Say where a task's deliverable lives and how to open it: its own project
+ * (a wrap-up can land in another project's thread, and opened the file there)
+ * and the project's Output page when the file is data that page reads. A
+ * trip's `trip.json` is opened as the trip board, not as JSON.
+ */
+export async function placeTaskDeliverable(
+  store: Pick<Store, 'getProject'>,
+  catalog: Pick<CatalogService, 'get'>,
+  task: Task,
+  deliverable: TaskDeliverable,
+): Promise<TaskDeliverable> {
+  const placed: TaskDeliverable = { ...deliverable, projectId: task.projectId };
+  if (deliverable.kind !== 'workspace') return placed;
+  try {
+    const type = (await store.getProject(task.projectId))?.projectType;
+    if (!type) return placed;
+    const manifest = (await catalog.get('project-type', type.id, undefined, type.version))
+      ?.manifest;
+    if (manifest?.kind !== 'project-type') return placed;
+    const read = manifest.pages?.reads?.some(
+      (r) => r.source === 'workspace' && r.path === deliverable.path,
+    );
+    return read ? { ...placed, view: 'output-page' } : placed;
+  } catch {
+    return placed;
+  }
+}
+
 /** What a task has made: the deliverable, and every output with it first. */
 export async function loadTaskResult(
   store: TaskOutputStore,
@@ -278,14 +308,18 @@ export function composeTaskWrapUp(
   task: Task,
   outputs: readonly ReferencedFile[],
   figures?: FigureReview | null,
-  deliverable?: ReferencedFile | null,
+  deliverable?: (ReferencedFile & { view?: 'output-page' }) | null,
 ): string {
   const lines = [`All done — **${task.title}** is finished.`];
+  // A project type's page reads the file; the page is what to look at.
+  const board = deliverable?.view === 'output-page';
   const rest = deliverable ? outputs.filter((file) => !sameFile(file, deliverable)) : outputs;
   if (deliverable) {
     lines.push(
       '',
-      `Here's your ${deliverableFormatNoun(deliverable.path)}: ${fileLabel(deliverable)}`,
+      board
+        ? "It's on the project's Output page."
+        : `Here's your ${deliverableFormatNoun(deliverable.path)}: ${fileLabel(deliverable)}`,
     );
     const shown = rest.slice(0, WRAP_UP_MAX_FILES - 1);
     if (shown.length > 0) {
@@ -307,11 +341,13 @@ export function composeTaskWrapUp(
   if (checks.length > 0) lines.push('', ...checks);
   lines.push(
     '',
-    deliverable
-      ? 'Open it to review, or tell me what you would like changed.'
-      : outputs.length > 0
-        ? 'Open any of them to review, or tell me what you would like changed.'
-        : `The task page (${task.ref}) has every step. Tell me if you would like anything changed.`,
+    board
+      ? 'Open the project to see it, or tell me what you would like changed.'
+      : deliverable
+        ? 'Open it to review, or tell me what you would like changed.'
+        : outputs.length > 0
+          ? 'Open any of them to review, or tell me what you would like changed.'
+          : `The task page (${task.ref}) has every step. Tell me if you would like anything changed.`,
   );
   return lines.join('\n');
 }

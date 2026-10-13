@@ -1,4 +1,5 @@
 import type { JSX } from 'react';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 import type { FileViewMode } from './file-view-modes.js';
 
 /* Same glyph contract as TaskStatusKeys: one 16 viewBox, one stroke weight,
@@ -126,7 +127,12 @@ export function FileViewModeKeys({
   onChange: (mode: FileViewMode) => void;
 }) {
   return (
-    <div className="gz-tray file-view-tray" role="radiogroup" aria-label="File list view">
+    <div
+      className="gz-tray file-view-tray"
+      role="radiogroup"
+      onKeyDown={onRadioKeyDown}
+      aria-label="File list view"
+    >
       {modes.map((mode) => {
         const meta = MODE_KEYS[mode];
         const Icon = meta.icon;
@@ -138,6 +144,7 @@ export function FileViewModeKeys({
             // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
             role="radio"
             aria-checked={selected}
+            tabIndex={selected || (!modes.includes(value) && mode === modes[0]) ? 0 : -1}
             className={`gz-key gz-key--icon${selected ? ' gz-key-active' : ''}`}
             title={meta.hint}
             aria-label={meta.label}

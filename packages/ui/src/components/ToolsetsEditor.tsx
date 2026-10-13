@@ -173,7 +173,25 @@ function ToolsetTile({
   );
 }
 
-export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
+export function ToolsetsEditor({ scope: incomingScope, subject, hint }: ToolsetsEditorProps) {
+  // Callers pass inline objects. Roster/status updates in the parent must not
+  // reload thousands of catalog entries unless the scope actually changes.
+  const kind = incomingScope.kind;
+  const id =
+    incomingScope.kind === 'project'
+      ? incomingScope.projectId
+      : incomingScope.kind === 'gezel'
+        ? incomingScope.gezelId
+        : '';
+  const scope = useMemo<ToolsetsScope>(
+    () =>
+      kind === 'project'
+        ? { kind, projectId: id }
+        : kind === 'gezel'
+          ? { kind, gezelId: id }
+          : { kind },
+    [kind, id],
+  );
   const [installed, setInstalled] = useState<InstalledToolset[]>([]);
   const [roleDefault, setRoleDefault] = useState<RoleDefault | null>(null);
   const [catalog, setCatalog] = useState<CatalogItemSummary[]>([]);

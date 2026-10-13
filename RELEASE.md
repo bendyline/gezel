@@ -12,7 +12,7 @@ The **Release Electron App** workflow is manually dispatched and always creates 
 
 The workflow fails closed:
 
-- The native release it bundles is the one pinned in source (`NATIVE_ENGINE_RELEASE` in [`native-manifest.ts`](packages/service/src/engines/native-manifest.ts)) — the same one the npm packages download. There is no input for it; to ship newer engines, commit a new pin first.
+- The native release it bundles is the one pinned in source (`NATIVE_ENGINE_RELEASE` in [`native-manifest.ts`](packages/inference/src/engines/native-manifest.ts)) — the same one the npm packages download. There is no input for it; to ship newer engines, commit a new pin first.
 - The pinned native release must already be published, must not be a draft, and must contain every platform/variant asset plus `SHA256SUMS` expected by preflight.
 - Every Windows signing and Apple signing/notarization secret listed below must be present before any build begins.
 - Quality, packaging, signature, notarization, and artifact-presence failures stop the release.
@@ -94,7 +94,7 @@ When you do need a new one:
 
 A failed leg produces no draft at all, so an absent release usually means a red `Build native engines` run — check that before assuming the tag never fired.
 
-6. **Re-pin the npm side.** `node scripts/pin-native-release.mjs --latest` updates `NATIVE_ENGINE_RELEASE` and `SHA256SUMS_DIGEST` in [`packages/service/src/engines/native-manifest.ts`](packages/service/src/engines/native-manifest.ts). Those two constants are the root of trust for engine downloads by anyone who installed from npm — they have no bundled binaries, so a stale pin sends them at the previous release. Review the diff and commit it; see [docs/npm-release.md](docs/npm-release.md).
+6. **Re-pin the npm side.** `node scripts/pin-native-release.mjs --latest` updates `NATIVE_ENGINE_RELEASE` and `SHA256SUMS_DIGEST` in [`packages/inference/src/engines/native-manifest.ts`](packages/inference/src/engines/native-manifest.ts). Those two constants are the root of trust for engine downloads by anyone who installed from npm — they have no bundled binaries, so a stale pin sends them at the previous release. Review the diff and commit it; see [docs/npm-release.md](docs/npm-release.md).
 
 ## Cut a release
 

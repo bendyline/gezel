@@ -1,4 +1,6 @@
 import { createLogger } from '@bendyline/gezel';
+import { v1ChatRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-chat';
+import { v1ModelsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-models';
 import { Hono } from 'hono';
 import type { ServiceContext } from './context.js';
 import { hostGuard } from './host-guard.js';
@@ -10,8 +12,6 @@ import {
   localBridgeHardening,
   mountAuthenticatedRoute,
 } from './local-bridge.js';
-import { v1ChatRoutes } from './routes/v1-chat.js';
-import { v1ModelsRoutes } from './routes/v1-models.js';
 import { opaqueServerErrors } from './server.js';
 
 export const VSCODE_BRIDGE_MARKER_HEADER = 'x-gezel-vscode-bridge';

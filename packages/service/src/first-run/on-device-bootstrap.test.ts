@@ -3,10 +3,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isRecommendedModel } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import type {
+  InstallEvent,
+  LlamaCppModelManager,
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/index';
+import type {
+  MlxInstallEvent,
+  MlxModelManager,
+} from '@bendyline/gezel-inference/internal/providers/mlx/index';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
-import type { InstallEvent, LlamaCppModelManager } from '../providers/llama-cpp/index.js';
-import type { MlxInstallEvent, MlxModelManager } from '../providers/mlx/index.js';
 import {
   bootstrapOnDeviceFirstRun,
   isSupportedOnDevicePlatform,

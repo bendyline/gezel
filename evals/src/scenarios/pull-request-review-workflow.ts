@@ -13,6 +13,7 @@ import {
   LATE_DEFECT,
   LATE_DEFECT_PATH,
   buildLargePrArtifacts,
+  largePrRecords,
   parsePathFrontmatter,
 } from './large-pr-review.ts';
 
@@ -344,12 +345,8 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       `restart interruption stranded task(s): ${phaseDiagnostics.restartRecovery.taskRefs.join(', ')}`,
     );
   }
-  const expectedFiles = buildLargePrArtifacts()
-    .slice(2)
-    .map((fixture) => parsePathFrontmatter(fixture.content));
-  const expectedRecords = buildLargePrArtifacts()
-    .slice(2)
-    .map((fixture) => fixture.path);
+  const expectedFiles = largePrRecords().map((fixture) => parsePathFrontmatter(fixture.content));
+  const expectedRecords = largePrRecords().map((fixture) => fixture.path);
   const publishedFiles = batches.flatMap((batch) => batch.paths);
   const publishedRecords = batches.flatMap((batch) => batch.records);
   if (!sameStrings(publishedFiles, expectedFiles)) {

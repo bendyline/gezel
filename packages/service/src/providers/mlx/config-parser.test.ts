@@ -1,8 +1,8 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readMlxSummary } from '@bendyline/gezel-inference/internal/providers/mlx/config-parser';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readMlxSummary } from './config-parser.js';
 
 describe('readMlxSummary', () => {
   let dir: string;

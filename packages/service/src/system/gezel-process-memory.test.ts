@@ -1,10 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
 import {
   findGezelEngineProcesses,
   parseFootprintBytes,
   parseProcessList,
   sampleDarwinGezelProcessMemory,
-} from './gezel-process-memory.js';
+} from '@bendyline/gezel-inference/internal/system/gezel-process-memory';
+import { describe, expect, it, vi } from 'vitest';
 
 const HOME = '/Users/test/.gezel-dev';
 

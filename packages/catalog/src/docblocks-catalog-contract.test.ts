@@ -48,18 +48,24 @@ async function loadIndex(kind: 'toolsets' | 'craftbook-templates'): Promise<Reso
 }
 
 describe('DocBlocks catalog contract', () => {
-  it('pins the verified latest MCP package and its exact 19-tool inventory', async () => {
+  it('pins a verified MCP package and its exact 19-tool inventory', async () => {
     const entries = await loadIndex('toolsets');
     const docblocks = entries.find((entry) => entry.manifest.id === 'docblocks')?.manifest;
     expect(docblocks, 'the bundled DocBlocks toolset should exist').toBeDefined();
     if (!docblocks) return;
 
-    expect(docblocks.version).toBe('2.6.2');
+    // Cover published Gilde and the authored update until its catalog release ships.
+    const verifiedReleases = new Map([
+      ['2.6.2', 'd5e700fef1fe3e6a42a06c69a80c5403e6c1a733fe50e8635186b22e114fe800'],
+      ['2.7.0', '51b3568929b305f60b52e6d407d5e9e05742e886e2301d6c5589dde5479b5f40'],
+    ]);
+    const version = docblocks.version ?? '';
+    expect(verifiedReleases.has(version), `unverified DocBlocks release ${version}`).toBe(true);
     expect(docblocks.runtime).toEqual(
       expect.objectContaining({
         package: '@bendyline/docblocks-cli',
-        version: '2.6.2',
-        sha256: 'd5e700fef1fe3e6a42a06c69a80c5403e6c1a733fe50e8635186b22e114fe800',
+        version,
+        sha256: verifiedReleases.get(version),
         entry: 'dist/bin.js',
         args: ['mcp'],
       }),

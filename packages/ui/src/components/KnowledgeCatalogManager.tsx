@@ -1,7 +1,8 @@
-import type {
-  CatalogItemSummary,
-  KnowledgeCatalogItemManifest,
-  KnowledgeInstallRequest,
+import {
+  type CatalogItemSummary,
+  type KnowledgeCatalogItemManifest,
+  type KnowledgeInstallRequest,
+  suggestKnowledgeCatalogs,
 } from '@bendyline/gezel';
 import type {
   IncompleteKnowledgeDownload,
@@ -24,6 +25,7 @@ import { InstallProgressRow } from './InstallProgressRow.js';
 import { KnowledgeCatalogMark } from './KnowledgeCatalogMark.js';
 import { LicenseButton } from './LicenseButton.js';
 import { formatBytes } from './engine-pill-stats.js';
+import { useInterests } from './useInterests.js';
 
 /**
  * Settings → Knowledge: the knowledge-catalog twin of LlamaCppModelManager.
@@ -165,6 +167,16 @@ export function KnowledgeCatalogManager() {
   const [available, setAvailable] = useState<Map<string, KnowledgeAvailableCatalog>>(new Map());
   const [incomplete, setIncomplete] = useState<IncompleteKnowledgeDownload[]>([]);
   const [installs, setInstalls] = useState<Map<string, ActiveInstall>>(new Map());
+  const interests = useInterests();
+  // Offers for the person's areas. Only offers: nothing downloads until a tap,
+  // and they are absent while the security policy keeps the app offline.
+  const suggested = useMemo(
+    () =>
+      interests.appNetwork
+        ? suggestKnowledgeCatalogs([...available.values()], interests.areas)
+        : [],
+    [available, interests.areas, interests.appNetwork],
+  );
   const [installError, setInstallError] = useState<string | null>(null);
   const [installWarning, setInstallWarning] = useState<{ id: string; message: string } | null>(
     null,
@@ -743,6 +755,40 @@ export function KnowledgeCatalogManager() {
           </div>
         )}
       </div>
+
+      {suggested.length > 0 && (
+        <div className="ollama-section ollama-section--flat knowledge-suggested">
+          <h4>Suggested for you</h4>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            From what you said you use gezel for. Nothing downloads until you choose one.
+          </p>
+          <ul className="knowledge-suggested-list">
+            {suggested.map((c) => {
+              const inflight = installs.get(c.id);
+              const pct = inflight ? progressPercent(inflight) : null;
+              return (
+                <li key={c.id} className="knowledge-suggested-row">
+                  <span className="knowledge-suggested-name">{c.name}</span>
+                  <span className="muted small">{formatBytes(c.archiveBytes)}</span>
+                  <button
+                    type="button"
+                    disabled={Boolean(inflight)}
+                    onClick={() => startCatalogInstall(c.id)}
+                  >
+                    {inflight
+                      ? pct !== null
+                        ? `Downloading… ${Math.round(pct)}%`
+                        : 'Downloading…'
+                      : c.incompleteDownload
+                        ? 'Resume download'
+                        : 'Add'}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       <div className="ollama-section ollama-section--flat ollama-section--download">
         <h4>Download a catalog</h4>

@@ -2,11 +2,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatEvent } from '@bendyline/gezel';
+import type { ProviderName } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
-import type { ProviderName } from '../providers/types.js';
 import { TaskManager } from './manager.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';
 import { NightShiftManager } from './night-shift-manager.js';
@@ -315,6 +315,59 @@ describe('NightShiftManager', () => {
     clock = localMs(2026, 6, 22, 6, 30);
     await m.tick();
     expect(settled).toEqual(['2026-06-20', '2026-06-21']);
+  });
+});
+
+describe('NightShiftManager — a new install', () => {
+  // A fresh install at 22:46 ran the Meester's nightly review a second after
+  // boot, failed it three times on an engine still downloading, and Home
+  // opened on that failure instead of the welcome.
+  function makeHeldManager(hold: { held: boolean }): NightShiftManager {
+    return new NightShiftManager({
+      store,
+      manager: tasks,
+      events,
+      now: () => new Date(clock),
+      firstUseHold: { isActive: async () => hold.held },
+    });
+  }
+
+  it('stays off while the install is new, then runs the same night once it is ready', async () => {
+    await addNightTask();
+    clock = localMs(2026, 6, 20, 22, 46);
+    const hold = { held: true };
+    const m = makeHeldManager(hold);
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+
+    hold.held = false;
+    clock = localMs(2026, 6, 20, 23, 20);
+    await m.tick();
+    expect(m.isActive()).toBe(true);
+    expect(m.source()).toBe('scheduled');
+  });
+
+  it('never holds a shift the person starts by hand', async () => {
+    await addNightTask();
+    clock = localMs(2026, 6, 20, 22, 46);
+    const m = makeHeldManager({ held: true });
+    await m.startManual();
+    expect(m.isActive()).toBe(true);
+    expect(m.source()).toBe('manual');
+  });
+
+  it('runs as before when the hold cannot be read', async () => {
+    await addNightTask();
+    clock = localMs(2026, 6, 20, 23, 0);
+    const m = new NightShiftManager({
+      store,
+      manager: tasks,
+      events,
+      now: () => new Date(clock),
+      firstUseHold: { isActive: () => Promise.reject(new Error('config unreadable')) },
+    });
+    await m.tick();
+    expect(m.isActive()).toBe(true);
   });
 });
 

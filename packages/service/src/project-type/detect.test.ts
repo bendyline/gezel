@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
-import { type LanguageProfile, detectAndPersistProjectType, scoreProjectTypes } from './detect.js';
+import {
+  type LanguageProfile,
+  detectAndPersistProjectType,
+  scoreProjectTypes,
+  withoutFiles,
+} from './detect.js';
 
 function profile(
   extensions: Record<string, number>,
@@ -81,5 +86,45 @@ describe('detectAndPersistProjectType', () => {
     } finally {
       await rm(home, { recursive: true, force: true });
     }
+  });
+
+  // The UX review's family trip came back labelled Social Media: a fresh
+  // workspace holds nothing but the scaffold's two JSON files, and the
+  // taxonomy's one JSON-shaped type scored on them alone.
+  it('does not read a type off the untouched workspace scaffold, and clears one it read before', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'gezel-detect-'));
+    try {
+      const store = new Store({ home });
+      const trip = await store.createProject({ name: 'Family trip to Portugal' });
+      await store.writeProjectDoc(trip.id, 'about.md', 'Ten days in Lisbon and the Algarve.');
+      await store.updateProject(trip.id, {
+        detectedProjectType: {
+          id: 'social-media',
+          score: 0.27,
+          scannedAt: '2026-10-11T00:00:00.000Z',
+        },
+      });
+
+      await expect(detectAndPersistProjectType({ store }, trip.id)).resolves.toBeNull();
+      expect((await store.getProject(trip.id))?.detectedProjectType).toBeUndefined();
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('withoutFiles', () => {
+  it('drops exactly the named files from both histograms', () => {
+    const profile: LanguageProfile = {
+      fileCount: 5,
+      extensions: { json: 3, md: 2 },
+      modalities: { text: 5 },
+    };
+    expect(
+      withoutFiles(profile, [
+        { path: 'package.json', size: 120 },
+        { path: 'tsconfig.json', size: 300 },
+      ]),
+    ).toEqual({ fileCount: 3, extensions: { json: 1, md: 2 }, modalities: { text: 3 } });
   });
 });

@@ -4,7 +4,7 @@
  * markdown report as bare prose. Both stay quiet once a write landed this
  * turn, and each pairs with the re-prompt that names the path to save.
  */
-import { salvageCodeBlocks } from '../providers/code-block-salvage.js';
+import { salvageCodeBlocks } from '@bendyline/gezel-inference/internal/providers/code-block-salvage';
 
 /** Write-shaped tool names — a successful call to any of these means the
  *  turn actually touched a file, so the chat-coded-file nudge stays quiet. */

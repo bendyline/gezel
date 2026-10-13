@@ -1,6 +1,6 @@
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
 import { describe, expect, it } from 'vitest';
 import type { McpBridgePool } from '../mcp-bridge-pool.js';
-import { ProviderQueue } from '../queue.js';
 import { RemoteSession } from './session.js';
 import { RemoteInferRequestSchema } from './wire.js';
 

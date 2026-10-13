@@ -289,7 +289,9 @@
 
 .history-row-selected,
 .history-row-selected:hover {
-  background: rgba(102, 127, 98, 0.32);
+  --muted: var(--text);
+  --text-muted: var(--text);
+  background: color-mix(in srgb, var(--titlebar) 32%, transparent);
 }
 
 .history-kind {

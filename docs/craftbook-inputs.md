@@ -71,12 +71,42 @@ branches).
 - **Never tell a step to write into the input.** An uploaded input folder is
   write-denied to gezels; write results beside it in the task folder.
 
+## Samples
+
+A book can carry a sample for an input, so a person can try it with nothing of
+their own (the welcome's craftbook first projects) and an eval has a fixed
+input:
+
+```json
+"samples": [
+  { "id": "shop-sales", "title": "a small shop's monthly sales", "param": "source",
+    "files": ["samples/shop-sales/sales.csv"] }
+]
+```
+
+The files live in the book's version folder under `samples/`, listed
+explicitly so nothing else in the folder is ever read (gilde's validator allows
+plain-text sample types there: `.csv`, `.tsv`, `.txt`, code files). At launch a
+`{ from: 'sample', sampleId }` source copies them into
+`artifacts/tasks/<num>/inputs/<param>/`, with the folder every file shares
+stripped: `samples/shop-sales/sales.csv` lands as `.../inputs/source/sales.csv`.
+The record says `from: 'sample'`, and every step's prompt calls it "the
+craftbook's sample (made-up example data, not the person's own)".
+
+The desktop reads samples through the catalog (`catalogSampleReader`). The
+phone build bundles their bytes into its content (`sampleFiles`), and the
+portable runtime copies them in the same transaction that writes the task
+(`core/src/runtime/task-inputs.ts`, which also resolves workspace and
+artifacts picks on the phone; files from the device are not yet supported
+there).
+
 ## Launching
 
 | Surface | How an input is supplied |
 | --- | --- |
 | New Task dialog | A source picker per input, above the other params: **In this project** (a workspace folder or file, with a live "37 files · 2.1 MB" check) or **From your computer** (choose a folder or files, or drop them; uploaded with progress). Scheduled launches offer the project source only. |
-| `CreateTaskRequest.inputs` | `{ [param]: { from: 'workspace', path } \| { from: 'artifacts', path } \| { from: 'upload', stagingId } }`. |
+| `CreateTaskRequest.inputs` | `{ [param]: { from: 'workspace', path } \| { from: 'artifacts', path } \| { from: 'upload', stagingId } \| { from: 'sample', sampleId } }`. |
+| The welcome's craftbook first projects | `{ from: 'sample', sampleId }`: the book's own sample, attached to the composer with the sentence. |
 | Any string param path (MCP `invoke_craftbook`, CLI, terminal, evals) | The param's plain value: a workspace path, or `artifacts:<path>` for the artifacts drawer. No new plumbing needed. |
 
 Uploads go through `POST /api/projects/:id/input-staging` (limits come back

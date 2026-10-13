@@ -1,3 +1,4 @@
+import type { EngineRouter as InferenceEngineRouter } from '@bendyline/gezel-inference/internal/providers/native/engine-router';
 /**
  * The Settings memory slider is only as good as its propagation. The
  * budget is read once inside `buildEngineRouter` and the router is cached
@@ -13,12 +14,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import { CapacityBroker } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
-import { CapacityBroker } from '../providers/native/capacity-broker.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ChatEventBus } from './events.js';
 import { ChatManager } from './manager.js';
@@ -35,7 +36,7 @@ const noopMemory = {
 } as unknown as MemoryManager;
 
 function routerWith(broker: CapacityBroker) {
-  return { broker } as unknown as import('../providers/native/engine-router.js').EngineRouter;
+  return { broker } as unknown as InferenceEngineRouter;
 }
 
 let home: string;

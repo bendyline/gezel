@@ -5,9 +5,10 @@ import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
-import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../../components/chat-theme.js';
+import { GEZEL_LIGHT_SURFACE, gezelChatThemeForMode } from '../../components/chat-theme.js';
 import { navigateToTab } from '../../components/nav-actions.js';
 import { queueOpenKnowledge } from '../../components/pending-open-knowledge.js';
+import { onRadioKeyDown } from '../../primitives/radio-keyboard.js';
 import { useEffectiveTheme } from '../../theme.js';
 import { inlineBundledAssets } from '../handboek/HandboekMediaProvider.js';
 import { createKnowledgeMediaProvider } from '../knowledge/KnowledgeMediaProvider.js';
@@ -31,8 +32,9 @@ function openHandboek(articleId: string) {
  * around the document exposed by the bundled Knowledge catalog.
  *
  * Two variants:
- *   - `toggle` (default): one page with a Read/Watch key tray — the
- *     workshop greeting's tour tab.
+ *   - `toggle` (default): one page under a tray holding the Read/Watch
+ *     keys and an Open in Handboek key — the workshop greeting's Handboek
+ *     tab, which stretches the page to fill its sheet, and the welcome tour.
  *   - `stacked`: the video player on top and the readable article
  *     beneath, both always visible — the first-run tutorial column. No
  *     tray (there is nothing to toggle) and no autoplay: an
@@ -159,35 +161,55 @@ export function IntroHandboekArticle({
   return (
     <div className="home-intro-article" data-testid="home-intro-article">
       <div className="home-intro-article-controls">
-        <button
-          type="button"
-          className="gz-link-button"
-          onClick={() => openHandboek(ARTICLE_ID)}
-          title="Read this article in the Handboek"
-        >
-          Open in Handboek →
-        </button>
-        {!stacked && (
-          <div className="gz-tray handboek-mode-tray" role="radiogroup" aria-label="View as">
+        {stacked ? (
+          <button
+            type="button"
+            className="gz-link-button"
+            onClick={() => openHandboek(ARTICLE_ID)}
+            title="Read this article in the Handboek"
+          >
+            Open in Handboek →
+          </button>
+        ) : (
+          // biome-ignore lint/a11y/useSemanticElements: a tray of keys, not a form; <fieldset> would bring a legend and form-group styling.
+          <div className="gz-tray handboek-mode-tray" role="group" aria-label="Handboek article">
+            <div
+              className="home-intro-modes"
+              role="radiogroup"
+              aria-label="View as"
+              onKeyDown={onRadioKeyDown}
+            >
+              <button
+                type="button"
+                // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
+                role="radio"
+                aria-checked={mode === 'doc'}
+                tabIndex={mode === 'doc' ? 0 : -1}
+                className={mode === 'doc' ? 'gz-key gz-key-active' : 'gz-key'}
+                onClick={() => setMode('doc')}
+              >
+                Read
+              </button>
+              <button
+                type="button"
+                // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
+                role="radio"
+                aria-checked={mode === 'video'}
+                tabIndex={mode === 'video' ? 0 : -1}
+                className={mode === 'video' ? 'gz-key gz-key-active' : 'gz-key'}
+                onClick={() => setMode('video')}
+              >
+                Watch
+              </button>
+            </div>
+            <span className="home-intro-tray-divider" aria-hidden="true" />
             <button
               type="button"
-              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
-              role="radio"
-              aria-checked={mode === 'doc'}
-              className={mode === 'doc' ? 'gz-key gz-key-active' : 'gz-key'}
-              onClick={() => setMode('doc')}
+              className="gz-key"
+              onClick={() => openHandboek(ARTICLE_ID)}
+              title="Read this article in the Handboek"
             >
-              Read
-            </button>
-            <button
-              type="button"
-              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
-              role="radio"
-              aria-checked={mode === 'video'}
-              className={mode === 'video' ? 'gz-key gz-key-active' : 'gz-key'}
-              onClick={() => setMode('video')}
-            >
-              Watch
+              Open in Handboek <span aria-hidden="true">→</span>
             </button>
           </div>
         )}
@@ -198,7 +220,7 @@ export function IntroHandboekArticle({
             <div className="home-intro-player">
               <DocPlayer
                 doc={playerDoc ?? doc}
-                theme={gezelChatTheme}
+                theme={gezelChatThemeForMode(effectiveTheme)}
                 displayMode="video"
                 audioMode="synthetic"
                 captionsEnabled
@@ -225,7 +247,7 @@ export function IntroHandboekArticle({
               <LinearDocView
                 doc={doc}
                 className="gezel-article-view"
-                theme={gezelChatTheme}
+                theme={gezelChatThemeForMode(effectiveTheme)}
                 surface={surface}
                 thinMargins
                 imageDisplayMode="inline"

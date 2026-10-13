@@ -79,11 +79,23 @@ describe('ProjectOutputPane responsive toolbar', () => {
     window.removeEventListener(OUTPUT_PANE_MAXIMIZED_EVENT, onMaximized);
   });
 
-  it('collapses a long page label to an accessible page icon in a narrow pane', async () => {
+  it('shows no page picker when the project has one page', () => {
     render(
       <ProjectOutputPane
         projectId="project"
         htmlFiles={[]}
+        typePage={{ entry: 'board.html', label: 'Dashboard' }}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByRole('combobox', { name: /Choose output page/ })).not.toBeInTheDocument();
+  });
+
+  it('collapses a long page label to an accessible page icon in a narrow pane', async () => {
+    render(
+      <ProjectOutputPane
+        projectId="project"
+        htmlFiles={['notes.html']}
         typePage={{ entry: 'report.html', label: longPageLabel }}
         onClose={() => {}}
       />,

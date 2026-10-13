@@ -30,7 +30,7 @@
  * ChatManager owns one instance, accounts each turn's usage, resets on user
  * sends, and routes a hard trip to an injected pause handler.
  */
-import type { ModelTier } from './local-model-tier.js';
+import type { ModelTier } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
 
 export interface TaskBudgetLimits {
   /** Cumulative provider round-trips (turns) before the threshold. */

@@ -1,9 +1,10 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SessionResumeError } from '@bendyline/gezel-inference/internal/providers/types';
+import type { ToolCallEvent, TurnUsage } from '@bendyline/gezel-inference/internal/providers/types';
+import type { SessionOpts } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SessionResumeError } from '../types.js';
-import type { ToolCallEvent, TurnUsage } from '../types.js';
 import type { ClaudeReasoningEffort } from './reasoning.js';
 import { ClaudeWorker, type WorkerTurnHooks } from './worker.js';
 
@@ -158,6 +159,35 @@ function buildWorker(opts: {
 }
 
 describe('ClaudeWorker — happy path', () => {
+  it('reports unavailable MCP servers from session init during a successful turn', async () => {
+    const binPath = await makeFakeClaude({
+      sessionId: 'cli-mcp-warning',
+      turns: [
+        [
+          {
+            type: 'system',
+            subtype: 'init',
+            session_id: 'cli-mcp-warning',
+            mcp_servers: [
+              { name: 'docblocks', status: 'failed' },
+              { name: 'gezel', status: 'connected' },
+            ],
+          },
+          { type: 'result', subtype: 'success', is_error: false, result: 'done' },
+        ],
+      ],
+    });
+    const worker = buildWorker({ binPath });
+    const control = makeNoopHooks();
+    try {
+      await worker.start();
+      await worker.sendTurn('go', control.hooks);
+      expect(control.warnings).toEqual(['MCP server docblocks is unavailable (failed).']);
+    } finally {
+      await worker.shutdown();
+    }
+  });
+
   it('captures session id on start, streams a turn, and reuses the process for turn 2', async () => {
     const pidFile = join(dir, 'pids.txt');
     const binPath = await makeFakeClaude({
@@ -492,6 +522,7 @@ describe('ClaudeWorker — system prompt delivery', () => {
     manageRuntimeFiles: boolean;
     sessionId: string;
     reasoningEffort?: ClaudeReasoningEffort;
+    extraMcpServers?: SessionOpts['extraMcpServers'];
     capture: (args: string[], spawnOptions: unknown) => void;
   }): ClaudeWorker {
     return new ClaudeWorker({
@@ -503,6 +534,7 @@ describe('ClaudeWorker — system prompt delivery', () => {
       context: { sessionId: opts.sessionId, gezelId: 'g-1', projectId: 'p-1', cwd: dir },
       runtimeDir: join(dir, 'runtime'),
       manageRuntimeFiles: opts.manageRuntimeFiles,
+      extraMcpServers: opts.extraMcpServers,
       idleTimeoutMs: 60_000,
       spawnImpl: ((command: string, args: readonly string[], spawnOptions: unknown) => {
         opts.capture([...args], spawnOptions);
@@ -512,6 +544,55 @@ describe('ClaudeWorker — system prompt delivery', () => {
       }) as never,
     });
   }
+
+  it('passes HTTP and SSE tools, headers, and stdio tools through a private MCP config', async () => {
+    const binPath = await makeFakeClaude({ sessionId: 'cli-mcp', turns: [] });
+    let capturedArgs: string[] = [];
+    const worker = buildCapturingWorker({
+      binPath,
+      systemMessage: 'Test',
+      manageRuntimeFiles: true,
+      sessionId: 'sess-mcp',
+      capture: (args) => {
+        capturedArgs = args;
+      },
+      extraMcpServers: [
+        {
+          id: 'docblocks',
+          kind: 'http',
+          transport: 'streamable-http',
+          url: 'https://127.0.0.1:1234/mcp',
+          headers: { Authorization: 'Bearer fixture-only' },
+        },
+        {
+          id: 'legacy',
+          kind: 'http',
+          transport: 'sse',
+          url: 'https://127.0.0.1:1234/sse',
+          headers: {},
+        },
+        { id: 'local', command: 'node', args: ['server.js'], env: {}, cwd: dir },
+      ],
+    });
+    try {
+      await worker.start();
+      const path = capturedArgs[capturedArgs.indexOf('--mcp-config') + 1]!;
+      const config = JSON.parse(await readFile(path, 'utf8'));
+      expect(config.mcpServers).toEqual({
+        docblocks: {
+          type: 'http',
+          url: 'https://127.0.0.1:1234/mcp',
+          headers: { Authorization: 'Bearer fixture-only' },
+        },
+        legacy: { type: 'sse', url: 'https://127.0.0.1:1234/sse', headers: {} },
+        local: { command: 'node', args: ['server.js'], env: {}, cwd: dir },
+      });
+      if (process.platform !== 'win32') expect((await stat(path)).mode & 0o777).toBe(0o600);
+      expect(capturedArgs.join(' ')).not.toContain('fixture-only');
+    } finally {
+      await worker.shutdown();
+    }
+  });
 
   it("passes reasoning effort through Claude Code's supported environment variable", async () => {
     const binPath = await makeFakeClaude({ sessionId: 'cli-effort', turns: [] });

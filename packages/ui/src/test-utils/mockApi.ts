@@ -26,6 +26,7 @@ import { vi } from 'vitest';
 export type MockApi = Partial<Record<keyof GezelClient, ReturnType<typeof vi.fn>>>;
 
 const DEFAULT_RESPONSES: Record<string, unknown> = {
+  getSystemHomeInfo: { usage: { everUsed: false } },
   getActivityStatus: {
     items: [],
     questions: [],
@@ -103,6 +104,20 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listRecognitionCatalog: { models: [] },
   listInstalledRecognitionModels: { models: [] },
   listInstalledVideoModels: { models: [] },
+  getVideoModelFit: {
+    pool: 'unified',
+    budgetBytes: 96 * 1024 ** 3,
+    gpuBudgetBytes: 96 * 1024 ** 3,
+    totalRamBytes: 128 * 1024 ** 3,
+    models: [],
+  },
+  getImageModelFit: {
+    pool: 'unified',
+    budgetBytes: 96 * 1024 ** 3,
+    gpuBudgetBytes: 96 * 1024 ** 3,
+    totalRamBytes: 128 * 1024 ** 3,
+    models: [],
+  },
   listIncompleteLlamaCppModels: { incomplete: [] },
   listIncompleteDs4Models: { incomplete: [] },
   listIncompleteMlxModels: { incomplete: [] },

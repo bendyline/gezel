@@ -131,6 +131,10 @@ export function computeHostEnvironment(
   // host also passes it to `startService` directly. Either way an inherited
   // value never decides it.
   variables.set('GEZEL_EMBEDDED_INFERENCE_ONLY', opts.inferenceOnly === true ? '1' : undefined);
+  if (opts.inferenceOnly) {
+    variables.set('GEZEL_DISABLE_MACHINE_ENGINE', '1');
+    variables.set('GEZEL_NATIVE_CAPACITY_AUTHORITY', 'local');
+  }
 
   const needsNode = opts.mode !== 'in-process' || opts.inferenceOnly !== true;
   const nodePath = needsNode

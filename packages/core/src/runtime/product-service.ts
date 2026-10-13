@@ -4,6 +4,7 @@ import {
   resolveSocialMode,
   withCharacterChatCap,
 } from '../character/index.js';
+import { sampleCommonDir } from '../craftbook-samples.js';
 import { isEngagementAllowed, isTaskWorkAllowed } from '../engagement.js';
 import { displayName } from '../gezel-display.js';
 import { resolveGezelTemplateForRole } from '../gezels/templates.js';
@@ -11,7 +12,7 @@ import { type XpRefresher, createXpRefresher } from '../growth/xp-refresher.js';
 import { stepCreditedGezelId } from '../growth/xp.js';
 import { checkHandoffChain } from '../handoff-limits.js';
 import { llamaCppNativeChatConfig, resolveLlamaCppChatLaunch } from '../llama-cpp-launch.js';
-import type { TerminalToolPolicy } from '../local-loop/provider-contract.js';
+import type { ActiveCraftbookStep, TerminalToolPolicy } from '../local-loop/provider-contract.js';
 import { createLogger } from '../log.js';
 import { renderPersonNotesBlock, selectPersonNotes } from '../memory-notes.js';
 import { mobileEnginePhaseDetail } from '../mobile/engine-phase.js';
@@ -46,6 +47,7 @@ import {
   UpdateConfigRequestSchema,
 } from '../schemas/api.js';
 import type { ProjectTypeTool } from '../schemas/catalog.js';
+import type { Craftbook, CraftbookSample } from '../schemas/craftbook.js';
 import type { ChatEvent, ChatMessage, ProviderName } from '../schemas/gezel.js';
 import {
   type MobileModelInventory,
@@ -59,16 +61,13 @@ import {
   type RuntimeCapabilities,
 } from '../schemas/runtime-capabilities.js';
 import type { ChatSession, ExpectedDeliverable, TurnMessageOrigin } from '../schemas/session.js';
-import {
-  CreateChatSessionRequestSchema,
-  InterruptSessionRequestSchema,
-  SendToSessionRequestSchema,
-} from '../schemas/session.js';
+import { InterruptSessionRequestSchema, SendToSessionRequestSchema } from '../schemas/session.js';
 import type { Task } from '../schemas/task.js';
 import { resolveSecurityPolicy } from '../security/policy.js';
 import { taskSessionCanContinue } from '../task-execution.js';
 import { renderTaskContextBlock } from '../tasks/prompt-context.js';
 import { buildStepDispatchSeed } from '../tasks/step-dispatch-seed.js';
+import { stepTurnSteering, tuningForStepAction } from '../tasks/step-turn-steering.js';
 import { deriveThreadTitleFromMessages } from '../thread-title.js';
 import { roleHasTeamScope } from '../tools/access.js';
 import type { NativeToolBinding } from '../tools/native-tools.js';
@@ -129,13 +128,14 @@ import type { PortableScripts } from './script-host.js';
 import { handlePortableScriptRoute } from './script-routes.js';
 import { createPortableScriptTaskActions } from './script-tasks.js';
 import { portableScriptTools } from './script-tools.js';
+import { type PortableSessionRouteHost, handlePortableSessionRoute } from './session-routes.js';
 import { type QueuedSendOptions, SessionSendQueue } from './session-send-queue.js';
 import { runSharedLoopTurn } from './shared-loop-turn.js';
 import { PortableSpeechRoutes } from './speech-routes.js';
 import type { PortableSpeech } from './speech.js';
 import type { PortableStore } from './store.js';
 import { assertPortableTaskSessionActive } from './task-authority.js';
-import { evaluatePortableTaskGate } from './task-gates.js';
+import { evaluatePortableTaskGate, portableDeliverableReady } from './task-gates.js';
 import { PortableTaskRunner } from './task-routes.js';
 import { taskActiveAssignee } from './tasks.js';
 import {
@@ -213,14 +213,6 @@ type PortableQueuedSend = QueuedSendOptions & {
 };
 type SessionScope = Pick<ChatSession, 'id' | 'gezelId' | 'projectId'>;
 type KnownSession = SessionScope & { providerName?: ProviderName };
-/** The message a turn is answering; a finished turn has appended its reply after it. */
-function lastUserText(session: ChatSession): string {
-  for (let i = session.messages.length - 1; i >= 0; i--) {
-    const message = session.messages[i]!;
-    if (message.role === 'user') return message.content;
-  }
-  return '';
-}
 /** A phone holds a handful of prompts in memory at most. */
 const MAX_ACTIVE_TURNS = 16;
 const MAX_QUEUED_PER_SESSION = 20;
@@ -268,6 +260,30 @@ export class PortableProductService {
   setNetworkCancellation(cancel: () => Promise<void>): void {
     this.cancelNetworkActivity = cancel;
   }
+  /**
+   * A bundled book's sample, from the content the build compiled: its files
+   * relative to the sample's own folder, so it lands as its contents.
+   */
+  private readBundledSample(
+    craftbookId: string,
+    sample: CraftbookSample,
+  ): Array<{ rel: string; bytes: Uint8Array }> | null {
+    const files = this.content.sampleFiles?.[craftbookId];
+    if (!files) return null;
+    const prefix = sampleCommonDir(sample.files);
+    const out: Array<{ rel: string; bytes: Uint8Array }> = [];
+    for (const path of sample.files) {
+      const base64 = files[path];
+      if (base64 === undefined) return null;
+      const binary = atob(base64);
+      out.push({
+        rel: path.slice(prefix.length),
+        bytes: Uint8Array.from(binary, (character) => character.charCodeAt(0)),
+      });
+    }
+    return out;
+  }
+
   setContent(content: PortableContent): void {
     this.content = content;
   }
@@ -404,6 +420,9 @@ export class PortableProductService {
     this.projectTypes = new PortableProjectTypes(host.projectTypes ?? (async () => []));
     this.tasks = new PortableTaskRunner({
       store,
+      samples: {
+        read: async (craftbookId, sample) => this.readBundledSample(craftbookId, sample),
+      },
       runStep: (task, activationId, control) => this.runTaskStep(task, activationId, control),
       cancelStep: () => this.cancelTaskTurns(),
       canRun: () => this.assertNoConflict(),
@@ -417,13 +436,8 @@ export class PortableProductService {
           )
         ).id,
       resolveStepRole: async (_project, role) => (await this.recruit(role)).id,
-      resolveCraftbook: async (id, source, version, projectId) =>
-        this.content.craftbooks.find(
-          (entry) =>
-            entry.book.id === id &&
-            (!source || entry.item.sourceId === source) &&
-            (!version || entry.item.manifest.version === version),
-        )?.book ?? (await portableProjectTypeCraftbook(this.projectTypeSupport(), projectId, id)),
+      resolveCraftbook: (id, source, version, projectId) =>
+        this.resolveBundledCraftbook(id, source, version, projectId),
       shouldContinue: async (task) =>
         !(await store.listQuestions({ projectId: task.projectId, pending: true })).some(
           (q) => q.taskRef === task.ref,
@@ -900,6 +914,7 @@ export class PortableProductService {
       inference: this.inference,
       scripts: () => this.scripts,
       craftbooks: () => this.content.craftbooks,
+      unavailableCraftbooks: () => this.content.unavailableCraftbooks ?? [],
       catalogModelFor: (inventory, modelId) => this.catalogModelFor(inventory, modelId),
     };
   }
@@ -1139,6 +1154,7 @@ export class PortableProductService {
             profile: ResolvedModelProfile;
             isMeester: boolean;
             prompt?: BuiltInstructions;
+            craftbookStep?: ActiveCraftbookStep;
           })
         | undefined =
         providerId === 'llama-cpp' && provider.capabilities.structuredChat && this.inference.chat
@@ -1174,6 +1190,28 @@ export class PortableProductService {
       session.model = modelId;
       const activeTask = await checkTask();
       const activeStep = activeTask?.craftbook.steps.find((step) => step.id === session.stepId);
+      // The desktop's per-step steering: the step the loop's correctives
+      // name, and an exact-action step's terminal tool and request shape.
+      const stepSteering =
+        activeTask && activeStep ? stepTurnSteering(activeTask, activeStep) : undefined;
+      if (structuredChat && stepSteering) {
+        structuredChat.craftbookStep = {
+          ...stepSteering.activeStep,
+          ...(stepSteering.workspaceDeliverable
+            ? {
+                deliverableReady: () =>
+                  portableDeliverableReady(
+                    this.store,
+                    activeTask!.ref,
+                    activeStep!.id,
+                    session.gezelId,
+                  ),
+              }
+            : {}),
+        };
+        if (stepSteering.action && structuredChat.tuning)
+          structuredChat.tuning = tuningForStepAction(structuredChat.tuning, stepSteering.action);
+      }
       const projectTools = await portableProjectScriptTools(this.projectTypes, context.project);
       // What the type's tools declare: a turn call ends the turn, and a
       // person's message is answered from the state as it stands.
@@ -1443,7 +1481,8 @@ export class PortableProductService {
         },
         inventoryTools,
         projectTools,
-        turnRules?.terminal && withCharacterChatCap(turnRules.terminal, socialCharacter),
+        stepSteering?.terminalToolPolicy ??
+          (turnRules?.terminal && withCharacterChatCap(turnRules.terminal, socialCharacter)),
         placement.requiredTool ??
           (gameState
             ? stateAnswerTool(projectTools, gameState.output, context.project)
@@ -1494,6 +1533,22 @@ export class PortableProductService {
    * checks a person can act on right away (size, engagement, the draft), and
    * runs when the current turn ends. A nudge that never queued is a plain send.
    */
+  private async resolveBundledCraftbook(
+    id: string,
+    source?: string,
+    version?: string,
+    projectId?: string,
+  ): Promise<Craftbook | undefined> {
+    return (
+      this.content.craftbooks.find(
+        (entry) =>
+          entry.book.id === id &&
+          (!source || entry.item.sourceId === source) &&
+          (!version || entry.item.manifest.version === version),
+      )?.book ?? (await portableProjectTypeCraftbook(this.projectTypeSupport(), projectId, id))
+    );
+  }
+
   private async submit(
     id: string,
     body: Record<string, unknown>,
@@ -1649,6 +1704,25 @@ export class PortableProductService {
       createGezel: (input) => this.createGezel(input),
     };
   }
+  private sessionRouteHost(): PortableSessionRouteHost {
+    return {
+      store: this.store,
+      inference: this.inference,
+      tasks: this.tasks,
+      turns: this.turns,
+      admissions: this.admissions,
+      session: (id) => this.session(id),
+      submit: (id, body) => this.submit(id, body),
+      interrupt: (id, body) => this.interrupt(id, body),
+      assertNoConflict: () => this.assertNoConflict(),
+      sessionBusy: (sessionId) => this.sessionBusy(sessionId),
+      assertSessionsFree: (match) => this.assertSessionsFree(match),
+      resolveCraftbook: (id, source, version, projectId) =>
+        this.resolveBundledCraftbook(id, source, version, projectId),
+      draftChanged: (draft) => this.draftChanged(draft),
+      emit: (session, event) => this.emit(session, event),
+    };
+  }
   /** Claim a session synchronously, before any await lets another send in. */
   private reserveAdmission(sessionId: string, taskOwned = false): Admission {
     let settle!: () => void;
@@ -1684,6 +1758,7 @@ export class PortableProductService {
         isMeester: boolean;
         /** The desktop builder's system prompt for this turn. */
         prompt?: BuiltInstructions;
+        craftbookStep?: ActiveCraftbookStep;
       };
     },
     inventory: readonly PortableToolSpec[],
@@ -1911,6 +1986,7 @@ export class PortableProductService {
             history: shared.history,
             prompt: messages.at(-1)?.content ?? '',
             ...(terminalToolPolicy ? { terminalToolPolicy } : {}),
+            ...(shared.craftbookStep ? { activeCraftbookStep: shared.craftbookStep } : {}),
             ...(requiredTool ? { requiredTool } : {}),
             tools: inventory,
             actions: loopOptions.actions,
@@ -2661,107 +2737,14 @@ export class PortableProductService {
         id,
         query,
       );
-    if (resource === 'sessions') {
-      if (!id) {
-        if (method === 'GET')
-          return json({
-            sessions: await this.store.listSessions({
-              gezelId: query.get('gezel') ?? undefined,
-              projectId: query.get('project') ?? undefined,
-            }),
-          });
-        if (method === 'POST') {
-          const input = CreateChatSessionRequestSchema.parse(body);
-          const gezel = await this.store.getGezel(input.gezelId);
-          const config = await this.store.readConfig();
-          const providerName = MobileProviderIdSchema.parse(
-            gezel?.provider ?? config.provider ?? 'llama-cpp',
-          );
-          const inventory =
-            providerName === 'llama-cpp' ? await this.inference.models?.() : undefined;
-          const model =
-            gezel?.parsed.frontmatter.model ?? inventory?.selectedModelId ?? providerName;
-          if (inventory && !inventory.models.some((item) => item.id === model))
-            throw new ProductError(
-              gezel?.parsed.frontmatter.model
-                ? `The model assigned to ${gezel.name} is not installed. Import it in Settings → Artificial Intelligence, or change this gezel's model.`
-                : inventory.models.length === 0
-                  ? 'No chat model is installed on this device. Download or import one in Settings → Artificial Intelligence, then send your message again.'
-                  : 'Choose an available chat model in Settings → Artificial Intelligence, then send your message again.',
-              409,
-            );
-          return json(await this.store.createSession({ ...input, providerName, model }));
-        }
-      }
-      if (id === 'inflight') {
-        // A send is in flight from the moment it is accepted, as on desktop:
-        // while it is set up, while it waits for the engine, and while it runs.
-        const entries = [
-          ...[...this.turns.values()].map((t) => ({ session: t.session, startedAt: t.startedAt })),
-          ...(
-            await Promise.all(
-              [...this.admissions.values()]
-                .filter((a) => !this.turns.has(a.sessionId))
-                .map(async (a) => {
-                  const session = await this.session(a.sessionId).catch(() => undefined);
-                  return session ? [{ session, startedAt: a.startedAt }] : [];
-                }),
-            )
-          ).flat(),
-        ];
-        return json({
-          inflight: entries
-            .filter(
-              ({ session }) =>
-                (!query.get('project') || query.get('project') === session.projectId) &&
-                (!query.get('gezel') || query.get('gezel') === session.gezelId),
-            )
-            .map(({ session, startedAt }) => ({
-              sessionId: session.id,
-              gezelId: session.gezelId,
-              projectId: session.projectId,
-              ...(session.taskRef ? { taskRef: session.taskRef } : {}),
-              providerName: session.providerName,
-              ...(session.model ? { model: session.model } : {}),
-              userText: lastUserText(session),
-              startedAt,
-              elapsedMs: Date.now() - startedAt,
-            })),
-        });
-      }
-      if (id) {
-        const session = await this.session(id);
-        if (!action && method === 'GET') return json(session);
-        if (action === 'inflight') {
-          const turn = this.turns.get(id);
-          const startedAt = turn?.startedAt ?? this.admissions.get(id)?.startedAt;
-          return json({
-            inflight:
-              startedAt === undefined
-                ? null
-                : {
-                    userText: lastUserText(turn?.session ?? session),
-                    startedAt,
-                    elapsedMs: Date.now() - startedAt,
-                  },
-          });
-        }
-        if (action === 'send' && method === 'POST') return json(await this.submit(id, body));
-        if (action === 'interrupt' && method === 'POST')
-          return json(await this.interrupt(id, body));
-        if (action === 'archive' && method === 'POST') {
-          this.assertSessionsFree((scope) => scope.id === id);
-          session.archived = true;
-          await this.store.writeSession(session);
-          return json(session);
-        }
-        if (!action && method === 'DELETE') {
-          this.assertSessionsFree((scope) => scope.id === id);
-          await this.store.deleteSession(session.gezelId, id);
-          return json({ ok: true });
-        }
-      }
-    }
+    const sessionResponse = await handlePortableSessionRoute(
+      this.sessionRouteHost(),
+      request,
+      url,
+      body,
+      parts,
+    );
+    if (sessionResponse) return sessionResponse;
     if (resource === 'timeline' || action === 'timeline')
       return json(
         await portableTimeline(

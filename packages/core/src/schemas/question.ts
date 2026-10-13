@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { NIGHT_SHIFT_QUIET_REASONS } from '../night-shift.js';
 import { NpmPackageNameSchema, NpmRegistryVersionSchema } from './npm-package.js';
+import { ProjectReferencedFileSchema } from './referenced-file.js';
 
 /**
  * Structured Q&A between gezels and the user.
@@ -463,6 +464,13 @@ export const QuestionSchema = z.object({
    * preview + "Open document" link.
    */
   documentPath: z.string().optional(),
+  /**
+   * Real files the prompt names, resolved when questions are read and never
+   * persisted, so a card links what exists now. Same meaning as
+   * `ChatMessage.referencedFiles`: the UI turns each matching code span into
+   * a link that opens the file.
+   */
+  referencedFiles: z.array(ProjectReferencedFileSchema).optional(),
   /**
    * Service-created specialized-question marker (see `QuestionIntent`
    * for context). Absent for plain user-facing questions asked via

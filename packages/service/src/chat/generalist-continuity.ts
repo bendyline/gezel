@@ -1,9 +1,12 @@
 import { type ProviderName, type Task, isLocalProvider, parseTaskRef } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { resolveCatalogParameterSize } from '@bendyline/gezel-inference/internal/chat/catalog-model-lookup';
+import {
+  type LocalModelTier,
+  classifyLocalModelTier,
+} from '@bendyline/gezel-inference/internal/chat/local-model-tier';
+import { resolveCatalogIdFromModelId } from '@bendyline/gezel-inference/internal/providers/catalog-model-config';
 import type { Store } from '../fs/store.js';
-import { resolveCatalogIdFromModelId } from '../providers/catalog-model-config.js';
-import { resolveCatalogParameterSize } from './catalog-model-lookup.js';
-import { type LocalModelTier, classifyLocalModelTier } from './local-model-tier.js';
 import { type StepSniffName, runStepSniff } from './step-sniff.js';
 
 /**

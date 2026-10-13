@@ -17,6 +17,8 @@ export function Content(props: ComponentProps<typeof RadixDropdownMenu.Content>)
 }
 export const Item = RadixDropdownMenu.Item;
 export const CheckboxItem = RadixDropdownMenu.CheckboxItem;
+export const RadioGroup = RadixDropdownMenu.RadioGroup;
+export const RadioItem = RadixDropdownMenu.RadioItem;
 export const ItemIndicator = RadixDropdownMenu.ItemIndicator;
 export const Label = RadixDropdownMenu.Label;
 export const Separator = RadixDropdownMenu.Separator;

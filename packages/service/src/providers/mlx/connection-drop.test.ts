@@ -1,5 +1,8 @@
+import {
+  buildMidStreamDropMessage,
+  isMidStreamConnectionDrop,
+} from '@bendyline/gezel-inference/internal/providers/mlx/provider';
 import { describe, expect, it } from 'vitest';
-import { buildMidStreamDropMessage, isMidStreamConnectionDrop } from './provider.js';
 
 describe('isMidStreamConnectionDrop', () => {
   it('matches undici’s bare "terminated" mid-stream error', () => {

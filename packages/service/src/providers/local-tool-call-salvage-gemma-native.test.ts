@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
 import {
   findGemmaNativeToolCallSpans,
   parseGemmaNativeToolCall,
   stripGemmaNativeToolCallsFromText,
-} from './local-tool-call-salvage.js';
+} from '@bendyline/gezel-inference/internal/providers/local-tool-call-salvage';
+import { describe, expect, it } from 'vitest';
 
 const TOOLS = new Set([
   'write_artifact',

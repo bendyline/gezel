@@ -1,11 +1,14 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  loadOrCreateDeviceIdentity,
+  verifyIdentitySignature,
+} from '@bendyline/gezel-inference/internal/remotes/identity';
 import { secretsFile } from '@bendyline/gezel/paths';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { loadEngineIdentity } from './engine-identity.js';
-import { loadOrCreateDeviceIdentity, verifyIdentitySignature } from './identity.js';
 
 const homes: string[] = [];
 afterEach(async () => {

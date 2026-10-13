@@ -1,19 +1,21 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { writeFileAtomic } from '../../fs/atomic.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 
 /**
  * One MCP server entry the Claude CLI should spawn for the session. Mirrors
- * Claude's `.mcp.json` shape — a stdio command + args + env. The provider
+ * Claude's `.mcp.json` shape — stdio, HTTP or SSE. The provider
  * always inserts the `gezel` entry pointing at gezel-mcp; per-gezel/shared/
  * system toolsets are appended verbatim from `SessionOpts.extraMcpServers`.
  */
-export interface ClaudeMcpServerEntry {
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-  cwd?: string;
-}
+export type ClaudeMcpServerEntry =
+  | {
+      command: string;
+      args: string[];
+      env: Record<string, string>;
+      cwd?: string;
+    }
+  | { type: 'http' | 'sse'; url: string; headers: Record<string, string> };
 
 /**
  * Build the `.mcp.json` Claude CLI consumes via `--mcp-config <path>`.
@@ -42,7 +44,7 @@ export async function writeRuntimeMcpConfig(opts: {
   const config = buildRuntimeMcpConfig(opts.servers);
   const body = `${JSON.stringify(config, null, 2)}\n`;
   await mkdir(dirname(opts.path), { recursive: true });
-  await writeFileAtomic(opts.path, body);
+  await writeFileAtomic(opts.path, body, { mode: 0o600 });
   return opts.path;
 }
 

@@ -8,6 +8,7 @@
  *
  * Among the candidates that comfortably fit the machine, the pick is by:
  *   1. `recoScore` (higher wins — the curated preference, e.g. Qwen over Gemma),
+ *      discounted for a 1- or 2-bit quant ({@link lowBitScoreFactor}),
  *   2. MoE-alignment (see below),
  *   3. size (largest that still fits — "the highest model that comfortably fits").
  *
@@ -31,7 +32,8 @@
  * candidates (with provider-appropriate `residentBytes`) and the live memory
  * profile; the UI badge reuses `isRecommendedModel` alone.
  */
-import { computeModelFit, isMoEFromTags } from './model-fit.js';
+import { MOE_NON_EXPERT_FRACTION_ESTIMATE, computeModelFit, isMoEFromTags } from './model-fit.js';
+import { lowBitScoreFactor } from './model-quantization.js';
 
 const GB = 1024 ** 3;
 
@@ -104,6 +106,14 @@ export interface RecoModelInput extends RecoGateInput {
   residentBytes: number;
   /** Exact GPU-resident residue under `--cpu-moe`, when the GGUF has been scanned. */
   nonExpertBytes?: number;
+  /** The engine block's quantization tag (`UD-Q4_K_XL`, `4bit`); a 1- or 2-bit quant ranks lower. */
+  quantization?: string;
+  /**
+   * What starting the model needs: its working set plus the KV cache at this
+   * host's context floor, with the engine's compute headroom. Compared with
+   * {@link RecoDevice.launchCapBytes}. Absent = `residentBytes`.
+   */
+  launchBytes?: number;
 }
 
 export interface RecoDevice {
@@ -131,6 +141,21 @@ export interface RecoDevice {
    * the daemon then refuses to load.
    */
   budgetBytes?: number;
+  /**
+   * The most a launch could hold right now: the free part of the fast pool
+   * plus the system RAM free now, less the OS reserve, capped by the budget. The launch-time
+   * context check applies this same ceiling. `budgetBytes` is fixed by the
+   * machine's size, so on a 12 GB card and 31 GB of RAM it admitted a 23.5 GB
+   * model the first chat turn refused with 7.7 GB of RAM free.
+   */
+  launchCapBytes?: number;
+  /**
+   * A discrete card's free memory right now, as device admission counts it.
+   * A MoE larger than the card needs room there for its always-active
+   * layers; any other model larger than the card is charged the whole card.
+   * Leave unset on unified and integrated hosts.
+   */
+  freeGpuBytes?: number;
 }
 
 export interface RecoPick {
@@ -169,7 +194,49 @@ interface Scored {
   score: number;
   isMoE: boolean;
   tier: string;
+  /** Whether a launch would be admitted with the memory free now. */
+  launchable: boolean;
   comfortable: boolean;
+}
+
+/**
+ * Whether the launch check would admit this model now. A model the machine
+ * could hold in principle is no first pick if the person's first chat turn
+ * is refused with "not enough memory", and the failure card reads the same
+ * verdict to decide whether Retry can help.
+ */
+export function launchFitsNow(
+  m: Pick<RecoModelInput, 'residentBytes' | 'launchBytes' | 'tags' | 'nonExpertBytes'>,
+  device: Pick<RecoDevice, 'launchCapBytes' | 'freeGpuBytes' | 'usableBytes'>,
+): boolean {
+  if (
+    device.launchCapBytes !== undefined &&
+    (m.launchBytes ?? m.residentBytes) > device.launchCapBytes
+  ) {
+    return false;
+  }
+  if (device.freeGpuBytes === undefined || m.residentBytes <= device.usableBytes) return true;
+  // Larger than the card. A MoE's offload plan keeps only its always-active
+  // layers there and streams the experts; any other model is charged the
+  // whole card.
+  const onCard = isMoEFromTags(m.tags)
+    ? (m.nonExpertBytes ?? m.residentBytes * MOE_NON_EXPERT_FRACTION_ESTIMATE) +
+      OFFLOAD_CARD_RESERVE_BYTES
+    : device.usableBytes;
+  return device.freeGpuBytes >= onCard;
+}
+
+/**
+ * What an offload plan keeps on the card beside the always-active layers:
+ * the KV cache at a working window, the compute buffers and a margin.
+ */
+const OFFLOAD_CARD_RESERVE_BYTES = 2 * GB;
+
+/** "recoScore 21", or "recoScore 21 → 16.8 (2-bit)" when the quant discount applied. */
+function scoreLabel(s: Scored): string {
+  const curated = s.m.recoScore as number;
+  if (s.score === curated) return `recoScore ${curated}`;
+  return `recoScore ${curated} → ${Math.round(s.score * 10) / 10} (${s.m.quantization})`;
 }
 
 /** MoE offload is a Mac / small-GPU win; a big discrete GPU prefers dense. */
@@ -217,7 +284,7 @@ export function isBandwidthBoundHost(device: RecoDevice): boolean {
 }
 
 export interface HardwareHint {
-  kind: 'moe-good-match' | 'large-dense-caution' | 'low-acceleration-caution';
+  kind: 'moe-good-match' | 'large-dense-caution' | 'low-acceleration-caution' | 'wont-start-now';
   /** Short pill label. */
   label: string;
   /** Longer tooltip explanation. */
@@ -232,8 +299,26 @@ export interface HardwareHint {
  */
 export function hardwareHint(
   device: RecoDevice,
-  model: { isMoE: boolean; fitTier: string; residentBytes?: number },
+  model: {
+    isMoE: boolean;
+    fitTier: string;
+    residentBytes?: number;
+    /**
+     * The daemon's verdict on starting it with the memory free now
+     * (`/api/system/memory/starts-now`). Settings called a model that had
+     * just been refused a "good match for this machine" (2026-10-11).
+     */
+    startsNow?: boolean;
+  },
 ): HardwareHint | null {
+  if (model.startsNow === false && model.fitTier !== 'too-big') {
+    return {
+      kind: 'wont-start-now',
+      label: "won't start right now",
+      detail:
+        'Starting it needs more memory than is free at the moment. Close some programs and it may start, or choose a model that fits on its own.',
+    };
+  }
   if (
     needsSmallModelRecommendation(device) &&
     model.fitTier !== 'too-big' &&
@@ -257,9 +342,15 @@ export function hardwareHint(
         "This machine's memory bandwidth favors Mixture-of-Experts models — only a few experts work per word, so they respond faster than a dense model of the same size.",
     };
   }
+  // A dense model that fits a discrete card runs from its fast memory; the
+  // caution is about one paced by system RAM. Gemma 4 12B, which finished a
+  // trip plan in three minutes on a 12 GB card, read "may respond slowly".
+  const onTheCard =
+    model.fitTier === 'fits' && device.gpuVramBytes != null && !isUnifiedMemoryDevice(device);
   if (
     !model.isMoE &&
     runnable &&
+    !onTheCard &&
     model.residentBytes != null &&
     model.residentBytes > device.usableBytes / 2
   ) {
@@ -305,12 +396,14 @@ export function pickRecommendedModel(
       ...(device.budgetBytes !== undefined ? { admissibleBytes: device.budgetBytes } : {}),
       ...(m.nonExpertBytes !== undefined ? { nonExpertBytes: m.nonExpertBytes } : {}),
     });
+    const launchable = launchFitsNow(m, device);
     return {
       m,
-      score: m.recoScore as number,
+      score: (m.recoScore as number) * lowBitScoreFactor(m.quantization),
       isMoE,
       tier: fit.tier,
-      comfortable: fit.tier === 'fits' || fit.tier === 'fits-offload',
+      launchable,
+      comfortable: launchable && (fit.tier === 'fits' || fit.tier === 'fits-offload'),
     };
   });
 
@@ -332,7 +425,7 @@ export function pickRecommendedModel(
     return {
       id: top.m.id,
       recoScore: top.score,
-      reason: `${top.m.id} (recoScore ${top.score}) — safest small model for CPU, integrated graphics, or a GPU below 8 GB`,
+      reason: `${top.m.id} (${scoreLabel(top)}) — safest small model for CPU, integrated graphics, or a GPU below 8 GB`,
     };
   }
 
@@ -340,10 +433,17 @@ export function pickRecommendedModel(
   if (comfortable.length > 0) {
     comfortable.sort(comparator(preferMoE));
     const top = comfortable[0] as Scored;
+    const passedOver = scored
+      .filter((s) => !s.launchable && s.score > top.score && !(excludeMoE && s.isMoE))
+      .map((s) => s.m.id);
+    const why =
+      passedOver.length > 0
+        ? `; passed over ${passedOver.join(', ')}: would not start with the memory free now`
+        : '';
     return {
       id: top.m.id,
       recoScore: top.score,
-      reason: `${top.m.id} (recoScore ${top.score}, ${top.isMoE ? 'MoE' : 'dense'}, ${top.tier})`,
+      reason: `${top.m.id} (${scoreLabel(top)}, ${top.isMoE ? 'MoE' : 'dense'}, ${top.tier})${why}`,
     };
   }
 
@@ -361,18 +461,17 @@ export function pickRecommendedModel(
   return {
     id: top.m.id,
     recoScore: top.score,
-    reason: `${top.m.id} (recoScore ${top.score}, ${top.isMoE ? 'MoE' : 'dense'}) — best-effort, nothing fits comfortably`,
+    reason: `${top.m.id} (${scoreLabel(top)}, ${top.isMoE ? 'MoE' : 'dense'}) — best-effort, nothing fits comfortably`,
   };
 }
 
 /**
  * Fast-memory budget available to a VIDEO generation, in bytes.
  *
- * Unlike the general {@link RecoDevice.usableBytes} (which reserves ~40% of
- * unified memory as headroom for a *coexisting* chat model), video generation
- * evicts the chat model first (the GPU arbiter's swap policy), so on Apple
- * unified memory it can use most of RAM — reserving only OS/process overhead.
- * Discrete GPUs are still bounded by their VRAM; CPU-only can't run these.
+ * @deprecated Disagrees with the daemon's own admission check. Read the
+ * daemon's verdict instead (`GET /api/video-gen/models/fit`), which prices the
+ * model with `videoMemoryRequirement` against the capacity the launch path
+ * actually admits. Kept only for semver; nothing in this repo calls it.
  */
 const VIDEO_UNIFIED_MEMORY_FRACTION = 0.8;
 export function videoMemoryBudgetBytes(device: RecoDevice): number {
@@ -384,14 +483,14 @@ export function videoMemoryBudgetBytes(device: RecoDevice): number {
 }
 
 /**
- * Simple fit check for a MEDIA model (image / video). Image generation leans
- * on system RAM (sd-cpp runs partly on CPU), so it gates on `minRamGB`; video
- * generation needs real GPU VRAM (or Apple unified memory), so it gates on
- * `minVramGB` against the video-specific budget above. A field left undefined
- * isn't checked. Audio models carry neither floor, so callers treat them as
- * always fitting. Deliberately coarser than the chat picker — there's one
- * recommended model per media modality, so this only answers "can this device
- * run it at all?".
+ * Fit check for a MEDIA model against the catalog's hand-authored
+ * `minRamGB` / `minVramGB`.
+ *
+ * @deprecated Those catalog figures are no longer authoritative and are being
+ * removed from the catalog. Read the daemon's verdict instead
+ * (`GET /api/image-gen/models/fit`, `GET /api/video-gen/models/fit`), which
+ * prices the model from its weight files with `media-memory.ts`. Kept only
+ * for semver; nothing in this repo calls it.
  */
 export function mediaModelFits(
   device: RecoDevice,

@@ -116,21 +116,30 @@ take it.
   then load under real Node. Under Electron with no `nodePath`, the Node a
   Gezel install keeps at `<Gezel home>/bin/node` is used when present, so
   hosting works on a machine with Gezel installed without shipping one.
-- **`in-process`** imports the service into the caller. Faster, no second
-  process, but every native dependency must match this process's ABI.
+- **`in-process`** imports the service (or, with `inferenceOnly`, the
+  inference package) into the caller. Faster, no second process, but every
+  native dependency must match this process's ABI.
 
 `HostOptions.inferenceOnly` is the embedding profile for apps that need
-on-device model listing, model installation, and OpenAI-compatible inference
-without running a second copy of the Gezel product. It skips schedulers,
-channels, editor bridges, machine-service discovery, indexing, and background
-maintenance. It also sets up none of a standalone Gezel's remote connectivity:
-the daemon opens no secret store, so nothing reaches the OS keychain or a
-secrets file in the app's home; it creates no device identity; and it serves no
-pairing, `/v1/identity`, `/v1/remote`, or LAN-serving endpoints. Both host
-modes honor it — a `child` daemon receives it as
-`GEZEL_EMBEDDED_INFERENCE_ONLY=1`. With `mode: 'in-process'`, the SDK uses the
-service's direct Fetch handler, so it needs neither a separate Node executable
-nor a loopback client connection under Electron.
+on-device model listing, model installation, OpenAI-compatible inference and
+embeddings without running a second copy of the Gezel product.
+`@bendyline/gezel-inference` owns it, and both host modes serve the same
+surface: `/v1/chat`, `/v1/responses`, `/v1/embeddings`, `/v1/models`,
+`/v1/models/ensure`, `/v1/knowledge`, the engine and model-bundle routes, and a
+narrow `/api/config`. There is no product API, no scheduler or background work,
+no machine-service discovery, no secret store (nothing reaches the OS keychain
+or a secrets file in the app's home), no device identity, and no pairing,
+`/v1/identity`, `/v1/remote` or LAN-serving endpoint. Chat and Responses serve
+on-device models only. `model: "gezel:embeddings"` runs the on-device text
+embedder.
+
+With `mode: 'in-process'`, the SDK loads `@bendyline/gezel-inference` (install
+it instead of the service) and uses its direct Fetch handler, so it needs
+neither a separate Node executable nor a loopback client connection under
+Electron. A `child` daemon is `gezeld` from `@bendyline/gezel-service`, started
+with `GEZEL_EMBEDDED_INFERENCE_ONLY=1`: it runs the same inference host behind
+the daemon's loopback TLS listener and runtime files, so child mode still needs
+the service package installed.
 
 The service reports the profile it actually started. An inference-only SDK
 request requires both `profile: 'embedded-inference'` and the direct Fetch

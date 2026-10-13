@@ -33,8 +33,8 @@
  */
 
 import { type ModelTier, tierAtLeast, tierRank } from '@bendyline/gezel';
+import type { LocalProviderName } from '@bendyline/gezel-inference/internal/providers/native/engine-key';
 import type { ResolvedModelFitness } from '../fitness/manager.js';
-import type { LocalProviderName } from '../providers/native/engine-key.js';
 
 export interface RoutingCandidate {
   provider: LocalProviderName;

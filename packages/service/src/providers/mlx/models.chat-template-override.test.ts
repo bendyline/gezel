@@ -3,8 +3,11 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import {
+  type MlxInstallEvent,
+  MlxModelManager,
+} from '@bendyline/gezel-inference/internal/providers/mlx/models';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type MlxInstallEvent, MlxModelManager } from './models.js';
 
 /**
  * `chatTemplateOverride` exists for the case the recovery pin cannot reach:

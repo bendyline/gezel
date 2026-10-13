@@ -1,6 +1,8 @@
 import type {
   CatalogItemSummary,
   ChatModelManifest,
+  MediaFitVerdict,
+  MediaModelFitResponse,
   NativeEngineName,
   RecoDevice,
 } from '@bendyline/gezel';
@@ -9,7 +11,7 @@ import {
   formatModelAttribution,
   isMoEFromTags,
   isRecommendedModel,
-  mediaModelFits,
+  lowBitScoreFactor,
   pickRecommendedModel,
 } from '@bendyline/gezel';
 
@@ -22,6 +24,8 @@ export interface BootstrapChatModel {
   approxSizeBytes: number;
   residentBytes: number;
   recoScore: number;
+  /** The engine block's quantization tag; a 1- or 2-bit quant ranks lower. */
+  quantization?: string;
   fit: 'fits' | 'fits-offload' | 'tight' | 'too-big';
   attribution: string;
 }
@@ -45,6 +49,14 @@ export interface AccessoryInputs {
   };
   recognition: Array<AccessoryCatalogModel>;
   installed: Partial<Record<AccessoryKind, ReadonlySet<string>>>;
+  /**
+   * The daemon's verdict per catalog id (`/models/fit`). Null when it could
+   * not answer: then no image or video model is recommended.
+   */
+  fit: {
+    image: ReadonlyMap<string, MediaFitVerdict> | null;
+    video: ReadonlyMap<string, MediaFitVerdict> | null;
+  };
 }
 
 interface AccessoryCatalogModel {
@@ -53,9 +65,15 @@ interface AccessoryCatalogModel {
   approxSizeBytes: number;
   recoScore?: number;
   licenseClass?: string;
-  minRamGB?: number;
-  minVramGB?: number;
+  tags?: string[];
   auxiliaryFiles?: Array<{ sizeBytes?: number }>;
+}
+
+/** Verdicts by catalog id from a `/models/fit` answer, or null without one. */
+export function fitVerdicts(
+  res: MediaModelFitResponse | null,
+): ReadonlyMap<string, MediaFitVerdict> | null {
+  return res ? new Map(res.models.map((m) => [m.id, m.verdict])) : null;
 }
 
 const CHAT_MEMORY_OVERHEAD: Record<BootstrapChatProvider, number> = {
@@ -111,6 +129,7 @@ export function rankChatModels(
       // Effective score: a model the shared gate rejects (restricted license,
       // no tool support) sorts as unscored rather than leading the list.
       recoScore: isRecommendedModel(manifest) ? (manifest.recoScore ?? 0) : 0,
+      ...(source.quantization ? { quantization: source.quantization } : {}),
       fit,
       attribution: formatModelAttribution(manifest),
     });
@@ -128,6 +147,7 @@ export function rankChatModels(
             ?.manifest as ChatModelManifest | undefined
         )?.tags ?? [],
       residentBytes: model.residentBytes,
+      ...(model.quantization ? { quantization: model.quantization } : {}),
     })),
     device,
   );
@@ -135,9 +155,11 @@ export function rankChatModels(
     (model) => model.fit === 'fits' || model.fit === 'fits-offload',
   );
   const pool = comfortable.length > 0 ? comfortable : candidates;
+  const ranked = (model: BootstrapChatModel) =>
+    model.recoScore * lowBitScoreFactor(model.quantization);
   pool.sort(
     (a, b) =>
-      b.recoScore - a.recoScore ||
+      ranked(b) - ranked(a) ||
       fitOrder(a.fit) - fitOrder(b.fit) ||
       b.residentBytes - a.residentBytes ||
       a.name.localeCompare(b.name),
@@ -165,12 +187,9 @@ export function bootstrapChatModelLabel(model: BootstrapChatModel): string {
 }
 
 /** Recommended accessory models that fit, excluding anything already installed. */
-export function pickAccessoryModels(
-  input: AccessoryInputs,
-  device: RecoDevice,
-): BootstrapAccessoryModel[] {
+export function pickAccessoryModels(input: AccessoryInputs): BootstrapAccessoryModel[] {
   const output: BootstrapAccessoryModel[] = [];
-  const image = pickCatalogMedia(input.imageItems, device, 'image');
+  const image = pickCatalogMedia(input.imageItems, input.fit.image);
   if (image && !input.installed.image?.has(image.id)) {
     output.push({
       kind: 'image',
@@ -211,7 +230,7 @@ export function pickAccessoryModels(
       approxSizeBytes: tts.approxSizeBytes,
     });
   }
-  const video = pickCatalogMedia(input.videoItems, device, 'video');
+  const video = pickCatalogMedia(input.videoItems, input.fit.video);
   if (video && !input.installed.video?.has(video.id)) {
     output.push({
       kind: 'video',
@@ -242,20 +261,14 @@ function fitOrder(fit: BootstrapChatModel['fit']): number {
   }
 }
 
+/** The best recommended image or video model the daemon says fits outright. */
 function pickCatalogMedia(
   items: readonly CatalogItemSummary[],
-  device: RecoDevice,
-  kind: 'image' | 'video',
+  verdicts: ReadonlyMap<string, MediaFitVerdict> | null,
 ): AccessoryCatalogModel | null {
   const models = items
     .map((item) => item.manifest as unknown as AccessoryCatalogModel)
-    .filter((model) => {
-      if (model.licenseClass !== 'open' || !model.recoScore) return false;
-      return mediaModelFits(
-        device,
-        kind === 'image' ? { minRamGB: model.minRamGB } : { minVramGB: model.minVramGB },
-      );
-    });
+    .filter((model) => isRecommendedModel(model) && verdicts?.get(model.id) === 'fits');
   return pickScoredOpen(models);
 }
 

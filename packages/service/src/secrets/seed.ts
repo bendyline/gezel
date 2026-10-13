@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createLogger } from '@bendyline/gezel';
-import type { SecretStore } from './types.js';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 
 const log = createLogger('secrets');
 

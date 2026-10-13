@@ -2,7 +2,7 @@
  * Granted-context extraction from a trial's daemon.log (Theme E / E4).
  *
  * The 64K context policy (`MIN_VIABLE_LOCAL_CONTEXT_TOKENS` in
- * packages/service/src/providers/native/capacity-broker.ts) is only as
+ * packages/inference/src/providers/native/capacity-broker.ts) is only as
  * real as our ability to observe it: the 2026-08-05 incident shipped
  * twelve gemma4-31b trials whose admission math said "12288 tokens" while
  * the engine launched at 65536 under the eval env bypass — and nothing in

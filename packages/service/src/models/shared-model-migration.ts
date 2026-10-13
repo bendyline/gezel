@@ -14,15 +14,15 @@ import {
   type SharedModelMigrationSource,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import type { MachineEngineBridge } from '../machine-engine/bridge.js';
-import { LlamaCppModelManager } from '../providers/llama-cpp/models.js';
-import { MlxModelManager } from '../providers/mlx/models.js';
 import {
   type InstalledPayloadRecord,
   comparePayloadIdentity,
   describeCatalogPayload,
-} from './catalog-payload-identity.js';
-import { GezmodelManager } from './gezmodel.js';
+} from '@bendyline/gezel-inference/internal/models/catalog-payload-identity';
+import { GezmodelManager } from '@bendyline/gezel-inference/internal/models/gezmodel';
+import { LlamaCppModelManager } from '@bendyline/gezel-inference/internal/providers/llama-cpp/models';
+import { MlxModelManager } from '@bendyline/gezel-inference/internal/providers/mlx/models';
+import type { MachineEngineBridge } from '../machine-engine/bridge.js';
 
 interface ModelSummary {
   id: string;

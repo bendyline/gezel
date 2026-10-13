@@ -5,7 +5,6 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { parseRemoteModelId } from '../remote/model-id.js';
 import type {
   AudioEngineHealth,
   AudioModelPullEvent,
@@ -13,7 +12,8 @@ import type {
   SpeechToTextProvider,
   TranscribeInput,
   TranscribeOutput,
-} from './types.js';
+} from '@bendyline/gezel-inference/internal/providers/audio/types';
+import { parseRemoteModelId } from '../remote/model-id.js';
 
 export interface RemoteSttProviderOpts {
   remoteId: string;

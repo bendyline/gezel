@@ -7,11 +7,11 @@ import {
   PiSetupStatusResponseSchema,
   type ProviderName,
 } from '@bendyline/gezel';
+import type { ModelInfo } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import { setupOwnerId } from '../fs/managed-marker.js';
 import type { PiBridgeController } from '../http/pi-bridge.js';
 import { createTokenStore } from '../http/token-store.js';
-import type { ModelInfo } from '../providers/types.js';
 import { PI_EXTENSION_MARKER } from './extension-source.js';
 import { PI_SETUP_APP_ID, createPiSetupManager } from './manager.js';
 

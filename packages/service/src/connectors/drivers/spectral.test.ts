@@ -1,6 +1,6 @@
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../../fs/store.js';
-import type { SecretStore } from '../../secrets/types.js';
 import type { AdapterDeps, ConnectorBindingRef } from '../types.js';
 
 /**

@@ -122,9 +122,12 @@ export class GezelApp<F extends ChatResponseFormat = 'openai'> {
 
   /**
    * Generate embeddings for `input` (single string or batch). Returns
-   * vectors in caller order plus token usage. Providers that don't
-   * implement embeddings (most local engines today) fail with a
-   * `GezelSdkError` carrying `code: 'embeddings_not_supported'`.
+   * vectors in caller order plus token usage. Use `model: 'gezel:embeddings'`
+   * for the on-device text embedder (the response's `model` names the
+   * embedder that produced the vectors; store it with them). A
+   * `<provider>:<model>` id whose provider has no embeddings fails with a
+   * `GezelSdkError` carrying `code: 'embeddings_not_supported'`; an embedder
+   * that is not installed fails with `code: 'embeddings_unavailable'`.
    */
   async embeddings(req: EmbeddingsRequest, opts: RequestOptions = {}): Promise<EmbeddingsResponse> {
     const res = await this.fetchFn(`${this.baseUrl}/v1/embeddings`, {

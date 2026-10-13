@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   approximateQuantizationLabel,
+  lowBitScoreFactor,
   quantizationBitDepths,
   quantizationTitle,
 } from './model-quantization.js';
@@ -66,5 +67,23 @@ describe('quantizationTitle', () => {
     expect(quantizationTitle(undefined, 'Q4_K_M')).toBe(
       'Approximate bits per weight · exact format: Q4_K_M',
     );
+  });
+});
+
+describe('lowBitScoreFactor', () => {
+  it('halves a 1-bit quant and takes a fifth off a 2-bit one', () => {
+    expect(lowBitScoreFactor('UD-IQ1_S')).toBe(0.5);
+    expect(lowBitScoreFactor('TQ1_0')).toBe(0.5);
+    expect(lowBitScoreFactor('UD-Q2_K_XL')).toBe(0.8);
+    expect(lowBitScoreFactor('IQ2_XXS')).toBe(0.8);
+  });
+
+  it('leaves three bits and up, and unreadable tags, alone', () => {
+    expect(lowBitScoreFactor('UD-Q3_K_XL')).toBe(1);
+    expect(lowBitScoreFactor('UD-Q4_K_XL')).toBe(1);
+    expect(lowBitScoreFactor('MXFP4')).toBe(1);
+    expect(lowBitScoreFactor('8bit')).toBe(1);
+    expect(lowBitScoreFactor('K-Quant-17GB')).toBe(1);
+    expect(lowBitScoreFactor(undefined)).toBe(1);
   });
 });

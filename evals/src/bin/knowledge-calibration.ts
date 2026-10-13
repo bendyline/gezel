@@ -44,7 +44,7 @@ import {
 } from '../retrieval-bench/knowledge-calibration/sweep.ts';
 import { parseArgs } from './args.ts';
 
-/** packages/service/src/relevance/registry.ts — ms-marco-minilm-l6@1. */
+/** packages/inference/src/relevance/registry.ts — ms-marco-minilm-l6@1. */
 const SHIPPED_THRESHOLDS = { drop: 0.00001, keep: 0.00003, strong: 0.95 };
 
 function parseThresholds(raw: unknown) {

@@ -3,8 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { NativeCapacityCommand } from '@bendyline/gezel';
+import {
+  DeviceCapacityLedger,
+  type DeviceCapacitySample,
+} from '@bendyline/gezel-inference/internal/providers/native/device-capacity-ledger';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DeviceCapacityLedger, type DeviceCapacitySample } from './device-capacity-ledger.js';
 
 const GIB = 1024 ** 3;
 const dirs: string[] = [];
@@ -175,6 +178,49 @@ describe('device memory admission', () => {
     const { ledger } = await fixture();
     await expect(ledger.execute(request(200))).rejects.toMatchObject({ code: 'capacity-denied' });
     expect((await ledger.execute(request(20))).state).toBe('granted');
+  });
+});
+
+describe('a model larger than a discrete card', () => {
+  // qwen3.6-35b-a3b-q4 on a 12 GB laptop: 24.2 GB planned, of which the
+  // offload plan keeps about 6 GB on the card and streams the experts.
+  const offloaded = (gpuGib: number) => ({ ...request(24.2), gpuBytes: gpuGib * GIB });
+
+  it('starts on a card other programs share when the RAM its experts need is free', async () => {
+    const { ledger } = await fixture({
+      budgetBytes: 30 * GIB,
+      gpuBudgetBytes: 11.34 * GIB,
+      availableBytes: 19 * GIB + 11.34 * GIB,
+      availableGpuBytes: 7 * GIB,
+      availableRamBytes: 19 * GIB,
+    });
+    expect((await ledger.execute(offloaded(6))).state).toBe('granted');
+  });
+
+  it('waits on RAM, naming the RAM it needs, when the experts would not fit', async () => {
+    const { ledger } = await fixture({
+      budgetBytes: 30 * GIB,
+      gpuBudgetBytes: 11.34 * GIB,
+      availableBytes: 7.7 * GIB + 11.34 * GIB,
+      availableGpuBytes: 11 * GIB,
+      availableRamBytes: 7.7 * GIB,
+    });
+    const reply = await ledger.execute(offloaded(6));
+    expect(reply.state).toBe('waiting');
+    expect(reply.externalShortfall).toBe(true);
+    expect(reply.requiredBytes).toBeCloseTo(18.2 * GIB, -6);
+    expect(reply.availableBytes).toBe(7.7 * GIB);
+  });
+
+  it('charges a model that fits the card nothing against RAM, as before', async () => {
+    const { ledger } = await fixture({
+      budgetBytes: 30 * GIB,
+      gpuBudgetBytes: 11.34 * GIB,
+      availableBytes: 1 * GIB + 11.34 * GIB,
+      availableGpuBytes: 11 * GIB,
+      availableRamBytes: 1 * GIB,
+    });
+    expect((await ledger.execute(request(10))).state).toBe('granted');
   });
 });
 

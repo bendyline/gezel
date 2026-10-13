@@ -4,14 +4,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { Resvg } from '@resvg/resvg-js';
+import { iconSvg, writeIconAsset } from './icon-artwork.mjs';
 
 const appDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 const assetsDir = join(appDir, 'assets');
 const outputPath = join(assetsDir, 'icon.ico');
 const checkOnly = process.argv.includes('--check');
 
-// Windows uses native-size drawings for the tiny shell frames. Explorer-size
-// frames come from a separate vector master with rounded transparent corners.
+// Native-size drawings share one master; only tiny frames snap to the pixel grid.
 const frameSpecs = [
   [16, 'icon-windows-small.svg'],
   [20, 'icon-windows-20.svg'],
@@ -25,6 +25,17 @@ const frameSpecs = [
 ];
 
 const pngSignature = Buffer.from('89504e470d0a1a0a', 'hex');
+
+for (const [size, name] of [
+  [16, 'icon-windows-small.svg'],
+  [20, 'icon-windows-20.svg'],
+  [24, 'icon-windows-24.svg'],
+  [32, 'icon-windows-32.svg'],
+  [96, 'icon-windows-medium.svg'],
+  [256, 'icon-windows-large.svg'],
+]) {
+  await writeIconAsset(join(assetsDir, name), iconSvg({ size }), checkOnly);
+}
 
 async function renderFrame(size, sourceName) {
   const svg = await readFile(join(assetsDir, sourceName), 'utf8');

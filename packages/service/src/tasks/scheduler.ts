@@ -17,10 +17,10 @@ import {
   taskEffectiveStatus,
   workshopTempoDefaults,
 } from '@bendyline/gezel';
+import { beginPerfWork } from '@bendyline/gezel-inference/internal/perf/responsiveness';
 import type { ChatManager } from '../chat/manager.js';
 import type { ActivityTracker } from '../fs/activity-tracker.js';
 import type { Store } from '../fs/store.js';
-import { beginPerfWork } from '../perf/responsiveness.js';
 import {
   buildPlateauDiagnosisNote,
   buildStageOneNudge,

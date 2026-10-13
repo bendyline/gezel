@@ -1,0 +1,98 @@
+{
+  "name": "@bendyline/gezel-inference",
+  "version": "0.1.0",
+  "description": "Shared on-device inference, model management and knowledge runtime for Gezel hosts.",
+  "license": "MIT",
+  "keywords": ["gezel", "ai", "agents", "local-first", "daemon", "server", "llm"],
+  "homepage": "https://github.com/bendyline/gezel",
+  "bugs": {
+    "url": "https://github.com/bendyline/gezel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendyline/gezel.git",
+    "directory": "packages/inference"
+  },
+  "author": {
+    "name": "Bendyline",
+    "email": "support@bendyline.com"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./native-release": {
+      "types": "./dist/native-release-entry.d.ts",
+      "import": "./dist/native-release-entry.js"
+    },
+    "./speech": {
+      "types": "./dist/speech.d.ts",
+      "import": "./dist/speech.js"
+    },
+    "./internal/*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    },
+    "./package.json": "./package.json",
+    "./packaging": {
+      "types": "./scripts/embedding-packaging.d.cts",
+      "default": "./scripts/embedding-packaging.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "scripts/embedding-packaging.cjs",
+    "scripts/embedding-packaging.d.cts",
+    "!dist/**/*.map",
+    "!dist/**/*_test.py",
+    "!dist/**/*_modeltest.py",
+    "!dist/**/__pycache__"
+  ],
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && node scripts/stage-assets.mjs",
+    "dev": "node scripts/stage-assets.mjs && tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@bendyline/gezel": "workspace:*",
+    "@bendyline/gezel-catalog": "workspace:*",
+    "@bendyline/gezel-client": "workspace:*",
+    "@bendyline/gezel-knowledge": "workspace:*",
+    "hono": "4.13.9",
+    "tar": "7.5.21",
+    "undici": "8.11.2",
+    "yauzl": "^3.4.0",
+    "yazl": "^3.3.1",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@huggingface/transformers": "^4.3.1"
+  },
+  "peerDependenciesMeta": {
+    "@huggingface/transformers": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/yauzl": "^3.4.0",
+    "@types/yazl": "^3.3.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10",
+    "@huggingface/transformers": "^4.3.1"
+  }
+}

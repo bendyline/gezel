@@ -1,8 +1,9 @@
+import type { EngineRouter as InferenceEngineRouter } from '@bendyline/gezel-inference/internal/providers/native/engine-router';
 import { describe, expect, it, vi } from 'vitest';
 import { ChatEventBus } from './events.js';
 import { ChatManager } from './manager.js';
 
-type EngineRouter = import('../providers/native/engine-router.js').EngineRouter;
+type EngineRouter = InferenceEngineRouter;
 
 function makeManager(engineRouter?: EngineRouter): ChatManager {
   return new ChatManager({

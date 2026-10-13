@@ -19,6 +19,10 @@ export function timelineRoutes(ctx: ServiceContext): Hono {
       rawLimit: c.req.query('limit'),
       before: c.req.query('before'),
       gezelId: c.req.query('gezel'),
+      // Home's conversation is what the person asked for. A scheduled run
+      // reports through the morning review, and on a new install its failure
+      // would otherwise replace the Meester's welcome.
+      excludeScheduledRuns: true,
     });
     return c.json(response);
   });
@@ -34,6 +38,7 @@ export async function buildTimeline(
     taskRef?: string;
     rawLimit?: string;
     before?: string;
+    excludeScheduledRuns?: boolean;
   },
 ): Promise<ListTimelineResponse> {
   const limit = clampLimit(opts.rawLimit);
@@ -41,6 +46,7 @@ export async function buildTimeline(
     ...(opts.projectId ? { projectId: opts.projectId } : {}),
     ...(opts.gezelId ? { gezelId: opts.gezelId } : {}),
     ...(opts.taskRef ? { taskRef: opts.taskRef } : {}),
+    ...(opts.excludeScheduledRuns ? { excludeScheduledRuns: true } : {}),
     limit,
     ...(opts.before ? { before: opts.before } : {}),
     // Lets the reference backfill recognize workspace paths, not just

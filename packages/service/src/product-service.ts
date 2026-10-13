@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { findBundledHandboekArchive } from './handboek/bundled-archive.js';
 import {
   migrateInstalledModelIds,
   reclaimStaleModelDownloads,
@@ -23,7 +24,6 @@ import {
   onSuspension,
   parseTaskRef,
   projectAllowsAmbientWork,
-  projectLeadGezelId,
   projectNightWorkEnabled,
   resolveSecurityPolicy,
   resolveSocialMode,
@@ -35,7 +35,6 @@ import {
   type ExternalFolders,
   KeyedLock,
   type Task,
-  type TaskAssignee,
   type TaskCraftbookStep,
   resolveDistributionProfile,
 } from '@bendyline/gezel';
@@ -47,6 +46,11 @@ import { AmbientDashboardGenerator } from './ambient/dashboard-generator.js';
 import { createAppServeController } from './app-serve/controller.js';
 import { AppToolRelayRegistry } from './app-tools/relay-registry.js';
 
+import { createEngineComponents } from '@bendyline/gezel-inference/internal/engine-components';
+import {
+  startResponsivenessMonitor,
+  syncPerfProfiling,
+} from '@bendyline/gezel-inference/internal/perf/responsiveness';
 import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
@@ -57,9 +61,9 @@ import {
   wireProductConnectorTaskPreparation,
 } from './connectors/product-wiring.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
-import { listApplicableCraftbooks, projectCraftbookSummaries } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
 import { clearCraftbookSuggestVectorCache } from './craftbook/suggest.js';
+import { createCraftbookTerminalCommands } from './craftbook/terminal-commands.js';
 import { DebugFlag } from './debug/flag.js';
 import {
   reopenIssuesForDismissedPack,
@@ -69,16 +73,18 @@ import {
 import { DiffpackManager } from './diffpack/manager.js';
 import { planProjectNightFixes, releaseStaleNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
-import { createEngineComponents } from './engine-components.js';
 import { prepareNativeEngines } from './engine-discovery.js';
 import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
-import { startResponsivenessMonitor, syncPerfProfiling } from './perf/responsiveness.js';
 
+import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
+import { KnowledgeManager } from '@bendyline/gezel-inference/internal/knowledge/manager';
+import { createWorkerCatalogHost } from '@bendyline/gezel-inference/internal/knowledge/worker-host';
+import { warmEmbeddings } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import { deferBootWork } from './boot-work.js';
+import { FirstUseIndexingHold, defaultProviderCanAnswer } from './first-run/indexing-hold.js';
 import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
 import { ActivityTracker } from './fs/activity-tracker.js';
-import { ensurePrivateUserHome } from './fs/home-permissions.js';
 import { mimeTypeForFilename } from './fs/media-types.js';
 import { Store } from './fs/store.js';
 import { ensureDefaultBoekwachter, resolveProjectBoekwachter } from './gezels/autonomous-roles.js';
@@ -125,9 +131,7 @@ import { toDecodableRaster } from './index-store/raster-normalize.js';
 import { ensureIndexFresh } from './index-store/readiness.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
-import { KnowledgeManager } from './knowledge/manager.js';
 import { createSharedKnowledgeInstaller } from './knowledge/shared-install.js';
-import { createWorkerCatalogHost } from './knowledge/worker-host.js';
 import { createLocalHarnessIntegrations } from './local-harness/integrations.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
 import {
@@ -137,14 +141,13 @@ import {
 } from './meester/night-shift-oversight.js';
 import { MeesterStatusGenerator } from './meester/status-generator.js';
 import { MemoryCompactor } from './memory/compaction.js';
-import { warmEmbeddings } from './memory/embeddings.js';
 import { MemoryHealthMonitor } from './memory/health.js';
 import { MemoryManager } from './memory/manager.js';
 import { openModelWorkers, shutdownModelWorkers } from './model-workers.js';
 
 import { buildChatModelInstallRegistries } from './models/install-jobs.js';
 
-import { migrateLegacySystemModels } from './models/storage-roots.js';
+import { migrateLegacySystemModels } from '@bendyline/gezel-inference/internal/models/storage-roots';
 import { DuckRunner } from './observations/duck.js';
 import { runProjectObservationNightly } from './observations/nightly.js';
 import {
@@ -158,32 +161,48 @@ import { PromptDraftManager } from './prompt-drafts/manager.js';
 import { PromptDraftSweeper } from './prompt-drafts/sweeper.js';
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
 import { TextToSpeechProviderManager } from './providers/audio/tts-manager.js';
+import { catalogSampleReader } from './tasks/inputs/samples.js';
 import { InputStagingManager } from './tasks/inputs/staging.js';
 
 import { ImageProviderManager } from './providers/image/manager.js';
 import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
 
+import { ensureLlamaEngineStatus } from '@bendyline/gezel-inference/internal/providers/llama-cpp/build-provider';
+import type { LLMProvider } from '@bendyline/gezel-inference/internal/providers/types';
+import { MlxRuntimeStatusBus } from '@bendyline/gezel-inference/internal/python/mlx-runtime-status-bus';
+import { UvRuntime } from '@bendyline/gezel-inference/internal/python/uv-runtime';
+import { RelevanceModelManager } from '@bendyline/gezel-inference/internal/relevance/manager';
+import {
+  loadOrCreateDeviceIdentity,
+  signCertFingerprint,
+} from '@bendyline/gezel-inference/internal/remotes/identity';
+import { closePairedRemoteFetches } from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
+import {
+  type RuntimeLock,
+  acquireSingleInstanceLock,
+} from '@bendyline/gezel-inference/internal/runtime-lock';
+import {
+  detectMemoryProfile,
+  detectMemoryProfileCached,
+} from '@bendyline/gezel-inference/internal/system/memory';
+import {
+  HF_CACHE_DIR_ENV,
+  transformersCacheDir,
+} from '@bendyline/gezel-inference/internal/transformers-cache';
 import { MediaSearchManager, backgroundDownloadsAllowed } from './media-search/manager.js';
 import { createOfficeIntegrations } from './office-host/integrations.js';
+import { resolveCopilotAvailability } from './providers/copilot-availability.js';
 import { resolveDefaultProviderName } from './providers/default-provider.js';
-import { ensureLlamaEngineStatus } from './providers/llama-cpp/build-provider.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
 import { resolveAutoMode } from './providers/recognition/prompts.js';
-import type { LLMProvider } from './providers/types.js';
 import { VideoProviderManager } from './providers/video/manager.js';
 import { VideoModelPullRegistry } from './providers/video/pull-registry.js';
-import { MlxRuntimeStatusBus } from './python/mlx-runtime-status-bus.js';
-import { UvRuntime } from './python/uv-runtime.js';
-import { RelevanceModelManager } from './relevance/manager.js';
-import { loadOrCreateDeviceIdentity, signCertFingerprint } from './remotes/identity.js';
-import { closePairedRemoteFetches } from './remotes/pinned-fetch.js';
 import { createRemotesRegistry } from './remotes/registry.js';
 import { createRemoteServingController } from './remotes/serving.js';
 import { createTenantLimiter } from './remotes/tenant-limits.js';
 import { ImageRenderer } from './rendering/image-renderer.js';
 import { ReportActionManager } from './report-actions/report-action-manager.js';
 import { writeRuntime } from './runtime-discovery.js';
-import { type RuntimeLock, acquireSingleInstanceLock } from './runtime-lock.js';
 import {
   startWindowsScriptSandbox,
   windowsScriptSandboxStatus,
@@ -191,7 +210,7 @@ import {
 import { ScriptRunner } from './scripts/runner.js';
 import { buildExtraSearchCatalogs } from './search/extra-catalogs.js';
 import { CATALOG_RELEVANT_HISTORY_KINDS, SearchService } from './search/search-service.js';
-import { MemorySecretStore, openSecretStore } from './secrets/index.js';
+import { openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
 import type { RunningService, StartServiceOptions } from './service-options.js';
 import { observeShutdownStep } from './shutdown-progress.js';
@@ -200,10 +219,8 @@ import { SystemToolsetInstallRegistry } from './system-toolsets/install-registry
 import { SystemStatusBus } from './system-toolsets/status-bus.js';
 import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
 import { SystemIdleState } from './system/idle-state.js';
-import { detectMemoryProfile, detectMemoryProfileCached } from './system/memory.js';
 import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-capability.js';
 import { loadTaskOutputs } from './tasks/completion-wrapup.js';
-import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
 import { reviewTaskFigures } from './tasks/figure-review.js';
 import { TaskLauncher } from './tasks/launcher.js';
 import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
@@ -221,8 +238,7 @@ import {
 } from './tasks/step-pause.js';
 import { isOwnerStep } from './tasks/step-runtime.js';
 import { TerminalEventBus } from './terminal/events.js';
-import { type CraftbookInvoker, TerminalManager } from './terminal/manager.js';
-import { HF_CACHE_DIR_ENV, transformersCacheDir } from './transformers-cache.js';
+import { TerminalManager } from './terminal/manager.js';
 import { WorkspaceIndexManager } from './workspace/index-manager.js';
 import { ensureCommandApprovalQuestions } from './workspace/scripts.js';
 import { WorkspaceWatchManager } from './workspace/watch-manager.js';
@@ -248,7 +264,6 @@ export async function startProductService(
   opts: StartServiceOptions & { role: 'user' | 'legacy-full' },
 ): Promise<RunningService> {
   const home = opts.home ?? gezelHome();
-  const embeddedInferenceOnly = opts.embeddedInferenceOnly === true;
   // A previous service in this process (an embedded host restarting) closed
   // the shared model workers on its way out.
   openModelWorkers();
@@ -525,19 +540,17 @@ export async function startProductService(
   // embedded inference profile never opens the OS keychain, never writes a
   // secrets file into the app's home, and never ingests an env file of
   // provider keys.
-  const secrets = embeddedInferenceOnly ? new MemorySecretStore() : await openSecretStore(home);
+  const secrets = await openSecretStore(home);
   log.info(`[secrets] backend=${secrets.backend}`);
   // The engine broker needs its device-identity key, but must never ingest
   // cloud/provider credentials from an install-time env file. Those remain
   // exclusively in each account's user daemon.
-  if (!embeddedInferenceOnly) await seedSecretsFromEnvFile(secrets);
+  await seedSecretsFromEnvFile(secrets);
   // Stable device identity (Ed25519) + the registry of servers this device has
   // paired with — both for remote model execution. Identity needs the secret
   // store (private key lives there); the registry is plain 0600 JSON. The
   // embedded profile offers no remote connectivity, so it has no identity.
-  const deviceIdentity = embeddedInferenceOnly
-    ? null
-    : await loadOrCreateDeviceIdentity(home, secrets);
+  const deviceIdentity = await loadOrCreateDeviceIdentity(home, secrets);
   const remotes = await createRemotesRegistry({ home });
   const systemStatus = new SystemStatusBus();
   const mlxRuntimeStatus = new MlxRuntimeStatusBus();
@@ -777,10 +790,26 @@ export async function startProductService(
   // The desktop app's OS-idle and power reports; read by enrichment and the
   // night shift.
   const systemIdle = new SystemIdleState();
+  // A new install's first half hour belongs to meeting the Meester, not to a
+  // title bar reporting "scanning Default" or a night shift failing on an
+  // engine that is still downloading. See first-run/indexing-hold.ts.
+  const indexingHold = new FirstUseIndexingHold({
+    readConfig: () => store.readConfig(),
+    writeConfig: (patch) => store.writeConfig(patch),
+    chatModelReady: async () =>
+      defaultProviderCanAnswer({
+        config: await store.readConfig(),
+        listInstalledModels: (provider) => chat.listModelsForProvider(provider),
+        hasCredential: async (name) =>
+          (await secrets.get({ kind: 'providerCredential', name })) !== null,
+        copilotAvailable: async () => (await resolveCopilotAvailability(home)).available,
+      }),
+  });
   const nightShift = new NightShiftManager({
     store,
     manager: tasks,
     events: chatEvents,
+    firstUseHold: indexingHold,
     ...(opts.nightShiftNow ? { now: opts.nightShiftNow } : {}),
     quotaGate: nightQuotaGate,
     resolveProviderName: (gezelId, opts) => chat.providerForGezel(gezelId, opts),
@@ -871,8 +900,9 @@ export async function startProductService(
     // so the runner's night dispatch holds until static + AI indexing is
     // current across projects, then the queued shift work proceeds. Not
     // awaited — a manual start must respond immediately, and a full drain
-    // can take a while on a big repo.
-    void indexEnrichmentRef?.catchUpAll();
+    // can take a while on a big repo. The hold is read before the sweep
+    // starts so that ordering survives it.
+    if (!(await indexingHold.isActive())) void indexEnrichmentRef?.catchUpAll();
     await taskRunner.rehydrateFromStore({ nightShiftOnly: true });
     await taskRunner.wake();
   });
@@ -1038,7 +1068,22 @@ export async function startProductService(
     const gezelId = step ? stepOwnerGezelId(task, step) : undefined;
     if (!step || !gezelId || !freshHires.delete(gezelId)) return;
     void chat
-      .postCrewIntroduction(task, gezelId, step)
+      .postCrewIntroduction(task, gezelId, step, 'joined')
+      .catch((err) =>
+        log.warn(`[service] crew introduction failed for ${task.ref}: ${String(err)}`),
+      );
+  };
+  // A task launched from a chat introduces its crew there as it starts:
+  // whoever takes the entry step, and the lead when that is someone else.
+  // A typed project's lead and a kickoff's voorman are not resolver hires,
+  // so before this they arrived without a word.
+  const introduceAtKickoff = (task: Task, step: TaskCraftbookStep | undefined): void => {
+    const gezelId = step ? stepOwnerGezelId(task, step) : undefined;
+    if (!step || !gezelId) return;
+    const fresh = freshHires.delete(gezelId);
+    if (!fresh && !task.launchSessionId) return;
+    void chat
+      .postCrewIntroduction(task, gezelId, step, 'kickoff')
       .catch((err) =>
         log.warn(`[service] crew introduction failed for ${task.ref}: ${String(err)}`),
       );
@@ -1191,7 +1236,7 @@ export async function startProductService(
         log.warn(`[service] owner-step card failed for ${task.ref}: ${String(err)}`),
       );
     }
-    if (task.status === 'active') introduceFreshHire(task, entry);
+    if (task.status === 'active') introduceAtKickoff(task, entry);
     // A book that verifies its work by running project commands
     // (`commandEvidence` gates) declares them as `commands` needs; raise
     // their first-use approval questions NOW so the user answers at
@@ -1315,8 +1360,7 @@ export async function startProductService(
   // bridge publishes the verified remote before invoking this single drain,
   // so new work routes machine-wide while existing local work finishes.
   const machineEngineDiscovery =
-    !embeddedInferenceOnly &&
-    (opts.machineEngineDiscovery ?? process.env.GEZEL_DISABLE_MACHINE_ENGINE !== '1');
+    opts.machineEngineDiscovery ?? process.env.GEZEL_DISABLE_MACHINE_ENGINE !== '1';
   if (serviceRole === 'user' && !machineEngineDiscovery) {
     log.info('[machine-engine] discovery disabled; native inference stays in this user daemon');
   }
@@ -1448,104 +1492,19 @@ export async function startProductService(
     });
   });
 
-  // Craftbook command launcher: the in-chat terminal recognizes a
-  // craftbook command (e.g. `code-review security high`) and dispatches
-  // it here. We create a task from the craftbook with the supplied
-  // params, assign the role-matched gezel for the entry step, and start
-  // it. Kept alongside the other cross-manager wiring; injected into the
-  // TerminalManager below. NOTE: an ordinary entry step is NOT sent
-  // through `onStepActivated`, so `dispatchTaskEntry` is its single
-  // kickoff. Deterministic entry setup may auto-advance; that later phase
-  // uses `onStepActivated`, and the entry helper refuses to dispatch it a
-  // second time. Its OTHER call site is the create route's `dispatchEntry`
-  // flag (routes/project-tasks.ts, the meester macros' path).
-  const craftbookInvoker: CraftbookInvoker = async ({ projectId, craftbookId, params }) => {
-    // Resolve through the task resolver's chain, not the catalog alone: a
-    // project-local book (`.gezel/craftbooks/`, usually converted from a
-    // repo SKILL.md) is offered by the launcher rail, so a catalog-only
-    // lookup here rejected exactly the books this project defined itself.
-    const resolved = await craftbookResolver.resolve(craftbookId, { projectId }).catch(() => null);
-    if (!resolved) {
-      throw new Error(`unknown craftbook "${craftbookId}"`);
-    }
-    const m = resolved.craftbook;
-
-    const paramSummary = Object.entries(params)
-      .map(([k, v]) => `${k}=${v}`)
-      .join(', ');
-    const withClause = paramSummary ? ` with ${paramSummary}.` : '.';
-    const tail = m.description ? ` ${m.description}` : '';
-    const description =
-      `Run the "${m.name}" craftbook against this project${withClause}${tail}`.slice(0, 2000);
-
-    // Assignee = role-matched gezel for the entry step, not the user.
-    const entryRole = m.steps.find((s) => s.id === m.entryStepId)?.suggestedRole;
-    let assignee: TaskAssignee = { kind: 'user' };
-    if (entryRole) {
-      const owner = await roleResolverClosure(entryRole, projectId).catch(() => null);
-      if (owner?.gezelId) assignee = { kind: 'gezel', gezelId: owner.gezelId };
-    }
-    if (assignee.kind === 'user') {
-      // A book whose entry step names no role — every SKILL.md conversion
-      // that carried no persona — would otherwise launch owned by the user
-      // and never dispatch: created, active, and inert, which reads to the
-      // user as "I ran it and nothing happened". The project lead (voorman,
-      // or the Meester in Default) is the standing answer to "who picks
-      // this up?". Falls through to the user only when there is none.
-      const project = await store.getProject(projectId).catch(() => null);
-      const config = await store.readConfig().catch(() => null);
-      const leadGezelId = project ? projectLeadGezelId(project, config?.meesterGezelId) : undefined;
-      if (leadGezelId) assignee = { kind: 'gezel', gezelId: leadGezelId };
-    }
-
-    const task = await tasks.create(projectId, {
-      title: `${m.name} — ${new Date().toLocaleString()}`,
-      description,
-      craftbookId,
-      assignee,
-      ...(Object.keys(params).length > 0 ? { craftbookParams: params } : {}),
-      // A craftbook with a declarative `spawn` block becomes a spawn host:
-      // its child template rides in as `spawnsCraftbook`, and the runtime
-      // fans out one child per item when the `spawnFanout` step activates
-      // (see the onStepActivated fanout branch). No cron/fanout needed —
-      // the fanout trigger is the spawn-host mechanism for this book.
-      ...(m.spawn
-        ? {
-            spawnsSteps: m.spawn.steps,
-            ...(m.spawn.entryStepId ? { spawnsEntryStepId: m.spawn.entryStepId } : {}),
-          }
-        : {}),
-      createdBy: { kind: 'user' },
-    });
-
-    // Stamp invocation params as an entry-step note so the gezel reads
-    // them via `read_task_notes` (mirrors spawnChild's instance context).
-    if (Object.keys(params).length > 0 && task.activeStepId) {
-      const lines = ['# Invocation parameters', ''];
-      for (const [k, v] of Object.entries(params)) lines.push(`- **${k}**: ${v}`);
-      await tasks
-        .appendNote(task.projectId, task.num, {
-          text: lines.join('\n'),
-          author: { kind: 'user' },
-          stepId: task.activeStepId,
-        })
-        .catch(() => {
-          /* note is best-effort */
-        });
-    }
-
-    // Entry-gezel resolution + ambient-work guard + enqueue live in the
-    // shared helper so this launcher and the create-route `dispatchEntry`
-    // flag (the meester macros' path) cannot drift.
-    const dispatch = await dispatchTaskEntry({ store, taskRunner, history }, task);
-
-    return {
-      taskRef: task.ref,
-      craftbookName: m.name,
-      ...(dispatch.assigneeName ? { assigneeName: dispatch.assigneeName } : {}),
-      started: dispatch.enqueued,
-    };
-  };
+  // The in-chat terminal's craftbook commands (e.g. `code-review security
+  // high`): recognized per project, then launched as a task owned by the
+  // role-matched gezel for the entry step; see craftbook/terminal-commands.ts.
+  const craftbookCommands = createCraftbookTerminalCommands({
+    store,
+    catalog,
+    git,
+    tasks,
+    taskRunner,
+    history,
+    craftbookResolver,
+    resolveRole: roleResolverClosure,
+  });
 
   const { JobManager: FolderJobManager } = await import('./folders/job-manager.js');
   const folderJobs = new FolderJobManager();
@@ -1584,6 +1543,7 @@ export async function startProductService(
     catalog,
     contentIndex,
     events: chatEvents,
+    holdsBackgroundScan: (project) => indexingHold.holds(project),
   });
   // Same post-construction injection as the content index above: the
   // indexer takes `chat` as a dependency, so the reference parser can only
@@ -1644,6 +1604,7 @@ export async function startProductService(
   chat.setPromptDrafts(promptDrafts);
   const inputStaging = new InputStagingManager(store);
   tasks.setInputStaging(inputStaging);
+  tasks.setSampleReader(catalogSampleReader(catalog));
   // The nightly oversight task is ensured at boot; ensure it again as each
   // window opens, so a task deleted, renamed or stuck on an old prompt since
   // boot is repaired in time to run tonight.
@@ -1821,11 +1782,13 @@ export async function startProductService(
     if (libraryRefreshTimer) clearTimeout(libraryRefreshTimer);
     libraryRefreshTimer = setTimeout(() => {
       libraryRefreshTimer = null;
-      void workspaceIndex
-        .refresh(sharedProject!.id)
-        .catch((err) =>
-          log.warn(`[library] refresh failed: ${err instanceof Error ? err.message : err}`),
-        );
+      void (async () => {
+        // The library is never one of the person's own folders.
+        if (await indexingHold.isActive()) return;
+        await workspaceIndex.refresh(sharedProject!.id);
+      })().catch((err) =>
+        log.warn(`[library] refresh failed: ${err instanceof Error ? err.message : err}`),
+      );
     }, LIBRARY_REFRESH_DEBOUNCE_MS);
     libraryRefreshTimer.unref?.();
   };
@@ -1849,6 +1812,7 @@ export async function startProductService(
   // User daemons only — the machine broker installs shared bytes but never
   // mounts, searches, or holds a per-user registry.
   const knowledge = new KnowledgeManager({
+    bundledHandboekArchive: findBundledHandboekArchive(),
     home,
     host: createWorkerCatalogHost(),
     catalog,
@@ -1898,6 +1862,7 @@ export async function startProductService(
     idle: systemIdle,
     isNightShiftActive: () => nightShift.isActive(),
     isPaused: () => indexingJob.isPaused(),
+    isBackgroundHeld: () => indexingHold.isActive(),
     events: chatEvents,
     history,
     refreshStatic: (projectId) => workspaceIndex.refreshAndWait(projectId),
@@ -2072,7 +2037,11 @@ export async function startProductService(
   // no 3-minute OS-idle wait, no Boekwachter. This is what makes semantic
   // search real minutes after a fresh install points gezel at a folder.
   workspaceIndex.setOnScanComplete((projectId) => {
-    indexEnrichment.drainEmbedOnly(projectId);
+    // During the first-use hold a scan still lists the files (the person's
+    // own folders get their first look); embedding them waits for the release.
+    void indexingHold.isActive().then((held) => {
+      if (!held) indexEnrichment.drainEmbedOnly(projectId);
+    });
   });
   // `gezel.index.*` for sandboxed scripts: the readiness surface craftbook
   // hooks use to make "this review depends on a current index" real. Wired
@@ -2110,6 +2079,8 @@ export async function startProductService(
     // watcher slot — yet it is the one workspace that routinely changes from
     // outside the app (a sync client landing a file from another device).
     pinnedProjects: () => (sharedProject ? [sharedProject.id] : []),
+    holdsRefresh: async (projectId) =>
+      indexingHold.holds(await store.getProject(projectId).catch(() => null)),
   });
 
   // Connectors: mail, calendar, and wiki natives plus the generic drivers,
@@ -2171,34 +2142,8 @@ export async function startProductService(
     workspaceIndex,
     events: terminalEvents,
     history,
-    // Only craftbooks applicable to THIS project (requirements met) are
-    // recognized as terminal commands — so e.g. `pull-request-review`
-    // isn't a command in a non-GitHub project. Project-local books are
-    // merged in (shadowing same-id catalog entries) to match what the
-    // launcher rail offers: without them, clicking a book this repo
-    // defined itself staged a line the terminal then tried to run as a
-    // shell command.
-    listCraftbookCommands: async (projectId) => {
-      const projectItems = await projectCraftbookSummaries(store, projectId, { git });
-      const projectIds = new Set(projectItems.map((it) => it.manifest.id));
-      const catalogItems = await listApplicableCraftbooks(catalog, store, projectId, { git });
-      const items = [
-        ...projectItems,
-        ...catalogItems.filter((it) => !projectIds.has(it.manifest.id)),
-      ];
-      return items.flatMap((it) =>
-        it.manifest.kind === 'craftbook-template'
-          ? [
-              {
-                id: it.manifest.id,
-                command: it.manifest.command ?? it.manifest.id,
-                ...(it.manifest.paramSchema ? { paramSchema: it.manifest.paramSchema } : {}),
-              },
-            ]
-          : [],
-      );
-    },
-    craftbookInvoker,
+    listCraftbookCommands: craftbookCommands.listCraftbookCommands,
+    craftbookInvoker: craftbookCommands.craftbookInvoker,
     // Project-wide MCP tools recognized as terminal commands + their run path,
     // both backed by the project-scoped (non-role-filtered) tool bridge.
     listMcpTools: async (projectId) => {
@@ -2311,8 +2256,11 @@ export async function startProductService(
   // token is not a chat bug, an engine bug, or a GPU bug, but it presents as
   // all three at once, each at a different call site. See spawn-capability.ts.
   const childProcessSpawn = await probeChildProcessSpawn();
+  let stopWindowsScriptSandbox: (() => Promise<void>) | undefined;
   if (childProcessSpawn === 'denied') log.error(`[spawn] ${SPAWN_DENIED_MESSAGE}`);
-  else if (process.platform === 'win32') await startWindowsScriptSandbox(store, home);
+  else if (process.platform === 'win32') {
+    stopWindowsScriptSandbox = await startWindowsScriptSandbox(store, home);
+  }
 
   // App-serve sites — per-site visitor listeners for shared AI App
   // mini-sites. A product feature: the machine-engine role never serves.
@@ -2441,7 +2389,6 @@ export async function startProductService(
     onUnexpectedHttpError: opts.onUnexpectedHttpError,
     previewCapabilities,
     previewBrowserOrigin: () => previewBrowser.origin,
-    embeddedInferenceOnly,
   });
   const remoteApp = buildRemoteApp(context);
   remoteFetchRef.value = remoteApp.fetch.bind(remoteApp);
@@ -2514,78 +2461,74 @@ export async function startProductService(
   // a broker defers so 6229 isn't double-bound and peers don't pay a second
   // streaming hop. A broker that is installed-but-down at this boot leaves
   // the user daemon serving until its next restart — logged, accepted.
-  if (!embeddedInferenceOnly) {
-    const lanServingDelegatedToBroker =
-      serviceRole === 'user' && machineEngine?.isRequired() === true;
-    if (!lanServingDelegatedToBroker) {
-      await remoteServing.reconfigure(config.remoteServing).catch((err) => {
-        log.error(
-          `[service] failed to start remote serving: ${err instanceof Error ? err.message : err}`,
-        );
-      });
-    } else if (config.remoteServing?.enabled) {
-      log.info(
-        '[service] LAN model serving is owned by the machine engine broker; per-user listener not started',
-      );
-    }
-    await ollamaEmulation.reconfigure(config.openaiEndpoints).catch((err) => {
-      log.warn(
-        `[service] ollama emulation not started: ${err instanceof Error ? err.message : err}`,
+  const lanServingDelegatedToBroker =
+    serviceRole === 'user' && machineEngine?.isRequired() === true;
+  if (!lanServingDelegatedToBroker) {
+    await remoteServing.reconfigure(config.remoteServing).catch((err) => {
+      log.error(
+        `[service] failed to start remote serving: ${err instanceof Error ? err.message : err}`,
       );
     });
-    await codexSetup.reconcile().catch((err) => {
-      log.warn(
-        `[service] Codex local-model bridge not started: ${err instanceof Error ? err.message : err}`,
-      );
-    });
-    await opencodeSetup.reconcile().catch((err) => {
-      log.warn(
-        `[service] OpenCode local-model bridge not started: ${err instanceof Error ? err.message : err}`,
-      );
-    });
-    await piSetup.reconcile().catch((err) => {
-      log.warn(
-        `[service] pi local-model bridge not started: ${err instanceof Error ? err.message : err}`,
-      );
-    });
-    await vscodeSetup.reconcile().catch((err) => {
-      log.warn(
-        `[service] VS Code local-model bridge not started: ${err instanceof Error ? err.message : err}`,
-      );
-    });
-    await officeIntegrations.reconcile();
-    scheduler.start();
-    nightShift.start();
-    await ensureNightShiftOversightTask(store, tasks).catch((err) => {
-      log.warn('[night-shift] oversight ensure failed:', err instanceof Error ? err.message : err);
-    });
-    // `afterRestart` is what charges each resumed step to its restart
-    // budget; the night-shift and per-project rehydrations below/elsewhere
-    // are a running process re-reading its own queue and must not count.
-    await taskRunner.rehydrateFromStore({ afterRestart: true }).catch((err) => {
-      log.warn('[task-runner] rehydrate failed:', err instanceof Error ? err.message : err);
-    });
-    taskRunner.start();
-    // Chat's half of the same recovery, and deliberately after the runner's:
-    // a task session is rehydrated from its task record, and
-    // `resumeInterruptedTurns` skips those so the two never drive one
-    // session at once. Handoffs replay first — a message still parked when
-    // the process stopped has no session-side trace for the resume pass to
-    // find, so it has to be re-issued rather than resumed.
-    await chat.replayPendingHandoffs().catch((err) => {
-      log.warn('[chat] handoff replay failed:', err instanceof Error ? err.message : err);
-    });
-    // Detached: the resume pass reads every session summary to find the
-    // stamps, and boot readiness is the splash screen the user is watching.
-    // The turns it starts are background-lane anyway.
-    void chat.resumeInterruptedTurns().catch((err) => {
-      log.warn('[chat] interrupted-turn resume failed:', err instanceof Error ? err.message : err);
-    });
-    await ensureIndexingJobTask(store, tasks).catch((err) => {
-      log.warn('[indexing-job] ensure failed:', err instanceof Error ? err.message : err);
-    });
-    await channels.start();
+  } else if (config.remoteServing?.enabled) {
+    log.info(
+      '[service] LAN model serving is owned by the machine engine broker; per-user listener not started',
+    );
   }
+  await ollamaEmulation.reconfigure(config.openaiEndpoints).catch((err) => {
+    log.warn(`[service] ollama emulation not started: ${err instanceof Error ? err.message : err}`);
+  });
+  await codexSetup.reconcile().catch((err) => {
+    log.warn(
+      `[service] Codex local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+    );
+  });
+  await opencodeSetup.reconcile().catch((err) => {
+    log.warn(
+      `[service] OpenCode local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+    );
+  });
+  await piSetup.reconcile().catch((err) => {
+    log.warn(
+      `[service] pi local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+    );
+  });
+  await vscodeSetup.reconcile().catch((err) => {
+    log.warn(
+      `[service] VS Code local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+    );
+  });
+  await officeIntegrations.reconcile();
+  scheduler.start();
+  nightShift.start();
+  await ensureNightShiftOversightTask(store, tasks).catch((err) => {
+    log.warn('[night-shift] oversight ensure failed:', err instanceof Error ? err.message : err);
+  });
+  // `afterRestart` is what charges each resumed step to its restart
+  // budget; the night-shift and per-project rehydrations below/elsewhere
+  // are a running process re-reading its own queue and must not count.
+  await taskRunner.rehydrateFromStore({ afterRestart: true }).catch((err) => {
+    log.warn('[task-runner] rehydrate failed:', err instanceof Error ? err.message : err);
+  });
+  taskRunner.start();
+  // Chat's half of the same recovery, and deliberately after the runner's:
+  // a task session is rehydrated from its task record, and
+  // `resumeInterruptedTurns` skips those so the two never drive one
+  // session at once. Handoffs replay first — a message still parked when
+  // the process stopped has no session-side trace for the resume pass to
+  // find, so it has to be re-issued rather than resumed.
+  await chat.replayPendingHandoffs().catch((err) => {
+    log.warn('[chat] handoff replay failed:', err instanceof Error ? err.message : err);
+  });
+  // Detached: the resume pass reads every session summary to find the
+  // stamps, and boot readiness is the splash screen the user is watching.
+  // The turns it starts are background-lane anyway.
+  void chat.resumeInterruptedTurns().catch((err) => {
+    log.warn('[chat] interrupted-turn resume failed:', err instanceof Error ? err.message : err);
+  });
+  await ensureIndexingJobTask(store, tasks).catch((err) => {
+    log.warn('[indexing-job] ensure failed:', err instanceof Error ? err.message : err);
+  });
+  await channels.start();
 
   // System-toolset bootstrap — installs pinned packages (e.g. @playwright/mcp)
   // and downloads Chromium in the background. Status progress is emitted on
@@ -2601,14 +2544,25 @@ export async function startProductService(
   // download executable code at all". The published phase is still `ready` —
   // nothing is pending, and the toolsets are simply absent.
   const skipBootstrap =
-    embeddedInferenceOnly ||
     !distribution.allowRuntimeCodeDownloads ||
     process.env.GEZEL_SKIP_SYSTEM_BOOTSTRAP === '1' ||
     process.env.GEZEL_MOCK_PROVIDER === '1';
   if (skipBootstrap) {
     systemStatus.publish({ phase: 'ready' });
   } else {
-    void runSystemBootstrap({ home, store, statusBus: systemStatus, debug }).catch((err) => {
+    // Without a logger every line the bootstrap writes is dropped, so a failed
+    // Chromium download showed in Settings and nowhere in the service log.
+    void runSystemBootstrap({
+      home,
+      store,
+      statusBus: systemStatus,
+      debug,
+      logger: {
+        info: (m) => log.info(m),
+        warn: (m) => log.warn(m),
+        error: (m) => log.error(m),
+      },
+    }).catch((err) => {
       log.error('[system-toolsets] bootstrap crashed:', err);
       systemStatus.publish({
         phase: 'error',
@@ -2650,7 +2604,7 @@ export async function startProductService(
   // self-heals any indexes left empty by the previously-broken vector
   // wrapper. No-op if embeddings are disabled.
   const memoryHealth = new MemoryHealthMonitor({ memory, store });
-  if (!embeddedInferenceOnly) memoryHealth.start();
+  memoryHealth.start();
 
   // Periodic Klerk-driven memory compaction — dedups/merges aged daily
   // memory files (and refreshes each gezel's lessons.md) so the corpus
@@ -2663,7 +2617,7 @@ export async function startProductService(
     growth,
     oneShot: (prompt, timeoutMs, opts) => chat.oneShotCompletion(prompt, timeoutMs, opts),
   });
-  if (!embeddedInferenceOnly) memoryCompactor.start();
+  memoryCompactor.start();
 
   // Weekly "what changed" digests per project — commits + history + sessions
   // distilled by the Klerk into reports/digest-YYYY-Www.md. Same gating
@@ -2683,15 +2637,13 @@ export async function startProductService(
     },
   });
   const promptDraftSweeper = new PromptDraftSweeper({ store, drafts: promptDrafts });
-  if (!embeddedInferenceOnly) {
-    promptDraftSweeper.start();
-    inputStaging.startSweeping(store);
-    digestGenerator.start();
-    gildeUpdates.startScheduler();
-    activityTracker.start();
-    meesterStatus.start();
-    ambientDashboard.start();
-  }
+  promptDraftSweeper.start();
+  inputStaging.startSweeping(store);
+  digestGenerator.start();
+  gildeUpdates.startScheduler();
+  activityTracker.start();
+  meesterStatus.start();
+  ambientDashboard.start();
 
   // Keurmeester harvest digest: aggregates supervision case records into
   // daily findings + proposed systemic improvements. Self-throttled
@@ -2703,37 +2655,31 @@ export async function startProductService(
     home,
     oneShot: (prompt, timeoutMs, opts) => chat.oneShotCompletion(prompt, timeoutMs, opts),
   });
-  if (!embeddedInferenceOnly) {
-    keurmeesterDigest.start();
-    workspaceIndex.start();
-    workspaceWatch.start();
-  }
+  keurmeesterDigest.start();
+  workspaceIndex.start();
+  workspaceWatch.start();
   // Benchmarks (evals) disable the background tick and drive enrichment
   // explicitly via POST /:id/index/enrich, so tick-vs-drive contention can't
   // double-pay summarizer calls or skew cost measurements.
-  if (!embeddedInferenceOnly && process.env.GEZEL_DISABLE_BACKGROUND_ENRICH !== '1') {
+  if (process.env.GEZEL_DISABLE_BACKGROUND_ENRICH !== '1') {
     indexEnrichment.start();
   }
-  if (!embeddedInferenceOnly) {
-    globalIndexManager.start();
-    connectorSync.start();
-  }
+  globalIndexManager.start();
+  connectorSync.start();
 
   // Idle-session summarization sweep: every hour, distill any non-archived
   // session that's been quiet for `config.summarization.idleHours` (default
   // 24h) into project memory. First pass runs ~60s after boot so a fresh
   // process doesn't block startup.
-  const idleSummarizerTimer = embeddedInferenceOnly
-    ? null
-    : setInterval(
-        () => {
-          chat.runIdleSummarizationSweep().catch((err) => {
-            log.warn('[summarize] idle sweep crashed:', err instanceof Error ? err.message : err);
-          });
-        },
-        60 * 60 * 1000,
-      );
-  idleSummarizerTimer?.unref();
+  const idleSummarizerTimer = setInterval(
+    () => {
+      chat.runIdleSummarizationSweep().catch((err) => {
+        log.warn('[summarize] idle sweep crashed:', err instanceof Error ? err.message : err);
+      });
+    },
+    60 * 60 * 1000,
+  );
+  idleSummarizerTimer.unref();
   // Give back the provider sessions and MCP subprocesses of quiet sessions;
   // finished task sessions otherwise hold theirs until the daemon stops.
   const idleSessionTimer = setInterval(
@@ -2749,40 +2695,35 @@ export async function startProductService(
   // Cancelled by stop(): deferred work that starts during shutdown can load a
   // model worker that process.exit then aborts mid-load (see boot-work.ts).
   const cancelBootWork: Array<() => void> = [];
-  if (!embeddedInferenceOnly) {
-    cancelBootWork.push(
-      deferBootWork(
-        60_000,
-        () => {
-          chat.runIdleSummarizationSweep().catch(() => {
-            /* swallow */
-          });
-        },
-        () => stopping,
-      ),
-    );
-  }
+  cancelBootWork.push(
+    deferBootWork(
+      60_000,
+      () => {
+        chat.runIdleSummarizationSweep().catch(() => {
+          /* swallow */
+        });
+      },
+      () => stopping,
+    ),
+  );
   // Load the embedding pipeline before an interactive caller needs it. The
   // titlebar search fans out over content on every query, so without this
   // the model's one-time load lands on somebody's first keystroke. Deferred
   // so it never competes with boot or the first-run model download.
-  if (!embeddedInferenceOnly) {
-    cancelBootWork.push(
-      deferBootWork(
-        20_000,
-        () => {
-          void warmEmbeddings().then((warmed) => {
-            if (warmed) log.debug('[memory] embedding pipeline warmed');
-          });
-          void relevance.bootWarm().catch(() => {});
-          void mediaSearch.bootWarm().catch(() => {});
-        },
-        () => stopping,
-      ),
-    );
-  }
+  cancelBootWork.push(
+    deferBootWork(
+      20_000,
+      () => {
+        void warmEmbeddings().then((warmed) => {
+          if (warmed) log.debug('[memory] embedding pipeline warmed');
+        });
+        void relevance.bootWarm().catch(() => {});
+        void mediaSearch.bootWarm().catch(() => {});
+      },
+      () => stopping,
+    ),
+  );
 
-  if (embeddedInferenceOnly) log.info('[service] embedded inference ready');
   return {
     context,
     server,
@@ -2790,13 +2731,7 @@ export async function startProductService(
     clientToken,
     cert,
     webUiToken,
-    profile: embeddedInferenceOnly ? 'embedded-inference' : 'full',
-    ...(embeddedInferenceOnly
-      ? {
-          fetch: ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
-            app.fetch(new Request(input, init))) as typeof fetch,
-        }
-      : {}),
+    profile: 'full',
     async stop() {
       stopping = true;
       for (const cancel of cancelBootWork) cancel();
@@ -2816,6 +2751,7 @@ export async function startProductService(
       // seconds into shutdown, and a first-run Chromium download must not
       // outlive it as an orphan.
       const systemBootstrapsStopped = stopSystemBootstraps();
+      const windowsScriptSandboxStopped = stopWindowsScriptSandbox?.();
       // Quiesce chat before tearing down any callback dependencies. In
       // particular, keep the HTTP listener alive while MCP subprocesses and
       // active provider turns unwind; otherwise their service callbacks fail
@@ -2856,11 +2792,12 @@ export async function startProductService(
       engineBinaries.clear();
       systemToolsetInstalls.clear();
       await shutdownStep('system toolsets', () => systemBootstrapsStopped);
+      await shutdownStep('Windows script sandbox', () => windowsScriptSandboxStopped);
       await shutdownStep('image provider', () => imageProvider.shutdown());
       await shutdownStep('video provider', () => videoProvider.shutdown());
       await shutdownStep('speech recognition', () => stt.shutdown());
       await shutdownStep('speech synthesis', () => tts.shutdown());
-      if (idleSummarizerTimer) clearInterval(idleSummarizerTimer);
+      clearInterval(idleSummarizerTimer);
       clearInterval(idleSessionTimer);
       stopMemoryDiagnostics();
       await shutdownStep('channels', () => channels.stop());

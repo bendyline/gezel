@@ -9,8 +9,8 @@ import { mkdir, readFile, stat, symlink, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
-import { writeFileAtomic } from '../../fs/atomic.js';
-import type { CodexReasoningEffort } from './reasoning.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import type { CodexReasoningEffort } from '@bendyline/gezel-inference/internal/providers/codex-cli/reasoning';
 import { buildCodexSafetyHookScript } from './safety-hook.js';
 
 const log = createLogger('codex-cli');

@@ -3,17 +3,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { securityPolicyForLevel } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import { resolveMlxEffectiveNumCtx } from '@bendyline/gezel-inference/internal/providers/mlx/build-provider';
+import {
+  CapacityDeniedError,
+  NOT_ENOUGH_MEMORY_MESSAGE,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { MlxRuntimeStatusBus } from '@bendyline/gezel-inference/internal/python/mlx-runtime-status-bus';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { PreviewLogBuffer } from '../preview-log/buffer.js';
-import { resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
 import { MockProvider } from '../providers/mock.js';
-import {
-  CapacityDeniedError,
-  NOT_ENOUGH_MEMORY_MESSAGE,
-} from '../providers/native/capacity-broker.js';
-import { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import {
   consultationIdleTimeoutMsForModel,
@@ -563,7 +563,7 @@ describe('ChatManager — send + persistence', () => {
     await manager.send(session.id, 'what is the meaning of life?');
 
     const disk = await store.getSession('ada', session.id);
-    expect(disk!.title).toBe('Meaning life');
+    expect(disk!.title).toBe('What is the meaning of life');
   });
 
   // The dispatch seed is the machinery's sentence; the extractor turned one
@@ -610,7 +610,7 @@ describe('ChatManager — send + persistence', () => {
     await manager.send(session.id, 'Please review the release checklist');
 
     const disk = await store.getSession('ada', session.id);
-    expect(disk?.title).toBe('Review release checklist');
+    expect(disk?.title).toBe('Review the release checklist');
   });
 
   it('emits delta and complete events', async () => {

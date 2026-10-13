@@ -34,6 +34,7 @@ export function ProjectQuestionsDialog({
               openQuestionInChat(question);
               onClose();
             }}
+            onNavigate={onClose}
           />
         </Dialog.Content>
       </Dialog.Portal>

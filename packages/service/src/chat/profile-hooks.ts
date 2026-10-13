@@ -10,14 +10,14 @@ import {
   type TurnMessageOrigin,
   createLogger,
 } from '@bendyline/gezel';
-import type { Store } from '../fs/store.js';
 import type {
   ModelCtx,
   NudgeVerdict,
   ResolvedModelProfile,
   TurnCtx,
-} from '../model-profile/types.js';
-import type { LLMSession } from '../providers/types.js';
+} from '@bendyline/gezel-inference/internal/model-profile/types';
+import type { LLMSession } from '@bendyline/gezel-inference/internal/providers/types';
+import type { Store } from '../fs/store.js';
 
 const log = createLogger('chat');
 

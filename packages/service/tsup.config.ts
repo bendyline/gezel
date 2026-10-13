@@ -88,30 +88,16 @@ export default defineConfig({
     // attachments in isolation; must exist as its own file, not bundled into
     // index.js. squisq stays external (see below), so this stays small.
     'index-store/convert-worker': 'src/index-store/convert-worker.ts',
-    // Loaded as a worker_thread by memory/embeddings.ts so ONNX embedding
-    // inference runs off the Electron main thread; must exist as its own file
-    // for `new Worker(...)` to resolve at runtime.
-    'memory/embed-worker': 'src/memory/embed-worker.ts',
+    // The text-embedding, GGUF-metadata, knowledge-search and relevance-model
+    // workers are emitted by @bendyline/gezel-inference, which owns them.
     // Sibling worker for CLIP image embeddings (+ the face lane's ONNX
-    // sessions). Separate from embed-worker so the two modalities' models,
-    // memory budgets, and crash accounting stay independent.
+    // sessions). Separate from the text embed worker so the two modalities'
+    // models, memory budgets, and crash accounting stay independent.
     'memory/image-embed-worker': 'src/memory/image-embed-worker.ts',
     // Deterministic workspace file/classification/symbol/SQLite indexing is
     // CPU-heavy on large repositories. Keep it off the daemon event loop (and
     // therefore off Electron's main thread in embedded dev mode).
     'index-store/static-index-worker': 'src/index-store/static-index-worker.ts',
-    // Settings previews context admission for every installed GGUF. Tokenizer
-    // metadata can be enormous, so the first inspection must not run on the
-    // embedded Electron main thread; subsequent polls hit the parent cache.
-    'providers/llama-cpp/gguf-metadata-worker': 'src/providers/llama-cpp/gguf-metadata-worker.ts',
-    // Owns every knowledge-catalog SQLite connection: CatalogHandle is
-    // synchronous (node:sqlite), so shard scans must run off the daemon
-    // loop (docs/gezk-format.md).
-    'knowledge/search-worker': 'src/knowledge/search-worker.ts',
-    // Relevance-model (cross-encoder) inference. Its own worker so ONNX runs
-    // never stall text embedding and its crashes never count against the
-    // embed worker's limit.
-    'relevance/relevance-worker': 'src/relevance/relevance-worker.ts',
     // Kokoro speech synthesis. An ONNX run blocks its thread for a whole
     // sentence; in embedded mode the event loop it would block is Electron's
     // main process, which beachballed the app for as long as a chat reply
@@ -199,15 +185,14 @@ export default defineConfig({
     'imapflow',
     'mailparser',
   ],
-  // Copy non-TS assets that ship alongside the bundle. The Python file
-  // is the wrapped MLX server (Phase 2) — spawned at runtime against
-  // the user's mlx venv. tsup doesn't copy non-TS source by default;
+  // Copy non-TS assets that ship alongside the bundle (the MLX server and
+  // Kokoro lexicon ship with @bendyline/gezel-inference instead). tsup
+  // doesn't copy non-TS source by default;
   // we handle it explicitly here so a single `pnpm build` produces a
   // ready-to-run dist tree. Done as an inline function (not a `node -e`
   // shell string) because PowerShell 5.1 mangles forward slashes inside
   // embedded JS string literals when invoking native commands.
   onSuccess: async () => {
-    cpSync('src/providers/mlx/python', 'dist/providers/mlx/python', { recursive: true });
     // Handboek content: the hand-curated documentation tree lives at the
     // repo root (docs/handboek/) so humans author it next to the other
     // docs, and ships inside the service package so the engine can serve
@@ -241,21 +226,8 @@ export default defineConfig({
     }
     cpSync(handboekGezk, 'dist/handboek.gezk');
     // The bundled diffusers video server (`gezel_video_server.py`),
-    // spawned at runtime against the user's `video` venv. Same rationale
-    // as the MLX python copy above.
+    // spawned at runtime against the user's `video` venv.
     cpSync('src/providers/video/python', 'dist/providers/video/python', { recursive: true });
-
-    // Kokoro's pronunciation dictionaries. The daemon phonemizes text itself
-    // rather than calling eSpeak NG (GPL-3, unshippable), so these files are a
-    // hard requirement for speech: without them synthesis has no dictionary.
-    // Staged by scripts/build-kokoro-lexicon.mjs from the pinned voice pack.
-    const kokoroSrc = resolve(__dirname, 'assets', 'kokoro');
-    if (!existsSync(kokoroSrc)) {
-      throw new Error(
-        `Kokoro lexicon assets missing at ${kokoroSrc} — run node scripts/build-kokoro-lexicon.mjs`,
-      );
-    }
-    cpSync(kokoroSrc, 'dist/kokoro-lexicon', { recursive: true });
 
     // Stage the workspace UI bundle into `dist/ui/` so an installed
     // service (e.g. the Node-only CLI distribution) can serve the browser

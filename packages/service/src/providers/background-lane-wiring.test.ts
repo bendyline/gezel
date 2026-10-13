@@ -1,6 +1,6 @@
+import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
 import { describe, expect, it } from 'vitest';
-import { LlamaCppProvider } from './llama-cpp/provider.js';
-import { MlxProvider } from './mlx/provider.js';
 
 /**
  * The background lane must be sized from the width the engine gate

@@ -170,19 +170,29 @@ export async function findAuthoredCraftbook(
   client: GezelClient,
   opts: { projectId: string; minSteps: number; nameHint?: RegExp },
 ): Promise<AuthoredCraftbookMatch | null> {
+  return (await findAuthoredCraftbooks(client, opts))[0] ?? null;
+}
+
+/** All eligible recipes, so a grader can evaluate actual task/output lineage
+ * rather than treating the longest unused draft as the requested result. */
+export async function findAuthoredCraftbooks(
+  client: GezelClient,
+  opts: { projectId: string; minSteps: number; nameHint?: RegExp },
+): Promise<AuthoredCraftbookMatch[]> {
   const summaries = await authoredCraftbookSummaries(client, opts.projectId);
   const eligible = summaries.filter((cb) => cb.stepCount >= opts.minSteps);
-  if (eligible.length === 0) return null;
   const hintScore = (cb: CraftbookSummary): number =>
     opts.nameHint && (opts.nameHint.test(cb.id) || opts.nameHint.test(cb.name)) ? 1 : 0;
   eligible.sort((a, b) => hintScore(b) - hintScore(a) || b.stepCount - a.stepCount);
-  const best = eligible[0];
-  if (!best) return null;
-  const { craftbook } = await client.getCraftbook(best.id, {
-    source: best.source === 'bundled' ? undefined : best.source,
-    projectId: opts.projectId,
-  });
-  return { summary: best, craftbook };
+  return Promise.all(
+    eligible.map(async (summary) => {
+      const { craftbook } = await client.getCraftbook(summary.id, {
+        source: summary.source === 'bundled' ? undefined : summary.source,
+        projectId: opts.projectId,
+      });
+      return { summary, craftbook };
+    }),
+  );
 }
 
 /** A task sourced from (or embedding) the given craftbook id. */
@@ -197,7 +207,8 @@ export async function findTaskForCraftbook(
   craftbookId: string,
 ): Promise<Task | null> {
   const { tasks } = await client.listProjectTasks(projectId);
-  return tasks.find((task) => taskReferencesCraftbook(task, craftbookId)) ?? null;
+  const matching = tasks.filter((task) => taskReferencesCraftbook(task, craftbookId));
+  return matching.find((task) => task.status === 'complete') ?? matching[0] ?? null;
 }
 
 /**
@@ -342,6 +353,8 @@ export function parseJsonValue(
 }
 
 export interface AuthoringPollArgs {
+  /** Pin launch/catalog repairs to a coordinator, not a task worker. */
+  targetGezelId?: string;
   scenarioId: string;
   projectId: string;
   /** Total number of graded milestones — `score = total - failures`. */
@@ -439,6 +452,7 @@ export async function finishAuthoringPoll(
     },
     {
       projectId: args.projectId,
+      targetGezelId: args.targetGezelId,
       expectedDeliverable: null,
       repairDirective: args.repairDirective,
     },

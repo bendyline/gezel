@@ -1,6 +1,6 @@
+import { createChatProgressReporter } from '@bendyline/gezel-inference/internal/http/openai-compat/chat-progress';
 import type { AppChatProgress } from '@bendyline/gezel/app-models';
 import { describe, expect, it } from 'vitest';
-import { createChatProgressReporter } from './chat-progress.js';
 
 describe('app inference progress', () => {
   it('keeps real prefill percentages separate from reasoning and measured decoding counters', () => {

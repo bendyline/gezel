@@ -1,11 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import type { MemoryProfile } from './memory.js';
+import type { MemoryProfile } from '@bendyline/gezel-inference/internal/system/memory';
 import {
   memoryProfileForLlamaGpu,
   parseNvidiaMemoryProbe,
   sampleMachineMemoryUsage,
   summarizeResidentModels,
-} from './memory.js';
+} from '@bendyline/gezel-inference/internal/system/memory';
+import { describe, expect, it } from 'vitest';
 
 const GiB = 1024 ** 3;
 
@@ -13,6 +13,7 @@ describe('parseNvidiaMemoryProbe', () => {
   it('keeps a GeForce discrete when its VRAM is as large as system RAM', () => {
     expect(parseNvidiaMemoryProbe('NVIDIA GeForce RTX 5060 Ti, 16384\n')).toEqual({
       vramBytes: 16 * GiB,
+      largestDeviceBytes: 16 * GiB,
       memoryKind: 'discrete',
       deviceNames: ['NVIDIA GeForce RTX 5060 Ti'],
     });
@@ -29,9 +30,16 @@ describe('parseNvidiaMemoryProbe', () => {
   it('sizes a GB10 that reports [N/A] from system RAM and keeps it unified', () => {
     expect(parseNvidiaMemoryProbe('NVIDIA GB10, [N/A]\n', 128 * GiB)).toEqual({
       vramBytes: 128 * GiB,
+      largestDeviceBytes: 128 * GiB,
       memoryKind: 'unified',
       deviceNames: ['NVIDIA GB10'],
     });
+  });
+
+  it('sums every card but keeps the largest one for single-device engines', () => {
+    expect(
+      parseNvidiaMemoryProbe('NVIDIA GeForce RTX 3060, 12288\nNVIDIA GeForce RTX 3060, 12288\n'),
+    ).toMatchObject({ vramBytes: 24 * GiB, largestDeviceBytes: 12 * GiB });
   });
 
   it('still ignores a discrete card whose memory is unreadable', () => {

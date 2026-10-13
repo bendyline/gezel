@@ -1,7 +1,7 @@
 import { type GezelConfig, securityPolicyForLevel } from '@bendyline/gezel';
+import type { SecretKey, SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { describe, expect, it } from 'vitest';
 import type { Store } from '../../fs/store.js';
-import type { SecretKey, SecretStore } from '../../secrets/types.js';
 import { BraveSearchProvider } from './brave.js';
 import { ChainedSearchProvider } from './chained.js';
 import { createSearchProvider } from './factory.js';

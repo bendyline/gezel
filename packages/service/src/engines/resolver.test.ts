@@ -4,15 +4,15 @@ import { mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/pro
 import { type Server, createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolvePlatformKey } from '@bendyline/gezel/native';
-import AdmZip from 'adm-zip';
-import * as tar from 'tar';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   EngineUnavailableError,
   impliedEngineVariant,
   resolveEngineToCompletion,
-} from './resolver.js';
+} from '@bendyline/gezel-inference/internal/engines/resolver';
+import { resolvePlatformKey } from '@bendyline/gezel/native';
+import AdmZip from 'adm-zip';
+import * as tar from 'tar';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 const PLATFORM_KEY = resolvePlatformKey() as string;
 const IS_WIN = process.platform === 'win32';

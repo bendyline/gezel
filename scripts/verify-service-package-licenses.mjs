@@ -87,7 +87,6 @@ export async function verifyServicePackageLicenses() {
     }
     for (const path of [
       'dist/licenses/npm/manifest.json',
-      'dist/kokoro-lexicon/LICENSE',
       ...packages.flatMap((record) => record.texts.map((text) => `dist/licenses/npm/${text.file}`)),
     ]) {
       if (!packed.has(path)) throw new Error(`service npm tarball is missing ${path}`);

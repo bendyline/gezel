@@ -55,11 +55,13 @@ delete process.env.GEZEL_SHARED_ASSETS_DIR;
 delete process.env.GEZEL_SYSTEM_SCOPE;
 process.env.GEZEL_SKIP_SYSTEM_BOOTSTRAP = '1';
 process.env.GEZEL_DISABLE_BACKGROUND_ENRICH = '1';
+// A full product daemon (image generation and project artifacts are product
+// routes), kept out of the OS keychain: the temporary home holds its secrets.
+process.env.GEZEL_SECRETS_BACKEND = 'file';
 
 const service = await startService({
   home,
   role: 'user',
-  embeddedInferenceOnly: true,
   machineEngineDiscovery: false,
 });
 assert(service.cert, 'Expected the real HTTPS transport');

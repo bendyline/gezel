@@ -3,13 +3,13 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RelevanceModelSpec } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   type RelevanceInstallEvent,
   installRelevanceModel,
   installedRelevanceModel,
   relevanceModelDir,
-} from './install.js';
+} from '@bendyline/gezel-inference/internal/relevance/install';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const FILES: Record<string, string> = {

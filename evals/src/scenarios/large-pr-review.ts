@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import {
   type MissingDeliverableFeedbackOptions,
@@ -46,6 +47,22 @@ export interface ArtifactFixture {
   content: string;
 }
 
+/**
+ * The connector writer's record identity: an eight-hex hash per changed path,
+ * carried in the manifest's files[], the record filename, and the
+ * files/_flags.json sidecar. publishCorpusBatches refuses a corpus without all
+ * three, which paused every pull-request-review-workflow run 0.2s after
+ * creation while the fixture still used `--fixture.md` names (2026-10-10).
+ */
+function recordHash(path: string): string {
+  return createHash('sha256').update(path).digest('hex').slice(0, 8);
+}
+
+/** The per-file patch records, in changed-file order. */
+export function largePrRecords(): ArtifactFixture[] {
+  return buildLargePrArtifacts().filter((artifact) => /\/files\/[^/]+\.md$/.test(artifact.path));
+}
+
 function patchRecord(
   path: string,
   newLine: number,
@@ -62,7 +79,7 @@ function patchRecord(
     .replace(/^-|-$/g, '')
     .toLowerCase();
   return {
-    path: `${CORPUS}/files/${String(ordinal).padStart(3, '0')}--${stem}--fixture.md`,
+    path: `${CORPUS}/files/${String(ordinal).padStart(3, '0')}--${stem}--${recordHash(path)}.md`,
     content: [
       '---',
       `path: ${path}`,
@@ -105,13 +122,23 @@ export function buildLargePrArtifacts(): ArtifactFixture[] {
   records.push(patchRecord(API_DEFINITION_PATH, 1, API_DEFINITION, TOTAL_FILES - 1));
   records.push(patchRecord(LATE_DEFECT_PATH, 1, LATE_DEFECT, TOTAL_FILES));
 
-  const paths = records.map((record, index) => ({
-    ordinal: index + 1,
-    path: parsePathFrontmatter(record.content),
-    status: 'modified',
-    additions: 20,
-    deletions: 1,
-  }));
+  const paths = records.map((record, index) => {
+    const path = parsePathFrontmatter(record.content);
+    return {
+      ordinal: index + 1,
+      path,
+      recordHash: recordHash(path),
+      status: 'modified',
+      additions: 20,
+      deletions: 1,
+    };
+  });
+  const flags = Object.fromEntries(
+    records.map((record, index) => [
+      paths[index]!.recordHash,
+      { file: record.path.slice(record.path.lastIndexOf('/') + 1) },
+    ]),
+  );
   const manifest = {
     schemaVersion: 1,
     pullRequest: PR_NUMBER,
@@ -150,6 +177,7 @@ export function buildLargePrArtifacts(): ArtifactFixture[] {
       path: `${CORPUS}/attachments/001/pr-52-files.json`,
       content: `${JSON.stringify(manifest, null, 2)}\n`,
     },
+    { path: `${CORPUS}/files/_flags.json`, content: `${JSON.stringify(flags, null, 2)}\n` },
     ...records,
   ];
 }
@@ -372,9 +400,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     );
     return { done: false };
   }
-  const expected = buildLargePrArtifacts()
-    .slice(2)
-    .map((fixture) => parsePathFrontmatter(fixture.content));
+  const expected = largePrRecords().map((fixture) => parsePathFrontmatter(fixture.content));
   const reviewedSet = new Set(reviewed);
   const complete =
     reviewedSet.size === TOTAL_FILES && expected.every((path) => reviewedSet.has(path));

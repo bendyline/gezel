@@ -7,6 +7,7 @@ import {
   createLogger,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   gezelDir,
   gezelPaths,
@@ -14,7 +15,6 @@ import {
   projectDir,
   projectStorageDir,
 } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
 import { Store } from '../fs/store.js';
 import { applyProjectType, preflightProjectType } from './apply.js';
 

@@ -1,8 +1,8 @@
+import { engineHoldLabelFor } from '@bendyline/gezel-inference/internal/providers/mlx/engine-hold';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import type { EnginePhaseEvent } from '@bendyline/gezel-inference/internal/providers/streaming-session';
+import type { LLMSession } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { EnginePhaseEvent } from '../streaming-session.js';
-import type { LLMSession } from '../types.js';
-import { engineHoldLabelFor } from './engine-hold.js';
-import { MlxProvider } from './provider.js';
 
 /**
  * The sidecar runs requests in waves, so a request can sit in the engine

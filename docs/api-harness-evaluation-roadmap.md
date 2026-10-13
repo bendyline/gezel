@@ -36,7 +36,7 @@ The three guidance profiles and the product-recovery switch are proposed experim
 
 Keep schema transformations and tool-surface changes separate from prose-only experiments. For example, `tools.gezels-as-roles` changes the delegation interface; removing it is not merely shortening a prompt. Likewise, forcing a small-model cookbook may be inert because a behavior self-gates on tier. Verify that each treatment actually reaches the API request.
 
-Essential controls are never experimental “help”: authorization, project isolation, cancellation, truthful tool results, protocol-correct histories, signed-thinking handling, and bounded execution remain enabled. Model reasoning effort is a separate axis; hold it fixed within each model during this campaign. The OpenAI GPT-6 reasoning-family detection gap should be corrected before testing explicit effort overrides.
+Essential controls are never experimental “help”: authorization, project isolation, cancellation, truthful tool results, protocol-correct histories, signed-thinking handling, and bounded execution remain enabled. Model reasoning effort is a separate axis; hold it fixed within each model during this campaign. The OpenAI provider recognizes GPT-6 models as reasoning models and clamps an effort override into each model's documented range ([openai-options.ts](../packages/service/src/providers/openai-options.ts)), so explicit effort overrides can be tested.
 
 ## Where repair belongs
 
@@ -153,7 +153,7 @@ Generalist **on** with restrained, evidence-driven support is the starting hypot
 Implement as small, reviewable changes in this order:
 
 1. **Measurement boundary:** user-simulation policy, intervention provenance, API provider/tool provenance, lifecycle qualification, and metadata in [runner](../evals/src/runner.ts), [types](../evals/src/types.ts), [facts](../evals/src/continuity-facts.ts), and shared reporting. Tests should catch forbidden evaluator sends and honest completion classification.
-2. **Experimental controls:** versioned prompt-section/behavior selections and scoped runtime recovery policy, using the existing [prompt assembly](prompt-stack.md) and [profile override path](../packages/service/src/model-profile/runtime.ts). Keep required contracts out of optional selections. Add contract coverage for treatment differences and unchanged permissions.
+2. **Experimental controls:** versioned prompt-section/behavior selections and scoped runtime recovery policy, using the existing [prompt assembly](prompt-stack.md) and [profile override path](../packages/inference/src/model-profile/runtime.ts). Keep required contracts out of optional selections. Add contract coverage for treatment differences and unchanged permissions.
 3. **Campaign orchestration:** reuse the generalist runner's interleaving and prompt runner's non-vacuity checks. Make provider/model, mode, guidance, recovery, repair policy, and user simulation explicit, validated fields. Inherit no ambient behavior overrides silently. Produce a costed run plan before executing it.
 4. **Boundary migration:** make product qualification unassisted by default, document legacy assisted use, and move only proven reusable recovery into the product. Keep prior result semantics intact.
 5. **Default promotion:** publish the per-model decision and evidence, retain a rollback setting, and schedule a bounded regression suite for future changes.

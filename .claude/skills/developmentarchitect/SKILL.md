@@ -90,7 +90,7 @@ Before reviewing, internalize the full system. Gezel ships from a single pnpm mo
 These come from `CLAUDE.md` — re-read it at the start of every review.
 
 - **All gezel/project/session/document/config state goes through `Store`.** Subtree carve-outs (`runtime/`, `logs/`, `history.jsonl`, `memories/index/`, `system-toolsets/`, `github/`, `sandbox/`, `python/`, native-binary trees) are owned by their feature module — they don't share Store's atomic-write contract because they're binary, append-only, or external working copies.
-- **Path-safety primitives in `packages/service/src/fs/safe-paths.ts`.** Any path built from user/model input funnels through `safeJoin` / `realpathContained`. The file's header documents the three latent bugs the naive `normalize(join).startsWith` pattern hides.
+- **Path-safety primitives in `packages/inference/src/fs/safe-paths.ts`.** Any path built from user/model input funnels through `safeJoin` / `realpathContained`. The file's header documents the three latent bugs the naive `normalize(join).startsWith` pattern hides.
 - **`ChatManager` owns sessions.** HTTP handlers should be thin wrappers; tests inject pre-seeded `providers` maps to exercise chat flow deterministically.
 - **MCP tools are how agents act.** If you find code teaching a gezel to "describe" doing something, consider adding a tool instead.
 - **`about.md` is for character, not tool listings.** Tools are auto-injected from the post-allowlist MCP bridge. Per-gezel `tools.md` is the power-user override. The McKinley Park weather incident is the cautionary tale.
@@ -151,13 +151,13 @@ packages/core/src/log.ts
 # Service entry & key services
 packages/service/src/service.ts
 packages/service/src/fs/store.ts
-packages/service/src/fs/safe-paths.ts
+packages/inference/src/fs/safe-paths.ts
 packages/service/src/chat/manager.ts
 packages/service/src/chat/role-tool-filter.ts
 packages/service/src/chat/local-model-tuning.ts
-packages/service/src/providers/types.ts
+packages/inference/src/providers/types.ts
 packages/service/src/providers/mcp-bridge.ts
-packages/service/src/model-profile/defaults.ts
+packages/inference/src/model-profile/defaults.ts
 
 # MCP server (gezel "hands")
 packages/mcp/src/server.ts

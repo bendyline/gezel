@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   XET_CHUNK_HEADER_BYTES,
   bg4Unregroup,
@@ -6,7 +5,8 @@ import {
   decodeSegmentChunks,
   lz4DecompressFrame,
   parseLinkHeader,
-} from './xet.js';
+} from '@bendyline/gezel-inference/internal/utils/xet';
+import { describe, expect, it } from 'vitest';
 
 // Build a minimal LZ4 frame: magic + FLG(version=1, no flags) + BD + HC=0,
 // then the given blocks, then the end mark. `blocks` are {compressed, bytes}.

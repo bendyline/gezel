@@ -5,6 +5,13 @@ import { createMockApi } from '../test-utils/mockApi.js';
 
 // Mock the api singleton (used by the view's useEffect).
 vi.mock('../api.js', () => ({ api: createMockApi() }));
+// One pushable task event for the live-refresh test.
+const stream = vi.hoisted(() => ({ events: [] as unknown[] }));
+vi.mock('../shared-chat-events.js', () => ({
+  streamSharedProjectChatEvents: async function* () {
+    for (const event of stream.events) yield event;
+  },
+}));
 
 // Mock the TaskDetail child so this test asserts on TaskTabContent's
 // own responsibility — fetch (task, gezels, projects), pass to child,
@@ -132,5 +139,18 @@ describe('TaskTabContent', () => {
     await waitFor(() => {
       expect(api.getTaskByRef).toHaveBeenCalledWith('PROJ-99');
     });
+  });
+});
+
+describe('TaskTabContent — live', () => {
+  // The bench froze at the step the task was on when the tab opened.
+  it('re-reads the task when it moves', async () => {
+    stream.events = [{ event: { type: 'task_event', taskRef: 'PROJ-42' } }];
+    vi.mocked(api.getTaskByRef).mockResolvedValue(FAKE_TASK);
+    vi.mocked(api.listGezels).mockResolvedValue({ gezels: [] } as never);
+    vi.mocked(api.listProjects).mockResolvedValue({ projects: [] } as never);
+    render(<TaskTabContent taskRef="PROJ-42" />);
+    await waitFor(() => expect(api.getTaskByRef).toHaveBeenCalledTimes(2), { timeout: 3000 });
+    stream.events = [];
   });
 });

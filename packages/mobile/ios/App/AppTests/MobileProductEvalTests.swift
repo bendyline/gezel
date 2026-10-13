@@ -74,7 +74,10 @@ final class MobileProductEvalTests: XCTestCase {
         }
         let view = try XCTUnwrap(candidate)
         func stage(_ value: String) { print("MOBILE_EVAL_STAGE \(value)") }
-        func runAsync(_ source: String, seconds: TimeInterval = 60) async throws -> Any? {
+        // The same budgets as the Android harness. A CI simulator has taken 83 s
+        // to load the page and over 60 s to finish the contract checks; a phase
+        // abandoned mid-run also leaves its contract provider installed for the next.
+        func runAsync(_ source: String, seconds: TimeInterval = 180) async throws -> Any? {
             _ = try await view.evaluateJavaScript("window.__gezelEvalPhase=null;(async()=>{\(source)})().then(value=>window.__gezelEvalPhase={value},error=>window.__gezelEvalPhase={error:String(error.message||error)+'\\n'+String(error.stack||'')});true")
             let deadline = Date().addingTimeInterval(seconds)
             while Date() < deadline {
@@ -89,10 +92,9 @@ final class MobileProductEvalTests: XCTestCase {
             throw NSError(domain: "MobileEval", code: 5, userInfo: [NSLocalizedDescriptionKey: "Native JavaScript phase exceeded \(seconds) seconds"])
         }
         func waitForApp() async throws {
-            let deadline = Date().addingTimeInterval(60)
-            for _ in 0..<600 {
+            let deadline = Date().addingTimeInterval(120)
+            while Date() < deadline {
                 if (try? await view.evaluateJavaScript("Boolean(!window.__gezelEvalReloading && window.__GEZEL__?.fetch && document.querySelector('[data-testid=\"app-sidebar\"]') && window.Capacitor?.Plugins?.GezelMobile)")) as? Bool == true { return }
-                if Date() >= deadline { break }
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
             throw NSError(domain: "MobileEval", code: 1, userInfo: [NSLocalizedDescriptionKey: "Packaged product did not initialize"])
@@ -303,7 +305,7 @@ final class MobileProductEvalTests: XCTestCase {
             return merged
         }
         func runPhase(_ phaseOptions: [String: Any]) async throws {
-            _ = try await view.callAsyncJavaScript("window.__gezelMobileEval.run(options).catch(error=>{window.__gezelMobileEvalError=String(error.stack||error)}); return true;", arguments: ["options": phaseOptions], in: nil, contentWorld: .page)
+            _ = try await view.callAsyncJavaScript("window.__gezelMobileEval.run(options).catch(error=>{window.__gezelMobileEvalError=String(error.message||error)+'\\n'+String(error.stack||'')}); return true;", arguments: ["options": phaseOptions], in: nil, contentWorld: .page)
             var lastRevision = -1
             var report: [String: Any] = [:]
             _ = try await view.evaluateJavaScript("window.__gezelMobileEvalClock.startSuspendMonitor();window.__gezelEvalOuterBudget=new window.__gezelMobileEvalClock.AwakeBudget(8*3600000);true")

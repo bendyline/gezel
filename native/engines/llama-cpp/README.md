@@ -81,7 +81,7 @@ are reconciled against this file by `scripts/check-notice.mjs`.
 - `/slots` — per-slot concurrency metrics.
 - `/health` — liveness probe (what the supervisor polls).
 
-See `packages/service/src/providers/llama-cpp/provider.ts` for the client side.
+See `packages/inference/src/providers/llama-cpp/provider.ts` for the client side.
 
 ## Platform backends
 

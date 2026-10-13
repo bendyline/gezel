@@ -1,6 +1,6 @@
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { describe, expect, it } from 'vitest';
 import type { Store } from '../../fs/store.js';
-import type { SecretStore } from '../../secrets/types.js';
 import { isObservationRecord } from '../types.js';
 import {
   AzureMonitorLogsAdapter,

@@ -1,6 +1,6 @@
 /**
  * Streaming `.gezk` inspection + verified extraction — the gezmodel archive
- * discipline (packages/service/src/models/gezmodel.ts) applied to catalogs:
+ * discipline (packages/inference/src/models/gezmodel.ts) applied to catalogs:
  * yauzl lazyEntries, per-entry safety rejection (traversal, absolute paths,
  * symlinks, encrypted entries, case-insensitive duplicates, directory
  * entries), manifest-declared-only extraction with BOTH-direction

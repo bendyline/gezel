@@ -2,19 +2,19 @@ import { arch, platform } from 'node:process';
 import { createLogger, securityPolicyForLevel } from '@bendyline/gezel';
 import type { ChatModelManifest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { usesMachineEngine } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import {
   isSupportedOnDevicePlatform as coreIsSupportedOnDevicePlatform,
   resolveOnDeviceProvider,
 } from '@bendyline/gezel/native';
 import { z } from 'zod';
 import type { Store } from '../fs/store.js';
-import { usesMachineEngine } from '../http/routes/machine-engine-proxy.js';
 import type { MachineEngineBridge } from '../machine-engine/bridge.js';
 
 const firstRunLog = createLogger('first-run');
+import type { LlamaCppModelManager } from '@bendyline/gezel-inference/internal/providers/llama-cpp/index';
+import type { MlxModelManager } from '@bendyline/gezel-inference/internal/providers/mlx/index';
 import { detectModelTier } from '../providers/llama-cpp/hardware-tier.js';
-import type { LlamaCppModelManager } from '../providers/llama-cpp/index.js';
-import type { MlxModelManager } from '../providers/mlx/index.js';
 
 /**
  * Re-exported so existing service callers keep one import site. The list
@@ -278,9 +278,9 @@ export async function bootstrapOnDeviceFirstRun(opts: {
             defaultModel: { ...config.defaultModel, [provider]: target.modelId },
             firstRunInstallError: null as unknown as undefined,
           });
-          // Note: no auto-install fire here — the Home banner's limbo
-          // recovery (FirstRunInstallBanner.tsx) detects the new pin
-          // + missing install and kicks off the install via SSE. That
+          // Note: no auto-install fire here — the meester's welcome on Home
+          // (useFirstRunModel.ts) sees the new pin + missing install and
+          // offers the download; the person's tap starts it via SSE. That
           // path also reflects progress in the catalog UI.
         }
       }
@@ -305,9 +305,13 @@ export async function bootstrapOnDeviceFirstRun(opts: {
   const gpuGb = decision.inputs.gpuVramBytes
     ? `, gpuVram=${Math.round(decision.inputs.gpuVramBytes / 1024 ** 3)}GB`
     : '';
+  const capGb =
+    decision.inputs.launchCapBytes !== undefined
+      ? `, startsNowUpTo=${(decision.inputs.launchCapBytes / 1024 ** 3).toFixed(1)}GB`
+      : '';
   const target = resolveFirstRunTarget(decision.tier, effPlatform, effArch);
   log.info(
-    `[first-run] chose ${target.provider}/${target.modelId}: ${decision.reason} (totalRam=${totalGb}GB${gpuGb})`,
+    `[first-run] chose ${target.provider}/${target.modelId}: ${decision.reason} (totalRam=${totalGb}GB${gpuGb}${capGb})`,
   );
 
   // Publish the recommendation before shared-model verification. A first

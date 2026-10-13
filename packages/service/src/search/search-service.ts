@@ -15,6 +15,20 @@ import type {
   UnifiedSearchResult,
   UnifiedSearchResultKind,
 } from '@bendyline/gezel';
+import {
+  embedKnowledgeQuery,
+  embedQuery,
+  embeddingPipelineStatus,
+} from '@bendyline/gezel-inference/internal/memory/embeddings';
+import {
+  type ActiveRelevance,
+  RELEVANCE_WINDOW,
+  type RelevanceStageProvider,
+  type RelevanceStageReport,
+  type RelevanceStageRequest,
+  applyRelevanceModel,
+  relevancePassage,
+} from '@bendyline/gezel-inference/internal/search/relevance-stage';
 import type { Store } from '../fs/store.js';
 import { isLibraryInternalPath } from '../fs/sync-junk.js';
 import type { ContentIndex } from '../index-store/content-index.js';
@@ -26,20 +40,10 @@ import {
   USER_MEMORY_ID,
   sameProjectMemoryScore,
 } from '../memory/daily-markdown.js';
-import { embedKnowledgeQuery, embedQuery, embeddingPipelineStatus } from '../memory/embeddings.js';
 import { imageEmbedAvailability } from '../memory/image-embeddings.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { SearchResult as MemorySearchResult } from '../memory/vector-index.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
-import {
-  type ActiveRelevance,
-  RELEVANCE_WINDOW,
-  type RelevanceStageProvider,
-  type RelevanceStageReport,
-  type RelevanceStageRequest,
-  applyRelevanceModel,
-  relevancePassage,
-} from './relevance-stage.js';
 
 /**
  * Cross-project unified search backing the titlebar search box.

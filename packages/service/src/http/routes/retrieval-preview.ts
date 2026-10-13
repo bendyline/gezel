@@ -8,14 +8,17 @@ import {
   renderTaskReferencesBlock,
   retrievalDocKey,
 } from '@bendyline/gezel';
+import {
+  embeddingsHealth,
+  warmEmbeddings,
+} from '@bendyline/gezel-inference/internal/memory/embeddings';
+import { relevanceSummary } from '@bendyline/gezel-inference/internal/search/relevance-stage';
 import { Hono } from 'hono';
-import { embeddingsHealth, warmEmbeddings } from '../../memory/embeddings.js';
 import {
   type ProjectRetrievalHit,
   resolveSessionRetrievalPolicy,
   retrieveProjectContext,
 } from '../../search/project-retrieval.js';
-import { relevanceSummary } from '../../search/relevance-stage.js';
 import { RetrievalTraceBuilder } from '../../search/retrieval-trace.js';
 import { gatherTaskReferences } from '../../tasks/references.js';
 import type { ServiceContext } from '../context.js';

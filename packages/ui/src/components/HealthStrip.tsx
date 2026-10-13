@@ -100,7 +100,11 @@ export function HealthStrip({ label }: { label?: string } = {}) {
       <StatusPill ok={nodeOk} label={`Node ${health?.nodeVersion ?? 'unknown'}`} />
       {health?.platform && <StatusPill ok label={`${humanPlatform(health.platform)} platform`} />}
       {systemStatus && (
-        <StatusPill ok={systemStatus.phase === 'ready'} label={systemStatusLabel(systemStatus)} />
+        <StatusPill
+          ok={systemStatus.phase === 'ready'}
+          label={systemStatusLabel(systemStatus)}
+          title={systemStatusTitle(systemStatus)}
+        />
       )}
       {config?.provider === 'llama-cpp' && health && <LlamaCppEnginePill health={health} />}
       {config?.provider === 'mlx' && mlxStatus && mlxStatus.phase !== 'idle' && (
@@ -118,9 +122,9 @@ export function HealthStrip({ label }: { label?: string } = {}) {
   );
 }
 
-function StatusPill({ ok, label }: { ok: boolean; label: string }) {
+function StatusPill({ ok, label, title }: { ok: boolean; label: string; title?: string }) {
   return (
-    <span className={`gz-status-pill gz-status-pill--${ok ? 'ok' : 'warn'}`}>
+    <span className={`gz-status-pill gz-status-pill--${ok ? 'ok' : 'warn'}`} title={title}>
       {ok ? '✓' : '!'} {label}
     </span>
   );
@@ -133,7 +137,7 @@ function humanPlatform(p: string): string {
   return p;
 }
 
-function systemStatusLabel(s: SystemBootstrapStatus): string {
+export function systemStatusLabel(s: SystemBootstrapStatus): string {
   if (s.phase === 'ready') return 'Runtime ready';
   if (s.phase === 'installing-toolsets') {
     return s.currentToolset
@@ -149,11 +153,21 @@ function systemStatusLabel(s: SystemBootstrapStatus): string {
     }
     return 'Downloading Chromium…';
   }
-  if (s.phase === 'setup-incomplete')
-    return `Runtime toolsets not pinned${s.error ? `: ${s.error.slice(0, 140)}` : ''}`;
-  if (s.phase === 'error')
-    return `Runtime setup failed${s.error ? `: ${s.error.slice(0, 140)}` : ''}`;
+  // The pill never wraps (see .gz-status-pill), so the error itself goes in
+  // the tooltip: a raw pnpm stack path in the label ran off the page.
+  if (s.phase === 'setup-incomplete') return 'Runtime toolsets not pinned';
+  if (s.phase === 'error') return 'Runtime setup failed';
   return 'Runtime setup pending';
+}
+
+const STATUS_TITLE_MAX = 600;
+
+/** The full failure for the pill's tooltip, or nothing when there isn't one. */
+export function systemStatusTitle(s: SystemBootstrapStatus): string | undefined {
+  if ((s.phase !== 'error' && s.phase !== 'setup-incomplete') || !s.error) return undefined;
+  const detail =
+    s.error.length > STATUS_TITLE_MAX ? `${s.error.slice(0, STATUS_TITLE_MAX)}…` : s.error;
+  return s.phase === 'error' ? `${detail}\n\nGezel tries again the next time it starts.` : detail;
 }
 
 function prettyToolsetName(id: string): string {

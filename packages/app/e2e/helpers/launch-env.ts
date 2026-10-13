@@ -76,6 +76,9 @@ export function buildLaunchEnv(extras: Record<string, string>): NodeJS.ProcessEn
     ...base,
     GEZEL_E2E: '1',
     GEZEL_SKIP_BUNDLED_RUNTIME_INSTALL: '1',
+    // A spec's fresh home would otherwise be a new install whose background
+    // indexing waits half an hour. A spec about the true first run passes ''.
+    GEZEL_DISABLE_FIRST_USE_GRACE: '1',
     GEZEL_MACHINE_SHARED_HOME: NO_MACHINE_SHARED_ROOT,
     GEZEL_SHARED_ASSETS_DIR: NO_SHARED_ASSETS_DIR,
     // The embedded service shares Electron's process, whose execPath points

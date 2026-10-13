@@ -314,10 +314,10 @@ large to ship in an npm tarball — the `linux-x64-cuda` archive alone is 756 MB
 — so they are downloaded on demand and verified.
 
 The chain of trust is anchored in the **published package**:
-[`packages/service/src/engines/native-manifest.ts`](../packages/service/src/engines/native-manifest.ts)
+[`packages/inference/src/engines/native-manifest.ts`](../packages/inference/src/engines/native-manifest.ts)
 bakes in `NATIVE_ENGINE_RELEASE` (the `native-v*` tag this build trusts) and
 `SHA256SUMS_DIGEST` (the sha256 of that release's `SHA256SUMS` asset).
-[`native-file-manifest.json`](../packages/service/src/engines/native-file-manifest.json)
+[`native-file-manifest.json`](../packages/inference/src/engines/native-file-manifest.json)
 also pins every executable and loadable regular file after
 signing/notarization. Schema 2 records symlinks separately, including their
 exact relative target text. Links may form ordinary internal SONAME chains,
@@ -326,7 +326,7 @@ unexpected links, and links that do not terminate at a pinned regular native
 file. That second manifest lets a standalone CLI verify and reuse an Electron
 installation's extracted payload without trusting metadata supplied by the
 installation itself.
-[`resolver.ts`](../packages/service/src/engines/resolver.ts) verifies the
+[`resolver.ts`](../packages/inference/src/engines/resolver.ts) verifies the
 downloaded `SHA256SUMS` against that digest *before* trusting any per-asset
 hash, then verifies each archive against its line. A tampered release cannot
 swap a binary.
@@ -353,8 +353,8 @@ release:**
 
 ```bash
 node scripts/pin-native-release.mjs --latest --macos-notarized
-git diff packages/service/src/engines/native-manifest.ts
-git diff packages/service/src/engines/native-file-manifest.json
+git diff packages/inference/src/engines/native-manifest.ts
+git diff packages/inference/src/engines/native-file-manifest.json
 ```
 
 Review and commit; the PR is the audit trail. Never hand-edit the digest to

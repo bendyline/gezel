@@ -1,4 +1,4 @@
-import { embedProfileId } from '../memory/embed-core.js';
+import { embedProfileId } from '@bendyline/gezel-inference/internal/memory/embed-core';
 import { imageEmbedModelId } from '../memory/image-embed-core.js';
 import { TEXT_EMBED_DIM } from './schema.js';
 import type { SqliteDriver } from './sqlite-driver.js';

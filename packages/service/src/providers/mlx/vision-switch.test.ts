@@ -1,8 +1,8 @@
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import { MlxVisionMode } from '@bendyline/gezel-inference/internal/providers/mlx/vision-mode';
+import type { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
+import type { LLMSession } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { NativeEngineSupervisor } from '../native/supervisor.js';
-import type { LLMSession } from '../types.js';
-import { MlxProvider } from './provider.js';
-import { MlxVisionMode } from './vision-mode.js';
 
 function sse(delta: Record<string, unknown>, finish: string): string {
   return [

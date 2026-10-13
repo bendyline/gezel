@@ -1,6 +1,6 @@
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
 import { lookupBehavior } from '@bendyline/gezel/local-loop';
 import { expect, it, vi } from 'vitest';
-import { MlxProvider } from './provider.js';
 
 function reply(delta: Record<string, unknown>, finishReason: string): Response {
   return new Response(

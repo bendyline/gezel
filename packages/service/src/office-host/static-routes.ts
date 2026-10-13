@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { Hono } from 'hono';
-import { safeJoin } from '../fs/safe-paths.js';
 import { mimeTypeForPath } from '../http/mime.js';
 import { staticUiCacheControl } from '../http/static-ui.js';
 

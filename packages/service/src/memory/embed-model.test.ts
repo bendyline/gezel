@@ -2,13 +2,6 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  BGE_SMALL_EN_V15_1,
-  MULTILINGUAL_E5_SMALL_1,
-  MULTILINGUAL_E5_SMALL_2,
-} from '@bendyline/gezel-knowledge';
-import { afterEach, describe, expect, it } from 'vitest';
-import { ModelFileDownloadError } from '../transformers-cache.js';
-import {
   PipelineLoadError,
   daemonEmbedderPin,
   daemonEmbedderVerified,
@@ -18,8 +11,19 @@ import {
   isRetryablePipelineLoadFailure,
   queryInstruction,
   resetDaemonEmbedderVerification,
-} from './embed-core.js';
-import { embed, embeddingsDisabledReason, sharesDaemonEmbedder } from './embeddings.js';
+} from '@bendyline/gezel-inference/internal/memory/embed-core';
+import {
+  embed,
+  embeddingsDisabledReason,
+  sharesDaemonEmbedder,
+} from '@bendyline/gezel-inference/internal/memory/embeddings';
+import { ModelFileDownloadError } from '@bendyline/gezel-inference/internal/transformers-cache';
+import {
+  BGE_SMALL_EN_V15_1,
+  MULTILINGUAL_E5_SMALL_1,
+  MULTILINGUAL_E5_SMALL_2,
+} from '@bendyline/gezel-knowledge';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const prior = process.env.GEZEL_EMBED_MODEL;
 const priorNoInstr = process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION;

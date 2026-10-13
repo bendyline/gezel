@@ -7,11 +7,11 @@ import {
   OpenCodeSetupStatusResponseSchema,
   type ProviderName,
 } from '@bendyline/gezel';
+import type { ModelInfo } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import { setupOwnerId } from '../fs/managed-marker.js';
 import type { OpenCodeBridgeController } from '../http/opencode-bridge.js';
 import { createTokenStore } from '../http/token-store.js';
-import type { ModelInfo } from '../providers/types.js';
 import {
   OPENCODE_SETUP_APP_ID,
   OPENCODE_SETUP_PROVIDER_ID,

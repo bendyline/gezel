@@ -23,8 +23,8 @@ export function SocialModeToggle({ describe = true }: { describe?: boolean }) {
     <>
       {describe && (
         <p className="muted" style={{ marginTop: 0 }}>
-          Gezels show their own character in how they talk, their growth is on display, and opening
-          a chat shows what is waiting for you.
+          Gezellen show their own character in how they talk, their growth is on display, and
+          opening a chat shows what is waiting for you.
         </p>
       )}
       <label className="debug-toggle" style={{ marginTop: 0 }}>

@@ -1,6 +1,7 @@
 import type { GezelSummary, Project, Task } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { useTaskEvents } from '../components/useTaskResult.js';
 import { TaskDetail } from './TaskDetail.js';
 
 interface TaskTabContentProps {
@@ -40,6 +41,19 @@ export function TaskTabContent({ taskRef, onTaskChanged }: TaskTabContentProps) 
       cancelled = true;
     };
   }, [taskRef]);
+
+  // The bench is a live view: a step advancing, a gezel hired for the next
+  // step, or the task settling re-reads it. It froze at whatever the task
+  // looked like when the tab opened, so a run that moved on still showed its
+  // first step as current.
+  useTaskEvents(task?.projectId, task?.ref, () => {
+    void Promise.all([api.getTaskByRef(taskRef), api.listGezels()])
+      .then(([t, gz]) => {
+        setTask(t);
+        setGezels(gz.gezels);
+      })
+      .catch(() => {});
+  });
 
   const onChanged = useCallback(
     (updated: Task) => {

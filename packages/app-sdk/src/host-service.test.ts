@@ -244,3 +244,27 @@ it('requires a store payload before touching the service and verifies explicit d
   expect(service.verifyNativeBinaries).toHaveBeenCalledWith({ candidates: [join(root, 'native')] });
   expect(service.calls).toEqual([]);
 });
+
+it('loads the lightweight package by default for in-process inference', async () => {
+  const home = join(root, 'lightweight');
+  const connection = await hostInProcess('fixture', {
+    home,
+    mode: 'in-process',
+    inferenceOnly: true,
+  });
+  cleanup.push(() => connection.close());
+  const response = await connection.fetch(`${connection.baseUrl}/v1/models`, {
+    headers: { Authorization: `Bearer ${connection.token}` },
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    data: expect.arrayContaining([expect.any(Object)]),
+  });
+  expect(
+    (
+      await connection.fetch(`${connection.baseUrl}/api/projects`, {
+        headers: { Authorization: `Bearer ${connection.token}` },
+      })
+    ).status,
+  ).toBe(404);
+});

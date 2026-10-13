@@ -4,10 +4,10 @@ import {
   type GezelConfig,
   createLogger,
 } from '@bendyline/gezel';
+import { EmbeddingsDisabledError } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import type { ChatManager } from '../chat/manager.js';
 import type { HistoryManager } from '../history/manager.js';
 import { type MemoryKind, isMemoryKind } from './daily-markdown.js';
-import { EmbeddingsDisabledError } from './embeddings.js';
 import type { MemoryManager } from './manager.js';
 
 const DEFAULT_MIN_USER_TURNS = 2;

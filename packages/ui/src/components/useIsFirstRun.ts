@@ -1,12 +1,14 @@
 import { isLocalProvider } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { MODEL_INVENTORY_CHANGED_EVENT } from '../model-inventory.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
+import { llamaEngineNeed } from './first-run-engine.js';
 
 /**
- * Whether the app is still in first-run onboarding — no working AI provider
- * set up yet. Drives relabeling the Meester home tab as "Get started" until
- * the user has downloaded a model / connected a provider.
+ * Whether an unused home still needs its first working AI provider. A later
+ * outage or provider change must never turn an established workshop back
+ * into onboarding (and hide the diagnostics needed to repair it).
  *
  * Two signals feed it:
  *   1. An initial estimate from config + installed models, so the sidebar
@@ -43,7 +45,9 @@ async function estimateFirstRun(): Promise<boolean> {
     }
     if (p === 'llama-cpp' || p == null) {
       const { models } = await api.listLlamaCppModels().catch(() => ({ models: [] }));
-      return models.length === 0;
+      if (models.length === 0) return true;
+      // Its engine is fetched lazily; a turn before it lands only fails.
+      return p === 'llama-cpp' && (await llamaEngineNeed(cfg)) !== null;
     }
     // Ollama / CLI providers configure elsewhere — don't claim first-run for
     // them; HomeView's probe broadcast will correct it if needed.
@@ -67,29 +71,84 @@ export function useIsFirstRun(enabled = true): boolean {
     if (!enabled) return;
     let cancelled = false;
     let revision = 0;
+    let inFlight = false;
+    let againAfter = false;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+    let completed = false;
+    // The bootstrap flag is not evidence of use: the daemon sets it even
+    // when setup fails. This endpoint excludes the automatically created crew
+    // and projects. Read it once, shared by estimates and Home's probe events.
+    // A portable host has no daemon home to report on and answers 501.
+    const usage = runtimeCapabilities().daemonSettings
+      ? api
+          .getSystemHomeInfo()
+          .then((home) => home.usage.everUsed)
+          .catch(() => false)
+      : Promise.resolve(false);
+    const settle = async (needsSetup: boolean, current: number) => {
+      const used = await usage;
+      if (cancelled || current !== revision) return;
+      completed ||= used;
+      const next = needsSetup && !completed;
+      setFirstRun(next);
+      schedulePoll(next);
+    };
+    const schedulePoll = (stillFirstRun: boolean) => {
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = null;
+      // A model can finish downloading while the person is on another page,
+      // where nothing announces it. Chat is held until this flips, so look
+      // again now and then rather than leave the composer locked.
+      if (stillFirstRun && !cancelled) pollTimer = setTimeout(recheck, FIRST_RUN_POLL_MS);
+    };
     const recheck = () => {
+      // An inventory answer can take a minute on a machine with large
+      // models; stacking requests behind it only slows them all. A change
+      // that lands meanwhile gets one fresh look once this answer is in.
+      if (inFlight) {
+        againAfter = true;
+        return;
+      }
+      inFlight = true;
       const current = ++revision;
-      void estimateFirstRun().then((v) => {
-        if (!cancelled && current === revision) setFirstRun(v);
-      });
+      void estimateFirstRun()
+        .then((v) => {
+          if (cancelled || current !== revision) return;
+          return settle(v, current);
+        })
+        .finally(() => {
+          inFlight = false;
+          if (againAfter && !cancelled) {
+            againAfter = false;
+            recheck();
+          }
+        });
     };
     recheck();
 
     const onFirstRun = (e: Event) => {
       const detail = (e as CustomEvent<{ firstRun?: boolean }>).detail;
       if (detail && typeof detail.firstRun === 'boolean') {
-        revision++;
-        setFirstRun(detail.firstRun);
+        // Once Home has observed a working provider, a later failed probe is
+        // a connection problem, even before the person's first saved chat.
+        if (!detail.firstRun) completed = true;
+        void settle(detail.firstRun, ++revision);
       }
     };
     window.addEventListener('gezel:first-run', onFirstRun);
     window.addEventListener('gezel:config-updated', recheck);
+    window.addEventListener(MODEL_INVENTORY_CHANGED_EVENT, recheck);
     return () => {
       cancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
       window.removeEventListener('gezel:first-run', onFirstRun);
       window.removeEventListener('gezel:config-updated', recheck);
+      window.removeEventListener(MODEL_INVENTORY_CHANGED_EVENT, recheck);
     };
   }, [enabled]);
 
   return firstRun;
 }
+
+/** How often a first-run install looks again for a model that has landed. */
+const FIRST_RUN_POLL_MS = 15_000;

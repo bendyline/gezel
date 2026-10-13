@@ -21,7 +21,7 @@ export const BASELINE_CSS = `:root {
   --hb-ink-warm: #2a2520;
   --hb-ink-muted: #5a4f42;
   --hb-ink-quiet: #8b7e6b;
-  --hb-sage: #667f62;
+  --hb-sage: #5c6a4a;
   --hb-sage-forest: #3d4d3a;
   --hb-cream-ink: #f3ede0;
   --hb-accent: #b0724c;

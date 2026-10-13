@@ -9,7 +9,7 @@ import { CatalogService } from './service.js';
  * example that names a missing model fails on its first `ensureModel` call:
  * the app-sdk Quickstart shipped `llama-cpp:qwen3-4b-instruct-q4_k_m`, an id
  * no catalog ever held (2026-09-30 npm ship audit). The checks mirror the
- * daemon's own resolution in packages/service/src/models/ensure.ts.
+ * daemon's own resolution in packages/inference/src/models/ensure.ts.
  */
 const repoRoot = resolve(import.meta.dirname, '..', '..', '..');
 

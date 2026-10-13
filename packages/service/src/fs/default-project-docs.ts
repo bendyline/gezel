@@ -52,14 +52,14 @@ export const SHARED_LIBRARY_STARTER_DOC = 'About this library.md';
  */
 export const SHARED_LIBRARY_STARTER_MD = `---
 title: About this library
-description: What the shared document library is and how gezels use it.
+description: What the shared document library is and how gezellen use it.
 ---
 
 # About this library
 
 This is the shared document library. Everything filed here is readable by every gezel you work with, in every project. That makes it the right home for things that should be true everywhere: how you want writing to sound, what your team is trying to do, the rules a reviewer should apply, and reference material worth keeping.
 
-## How your gezels use it
+## How your gezellen use it
 
 Gezels see a list of this library's documents in every conversation, and they search its contents when a question touches team policy, guidelines, or conventions. You do not have to point them at a file: filing it here is enough.
 

@@ -65,7 +65,7 @@ version set every gate reads.
 | Format definitions: manifest, registry, document and profile schemas, id grammars, `knowledge://` references, quantization, DDL, canonical JSON, signing | [`packages/gezk`](../packages/gezk) (`@bendyline/gezk`; `./node` adds the crypto/fs pieces). No gezel dependency. |
 | Compiler, deterministic archive writer, verified archive reader, catalog handle (browse, FTS, two-stage semantic search), validator, profile registry, Markdown adapter | [`packages/knowledge`](../packages/knowledge) (`@bendyline/gezel-knowledge`) |
 | Product plumbing: user registry, machine inventory, install/update requests, history kinds | [`packages/core/src/schemas/knowledge.ts`](../packages/core/src/schemas/knowledge.ts), which re-exports the format names **explicitly** — an `export *` from an external package is lowered by esbuild to a runtime namespace copy that never reaches the bundle's own exports (`knowledge-reexports.test.ts` guards the list) |
-| The daemon's knowledge worker, install pipeline, broker, search arm | [`packages/service/src/knowledge/`](../packages/service/src/knowledge/), [`machine-engine/knowledge-assets.ts`](../packages/service/src/machine-engine/knowledge-assets.ts) |
+| The daemon's knowledge worker, install pipeline, broker, search arm | [`packages/service/src/knowledge/`](../packages/service/src/knowledge/), [`machine-engine/knowledge-assets.ts`](../packages/inference/src/machine-engine/knowledge-assets.ts) |
 | Product architecture (trust tiers, placement, UX, retrieval budgets) | [knowledge-catalogs.md](knowledge-catalogs.md) |
 
 ## Keeping the public artifacts in step

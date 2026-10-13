@@ -1,15 +1,15 @@
 import { RecognitionRequestSchema, createLogger } from '@bendyline/gezel';
-import { Hono } from 'hono';
-import { streamSSE } from 'hono/streaming';
-import { z } from 'zod';
-import { readImageStaticMeta } from '../../index-store/image-meta.js';
-import { ChatModelInstallRegistry } from '../../models/install-registry.js';
+import { ChatModelInstallRegistry } from '@bendyline/gezel-inference/internal/models/install-registry';
 import {
   INVALID_MODEL_ID_CODE,
   INVALID_MODEL_ID_MESSAGE,
   isSafeModelId,
-} from '../../models/model-id.js';
-import { ReadOnlyModelError } from '../../models/storage-roots.js';
+} from '@bendyline/gezel-inference/internal/models/model-id';
+import { ReadOnlyModelError } from '@bendyline/gezel-inference/internal/models/storage-roots';
+import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
+import { z } from 'zod';
+import { readImageStaticMeta } from '../../index-store/image-meta.js';
 import {
   RECOGNITION_MODEL_CATALOG,
   findRecognitionCatalogEntry,

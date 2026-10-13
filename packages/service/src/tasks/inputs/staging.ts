@@ -19,8 +19,8 @@ import {
   normalizeInputPath,
   nowIso,
 } from '@bendyline/gezel';
-import { writeFileAtomic } from '../../fs/atomic.js';
-import { isReservedWindowsName, safeJoin } from '../../fs/safe-paths.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { isReservedWindowsName, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 
 const log = createLogger('task-inputs');
 

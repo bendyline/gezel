@@ -1,4 +1,4 @@
-import type { LibreOfficeSetupStatusResponse } from '@bendyline/gezel';
+import type { LibreOfficeSetupStatusResponse, LocalHarnessSetupState } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
@@ -26,7 +26,13 @@ function errorText(err: unknown): string {
  * owner credential (ADR 0018), and asks for a connection code only when it
  * cannot read that credential.
  */
-export function LibreOfficeSetupCard({ onChanged }: { onChanged?: () => void | Promise<void> }) {
+export function LibreOfficeSetupCard({
+  onChanged,
+  onStateChange,
+}: {
+  onChanged?: () => void | Promise<void>;
+  onStateChange?: (state: LocalHarnessSetupState) => void;
+}) {
   const bridge = window.__GEZEL__?.libreoffice;
   const localDesktop = isLocalDesktopMode() && Boolean(bridge);
   const [status, setStatus] = useState<LibreOfficeSetupStatusResponse | null>(null);
@@ -52,6 +58,11 @@ export function LibreOfficeSetupCard({ onChanged }: { onChanged?: () => void | P
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const state = status?.state;
+  useEffect(() => {
+    if (state) onStateChange?.(state);
+  }, [state, onStateChange]);
 
   const run = async (
     action: () => Promise<
@@ -97,7 +108,7 @@ export function LibreOfficeSetupCard({ onChanged }: { onChanged?: () => void | P
       </div>
 
       <p className="muted small harness-setup-intro">
-        Adds a Gezel panel to Writer, Calc, and Impress, where your gezels chat with you about the
+        Adds a Gezel panel to Writer, Calc, and Impress, where your gezellen chat with you about the
         open document and can read and edit it. It is installed for your account only.
       </p>
 

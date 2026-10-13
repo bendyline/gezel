@@ -44,10 +44,30 @@ const VIDEO_MODEL = {
     recoScore: 10,
     approxSizeBytes: 4 * GiB,
     family: 'ltx',
-    hardwareTier: 'mid',
-    minVramGB: 16,
   },
 };
+
+function fitResponse(
+  models: Array<{ id: string; verdict: string; reason?: string; pool?: string }>,
+) {
+  return {
+    pool: 'unified',
+    budgetBytes: 22 * GiB,
+    gpuBudgetBytes: 22 * GiB,
+    totalRamBytes: 32 * GiB,
+    models: models.map((m) => ({
+      pool: 'unified',
+      weightBytes: 20 * GiB,
+      bytes: 36 * GiB,
+      gpuBytes: 36 * GiB,
+      exact: true,
+      neededBytes: 36 * GiB,
+      availableBytes: 22 * GiB,
+      reason: '',
+      ...m,
+    })),
+  };
+}
 
 describe('VideoModelManager active-model selection', () => {
   beforeEach(() => {
@@ -111,6 +131,59 @@ describe('VideoModelManager downloads', () => {
     vi.mocked(api.listInstalledVideoModels).mockResolvedValue({ models: [] } as never);
     vi.mocked(api.listActiveVideoPulls).mockResolvedValue({ pulls: [] } as never);
     vi.mocked(api.listCatalogItems).mockResolvedValue({ items: [VIDEO_MODEL] } as never);
+    vi.mocked(api.getVideoModelFit).mockResolvedValue(fitResponse([]) as never);
+  });
+
+  it('hides a model the daemon says will not run, and shows it disabled under Show all', async () => {
+    vi.mocked(api.getVideoModelFit).mockResolvedValue(
+      fitResponse([
+        {
+          id: 'test-video-model',
+          verdict: 'wont-run',
+          reason: 'It needs about 36 GB of memory while generating.',
+        },
+      ]) as never,
+    );
+    render(<VideoModelManager />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Show all models' }));
+    const tooLarge = await screen.findByRole('button', { name: 'Too large' });
+    expect(tooLarge).toBeDisabled();
+    expect(tooLarge).toHaveAttribute('title', 'It needs about 36 GB of memory while generating.');
+    expect(screen.getByText('too large for this machine')).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Hide models too large for this machine' }),
+    );
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Too large' })).toBeNull());
+  });
+
+  it('asks before downloading a model that may not fit, and only then pulls', async () => {
+    vi.mocked(api.getVideoModelFit).mockResolvedValue(
+      fitResponse([
+        { id: 'test-video-model', verdict: 'may-not-run', reason: 'It probably needs 36 GB.' },
+      ]) as never,
+    );
+    vi.mocked(api.pullVideoModel).mockResolvedValue(undefined);
+    render(<VideoModelManager />);
+
+    await screen.findByText('may not fit this machine');
+    await userEvent.click(screen.getByRole('button', { name: 'Download' }));
+    expect(api.pullVideoModel).not.toHaveBeenCalled();
+    expect(await screen.findByText(/It probably needs 36 GB/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Download anyway' }));
+    expect(api.pullVideoModel).toHaveBeenCalledWith(
+      'test-video-model',
+      expect.any(Function),
+      expect.anything(),
+    );
+  });
+
+  it('shows everything when the daemon cannot say what fits', async () => {
+    vi.mocked(api.getVideoModelFit).mockRejectedValue(new Error('404'));
+    render(<VideoModelManager />);
+    expect(await screen.findByRole('button', { name: 'Download' })).toBeEnabled();
   });
 
   it('starts a new pull immediately when a failed download is retried', async () => {

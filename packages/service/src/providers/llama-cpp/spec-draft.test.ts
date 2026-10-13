@@ -1,6 +1,6 @@
+import type { PerModelLlamaCppEngineConfig } from '@bendyline/gezel-inference/internal/providers/llama-cpp/engine-flags';
+import { resolveSpecDraft } from '@bendyline/gezel-inference/internal/providers/llama-cpp/spec-draft';
 import { describe, expect, it } from 'vitest';
-import type { PerModelLlamaCppEngineConfig } from './engine-flags.js';
-import { resolveSpecDraft } from './spec-draft.js';
 
 const draftManifest: PerModelLlamaCppEngineConfig = {
   spec: { type: 'draft-simple', draftModelId: 'gemma4-e2b-q4', nMax: 4 },

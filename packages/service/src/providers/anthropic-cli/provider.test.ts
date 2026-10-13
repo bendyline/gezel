@@ -28,7 +28,7 @@ describe('AnthropicCliProvider model catalog', () => {
       'Claude Sonnet — Balanced speed and capability for daily work',
     );
     expect(models.find((model) => model.id === 'fable')).toMatchObject({
-      name: 'Claude Fable 5 — Highest capability for demanding, long-running work',
+      name: 'Claude Fable — Highest capability for demanding, long-running work',
       reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
       defaultReasoningEffort: 'high',
       contextWindow: 1_000_000,
@@ -42,15 +42,14 @@ describe('AnthropicCliProvider model catalog', () => {
     const provider = new AnthropicCliProvider({ runtimeDir: '/tmp/gezel-claude-cli-test' });
     const models = await provider.listModels();
 
-    expect(models.find((model) => model.id === 'opus')).toMatchObject({
-      reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-      defaultReasoningEffort: 'xhigh',
-    });
-    expect(models.find((model) => model.id === 'sonnet')).toMatchObject({
-      reasoningEfforts: ['low', 'medium', 'high', 'max'],
-      defaultReasoningEffort: 'high',
-    });
-    expect(models.find((model) => model.id === 'haiku')?.supportsReasoning).toBeUndefined();
+    for (const id of ['opus', 'sonnet', 'haiku']) {
+      expect(models.find((model) => model.id === id)).toMatchObject({
+        supportsReasoning: true,
+        reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+        defaultReasoningEffort: 'medium',
+      });
+    }
+    expect(models.find((model) => model.id === 'best')?.defaultReasoningEffort).toBe('high');
   });
 
   it('lets configured entries override built-in aliases', async () => {

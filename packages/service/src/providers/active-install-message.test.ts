@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
 import {
   type ActiveInstallLike,
   installPercent,
   localDeviceSettingsLabel,
   noModelYetMessage,
-} from './active-install-message.js';
+} from '@bendyline/gezel-inference/internal/providers/active-install-message';
+import { describe, expect, it } from 'vitest';
 
 describe('localDeviceSettingsLabel', () => {
   it('names the Settings tab the way each platform shows it', () => {

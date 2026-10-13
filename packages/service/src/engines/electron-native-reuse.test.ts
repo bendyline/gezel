@@ -2,13 +2,13 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   type ElectronNativeReuseOptions,
   reuseVerifiedElectronNativeBinaries,
   verifyNativeBinaries,
-} from './electron-native-reuse.js';
-import type { VerifyOptions } from './signature.js';
+} from '@bendyline/gezel-inference/internal/engines/electron-native-reuse';
+import type { VerifyOptions } from '@bendyline/gezel-inference/internal/engines/signature';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const roots: string[] = [];
 const originalNativeRoot = process.env.GEZEL_NATIVE_BIN_DIR;
@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 describe('Electron native reuse', () => {
-  it('adopts only a fully pinned and publisher-verified payload', async () => {
+  it('adopts a fully pinned payload without re-checking file signatures', async () => {
     const root = await mkdtemp(join(tmpdir(), 'gezel-electron-native-'));
     roots.push(root);
     const dir = join(root, 'win32-x64');
@@ -58,10 +58,11 @@ describe('Electron native reuse', () => {
 
     expect(result.reused).toBe(true);
     expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(root);
-    expect(verifySignature).toHaveBeenCalledOnce();
+    // The pins are the per-file check; the release verified these signatures.
+    expect(verifySignature).not.toHaveBeenCalled();
   });
 
-  it('pure verifier: adopts only a fully pinned and publisher-verified payload', async () => {
+  it('pure verifier: adopts a fully pinned payload without re-checking file signatures', async () => {
     const root = await mkdtemp(join(tmpdir(), 'gezel-electron-native-'));
     roots.push(root);
     const dir = join(root, 'win32-x64');
@@ -99,7 +100,49 @@ describe('Electron native reuse', () => {
 
     expect(result.reused).toBe(true);
     expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(originalNativeRoot);
-    expect(verifySignature).toHaveBeenCalledOnce();
+    expect(verifySignature).not.toHaveBeenCalled();
+  });
+
+  it('rejects a pinned file whose bytes changed, whatever its signature', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gezel-electron-native-'));
+    roots.push(root);
+    const dir = join(root, 'win32-x64');
+    await mkdir(dir, { recursive: true });
+    const pinned = Buffer.from('signed executable fixture');
+    // Same size, different bytes: only the hash can tell them apart.
+    const replaced = Buffer.from('signed executable fixturE');
+    await writeFile(join(dir, 'gezel-device-health.exe'), replaced);
+    const verifySignature = vi.fn(async (_path: string, _opts: VerifyOptions) => ({
+      accepted: true,
+      result: { status: 'valid' as const, detail: 'Bendyline LLC' },
+    }));
+
+    const result = await verifyNativeBinaries({
+      candidates: [root],
+      platform: 'win32',
+      arch: 'x64',
+      release: '9.9.9',
+      manifest: {
+        schemaVersion: 2,
+        release: '9.9.9',
+        platforms: {
+          'win32-x64': {
+            files: {
+              'gezel-device-health.exe': {
+                sha256: createHash('sha256').update(pinned).digest('hex'),
+                sizeBytes: pinned.length,
+                signature: 'bendyline',
+              },
+            },
+            symlinks: {},
+          },
+        },
+      },
+      verifySignature,
+    });
+
+    expect(result.reused).toBe(false);
+    expect(result.reason).toContain('sha256 mismatch: win32-x64/gezel-device-health.exe');
   });
 
   it('rejects an unpinned loadable DLL even when pinned files match', async () => {
@@ -188,10 +231,9 @@ describe('Electron native reuse', () => {
     });
 
     expect(result.reused).toBe(true);
-    expect(verifySignature).toHaveBeenCalledTimes(2);
-    expect(verifySignature.mock.calls[0]?.[1]).not.toHaveProperty('requireNotarizedApp');
-    expect(verifySignature.mock.calls[1]?.[0]).toMatch(/Gezel\.app$/);
-    expect(verifySignature.mock.calls[1]?.[1]).toMatchObject({
+    expect(verifySignature).toHaveBeenCalledOnce();
+    expect(verifySignature.mock.calls[0]?.[0]).toMatch(/Gezel\.app$/);
+    expect(verifySignature.mock.calls[0]?.[1]).toMatchObject({
       requireNotarizedApp: true,
     });
   });
@@ -248,9 +290,8 @@ describe('Electron native reuse', () => {
 
     expect(result.reused).toBe(true);
     expect(result.nativeBinDir).toBe(root);
-    expect(verifySignature).toHaveBeenCalledOnce();
-    expect(verifySignature.mock.calls[0]?.[0]).toBe(join(dir, fixtureName));
-    expect(verifySignature.mock.calls[0]?.[1]).not.toHaveProperty('requireNotarizedApp');
+    // A standalone tree has no enclosing app to assess, and its pins are the file check.
+    expect(verifySignature).not.toHaveBeenCalled();
   });
 
   it.runIf(process.platform !== 'win32')(

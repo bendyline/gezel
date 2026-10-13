@@ -1,14 +1,21 @@
-import type { EnginePhaseEvent } from '@bendyline/gezel/local-loop';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  type SSEWriter,
+  runNonStreaming,
+  runStreaming,
+} from '@bendyline/gezel-inference/internal/http/openai-compat/streaming';
+import {
+  createStreamingDiagnostics,
+  snapshotStreamingDiagnostics,
+} from '@bendyline/gezel-inference/internal/http/openai-compat/streaming-telemetry';
+import { ToolCallStreamFilter } from '@bendyline/gezel-inference/internal/http/openai-compat/tool-call-stream-filter';
 import type {
   ExternalToolCall,
   LLMSession,
   ToolArgsDeltaMeta,
   TurnUsage,
-} from '../../providers/types.js';
-import { createStreamingDiagnostics, snapshotStreamingDiagnostics } from './streaming-telemetry.js';
-import { type SSEWriter, runStreaming } from './streaming.js';
-import { ToolCallStreamFilter } from './tool-call-stream-filter.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
+import type { EnginePhaseEvent } from '@bendyline/gezel/local-loop';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 function fakeSession(input: {
   chunks: string[];
@@ -18,6 +25,7 @@ function fakeSession(input: {
   calls?: ExternalToolCall[];
   sendGate?: Promise<void>;
   lifecycle?: { activeReasoningSubscriptions: number; reasoningSubscribeCalls: number };
+  finish?: LLMSession['lastTurnFinish'];
 }): LLMSession {
   const phaseHandlers = new Set<(event: EnginePhaseEvent) => void>();
   const deltaHandlers = new Set<(chunk: string) => void>();
@@ -28,6 +36,7 @@ function fakeSession(input: {
   const usageHandlers = new Set<(usage: TurnUsage) => void>();
 
   return {
+    lastTurnFinish: input.finish,
     async sendAndWait(): Promise<string> {
       await input.sendGate;
       for (const phase of input.phases ?? []) for (const handler of phaseHandlers) handler(phase);
@@ -212,6 +221,35 @@ describe('runStreaming textual tool-call suppression', () => {
 
     const content = frames.map((frame) => choice(frame)?.delta?.content ?? '').join('');
     expect(content).toBe('Show <tool_call>example</tool_call> literally.');
+  });
+});
+
+describe('engine-reported finish', () => {
+  it("reports an engine's own length stop and the lower cap it applied", async () => {
+    // Apple's on-device model clamps every reply to 1,024 tokens. Against the
+    // caller's 8,192 the usage heuristic read its cut-off reply as a stop.
+    const session = fakeSession({
+      chunks: ['[{"quote":"cut'],
+      finish: { reason: 'length', maxTokens: 1024 },
+    });
+    const { sink, frames } = collectingSink();
+    await runStreaming(session, 'review', 'apple', sink, () => 123, { lengthCapTokens: 8192 });
+    const finish = frames.find((frame) => choice(frame)?.finish_reason);
+    expect(choice(finish!)?.finish_reason).toBe('length');
+    expect(finish?.gezel_max_tokens).toBe(1024);
+
+    const whole = await runNonStreaming(session, 'review', 'apple', () => 123, {
+      lengthCapTokens: 8192,
+    });
+    expect(whole.choices[0].finish_reason).toBe('length');
+    expect(whole.gezel_max_tokens).toBe(1024);
+  });
+
+  it('reports no cap when the engine applied the one requested', async () => {
+    const session = fakeSession({ chunks: ['done'], finish: { reason: 'stop', maxTokens: 512 } });
+    const whole = await runNonStreaming(session, 'x', 'apple', () => 123, { lengthCapTokens: 512 });
+    expect(whole.choices[0].finish_reason).toBe('stop');
+    expect(whole).not.toHaveProperty('gezel_max_tokens');
   });
 });
 

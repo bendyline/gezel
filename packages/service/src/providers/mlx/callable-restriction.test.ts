@@ -1,7 +1,7 @@
+import type { ResolvedModelProfile } from '@bendyline/gezel-inference/internal/model-profile/types';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import type { LLMSession } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ResolvedModelProfile } from '../../model-profile/types.js';
-import type { LLMSession } from '../types.js';
-import { MlxProvider } from './provider.js';
 
 // A coordinator routing clamp keeps every tool advertised (the rendered
 // prompt must not change, or an untrimmable cache re-prefills from the

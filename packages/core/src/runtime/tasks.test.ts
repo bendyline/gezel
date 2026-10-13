@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CraftbookSchema } from '../schemas/craftbook.js';
 import { TaskSchema } from '../schemas/task.js';
+import { craftbookHostGap } from './craftbook-host-gap.js';
 import {
   type PortableFileEntry,
   type PortableFileSystem,
@@ -392,7 +393,7 @@ describe('portable ordinary task lifecycle', () => {
         ...input,
         steps: [{ name: 'Hook', terminal: true, onEnter: { scope: 'craftbook', name: 'setup' } }],
       }),
-    ).rejects.toThrow('embedded craftbook');
+    ).rejects.toThrow('missing one of its own scripts');
     await expect(store.getTask('../../outside/1')).rejects.toThrow();
     expect(await store.listTasks()).toHaveLength(0);
   });
@@ -451,5 +452,159 @@ describe('portable task gate contract', () => {
       checks: [{ kind: 'minBytes', file: '../../config.json', bytes: 1 }],
     };
     expect(await evaluatePortableTaskGate(store, task, step)).toMatchObject({ approved: false });
+  });
+});
+
+describe('portable craftbook inputs and samples', () => {
+  const ALL_GROUPS = [
+    'security-intel',
+    'image-intel',
+    'entity-intel',
+    'archives',
+    'data-tables',
+    'craftbooks',
+    'ai-apps',
+    'audio',
+    'code-execution',
+    'browser-automation',
+    'git',
+    'web',
+    'images',
+    'videos',
+    'role-delegation',
+    'role-delegation-escalation',
+  ];
+  const book = CraftbookSchema.parse({
+    id: 'notes-book',
+    name: 'Notes to actions',
+    createdAt: '2026-09-20T12:00:00Z',
+    updatedAt: '2026-09-20T12:00:00Z',
+    entryStepId: 'read',
+    paramSchema: {
+      type: 'object',
+      required: ['source'],
+      properties: {
+        source: {
+          type: 'string',
+          title: 'Meeting notes',
+          input: { kind: 'file', accept: ['.md'] },
+        },
+      },
+    },
+    samples: [
+      {
+        id: 'team',
+        title: "a team meeting's notes",
+        param: 'source',
+        files: ['samples/team/notes.md'],
+      },
+    ],
+    steps: [
+      {
+        id: 'read',
+        name: 'Read the notes',
+        terminal: true,
+        toolPolicy: { disallowBuiltinToolsets: ALL_GROUPS },
+      },
+    ],
+  });
+  const samples = {
+    read: async () => [
+      { rel: 'notes.md', bytes: encodeText('# Weekly sync\n- Ana sends the plan') },
+    ],
+  };
+
+  it('copies a sample into the task inputs folder with the task, and records it', async () => {
+    const { store, files } = fixture();
+    await store.ensureLayout();
+    const task = await store.createTask(
+      'default',
+      {
+        title: 'Notes',
+        description: brief,
+        craftbookId: 'notes-book',
+        inputs: { source: { from: 'sample', sampleId: 'team' } },
+      },
+      book,
+      { samples },
+    );
+    expect(task.inputs?.source).toMatchObject({
+      from: 'sample',
+      drawer: 'artifacts',
+      path: 'tasks/1/inputs/source/notes.md',
+      label: "a team meeting's notes",
+      fileCount: 1,
+    });
+    expect(task.craftbookParams?.source).toBe('tasks/1/inputs/source/notes.md');
+    expect(
+      new TextDecoder().decode(
+        files.entries.get('projects/default/artifacts/tasks/1/inputs/source/notes.md')!,
+      ),
+    ).toContain('Weekly sync');
+    expect(files.entries.has('projects/default/artifacts/tasks/1/inputs/source.json')).toBe(true);
+  });
+
+  it('reads a workspace pick in place, and refuses files from the device for now', async () => {
+    const { store } = fixture();
+    await store.ensureLayout();
+    await store.writeFileBytes('workspace', 'default', 'notes/sync.md', encodeText('# Sync'));
+    const task = await store.createTask(
+      'default',
+      {
+        title: 'Notes',
+        description: brief,
+        craftbookId: 'notes-book',
+        inputs: { source: { from: 'workspace', path: 'notes/sync.md' } },
+      },
+      book,
+    );
+    expect(task.inputs?.source).toMatchObject({ from: 'workspace', path: 'notes/sync.md' });
+    await expect(
+      store.createTask(
+        'default',
+        {
+          title: 'Notes',
+          description: brief,
+          craftbookId: 'notes-book',
+          inputs: { source: { from: 'upload', stagingId: 'stg-0123456789abcdef' } },
+        },
+        book,
+      ),
+    ).rejects.toThrow('cannot be used yet');
+  });
+
+  it('answers input-preview as a preview, never as a task creation', async () => {
+    const { store } = fixture();
+    await store.ensureLayout();
+    const runner = new PortableTaskRunner({
+      store,
+      runStep: vi.fn(),
+      samples,
+      resolveCraftbook: async () => book,
+    });
+    const response = await runner.route('POST', '/api/projects/default/tasks/input-preview', {
+      craftbookId: 'notes-book',
+      param: 'source',
+      source: { from: 'sample', sampleId: 'team' },
+    });
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({ fileCount: 1, label: "a team meeting's notes" });
+    expect(await store.listTasks({ projectId: 'default' })).toHaveLength(0);
+    const unknown = await runner.route('POST', '/api/projects/default/tasks/workflow', {});
+    expect(unknown?.status).toBe(501);
+  });
+
+  it('says why a book cannot run here instead of dropping it', () => {
+    const host = {
+      tools: new Set(['read_artifact', 'write_artifact', 'write_task_note']),
+      standardScripts: new Set<string>(),
+      gateCheckKinds: new Set(['minBytes']),
+    };
+    expect(craftbookHostGap(book, host)).toBeNull();
+    expect(craftbookHostGap({ ...book, toolsets: [{ id: 'x' }] } as never, host)).toBe(
+      'Needs tools installed on the desktop.',
+    );
+    const loose = { ...book, steps: [{ ...book.steps[0]!, toolPolicy: {} }] };
+    expect(craftbookHostGap(loose as never, host)).toBe('Can use tools this device does not have.');
   });
 });

@@ -1,6 +1,6 @@
 import type { GitHubIdentity } from '@bendyline/gezel';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { Octokit } from '@octokit/rest';
-import type { SecretStore } from '../secrets/types.js';
 
 /**
  * GitHub auth glue that the New Project flow + Settings sign-in chip

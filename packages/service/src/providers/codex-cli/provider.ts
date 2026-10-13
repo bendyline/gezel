@@ -1,28 +1,71 @@
 import { createLogger, normalizeCodexPermissionMode } from '@bendyline/gezel';
-import { ProviderQueue } from '../queue.js';
-import { ExternalToolsUnsupportedError, SessionResumeError } from '../types.js';
-import type { LLMProvider, LLMSession, ModelInfo, ProviderName, SessionOpts } from '../types.js';
+import {
+  type CodexReasoningEffort,
+  isCodexReasoningEffort,
+} from '@bendyline/gezel-inference/internal/providers/codex-cli/reasoning';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import {
+  ExternalToolsUnsupportedError,
+  SessionResumeError,
+} from '@bendyline/gezel-inference/internal/providers/types';
+import type {
+  LLMProvider,
+  LLMSession,
+  ModelInfo,
+  ProviderName,
+  SessionOpts,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { type CodexBinary, resolveCodexBinary } from './binary.js';
 import type { CodexPermissionMode } from './invoker.js';
-import { type CodexReasoningEffort, isCodexReasoningEffort } from './reasoning.js';
 import { CodexCliSession, type CodexSessionDeps } from './session.js';
 
-const DEFAULT_MODEL = 'gpt-5.5';
+const DEFAULT_MODEL = 'gpt-6.1-sol';
 
 const log = createLogger('codex-cli');
 
 /**
  * Hardcoded model list. Codex CLI's `-m` flag accepts any model id the
- * upstream account can route to — we ship the common GPT-5 series tags
- * by default. Users who want a different id (legacy `o3-mini`, hosted
- * fine-tunes, OSS models via `--oss`) can extend the list via
- * `config.codexCli.extraModels`.
+ * upstream account can route to — we ship the models Codex itself lists.
+ * Users who want a different id (a model Codex retired for ChatGPT sign-in
+ * but still serves on an API key, hosted fine-tunes, OSS models via `--oss`)
+ * can extend the list via `config.codexCli.extraModels`.
  *
  * Display labels are cosmetic — the id is what's passed to `-m`. Keep these
  * entries and their model-specific effort lists synchronized with Codex's
- * model catalog when OpenAI ships a new family or revision.
+ * model catalog (`~/.codex/models_cache.json`: `slug`,
+ * `supported_reasoning_levels`, `default_reasoning_level`) when OpenAI ships
+ * a new family or revision. `gpt-5.5` is hidden there and leaves Codex for
+ * ChatGPT sign-in on 2026-10-14; drop it after that.
  */
 const HARDCODED_MODELS: ModelInfo[] = [
+  {
+    id: 'gpt-6.1-sol',
+    name: 'gpt-6.1-sol — GPT-6.1 Sol',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    defaultReasoningEffort: 'low',
+  },
+  {
+    id: 'gpt-6-astra',
+    name: 'gpt-6-astra — GPT-6 Astra',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    defaultReasoningEffort: 'medium',
+  },
+  {
+    id: 'gpt-6-sol',
+    name: 'gpt-6-sol — GPT-6 Sol',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    defaultReasoningEffort: 'medium',
+  },
+  {
+    id: 'gpt-6-luna',
+    name: 'gpt-6-luna — GPT-6 Luna',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    defaultReasoningEffort: 'medium',
+  },
   {
     id: 'gpt-5.6-sol',
     name: 'gpt-5.6-sol — GPT-5.6 Sol',
@@ -50,19 +93,6 @@ const HARDCODED_MODELS: ModelInfo[] = [
     supportsReasoning: true,
     reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
     defaultReasoningEffort: 'medium',
-  },
-  {
-    id: 'gpt-5.4',
-    name: 'gpt-5.4 — GPT-5.4',
-    supportsReasoning: true,
-    reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
-    defaultReasoningEffort: 'medium',
-  },
-  {
-    id: 'gpt-5.3',
-    name: 'gpt-5.3 — GPT-5.3',
-    supportsReasoning: true,
-    reasoningEfforts: ['low', 'medium', 'high'],
   },
 ];
 

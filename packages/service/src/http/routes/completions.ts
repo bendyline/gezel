@@ -21,14 +21,14 @@ import {
   type ProjectCompletionResponse,
   createLogger,
 } from '@bendyline/gezel';
-import { isRambleAbortMessage } from '@bendyline/gezel/local-loop';
-import { type Context, Hono } from 'hono';
-import type { ResolveTuningInput } from '../../model-profile/tuning.js';
+import type { ResolveTuningInput } from '@bendyline/gezel-inference/internal/model-profile/tuning';
 import {
   isCapacityDeniedError,
   isEngineBusyError,
-} from '../../providers/native/capacity-broker.js';
-import { ModelNotInstalledError } from '../../providers/types.js';
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { ModelNotInstalledError } from '@bendyline/gezel-inference/internal/providers/types';
+import { isRambleAbortMessage } from '@bendyline/gezel/local-loop';
+import { type Context, Hono } from 'hono';
 import type { ServiceContext } from '../context.js';
 
 const DEFAULT_COMPLETION_TIMEOUT_MS = 600_000;

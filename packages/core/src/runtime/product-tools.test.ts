@@ -75,6 +75,51 @@ describe('portable tool authority and durable effects', () => {
     expect(await store.readFile('workspace', 'default', 'report.md')).toBeNull();
   });
 
+  it('narrows a stepwise step to its deliverable kit, keeping what the procedure names', async () => {
+    const { store, gezel } = await fixture();
+    const task = await store.createTask('default', {
+      title: 'Summarise notes',
+      description: 'Summarise the meeting notes into a short list of decisions and owners.',
+      executionMode: 'stepwise',
+      steps: [
+        {
+          name: 'Summarise',
+          prompt: 'Read the notes and write `tasks/1/summary.md` with `write_artifact`.',
+          advanceWhen: { file: 'tasks/1/summary.md', artifact: true },
+        },
+      ],
+    });
+    const session = await store.createSession({
+      gezelId: gezel.id,
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+      providerName: 'llama-cpp',
+    });
+    const tools = (await portableToolSurface(store, session)).map((tool) => tool.name);
+    expect(tools).toEqual(expect.arrayContaining(['write_artifact', 'read_artifact', 'read_file']));
+    // Memory survives every narrowing, recall as much as saving.
+    expect(tools).toEqual(expect.arrayContaining(['search_memory', 'save_memory']));
+    expect(tools).not.toContain('write_file');
+    await expect(
+      executePortableTool(store, session, 'write_file', { path: 'x.md', content: 'x' }, actions),
+    ).rejects.toThrow('unavailable');
+    const open = await store.createTask('default', {
+      title: 'Talk it through',
+      description: 'Talk through the meeting notes and agree on what matters most.',
+      executionMode: 'stepwise',
+      steps: [{ name: 'Discuss', prompt: 'Talk it through with the person.' }],
+    });
+    const openSession = await store.createSession({
+      gezelId: gezel.id,
+      taskRef: open.ref,
+      stepId: open.activeStepId,
+      providerName: 'llama-cpp',
+    });
+    expect((await portableToolSurface(store, openSession)).map((tool) => tool.name)).toContain(
+      'write_file',
+    );
+  });
+
   it('explains a rejected argument in words the model can retry from', async () => {
     const { store, session } = await fixture();
     await expect(

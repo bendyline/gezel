@@ -55,6 +55,9 @@ export function runtimeCraftbookFromTemplate(
     ...(m.models ? { models: m.models } : {}),
     ...(m.services ? { services: m.services } : {}),
     ...(m.paramSchema ? { paramSchema: m.paramSchema } : {}),
+    // Samples ride in so a launch can pick `{ from: 'sample' }` for an input;
+    // dropped here, the welcome's "Try it on a sample" would fail at create.
+    ...(m.samples ? { samples: m.samples } : {}),
     ...(m.command ? { command: m.command } : {}),
     ...(m.requirements ? { requirements: m.requirements } : {}),
     // Soft "works better with" hints ride into the task snapshot so the

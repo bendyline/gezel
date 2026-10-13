@@ -120,6 +120,7 @@ func generate(_ message: [String: Any], id: String) {
                 maxTokens: message["maxTokens"] as? Int ?? AppleFoundationProvider.maximumOutputTokens,
                 contextSize: message["contextSize"] as? Int ?? 4096,
                 tools: message["tools"] as? [[String: Any]] ?? [],
+                schema: message["schema"] as? [String: Any],
                 invoke: { name, arguments in
                     let callId = UUID().uuidString
                     return try await withTaskCancellationHandler {

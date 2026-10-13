@@ -10,8 +10,12 @@ import type {
   VSCodeSetupProfileOption,
   VSCodeSetupStatusResponse,
 } from '@bendyline/gezel';
-import { writeFileAtomic } from '../fs/atomic.js';
-import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import {
+  readSecurityJson,
+  writeSecurityJson,
+} from '@bendyline/gezel-inference/internal/fs/security-json';
+import type { ModelInfo } from '@bendyline/gezel-inference/internal/providers/types';
 import { type TokenStore, VSCODE_SETUP_RESERVED_APP_ID } from '../http/token-store.js';
 import type { VSCodeBridgeController } from '../http/vscode-bridge.js';
 import {
@@ -27,7 +31,6 @@ import {
   readOptionalFile,
   recommendedHarnessModel,
 } from '../local-harness/base.js';
-import type { ModelInfo } from '../providers/types.js';
 import { type VSCodeBinaryDetection, detectVSCodeBinary } from './binary.js';
 import {
   type VSCodeProviderEntry,

@@ -9,11 +9,12 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { normalizeCodexPermissionMode } from '@bendyline/gezel';
-import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
-import { scriptToolNamesFromEnv } from '../../project-type/script-tools.js';
-import { isHttpSpec, isStdioSpec } from '../mcp-bridge.js';
-import { type ProviderQueue, runInQueue } from '../queue.js';
-import { StreamingSessionBase } from '../streaming-session.js';
+import type { CodexReasoningEffort } from '@bendyline/gezel-inference/internal/providers/codex-cli/reasoning';
+import {
+  type ProviderQueue,
+  runInQueue,
+} from '@bendyline/gezel-inference/internal/providers/queue';
+import { StreamingSessionBase } from '@bendyline/gezel-inference/internal/providers/streaming-session';
 import type {
   LLMSession,
   ProviderSessionState,
@@ -21,11 +22,13 @@ import type {
   SessionOpts,
   ToolCallEvent,
   TurnUsage,
-} from '../types.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
+import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
+import { scriptToolNamesFromEnv } from '../../project-type/script-tools.js';
+import { isHttpSpec, isStdioSpec } from '../mcp-bridge.js';
 import type { CodexBinaryCapabilities } from './binary.js';
 import { CODEX_CLI_EXCLUDED_MCP_TOOLS } from './excluded-mcp-tools.js';
 import { type CodexInvokerHooks, type CodexPermissionMode, runCodexTurn } from './invoker.js';
-import type { CodexReasoningEffort } from './reasoning.js';
 import {
   type CodexMcpServerEntry,
   type CodexRuntimeConfig,

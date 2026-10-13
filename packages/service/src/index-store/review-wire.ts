@@ -5,7 +5,7 @@ import type {
   FileReviewWire,
   ListFileIssuesRequest,
 } from '@bendyline/gezel';
-import { safeJoin } from '../fs/safe-paths.js';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { ProjectBoekwachterIssueRecord } from '../fs/store.js';
 import type { FileReviewRow } from './index-store-types.js';
 import type { IndexStore } from './index-store.js';

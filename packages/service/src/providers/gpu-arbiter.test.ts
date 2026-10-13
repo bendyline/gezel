@@ -1,5 +1,9 @@
+import {
+  GpuArbiter,
+  detectGpuPolicy,
+  resolveGpuPolicy,
+} from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
 import { describe, expect, it, vi } from 'vitest';
-import { GpuArbiter, detectGpuPolicy, resolveGpuPolicy } from './gpu-arbiter.js';
 
 describe('GpuArbiter', () => {
   it('coexist policy makes acquire a no-op', async () => {

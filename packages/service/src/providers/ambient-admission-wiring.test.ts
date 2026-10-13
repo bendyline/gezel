@@ -1,9 +1,9 @@
+import { Ds4Provider } from '@bendyline/gezel-inference/internal/providers/ds4/provider';
+import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import { defaultAmbientQuietMs } from '@bendyline/gezel-inference/internal/providers/queue';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Ds4Provider } from './ds4/provider.js';
-import { LlamaCppProvider } from './llama-cpp/provider.js';
-import { MlxProvider } from './mlx/provider.js';
 import { OllamaProvider } from './ollama.js';
-import { defaultAmbientQuietMs } from './queue.js';
 
 /**
  * Wiring guard for ambient admission control (see the queue.ts class

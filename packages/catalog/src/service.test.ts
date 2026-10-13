@@ -138,25 +138,25 @@ describe('CatalogService against bundled data', () => {
     // Sanity check: each tier from low-end laptop to flagship workstation has at least one entry.
     expect(ids).toContain('sd-1.5');
     expect(ids).toContain('sdxl-base-1.0');
-    expect(ids).toContain('flux-1-schnell-q4');
+    expect(ids).toContain('flux-2-klein-4b-q4');
   });
 
   it('flags non-commercial image models so the UI can warn the user', async () => {
     const items = await service.list('image-model');
-    const fluxDev = items.find((i) => i.manifest.id === 'flux-1-dev-q4');
-    expect(fluxDev).toBeDefined();
-    if (fluxDev?.manifest.kind === 'image-model') {
-      expect(fluxDev.manifest.commercialUse).toBe(false);
+    const sdxlTurbo = items.find((i) => i.manifest.id === 'sdxl-turbo');
+    expect(sdxlTurbo).toBeDefined();
+    if (sdxlTurbo?.manifest.kind === 'image-model') {
+      expect(sdxlTurbo.manifest.commercialUse).toBe(false);
     }
   });
 
-  it('attaches auxiliary files to diffusion-model entries (FLUX et al.)', async () => {
-    const flux = await service.get('image-model', 'flux-1-schnell-q4');
-    expect(flux).not.toBeNull();
-    if (flux?.manifest.kind === 'image-model') {
-      expect(flux.manifest.weightsKind).toBe('diffusion-model');
-      const roles = flux.manifest.auxiliaryFiles.map((a) => a.role);
-      expect(roles).toEqual(expect.arrayContaining(['vae', 'clip_l', 't5xxl']));
+  it('attaches auxiliary files to diffusion-model entries (FLUX.2 et al.)', async () => {
+    const klein = await service.get('image-model', 'flux-2-klein-4b-q4');
+    expect(klein).not.toBeNull();
+    if (klein?.manifest.kind === 'image-model') {
+      expect(klein.manifest.weightsKind).toBe('diffusion-model');
+      const roles = klein.manifest.auxiliaryFiles.map((a) => a.role);
+      expect(roles).toEqual(expect.arrayContaining(['vae', 'llm']));
     }
   });
 

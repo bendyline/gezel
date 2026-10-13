@@ -122,6 +122,7 @@ function readStaticServerToolRegistrations(): string[] {
   const sourcePaths = [
     resolve(__dirname, 'server.ts'),
     resolve(__dirname, 'cross-drawer-read-tools.ts'),
+    resolve(__dirname, 'connector-action-tools.ts'),
   ];
   const names: string[] = [];
   function visit(node: ts.Node): void {

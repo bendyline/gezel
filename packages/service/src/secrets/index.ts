@@ -1,16 +1,16 @@
 import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
-import { deviceIdentityFile, secretsFile } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
-import { FileSecretStore } from './file-store.js';
-import { KeyringSecretStore, probeKeyringAvailable } from './keyring-store.js';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   SecretBackendUnavailableError,
   type SecretStore,
   SecretStoreCorruptError,
   deviceIdentityScope,
-} from './types.js';
+} from '@bendyline/gezel-inference/internal/secrets/types';
+import { deviceIdentityFile, secretsFile } from '@bendyline/gezel/paths';
+import { FileSecretStore } from './file-store.js';
+import { KeyringSecretStore, probeKeyringAvailable } from './keyring-store.js';
 
 const log = createLogger('secrets');
 
@@ -22,13 +22,13 @@ export type {
   SecretKey,
   SecretStoreBackend,
   ProviderCredentialName,
-} from './types.js';
+} from '@bendyline/gezel-inference/internal/secrets/types';
 export {
   SecretBackendUnavailableError,
   SecretStoreCorruptError,
   stringifySecretKey,
   toolsetKeyPrefix,
-} from './types.js';
+} from '@bendyline/gezel-inference/internal/secrets/types';
 
 export interface OpenSecretStoreOptions {
   /** Force the file-backed fallback. Used in tests + explicit dev opt-out. */

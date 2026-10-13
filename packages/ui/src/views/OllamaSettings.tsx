@@ -175,6 +175,7 @@ export function OllamaSettings({ config, onConfigChanged }: Props) {
         <div className="new-row">
           <input
             placeholder="http://localhost:11434"
+            aria-label="Ollama server URL"
             value={urlDraft}
             onChange={(e) => setUrlDraft(e.target.value)}
             style={{ flex: 1 }}
@@ -226,6 +227,7 @@ export function OllamaSettings({ config, onConfigChanged }: Props) {
             type="number"
             min={1}
             placeholder="e.g. 8192"
+            aria-label="Context window (tokens)"
             value={ctxDraft}
             onChange={(e) => setCtxDraft(e.target.value)}
             style={{ flex: 1 }}
@@ -252,6 +254,7 @@ export function OllamaSettings({ config, onConfigChanged }: Props) {
             type="number"
             min={1}
             placeholder="e.g. 4096"
+            aria-label="Reply limit (tokens)"
             value={numPredictDraft}
             onChange={(e) => setNumPredictDraft(e.target.value)}
             style={{ flex: 1 }}

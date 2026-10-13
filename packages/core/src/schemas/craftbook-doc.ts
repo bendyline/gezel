@@ -10,6 +10,7 @@ import {
   CraftbookRecommendationSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
+  CraftbookSampleSchema,
   CraftbookScriptsSchema,
   CraftbookServiceNeedSchema,
   CraftbookSpawnSchema,
@@ -43,6 +44,8 @@ export const CraftbookDocSchema = zod.object({
   /** Entry step id. Defaults to the first step. */
   entryStepId: zod.string().optional(),
   triggers: zod.array(zod.string()).optional(),
+  /** Samples for the book's inputs, under `samples/` in its version folder. */
+  samples: zod.array(CraftbookSampleSchema).optional(),
   command: zod
     .string()
     .regex(/^[a-z][a-z0-9-]*$/)

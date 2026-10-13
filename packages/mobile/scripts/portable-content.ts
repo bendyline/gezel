@@ -6,7 +6,7 @@ import { BundledSource } from '../../catalog/src/source.js';
 import { type Craftbook, craftbookFromDoc, parseCraftbookDoc } from '../../core/src/browser.js';
 import { portableCatalogModels } from '../../core/src/runtime/portable-catalog.js';
 import { portableToolNames } from '../../core/src/runtime/product-tools.js';
-import { supportsPortableContent } from './portable-content-support.js';
+import { portableContentGap, supportsPortableContent } from './portable-content-support.js';
 import { supportsPortableScriptSource } from './portable-script-support.js';
 
 const ID = 'virtual:gezel-portable-content';
@@ -52,6 +52,10 @@ export function portableContentPlugin(): Plugin {
         if (detail?.about) templates.push({ ...detail, logoUrl: undefined });
       }
       const craftbooks = [];
+      // Each bundled book's samples, so a first project runs on its sample
+      // offline: base64 by version-folder path, keyed by craftbook id.
+      const sampleFiles: Record<string, Record<string, string>> = {};
+      const unavailableCraftbooks: unknown[] = [];
       for (const item of await source.list('craftbook-template')) {
         const raw = await source.readItemFile(
           'craftbook-template',
@@ -68,16 +72,44 @@ export function portableContentPlugin(): Plugin {
         });
         if (!compiled.ok) continue;
         const book = { ...compiled.craftbook, version: item.manifest.version };
-        if (!supportsPortableContent(book, portableToolNames())) continue;
+        const reason = portableContentGap(book, portableToolNames());
+        if (reason) {
+          // Shown in New Task as unavailable, with the reason; never run.
+          const manifest = item.manifest as { steps?: Array<{ id: string; name: string }> };
+          unavailableCraftbooks.push({
+            ...item,
+            logoUrl: undefined,
+            manifest: {
+              ...item.manifest,
+              steps: (manifest.steps ?? []).map((step) => ({ id: step.id, name: step.name })),
+            },
+            unavailableReason: reason,
+          });
+          continue;
+        }
         const detail = await source.get(
           'craftbook-template',
           item.manifest.id,
           item.manifest.version,
         );
-        if (detail) craftbooks.push({ item: { ...detail, logoUrl: undefined }, book });
+        if (!detail) continue;
+        craftbooks.push({ item: { ...detail, logoUrl: undefined }, book });
+        for (const sample of book.samples ?? []) {
+          for (const path of sample.files) {
+            const bytes = await source.readItemFile(
+              'craftbook-template',
+              item.manifest.id,
+              path,
+              item.manifest.version,
+            );
+            if (!bytes) continue;
+            sampleFiles[item.manifest.id] ??= {};
+            sampleFiles[item.manifest.id]![path] = bytes.toString('base64');
+          }
+        }
       }
       const models = portableCatalogModels(await source.list('chat-model'));
-      return `export default ${JSON.stringify({ templates, craftbooks, models })};`;
+      return `export default ${JSON.stringify({ templates, craftbooks, models, sampleFiles, unavailableCraftbooks })};`;
     },
   };
 }

@@ -5,6 +5,7 @@ import {
   memoryNoteLine,
   renderMemoryNotes,
 } from '@bendyline/gezel';
+import { EmbeddingsDisabledError } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import type { ContentIndex } from '../index-store/content-index.js';
 import {
   type MemoryKind,
@@ -12,7 +13,6 @@ import {
   USER_MEMORY_ID,
   sameProjectMemoryScore,
 } from './daily-markdown.js';
-import { EmbeddingsDisabledError } from './embeddings.js';
 import type { MemoryManager } from './manager.js';
 
 const log = createLogger('memory');

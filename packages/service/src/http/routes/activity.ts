@@ -1,5 +1,6 @@
 import { resolveActivity } from '@bendyline/gezel';
 import { Hono } from 'hono';
+import { withQuestionFileReferences } from '../../references/question-files.js';
 import { normalizeNightShiftReportAttachment } from '../../tasks/night-review.js';
 import type { ServiceContext } from '../context.js';
 import { queueStatusSnapshot } from './queues.js';
@@ -44,7 +45,10 @@ export function activityRoutes(ctx: ServiceContext): Hono {
     return c.json(
       resolveActivity({
         tasks,
-        questions: questions.map(normalizeNightShiftReportAttachment),
+        questions: await withQuestionFileReferences(
+          ctx.store,
+          questions.map(normalizeNightShiftReportAttachment),
+        ),
         waiting: ctx.taskRunner.waitingStates(),
         inflight,
         inactiveProjectIds: new Set(

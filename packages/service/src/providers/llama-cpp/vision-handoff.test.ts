@@ -1,6 +1,6 @@
+import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { TOOL_IMAGES_MESSAGE } from '@bendyline/gezel-inference/internal/providers/mlx/tool-image-retention';
 import { describe, expect, it } from 'vitest';
-import { TOOL_IMAGES_MESSAGE } from '../mlx/tool-image-retention.js';
-import { LlamaCppProvider } from './provider.js';
 
 function sse(events: unknown[]) {
   return new Response(

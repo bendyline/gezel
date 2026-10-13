@@ -1,8 +1,32 @@
+import {
+  CODEX_REASONING_EFFORTS,
+  isCodexReasoningEffort,
+} from '@bendyline/gezel-inference/internal/providers/codex-cli/reasoning';
 import { describe, expect, it } from 'vitest';
 import { CodexCliProvider } from './provider.js';
-import { CODEX_REASONING_EFFORTS, isCodexReasoningEffort } from './reasoning.js';
 
 describe('CodexCliProvider model catalog', () => {
+  it('offers the GPT-6 family with the levels Codex lists for each model', async () => {
+    const provider = new CodexCliProvider({ runtimeDir: '/tmp/gezel-codex-cli-test' });
+    const models = await provider.listModels();
+
+    expect(models.find((model) => model.id === 'gpt-6.1-sol')).toMatchObject({
+      name: 'gpt-6.1-sol — GPT-6.1 Sol',
+      reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      defaultReasoningEffort: 'low',
+    });
+    for (const id of ['gpt-6-astra', 'gpt-6-sol']) {
+      expect(models.find((model) => model.id === id)).toMatchObject({
+        reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+        defaultReasoningEffort: 'medium',
+      });
+    }
+    expect(models.find((model) => model.id === 'gpt-6-luna')).toMatchObject({
+      reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      defaultReasoningEffort: 'medium',
+    });
+  });
+
   it('offers the GPT-5.6 family with Codex-specific reasoning levels', async () => {
     const provider = new CodexCliProvider({ runtimeDir: '/tmp/gezel-codex-cli-test' });
     const models = await provider.listModels();
@@ -22,16 +46,17 @@ describe('CodexCliProvider model catalog', () => {
     });
   });
 
-  it('preserves the older flagship entries and lets configured models override defaults', async () => {
+  it('drops models Codex retired and lets configured models override defaults', async () => {
     const provider = new CodexCliProvider({
       runtimeDir: '/tmp/gezel-codex-cli-test',
       extraModels: [{ id: 'gpt-5.5', name: 'Pinned GPT-5.5' }],
     });
     const models = await provider.listModels();
 
-    expect(models.map((model) => model.id)).toEqual(
-      expect.arrayContaining(['gpt-5.3', 'gpt-5.4', 'gpt-5.5']),
-    );
+    const ids = models.map((model) => model.id);
+    expect(ids).toContain('gpt-5.5');
+    expect(ids).not.toContain('gpt-5.4');
+    expect(ids).not.toContain('gpt-5.3');
     expect(models.find((model) => model.id === 'gpt-5.5')).toEqual({
       id: 'gpt-5.5',
       name: 'Pinned GPT-5.5',

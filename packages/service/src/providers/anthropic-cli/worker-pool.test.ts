@@ -1,5 +1,5 @@
+import type { TurnUsage } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TurnUsage } from '../types.js';
 import { ClaudeWorkerPool, type ClaudeWorkerSpec } from './worker-pool.js';
 import type { ClaudeWorker, ClaudeWorkerOpts, SendTurnOpts, WorkerTurnHooks } from './worker.js';
 

@@ -1,5 +1,6 @@
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { Suspense, lazy } from 'react';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 
 const loadRelevanceModelModule = () => import('../components/RelevanceModelCard.js');
 
@@ -49,6 +50,7 @@ export function MemorySection({
         <div
           className="gz-tray"
           role="radiogroup"
+          onKeyDown={onRadioKeyDown}
           aria-label="Indexed context per turn"
           style={{ marginTop: '0.5rem' }}
         >
@@ -59,6 +61,7 @@ export function MemorySection({
               // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
               role="radio"
               aria-checked={retrievalMode === mode}
+              tabIndex={retrievalMode === mode ? 0 : -1}
               className={`gz-key${retrievalMode === mode ? ' gz-key-active' : ''}`}
               onClick={() => void onRetrievalChange({ mode })}
             >
@@ -72,6 +75,7 @@ export function MemorySection({
             type="number"
             min={0}
             max={16000}
+            aria-label="Optional token cap"
             value={retrievalBudget ?? ''}
             placeholder="Mode default"
             onChange={(e) => {
@@ -126,6 +130,7 @@ export function MemorySection({
             type="number"
             min={1}
             max={720}
+            aria-label="Idle after (hours)"
             value={idleHours}
             onChange={(e) => {
               const v = Number.parseFloat(e.target.value);
@@ -141,6 +146,7 @@ export function MemorySection({
             type="number"
             min={1}
             max={50}
+            aria-label="Min user turns"
             value={minUserTurns}
             onChange={(e) => {
               const v = Number.parseInt(e.target.value, 10);

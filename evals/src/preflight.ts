@@ -237,7 +237,7 @@ export function buildPreflightChecks(ev: PreflightEvidence): {
   // Spawn/capacity: the trial-level classifier already recognizes these
   // terminal shapes; surface them as the admission-blocking check.
   // Line shape is a contract with capacityDenialLogLine in
-  // packages/service/src/providers/native/provider-pool.ts.
+  // packages/inference/src/providers/native/provider-pool.ts.
   const capacityDenied = /capacity broker denied [^\n]*budget exhausted/.exec(log);
   const spawnFailed = ev.result.failureMode === 'spawn-error' || capacityDenied !== null;
   const nativeLaunch = /\[(?:llama-server|mlx|ds4-server)\] launch\b/.exec(log);

@@ -1,8 +1,8 @@
 import type { FileTurnIntent } from '@bendyline/gezel';
+import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import type { LLMSession } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LlamaCppProvider } from './llama-cpp/provider.js';
-import { MlxProvider } from './mlx/provider.js';
-import type { LLMSession } from './types.js';
 
 function reply(content: string): Response {
   return stream({ content });

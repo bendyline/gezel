@@ -1,11 +1,14 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createInProcessCatalogHost } from '@bendyline/gezel-inference/internal/knowledge/catalog-host';
+import type { KnowledgeInstallEvent } from '@bendyline/gezel-inference/internal/knowledge/install';
+import {
+  KnowledgeManager,
+  KnowledgeNotFoundError,
+} from '@bendyline/gezel-inference/internal/knowledge/manager';
 import { knowledgeCatalogVersionDir } from '@bendyline/gezel/paths';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createInProcessCatalogHost } from './catalog-host.js';
-import type { KnowledgeInstallEvent } from './install.js';
-import { KnowledgeManager, KnowledgeNotFoundError } from './manager.js';
 import { buildTestCatalog, testHashVector } from './test-catalog-fixture.js';
 
 let dir: string;

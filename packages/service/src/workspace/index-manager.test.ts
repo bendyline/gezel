@@ -23,6 +23,36 @@ describe('WorkspaceIndexManager project opt-out', () => {
   });
 });
 
+describe('WorkspaceIndexManager first-use hold', () => {
+  it('skips a held project in the background tick and indexes the next one', async () => {
+    const store = {
+      readConfig: async () => ({}),
+      listProjects: async () => [
+        { id: 'default' },
+        { id: 'pictures', workingDir: 'D:\\Users\\me\\Pictures' },
+      ],
+      projectIndexingEnabled: vi.fn(async () => true),
+    } as unknown as Store;
+    const manager = new WorkspaceIndexManager({
+      home: 'D:\\gezel-home-absent',
+      store,
+      chat: { isProjectActive: () => false } as unknown as ChatManager,
+      catalog: {} as never,
+      holdsBackgroundScan: async (project) => project.id === 'default',
+    });
+    const internals = manager as unknown as {
+      tick(): Promise<void>;
+      indexOne(projectId: string): Promise<void>;
+    };
+    const indexOne = vi.spyOn(internals, 'indexOne').mockResolvedValue(undefined);
+
+    await internals.tick();
+
+    expect(indexOne).toHaveBeenCalledTimes(1);
+    expect(indexOne).toHaveBeenCalledWith('pictures');
+  });
+});
+
 describe('withLock serialization contract', () => {
   const makeManager = () =>
     new WorkspaceIndexManager({

@@ -40,7 +40,7 @@ On Linux we additionally ship a **CUDA** sd-server in the `-cuda` key,
 beside llama-server and ds4, so hosts that can run it get an accelerated
 render and everyone else still resolves a binary. Consumers probe and
 pick — see `impliedEngineVariant` in
-`packages/service/src/engines/resolver.ts` for why this is deliberately
+`packages/inference/src/engines/resolver.ts` for why this is deliberately
 NOT an implied variant, and `scripts/native-payload.mjs` for why it
 shares the `-cuda` key instead of taking one of its own (the NVIDIA
 redistributables are ~800 MB and ship once).

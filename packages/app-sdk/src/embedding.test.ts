@@ -152,6 +152,34 @@ it('carries progress, tuning, final model and usage without treating metadata as
   await host.close();
 });
 
+it('passes a response format through and reports a reply cap the model lowered', async () => {
+  const { connection } = fixture();
+  const chat = vi.spyOn(connection.app, 'chat').mockResolvedValue(
+    (async function* () {
+      yield { choices: [{ delta: { content: '[{"quote":"cut' }, finish_reason: null }] };
+      yield { choices: [{ delta: {}, finish_reason: 'length' }], gezel_max_tokens: 1024 };
+    })() as never,
+  );
+  const host = createEmbedding({ connect: async () => connection });
+  await host.setEnabled(true);
+  const responseFormat = {
+    type: 'json_schema' as const,
+    json_schema: { name: 'review', schema: { type: 'array', items: { type: 'string' } } },
+  };
+  const result = await host.streamText({
+    model: 'fixture',
+    messages: [],
+    maxTokens: 8192,
+    responseFormat,
+  });
+  expect(chat).toHaveBeenCalledWith(
+    expect.objectContaining({ max_tokens: 8192, response_format: responseFormat }),
+    expect.anything(),
+  );
+  expect(result).toMatchObject({ finishReason: 'length', appliedMaxTokens: 1024 });
+  await host.close();
+});
+
 it('rejects explicitly unsupported sampling options before generation', async () => {
   const { connection } = fixture();
   vi.spyOn(connection.models, 'inspect').mockResolvedValue({

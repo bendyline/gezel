@@ -14,7 +14,7 @@ import {
   type SecretStoreBackend,
   stringifySecretKey,
   toolsetKeyPrefix,
-} from './types.js';
+} from '@bendyline/gezel-inference/internal/secrets/types';
 
 export class MemorySecretStore implements SecretStore {
   readonly backend: SecretStoreBackend = 'memory';

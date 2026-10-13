@@ -1,10 +1,9 @@
 import { estimateLlamaCppResidentBytes, estimateMlxResidentBytes } from '@bendyline/gezel';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   estimateKvReserveBytes,
   estimateLinearHybridKvLinearization,
   estimateWindowedKvLinearization,
-} from '../llama-cpp/offload-planner.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/offload-planner';
 import {
   CapacityBroker,
   autoDetectBudgetBytes,
@@ -28,7 +27,8 @@ import {
   resolveLlamaCppContextRequirement,
   resolveLocalContextRequirement,
   setDetectedGpuVramBytes,
-} from './capacity-broker.js';
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const GB = 1024 ** 3;
 

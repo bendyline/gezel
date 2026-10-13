@@ -10,7 +10,7 @@ it('atomically admits one of two independent daemon processes against one GPU bu
   try {
     const code = `
       import { randomUUID } from 'node:crypto';
-      import { DeviceCapacityLedger } from ${JSON.stringify(new URL('./device-capacity-ledger.ts', import.meta.url).href)};
+      import { DeviceCapacityLedger } from ${JSON.stringify(import.meta.resolve('@bendyline/gezel-inference/internal/providers/native/device-capacity-ledger'))};
       const ledger = new DeviceCapacityLedger({ directory: process.env.TEST_CAPACITY_DIRECTORY,
         sample: async () => ({ budgetBytes: 112 * 1024 ** 3, gpuBudgetBytes: 96 * 1024 ** 3, serializeLoads: false }) });
       const reply = await ledger.execute({ action: 'acquire', id: randomUUID(), ownerPid: Number(process.env.TEST_OWNER_PID),

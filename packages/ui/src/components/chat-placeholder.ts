@@ -42,7 +42,7 @@ const MEESTER_VARIANTS: ReadonlyArray<NamedVariant> = [
   (name) =>
     `${name} knows the whole team. Ask what everyone's doing, delegate something new, or just vent about a stuck project.`,
   (name) =>
-    `Got a half-baked idea? ${name} will help shape it into something your gezels can actually start on.`,
+    `Got a half-baked idea? ${name} will help shape it into something your gezellen can actually start on.`,
   (name, pronouns) =>
     `Ask ${name} who's working on what, or hand ${pronouns.object} something new to route.`,
 ];

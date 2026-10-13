@@ -168,8 +168,16 @@ export function checkPressRelease(markdown: string): {
     {
       id: 'opening-date',
       label: 'opening date',
-      required: ['14 october', 'october 14', '2026-10-14'],
-      forbidden: ['30 september', 'september 30'],
+      required: [
+        '\\b14(?:th)?\\s+oct(?:ober)?\\b',
+        '\\boct(?:ober)?\\.?\\s+14(?:th)?\\b',
+        '\\b2026-10-14\\b',
+      ],
+      forbidden: [
+        '\\b30(?:th)?\\s+sep(?:t(?:ember)?)?\\b',
+        '\\bsep(?:t(?:ember)?)?\\.?\\s+30(?:th)?\\b',
+        '\\b2026-09-30\\b',
+      ],
     },
     {
       id: 'spokesperson-title',

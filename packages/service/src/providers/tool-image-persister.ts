@@ -1,3 +1,5 @@
+import type { ToolImagePersister } from '@bendyline/gezel-inference/internal/providers/image-persister-contract';
+export type { ToolImagePersister } from '@bendyline/gezel-inference/internal/providers/image-persister-contract';
 import type { ChatSession } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 
@@ -17,17 +19,6 @@ import type { Store } from '../fs/store.js';
  * session UUIDs. We fall back to the session's short id when there is no
  * title yet (a brand-new session whose first user message hasn't landed).
  */
-export interface ToolImagePersister {
-  /**
-   * Write all images from a single tool result to the project artifacts
-   * tree. The persister owns an internal monotonic counter so multiple
-   * calls of the same tool inside one session don't collide on filename.
-   * Returns the saved relative paths, parallel to the input array.
-   */
-  persist(
-    images: ReadonlyArray<{ base64: string; mimeType: string }>,
-  ): Promise<Array<{ path: string; mimeType: string }>>;
-}
 
 export interface CreateToolImagePersisterOptions {
   store: Store;

@@ -1,13 +1,16 @@
+import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
+import {
+  ds4VisionResidentBytes,
+  shouldUseDs4SsdStreaming,
+} from '@bendyline/gezel-inference/internal/providers/ds4/residency';
+import { tailLatestEngineLog } from '@bendyline/gezel-inference/internal/providers/llama-cpp/log';
+import { CapacityDeniedError } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { nativeVisionEnabledFor } from '@bendyline/gezel-inference/internal/providers/vision-capability';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { ds4VisionResidentBytes, shouldUseDs4SsdStreaming } from '../../providers/ds4/residency.js';
-import { tailLatestEngineLog } from '../../providers/llama-cpp/log.js';
-import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
-import { nativeVisionEnabledFor } from '../../providers/vision-capability.js';
 import type { EngineContext } from '../engine-context.js';
 import { subscribeToInstallSse } from './install-sse.js';
-import { machineEngineProxy } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
 
 /**

@@ -42,6 +42,7 @@ import * as scriptSources from './script-sources.js';
 import * as search from './search.js';
 import * as sessions from './sessions.js';
 import * as taskEditing from './task-editing.js';
+import { previewPortableTaskInput } from './task-inputs.js';
 import * as tasks from './tasks.js';
 
 /** Shared product persistence. Hosts supply confined, atomic file operations. */
@@ -495,8 +496,14 @@ export class PortableStore {
     projectId: string,
     input: Parameters<typeof tasks.createTask>[2],
     resolved?: Parameters<typeof tasks.createTask>[3],
+    options?: Parameters<typeof tasks.createTask>[4],
   ): Promise<Task> {
-    return this.run((repo) => tasks.createTask(repo, projectId, input, resolved));
+    return this.run((repo) => tasks.createTask(repo, projectId, input, resolved, options));
+  }
+  previewTaskInput(
+    args: Omit<Parameters<typeof previewPortableTaskInput>[0], 'repo'>,
+  ): ReturnType<typeof previewPortableTaskInput> {
+    return this.run((repo) => previewPortableTaskInput({ ...args, repo }));
   }
   updateTask(
     ref: string,

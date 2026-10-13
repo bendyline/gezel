@@ -421,11 +421,11 @@
 
 .ollama-pull {
   padding: 0.5rem 0.65rem;
-  border: 1px solid rgba(102, 127, 98, 0.35);
+  border: 1px solid color-mix(in srgb, var(--titlebar) 35%, transparent);
   border-radius: 6px;
-  /* Tint matches the sage titlebar (#667f62) so active downloads read as
-     part of the gezel theme instead of a random blue highlight. */
-  background: rgba(102, 127, 98, 0.15);
+  /* Tint matches the sage titlebar so active downloads read as part of the
+     gezel theme instead of a random blue highlight. */
+  background: color-mix(in srgb, var(--titlebar) 15%, transparent);
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -672,7 +672,7 @@
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
   gap: 0.6rem;
 }
 
@@ -870,7 +870,7 @@
    the pane, half a screen from the model it belongs to. */
 .catalog-ollama-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
   gap: 0.6rem;
 }
 
@@ -1860,4 +1860,30 @@ a.license-button:hover {
   100% {
     transform: translateX(285%);
   }
+}
+
+/* Suggested-for-you knowledge offers: one row per catalog, name · size · key.
+   Offers only; the key starts the same install the full list does. */
+.knowledge-suggested-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-suggested-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.knowledge-suggested-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

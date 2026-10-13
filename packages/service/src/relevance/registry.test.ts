@@ -1,8 +1,12 @@
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  DEFAULT_RELEVANCE_MODEL_ID,
+  RELEVANCE_MODELS,
+  findRelevanceModel,
+} from '@bendyline/gezel-inference/internal/relevance/registry';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_RELEVANCE_MODEL_ID, RELEVANCE_MODELS, findRelevanceModel } from './registry.js';
 
 describe('relevance model registry', () => {
   it('pins every model consistently', () => {

@@ -11,16 +11,19 @@ import {
   isTaskInputArtifactPath,
   touchesTaskInputArtifactPath,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import {
+  assertNoTemplatePlaceholderPath,
+  safeJoin,
+} from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import {
   type ExternalFolders,
   PROJECT_SHADOW_DIR_NAME,
   PROJECT_TABULAR_DIR_NAME,
   projectArtifactsDir,
 } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from './atomic.js';
 import { mimeTypeForFilename } from './media-types.js';
 import { resolveOwnedMutationPath } from './mutation-path-refusal.js';
-import { assertNoTemplatePlaceholderPath, safeJoin } from './safe-paths.js';
 import {
   type WalkDirResult,
   listDirEntries,

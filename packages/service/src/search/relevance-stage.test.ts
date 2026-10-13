@@ -6,17 +6,17 @@ import type {
   RetrievalDecisionTrace,
   UnifiedSearchResult,
 } from '@bendyline/gezel';
-import { beforeEach, describe, expect, it } from 'vitest';
-import type { Store } from '../fs/store.js';
-import type { RelevanceScorer } from '../relevance/relevance-model.js';
-import { gatherTaskReferences } from '../tasks/references.js';
-import { type RetrievalSearch, retrieveProjectContext } from './project-retrieval.js';
+import type { RelevanceScorer } from '@bendyline/gezel-inference/internal/relevance/relevance-model';
 import {
   type ActiveRelevance,
   applyRelevanceModel,
   clearRelevanceScoreCache,
   relevancePassage,
-} from './relevance-stage.js';
+} from '@bendyline/gezel-inference/internal/search/relevance-stage';
+import { beforeEach, describe, expect, it } from 'vitest';
+import type { Store } from '../fs/store.js';
+import { gatherTaskReferences } from '../tasks/references.js';
+import { type RetrievalSearch, retrieveProjectContext } from './project-retrieval.js';
 import { scoreResult } from './search-service.js';
 
 const CALIBRATED: RelevanceThresholds = { drop: 0.05, keep: 0.2, strong: 0.7 };

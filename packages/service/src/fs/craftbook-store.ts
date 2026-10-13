@@ -9,6 +9,7 @@ import {
   ProjectCraftbookProvenanceSchema,
   nowIso,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   craftbookTemplateDir,
   craftbookTemplateManifestFile,
@@ -19,7 +20,6 @@ import {
   projectLocalCraftbooksRoot,
 } from '@bendyline/gezel/paths';
 import { WorkspaceWriteDeniedError, type WorkspaceWriteDeniedReason } from '../workspace/errors.js';
-import { writeFileAtomic } from './atomic.js';
 import {
   readProjectCraftbookDocument,
   updateProjectCraftbookDocument,

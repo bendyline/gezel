@@ -6,8 +6,8 @@ import {
   ScriptNameSchema,
   type ScriptProvenance,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { projectScriptFile, userScriptFile, userScriptsDir } from '@bendyline/gezel/paths';
-import { writeFileAtomic } from '../fs/atomic.js';
 import { craftbookScriptProvenance, generatedScriptProvenance } from './install.js';
 import { parseScriptMeta } from './meta.js';
 

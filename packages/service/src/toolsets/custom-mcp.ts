@@ -8,8 +8,8 @@ import type {
   ToolsetRuntime,
   ToolsetsScope,
 } from '@bendyline/gezel';
+import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import type { McpServerSpec } from '../providers/mcp-bridge.js';
-import type { SecretStore } from '../secrets/types.js';
 
 export const PROJECT_MCP_CONFIG_PATHS = [
   '.gezel/mcp.json',

@@ -1,0 +1,3602 @@
+/**
+ * MlxProvider — talks to a local `mlx_lm.server` subprocess over HTTP.
+ * The server speaks OpenAI-compatible `/v1/chat/completions` with SSE
+ * streaming; tool calling rides the standard OpenAI function-tool
+ * shape, same as llama-cpp.
+ *
+ * Platform: **darwin-arm64 only**. Apple Silicon's unified memory +
+ * Metal Performance Shaders are what make MLX fast; there's no MLX
+ * backend for Intel Mac, Linux, or Windows. `ChatManager.ensureProvider`
+ * gates the branch on platform; this file assumes Apple Silicon.
+ *
+ * Session model is stateless (same as llama-cpp / Ollama): full
+ * transcript lives in memory and is re-sent per turn.
+ * `ProviderSessionState` is empty — the session record on disk is the
+ * source of truth.
+ *
+ * Lifecycle of the mlx_lm.server process is managed by a
+ * {@link NativeEngineSupervisor}: lazy-start on first turn, idle-stop,
+ * health-watch, restart budget. Startup is usually slower than
+ * llama-cpp (Python import + PyTorch/MLX init) so we give it a 180s
+ * startup budget.
+ *
+ * First-time install of mlx-lm itself is handled outside this file —
+ * `buildMlxProvider` in ChatManager calls `UvRuntime.ensureVenv('mlx',
+ * [mlxLmSpec])` before spawning the supervisor, ensuring the venv +
+ * packages exist.
+ */
+
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
+
+import {
+  AwakeBudget,
+  autoCompactedNotice,
+  createAwakeTimeout,
+  createLogger,
+  leaksUntaggedReasoning,
+  turnCancelledMessage,
+} from '@bendyline/gezel';
+import {
+  leadingSystemMessages,
+  standaloneTurnMessages,
+  toolSurfaceSize,
+} from '@bendyline/gezel/local-loop';
+import { computeToolBudgetChars } from '@bendyline/gezel/local-loop';
+import type { TurnRambleDetectionConfig } from '../../model-profile/behaviors/turn-ramble-detection.js';
+import {
+  extractReasoningWithProfile,
+  profileBehaviorConfig,
+  profileHasBehavior,
+} from '../../model-profile/runtime.js';
+import type { ResolvedModelProfile } from '../../model-profile/types.js';
+import { prepareSalvagedCodeBlocks } from '../code-block-salvage.js';
+import { hasCompleteToolCallMarkup } from '../complete-tool-call.js';
+import { DeliverableReadPaceTracker } from '../deliverable-read-pacing.js';
+import { collapseDuplicateToolCalls } from '../duplicate-tool-calls.js';
+import {
+  appendCapTruncationHintToRejectedWrite,
+  appendTruncationHintToToolResult,
+  buildUnknownToolNudge,
+  describeMalformation,
+  findTruncatedProseToolCall,
+  findUnrecognizedFunctionMarkup,
+  findUnrecognizedToolEnvelope,
+  foldPreToolPreamble,
+  formatToolMenu,
+  isWriteShapedToolName,
+  parseGemmaNativeToolCall,
+  parseGemmaToolCall,
+  uniqueWantedToolNames,
+} from '../local-tool-call-salvage.js';
+import type {
+  NativeEngineLifecycleSnapshot,
+  NativeEngineSupervisor,
+} from '../native/supervisor.js';
+import { readSseEvents } from '../openai-compatible/sse.js';
+import {
+  PROJECT_MACRO_INTERCEPT_CAP,
+  deriveProjectMacroClosing,
+} from '../project-macro-loop-bail.js';
+import { prepareSalvagedProseDocument } from '../prose-document-salvage.js';
+import { ProviderDisposedError, runOnLiveProvider } from '../provider-disposal.js';
+import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs } from '../queue.js';
+import { buildRambleAbortMessage } from '../ramble-abort-message.js';
+import { RambleDetector, inertRambleDetector, outputIsConstrained } from '../ramble-detector.js';
+import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
+import {
+  type RequiredInput,
+  promptReadInputs,
+  requiredInputsRead,
+  unreadRequiredInputs,
+} from '../required-input-reads.js';
+import {
+  type EnginePhaseEvent,
+  type EngineStatsEvent,
+  StreamingSessionBase,
+} from '../streaming-session.js';
+import {
+  DeliverableReadySteer,
+  TERMINAL_ACTION_SKIPPED_OUTPUT,
+  terminalToolClosingText,
+} from '../terminal-tool-policy.js';
+import { coerceToolCallArgs } from '../tool-arg-schema-coercion.js';
+import { type ToolExecutor, createToolExecutor } from '../tool-executor.js';
+import { type ToolFailureLoop, ToolFailureTracker } from '../tool-failure-tracker.js';
+import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
+import type {
+  BatchCapability,
+  ExternalToolCall,
+  ExternalToolSpec,
+  LLMProvider,
+  LLMSession,
+  ModelInfo,
+  ProviderSessionState,
+  SendAndWaitOpts,
+  SessionOpts,
+  ToolSurfaceSize,
+  WireTranscriptEntry,
+} from '../types.js';
+import {
+  asyncHandoffClosing,
+  immediateFileWriteClosing,
+  isSuccessfulAsyncHandoff,
+} from './async-file-handoff.js';
+export { isSuccessfulAsyncHandoff };
+import {
+  type ChatCompletionChunk,
+  type ChatMessage,
+  setChatTemplateKwarg,
+} from './chat-protocol.js';
+import { type EngineRequestPriority, MlxEngineGate } from './engine-gate.js';
+import { EngineHold, type EngineQueueMarker, engineHoldLabelFor } from './engine-hold.js';
+import { EngineLogRouter } from './engine-log-router.js';
+import { MlxEngineStatsSampler } from './engine-stats-sampler.js';
+import {
+  StreamingReasoningSplit,
+  type TemplateReasoningOpen,
+  requestOpensReasoning,
+} from './reasoning-stream.js';
+import { applyMlxRequestShape } from './request-shape.js';
+import {
+  PRE_FIRST_BYTE_BASE_MS,
+  buildMidStreamDropMessage,
+  buildPreFirstByteAbortMessage,
+  computePreFirstByteBudgetMs,
+  estimatePromptTokens,
+  formatTps,
+  isMidStreamConnectionDrop,
+  translateMlxHttpError,
+} from './runtime-diagnostics.js';
+import {
+  type MlxFatalError,
+  classifyMlxFatalErrorLine,
+  classifyMlxStartupLine,
+} from './stdout-parser.js';
+import { salvageTextualToolCalls } from './textual-tool-call-salvage.js';
+import {
+  APPEND_TO_FILE_CONTINUATION_TOOL,
+  type ChatCompletionTool,
+  MlxToolCallAccumulator,
+  applyCallableToolGrammar,
+  callableRequestToolNames,
+  chatCompletionToolName,
+  externalToolsAsChatCompletions,
+  hermesRequiredArgGrammarRequested,
+  missingTopLevelRequiredToolArgs,
+  toChatCompletionsTools,
+  validatorReportedMissingRequiredArgs,
+} from './tool-call-protocol.js';
+import { LeakyToolCallStripper } from './tool-call-stripper.js';
+import { TOOL_IMAGES_MESSAGE, retireInspectedToolImages } from './tool-image-retention.js';
+import { type MlxTurnUsageSnapshot, buildMlxTerminalTelemetry } from './turn-telemetry.js';
+import { MlxVisionMode, unseenToolImagesNote } from './vision-mode.js';
+import { mlxWireTranscript } from './wire-transcript.js';
+
+export {
+  buildMidStreamDropMessage,
+  computePreFirstByteBudgetMs,
+  estimatePromptTokens,
+  isMidStreamConnectionDrop,
+};
+
+import {
+  FILE_REPAIR_MUTATION_TOOLS,
+  FILE_REPAIR_READ_TOOLS,
+  applyConstrainedTurnShape,
+  disableTemplateThinking,
+  fileRepairTargetPath,
+  isSourceFileRepairPrompt,
+  requiredToolOnly,
+  writeFileOnlyTools,
+} from '../constrained-turn.js';
+import { hasExplicitFullFileRewriteWording } from '../direct-file-work-prompt.js';
+import {
+  buildImmediateFileWriteNoMutationNudge,
+  buildPrerequisiteRepairReadNudge,
+  buildScenarioRepairNoMutationNudge,
+  completeWorkspaceReadPaths,
+  extractPrerequisiteRepairReadPaths,
+  normalizeWorkspacePathForCompare,
+  remainingPrerequisiteRepairReadPaths,
+} from '../file-repair-policy.js';
+import {
+  LOCAL_TURN_LIMITS,
+  LocalTurnPolicy,
+  compactLocalTurn,
+  planFileTurn,
+  repairTools,
+  turnCheckpoint,
+} from '../local-turn-policy.js';
+
+const MAX_TOOL_LOOP_TURNS = LOCAL_TURN_LIMITS.iterations;
+// Hard per-turn ceiling when the caller doesn't pass `opts.timeoutMs`.
+// 10 minutes matches what the manager passes for local providers in
+// short-form sessions; the original 3-minute floor was too tight for
+// 26B+ models doing heavy reasoning. Manager calls always override
+// this with `OLLAMA_TURN_TIMEOUT_MS` (30 min); the constant here is
+// only the fallback for one-shot / test paths.
+const DEFAULT_TIMEOUT_MS = 600_000;
+
+// Fallback for direct/external provider construction where no catalog model
+// metadata is available. Supervised catalog models pass their native context
+// window explicitly from buildMlxProvider.
+const DEFAULT_NUM_CTX = 65_536;
+// File-producing turns need enough room for the tool arguments themselves.
+// The Developer template selects `thinking-coding`, whose normal 2,048-token
+// budget truncated single-file HTML games mid-script. Treat 4,096 as a floor,
+// matching llama.cpp's immediate-write path; user/model tuning may still grant
+// more. This is intentionally not a cap.
+const FILE_WRITE_MIN_TOKENS = 4_096;
+// Steers issued per send after a cap-truncated payload mutation was
+// refused. Two is enough to convert "re-emit the whole file" into
+// "make targeted edits"; beyond that the model is not reading the
+// steer and more attempts only burn engine time at full context.
+const MAX_CAP_TRUNCATION_STEERS = LOCAL_TURN_LIMITS.capTruncation;
+// Max automatic append_to_file continuations after an immediate-write
+// truncation before we bail with the partial. Each continuation is one
+// bounded turn that writes the next chunk — comfortably above any
+// single-file scenario deliverable while preventing a runaway. Replaces
+// the old "bail after one truncated write and hope the next turn appends"
+// path: the weak model had no append_to_file in its surface and just rambled
+// instead (wild-caught tankcombat: a 5.8 KB game truncated at the former
+// short output budget and the model never continued it).
+const MAX_IMMEDIATE_WRITE_CONTINUATIONS = LOCAL_TURN_LIMITS.writeContinuations;
+const IMMEDIATE_FILE_WRITE_PROMPT_SUFFIX =
+  '\n\n[Local-model rescue: make this a compact first pass. Your entire visible output should be one `write_file` tool call. Prioritize a complete, runnable file over decorative extras; include every requested behavior and any named asset path. Do not include planning prose.]';
+
+const log = createLogger('mlx');
+/**
+ * Cap on how many times we'll nudge the model to retry a malformed
+ * tool call within a single turn before giving up. Two attempts is
+ * enough that a model with a transient slip can correct itself, low
+ * enough that a model that just can't form structured calls (small
+ * quants, certain Gemma variants) doesn't burn the whole turn budget.
+ */
+const MAX_MALFORMED_RETRIES = LOCAL_TURN_LIMITS.malformed;
+
+export class MlxProvider implements LLMProvider {
+  readonly name = 'mlx' as const;
+  readonly visionMode: MlxVisionMode;
+  readonly queue: ProviderQueue;
+  readonly supportsExternalTools = true;
+  readonly supportsPriorMessages = true;
+  private readonly supervisor?: NativeEngineSupervisor;
+  private readonly externalBaseUrl?: string;
+  private readonly defaultModel: string;
+  private readonly numCtx: number;
+  private readonly plannedReservation?: number;
+  private readonly fetchImpl: typeof fetch;
+  /** Set in {@link shutdown}; a disposed provider must never respawn its engine. */
+  private disposed = false;
+  /**
+   * Catalog manager — when set, `listModels()` enumerates every model
+   * the user has installed via Settings → This Mac so the model picker
+   * in Settings → AI can pick from the full list. Optional because
+   * external-baseUrl mode (`GEZEL_MLX_SERVER_URL`) skips the catalog
+   * entirely. The picker selection writes back to
+   * `config.defaultModel.mlx` as a catalog id; `buildMlxProvider`
+   * resolves the id to a `modelDir` on the next provider rebuild.
+   */
+  private readonly modelManager?: import('./models.js').MlxModelManager;
+  /**
+   * Friendly model name for the engine pill — e.g. "Qwen 3.5 8B".
+   * Surfaced in `loading_model` phase events as "Loading model
+   * (<name>)" so the user knows *which* MLX model is loading. Empty
+   * when the catalog manager wasn't wired in (external base URL mode)
+   * or when the runtime path doesn't map to a catalog entry — the
+   * pill falls back to the bare "Loading model" label in those cases.
+   */
+  private readonly modelDisplayName?: string;
+  /**
+   * Catalog model id for the on-disk model the provider is serving —
+   * `qwen3.6-27b-mlx`, `gemma4-e4b-mlx`, etc. Distinct from
+   * `defaultModel`, which holds the absolute model directory path
+   * (mlx_vlm.server's PRELOAD_MODEL value). Surfaced via
+   * {@link getEffectiveModelId} so the chat manager can resolve a
+   * tier for sessions that don't have an explicit model selection
+   * (`record.model` undefined AND `config.defaultModel.mlx`
+   * undefined). Without this, those sessions classify as
+   * `tier:tiny` because the tier resolver gets a path it can't parse.
+   *
+   * Empty when the provider was constructed in external-baseUrl mode
+   * (we don't know what the user's mlx-server is serving) or before
+   * the catalog has resolved a default model.
+   */
+  private readonly catalogModelId?: string;
+  /** See the constructor option of the same name. */
+  private readonly templateOpensReasoning?: TemplateReasoningOpen;
+  private readonly activeSessions = new Set<MlxSession>();
+  /**
+   * Engine stdout → per-session phase events, plus the "is this line fatal?"
+   * state machine. See {@link EngineLogRouter}; the rules there are load-bearing.
+   */
+  private readonly logRouter = new EngineLogRouter({
+    modelDisplayName: () => this.modelDisplayName,
+    // A tagged phase belongs to exactly one session; anything untagged is an
+    // engine-wide signal every session should see. Without this, a session
+    // streaming its reply picks up a neighbour's prefill bar — at the
+    // neighbour's token total — because one engine has one stdout.
+    deliver: (phase) => {
+      // Engine-wide record of who the engine was last seen working FOR.
+      // A session that never gets a first byte cannot tell "the engine is
+      // sick" from "the engine is busy with someone else" from inside its
+      // own request — this is the only place both are visible.
+      if (phase.cacheId && phase.phase === 'prefill' && !phase.engineQueue) {
+        this.lastTaggedPrefill = {
+          cacheId: phase.cacheId,
+          detail: phase.detail ?? '',
+          at: Date.now(),
+        };
+      }
+      for (const s of this.activeSessions) {
+        if (phase.cacheId && !s.ownsCacheId(phase.cacheId)) continue;
+        s.publishEnginePhase(phase);
+      }
+    },
+    onFatal: (fatal) => {
+      // If a session is blocked inside `supervisor.ensureRunning()` waiting on
+      // `/health`, abortStartup rejects that wait with the real error now
+      // instead of letting it burn the full startup budget (up to 5 minutes);
+      // the session-level catch turns it into the red bubble in chat.
+      const hintSuffix = fatal.hint ? `\n\n${fatal.hint}` : '';
+      const err = new Error(`[mlx] engine failed to start: ${fatal.message}${hintSuffix}`);
+      this.supervisor?.abortStartup(err);
+      // Tear the child down so the next `ensureRunning()` respawns fresh.
+      void this.supervisor?.stop().catch(() => {});
+    },
+    onReady: () => {
+      if (this.supervisor) this.engineStats.schedule();
+    },
+  });
+  private readonly engineStats = new MlxEngineStatsSampler({
+    pid: () => this.supervisor?.currentChildPid(),
+    publish: (stats) => {
+      for (const s of this.activeSessions) s.publishEngineStats(stats);
+    },
+  });
+  /** Width-N gate over physical engine requests; see {@link MlxEngineGate}. */
+  private readonly engineGate: MlxEngineGate;
+  private readonly batchMaxConcurrency: number;
+  private readonly turnProtection = new AsyncLocalStorage<boolean>();
+
+  constructor(opts: {
+    /** A fixed tower: true only when the engine behind `baseUrl` serves images. */
+    visionEnabled?: boolean;
+    /** Supervised engines: text-only until a request carries images; see vision-mode.ts. */
+    vision?: MlxVisionMode;
+    supervisor?: NativeEngineSupervisor;
+    baseUrl?: string;
+    defaultModel?: string;
+    numCtx?: number;
+    /**
+     * Broker-ledger reservation for this replica: resident weights plus
+     * KV at the admitted window, computed by the build-time admission
+     * pass (see `LLMProvider.plannedReservationBytes`).
+     */
+    plannedReservationBytes?: number;
+    concurrency?: number;
+    /**
+     * Engine batch width — how many sequences the wrapped MLX server can
+     * generate concurrently. This defaults to 1 (a singleton BatchGenerator
+     * queue); raising it widens the gate and switches the queue to the
+     * adaptive interactive policy.
+     */
+    batchMaxConcurrency?: number;
+    affinity?: boolean;
+    fetchImpl?: typeof fetch;
+    modelManager?: import('./models.js').MlxModelManager;
+    modelDisplayName?: string;
+    /** See {@link MlxProvider.catalogModelId} for the contract. */
+    catalogModelId?: string;
+    /**
+     * Whether this model's chat template opens a reasoning block as the last
+     * thing it emits, and whether `enable_thinking` controls it. Detected once
+     * from the model directory at build time — see {@link templateOpensReasoning}.
+     */
+    templateOpensReasoning?: TemplateReasoningOpen;
+  }) {
+    if (!opts.supervisor && !opts.baseUrl) {
+      throw new Error('[mlx] need either a supervisor or baseUrl');
+    }
+    if (opts.supervisor && opts.baseUrl) {
+      throw new Error('[mlx] supervisor and baseUrl are mutually exclusive');
+    }
+    if (opts.supervisor) this.supervisor = opts.supervisor;
+    if (opts.baseUrl) this.externalBaseUrl = opts.baseUrl.replace(/\/+$/, '');
+    this.defaultModel = opts.defaultModel ?? 'mlx';
+    this.numCtx = opts.numCtx ?? DEFAULT_NUM_CTX;
+    this.plannedReservation = opts.plannedReservationBytes;
+    this.fetchImpl = opts.fetchImpl ?? fetch;
+    if (opts.modelManager) this.modelManager = opts.modelManager;
+    if (opts.modelDisplayName) this.modelDisplayName = opts.modelDisplayName;
+    if (opts.catalogModelId) this.catalogModelId = opts.catalogModelId;
+    if (opts.templateOpensReasoning) this.templateOpensReasoning = opts.templateOpensReasoning;
+    const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
+    this.batchMaxConcurrency = batchMax;
+    this.engineGate = new MlxEngineGate(batchMax);
+    this.visionMode = opts.vision ?? MlxVisionMode.fixed(opts.visionEnabled === true);
+    this.visionMode.bindEngine(this.supervisor, this.engineGate, () => this.disposed);
+    // Interactive turns are capped at the memory-safe engine width (`batchMax`);
+    // the engine gate below (`acquireExclusiveEngineRequest`) enforces the same
+    // bound on real generation. The queue itself, though, must run at least ONE
+    // slot ABOVE that cap, reserved for the background lane — otherwise a
+    // mid-turn one-shot pinned to THIS provider (in-flight compaction, memory
+    // extraction, summarization; all `lane: 'background'`) can't dispatch while
+    // the foreground turn awaits it. At width 1 without the reserve, the turn
+    // holds the only slot and its own compaction one-shot deadlocks behind it
+    // forever: the turn awaits a job that can't start, and the one-shot's
+    // timeout only arms AFTER it acquires a slot. That is exactly what wedged
+    // sessions "mid-turn" once the memory ceiling clamped a big model to width 1.
+    // The +1 admits the chore WITHOUT ever running a 2nd concurrent generation —
+    // the engine gate, not queue width, is the OOM guard.
+    const interactiveConcurrency = batchMax;
+    const queueConcurrency = Math.max(opts.concurrency ?? 1, interactiveConcurrency + 1);
+    this.queue = new ProviderQueue({
+      concurrency: queueConcurrency,
+      interactiveConcurrency,
+      // Keyed to the engine gate's width (`batchMax`), not to the queue's
+      // deadlock reserve above — see `backgroundLaneCap`.
+      backgroundConcurrency: backgroundLaneCap(batchMax),
+      ...(opts.affinity !== undefined ? { affinity: opts.affinity } : {}),
+      // Single local GPU — same ambient admission control as llama-cpp:
+      // housekeeping turns wait for a quiet window so they never wedge
+      // the lane right before the user's next message.
+      ambientQuietMs: defaultAmbientQuietMs(),
+      // The sidecar parks background waves for a waiting person, so a
+      // person's turn may pass task steps that fill every slot — the
+      // engine gate has the matching overflow (engine-gate.ts).
+      engineOverflow: true,
+    });
+  }
+
+  /**
+   * Batch capability advertised by the wrapped MLX BatchGenerator.
+   * See {@link LLMProvider.batch}.
+   */
+  get batch(): BatchCapability {
+    return { maxConcurrency: this.batchMaxConcurrency };
+  }
+
+  /** Can see images now, or after one reload into the vision tower. */
+  get supportsImageInput(): boolean {
+    return this.visionMode.capable;
+  }
+
+  /**
+   * Cache adapter (Phase 1+). Set by ChatManager after construction.
+   * Phase 2 wires the real `MlxCacheAdapter` that talks to the
+   * wrapped `gezel_mlx_server.py`. Sessions call its
+   * `buildRequestExtras` on every send to derive `cache_id`.
+   */
+  private cacheAdapter: import('./cache-adapter.js').MlxCacheAdapter | null = null;
+
+  setCacheAdapter(adapter: import('./cache-adapter.js').MlxCacheAdapter): void {
+    this.cacheAdapter = adapter;
+  }
+
+  getCacheAdapter(): import('./cache-adapter.js').MlxCacheAdapter | null {
+    return this.cacheAdapter;
+  }
+
+  /**
+   * Current engine base URL — `null` when the supervised engine
+   * hasn't started yet. Cache adapter polls treat null as "not
+   * ready" and return empty stats.
+   */
+  currentBaseUrl(): string | null {
+    if (this.externalBaseUrl) return this.externalBaseUrl;
+    return this.supervisor?.currentBaseUrl() ?? null;
+  }
+
+  private lastTaggedPrefill: { cacheId: string; detail: string; at: number } | null = null;
+
+  /**
+   * The most recent prefill this engine ran for a DIFFERENT session, if it
+   * happened after `sinceMs`. Proof that the engine was alive and working —
+   * just not on the caller's turn.
+   */
+  prefillForOtherSessionSince(
+    ownCacheId: string | null,
+    sinceMs: number,
+  ): { detail: string; at: number } | null {
+    const last = this.lastTaggedPrefill;
+    if (!last || last.at < sinceMs) return null;
+    if (ownCacheId !== null && last.cacheId === ownCacheId) return null;
+    return { detail: last.detail, at: last.at };
+  }
+
+  /** True only while this sidecar is serving or queuing a physical request. */
+  isEngineBusy(): boolean {
+    return this.engineGate.busy;
+  }
+
+  /** Hold startup demand through the first request, before the engine gate exists. */
+  async withEngineTurn<T>(run: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (!this.supervisor?.coordinatesCapacity || this.turnProtection.getStore()) return run();
+    return this.supervisor.withRequest(() => this.turnProtection.run(true, run), signal);
+  }
+
+  engineLifecycleSnapshot(): NativeEngineLifecycleSnapshot | undefined {
+    return this.supervisor?.lifecycleSnapshot();
+  }
+
+  async acquireExclusiveEngineRequest(
+    label: string,
+    signal?: AbortSignal,
+    onWait?: (info: { aheadOf: number }) => void,
+    capacityProtected = false,
+    priority: EngineRequestPriority = 'interactive',
+  ): Promise<() => void> {
+    if (signal?.aborted)
+      throw new DOMException(`MLX engine request ${label} aborted`, 'AbortError');
+    if (this.supervisor?.coordinatesCapacity && !capacityProtected)
+      await this.supervisor.yieldForWaitingCapacity(signal);
+    return this.engineGate.acquire(label, signal, onWait, priority);
+  }
+
+  /** Cache warms through the adapter: nobody is waiting on them, so they queue as background. */
+  async runExclusiveEngineRequest<T>(label: string, work: () => Promise<T>): Promise<T> {
+    const release = await this.acquireExclusiveEngineRequest(
+      label,
+      undefined,
+      undefined,
+      false,
+      'background',
+    );
+    try {
+      return await work();
+    } finally {
+      release();
+    }
+  }
+
+  async initialize(): Promise<void> {
+    // No-op — supervisor starts the child lazily on first sendAndWait.
+  }
+
+  getContextWindow(): number {
+    return this.numCtx;
+  }
+
+  /** See `LLMProvider.plannedReservationBytes`. */
+  plannedReservationBytes(): number | undefined {
+    return this.plannedReservation;
+  }
+
+  /**
+   * True once {@link shutdown} has been called. A session whose stream dies
+   * reads this to tell "Gezel stopped this engine" from "the engine died on
+   * its own" — the two need different messages, and the flag is set before
+   * the stop so the racing turn always sees it.
+   */
+  get isDisposed(): boolean {
+    return this.disposed;
+  }
+
+  async shutdown(): Promise<void> {
+    // Poison FIRST so a turn racing the shutdown can't lazily respawn
+    // the engine after the stop below. The engine pool evicts replicas
+    // by calling `shutdown()`; a session still holding this instance
+    // must error out instead of resurrecting a zombie process outside
+    // the pool's capacity accounting.
+    this.disposed = true;
+    await this.supervisor?.stop();
+  }
+
+  async createSession(opts: SessionOpts): Promise<LLMSession> {
+    if (this.disposed) {
+      throw new ProviderDisposedError('mlx');
+    }
+    const bridges = await createToolExecutor(opts, '[mlx]');
+    return new MlxSession({
+      resolveBaseUrl: () => this.resolveBaseUrl(),
+      markUsed: () => this.supervisor?.markUsed(),
+      fetchImpl: this.fetchImpl,
+      model: opts.model ?? this.defaultModel,
+      numCtx: this.numCtx,
+      systemMessage: opts.systemMessage,
+      ...(opts.systemPromptLayers ? { systemPromptLayers: opts.systemPromptLayers } : {}),
+      ...(opts.systemSharedPrefix ? { systemSharedPrefix: opts.systemSharedPrefix } : {}),
+      ...(opts.volatileContext ? { volatileContext: opts.volatileContext } : {}),
+      // Pass widened priorMessages through — the session translates
+      // tool-role entries into ChatMessage tool_calls / role:'tool'
+      // entries in its constructor.
+      priorMessages: opts.priorMessages ?? [],
+      bridges,
+      queue: this.queue,
+      provider: this,
+      ...(opts.externalTools && opts.externalTools.length > 0
+        ? { externalTools: opts.externalTools }
+        : {}),
+      ...(opts.debug ? { debug: opts.debug } : {}),
+      ...(opts.requestCompaction ? { requestCompaction: opts.requestCompaction } : {}),
+      ...(opts.profile ? { profile: opts.profile } : {}),
+      ...(this.templateOpensReasoning
+        ? { templateOpensReasoning: this.templateOpensReasoning }
+        : {}),
+      ...(opts.activeCraftbookStep ? { activeCraftbookStep: opts.activeCraftbookStep } : {}),
+      ...(opts.tuning ? { tuning: opts.tuning } : {}),
+      ...(opts.forceDirectFileWork ? { forceDirectFileWork: true } : {}),
+      ...(opts.singleToolCallTurn ? { singleToolCallTurn: true } : {}),
+      ...(opts.terminalToolPolicy ? { terminalToolPolicy: opts.terminalToolPolicy } : {}),
+      ...(opts.onWireTranscript ? { onWireTranscript: opts.onWireTranscript } : {}),
+    });
+  }
+
+  /** Classifier hook wired into the supervisor's `onRawLine`. */
+  onStdoutLine(line: string): void {
+    this.logRouter.onLine(line);
+  }
+
+  /** See {@link EngineLogRouter.takeFatalError}. */
+  takeFatalError(): MlxFatalError | null {
+    return this.logRouter.takeFatalError();
+  }
+
+  /** See {@link EngineLogRouter.takeRuntimeError}. */
+  takeRuntimeError(): MlxFatalError | null {
+    return this.logRouter.takeRuntimeError();
+  }
+
+  _registerActiveSession(session: MlxSession): void {
+    this.activeSessions.add(session);
+    // Catch a late joiner up on the engine-wide phase only. A tagged phase
+    // belongs to one session's prefill; replaying it here is how a fresh chat
+    // would inherit a neighbour's progress bar.
+    const pending = this.logRouter.lastPhase();
+    if (pending && !pending.cacheId) session.publishEnginePhase(pending);
+    const stats = this.engineStats.latest;
+    if (stats) session.publishEngineStats(stats);
+  }
+
+  _deregisterActiveSession(session: MlxSession): void {
+    this.activeSessions.delete(session);
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    if (this.modelManager) {
+      try {
+        const installed = await this.modelManager.listInstalled();
+        if (installed.length > 0) {
+          return installed.map((m) => {
+            const sizeGb = m.approxSizeBytes / (1024 * 1024 * 1024);
+            const sizeLabel = sizeGb >= 0.1 ? ` · ${sizeGb.toFixed(1)} GB` : '';
+            const ctxLabel = m.contextWindow ? ` · ${Math.round(m.contextWindow / 1024)}k ctx` : '';
+            return {
+              id: m.id,
+              name: `${m.name}${sizeLabel}${ctxLabel}`,
+              supportsTools: true,
+            };
+          });
+        }
+      } catch {
+        // Fall through to the default-only entry below — model
+        // enumeration is a UI nicety, not load-bearing for chat.
+      }
+    }
+    return [
+      {
+        id: this.defaultModel,
+        name: this.defaultModel,
+        supportsTools: true,
+      },
+    ];
+  }
+
+  getEffectiveModelId(): string | undefined {
+    return this.catalogModelId;
+  }
+
+  private async resolveBaseUrl(): Promise<string> {
+    if (this.externalBaseUrl) return this.externalBaseUrl;
+    if (this.disposed) {
+      throw new Error('[mlx] provider disposed (engine was evicted) — re-resolve it');
+    }
+    if (!this.supervisor) throw new Error('[mlx] no base URL resolver configured');
+    const launch = await this.supervisor.ensureRunning();
+    return launch.baseUrl.replace(/\/+$/, '');
+  }
+}
+
+interface MlxSessionDeps {
+  resolveBaseUrl: () => Promise<string>;
+  markUsed: () => void;
+  fetchImpl: typeof fetch;
+  model: string;
+  numCtx: number;
+  systemMessage: string;
+  /** Layered prefix-cache keys (flag ON only). See {@link SystemPromptLayers}. */
+  systemPromptLayers?: import('../../cache/adapter.js').SystemPromptLayers;
+  /** See {@link SessionOpts.systemSharedPrefix}. */
+  systemSharedPrefix?: string;
+  /** Volatile band seeded as a frozen system message after messages[0] (flag ON only). */
+  volatileContext?: string;
+  priorMessages: Array<
+    | { role: 'user' | 'assistant'; content: string; images?: string[] }
+    | { role: 'assistant'; content: string; toolCalls: ExternalToolCall[] }
+    | { role: 'tool'; content: string; toolCallId: string }
+  >;
+  bridges: ToolExecutor;
+  /**
+   * Caller-supplied external tool definitions. Advertised to mlx-lm's
+   * OpenAI-compatible endpoint alongside any bridge tools; calls
+   * against these names halt the loop rather than executing — captured
+   * via {@link LLMSession.capturedToolCalls}.
+   */
+  externalTools?: ExternalToolSpec[];
+  queue: ProviderQueue;
+  provider: MlxProvider;
+  debug?: { isEnabled(): boolean };
+  /**
+   * Mid-tool-loop compaction hook — see {@link SessionOpts.requestCompaction}.
+   * Same shape as the llama-cpp + ollama paths; the manager wires it
+   * to a one-shot synthesis call when the active provider is local.
+   */
+  requestCompaction?: NonNullable<SessionOpts['requestCompaction']>;
+  /**
+   * Resolved per-model behavior profile. Same role as Ollama's: gates
+   * the ramble detector + pre-tool preamble fold on profile opt-in.
+   */
+  profile?: ResolvedModelProfile;
+  /**
+   * Whether this model's chat template opens a reasoning block as the last
+   * thing it emits, so the stream starts mid-thought with only a closing tag
+   * to come. Read from the model directory at build time — guessing it from
+   * the token stream is exactly the ambiguity that made reasoning leak.
+   * Resolve per request with `requestOpensReasoning`: a switch-aware template
+   * opens nothing when the request turns thinking off.
+   */
+  templateOpensReasoning?: TemplateReasoningOpen;
+  /** Active craftbook step — passed to anti-spin abort messages. */
+  activeCraftbookStep?: NonNullable<SessionOpts['activeCraftbookStep']>;
+  /**
+   * Resolved sampling / reasoning / output / tool-choice knobs. Built
+   * by ChatManager from `gezel.tuning` + `catalog.manifest.tuning` and
+   * applied to the request body via `MLX_TUNING_MAP`. When unset, the
+   * provider sends only the request shape's required fields and lets
+   * mlx-vlm fall back to its own defaults.
+   */
+  tuning?: import('../../model-profile/index.js').ResolvedTuning;
+  /** Manager-authoritative direct file-work classification. */
+  forceDirectFileWork?: boolean;
+  /** See {@link SessionOpts.singleToolCallTurn}. */
+  singleToolCallTurn?: boolean;
+  terminalToolPolicy?: NonNullable<SessionOpts['terminalToolPolicy']>;
+  /** See {@link SessionOpts.onWireTranscript}. */
+  onWireTranscript?: NonNullable<SessionOpts['onWireTranscript']>;
+}
+
+class MlxSession extends StreamingSessionBase implements LLMSession {
+  get supportsImageInput(): boolean {
+    return this.deps.provider.supportsImageInput;
+  }
+  private readonly messages: ChatMessage[];
+  /**
+   * Direct provider callers and ephemeral one-shot work do not always have a
+   * persisted chat-session id to put in `opts.queue.sessionId`. The wrapped
+   * MLX server treats a missing `cache_id` as an instruction to clear the KV
+   * cache after every request, which makes every tool-loop continuation pay a
+   * full re-prefill. Keep a stable id for this MlxSession as the fallback;
+   * normal chats still override it with their durable Gezel session id.
+   */
+  private readonly fallbackCacheId = `mlx-session-${randomUUID()}`;
+  private fallbackCacheUsed = false;
+  // Monotonic counter across `sendAndWait` calls on this session. Used as a
+  // tag in diagnostic logs so the per-turn lifecycle (queue dispatch → fetch
+  // → SSE start → SSE end) can be reassembled even when overlapping with
+  // other sessions in the daemon log. Helped diagnose mlx_vlm.server SSE
+  // termination issues where turn N completed cleanly but turn N+1 hung.
+  private sendSeq = 0;
+  /** See LlamaCppSession.currentTurnStartIdx — same role here. */
+  private currentTurnStartIdx = 0;
+  private turnPolicy = new LocalTurnPolicy();
+  /**
+   * Aggregated `<think>` / `<reasoning>` text captured this turn,
+   * across every iteration of the tool loop. Reset at the top of each
+   * `sendAndWaitInner`. ChatManager reads it via
+   * `getLastTurnReasoning()` after the turn resolves and stashes the
+   * trace on the assistant message so the chat bubble can render it
+   * behind a collapsed expander.
+   */
+  private lastTurnReasoning = '';
+
+  /**
+   * Tool-call bodies the salvage layer couldn't parse on the most
+   * recent turn after the retry budget exhausted. Captured at the
+   * budget-exhausted branch and read by ChatManager via
+   * `getLastTurnAttemptedToolCalls()` to stash on the assistant
+   * message for the debug bundle. Reset at the top of `sendAndWaitInner`.
+   */
+  private lastTurnAttemptedToolCalls: Array<{ body: string; reason?: string }> = [];
+
+  /**
+   * Watchdog reset hook owned by the in-flight `sendAndWaitInner`. Set
+   * just before the fetch fires; cleared in the turn's cleanup. While
+   * non-null, any engine-phase event arriving via `publishEnginePhase`
+   * counts as "the model is making progress" and resets the idle timer.
+   * Without this, large-prompt prefill (e.g. 30K tokens at 230 tok/s ≈
+   * 2 minutes) trips the pre-first-byte watchdog even though the
+   * python child is happily chunking through prefill — the SSE stream
+   * is silent until the very first generated token.
+   */
+  private currentTurnIdleReset: (() => void) | null = null;
+
+  /**
+   * Handler owned by the in-flight request for the engine's wave-scheduling
+   * markers (`waiting` / `paused` / `admitted`). Set beside
+   * {@link currentTurnIdleReset} and cleared with it.
+   */
+  private currentTurnEngineQueue: ((queue: EngineQueueMarker) => void) | null = null;
+
+  private readonly engineHold = new EngineHold();
+
+  /**
+   * Last prefill phase event seen during the current turn — captured
+   * for the abort message so the user sees "aborted at prefill 47% /
+   * 14336 of 29930 tokens" instead of just "no first byte." Cleared
+   * at the start of every send.
+   */
+  private lastPrefillEvent: { progress: number; detail: string; at: number } | null = null;
+
+  /**
+   * The `cache_id` this session sends to the engine. Set on every send, and
+   * the key the provider routes per-sub engine phases by — see
+   * {@link MlxSession.ownsCacheId}.
+   */
+  private currentCacheId: string | null = null;
+
+  private readonly externalToolNames: Set<string>;
+  private capturedCalls: ExternalToolCall[] = [];
+  private toolSurface: ToolSurfaceSize | undefined;
+  /**
+   * Session-scoped quarantine for the assisted MTP route. Once an emitted
+   * Hermes call proves that decode-time required-field enforcement diverged,
+   * every later grammar-armed request from this live session uses ordinary
+   * sequential BatchGenerator decoding. The latch preserves speculation for
+   * healthy sessions while ensuring one bad call cannot become a five-retry
+   * validator loop.
+   */
+  private forceSequentialToolGrammar = false;
+
+  constructor(private readonly deps: MlxSessionDeps) {
+    super();
+    this.externalToolNames = new Set((deps.externalTools ?? []).map((t) => t.name));
+    this.messages = [{ role: 'system', content: deps.systemMessage }];
+    // Layered prefix caching (flag ON): the volatile band rides as a
+    // SEPARATE frozen system message after the stable system message, so
+    // the stable `[system][tools]` wire prefix stays reusable.
+    if (deps.volatileContext) {
+      this.messages.push({ role: 'system', content: deps.volatileContext });
+    }
+    for (const m of deps.priorMessages) {
+      if (m.role === 'tool') {
+        this.messages.push({
+          role: 'tool',
+          content: m.content,
+          tool_call_id: m.toolCallId,
+        });
+        continue;
+      }
+      if (m.role === 'assistant' && 'toolCalls' in m && m.toolCalls.length > 0) {
+        this.messages.push({
+          role: 'assistant',
+          content: m.content || null,
+          tool_calls: m.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: { name: tc.name, arguments: tc.arguments },
+          })),
+        });
+        continue;
+      }
+      if (m.role === 'user' && m.images?.length && !this.supportsImageInput) {
+        throw new Error(
+          '[Mac AI] This MLX engine cannot accept image history. Enable its vision tower.',
+        );
+      }
+      this.messages.push({
+        role: m.role,
+        content: m.content,
+        ...(m.role === 'user' && m.images?.length ? { images: m.images } : {}),
+      });
+    }
+  }
+
+  capturedToolCalls(): ExternalToolCall[] {
+    return [...this.capturedCalls];
+  }
+
+  getWireTranscript(): WireTranscriptEntry[] | undefined {
+    return mlxWireTranscript(this.messages);
+  }
+
+  getToolSurface(): ToolSurfaceSize | undefined {
+    return this.toolSurface;
+  }
+
+  get numCtx(): number {
+    return this.deps.numCtx;
+  }
+
+  estimatePromptChars(): number {
+    let total = 0;
+    for (const m of this.messages) {
+      if (typeof m.content === 'string') total += m.content.length;
+      // The sidecar bounds images to 1024px. Reserve patch tokens without
+      // counting base64 bytes as language tokens or treating pixels as free.
+      total += (m.images?.length ?? 0) * 8192;
+      if (m.tool_calls) {
+        for (const tc of m.tool_calls)
+          total += tc.function.arguments.length + tc.function.name.length;
+      }
+    }
+    if (!this.deps.bridges.isEmpty()) {
+      for (const t of this.deps.bridges.getOpenAITools()) {
+        total += JSON.stringify(t).length;
+      }
+    }
+    return total;
+  }
+
+  /**
+   * Prefill the exact standing `[system][tools][transcript]` prefix without
+   * appending a user turn or mutating this session. Used by the machine broker
+   * after a user daemon prepares `/v1/remote/cache/warm`.
+   */
+  async prefillOnly(opts?: { timeoutMs?: number; sessionId?: string }): Promise<void> {
+    // Vision KV is not eligible for text-prefix warming or persistence.
+    if (this.messages.some((message) => message.images?.length)) return;
+    // Focusing a chat must not cold-start MLX. The real turn owns normal lazy
+    // startup; warming only accelerates an already-resident server.
+    const baseUrl = this.deps.provider.currentBaseUrl();
+    if (!baseUrl) return;
+    // A warm whose roster differs from the real turn's is worse than no warm
+    // at all. Qwen-family templates render the tool block at the TOP of the
+    // system message, so a no-tools render shares 3 tokens with a 44-tool
+    // turn — the shared prefix it saves then forces a full re-prefill on
+    // every session that seeds from it, and the next warm overwrites the
+    // corrected prefix right back.
+    //
+    // Wild-caught (koray PR-review fanout): `prefix-0b60345fcefa9ffd`
+    // oscillated between a 15,563-token no-tools render and a 24,796-token
+    // real one, ~9.2k tokens apart, producing `lcp=3 lcp_frac=0.00` and
+    // `mode=fresh reused=0` on turn after turn — 40 full re-prefills and
+    // 1.58M tokens re-prefilled against 238k of new work.
+    //
+    // The bridges spawn lazily, so an early warm sees an empty roster. A
+    // cold prefix costs one slow turn; a WRONG one costs every turn. An
+    // genuinely tool-less session also reads as empty here and is skipped
+    // too — its prompt is small, so the warm it loses is worth little,
+    // and that is the safe direction to be wrong in.
+    if (this.deps.bridges.isEmpty() && (this.deps.externalTools ?? []).length === 0) {
+      log.debug(
+        'turn#warm skipped — no tool roster registered yet; warming now would save a no-tools prefix that cannot match a real turn',
+      );
+      return;
+    }
+    const bridgeTools = this.deps.bridges.isEmpty()
+      ? []
+      : toChatCompletionsTools(this.deps.bridges);
+    const externalAsChatCompletions = externalToolsAsChatCompletions(this.deps.externalTools);
+    const tools = [...bridgeTools, ...externalAsChatCompletions];
+    const body: Record<string, unknown> = {
+      model: this.deps.model,
+      messages: this.messages,
+      stream: false,
+      max_tokens: 1,
+    };
+    applyMlxRequestShape(body, this.deps, { hasTools: tools.length > 0 });
+    // A warm must remain a one-token prefill even when catalog tuning carries
+    // a wider output cap.
+    body.max_tokens = 1;
+    // Nobody reads a warm; it must never hold up a person's turn.
+    body.priority = 'background';
+    if (tools.length > 0) body.tools = tools;
+    if (opts?.sessionId) {
+      const adapter = this.deps.provider.getCacheAdapter();
+      if (adapter) {
+        await adapter.prepareForSend(
+          opts.sessionId,
+          this.deps.systemMessage,
+          this.deps.systemPromptLayers,
+          // Same roster the body above will actually send. Omitting it made
+          // this warm register a prefix identity that could not distinguish
+          // a no-tools render from the real turn's — the send path at the
+          // bottom of `send()` has always passed it; this one did not.
+          body.tools as readonly unknown[] | undefined,
+          this.deps.systemSharedPrefix,
+        );
+        Object.assign(body, adapter.buildRequestExtras(opts.sessionId));
+      }
+    }
+    const requestSignal = AbortSignal.timeout(opts?.timeoutMs ?? 10 * 60_000);
+    const releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
+      `cache-warm:${opts?.sessionId ?? 'anonymous'}`,
+      requestSignal,
+      undefined,
+      false,
+      'background',
+    );
+    try {
+      const res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: requestSignal,
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(`prefillOnly: HTTP ${res.status} ${detail.slice(0, 200)}`);
+      }
+      await res.text().catch(() => '');
+    } finally {
+      releaseEngineRequest();
+    }
+  }
+
+  getLastTurnReasoning(): string | undefined {
+    return this.lastTurnReasoning.length > 0 ? this.lastTurnReasoning : undefined;
+  }
+
+  /**
+   * Running length of the same trace {@link getLastTurnReasoning}
+   * returns — read when a tool call fires so the persisted call can
+   * carry the offset it fired at.
+   */
+  getCurrentTurnReasoningLength(): number {
+    return this.lastTurnReasoning.length;
+  }
+
+  getLastTurnAttemptedToolCalls(): Array<{ body: string; reason?: string }> | undefined {
+    return this.lastTurnAttemptedToolCalls.length > 0 ? this.lastTurnAttemptedToolCalls : undefined;
+  }
+
+  /**
+   * Whether a phase tagged with this engine cache id belongs to this session.
+   * The id is the one sent as `cache_id` on every request, so it is exactly
+   * what the sidecar stamps onto its per-sub prefill markers.
+   */
+  ownsCacheId(cacheId: string): boolean {
+    return this.currentCacheId === cacheId;
+  }
+
+  publishEnginePhase(ev: EnginePhaseEvent): void {
+    if (ev.engineQueue) {
+      // Scheduling markers are the in-flight request's business alone: they
+      // re-arm its watchdog and relabel it. Outside a request there is
+      // nothing to wait on, so they are dropped.
+      this.currentTurnEngineQueue?.(ev.engineQueue);
+      return;
+    }
+    // Capture the latest prefill state so the pre-first-byte abort
+    // message (when it does fire) can attribute the stall to a real
+    // observed point in the prefill arc.
+    if (ev.phase === 'prefill' && typeof ev.progress === 'number') {
+      this.lastPrefillEvent = {
+        progress: ev.progress,
+        detail: ev.detail ?? '',
+        at: Date.now(),
+      };
+    }
+    // Reset the in-flight turn's idle watchdog. Any engine-phase event
+    // (prefill chunk, model-load tick, ready signal) is real evidence
+    // the python child is making progress, even though the SSE stream
+    // hasn't yielded its first token yet.
+    this.currentTurnIdleReset?.();
+    this.emitEnginePhase(ev);
+  }
+
+  publishEngineStats(ev: EngineStatsEvent): void {
+    this.emitEngineStats(ev);
+  }
+  private async maybeCompactMidLoop(opts?: { force?: boolean }): Promise<boolean> {
+    return compactLocalTurn(
+      this.turnPolicy,
+      {
+        messages: this.messages,
+        turnStart: this.currentTurnStartIdx,
+        estimatedTokens: Math.ceil(this.estimatePromptChars() / 4),
+        numCtx: this.deps.numCtx,
+        request: this.deps.requestCompaction,
+        replace: (start, count, content) => {
+          this.messages.splice(start, count, { role: 'assistant', content });
+          this.currentTurnStartIdx = start + 1;
+        },
+        warn: (error) => log.warn('Mid-loop compaction failed', { error: String(error) }),
+        completed: (removed) => this.emitWarning(autoCompactedNotice(removed, this.deps.numCtx)),
+      },
+      opts?.force,
+    );
+  }
+
+  get isDisposed(): boolean {
+    return this.deps.provider.isDisposed;
+  }
+
+  async sendAndWait(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
+    this.lastTurnBail = null;
+    // Queue-bypass path: sync consultations spawned via ask_specialist /
+    // ask_gezel would otherwise deadlock behind the asker's held slot
+    // (the asker is parked in `bridges.callTool` waiting for the
+    // consultation's reply — chicken-and-egg). The wrapped Python
+    // server's BatchEngine and its memory-aware admission still enforce
+    // the configured generation width, so bypassing the TS-side FIFO only
+    // loses the queue's affinity scoring, not safety.
+    return runOnLiveProvider(this.deps.provider, opts, () =>
+      this.deps.provider.withEngineTurn(
+        () => this.sendAndWaitInner(prompt, opts),
+        opts?.queue?.signal,
+      ),
+    );
+  }
+
+  private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
+    // Fail fast if the supervisor already saw mlx_lm.server die at
+    // startup. The httpd process can keep returning 200 on /health
+    // after `_generate` raises, so without this check we'd spend the
+    // full turn timeout hanging on an unresponsive
+    // /v1/chat/completions endpoint with no user-facing signal.
+    const fatal = this.deps.provider.takeFatalError();
+    if (fatal) {
+      const hintSuffix = fatal.hint ? `\n\n${fatal.hint}` : '';
+      throw new Error(`[Mac AI] engine failed to start: ${fatal.message}${hintSuffix}`);
+    }
+
+    const totalTimeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    // Budget in awake time, not wall clock. A laptop that naps mid-turn used
+    // to burn the whole budget while frozen and die on the wake-up burst
+    // reporting a duration it never got — `afterMs=1002151` against a 180s
+    // budget, of which 822s were macOS dark-wake sleep. `AwakeBudget` holds
+    // still across a suspension and gives up on its own terms when one nap is
+    // long enough to mean the machine was put away for good.
+    const budget = new AwakeBudget(totalTimeoutMs);
+    const turnTimeoutError = () =>
+      new Error(
+        `[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s${budget.describeSuspension()}`,
+      );
+    const start = Date.now();
+    const seq = ++this.sendSeq;
+    const debugOn = this.deps.debug?.isEnabled() === true;
+    // Always-on lifecycle tag — low frequency, high signal when piecing
+    // together "first turn worked, second never returned". Includes the
+    // pre-existing message count so the sequence in the log unambiguously
+    // shows whether the prior assistant reply landed in `this.messages`
+    // before this turn started.
+    log.info(`turn#${seq} START prompt=${prompt.length}c msgs=${this.messages.length}`);
+
+    const continueFromToolResult = opts?.continueFromToolResult === true;
+    if (continueFromToolResult) {
+      if (prompt.length > 0 || (opts?.attachments?.length ?? 0) > 0) {
+        throw new Error(
+          '[Mac AI] a tool-result continuation cannot include a new prompt or attachments',
+        );
+      }
+      const last = this.messages.at(-1);
+      if (last?.role !== 'tool' && !(last?.role === 'user' && last.images?.length)) {
+        throw new Error('[Mac AI] a tool-result continuation requires a trailing tool result');
+      }
+    }
+    const userMsg: ChatMessage = { role: 'user', content: prompt };
+    if (opts?.attachments && opts.attachments.length > 0) {
+      if (!this.supportsImageInput)
+        throw new Error(
+          '[Mac AI] This MLX runtime supports text only. Enable native vision for an installed vision checkpoint; no image was delivered to the model.',
+        );
+      userMsg.images = opts.attachments.map((a) => a.base64);
+    }
+    // Mark this turn's start so mid-loop compaction can split prior
+    // history (compactable) from in-flight tool loop (preserve verbatim).
+    // See LlamaCppSession.sendAndWaitInner for the rationale.
+    this.currentTurnStartIdx = this.messages.length;
+    this.turnPolicy = new LocalTurnPolicy(
+      turnCheckpoint(opts?.queue?.signal, () => budget.expired(), turnTimeoutError),
+    );
+    this.turnPolicy.checkpoint();
+    // Reset captured reasoning at the top of each turn — manager
+    // reads `getLastTurnReasoning()` after this resolves.
+    this.lastTurnReasoning = '';
+    // Same lifecycle for the attempted-tool-calls capture: read once
+    // by manager after the turn resolves, populated only when the
+    // salvage retry budget exhausts below.
+    this.lastTurnAttemptedToolCalls = [];
+    if (!continueFromToolResult) this.messages.push(userMsg);
+
+    // Reset captures — each sendAndWait surfaces only its own externals.
+    this.capturedCalls = [];
+    const bridgeTools = this.deps.bridges.isEmpty()
+      ? []
+      : toChatCompletionsTools(this.deps.bridges);
+    const externalAsChatCompletions = externalToolsAsChatCompletions(this.deps.externalTools);
+    const tools =
+      bridgeTools.length + externalAsChatCompletions.length > 0
+        ? [...bridgeTools, ...externalAsChatCompletions]
+        : undefined;
+    this.toolSurface = toolSurfaceSize(tools ?? []);
+    // Names of tools the model actually sees this turn. This must be
+    // derived from the advertised request surface, not the raw bridge
+    // inventory: role filtering hides tools from builders, but the bridge
+    // can still call them internally. Salvage and execution must not
+    // promote hidden-tool prose into real side effects.
+    const advertisedBridgeToolNames = new Set(
+      bridgeTools.map((t) => chatCompletionToolName(t)).filter((n): n is string => !!n),
+    );
+    const knownToolNames = new Set(
+      (tools ?? []).map((t) => chatCompletionToolName(t)).filter((n): n is string => !!n),
+    );
+    const requiresToolCall = this.deps.tuning?.toolChoice === 'required' && knownToolNames.size > 0;
+    // Tool-name → declared input schema, so salvaged calls can have
+    // structural arguments the markup formats flattened into strings
+    // reinterpreted before anything else reads them. The Hermes /
+    // Claude / GLM / XML shapes are all flat KEY→text maps and cannot
+    // carry a nested object or array; without this the model's correct
+    // JSON reaches the validator as `got string, expected object` and
+    // it loops re-emitting the same call. See tool-arg-schema-coercion.ts.
+    const toolArgSchemas = new Map<string, Record<string, unknown>>();
+    // Param-name → owning-tool-names index, so an unknown-tool nudge can
+    // catch the model naming a PARAMETER as the function (e.g. `description`
+    // is an argument of `start_project`, not a tool). Built once per send.
+    const toolParamIndex = new Map<string, string[]>();
+    for (const t of tools ?? []) {
+      const tname = chatCompletionToolName(t);
+      if (!tname) continue;
+      const schema = t.function.parameters as Record<string, unknown> | undefined;
+      if (schema) toolArgSchemas.set(tname, schema);
+      const props = (schema as { properties?: Record<string, unknown> } | undefined)?.properties;
+      if (!props) continue;
+      for (const param of Object.keys(props)) {
+        const arr = toolParamIndex.get(param);
+        if (arr) {
+          if (!arr.includes(tname)) arr.push(tname);
+        } else {
+          toolParamIndex.set(param, [tname]);
+        }
+      }
+    }
+    // Surgical edit tools on the roster ⇒ the deliverable is a modify of
+    // an existing file, so a repeated source-write failure should steer
+    // toward a targeted patch rather than "re-emit the whole file."
+    const surgicalEditsAvailable =
+      knownToolNames.has('replace_in_file') ||
+      knownToolNames.has('insert_at_marker') ||
+      knownToolNames.has('replace_lines') ||
+      knownToolNames.has('append_to_file');
+    // Delegation tools on the roster ⇒ repeated edit failures can hand the
+    // file to a more capable model instead of thrashing to a plain abort.
+    const delegationAvailable = [...knownToolNames].some((n) => n.startsWith('delegate_'));
+    const writerFlags = {
+      artifactWriterAvailable: knownToolNames.has('write_artifact'),
+      workspaceWriterAvailable: knownToolNames.has('write_file'),
+    };
+    // Counter for the model self-correction loop: each malformed tool
+    // call we nudge the model about counts against this budget. Not
+    // reset between iterations — a turn with two consecutive bad calls
+    // burns through both retries instead of looping forever.
+    let malformedRetries = 0;
+    // Signature of the last unparseable/unknown tool-call we nudged about.
+    // If the model emits the IDENTICAL bad call again after a nudge, the
+    // nudge isn't landing — stop spending retries on a repeat (the actionable
+    // nudge already fired once) and end the turn instead of apology-looping.
+    let lastBadCallSig: string | null = null;
+    // Auto-continuation state for truncated immediate-writes. When an
+    // immediate-write `write_file` is EOS-flushed (file larger than the
+    // per-turn token cap), we keep the turn alive — surfacing
+    // `append_to_file` and looping — until the model writes the tail
+    // without truncating, or we hit MAX_IMMEDIATE_WRITE_CONTINUATIONS.
+    let repairReadCalls = 0;
+    const repairReadPaths: string[] = [];
+    const requiredInputReads: RequiredInput[] = [];
+    const requiredInputs = [
+      ...(this.deps.activeCraftbookStep?.requiredInputs ?? []),
+      ...promptReadInputs(prompt),
+    ];
+    let requiredInputHoldLogged = false;
+    let repairFailedMutations = 0;
+    let repairMutationSucceeded = false;
+    const requiredReadPaths =
+      opts?.fileTurnIntent?.kind === 'repair-file' && opts.fileTurnIntent.readPaths
+        ? opts.fileTurnIntent.readPaths
+        : extractPrerequisiteRepairReadPaths(prompt);
+    let writeContinuationActive = false;
+    let writeContinuations = 0;
+    // Per-tool consecutive-failure tracker. Catches the Qwen 3.6 27B
+    // pattern of emitting JSON-stringified args, hitting the same Zod
+    // validation error every iteration, "diagnosing" the schema in
+    // chat, and re-trying the same wrong shape forever. See the
+    // tracker's docstring for the threshold rationale.
+    const failureTracker = new ToolFailureTracker({
+      surgicalEditsAvailable,
+      delegationAvailable,
+      ...writerFlags,
+    });
+    // Per-turn same-(name, args) repeat tracker. Catches the
+    // "narrative spinning" loop where the model re-reads the same
+    // files (read_task_notes, read_file, etc.) iteration after
+    // iteration, narrating "let me plan" prose between each call,
+    // never reaching write_file. See ToolRepeatTracker docstring for
+    // the threshold rationale.
+    const repeatTracker = new ToolRepeatTracker();
+    const deliverableReadPaceTracker = DeliverableReadPaceTracker.fromUserText(
+      prompt,
+      opts?.fileTurnIntent,
+    );
+    const deliverableReadySteer = DeliverableReadySteer.forStep(this.deps.activeCraftbookStep);
+    // Per-turn `ask_user_question` guard. Once a question card lands
+    // successfully, additional ask_user_question calls in the same
+    // turn are intercepted with a synthetic "you already asked, end
+    // your turn" response — without this, verbose-family models
+    // double-post cards (the second one usually re-phrasing the
+    // first; user gets a cluttered Home panel). The flag also
+    // signals `foldPreToolPreamble` to fold trailing wrap-up prose
+    // for the rest of the turn.
+    let askedQuestionThisTurn = false;
+    // Per-turn project-macro guard. `start_project` and `start_job`
+    // are atomic high-stakes macros — each call creates a project +
+    // voorman + kickoff task. Without this, a Gemma 4 cold-start
+    // turn that emits multiple `<|tool_call|>start_project{...}<|/tool_call|>`
+    // envelopes in one response (brainstorming variations of the
+    // same idea) produces N duplicate projects. Wild-caught on a
+    // clean install ("Can you create a space invaders
+    // game?" → 5 projects with iterated names).
+    let startedProjectOrJobThisTurn: { tool: string; firstResult: string } | null = null;
+    // Count redundant macro intercepts within this turn. Once the
+    // per-turn guard arms (after the first successful start_project /
+    // start_job), every additional macro call gets intercepted with
+    // a "STOP" message. Some local models (gemma4-26b on MLX, wild-caught)
+    // misread that as "your call was
+    // malformed, retry it" and keep emitting envelopes until
+    // MAX_TOOL_LOOP_TURNS bails — minutes of blank bubble for the
+    // user. After `PROJECT_MACRO_INTERCEPT_CAP` redundant attempts,
+    // we force end-of-turn with a synthesized closing summary
+    // derived from the first successful result.
+    let projectMacroInterceptCount = 0;
+    let forceProjectMacroBail: { closingText: string } | null = null;
+    let fullText = '';
+    let lastUsage: MlxTurnUsageSnapshot | null = null;
+    let firstTokenAt: number | null = null;
+    let lastIterationStartedAt = start;
+    let lastIterationFirstTokenAt: number | null = null;
+    let lastIterationFinishedAt: number | null = null;
+    let turnFailed = false;
+
+    // Every successful terminal path must publish the same usage + turn
+    // snapshot. Keeping this in the outer finally covers ordinary replies,
+    // external tool capture, synthesized terminal closings, question cards,
+    // and one-shot sessions without duplicating subtly different accounting
+    // at each return site.
+    const emitTerminalTelemetry = (): void => {
+      const telemetry = buildMlxTerminalTelemetry({
+        lastUsage,
+        model: this.deps.model,
+        start,
+        lastIterationStartedAt,
+        lastIterationFirstTokenAt,
+        lastIterationFinishedAt,
+        firstTokenAt,
+      });
+      if (!telemetry) return;
+      this.emitUsage(telemetry.usage);
+      this.emitTurnStats(telemetry.stats);
+    };
+
+    this.deps.provider._registerActiveSession(this);
+
+    // Status heartbeat. The pre-first-token window — cache warm (prepareForSend)
+    // plus prompt prefill — can run for minutes on a large prompt and emits no
+    // stdout phases, so the engine pill would otherwise sit on a stale label
+    // until "First token in …" finally lands. Re-emit a live, descriptive phase
+    // every few seconds so the pill keeps a meaningful label (and its elapsed
+    // clock) the whole time. Crucially this uses `emitEnginePhase` (UI bus only)
+    // and NOT `publishEnginePhase`, so it does NOT reset the stall watchdog — a
+    // genuinely hung engine still trips the idle abort.
+    let prepLabel = 'Preparing…';
+    this.lastPrefillEvent = null;
+    this.engineHold.end();
+    const emitPrep = (): void => {
+      if (firstTokenAt !== null) return;
+      // Held by the engine behind other work: say so, and show no bar —
+      // nothing of THIS prompt is being processed.
+      const holdLabel = this.engineHold.label;
+      if (holdLabel) {
+        this.emitEnginePhase({ provider: 'mlx', phase: 'prefill', detail: holdLabel });
+        return;
+      }
+      // Carry the last observed prefill progress forward. A phase event
+      // WITHOUT `progress` tells the UI the bar is over (the timeline's
+      // engine_phase handler deletes `thinkingProgress` and its detail), so
+      // a bare heartbeat landing between two `Prefill:` lines blinked the
+      // bar and its token count out every 4s for the whole prefill — which
+      // on a 61K-token prompt is minutes of flicker.
+      const last = this.lastPrefillEvent;
+      this.emitEnginePhase({
+        provider: 'mlx',
+        phase: 'prefill',
+        detail: last?.detail || prepLabel,
+        ...(last ? { progress: last.progress } : {}),
+      });
+    };
+    const statusHeartbeat = setInterval(emitPrep, 4_000);
+    emitPrep();
+
+    // The physical request lease must outlive all per-iteration setup, but it
+    // must never outlive this send. In particular, a fetch-level AbortError
+    // happens before the SSE-body `finally`; keeping the active release here
+    // lets the outer `finally` recover the slot from every exit path.
+    let releaseActiveEngineRequest: (() => void) | null = null;
+    // Cap-truncation steers spent this send. Bounded because the steer is
+    // only worth issuing while the model can still act on it: past the
+    // budget the honest outcome is the warning banner and an ended turn,
+    // not another 6k-token attempt at the same over-cap payload.
+    let capTruncationSteers = 0;
+
+    try {
+      for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
+        this.turnPolicy.checkpoint();
+        // Shared pressure check preserves all system bands and active tool results.
+        await this.maybeCompactMidLoop();
+
+        lastIterationStartedAt = Date.now();
+        lastIterationFirstTokenAt = null;
+        lastIterationFinishedAt = null;
+
+        if (budget.expired()) throw turnTimeoutError();
+
+        // Before the URL: loading the vision tower restarts the engine.
+        // A standalone turn's seed carries the whole state: earlier turns
+        // stay in the transcript but not in the request.
+        const transcript = opts?.standalone
+          ? standaloneTurnMessages(this.messages, this.currentTurnStartIdx)
+          : this.messages;
+        const messages = await this.deps.provider.visionMode.prepareRequest(
+          retireInspectedToolImages(transcript),
+          opts?.standalone ? leadingSystemMessages(this.messages) : this.currentTurnStartIdx,
+          opts?.queue?.signal,
+        );
+        const baseUrl = await this.deps.resolveBaseUrl();
+        const body: Record<string, unknown> = {
+          model: this.deps.model,
+          messages,
+          stream: true,
+          // Per-turn output cap. mlx-vlm's stream_generate defaults to
+          // a small built-in cap (256 in some versions) — verbose
+          // reasoning models burn through that on `<think>` blocks
+          // alone and truncate mid-tool-call. 16 384 covers any
+          // realistic chat turn; can be overridden per-model via
+          // catalog `tuning.sampling.maxTokens`.
+          max_tokens: 16_384,
+        };
+        applyMlxRequestShape(body, this.deps, { hasTools: Boolean(tools?.length) });
+        // Engine-side scheduling: who is waiting on this turn. Omitted reads
+        // as interactive at the sidecar, so only background is spelled out.
+        const enginePriority = opts?.queue?.enginePriority ?? 'interactive';
+        if (enginePriority === 'background') body.priority = 'background';
+        // Continuation-iteration output cap — see SendAndWaitOpts.
+        // Iteration 0 keeps the catalog cap so a tool call is never cut
+        // off before it starts; wrap-up iterations get the tight cap.
+        if (turn > 0 && opts?.continuationMaxTokens && opts.continuationMaxTokens > 0) {
+          const current =
+            typeof body.max_tokens === 'number' ? body.max_tokens : Number.POSITIVE_INFINITY;
+          body.max_tokens = Math.min(current, opts.continuationMaxTokens);
+        }
+        if (this.forceSequentialToolGrammar && hermesRequiredArgGrammarRequested(body)) {
+          body.disable_speculation = true;
+        }
+        // Tool surface actually sent this turn. Defaults to the full roster;
+        // constrained turns narrow it below.
+        let requestTools = tools;
+        // A turn whose whole job is one call (a game reaction's move): the
+        // first request offers that tool alone, without thinking, as on
+        // llama-cpp. The sidecar has no forced tool choice; one tool on offer
+        // leaves nothing else to reach for.
+        if (turn === 0 && opts?.requiredTool) {
+          const required = requiredToolOnly(tools, opts.requiredTool);
+          if (required.length > 0) {
+            requestTools = required;
+            disableTemplateThinking(body);
+            log.debug(`turn#${seq}.${turn} required-call turn: ${opts.requiredTool} only`);
+          }
+        }
+        const fileTurnPlan = planFileTurn(prompt, tools, opts?.fileTurnIntent);
+        const unreadInputs = unreadRequiredInputs(requiredInputs, requiredInputReads);
+        const immediateFileWriteTurn =
+          fileTurnPlan.kind === 'create-file' && unreadInputs.length === 0;
+        if (
+          fileTurnPlan.kind === 'create-file' &&
+          unreadInputs.length > 0 &&
+          !requiredInputHoldLogged
+        ) {
+          requiredInputHoldLogged = true;
+          log.info(
+            `turn#${seq}.${turn} immediate-write held: input(s) unread (${unreadInputs.map((i) => i.path).join(', ')})`,
+          );
+        }
+        const fileRepairTurn = fileTurnPlan.kind === 'repair-file';
+        const remainingReadPaths = fileRepairTurn
+          ? remainingPrerequisiteRepairReadPaths(requiredReadPaths, repairReadPaths)
+          : [];
+        if (fileRepairTurn) {
+          if (
+            remainingReadPaths.length &&
+            repairReadCalls > requiredReadPaths.length + LOCAL_TURN_LIMITS.noProgress
+          ) {
+            throw new Error('File repair exceeded its bounded prerequisite read allowance.');
+          }
+          const rewrite =
+            opts?.fileTurnIntent?.kind === 'repair-file' && opts.fileTurnIntent.strategy
+              ? opts.fileTurnIntent.strategy === 'rewrite'
+              : hasExplicitFullFileRewriteWording(prompt);
+          requestTools = repairTools(tools, {
+            readSucceeded: repairReadPaths.length > 0,
+            source: isSourceFileRepairPrompt(prompt, opts?.fileTurnIntent),
+            rewrite:
+              rewrite || repairFailedMutations >= 2 || this.turnPolicy.count('noProgress') >= 2,
+            prerequisiteReadsPending: remainingReadPaths.length > 0,
+          });
+          applyConstrainedTurnShape(body);
+        }
+        if (immediateFileWriteTurn) {
+          if (
+            typeof userMsg.content === 'string' &&
+            !userMsg.content.includes('[Local-model rescue:')
+          ) {
+            userMsg.content += IMMEDIATE_FILE_WRITE_PROMPT_SUFFIX;
+          }
+          const shaped = applyConstrainedTurnShape(body);
+          // Narrow to write_file alone, matching llama-cpp. Without this the
+          // model keeps the full roster on a turn whose only acceptable move
+          // is the write, and wanders back into reads and delegation.
+          const narrowed = writeFileOnlyTools(tools);
+          if (narrowed.length > 0) requestTools = narrowed;
+          // The switch alone is not enough. Qwen 3.8's HF template resolves
+          // `reasoning_effort|default('xhigh')` inside its thinking branch, so
+          // a turn that isn't fully suppressed reasons at the model's most
+          // expensive setting and truncates the write_file body it was asked
+          // for. llama-cpp has downgraded depth here for a while; MLX did not,
+          // which is the whole of the measured engine divergence.
+          log.debug(
+            `turn#${seq}.${turn} immediate-write mode: write_file-only surface (${narrowed.length} tool), thinking disabled${
+              shaped.reasoningDepthDowngraded.length > 0
+                ? `, reasoning depth -> low (${shaped.reasoningDepthDowngraded.join(', ')})`
+                : ''
+            }, max_tokens=${body.max_tokens}`,
+          );
+        }
+        if (
+          this.deps.forceDirectFileWork &&
+          (typeof body.max_tokens !== 'number' || body.max_tokens < FILE_WRITE_MIN_TOKENS)
+        ) {
+          body.max_tokens = FILE_WRITE_MIN_TOKENS;
+        }
+        if (requestTools && requestTools.length > 0) body.tools = requestTools;
+        // Tool-schema size breakdown (opt-in: GEZEL_PROMPT_BREAKDOWN=1). The
+        // companion to buildInstructions' system-text breakdown — the tool JSON
+        // schemas are prefilled alongside the system prompt, so this shows the
+        // other half of the per-turn token cost. Once per send (turn 0 only).
+        if (turn === 0 && process.env.GEZEL_PROMPT_BREAKDOWN === '1' && tools && tools.length > 0) {
+          const serialized = JSON.stringify(tools);
+          const top = [...tools]
+            .map((t) => ({ name: chatCompletionToolName(t) ?? '?', ch: JSON.stringify(t).length }))
+            .sort((a, b) => b.ch - a.ch)
+            .slice(0, 12)
+            .map(
+              (t) =>
+                `  ${String(Math.round(t.ch / 4)).padStart(5)} tok  ${String(t.ch).padStart(6)} ch  ${t.name}`,
+            )
+            .join('\n');
+          log.info(
+            `turn#${seq} [prompt-breakdown] tools: ${tools.length} defs · ` +
+              `~${Math.round(serialized.length / 4)} tok (${serialized.length} ch). Largest:\n${top}`,
+          );
+        }
+        // Write-continuation: add `append_to_file` to the surface so the
+        // model can finish a truncated file by appending its tail. Only
+        // active after an immediate-write truncation; the base surface
+        // stays write_file-only so the FIRST write is still focused.
+        if (writeContinuationActive && Array.isArray(body.tools)) {
+          if (!body.tools.some((t) => chatCompletionToolName(t) === 'append_to_file')) {
+            body.tools = [...body.tools, APPEND_TO_FILE_CONTINUATION_TOOL];
+          }
+        }
+        applyCallableToolGrammar(body, this.deps.bridges);
+        // Cache reuse extras from the engine's adapter (Phase 2). Adds
+        // `cache_id: <sessionId>` so our wrapped `gezel_mlx_server.py`
+        // preserves and reuses the prompt cache across turns. Falls
+        // back to no-extras (= upstream behavior, full re-prefill per
+        // turn) when no adapter is wired (tests, no controller setup).
+        // Phase 3 also hands the system prompt to the adapter so it can
+        // register and warm a per-gezel prefix entry — first session
+        // for a new gezel pays cold prefill, sibling sessions inherit
+        // the warm prefix from disk on first turn.
+        const adapter = this.deps.provider.getCacheAdapter();
+        const durableCacheId = opts?.queue?.sessionId;
+        const cacheId = durableCacheId ?? this.fallbackCacheId;
+        // The sidecar stamps per-sub prefill markers with the request's
+        // `cache_id`, so this is the key the provider routes them by. With no
+        // adapter the id never reaches the engine and its markers arrive
+        // untagged — which the fanout treats as engine-wide and broadcasts,
+        // exactly as before.
+        this.currentCacheId = cacheId;
+        if (adapter) {
+          if (!durableCacheId) this.fallbackCacheUsed = true;
+          await adapter.prepareForSend(
+            cacheId,
+            this.deps.systemMessage,
+            this.deps.systemPromptLayers,
+            // The wire tools this turn will actually send. Warming without
+            // them renders a prompt through a different template branch,
+            // which on Qwen shares 3 tokens with the real turn.
+            body.tools as readonly unknown[] | undefined,
+            this.deps.systemSharedPrefix,
+          );
+          const extras = adapter.buildRequestExtras(cacheId);
+          Object.assign(body, extras);
+          // Diagnostic: one line per request so the next "Stream
+          // finished, cleared cache" investigation is visible from
+          // the TS side without grepping Python stdout. The Python
+          // server prints `[cache] hit/miss cache_id=…` on its end;
+          // cross-referencing both confirms the round-trip works.
+          // Drop to `debug` once cache reuse is confirmed stable.
+          if (turn === 0) {
+            log.info(
+              `turn#${seq} cache extras attached: cache_id=${String(extras.cache_id ?? '')} prefix_cache_id=${String(extras.prefix_cache_id ?? 'none')}`,
+            );
+          }
+        } else if (turn === 0) {
+          // The OTHER side of the diagnostic: when cache extras are
+          // skipped, log WHY so we can tell from one line that the adapter
+          // is unwired. Missing queue.sessionId is safe: cacheId falls back
+          // to a stable id owned by this MlxSession. An unwired adapter means
+          // the Python server clears its cache on finish and the next turn
+          // pays full re-prefill — exactly
+          // the prefill-loop the user reported on gemma4-26b.
+          log.warn(
+            `turn#${seq} cache extras NOT attached (full re-prefill expected): ` +
+              `adapter=null cacheId=${cacheId}`,
+          );
+        }
+
+        const externalSignal = opts?.queue?.signal;
+        if (budget.expired()) throw turnTimeoutError();
+        // Sleep-aware: `AbortSignal.timeout` fires the instant the host
+        // resumes, which would drop a queued turn that never had its slot.
+        const engineDeadline = createAwakeTimeout(budget.remainingMs());
+        const engineDeadlineSignal = engineDeadline.signal;
+        const engineWaitSignal = externalSignal
+          ? AbortSignal.any([externalSignal, engineDeadlineSignal])
+          : engineDeadlineSignal;
+        let releaseEngineRequest: () => void;
+        try {
+          releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
+            `turn#${seq}.${turn}`,
+            engineWaitSignal,
+            // To the user, waiting for the queue and waiting for the engine
+            // gate are one state: this turn has not started yet.
+            opts?.queue?.onQueueWait,
+            true,
+            enginePriority,
+          );
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') {
+            if (externalSignal?.aborted) {
+              throw new Error(turnCancelledMessage());
+            }
+            if (engineDeadlineSignal.aborted) throw turnTimeoutError();
+          }
+          throw err;
+        } finally {
+          // The signal only guards the wait for a slot; the turn's own ticker
+          // owns the deadline from here.
+          engineDeadline.dispose();
+        }
+        let engineRequestReleased = false;
+        const releaseEngineRequestOnce = () => {
+          if (engineRequestReleased) return;
+          engineRequestReleased = true;
+          releaseActiveEngineRequest = null;
+          releaseEngineRequest();
+        };
+        releaseActiveEngineRequest = releaseEngineRequestOnce;
+        if (budget.expired()) {
+          releaseEngineRequestOnce();
+          throw turnTimeoutError();
+        }
+        const ctrl = new AbortController();
+        // Tag which trigger fired the abort — distinguishes the
+        // hard-timer vs caller-cancel paths in the log so a hang
+        // diagnosed via "turn#N FETCH-ABORT timer" reads unambiguously
+        // as a model timeout rather than a user-driven cancel.
+        let abortReason: 'timer' | 'caller' | 'idle' | null = null;
+        const onExternalAbort = () => {
+          abortReason ??= 'caller';
+          ctrl.abort();
+        };
+        if (externalSignal) {
+          if (externalSignal.aborted) onExternalAbort();
+          else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+        }
+        // Deadline poll rather than a single armed timer. A `setTimeout`
+        // armed before a suspension fires the instant the host resumes, so
+        // the turn dies on the wake-up burst; polling re-reads the awake
+        // budget each tick, so a nap defers the abort instead of causing it.
+        // Drift is bounded by the poll interval, never by the sleep duration.
+        // `budget.expired()` also covers the give-up case — one nap long
+        // enough that the engine's SSE stream is not worth waiting on.
+        const deadlineTicker = setInterval(() => {
+          if (!budget.expired()) return;
+          abortReason ??= 'timer';
+          log.error(
+            `turn#${seq}.${turn} ABORT-FIRED reason=timer afterMs=${Date.now() - start} ` +
+              `awakeMs=${Math.round(totalTimeoutMs - budget.remainingMs())} suspendedMs=${budget.suspendedMs()}`,
+          );
+          ctrl.abort();
+          clearInterval(deadlineTicker);
+        }, 2_000);
+        // Stream-idle watchdog. mlx_vlm.server has a known SSE
+        // termination quirk where it stops emitting tokens mid-
+        // stream without sending `[DONE]` and without closing the
+        // connection — the for-await loop just hangs forever.
+        // Without this watchdog the UI shows "still working" until
+        // the hard deadline (3 min default) fires. The idle timer
+        // anchors on every SSE event arrival; if the stream is
+        // silent for `streamingIdleMs`, abort and let the catch
+        // path surface what we have so far + a clear message.
+        //
+        // Pre-first-byte uses a longer budget because cold-start
+        // model load + prefill on a 27B Qwen can legitimately take
+        // minutes before the first token. The 180s budget covers a
+        // cold model load before chunked prefill begins emitting
+        // progress events; once `Prefill: …` lines start flowing,
+        // `currentTurnIdleReset` (wired from `publishEnginePhase`)
+        // anchors the watchdog on every prefill chunk so the timer
+        // tracks real progress instead of wall-clock seconds.
+        // Once tokens are flowing, a much tighter budget detects
+        // mid-stream stalls without false-positive aborts on healthy
+        // generation gaps.
+        // Idle-watchdog budgets. Aligned with ollama / llama-cpp's
+        // 300s defaults — earlier MLX-specific tighter values
+        // (60s streaming, 180s pre-first-byte) were killing legitimate
+        // 26B+ Gemma / Qwen turns that go silent for 60–120s while
+        // doing heavy reasoning between tokens or hitting a slow
+        // generation patch. The 30-min hard turn deadline from the
+        // manager still bounds total runtime.
+        //
+        //   - PRE_FIRST_BYTE_IDLE_MS: cold-start budget before any
+        //     SSE / progress event arrives. Covers model load +
+        //     prompt prefill on a 26B model at heavy quant. Now SCALED
+        //     by prompt size (computePreFirstByteBudgetMs) — a 37K-token
+        //     turn on a 27B-q8 needs far longer to first token than a 2K
+        //     "hello", and the old flat 300s aborted the big ones
+        //     mid-prefill (the qwen3.6-27b voorman stall).
+        //   - PRE_FIRST_BYTE_PER_PROGRESS_MS: budget to re-arm after a
+        //     prefill event arrives pre-first-byte. Unified to the SAME
+        //     size-scaled value: the serial path emits tqdm chunks every
+        //     couple seconds (each just re-arms the generous bound — fine),
+        //     while the batched path emits only a single "prefilling N
+        //     tokens" start marker and then blocks the event loop through
+        //     the whole prefill, so a tight per-chunk timer would
+        //     false-abort it. One generous bound serves both.
+        //   - STREAMING_IDLE_MS: budget between two consecutive SSE
+        //     content events once tokens are flowing. Generous enough
+        //     to cover a heavy reasoning gap on a 26B model.
+        const approxPromptTokens = estimatePromptTokens(this.messages, body.tools);
+        const PRE_FIRST_BYTE_IDLE_MS = computePreFirstByteBudgetMs(approxPromptTokens);
+        const PRE_FIRST_BYTE_PER_PROGRESS_MS = PRE_FIRST_BYTE_IDLE_MS;
+        const STREAMING_IDLE_MS = 300_000;
+        if (turn === 0 || PRE_FIRST_BYTE_IDLE_MS > PRE_FIRST_BYTE_BASE_MS) {
+          log.info(
+            `turn#${seq}.${turn} pre-first-byte budget ${Math.round(PRE_FIRST_BYTE_IDLE_MS / 1000)}s ` +
+              `(~${approxPromptTokens.toLocaleString('en-US')} prompt tokens)`,
+          );
+        }
+        let idleAbortKind: 'pre-first-byte' | 'streaming' | null = null;
+        let lastSseEventAt: number | null = null;
+        let firstSseEventAt: number | null = null;
+        let idleTimer = setTimeout(() => {
+          idleAbortKind = 'pre-first-byte';
+          abortReason ??= 'idle';
+          log.error(
+            `turn#${seq}.${turn} ABORT-FIRED reason=idle (pre-first-byte) afterMs=${Date.now() - start}`,
+          );
+          ctrl.abort();
+        }, PRE_FIRST_BYTE_IDLE_MS);
+        const armStreamingIdle = () => {
+          clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            idleAbortKind = 'streaming';
+            abortReason ??= 'idle';
+            log.error(
+              `turn#${seq}.${turn} ABORT-FIRED reason=idle (streaming) afterMs=${Date.now() - start}`,
+            );
+            ctrl.abort();
+          }, STREAMING_IDLE_MS);
+        };
+        const resetIdle = () => {
+          if (firstSseEventAt === null) firstSseEventAt = Date.now();
+          lastSseEventAt = Date.now();
+          this.engineHold.end();
+          armStreamingIdle();
+        };
+        // Pre-first-byte progress reset — fires on prefill events
+        // (and any other engine phase) arriving via the supervisor's
+        // stdout fanout. Uses a tighter per-progress budget than the
+        // initial cold-start budget: once we've seen one prefill
+        // chunk, we know the engine is alive; the next chunk is
+        // expected within ~PER_PROGRESS_MS at typical 200–250 tok/s
+        // for 2K-token batches.
+        const resetIdleFromPhaseEvent = () => {
+          // Only meaningful before the first SSE byte. Once tokens
+          // flow, `resetIdle()` (called inside the SSE loop) takes
+          // over with the tighter STREAMING_IDLE_MS budget.
+          if (firstSseEventAt !== null) return;
+          clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            idleAbortKind = 'pre-first-byte';
+            abortReason ??= 'idle';
+            log.error(
+              `turn#${seq}.${turn} ABORT-FIRED reason=idle (pre-first-byte, after progress) afterMs=${Date.now() - start}`,
+            );
+            ctrl.abort();
+          }, PRE_FIRST_BYTE_PER_PROGRESS_MS);
+        };
+        this.currentTurnIdleReset = resetIdleFromPhaseEvent;
+        this.lastPrefillEvent = null;
+        // Engine-side holds (see engine-hold.ts): every `waiting` / `paused`
+        // marker proves the engine is alive and busy, so it re-arms whichever
+        // idle bound is live. The turn's own deadline (`budget`) still bounds
+        // the whole wait.
+        this.engineHold.end();
+        this.currentTurnEngineQueue = (queue) => {
+          if (queue.state === 'admitted') {
+            if (this.engineHold.label === null) return;
+            this.engineHold.end();
+            if (firstSseEventAt === null) emitPrep();
+            return;
+          }
+          if (firstSseEventAt === null) resetIdleFromPhaseEvent();
+          else armStreamingIdle();
+          if (firstSseEventAt !== null) {
+            // Paused mid-reply: the stream stops until the chat ahead is
+            // served. The reply so far stays on screen; the pill says why.
+            const detail = engineHoldLabelFor(queue);
+            this.emitEnginePhase({ provider: 'mlx', phase: 'generating', detail });
+            return;
+          }
+          const detail = this.engineHold.begin(queue, opts?.queue?.onQueueWait);
+          this.emitEnginePhase({ provider: 'mlx', phase: 'prefill', detail });
+        };
+        // Anchored at request dispatch: only work the engine did while THIS
+        // turn was already waiting can explain why it never got a first byte.
+        const requestDispatchedAt = Date.now();
+        const busyElsewhere = (): { detail: string; secondsAgo: number } | null => {
+          const other = this.deps.provider.prefillForOtherSessionSince(
+            this.currentCacheId ?? null,
+            requestDispatchedAt,
+          );
+          if (!other) return null;
+          return {
+            detail: other.detail,
+            secondsAgo: Math.max(0, Math.round((Date.now() - other.at) / 1000)),
+          };
+        };
+        const cleanupTurn = () => {
+          clearInterval(deadlineTicker);
+          clearTimeout(idleTimer);
+          this.engineHold.end();
+          this.currentTurnEngineQueue = null;
+          this.currentTurnIdleReset = null;
+          releaseEngineRequestOnce();
+          externalSignal?.removeEventListener('abort', onExternalAbort);
+        };
+
+        // Checkpoint the exact transcript this request sends, so a restart
+        // can reseed the session with the prompt the engine is about to cache
+        // instead of a lossy rebuild that matches only its system head. Taken
+        // here, after every in-iteration edit — the immediate-write suffix
+        // lands on the user message late.
+        if (this.deps.onWireTranscript) {
+          const transcript = mlxWireTranscript(messages);
+          if (transcript) this.deps.onWireTranscript(transcript);
+        }
+        if (debugOn) {
+          log.debug(
+            `turn#${seq}.${turn} FETCH baseUrl=${baseUrl} model=${this.deps.model} ` +
+              `bodyMsgs=${this.messages.length} tools=${tools?.length ?? 0}`,
+          );
+        }
+        let res: Response;
+        try {
+          res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: ctrl.signal,
+          });
+        } catch (err) {
+          cleanupTurn();
+          this.deps.markUsed();
+          log.error(
+            `turn#${seq}.${turn} FETCH-ERR ${(err as Error).name}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          if ((err as Error).name === 'AbortError') {
+            if (externalSignal?.aborted) {
+              throw new Error(turnCancelledMessage());
+            }
+            if (abortReason === 'idle') {
+              // Idle-fired during the fetch itself (no response body yet).
+              // If we observed prefill chunks, attribute the stall to the
+              // last seen progress point — much more useful than "no
+              // first byte" when the model was clearly working.
+              throw new Error(
+                buildPreFirstByteAbortMessage(this.lastPrefillEvent, busyElsewhere()),
+              );
+            }
+            throw turnTimeoutError();
+          }
+          throw new Error(
+            `[Mac AI] couldn't reach the engine at ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        if (!res.ok || !res.body) {
+          cleanupTurn();
+          this.deps.markUsed();
+          const txt = await res.text().catch(() => '');
+          log.error(`turn#${seq}.${turn} HTTP-ERR status=${res.status} ${res.statusText}`);
+          throw new Error(translateMlxHttpError(res.status, res.statusText, txt));
+        }
+        if (debugOn) {
+          log.debug(
+            `turn#${seq}.${turn} HTTP-OK status=${res.status} ` +
+              `headers={content-type:${res.headers.get('content-type') ?? '?'}}`,
+          );
+        }
+
+        if (firstTokenAt === null) {
+          // The request is in; we're now prefilling the prompt. Switch the
+          // heartbeat label and emit once immediately so the pill updates
+          // without waiting for the next heartbeat tick.
+          prepLabel = 'Processing prompt';
+          emitPrep();
+        }
+
+        let turnContent = '';
+        let finishReason: string | null = null;
+        const toolCallAccumulator = new MlxToolCallAccumulator();
+        // Code-block salvage (Phase: gemma-26b orchestration). When the
+        // ramble detector aborts a turn with NO recognizable tool-call
+        // markup but the buffered prose DOES contain a fenced code
+        // block (the "Here's the file: ```html …```" pattern small
+        // models drift into instead of calling write_file), we promote
+        // each block to a synthesized `write_artifact` call. The
+        // accumulator below lives outside the try/catch so the post-
+        // exit merge can include it alongside the other salvage
+        // sources.
+        let codeBlockRepaired: Array<{
+          id: string;
+          type: 'function';
+          function: { name: string; arguments: string };
+        }> = [];
+        // Wall-of-prose detector. Verbose-family models (Qwen 3.6
+        // 27B at heavy quant in particular) emit a tool-call markup
+        // block early in the turn, then continue narrating for
+        // thousands of characters about what they "would" do next —
+        // the failure mode the about.md "stuck planning" rule warns
+        // about. The original boolean version of this detector
+        // disarmed permanently after the first tool-call signal
+        // and missed exactly that pattern; `RambleDetector` measures
+        // prose-since-last-action so the cap re-arms after every
+        // markup block.
+        //
+        // Threshold: 6000 chars (~1500 tokens) of prose past the
+        // last action. Generous enough that legitimate medium-length
+        // tail explanations pass through; tight enough to catch the
+        // "wrote one tool then rambled" wall before the user has
+        // waited 90+ seconds. Gated on profile opt-in via
+        // `turn.ramble-detection`; per-model thresholds come from
+        // the validated config. Absent → detector disabled.
+        //
+        // Read from the request, not only the template: a thinking-off
+        // request renders the block already closed, and seeding from the
+        // template streamed a whole `write_file` call into the reasoning pane.
+        const opensInReasoning = requestOpensReasoning(this.deps.templateOpensReasoning, body);
+        const rambleConfig = profileBehaviorConfig<TurnRambleDetectionConfig>(
+          this.deps.profile,
+          'turn.ramble-detection',
+        );
+        const ramble = outputIsConstrained(this.deps.tuning)
+          ? inertRambleDetector()
+          : rambleConfig
+            ? new RambleDetector({
+                threshold: rambleConfig.coldThreshold,
+                postActionThreshold: rambleConfig.postActionThreshold,
+                enabled: true,
+                // Models that leak untagged reasoning narrate their plan
+                // in the open before acting; give the cold cap room to
+                // reach the tool call. Prefer the profile opt-in, but also
+                // honor the model-id family signal so a verbose family whose
+                // profile is missing `turn.preamble-folding` (config drift)
+                // still gets the leaky budget instead of the tight 6k cap.
+                leakyReasoning:
+                  profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
+                  leaksUntaggedReasoning(this.deps.model),
+                // MLX inlines chain-of-thought in the content deltas, and
+                // a template that opens `<think>` itself never shows the
+                // detector an open marker — so without this the whole
+                // reasoning block is scored as cold prose. Same flag the
+                // StreamingReasoningSplit below is seeded with.
+                opensInReasoning,
+              })
+            : // Repetition guard is safe on any local model (fires only on
+              // degenerate low-novelty loops); arm it even without the
+              // length-cap opt-in. See RambleDetector. Still needs the
+              // reasoning-open seed: the guard exempts reasoning spans, and
+              // a template-opened `<think>` is one.
+              new RambleDetector({
+                threshold: 6000,
+                enabled: false,
+                repetitionGuardEnabled: true,
+                opensInReasoning,
+              });
+        let rambleAborted = false;
+        // Single-call turn: stop the stream once the one usable call is
+        // complete in the VISIBLE text. Reasoning is excluded so a call the
+        // model drafts while thinking can't end the turn early.
+        let singleCallComplete = false;
+        let singleCallVisible = '';
+        // Tool name for the live tool-args channel — only the first
+        // fragment of a streamed tool call carries `function.name`.
+        let liveToolArgsName = '';
+        // Drop chat-template tool-call markers (Gemma 3+ leaks
+        // `<|tool_call|>...<tool_call|>` token text into the content
+        // stream even though it ALSO ships a structured `tool_calls`
+        // delta — the structured one is what the UI renders, the text
+        // version is just noise). Streaming-safe: holds back fragments
+        // that could be a partial marker prefix until disambiguated.
+        const stripper = new LeakyToolCallStripper();
+        // MLX inlines chain-of-thought in the same content deltas as the
+        // reply; only the end-of-turn `extractReasoningWithProfile` pass below
+        // separates them. Everything reading live deltas — the chat bubble and
+        // every connected app through the OpenAI-compatible facade — would
+        // otherwise render thinking as the answer. This is the dedicated
+        // reasoning channel llama.cpp and ds4 get from their engines.
+        const reasoningSplit = new StreamingReasoningSplit({
+          opensInReasoning,
+          enabled: this.deps.profile?.style.reasoningFormat !== 'none',
+        });
+        // Throttle live phase emissions during generation so we don't
+        // saturate the SSE fanout with one phase event per token —
+        // ~3 Hz is fast enough that the tok/s readout feels live, slow
+        // enough that the UI's React reconciler doesn't choke on a
+        // 30-tok/s burst from a small model.
+        let lastPhaseAt = 0;
+        const PHASE_EMIT_MIN_INTERVAL_MS = 300;
+        // Stream-active heartbeat to the daemon LOG (distinct from the UI-bus
+        // phase emits above, which never reach stdout). The eval harness's
+        // soft-progress watchdog digests daemon.log; with no periodic line
+        // during a long MLX decode it reads active generation as a stall and
+        // false-fails big models mid-first-turn. Mirror the llama-cpp
+        // provider's `[<engine>] stream-active` pulse so the watchdog sees the
+        // engine is alive. ~5s cadence keeps the log quiet.
+        let lastStreamPulseAt = 0;
+        const STREAM_PULSE_INTERVAL_MS = 5_000;
+        // SSE-loop exit attribution. The loop can leave four ways:
+        // explicit `[DONE]` marker (healthy), natural stream end with no
+        // `[DONE]` (mlx_vlm.server bug — server closed before sentinel),
+        // exception (caught below), or it never exits (caller sees the
+        // hardTimer abort fire and the catch turns it into AbortError).
+        // The terminator is logged unconditionally on the way out so the
+        // smoking gun for "second turn hangs" shows up in regular logs.
+        let sseChunks = 0;
+        let sseExitReason: 'done' | 'stream-end' | 'error' = 'stream-end';
+        try {
+          for await (const event of readSseEvents(res.body)) {
+            // Anchor the idle watchdog on every event — content
+            // chunks AND framing chunks (usage updates, empty
+            // deltas) all count as "stream is alive."
+            resetIdle();
+            sseChunks++;
+            if (event === '[DONE]') {
+              sseExitReason = 'done';
+              break;
+            }
+            const chunk = event as ChatCompletionChunk;
+            const choice = chunk.choices?.[0];
+            const delta = choice?.delta;
+            const hasContent = Boolean(delta?.content);
+            const hasToolCalls = Boolean(delta?.tool_calls && delta.tool_calls.length > 0);
+            // mlx_vlm.server emits Responses-API field names; older
+            // OpenAI-compatible servers use the Chat-Completions ones.
+            // Read both so this code works against either shape.
+            const usage = chunk.usage;
+            const promptTokens = usage?.input_tokens ?? usage?.prompt_tokens;
+            const completionTokens = usage?.output_tokens ?? usage?.completion_tokens;
+            const promptTps = usage?.prompt_tps;
+            const generationTps = usage?.generation_tps;
+            const cachedTokens = usage?.cached_tokens;
+            // A structured-tool response may never emit visible `content`.
+            // Count its first argument fragment as model activity so TTFT is
+            // still observable and the engine phase advances to generating.
+            if ((hasContent || hasToolCalls) && lastIterationFirstTokenAt === null) {
+              lastIterationFirstTokenAt = Date.now();
+            }
+            if ((hasContent || hasToolCalls) && firstTokenAt === null) {
+              firstTokenAt = lastIterationFirstTokenAt ?? Date.now();
+              const ttft = firstTokenAt - start;
+              log.info(`TTFT ${ttft}ms (session model=${this.deps.model})`);
+              // First-token detail folds in the prefill speed when
+              // the engine surfaces it. Prefill happens entirely
+              // inside `generate_step`, so this is the first chance
+              // we get to put a number on it.
+              const prefillSuffix =
+                promptTps && promptTps > 0 ? ` · prefill ${formatTps(promptTps)} tok/s` : '';
+              this.emitEnginePhase({
+                provider: 'mlx',
+                phase: 'generating',
+                detail: `First token in ${(ttft / 1000).toFixed(1)}s${prefillSuffix}`,
+                ttftMs: ttft,
+              });
+              lastPhaseAt = firstTokenAt;
+            }
+            if ((hasContent || hasToolCalls) && firstTokenAt !== null) {
+              const now = Date.now();
+              if (now - lastPhaseAt >= PHASE_EMIT_MIN_INTERVAL_MS) {
+                this.emitEnginePhase({
+                  provider: 'mlx',
+                  phase: 'generating',
+                  // No `detail`: the counters are the payload, and the
+                  // phase's own copy belongs to the UI. Composing them
+                  // into prose here only forced the pill to scrape them
+                  // back out — and the scrape left the header reading
+                  // "Koray · · 61 tokens".
+                  ...(completionTokens !== undefined && completionTokens > 0
+                    ? { outputTokens: completionTokens }
+                    : {}),
+                  ...(generationTps !== undefined && generationTps > 0
+                    ? { tokensPerSec: generationTps }
+                    : {}),
+                });
+                lastPhaseAt = now;
+              }
+            }
+            if (hasContent) {
+              // Run the raw chunk through the marker stripper before
+              // it lands anywhere user-visible. The TTFT / generating
+              // phase emissions still fire on raw-chunk presence —
+              // they're a "model is producing tokens" signal, not a
+              // "user sees content" signal — so leaked-marker chunks
+              // still tick the engine pill correctly even when the
+              // visible output is empty.
+              const safeContent = stripper.push(delta!.content!);
+              if (safeContent.length > 0) turnContent += safeContent;
+              {
+                // Watchdog heartbeat to the daemon log (see decl above).
+                const now = Date.now();
+                if (now - lastStreamPulseAt >= STREAM_PULSE_INTERVAL_MS) {
+                  const tps =
+                    generationTps && generationTps > 0
+                      ? ` · ${formatTps(generationTps)} tok/s`
+                      : '';
+                  log.info(`[mlx] stream-active tokens=${completionTokens ?? 0}${tps}`);
+                  lastStreamPulseAt = now;
+                }
+              }
+              if (safeContent.length > 0) {
+                // `turnContent` keeps the raw text on purpose: ramble
+                // detection reads the reasoning phase, and the end-of-turn
+                // split still owns what gets committed. Only what goes out
+                // live is separated here.
+                const live = reasoningSplit.push(safeContent);
+                if (live.visible.length > 0) this.emitDelta(live.visible);
+                if (live.reasoning.length > 0) this.emitReasoningDelta(live.reasoning);
+                if (
+                  this.deps.singleToolCallTurn &&
+                  !singleCallComplete &&
+                  live.visible.length > 0
+                ) {
+                  singleCallVisible += live.visible;
+                  if (hasCompleteToolCallMarkup(singleCallVisible)) {
+                    singleCallComplete = true;
+                    log.info(
+                      `turn#${seq}.${turn} ABORT-FIRED reason=single-call-complete ` +
+                        `afterMs=${Date.now() - start}`,
+                    );
+                    ctrl.abort();
+                  }
+                }
+              }
+              if (!singleCallComplete && !rambleAborted && ramble.observeContent(turnContent)) {
+                rambleAborted = true;
+                abortReason ??= 'idle';
+                log.error(
+                  `turn#${seq}.${turn} ABORT-FIRED reason=ramble ` +
+                    `(${ramble.firedOnRepetition ? 'repetition-loop' : ramble.isInsideReasoning ? 'reasoning' : ramble.inPostActionMode ? 'post-action' : 'cold'}; ` +
+                    `${ramble.proseSinceLastAction} chars since last signal, cap ${ramble.activeThreshold}) ` +
+                    `afterMs=${Date.now() - start}`,
+                );
+                ctrl.abort();
+              }
+            }
+            if (hasToolCalls) {
+              // Tool-argument streaming emits no deltas — pulse so long
+              // structured writes read as live activity, not a stall.
+              this.emitWirePulse();
+              ramble.recordStructuredAction(turnContent.length);
+              for (const tc of delta!.tool_calls!) {
+                toolCallAccumulator.ingest(tc);
+                // Live tool-args channel — see the llama-cpp counterpart.
+                if (tc.function?.name) liveToolArgsName = tc.function.name;
+                const argChunk = tc.function?.arguments ?? '';
+                if (tc.function?.name || argChunk.length > 0) {
+                  this.emitToolArgsDelta(liveToolArgsName, argChunk, {
+                    index: tc.index,
+                    ...(tc.id ? { id: tc.id } : {}),
+                  });
+                }
+              }
+            }
+            if (usage && promptTokens !== undefined && completionTokens !== undefined) {
+              lastUsage = {
+                prompt_tokens: promptTokens,
+                completion_tokens: completionTokens,
+                ...(promptTps !== undefined ? { prompt_tps: promptTps } : {}),
+                ...(generationTps !== undefined ? { generation_tps: generationTps } : {}),
+                ...(cachedTokens !== undefined ? { cached_tokens: cachedTokens } : {}),
+              };
+            }
+            if (choice?.finish_reason) {
+              finishReason = choice.finish_reason;
+            }
+            if (!hasContent && !hasToolCalls && !chunk.usage) {
+              this.emitWirePulse();
+            }
+          }
+        } catch (err) {
+          sseExitReason = 'error';
+          cleanupTurn();
+          this.deps.markUsed();
+          const stoppedAfterSingleCall =
+            singleCallComplete && (err as Error).name === 'AbortError' && !externalSignal?.aborted;
+          if (stoppedAfterSingleCall) {
+            log.info(
+              `turn#${seq}.${turn} SSE-EXIT reason=single-call-complete chunks=${sseChunks} contentChars=${turnContent.length} afterMs=${Date.now() - start}`,
+            );
+          } else {
+            log.error(
+              `turn#${seq}.${turn} SSE-EXIT reason=error chunks=${sseChunks} contentChars=${turnContent.length} afterMs=${Date.now() - start} ${(err as Error).name}: ${err instanceof Error ? err.message : String(err)}${abortReason ? ` (abort=${abortReason})` : ''}`,
+            );
+          }
+          // Recovery path: a `ramble` abort that has salvageable
+          // tool-call markup falls through to the salvage block
+          // below instead of throwing — keeps the model's queued
+          // tools alive so the next iteration sees results. Set
+          // by the ramble branch when we want the catch to NOT
+          // re-throw `err` at the end. A single-call stop is the same
+          // fall-through with nothing to warn about.
+          let recoveredFromRamble = false;
+          if ((err as Error).name === 'AbortError') {
+            if (externalSignal?.aborted) {
+              throw new Error(turnCancelledMessage());
+            }
+            if (stoppedAfterSingleCall) {
+              finishReason ??= 'single-call-complete';
+              recoveredFromRamble = true;
+            } else if (rambleAborted) {
+              const hasSalvageableMarkup = /<tool_call>|<function=/i.test(turnContent);
+              if (hasSalvageableMarkup) {
+                this.emitWarning(
+                  ramble.firedOnRepetition
+                    ? 'Stopped a repeating output loop — firing the tool calls you queued.'
+                    : `Stopped the planning monologue (${turnContent.length} chars without follow-through) — firing the tool calls you queued. Take a smaller next step.`,
+                );
+                finishReason ??= 'ramble-recovered';
+                recoveredFromRamble = true;
+              } else {
+                // Last-ditch salvage: small models often inline code in
+                // fenced blocks instead of calling the write tool.
+                // Promote each fenced block to a synthesized write call.
+                //
+                // Prefer `write_file`: a salvaged fenced block is source
+                // the user ships, which belongs in the workspace, not
+                // the artifacts drawer — the abort copy itself says
+                // "don't save source files with write_artifact." Fall
+                // back to `write_artifact` only when the role has no
+                // workspace-write surface (e.g. a research/notes role).
+                // Either way, gate on the chosen tool being wired —
+                // fabricating a call to a tool that doesn't exist would
+                // just trip the validate-ids wrapper. Wild-caught
+                // (qwen3.6 consultation): a write_file-only
+                // Builder role rambled the HTML in chat, but this gate
+                // checked ONLY `write_artifact` and skipped salvage,
+                // so the whole turn (and the drafted file) was thrown
+                // away. Both tools take the same `{path, content}`
+                // shape, so the synthesized args are identical. Only
+                // fires when there's no other salvageable signal (the
+                // structured markup branch above handled the easy cases).
+                const salvageToolName = knownToolNames.has('write_file')
+                  ? 'write_file'
+                  : knownToolNames.has('write_artifact')
+                    ? 'write_artifact'
+                    : null;
+                if (salvageToolName) {
+                  const blocks = prepareSalvagedCodeBlocks(
+                    turnContent,
+                    this.deps.activeCraftbookStep?.deliverableFile,
+                  );
+                  if (blocks.length > 0) {
+                    codeBlockRepaired = blocks.map((b, i) => ({
+                      id: `code-salvage-${seq}-${turn}-${i}`,
+                      type: 'function' as const,
+                      function: {
+                        name: salvageToolName,
+                        arguments: JSON.stringify({
+                          path: b.filename,
+                          content: b.content,
+                        }),
+                      },
+                    }));
+                    log.info(
+                      `turn#${seq}.${turn} code-block-salvage: extracted ${blocks.length} ` +
+                        `fenced block(s) from ${turnContent.length}-char ramble buffer ` +
+                        `→ ${salvageToolName} (${blocks.map((b) => `${b.lang}:${b.filename}`).join(', ')})`,
+                    );
+                    this.emitWarning(
+                      `The model wrote ${blocks.length === 1 ? 'a code block' : `${blocks.length} code blocks`} in chat instead of calling ${salvageToolName} — promoting them to actual file writes. Ask the model to use tools directly next time.`,
+                    );
+                    finishReason ??= 'ramble-recovered';
+                    recoveredFromRamble = true;
+                  }
+                }
+                if (!recoveredFromRamble) {
+                  // Log a content preview so future regressions are easier
+                  // to diagnose: the ramble buffer is otherwise lost when
+                  // the throw fires.
+                  const head = turnContent.slice(0, 400).replace(/\s+/g, ' ');
+                  const tail = turnContent.slice(-200).replace(/\s+/g, ' ');
+                  log.warn(
+                    `turn#${seq}.${turn} ramble-no-salvage preview head=${JSON.stringify(head)} tail=${JSON.stringify(tail)}`,
+                  );
+                  throw new Error(
+                    buildRambleAbortMessage({
+                      providerLabel: '[Mac AI]',
+                      charCount: turnContent.length,
+                      knownToolNames,
+                      ...(this.deps.activeCraftbookStep?.deliverableFile
+                        ? { deliverableFile: this.deps.activeCraftbookStep.deliverableFile }
+                        : {}),
+                      ...(this.deps.activeCraftbookStep?.deliverableIsArtifact
+                        ? { deliverableIsArtifact: true }
+                        : {}),
+                    }),
+                  );
+                }
+              }
+            } else if (abortReason === 'idle') {
+              // Build a stall-aware message. Pre-first-byte vs
+              // streaming idle land on different sentences so the
+              // user can tell whether the model never started or
+              // started then froze. The chars-received counter is
+              // informative when the bubble would otherwise look
+              // empty.
+              if (idleAbortKind === 'pre-first-byte') {
+                throw new Error(
+                  buildPreFirstByteAbortMessage(this.lastPrefillEvent, busyElsewhere()),
+                );
+              }
+              const sinceFirst =
+                firstSseEventAt !== null ? Math.round((Date.now() - firstSseEventAt) / 1000) : null;
+              const sinceLast =
+                lastSseEventAt !== null ? Math.round((Date.now() - lastSseEventAt) / 1000) : null;
+              const stats = sinceFirst
+                ? `received ${turnContent.length} chars in ${sinceFirst}s before going silent for ${sinceLast}s`
+                : `received ${turnContent.length} chars before stalling`;
+              // Engine facts go to the log; the person gets what happened and
+              // what to do. A stream parked for a waiting chat never lands
+              // here — its `paused` markers re-arm this bound.
+              log.warn(`turn#${seq}.${turn} streaming idle abort: ${stats}`);
+              const quietSeconds = Math.round(STREAMING_IDLE_MS / 1000);
+              throw new Error(
+                turnContent.length === 0
+                  ? `[Mac AI] The model went quiet for ${quietSeconds} seconds before writing anything, so this turn was stopped. Try again; if it keeps happening, restart the engine in Settings → On-device.`
+                  : `[Mac AI] The model went quiet for ${quietSeconds} seconds partway through its reply, so this turn was stopped. Try again; if it keeps happening, restart the engine in Settings → On-device.`,
+              );
+            } else {
+              throw turnTimeoutError();
+            }
+          }
+          // Not one of our aborts (those are AbortErrors, handled above).
+          // A non-abort failure mid-body is almost always the engine
+          // dropping the HTTP stream from under us — undici surfaces a
+          // premature socket close as a bare `TypeError: terminated`,
+          // which is what reached the user before this. Translate it into
+          // something actionable instead of the cryptic one-word message;
+          // the original text still rides along in the persisted warning.
+          if (!recoveredFromRamble && isMidStreamConnectionDrop(err)) {
+            throw new Error(
+              buildMidStreamDropMessage(
+                turnContent.length,
+                this.deps.provider.isDisposed,
+                this.deps.provider.engineLifecycleSnapshot()?.running,
+              ),
+            );
+          }
+          if (!recoveredFromRamble) throw err;
+        } finally {
+          lastIterationFinishedAt = Date.now();
+          cleanupTurn();
+          this.deps.markUsed();
+        }
+
+        // Drain any safely-buffered tail from the marker stripper. If
+        // the model never closed an open marker `flush()` returns ''
+        // (treats it as truncated noise) — the alternative is leaking
+        // a half-marker into the saved transcript.
+        const tail = stripper.flush();
+        if (tail.length > 0) {
+          turnContent += tail;
+          const live = reasoningSplit.push(tail);
+          if (live.visible.length > 0) this.emitDelta(live.visible);
+          if (live.reasoning.length > 0) this.emitReasoningDelta(live.reasoning);
+        }
+        {
+          // Whatever the split was still holding: a reasoning block the model
+          // never closed stays on the reasoning channel rather than becoming
+          // the reply.
+          const rest = reasoningSplit.flush();
+          if (rest.visible.length > 0) this.emitDelta(rest.visible);
+          if (rest.reasoning.length > 0) this.emitReasoningDelta(rest.reasoning);
+        }
+
+        // Always-on terminator log. `stream-end` here is the smoking gun
+        // for "engine closed the connection without sending [DONE]" —
+        // benign on a well-behaved server but worth flagging since it
+        // means we'd hang on any keep-alive variant.
+        log.debug(
+          `turn#${seq}.${turn} SSE-EXIT reason=${sseExitReason} chunks=${sseChunks} ` +
+            `contentChars=${turnContent.length} toolCalls=${toolCallAccumulator.size()} ` +
+            `finish=${finishReason ?? 'null'} afterMs=${Date.now() - start}`,
+        );
+
+        const structuredCalls = toolCallAccumulator.finalize();
+        // Ids of synthesized tool calls whose underlying salvage span
+        // was flagged `truncated` by the lenient Hermes parser. The
+        // tool-execution loop reads this to append an auto-
+        // continuation hint to the corresponding tool result, so the
+        // model knows the partial write_file landed and can issue a
+        // follow-up with the remaining bytes.
+        const truncatedCallIds = new Set<string>();
+        // Payload-mutation calls the cap cut mid-content that we refused
+        // to execute, because landing a prefix would destroy a whole-file
+        // target with no append path (see WRITE_SHAPED_TOOL_NAMES). The
+        // refusal is correct; ending the turn on it silently is not —
+        // nothing tells the model WHY, so the next attempt re-emits the
+        // same over-cap payload. Consumed below to steer toward
+        // incremental edits instead of falling through to a blank reply.
+        const droppedTruncatedPayloadCalls: Array<{
+          name: string;
+          args: Record<string, unknown>;
+        }> = [];
+
+        // Try to repair any tool-call markers the stripper extracted
+        // but mlx_vlm.server's parser missed. Repair only succeeds when
+        // (1) the body parses cleanly and (2) the named function is in
+        // the bridge's known-tools set — refusing fabricated names is
+        // the safety rail. Failures land in `unrepairedBodies`, which
+        // drives the warning + model self-correction below.
+        const strippedBodies = stripper.getStrippedBodies();
+        const eosFlushedIndices = stripper.getEosFlushedBodyIndices();
+        this.turnPolicy.checkpoint();
+        const repairedCalls: typeof structuredCalls = [];
+        const unrepairedBodies: string[] = [];
+        for (let bodyIdx = 0; bodyIdx < strippedBodies.length; bodyIdx++) {
+          const body = strippedBodies[bodyIdx]!;
+          // Two-stage repair: try the legacy JSON-rehab path first
+          // (handles Gemma's loose `{key: 'value'}` flavors), then
+          // fall back to the native Gemma 4 char-by-char parser
+          // (handles the chat-template's true format `{key:<|"|>val<|"|>}`
+          // where string content contains unescaped newlines/quotes
+          // that defeat JSON.parse). The native parser is strictly
+          // additive — it only succeeds on shapes the JSON path would
+          // have rejected anyway, so wiring it in can't regress
+          // previously-working salvage. See
+          // local-tool-call-salvage-gemma-native.test.ts.
+          const parsed =
+            parseGemmaToolCall(body, knownToolNames) ??
+            parseGemmaNativeToolCall(body, knownToolNames);
+          if (parsed) {
+            // An EOS-flushed artifact call is only a prefix of an atomic
+            // whole-file replacement, and the artifact drawer has no append
+            // primitive. Do not destroy the previous artifact with it.
+            if (
+              eosFlushedIndices.has(bodyIdx) &&
+              parsed.name === 'write_artifact' &&
+              typeof parsed.arguments.content === 'string' &&
+              typeof parsed.arguments.path === 'string'
+            ) {
+              this.emitWarning(
+                'The model hit its output limit while replacing an artifact. The incomplete write was skipped and the previous artifact was preserved; split or deterministically assemble the deliverable before retrying.',
+              );
+              continue;
+            }
+            const id = `repair-${seq}-${turn}-${repairedCalls.length}`;
+            repairedCalls.push({
+              id,
+              type: 'function' as const,
+              function: {
+                name: parsed.name,
+                arguments: JSON.stringify(parsed.arguments),
+              },
+            });
+            // Layer 3 — if this Gemma marker call came from an
+            // EOS-flushed body (close marker never arrived) AND it's
+            // a write-shaped call with a string `content` arg, tag
+            // it as truncated. parseGemmaNativeToolCall is permissive
+            // about unclosed `<|"|>` boundaries (returns the rest of
+            // the buffer as the string value), so we get a "complete-
+            // looking" call object whose `content` is actually the
+            // bytes received before the truncation point. The
+            // continuation hint tells the model to append the missing
+            // tail rather than re-emit the whole file.
+            if (eosFlushedIndices.has(bodyIdx)) {
+              const args = parsed.arguments;
+              const isWriteShaped = isWriteShapedToolName(parsed.name);
+              if (
+                isWriteShaped &&
+                typeof args.content === 'string' &&
+                typeof args.path === 'string'
+              ) {
+                truncatedCallIds.add(id);
+                log.info(
+                  `turn#${seq}.${turn} Gemma marker call ${parsed.name} (path=${args.path}, partial=${(args.content as string).length} bytes) was EOS-flushed — continuation hint will fire on the tool result`,
+                );
+              }
+            }
+          } else {
+            unrepairedBodies.push(body);
+          }
+        }
+        const salvaged = salvageTextualToolCalls({
+          turnContent,
+          knownToolNames,
+          seq,
+          turn,
+          structuredCalls,
+          repairedCalls,
+          codeBlockRepaired,
+          truncatedCallIds,
+          droppedTruncatedPayloadCalls,
+          emitWarning: (message) => this.emitWarning(message),
+        });
+        turnContent = salvaged.turnContent;
+        const {
+          proseRepaired,
+          xmlTagRepaired,
+          claudeInvokeRepaired,
+          glmRepaired,
+          hermesRepaired,
+          shellRepaired,
+          envelopeRepaired,
+          envelopeTruncated,
+          unknownCall,
+          truncatedSalvage,
+          bareInvokeRepaired,
+        } = salvaged;
+        const rawTurnContentBeforeReasoning = turnContent;
+
+        // Reasoning-tag extraction applies regardless of which (if any)
+        // salvage path fired. Qwen 3.5/3.6 leak `<think>…</think>`
+        // chain-of-thought blocks that read as the assistant's actual
+        // message; smaller DeepSeek-R1 distillates and Gemma 3/4 with
+        // the verbose-family hint do the same. The captured text gets
+        // accumulated into `lastTurnReasoning` so the chat bubble can
+        // render it behind a collapsed expander.
+        {
+          const split = extractReasoningWithProfile(turnContent, this.deps.profile);
+          turnContent = split.visible;
+          if (split.reasoning) {
+            this.lastTurnReasoning =
+              this.lastTurnReasoning.length > 0
+                ? `${this.lastTurnReasoning}\n\n${split.reasoning}`
+                : split.reasoning;
+          }
+        }
+        const mergedCalls = [
+          ...structuredCalls,
+          ...repairedCalls,
+          ...proseRepaired,
+          ...xmlTagRepaired,
+          ...claudeInvokeRepaired,
+          ...glmRepaired,
+          ...hermesRepaired,
+          ...shellRepaired,
+          ...envelopeRepaired,
+          ...truncatedSalvage,
+          ...bareInvokeRepaired,
+          ...codeBlockRepaired,
+        ];
+        // Every markup salvage format above is a flat KEY→text map, so a
+        // parameter declared `object`/`array` arrives as a string. Repair
+        // against the declared schema here, at the one place all the
+        // salvage passes converge, so the structural shape is what gets
+        // logged, recorded, and dispatched. Schema-gated: a genuine
+        // string argument (a JSON file's `content`) is never touched.
+        const coerced = coerceToolCallArgs(mergedCalls, (n) => toolArgSchemas.get(n));
+        for (const r of coerced.repaired) {
+          log.info(
+            `turn#${seq}.${turn} repaired flattened arg(s) on ${r.name}: ${r.paths.join(', ')}`,
+          );
+        }
+        // After coercion, so two spellings of the same arguments compare equal.
+        const collapsed = collapseDuplicateToolCalls(coerced.calls);
+        for (const d of collapsed.dropped) {
+          log.info(
+            `turn#${seq}.${turn} collapsed ${d.count} duplicate ${d.name} call(s) emitted in this generation`,
+          );
+        }
+        let toolCalls = collapsed.calls as typeof mergedCalls;
+        if (rambleAborted && toolCalls.length === 0) {
+          // If ctrl.abort() races with mlx-vlm closing the SSE stream,
+          // the for-await loop can exit cleanly instead of throwing an
+          // AbortError. Without this guard the no-tool ramble falls
+          // through as an empty assistant message after reasoning
+          // extraction, so the gezel never receives the corrective.
+          // Wild-caught (qwen3.6 35B MLX tankcombat):
+          // Meester generated 3.5K tokens, the Python server logged
+          // "client disconnected mid-generation", and the session
+          // persisted a blank assistant turn with no project handoff.
+          const head = rawTurnContentBeforeReasoning.slice(0, 400).replace(/\s+/g, ' ');
+          const tail = rawTurnContentBeforeReasoning.slice(-200).replace(/\s+/g, ' ');
+          log.warn(
+            `turn#${seq}.${turn} ramble-clean-exit-no-salvage preview head=${JSON.stringify(head)} tail=${JSON.stringify(tail)}`,
+          );
+          throw new Error(
+            buildRambleAbortMessage({
+              providerLabel: '[Mac AI]',
+              charCount: rawTurnContentBeforeReasoning.length,
+              knownToolNames,
+              ...(this.deps.activeCraftbookStep?.deliverableFile
+                ? { deliverableFile: this.deps.activeCraftbookStep.deliverableFile }
+                : {}),
+              ...(this.deps.activeCraftbookStep?.deliverableIsArtifact
+                ? { deliverableIsArtifact: true }
+                : {}),
+            }),
+          );
+        }
+        // Prose-document salvage. Past the guard above, zero tool calls
+        // means the model ENDED ITS OWN TURN — the one condition under
+        // which the buffer is a finished document rather than a cut-off
+        // one. A craftbook step whose deliverable is markdown gets it
+        // promoted to the write tool instead of leaving the text in chat
+        // where the gate will never see it. `turnContent` is already
+        // reasoning-stripped here; `finishReason === 'length'` means the
+        // token cap cut it, which is a truncation like any other.
+        if (toolCalls.length === 0 && finishReason !== 'length') {
+          const deliverable = this.deps.activeCraftbookStep?.deliverableFile;
+          const salvageToolName = this.deps.activeCraftbookStep?.deliverableIsArtifact
+            ? knownToolNames.has('write_artifact')
+              ? 'write_artifact'
+              : null
+            : knownToolNames.has('write_file')
+              ? 'write_file'
+              : null;
+          const document = salvageToolName
+            ? prepareSalvagedProseDocument({
+                text: turnContent,
+                deliverableFile: deliverable,
+                streamComplete: true,
+              })
+            : null;
+          if (document && salvageToolName && deliverable) {
+            toolCalls = [
+              {
+                id: `prose-doc-salvage-${seq}-${turn}`,
+                type: 'function' as const,
+                function: {
+                  name: salvageToolName,
+                  arguments: JSON.stringify({ path: deliverable, content: document }),
+                },
+              },
+            ] as typeof toolCalls;
+            log.info(
+              `turn#${seq}.${turn} prose-document-salvage: promoted ${document.length}-char ` +
+                `markdown buffer to ${salvageToolName} path=${deliverable}`,
+            );
+            this.emitWarning(
+              `The model wrote ${deliverable} in chat instead of calling ${salvageToolName} — promoting it to a real write. Ask the model to use the tool directly next time.`,
+            );
+          }
+        }
+        // Cap-truncated payload mutation with nothing left to run. The
+        // skip above is right — a partial `write_artifact` would replace
+        // a complete artifact with a prefix, and there is no
+        // `append_artifact` to finish it. But falling through from here
+        // ends the turn with zero tool calls and (after the rumination
+        // fold) zero visible text: the user gets a blank bubble and the
+        // MODEL gets nothing at all, so the next attempt re-emits the
+        // same over-cap payload. llama-cpp already steers this case via
+        // {@link appendCapTruncationHintToRejectedWrite} because its
+        // rejected write comes back as a tool result; on MLX the call
+        // never executes, so synthesize the same steer as a corrective
+        // and spend another loop iteration on it.
+        //
+        // Wild-caught on gezel/49: a `write_artifact` carrying a
+        // 580-path coverage ledger was cut at max_tokens=6144, dropped
+        // here, and the turn ended after 62 minutes with replyChars=0.
+        if (
+          toolCalls.length === 0 &&
+          droppedTruncatedPayloadCalls.length > 0 &&
+          this.turnPolicy.retry('capTruncation')
+        ) {
+          capTruncationSteers++;
+          const dropped = droppedTruncatedPayloadCalls[0]!;
+          const liveToolNames = new Set(
+            (Array.isArray(body.tools) ? (body.tools as ChatCompletionTool[]) : [])
+              .map((tool) => chatCompletionToolName(tool))
+              .filter((name): name is string => typeof name === 'string'),
+          );
+          const requestMaxTokens = typeof body.max_tokens === 'number' ? body.max_tokens : null;
+          const steer = appendCapTruncationHintToRejectedWrite(
+            `ERROR: \`${dropped.name}\` was not executed because the call was cut off at the per-turn output token cap before its payload finished.`,
+            dropped.name,
+            dropped.args,
+            requestMaxTokens,
+            {
+              availableToolNames: liveToolNames,
+              taskStep: this.deps.activeCraftbookStep !== undefined,
+            },
+          );
+          const noRemedy = steer.includes('No incremental edit tool is wired this turn');
+          log.info(
+            `turn#${seq}.${turn} cap-truncated ${dropped.name} dropped with no other call — ` +
+              `${noRemedy ? 'no incremental tool wired; escalation steer' : 'incremental-edit steer'} ` +
+              `injected (attempt ${capTruncationSteers}/${MAX_CAP_TRUNCATION_STEERS}, max_tokens=${requestMaxTokens ?? 'unset'})`,
+          );
+          this.messages.push({ role: 'user', content: `[system] ${steer}` });
+          continue;
+        }
+        // Auto-fold pre-tool preamble for verbose-family models. When
+        // a tool call fired this turn, untagged visible text is
+        // almost always reasoning the model leaked instead of
+        // wrapping in `<think>` ("The user wants…", "Let me…").
+        // Substantive answer comes after the tool runs in the next
+        // tool-loop iteration. See {@link foldPreToolPreamble}.
+        turnContent = foldPreToolPreamble({
+          text: turnContent,
+          toolCallsFired: toolCalls.length > 0,
+          modelLeaksReasoning: profileHasBehavior(this.deps.profile, 'turn.preamble-folding'),
+          askedQuestionThisTurn,
+        });
+        // Append to fullText AFTER every salvage path has had its turn
+        // at stripping — earlier ordering meant the un-stripped prose /
+        // envelope / reasoning text still landed in the persisted
+        // assistant message even though the salvage worked.
+        fullText += turnContent;
+
+        // External tool capture: when the model invoked any caller-
+        // supplied external tool, halt the loop and surface ALL
+        // pending calls (external + bridge) to the caller. Bridge
+        // calls in the same turn go unexecuted — the `/v1/chat/completions`
+        // route owns the next turn.
+        if (
+          toolCalls.length > 0 &&
+          toolCalls.some((tc) => this.externalToolNames.has(tc.function.name))
+        ) {
+          this.capturedCalls = toolCalls.map((tc) => ({
+            id: tc.id,
+            name: tc.function.name,
+            arguments: tc.function.arguments,
+          }));
+          this.messages.push({
+            role: 'assistant',
+            content: turnContent || null,
+            tool_calls: toolCalls,
+          });
+          return fullText;
+        }
+
+        // Successful salvage paths (`repairedCalls`, `proseRepaired`,
+        // `envelopeRepaired`) used to surface a yellow user-facing
+        // warning — but salvage IS the success case, the tool fires
+        // correctly and the call appears as a normal tool widget.
+        // Annotating every Qwen/etc. turn with a warning trained users
+        // to ignore them. Keep the console log for ops; drop the toast.
+        if (repairedCalls.length > 0) {
+          log.info(
+            `turn#${seq}.${turn} repaired ${repairedCalls.length} ` +
+              `malformed tool call(s): ${repairedCalls.map((c) => c.function.name).join(', ')}`,
+          );
+        }
+        if (proseRepaired.length > 0) {
+          log.info(
+            `turn#${seq}.${turn} salvaged ${proseRepaired.length} prose-shaped tool call(s): ${proseRepaired.map((c) => c.function.name).join(', ')}`,
+          );
+        }
+        if (xmlTagRepaired.length > 0) {
+          log.info(
+            `turn#${seq}.${turn} salvaged ${xmlTagRepaired.length} XML-tag tool call(s): ${xmlTagRepaired.map((c) => c.function.name).join(', ')}`,
+          );
+        }
+        if (claudeInvokeRepaired.length > 0) {
+          log.info(
+            `turn#${seq}.${turn} salvaged ${claudeInvokeRepaired.length} Claude-invoke tool call(s): ${claudeInvokeRepaired.map((c) => c.function.name).join(', ')}`,
+          );
+        }
+        if (glmRepaired.length > 0) {
+          log.info(
+            `turn#${seq}.${turn} salvaged ${glmRepaired.length} GLM-style tool call(s): ${glmRepaired.map((c) => c.function.name).join(', ')}`,
+          );
+        }
+        if (hermesRepaired.length > 0) {
+          log.info(
+            `turn#${seq}.${turn} salvaged ${hermesRepaired.length} Hermes-style tool call(s): ${hermesRepaired.map((c) => c.function.name).join(', ')}`,
+          );
+        }
+        if (shellRepaired.length > 0) {
+          log.info(
+            `turn#${seq}.${turn} salvaged ${shellRepaired.length} shell-style tool call(s): ${shellRepaired.map((c) => c.function.name).join(', ')}`,
+          );
+        }
+        if (envelopeRepaired.length > 0) {
+          log.info(
+            `turn#${seq}.${turn} salvaged ${envelopeRepaired.length} JSON-envelope tool call(s): ${envelopeRepaired.map((c) => c.function.name).join(', ')}`,
+          );
+        }
+        if (bareInvokeRepaired.length > 0) {
+          log.info(
+            `turn#${seq}.${turn} salvaged ${bareInvokeRepaired.length} bare-invoke tool call(s): ${bareInvokeRepaired.map((c) => c.function.name).join(', ')}`,
+          );
+        }
+        if (envelopeTruncated) {
+          log.info(
+            `turn#${seq}.${turn} truncated JSON-envelope tool call: ` +
+              `${envelopeTruncated.wanted ?? '<unknown>'}`,
+          );
+          this.emitWarning(
+            `The model's last tool call (\`${envelopeTruncated.wanted ?? 'unknown'}\`) was cut off mid-stream and was skipped. Try again — or raise the output token cap if this happens often.`,
+          );
+        } else if (toolCalls.length === 0 && turnContent.length > 0) {
+          // Prose-shaped truncation — `name(args` with no closing paren.
+          // Only check when no other salvage fired and no envelope-truncation
+          // has already been flagged for the same tail.
+          const proseTruncated = findTruncatedProseToolCall(turnContent, knownToolNames);
+          if (proseTruncated) {
+            log.info(`turn#${seq}.${turn} truncated prose tool call: ${proseTruncated.wanted}`);
+            this.emitWarning(
+              `The model started calling \`${proseTruncated.wanted}\` but was cut off mid-args. It likely spent its output budget on reasoning before reaching the tool call. Try again — or raise the output token cap.`,
+            );
+          }
+        }
+
+        // "Did you mean…?" nudge: model emitted a `{tool, args}`
+        // envelope with a tool name we don't recognize (e.g.
+        // `listtasks` instead of `list_tasks`). The salvage above
+        // bailed because the name failed the known-set check; we
+        // can't safely fabricate a call against the wrong name, but
+        // we CAN tell the model what they mistyped and keep the
+        // turn going. Shares the malformedRetries budget so a model
+        // that keeps emitting bad names doesn't loop forever.
+        if (toolCalls.length === 0) {
+          // Cover BOTH unknown-tool shapes: the JSON `{tool,args}`
+          // envelope AND the `<function=NAME>` / `<invoke name=…>`
+          // markup. The latter is how a delegator role (no `write_file`)
+          // "calls" write_file — before this it got no feedback and
+          // believed the write succeeded. `buildUnknownToolNudge` routes
+          // a no-write-access role to delegation instead of "did you
+          // mean…?". Wild-caught (Space Shooter Arcade).
+          const miss =
+            unknownCall ??
+            findUnrecognizedToolEnvelope(turnContent, knownToolNames) ??
+            findUnrecognizedFunctionMarkup(turnContent, knownToolNames);
+          if (miss) {
+            const missSig = `u:${miss.wanted.toLowerCase()}`;
+            if (this.turnPolicy.retry('malformed', missSig)) {
+              malformedRetries++;
+              lastBadCallSig = missSig;
+              log.info(
+                `turn#${seq}.${turn} model called unknown tool "${miss.wanted}"${miss.suggestion ? ` — suggesting "${miss.suggestion}"` : ''} (retry ${malformedRetries}/${MAX_MALFORMED_RETRIES})`,
+              );
+              // No user-facing warning here — the unknown-name retry is
+              // an internal recovery, the next loop iteration produces
+              // the real tool call, the user sees a clean tool widget. The
+              // nudge now names valid tools + flags param-as-function slips.
+              this.messages.push({ role: 'assistant', content: turnContent });
+              this.messages.push({
+                role: 'user',
+                content: buildUnknownToolNudge(
+                  miss.wanted,
+                  miss.suggestion,
+                  knownToolNames,
+                  toolParamIndex,
+                ),
+              });
+              continue;
+            }
+            // Repeat of the same unknown tool after a nudge (or budget spent):
+            // the nudge isn't landing, so stop retrying and let the turn end
+            // rather than apology-loop. The actionable nudge already fired.
+            if (missSig === lastBadCallSig) {
+              log.info(
+                `turn#${seq}.${turn} model repeated unknown tool "${miss.wanted}" after a nudge — stopping retries`,
+              );
+            }
+            this.emitWarning(
+              'The model could not call an available tool after bounded recovery. No tool ran.',
+            );
+            return fullText;
+          }
+        }
+
+        // Self-correction nudge: model emitted tool-call markers but
+        // none parsed AND no structured calls came through. Push the
+        // partial assistant text + a corrective user message describing
+        // what was wrong, then continue the loop so the model gets a
+        // chance to retry with proper structure. Capped via
+        // `malformedRetries` so we don't loop forever on a model that
+        // just can't form structured calls.
+        if (toolCalls.length === 0 && unrepairedBodies.length > 0) {
+          const malSig = `m:${unrepairedBodies[0]!.replace(/\s+/g, '').toLowerCase().slice(0, 200)}`;
+          if (this.turnPolicy.retry('malformed', malSig)) {
+            malformedRetries++;
+            lastBadCallSig = malSig;
+            const detail = describeMalformation(unrepairedBodies[0]!);
+            log.info(
+              `turn#${seq}.${turn} nudging model after malformed tool call ` +
+                `(retry ${malformedRetries}/${MAX_MALFORMED_RETRIES})`,
+            );
+            // Suppress the per-retry user-visible warning when the
+            // model's profile knows the family's tool-call quirks
+            // (`parse.gemma-special-token` etc.). For those models a
+            // malformed marker is a recoverable family tic rather than
+            // a user-actionable problem; the internal retry-nudge
+            // still fires on the next loop iteration so behavior
+            // doesn't change, just the noise floor in the chat. Only
+            // the final budget-exhausted warning below stays universal
+            // — that's load-bearing because the turn ends without a
+            // real tool call landing.
+            const suppressPerRetryWarning = profileHasBehavior(
+              this.deps.profile,
+              'parse.gemma-special-token',
+            );
+            if (!suppressPerRetryWarning) {
+              this.emitWarning(
+                `Model attempted a tool call with malformed syntax — asking it to retry (${malformedRetries}/${MAX_MALFORMED_RETRIES}).`,
+              );
+            }
+            this.messages.push({ role: 'assistant', content: turnContent });
+            this.messages.push({
+              role: 'user',
+              content: `[system] Your previous response contained a malformed tool-call marker — the syntax didn't match the structured tool-call format the runtime can parse. ${detail} Please retry the tool invocation using the standard structured tool-call format (do not write the literal <|tool_call|> tokens as text — emit a real function call via the tools mechanism). Your available tools are: ${formatToolMenu(knownToolNames)}.`,
+            });
+            continue;
+          }
+          // Either the retry budget is spent OR the model just re-emitted the
+          // identical malformed call — in both cases keep nudging is futile;
+          // fall through to the terminal correction below instead of looping.
+          if (malSig === lastBadCallSig) {
+            log.info(
+              `turn#${seq}.${turn} model repeated the same malformed tool call after a nudge — stopping retries`,
+            );
+          }
+          // Retry budget exhausted — fall through to the normal end-of-
+          // turn block but emit a final user-visible warning so the user
+          // knows the chat ended without a real tool call firing.
+          this.emitWarning(
+            `Model attempted ${unrepairedBodies.length} tool call${unrepairedBodies.length === 1 ? '' : 's'} but couldn't form ${unrepairedBodies.length === 1 ? 'it' : 'them'} correctly after ${MAX_MALFORMED_RETRIES} retries. Try rephrasing or use a cloud model for tool-heavy work in this thread.`,
+          );
+          // Capture the failed bodies so ChatManager can stash them on
+          // the persisted message for the debug bundle. Truncated per-
+          // body so a runaway fabrication doesn't blow up the session
+          // file. Without this, the bodies live only in provider logs
+          // and the bundle reader sees "tool call attempted but couldn't
+          // form" with no record of what shape was actually emitted.
+          this.lastTurnAttemptedToolCalls = unrepairedBodies.map((body) => ({
+            body: body.length > 600 ? `${body.slice(0, 600)}…` : body,
+            reason: describeMalformation(body),
+          }));
+          // Inject a corrective system note into history so the NEXT
+          // turn doesn't carry forward the model's "I just created the
+          // project" assumption. Without this, the model's own prose
+          // sits in history with no contradicting signal — turn N+1
+          // tries to read the kickoff task of a project that doesn't
+          // exist, hits the strict-IDs guard, and the cascade is on.
+          // Using `role: 'user'` with a `[system]` prefix matches the
+          // pattern the within-turn retries already use; the model
+          // treats it as authoritative correction.
+          const wantedNames = uniqueWantedToolNames(unrepairedBodies, knownToolNames);
+          const wantedSummary =
+            wantedNames.length > 0 ? `\`${wantedNames.join('`, `')}\`` : 'a tool';
+          this.messages.push({
+            role: 'user',
+            content: `[system] Your previous turn attempted to call ${wantedSummary} but the tool-call syntax was malformed; the runtime could not parse it after ${MAX_MALFORMED_RETRIES} retries. NO TOOL RAN this turn. Any state your reasoning described (projects created, gezels recruited, files written, tasks assigned) does NOT exist on disk. Before referring to that state in subsequent turns, call \`list_projects\` / \`list_gezels\` to verify the actual state, OR retry the tool call using the structured function-calling mechanism with valid JSON arguments.`,
+          });
+        }
+
+        if (
+          toolCalls.length === 0 &&
+          fileTurnPlan.kind !== 'ordinary' &&
+          !repairMutationSucceeded &&
+          !askedQuestionThisTurn
+        ) {
+          const noMutationNudges = this.turnPolicy.requireProgressRetry();
+          const nudge = remainingReadPaths.length
+            ? buildPrerequisiteRepairReadNudge({
+                remainingPaths: remainingReadPaths,
+                noProgressNudges: noMutationNudges,
+              })
+            : immediateFileWriteTurn
+              ? buildImmediateFileWriteNoMutationNudge({
+                  targetPath: opts?.fileTurnIntent?.path ?? fileRepairTargetPath(prompt),
+                  noMutationNudges,
+                })
+              : buildScenarioRepairNoMutationNudge(knownToolNames, {
+                  readOnlyCalls: repairReadCalls,
+                  readFilePaths: repairReadPaths,
+                  failedMutationCalls: repairFailedMutations,
+                  noMutationNudges,
+                });
+          this.messages.push({ role: 'user', content: nudge });
+          continue;
+        }
+        if (toolCalls.length === 0 && requiresToolCall) {
+          if (this.turnPolicy.retry('noProgress')) {
+            const attempt = this.turnPolicy.count('noProgress');
+            log.info(
+              `turn#${seq}.${turn} required tool call missing — retrying ` +
+                `(${attempt}/${LOCAL_TURN_LIMITS.noProgress})`,
+            );
+            // The first decode is not a valid answer to a required-tool
+            // request. Keep it in provider history as the assistant output
+            // being corrected, but do not leak it into the eventual visible
+            // reply when the retry succeeds.
+            if (turnContent.length > 0) {
+              this.messages.push({ role: 'assistant', content: turnContent });
+              fullText = fullText.slice(0, -turnContent.length);
+            }
+            this.messages.push({
+              role: 'user',
+              content: `[system] This turn requires an actual structured tool call, but no tool ran. Emit exactly one real function call now using one of: ${formatToolMenu(knownToolNames)}. Do not explain, narrate, or print tool-call markup as text.`,
+            });
+            continue;
+          }
+          throw new Error(
+            `The model did not emit a required tool call after ${LOCAL_TURN_LIMITS.noProgress} corrective retries. No tool ran.`,
+          );
+        }
+        if (toolCalls.length === 0) {
+          this.messages.push({ role: 'assistant', content: turnContent });
+          if (finishReason === 'length') {
+            this.emitWarning(
+              'Model output was cut off at the length limit. The last turn may be incomplete.',
+            );
+          }
+          log.info(
+            `turn#${seq} END ok afterMs=${Date.now() - start} ` +
+              `replyChars=${fullText.length} loopTurns=${turn + 1}`,
+          );
+          return fullText;
+        }
+
+        // Mixed-success path: at least one tool call ran (structured or
+        // repaired) but some marker bodies still couldn't be parsed.
+        // Mention the skipped attempts so the user understands why a
+        // tool they expected to fire didn't, without blocking the work
+        // that did succeed.
+        //
+        // Suppressed for profiles that opt into `parse.gemma-special-token` —
+        // for those families a malformed marker alongside successful
+        // calls is a known family tic, not a user-actionable problem.
+        // The successful call is what the user sees in the UI; the
+        // skipped one would just confuse them ("did the tool fire or
+        // not?"). Logged as `info` instead so the diagnostic trail
+        // remains.
+        if (unrepairedBodies.length > 0) {
+          if (profileHasBehavior(this.deps.profile, 'parse.gemma-special-token')) {
+            log.info(
+              `turn#${seq}.${turn} ${unrepairedBodies.length} unrepaired marker body${unrepairedBodies.length === 1 ? '' : 's'} alongside ${toolCalls.length} successful call${toolCalls.length === 1 ? '' : 's'} (suppressed user warning — known family tic)`,
+            );
+          } else {
+            this.emitWarning(
+              `${unrepairedBodies.length} additional tool-call attempt` +
+                `${unrepairedBodies.length === 1 ? ' was' : 's were'} malformed and skipped.`,
+            );
+          }
+        }
+
+        this.messages.push({
+          role: 'assistant',
+          content: turnContent || null,
+          tool_calls: toolCalls,
+        });
+        let abortDueToFailureLoop: ToolFailureLoop | null = null;
+        let asyncHandoffCount = 0;
+        let terminalActionClosing: string | null = null;
+        const toolImages: string[] = [];
+        const immediateFileWritePaths: string[] = [];
+        // Set when an immediate-write / continuation write this turn was
+        // EOS-flushed (truncated mid-content) — drives the bail-vs-loop
+        // decision below.
+        let immediateWriteTruncated = false;
+        for (const call of toolCalls) {
+          this.turnPolicy.checkpoint();
+          if (terminalActionClosing) {
+            this.messages.push({
+              role: 'tool',
+              content: TERMINAL_ACTION_SKIPPED_OUTPUT,
+              tool_call_id: call.id,
+            });
+            continue;
+          }
+          let args: Record<string, unknown> = {};
+          let malformedArgs = false;
+          try {
+            args = call.function.arguments.length > 0 ? JSON.parse(call.function.arguments) : {};
+          } catch {
+            malformedArgs = true;
+          }
+          malformedArgs ||= !args || typeof args !== 'object' || Array.isArray(args);
+          let output: string;
+          // Intercept duplicate ask_user_question calls within the
+          // same turn — synthesize a response that tells the model
+          // its first question is already pending and to end the
+          // turn. The second card is suppressed entirely (no API
+          // call, no UI clutter).
+          if (malformedArgs) {
+            if (
+              !this.turnPolicy.retry(
+                'malformed',
+                `args:${call.function.name}:${call.function.arguments}`,
+              )
+            ) {
+              throw new Error(
+                'Malformed tool-call recovery budget exhausted; no tool was executed.',
+              );
+            }
+            args = {};
+            output = `ERROR: ${call.function.name} was not executed because its arguments are not a valid JSON object. Retry with the declared fields.`;
+          } else if (
+            !this.supportsImageInput &&
+            call.function.name.replaceAll('-', '_') === 'read_image_as_base64'
+          ) {
+            // Do not execute the bridge: that would emit a successful image-read
+            // receipt although this engine can never load a vision tower and its
+            // pixels would be dropped. A craftbook must not approve fabricated inspection.
+            output =
+              'ERROR: Image inspection is unavailable in this text-only MLX runtime. No image was delivered. Use a provider with image input support; do not claim visual observations or approve a visual review.';
+          } else if (
+            opts?.fileTurnIntent &&
+            FILE_REPAIR_MUTATION_TOOLS.has(call.function.name) &&
+            (opts.fileTurnIntent.kind === 'create-file' ||
+              opts.fileTurnIntent.mutationPath ||
+              opts.fileTurnIntent.strategy === 'rewrite') &&
+            (typeof args.path !== 'string' ||
+              normalizeWorkspacePathForCompare(args.path) !==
+                normalizeWorkspacePathForCompare(
+                  opts.fileTurnIntent.kind === 'repair-file'
+                    ? (opts.fileTurnIntent.mutationPath ?? opts.fileTurnIntent.path)
+                    : opts.fileTurnIntent.path,
+                ))
+          ) {
+            output = 'ERROR: This mutation must use the requested output path.';
+          } else if (
+            fileRepairTurn &&
+            remainingReadPaths.length &&
+            (call.function.name !== 'read_file' ||
+              typeof args.path !== 'string' ||
+              remainingPrerequisiteRepairReadPaths(remainingReadPaths, [args.path]).length ===
+                remainingReadPaths.length)
+          ) {
+            output = 'ERROR: Read the remaining required source paths before editing.';
+          } else if (call.function.name === 'ask_user_question' && askedQuestionThisTurn) {
+            output =
+              "You already posted a question card to the user earlier in this turn. The second `ask_user_question` call was suppressed so the user only sees one card. END YOUR TURN NOW — the user's answer to the first question will arrive as the next user message; this turn produces no further visible content.";
+          } else if (
+            (call.function.name === 'start_project' || call.function.name === 'start_job') &&
+            startedProjectOrJobThisTurn
+          ) {
+            // Success-led phrasing — wild-caught on gemma4-26b/MLX,
+            // the previous "DO NOT call..." wording got misread by
+            // the model as "your call was malformed, retry it" and
+            // looped for 10+ iterations before MAX_TOOL_LOOP_TURNS
+            // bailed. Leading with "✓ created" + the original
+            // tool result makes the success unambiguous; the STOP
+            // instruction is the closing emphasis, not the framing.
+            projectMacroInterceptCount++;
+            output = `✓ The project was successfully created on your earlier \`${startedProjectOrJobThisTurn.tool}\` call this turn — kickoff is complete and the lead is on it.\n\nOriginal result:\n${startedProjectOrJobThisTurn.firstResult}\n\nSTOP — do NOT emit any more tool calls this turn. Each project-start call creates a real project, lead, and kickoff task; repeating the macro would create duplicates. END YOUR TURN NOW with a one-sentence summary to the user (e.g. "Project is on it — the voorman is leading"). The lead handles the work from here.`;
+            if (projectMacroInterceptCount >= PROJECT_MACRO_INTERCEPT_CAP) {
+              forceProjectMacroBail = {
+                closingText: deriveProjectMacroClosing(startedProjectOrJobThisTurn.firstResult),
+              };
+            }
+          } else if (
+            advertisedBridgeToolNames.has(call.function.name) &&
+            this.deps.bridges.isRestrictedFromCalling(call.function.name)
+          ) {
+            // The grammar keeps a native call inside the callable set; this
+            // catches calls salvaged from text, which the grammar never sees.
+            output = `ERROR: \`${call.function.name}\` is not available for this request. Call one of: ${formatToolMenu(new Set(callableRequestToolNames(tools, this.deps.bridges)))}.`;
+          } else if (
+            advertisedBridgeToolNames.has(call.function.name) &&
+            this.deps.bridges.hasTool(call.function.name)
+          ) {
+            const missingRequired = missingTopLevelRequiredToolArgs(
+              toolArgSchemas.get(call.function.name),
+              args,
+            );
+            const grammarContractViolation =
+              missingRequired.length > 0 &&
+              hermesRequiredArgGrammarRequested(body) &&
+              !this.forceSequentialToolGrammar;
+            if (grammarContractViolation) {
+              this.forceSequentialToolGrammar = true;
+              log.warn(
+                `turn#${seq}.${turn} required-argument grammar contract violation tool=${call.function.name} missing=${missingRequired.join(',')} — latching this session to sequential decode`,
+              );
+              // Do not send a call that the advertised schema proves cannot
+              // pass validation. Keeping it out of the bridge also avoids
+              // poisoning the session-wide unresolved-failure ledger before
+              // the sequential retry gets a chance to recover.
+              output = `ERROR: ${call.function.name} was not executed because the constrained decoder omitted required fields: ${missingRequired.join(', ')}. The runtime switched this session to sequential decoding; retry the call once.`;
+            } else {
+              try {
+                const budgetChars = computeToolBudgetChars(
+                  this.deps.numCtx,
+                  this.estimatePromptChars(),
+                );
+                let unseenImages = 0;
+                output = await this.deps.bridges.callTool(call.function.name, args, {
+                  budgetChars,
+                  numCtxTokens: this.deps.numCtx,
+                  onApprovalPending: () => {
+                    askedQuestionThisTurn = true;
+                  },
+                  onImages: (images) => {
+                    if (this.supportsImageInput) toolImages.push(...images.map((i) => i.base64));
+                    else unseenImages += images.length;
+                  },
+                });
+                output += unseenToolImagesNote(unseenImages);
+              } catch (err) {
+                output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+              }
+              // Defense in depth for a schema skew between the model-facing
+              // roster and the authoritative MCP validator. The local presence
+              // check above catches the normal case before execution; this arm
+              // catches a validator that knows about a required key absent from
+              // the advertised schema. Sequential decode may still recover on
+              // the next iteration, and the log now makes the skew explicit.
+              if (
+                validatorReportedMissingRequiredArgs(output) &&
+                hermesRequiredArgGrammarRequested(body) &&
+                !this.forceSequentialToolGrammar
+              ) {
+                this.forceSequentialToolGrammar = true;
+                log.warn(
+                  `turn#${seq}.${turn} MCP validator reported a required-argument violation not visible in the emitted call for tool=${call.function.name} — latching this session to sequential decode`,
+                );
+              }
+            }
+            // Successful ask_user_question (output not an ERROR
+            // and not the suppression sentinel above) → arm the
+            // dedup guard and the post-ask fold for the rest of
+            // this turn.
+            if (call.function.name === 'ask_user_question' && !output.startsWith('ERROR:')) {
+              askedQuestionThisTurn = true;
+            }
+            if (isSuccessfulAsyncHandoff(call.function.name, output)) {
+              asyncHandoffCount++;
+            }
+            if (
+              (immediateFileWriteTurn || writeContinuationActive) &&
+              (call.function.name === 'write_file' || call.function.name === 'append_to_file') &&
+              !output.startsWith('ERROR:')
+            ) {
+              if (typeof args.path === 'string') immediateFileWritePaths.push(args.path);
+              // If this write was itself truncated, the file still isn't
+              // complete — flag it so the bail block loops a continuation
+              // instead of declaring the file done.
+              if (truncatedCallIds.has(call.id)) immediateWriteTruncated = true;
+            }
+            // Successful start_project / start_job → arm the
+            // per-turn macro guard so subsequent variants get
+            // intercepted above before reaching the bridge.
+            if (
+              (call.function.name === 'start_project' || call.function.name === 'start_job') &&
+              !output.startsWith('ERROR:')
+            ) {
+              startedProjectOrJobThisTurn = { tool: call.function.name, firstResult: output };
+            }
+          } else {
+            output = `ERROR: tool ${call.function.name} is not available`;
+          }
+          // Auto-continuation hint for truncated write-shaped tool
+          // calls. Wild-caught on Qwen 3.6 27B write_file calls whose
+          // `<parameter=content>…` stream-truncated before the closer
+          // arrived (Hermes shape), and on Gemma 4 26B prose-shape /
+          // JSON-envelope `write_file({...})` calls cut mid-content.
+          // The bridge executed the call with the partial body (an
+          // incomplete file on disk); without this hint the model
+          // just narrates "I wrote the file" on the next turn and
+          // the trial times out. Shared with Ollama + llama-cpp
+          // providers via {@link appendTruncationHintToToolResult}.
+          if (truncatedCallIds.has(call.id)) {
+            const before = output.length;
+            output = appendTruncationHintToToolResult(output, call.function.name, args);
+            if (output.length !== before) {
+              const path = typeof args.path === 'string' ? args.path : '(unknown)';
+              const bytes = typeof args.content === 'string' ? args.content.length : 0;
+              log.info(
+                `turn#${seq} auto-continuation hint appended to tool=${call.function.name} id=${call.id} path=${path} bytes=${bytes}`,
+              );
+            }
+          }
+          this.turnPolicy.checkpoint();
+          requiredInputReads.push(...requiredInputsRead(call.function.name, args, output));
+          if (fileRepairTurn) {
+            if (FILE_REPAIR_READ_TOOLS.has(call.function.name)) repairReadCalls++;
+            repairReadPaths.push(...completeWorkspaceReadPaths(call.function.name, args, output));
+            if (FILE_REPAIR_MUTATION_TOOLS.has(call.function.name)) {
+              if (output.startsWith('ERROR:')) repairFailedMutations++;
+              else repairMutationSucceeded = true;
+            }
+          }
+          const tracked = failureTracker.recordResult(call.function.name, output);
+          terminalActionClosing ??= terminalToolClosingText(
+            this.deps.terminalToolPolicy,
+            call.function.name,
+            args,
+            output,
+          );
+          // Layer the same-args repeat tracker on top of the failure
+          // tracker. The failure tracker catches "tool keeps erroring";
+          // the repeat tracker catches "tool keeps succeeding with the
+          // same args while the model spins on planning prose" — the
+          // narrative-spinning loop the user reported on Ada.
+          const repeated = repeatTracker.recordCall(call.function.name, args, tracked.output);
+          const paced = deliverableReadPaceTracker?.recordCall(call.function.name, repeated.output);
+          const readyFooter = await deliverableReadySteer?.footerFor(
+            call.function.name,
+            args,
+            output,
+            () => knownToolNames,
+          );
+          if (readyFooter) {
+            log.info(
+              `turn#${seq} deliverable-ready footer appended tool=${call.function.name} path=${deliverableReadySteer?.deliverableFile} fired=${deliverableReadySteer?.firedCount}`,
+            );
+          }
+          // Always push the (possibly-augmented) tool message so the
+          // transcript reflects what the model would see — even on
+          // hard abort, debugging the runaway is easier with the
+          // last context preserved.
+          this.messages.push({
+            role: 'tool',
+            content: readyFooter
+              ? `${paced?.output ?? repeated.output}\n\n${readyFooter}`
+              : (paced?.output ?? repeated.output),
+            tool_call_id: call.id,
+          });
+          if (tracked.shouldAbort) {
+            abortDueToFailureLoop = {
+              tool: call.function.name,
+              count: tracked.count,
+              ...(tracked.sourceFailureKind
+                ? { sourceFailureKind: tracked.sourceFailureKind }
+                : {}),
+              ...(tracked.transportFailure ? { transportFailure: true } : {}),
+              ...(tracked.missingPath ? { missingPath: true } : {}),
+            };
+            break;
+          }
+          if (paced?.shouldAbort && deliverableReadPaceTracker) {
+            throw deliverableReadPaceTracker.buildAbort('Mac AI');
+          }
+          if (repeated.shouldAbort) {
+            log.error(
+              `turn#${seq} END abort-repeat-loop afterMs=${Date.now() - start} ` +
+                `tool=${call.function.name} sameArgsCalls=${repeated.count}`,
+            );
+            throw ToolRepeatTracker.buildAbort({
+              providerLabel: 'Mac AI',
+              toolName: call.function.name,
+              args,
+              count: repeated.count,
+              registeredTools: knownToolNames,
+              ...(this.deps.activeCraftbookStep
+                ? { activeStep: this.deps.activeCraftbookStep }
+                : {}),
+            });
+          }
+        }
+        // Keep tool-call/result pairs adjacent, then deliver the actual pixels
+        // as one vision message. Base64 must never be tokenized as tool text.
+        if (toolImages.length)
+          this.messages.push({
+            role: 'user',
+            content: TOOL_IMAGES_MESSAGE,
+            images: toolImages,
+          });
+        if (abortDueToFailureLoop) {
+          const { tool: failedTool, count: failCount } = abortDueToFailureLoop;
+          log.error(
+            `turn#${seq} END abort-failure-loop afterMs=${Date.now() - start} ` +
+              `tool=${failedTool} consecutiveFails=${failCount}`,
+          );
+          throw ToolFailureTracker.buildLoopAbort({
+            providerLabel: 'Mac AI',
+            loop: abortDueToFailureLoop,
+            surgicalEditsAvailable,
+            delegationAvailable,
+            ...writerFlags,
+          });
+        }
+        this.turnPolicy.checkpoint();
+        if (fileRepairTurn && repairMutationSucceeded) {
+          const closing = 'Updated the requested file.';
+          this.messages.push({ role: 'assistant', content: closing });
+          return closing;
+        }
+        if (!terminalActionClosing && deliverableReadySteer) {
+          const backstop = await deliverableReadySteer.backstopClosing();
+          if (backstop) {
+            log.info(
+              `turn#${seq} deliverable-ready backstop: ${deliverableReadySteer.deliverableFile} stayed ready through the grace iterations; ending turn for the end-of-turn advance`,
+            );
+            terminalActionClosing = backstop;
+          }
+        }
+        if (terminalActionClosing) {
+          // The action itself is the terminal outcome. Do not spend another
+          // generation asking the model to re-analyze a board that changed
+          // under it; persist one short line and release the turn.
+          this.messages.push({ role: 'assistant', content: terminalActionClosing });
+          fullText = terminalActionClosing;
+          log.info(
+            `turn#${seq} END terminal-tool-bail afterMs=${Date.now() - start} loopTurns=${turn + 1}`,
+          );
+          return fullText;
+        }
+        if (immediateFileWritePaths.length > 0) {
+          // File was truncated mid-content and we still have continuation
+          // budget — keep the turn alive instead of bailing on a partial.
+          // The tool result already carries the "append the rest" hint;
+          // surfacing `append_to_file` (above) lets the model act on it.
+          if (immediateWriteTruncated && this.turnPolicy.retry('writeContinuations')) {
+            writeContinuationActive = true;
+            writeContinuations++;
+            // Make append_to_file callable + salvageable for the next turn.
+            advertisedBridgeToolNames.add('append_to_file');
+            knownToolNames.add('append_to_file');
+            log.info(
+              `turn#${seq} immediate-write truncated — auto-continuation ${writeContinuations}/${MAX_IMMEDIATE_WRITE_CONTINUATIONS} (append_to_file surfaced) paths=${immediateFileWritePaths.join(',')}`,
+            );
+            continue;
+          }
+          const closingText = immediateFileWriteClosing(immediateFileWritePaths);
+          this.messages.push({ role: 'assistant', content: closingText });
+          this.lastTurnBail = 'immediate-write';
+          fullText = closingText;
+          log.info(
+            `turn#${seq} END immediate-write-bail afterMs=${Date.now() - start} ` +
+              `paths=${immediateFileWritePaths.join(',') || '(unknown)'} loopTurns=${turn + 1}` +
+              `${writeContinuations > 0 ? ` continuations=${writeContinuations}` : ''}`,
+          );
+          return fullText;
+        }
+        if (asyncHandoffCount > 0) {
+          const closingText = asyncHandoffClosing(asyncHandoffCount);
+          this.messages.push({ role: 'assistant', content: closingText });
+          fullText = closingText;
+          log.info(
+            `turn#${seq} END async-handoff-bail afterMs=${Date.now() - start} ` +
+              `handoffs=${asyncHandoffCount} loopTurns=${turn + 1}`,
+          );
+          return fullText;
+        }
+        if (forceProjectMacroBail) {
+          // Model emitted PROJECT_MACRO_INTERCEPT_CAP+ redundant
+          // start_project / start_job envelopes despite the per-turn
+          // guard returning a clear "STOP" message each time. The
+          // project IS real — we hold onto the first call's result
+          // text — but the model can't be talked into wrapping the
+          // turn, so we synthesize a one-line closing and exit. The
+          // user sees a clean bubble instead of minutes of malformed
+          // retry prose.
+          log.warn(
+            `turn#${seq} END force-macro-bail afterMs=${Date.now() - start} ` +
+              `intercepts=${projectMacroInterceptCount} loopTurns=${turn + 1}`,
+          );
+          this.messages.push({ role: 'assistant', content: forceProjectMacroBail.closingText });
+          fullText = forceProjectMacroBail.closingText;
+          this.emitWarning(
+            `On-device model emitted ${projectMacroInterceptCount + 1} \`${startedProjectOrJobThisTurn?.tool ?? 'start_project'}\` attempts in one turn after the first one succeeded. The runtime ended the turn for you — the project is real and the lead is on it. Consider switching the Meester to a cloud model if this recurs.`,
+          );
+          return fullText;
+        }
+
+        // Terminal: the model posted a question card to the user — end the
+        // turn (its answer arrives as the next user message). Without this the
+        // loop issues another generation request and can wedge in-flight; see
+        // the llama-cpp provider for the full "stuck session" rationale.
+        if (askedQuestionThisTurn) return fullText;
+      }
+      throw new Error(
+        `[mlx] too many tool-call loops (>${MAX_TOOL_LOOP_TURNS}); aborting to prevent runaway`,
+      );
+    } catch (err) {
+      turnFailed = true;
+      log.info(
+        `turn#${seq} END throw afterMs=${Date.now() - start} ` +
+          `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+      );
+      throw err;
+    } finally {
+      if (!turnFailed) {
+        try {
+          emitTerminalTelemetry();
+        } catch (err) {
+          // Telemetry must never turn a completed model response into a
+          // failed user turn. Preserve the reply and leave a diagnostic.
+          log.warn(
+            `turn#${seq} terminal telemetry failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      releaseActiveEngineRequest?.();
+      clearInterval(statusHeartbeat);
+      this.deps.provider._deregisterActiveSession(this);
+    }
+  }
+
+  providerState(): ProviderSessionState {
+    return {};
+  }
+
+  getRegisteredToolNames(): string[] {
+    if (this.deps.bridges.isEmpty()) return [];
+    return this.deps.bridges.getOpenAITools().map((t) => t.name);
+  }
+
+  setSystemMessage(text: string): void {
+    // Replace the system message in-place. The constructor always
+    // installs a `{role: 'system'}` entry at index 0, so this is
+    // safe even after a turn or two have appended user/assistant
+    // messages — those stay where they are.
+    if (this.messages.length === 0 || this.messages[0]?.role !== 'system') {
+      this.messages.unshift({ role: 'system', content: text });
+      this.currentTurnStartIdx += 1;
+    } else {
+      this.messages[0] = { role: 'system', content: text };
+    }
+    // Keep the prefix-cache mapping in sync with the bytes actually sent
+    // (the next prepareForSend hashes deps.systemMessage / the layered
+    // `project` band). Without this a mid-session refresh would key the
+    // cache on the original prompt. The refresh only changes the tools
+    // block (late `project` layer), so update `project`, keep `gezel`.
+    this.deps.systemMessage = text;
+    if (this.deps.systemPromptLayers) {
+      this.deps.systemPromptLayers = {
+        gezel: this.deps.systemPromptLayers.gezel,
+        project: text,
+      };
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    this.clearHandlers();
+    const adapter = this.deps.provider.getCacheAdapter();
+    if (adapter && this.fallbackCacheUsed) {
+      // Ephemeral/one-shot sessions only need their fallback cache while the
+      // MlxSession is alive (especially across tool-loop iterations). Do not
+      // leave one never-resumable disk entry per background completion.
+      await adapter.evict([this.fallbackCacheId]).catch((err) => {
+        log.warn(
+          `failed to evict ephemeral cache ${this.fallbackCacheId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+    }
+    try {
+      await this.deps.bridges.stop();
+    } catch {
+      /* ignore */
+    }
+  }
+}

@@ -55,8 +55,11 @@ test('Home renders the workshop once configured', async () => {
   // resolves ok (mock provider) and the meester is auto-provisioned.
   await expect(page.getByTestId('home-workshop')).toBeVisible({ timeout: 20000 });
 
-  // Greeting band (time-of-day headline, no stored user name).
-  await expect(page.getByText(/Good (morning|afternoon|evening)\./)).toBeVisible();
+  // Greeting band (time-of-day headline, no stored user name). The welcome
+  // opens on the same words, so look inside the band.
+  await expect(
+    page.getByTestId('greeting-band').getByText(/Good (morning|afternoon|evening)\./),
+  ).toBeVisible();
 
   // The meester conversation fills the workshop body; there is no side rail.
   await expect(page.locator('.home-workshop-conversation')).toBeVisible();
@@ -81,10 +84,12 @@ test('Home renders the workshop once configured', async () => {
 });
 
 test('the greeting collapses and the tour tab swaps content', async () => {
-  // A fresh home shows the meester's introduction, which steps the greeting
+  // A fresh home shows the meester's welcome, which steps the greeting
   // aside for this visit. Wait for it, so a late introduction cannot collapse
   // the band under the clicks below; reopening it by hand is authoritative.
-  await expect(page.getByText(/your meester\./)).toBeVisible({ timeout: 20_000 });
+  await expect(
+    page.getByTestId('meester-welcome').getByRole('heading', { name: /I run this workshop/ }),
+  ).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: 'Expand the greeting' }).click();
   await expect(page.getByText('Tip of the day')).toBeVisible();
 

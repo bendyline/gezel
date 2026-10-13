@@ -31,8 +31,8 @@ import {
   createLogger,
   nowIso,
 } from '@bendyline/gezel';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { slug } from '../connectors/writer.js';
-import { safeJoin } from '../fs/safe-paths.js';
 import { columnsStruct } from './compactor.js';
 import { type DuckRunner, sqlLiteral } from './duck.js';
 import {

@@ -31,8 +31,6 @@ const IMAGE_MODEL = {
     weightsKind: 'sdxl',
     supportsImg2Img: true,
     auxiliaryFiles: [],
-    hardwareTier: 'mid',
-    minRamGB: 16,
     quantization: 'Q4',
   },
 };
@@ -129,5 +127,36 @@ describe('ImageModelManager downloads', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Downloading/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+  });
+
+  it('hides a model whose weights cannot fit the card, and names the memory it needs', async () => {
+    vi.mocked(api.getImageModelFit).mockResolvedValue({
+      pool: 'discrete',
+      budgetBytes: 17 * GiB,
+      gpuBudgetBytes: 7.6 * GiB,
+      totalRamBytes: 16 * GiB,
+      models: [
+        {
+          id: 'sdxl-turbo',
+          verdict: 'wont-run',
+          pool: 'discrete',
+          weightBytes: 9 * GiB,
+          bytes: 11 * GiB,
+          gpuBytes: 9 * GiB,
+          exact: true,
+          neededBytes: 9 * GiB,
+          availableBytes: 7.6 * GiB,
+          reason: 'Its weights need about 9 GB of graphics memory; this card has about 7.6 GB.',
+        },
+      ],
+    } as never);
+    render(<ImageModelManager />);
+
+    expect(await screen.findByText(/1 model is too large for this machine/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download' })).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show all models' }));
+    expect(await screen.findByRole('button', { name: 'Too large' })).toBeDisabled();
+    expect(screen.getByText('needs ~9 GB graphics memory')).toBeInTheDocument();
   });
 });

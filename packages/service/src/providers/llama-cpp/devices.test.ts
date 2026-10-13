@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
   gpuMemoryKindFromName,
   gpuVendorFromName,
@@ -7,7 +6,8 @@ import {
   parseLlamaDevices,
   parseNvidiaRuntimeDevices,
   pickBestGpuDevice,
-} from './devices.js';
+} from '@bendyline/gezel-inference/internal/providers/llama-cpp/devices';
+import { describe, expect, it } from 'vitest';
 
 const M4_MAX = `Available devices:
   MTL0: Apple M4 Max (53084 MiB, 53083 MiB free)

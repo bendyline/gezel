@@ -93,9 +93,6 @@ vi.mock('../components/CopilotLoginCommand.js', () => ({
 vi.mock('../components/DeviceSummary.js', () => ({
   DeviceSummary: () => <div data-testid="device-summary">device</div>,
 }));
-vi.mock('../components/FirstRunInstallBanner.js', () => ({
-  FirstRunInstallBanner: () => <div data-testid="first-run-install-banner" />,
-}));
 vi.mock('../components/GezelIcon.js', () => ({
   GezelIcon: ({ name, pulsing }: { name: string; pulsing?: boolean }) => (
     <span data-testid="gezel-icon" data-name={name} data-pulsing={pulsing ? 'true' : 'false'} />
@@ -103,12 +100,27 @@ vi.mock('../components/GezelIcon.js', () => ({
 }));
 // Most tests want a conversation that is not empty, so the meester's
 // introduction stays out of them unless a test asks for it.
-const timeline = vi.hoisted(() => ({ empty: false }));
-vi.mock('../components/GlobalTimeline.js', () => ({
-  GlobalTimeline: ({ emptyContent }: { emptyContent?: import('react').ReactNode }) => (
-    <div data-testid="timeline">{timeline.empty ? emptyContent : null}</div>
-  ),
+const timeline = vi.hoisted(() => ({
+  empty: false,
+  attention: null as { failedTurn: boolean; latestReplyAt: string | null } | null,
 }));
+vi.mock('../components/GlobalTimeline.js', async () => {
+  const { useEffect } = await import('react');
+  return {
+    GlobalTimeline: ({
+      emptyContent,
+      onAttentionChange,
+    }: {
+      emptyContent?: import('react').ReactNode;
+      onAttentionChange?: (a: { failedTurn: boolean; latestReplyAt: string | null }) => void;
+    }) => {
+      useEffect(() => {
+        if (timeline.attention) onAttentionChange?.(timeline.attention);
+      }, [onAttentionChange]);
+      return <div data-testid="timeline">{timeline.empty ? emptyContent : null}</div>;
+    },
+  };
+});
 vi.mock('../components/HealthStrip.js', () => ({
   HealthStrip: () => null,
 }));
@@ -134,7 +146,7 @@ vi.mock('./home/IntroHandboekArticle.js', () => ({
 // don't need to mock the Poppetje engine.
 
 const { HomeView } = await import('./HomeView.js');
-const { HomeWorkshop } = await import('./home/HomeWorkshop.js');
+const { HomeWorkshop, resetHomeVisit } = await import('./home/HomeWorkshop.js');
 const { api } = await import('../api.js');
 const { resetUpdateStateForTests } = await import('../update-state.js');
 
@@ -163,6 +175,8 @@ function onboard() {
 
 describe('HomeView', () => {
   beforeEach(() => {
+    resetHomeVisit();
+    timeline.attention = null;
     onboard();
     vi.mocked(api.listProjects).mockResolvedValue({
       projects: [{ id: 'default', name: 'default' }],
@@ -318,10 +332,10 @@ describe('HomeView', () => {
     });
   });
 
-  it('holds the loading splash while the probe is in flight — never flashes First run setup', async () => {
+  it('holds the loading splash while the probe is in flight — never flashes a download offer', async () => {
     // A probe that stays pending lets us inspect the intermediate state. The
     // regression this guards: a slow cold-boot probe used to drop the splash
-    // early and render "First run setup" for seconds before flipping to chat.
+    // early and show setup for seconds before flipping to chat.
     let resolveProbe!: (v: unknown) => void;
     vi.mocked(api.testProvider).mockReturnValue(
       new Promise((res) => {
@@ -332,43 +346,159 @@ describe('HomeView', () => {
       provider: 'llama-cpp',
       meesterGezelId: 'gz-meester',
     } as never);
+    timeline.empty = true;
+    try {
+      const { container } = render(<HomeView />);
 
-    const { container } = render(<HomeView />);
+      expect(container.querySelector('.home-view-loading')).toHaveAttribute('aria-busy', 'true');
+      expect(screen.queryByText(/Loading/)).not.toBeInTheDocument();
+      expect(screen.queryByTestId('home-workshop')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Fetch my tools/ })).not.toBeInTheDocument();
 
-    expect(container.querySelector('.home-view-loading')).toHaveAttribute('aria-busy', 'true');
-    expect(screen.queryByText(/Loading/)).not.toBeInTheDocument();
-    expect(screen.queryByText('First run setup')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('home-workshop')).not.toBeInTheDocument();
-    // …and nothing first-run-flavoured either. The splash used to render the
-    // full intro plus the "What is gezel?" article, which flashed past on
-    // every boot of a configured install before the workshop took over.
-    expect(screen.queryByTestId('home-intro-article')).not.toBeInTheDocument();
-
-    // Probe lands ok → straight to the workshop, with no first-run in between.
-    resolveProbe({ ok: true, modelCount: 3 });
-    await waitFor(() => {
-      expect(screen.getByTestId('home-workshop')).toBeInTheDocument();
-    });
-    expect(screen.queryByText('First run setup')).not.toBeInTheDocument();
+      // Probe lands ok: straight to the workshop, with no tools beat in between.
+      resolveProbe({ ok: true, modelCount: 3 });
+      expect(await screen.findByTestId('meester-welcome')).toHaveAttribute(
+        'data-welcome-state',
+        'ready',
+      );
+      expect(screen.queryByText(/I need my tools/)).not.toBeInTheDocument();
+    } finally {
+      timeline.empty = false;
+    }
   });
 
-  it.each(['mlx', 'llama-cpp'] as const)(
-    'keeps a healthy %s engine with no installed models in first run',
-    async (provider) => {
+  describe('first run', () => {
+    beforeEach(() => {
+      timeline.empty = true;
+      vi.mocked(api.listMlxModels).mockResolvedValue({ models: [] } as never);
+      vi.mocked(api.listMlxActiveInstalls).mockResolvedValue({ installs: [] } as never);
+      vi.mocked(api.listLlamaCppActiveInstalls).mockResolvedValue({ installs: [] } as never);
+    });
+    afterEach(() => {
+      timeline.empty = false;
+    });
+
+    it.each(['mlx', 'llama-cpp'] as const)(
+      'keeps a healthy %s engine with no installed models on the meester asking for tools',
+      async (provider) => {
+        vi.mocked(api.getConfig).mockResolvedValue({
+          provider,
+          meesterGezelId: 'gz-meester',
+          defaultModel: { [provider]: 'recommended-model' },
+        } as never);
+        vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 0 } as never);
+
+        render(<HomeView />);
+
+        const welcome = await screen.findByTestId('meester-welcome');
+        await waitFor(() => expect(welcome.dataset.welcomeState).toBe('needs-download'));
+        expect(screen.getByRole('button', { name: /^Fetch my tools/ })).toBeInTheDocument();
+        // One surface: the workshop, not a separate setup page.
+        expect(screen.getByTestId('home-workshop')).toBeInTheDocument();
+      },
+    );
+
+    // A model on disk with its engine still to fetch said "I'm ready", and the
+    // first message failed on the engine download.
+    it('is not ready while the engine that runs the model is missing', async () => {
       vi.mocked(api.getConfig).mockResolvedValue({
-        provider,
+        provider: 'llama-cpp',
         meesterGezelId: 'gz-meester',
-        defaultModel: { [provider]: 'recommended-model' },
+        defaultModel: { 'llama-cpp': 'recommended-model' },
+      } as never);
+      vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 1 } as never);
+      vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+        models: [{ id: 'recommended-model', name: 'Recommended' }],
+      } as never);
+      vi.mocked(api.getNativeEngineStatus).mockResolvedValue({
+        release: 'native-v1',
+        pinned: true,
+        platformKey: 'win32-x64',
+        engines: [{ name: 'llama-server', installed: false }],
+      } as never);
+      vi.mocked(api.ensureNativeEngine).mockReturnValue(new Promise(() => {}) as never);
+      try {
+        render(<HomeView />);
+        const welcome = await screen.findByTestId('meester-welcome');
+        await waitFor(() => expect(welcome.dataset.welcomeState).toBe('engine'));
+        expect(screen.queryByText("I'm ready. What shall we make?")).not.toBeInTheDocument();
+      } finally {
+        vi.mocked(api.getNativeEngineStatus).mockResolvedValue({} as never);
+        vi.mocked(api.listLlamaCppModels).mockResolvedValue({ models: [] } as never);
+      }
+    });
+
+    it('is a conversation with the meester, not a setup form', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'llama-cpp',
+        meesterGezelId: 'gz-meester',
+        defaultModel: { 'llama-cpp': 'recommended-model' },
       } as never);
       vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 0 } as never);
 
       render(<HomeView />);
 
-      expect(await screen.findByText('First run setup')).toBeInTheDocument();
-      expect(screen.getByTestId('first-run-install-banner')).toBeInTheDocument();
-      expect(screen.queryByTestId('home-workshop')).not.toBeInTheDocument();
-    },
-  );
+      await screen.findByRole('button', { name: /^Fetch my tools/ });
+      // The security posture and the preferences are defaults now, changed
+      // later in Settings; the greeting band would greet a second time.
+      expect(
+        screen.queryByRole('radiogroup', { name: 'Security posture' }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+      expect(screen.queryByRole('tab', { name: GREETING_TAB })).not.toBeInTheDocument();
+      expect(screen.getByText(/Change what I'm allowed to do/)).toBeInTheDocument();
+    });
+
+    it('sends a disconnected cloud provider to Settings from the welcome', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'copilot',
+        hasGithubToken: false,
+        meesterGezelId: 'gz-meester',
+      } as never);
+      vi.mocked(api.testProvider).mockResolvedValue({ ok: false, error: 'not signed in' } as never);
+
+      render(<HomeView />);
+
+      const connect = await screen.findByRole('button', { name: 'Connect an AI' });
+      expect(screen.queryByRole('tab', { name: /GitHub Copilot/ })).not.toBeInTheDocument();
+      const events: CustomEvent[] = [];
+      const handler = (e: Event) => events.push(e as CustomEvent);
+      window.addEventListener('gezel:navigate', handler);
+      fireEvent.click(connect);
+      window.removeEventListener('gezel:navigate', handler);
+      expect(events.at(-1)?.detail).toEqual({ view: 'settings', section: 'defaults' });
+    });
+
+    it('lets a phone host draw its model list in the welcome, then carries on when one is ready', async () => {
+      const bridge = window.__GEZEL__;
+      const renderModelSettings = vi.fn(() => <div>Native model download controls</div>);
+      window.__GEZEL__ = { ...bridge!, renderModelSettings };
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'llama-cpp',
+        meesterGezelId: 'gz-meester',
+      } as never);
+      vi.mocked(api.testProvider).mockResolvedValue({
+        ok: false,
+        error: 'Choose a chat model',
+      } as never);
+      try {
+        render(<HomeView platform="mobile" />);
+        expect(await screen.findByText('Native model download controls')).toBeVisible();
+        expect(renderModelSettings).toHaveBeenCalledWith({ setup: true });
+        const workshop = screen.getByTestId('home-workshop');
+
+        vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 1 } as never);
+        fireEvent(window, new CustomEvent('gezel:config-updated'));
+
+        expect(await screen.findByText("I'm ready. What shall we make?")).toBeInTheDocument();
+        expect(screen.queryByText('Native model download controls')).not.toBeInTheDocument();
+        // The same surface carried on; nothing swapped the page out.
+        expect(screen.getByTestId('home-workshop')).toBe(workshop);
+      } finally {
+        window.__GEZEL__ = bridge;
+      }
+    });
+  });
 
   it('does not require a locally installed model when a cloud provider is connected', async () => {
     vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 0 } as never);
@@ -376,158 +506,15 @@ describe('HomeView', () => {
     render(<HomeView />);
 
     expect(await screen.findByTestId('home-workshop')).toBeInTheDocument();
-    expect(screen.queryByText('First run setup')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: GREETING_TAB })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Connect an AI' })).not.toBeInTheDocument();
   });
 
-  it('uses the shared first-run page for native models and leaves setup when a selected model is ready', async () => {
-    const bridge = window.__GEZEL__;
-    const renderModelSettings = vi.fn(() => <div>Native model download controls</div>);
-    window.__GEZEL__ = { ...bridge!, renderModelSettings };
-    vi.mocked(api.getConfig).mockResolvedValue({
-      provider: 'llama-cpp',
-      meesterGezelId: 'gz-meester',
-    } as never);
-    vi.mocked(api.testProvider).mockResolvedValue({
-      ok: false,
-      error: 'Choose a chat model',
-    } as never);
-    try {
-      render(<HomeView platform="mobile" />);
-      expect(await screen.findByText('First run setup')).toBeVisible();
-      expect(screen.getByText('Native model download controls')).toBeVisible();
-      expect(renderModelSettings).toHaveBeenCalledWith({ setup: true });
-      expect(screen.queryByTestId('home-intro-article')).not.toBeInTheDocument();
-      expect(screen.getByText('Preferences')).toBeVisible();
-      expect(screen.queryByTestId('chat-composer')).not.toBeInTheDocument();
-      vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 1 } as never);
-      fireEvent(window, new CustomEvent('gezel:config-updated'));
-      expect(await screen.findByTestId('home-workshop')).toBeInTheDocument();
-      expect(screen.queryByText('First run setup')).not.toBeInTheDocument();
-    } finally {
-      window.__GEZEL__ = bridge;
-    }
-  });
-
-  it('first run is local-only: shows the on-device engine link, not the provider picker', async () => {
-    // Not configured (probe fails) → the onboarding layout renders.
-    vi.mocked(api.getConfig).mockResolvedValue({
-      provider: 'copilot',
-      hasGithubToken: false,
-      meesterGezelId: 'gz-meester',
-    } as never);
-    vi.mocked(api.testProvider).mockResolvedValue({ ok: false, error: 'not signed in' } as never);
-    vi.mocked(api.health).mockResolvedValue({
-      ok: true,
-      version: '0.1.0',
-      platform: 'win32',
-    } as never);
-
-    render(<HomeView />);
-
-    const link = await screen.findByRole('button', { name: /Manage AI models in Settings/ });
-    expect(link).toBeInTheDocument();
-    // The intro copy is the embedded Handboek article, not hardcoded prose.
-    expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
-    expect(screen.queryByText(/AI-powered teammate/)).not.toBeInTheDocument();
-    // The removed model-picking experience: no "Connect an AI model provider"
-    // section, no provider tabs.
-    expect(screen.queryByText(/Connect an AI model provider/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: /GitHub Copilot/ })).not.toBeInTheDocument();
-
-    // Clicking deep-links to the on-device engine settings section
-    // (llamaCpp on non-mac, mlx on mac).
-    const events: CustomEvent[] = [];
-    const handler = (e: Event) => events.push(e as CustomEvent);
-    window.addEventListener('gezel:navigate', handler);
-    fireEvent.click(link);
-    window.removeEventListener('gezel:navigate', handler);
-    expect(events.at(-1)?.detail).toEqual({ view: 'settings', section: 'llamaCpp' });
-  });
-
-  it('first run puts setup above the intro article', async () => {
-    // The download affordance has to own the top of the screen; the "what is
-    // gezel?" pitch is reading material for after.
-    vi.mocked(api.getConfig).mockResolvedValue({
-      provider: 'copilot',
-      hasGithubToken: false,
-      meesterGezelId: 'gz-meester',
-    } as never);
-    vi.mocked(api.testProvider).mockResolvedValue({ ok: false, error: 'not signed in' } as never);
-    vi.mocked(api.health).mockResolvedValue({
-      ok: true,
-      version: '0.1.0',
-      platform: 'win32',
-    } as never);
-
-    render(<HomeView />);
-
-    const heading = await screen.findByText('First run setup');
-    const intro = screen.getByTestId('home-intro-article');
-    expect(heading.compareDocumentPosition(intro) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it('first run offers "Show gezel names and poppetjes" below the security posture', async () => {
-    vi.mocked(api.getConfig).mockResolvedValue({
-      provider: 'copilot',
-      hasGithubToken: false,
-      meesterGezelId: 'gz-meester',
-    } as never);
-    vi.mocked(api.testProvider).mockResolvedValue({ ok: false, error: 'not signed in' } as never);
-    vi.mocked(api.updateConfig).mockResolvedValue({} as never);
-
-    render(<HomeView />);
-
-    // Positive framing, on by default — the old "Boring mode" in-joke led the
-    // section and sat above the security posture (2026-09-02 UX review).
-    const checkbox = await screen.findByRole('checkbox', {
-      name: /Show gezel names and poppetjes/,
-    });
-    expect(checkbox).toBeChecked();
-
-    // The consequential choice (security posture) comes first on the page.
-    const security = screen.getByRole('radiogroup', { name: 'Security posture' });
-    expect(
-      security.compareDocumentPosition(checkbox) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-
-    // Unchecking flips to role-based names AND letter avatars in one write.
-    fireEvent.click(checkbox);
-    await waitFor(() => {
-      expect(api.updateConfig).toHaveBeenCalledWith({
-        roleBasedNameOnlyMode: true,
-        showPoppetjes: false,
-      });
-    });
-  });
-
-  it('first run shows the relevance check as on for a new install and lets the person turn it off', async () => {
-    vi.mocked(api.getConfig).mockResolvedValue({
-      provider: 'copilot',
-      hasGithubToken: false,
-      meesterGezelId: 'gz-meester',
-      relevanceModel: { enabled: true },
-    } as never);
-    vi.mocked(api.testProvider).mockResolvedValue({ ok: false, error: 'not signed in' } as never);
-    vi.mocked(api.updateConfig).mockResolvedValue({} as never);
-
-    render(<HomeView />);
-
-    const checkbox = await screen.findByRole('checkbox', {
-      name: /Check that reference material is on topic/,
-    });
-    expect(checkbox).toBeChecked();
-    fireEvent.click(checkbox);
-    await waitFor(() => {
-      expect(api.updateConfig).toHaveBeenCalledWith({ relevanceModel: { enabled: false } });
-    });
-  });
-
-  it('loads health, config, and projects on mount', async () => {
+  it('loads config and projects on mount', async () => {
     render(<HomeView />);
     await waitFor(() => {
-      expect(api.health).toHaveBeenCalled();
+      expect(api.getConfig).toHaveBeenCalled();
     });
-    expect(api.getConfig).toHaveBeenCalled();
     expect(api.listProjects).toHaveBeenCalled();
   });
 
@@ -926,7 +913,7 @@ describe('HomeView', () => {
     timeline.empty = true;
     try {
       render(<HomeView />);
-      await screen.findByText(/your meester\./);
+      await screen.findByRole('heading', { name: /I run this workshop/ });
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Expand the greeting' })).toBeInTheDocument();
       });
@@ -986,13 +973,33 @@ describe('HomeView', () => {
     timeline.empty = true;
     try {
       rerender(<HomeWorkshop config={config} {...props} />);
-      await screen.findByText(/your meester\./);
+      await screen.findByRole('heading', { name: /I run this workshop/ });
       expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Collapse the greeting' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Return to Meester chat' })).toBeInTheDocument();
     } finally {
       timeline.empty = false;
     }
+  });
+
+  // Coming back from Settings reopened the band over a conversation whose last
+  // turn had failed, and its Retry could not be reached (2026-10-11).
+  it('greets once per launch: coming back to Home opens on the conversation', async () => {
+    const first = render(<HomeView />);
+    await screen.findByText('Tip of the day');
+    first.unmount();
+
+    render(<HomeView />);
+    await screen.findByRole('button', { name: 'Expand the greeting' });
+    await waitFor(() => expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument());
+  });
+
+  it('keeps the band out of the way of a failed turn', async () => {
+    timeline.attention = { failedTurn: true, latestReplyAt: null };
+    render(<HomeView />);
+    await screen.findByRole('button', { name: 'Expand the greeting' });
+    await waitFor(() => expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument());
+    expect(api.updateConfig).not.toHaveBeenCalledWith({ homeGreetingCollapsed: true });
   });
 
   it('starts collapsed when the saved preference says so', async () => {

@@ -40,6 +40,7 @@ import { applyGateRejection } from '../tasks/gate-accounting.js';
 import { gateHandoffNoteText, stampGateHandoff } from '../tasks/gate-handoff.js';
 import { bumpStepActivation } from '../tasks/step-activation.js';
 import { explicitStepJump, resolveNextStep, unknownTaskStepText } from '../tasks/step-routing.js';
+import { portableCraftbookGap } from './craftbook-host-gap.js';
 import { slugifyEntityName } from './entities.js';
 import { encodeText } from './files.js';
 import { requireGezel } from './gezels.js';
@@ -53,6 +54,7 @@ import {
 import type { PortableRepository } from './repository.js';
 import { stageCraftbookScriptSources } from './script-sources.js';
 import { resolvePortableTaskExecution } from './task-execution.js';
+import { type PortableSampleSource, planPortableTaskInputs } from './task-inputs.js';
 
 export { taskActiveAssignee } from '../task-execution.js';
 
@@ -188,56 +190,27 @@ export async function listTasks(
   }
   return tasks.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.num - a.num);
 }
+/** Refuse a book the portable runner cannot drive, with the reason New Task shows. */
 export function assertPortableCraftbookSupported(book: Craftbook) {
-  if (
-    book.spawn ||
-    book.hooks?.length ||
-    book.commands?.length ||
-    book.connectors?.length ||
-    book.toolsets?.length ||
-    book.requirements?.length ||
-    book.capabilityFloor
-  )
-    throw new Error('This craftbook requires desktop execution capabilities');
-  for (const step of book.steps) {
-    if (
-      [
-        ...normalizeScriptRefs(step.onEnter),
-        ...normalizeScriptRefs(step.onExit),
-        ...(step.gate ? (normalizeStepGate(step.gate).scripts ?? []) : []),
-      ].some((ref) => ref.scope === 'craftbook' && !Object.hasOwn(book.scripts ?? {}, ref.name))
-    )
-      throw new Error(
-        `Step ${step.name} references an embedded craftbook script missing from its snapshot`,
-      );
-    if (
-      step.spawnFanout ||
-      step.branches?.length ||
-      step.capabilityFloor ||
-      step.advanceWhen?.requireChange
-    )
-      throw new Error(`Step ${step.name} requires unsupported lifecycle or branching behavior`);
-    if (
-      step.gate &&
-      (normalizeStepGate(step.gate).at !== 'completion' ||
-        normalizeStepGate(step.gate).reviewer ||
-        (normalizeStepGate(step.gate).onReject &&
-          normalizeStepGate(step.gate).onReject !== step.id))
-    )
-      throw new Error('Activation gates are not supported by this foreground task runner');
-  }
+  const gap = portableCraftbookGap(book);
+  if (gap) throw new Error(gap);
 }
 interface NewProjectTaskStage {
   writes: Map<string, Uint8Array>;
   directories: string[];
+}
+export interface PortableCreateTaskOptions {
+  /** Where a book's bundled samples are read from, for `{ from: 'sample' }` inputs. */
+  samples?: PortableSampleSource;
 }
 export async function createTask(
   repo: PortableRepository,
   projectId: string,
   input: CreateTaskRequest,
   resolved?: Craftbook,
+  options: PortableCreateTaskOptions = {},
 ): Promise<Task> {
-  return createTaskInternal(repo, projectId, input, resolved);
+  return createTaskInternal(repo, projectId, input, resolved, undefined, options);
 }
 async function createTaskInternal(
   repo: PortableRepository,
@@ -245,6 +218,7 @@ async function createTaskInternal(
   input: CreateTaskRequest,
   resolved?: Craftbook,
   staged?: NewProjectTaskStage,
+  options: PortableCreateTaskOptions = {},
 ): Promise<Task> {
   const request = CreateTaskRequestSchema.parse(input);
   if (!staged) await writable(repo, projectId);
@@ -258,13 +232,8 @@ async function createTaskInternal(
     request.deliveryMode === 'propose'
   )
     throw new Error('Scheduled, spawned, and change-proposal tasks require desktop execution');
-  // Resolving a craftbook input (enumerating it, writing its manifest,
-  // adopting an upload) is desktop work. An input's plain path in
-  // `craftbookParams` still reaches the prompt as an ordinary param.
-  if (request.inputs && Object.keys(request.inputs).length > 0)
-    throw new Error(
-      'Picked input files require desktop execution; pass the folder as a craftbook param instead',
-    );
+  if (!resolved && request.inputs && Object.keys(request.inputs).length > 0)
+    throw new Error('Picked input files belong to a craftbook; this task has none');
   if (request.craftbookId && (!resolved || resolved.id !== request.craftbookId))
     throw new Error('This craftbook is not bundled for offline execution');
   const base = `${projectRoot(projectId)}/tasks`;
@@ -281,6 +250,22 @@ async function createTaskInternal(
     'task.projectId': projectId,
   };
   const overrides = resolveRuntimeTokensInParams(request.craftbookParams ?? {}, runtime);
+  // Inputs resolve before defaults and requirements, as on the desktop: a
+  // required input is satisfied by its resolved path, and `{{param}}`
+  // interpolates to it. Nothing is written until the task commits.
+  const inputsPlan = resolved
+    ? await planPortableTaskInputs({
+        repo,
+        projectId,
+        book: resolved,
+        ...(request.inputs ? { sources: request.inputs } : {}),
+        params: overrides,
+        taskDir: artifactDir,
+        ...(options.samples ? { samples: options.samples } : {}),
+        now: repo.now(),
+      })
+    : null;
+  if (inputsPlan) Object.assign(overrides, inputsPlan.params);
   const params = {
     ...resolveCraftbookParamDefaults(
       craftbookParamDefaults(resolved?.paramSchema),
@@ -343,7 +328,11 @@ async function createTaskInternal(
     activeStepId: book.entryStepId,
     artifactDir,
     launchSessionId: request.launchSessionId,
+    ...(request.craftbookInvocationKey
+      ? { origin: { kind: 'craftbook-invocation', key: request.craftbookInvocationKey } }
+      : {}),
     craftbookParams: params,
+    ...(inputsPlan ? { inputs: inputsPlan.records } : {}),
     sourceCraftbookIds: resolved
       ? [
           {
@@ -366,6 +355,7 @@ async function createTaskInternal(
   });
   if (task.status !== 'draft') await resolvePortableTaskExecution(repo, task);
   const writes = taskWrites(repo, task);
+  for (const [path, bytes] of inputsPlan?.writes ?? []) writes.set(path, bytes);
   await stageCraftbookScriptSources(repo, projectId, task.craftbook, writes);
   writes.set(`${base}/.next-id`, encodeText(`${num}\n`));
   const directory = `${projectRoot(projectId)}/artifacts/${artifactDir}`;

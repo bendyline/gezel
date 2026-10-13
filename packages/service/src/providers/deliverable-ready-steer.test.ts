@@ -1,8 +1,11 @@
+import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { MlxProvider } from '@bendyline/gezel-inference/internal/providers/mlx/provider';
+import type {
+  ActiveCraftbookStep,
+  LLMSession,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { LlamaCppProvider } from './llama-cpp/provider.js';
-import { MlxProvider } from './mlx/provider.js';
 import { OllamaProvider } from './ollama.js';
-import type { ActiveCraftbookStep, LLMSession } from './types.js';
 
 /**
  * The deliverable-ready footer and backstop on each local tool loop:

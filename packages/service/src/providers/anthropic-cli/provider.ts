@@ -1,7 +1,16 @@
 import { createLogger } from '@bendyline/gezel';
-import { ProviderQueue } from '../queue.js';
-import { ExternalToolsUnsupportedError, SessionResumeError } from '../types.js';
-import type { LLMProvider, LLMSession, ModelInfo, ProviderName, SessionOpts } from '../types.js';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import {
+  ExternalToolsUnsupportedError,
+  SessionResumeError,
+} from '@bendyline/gezel-inference/internal/providers/types';
+import type {
+  LLMProvider,
+  LLMSession,
+  ModelInfo,
+  ProviderName,
+  SessionOpts,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { type ClaudeBinary, resolveClaudeBinary } from './binary.js';
 import { type ClaudeReasoningEffort, isClaudeReasoningEffort } from './reasoning.js';
 import { AnthropicCliSession, type SessionDeps } from './session.js';
@@ -24,21 +33,28 @@ const log = createLogger('anthropic-cli');
  * version. Alias resolution depends on the user's account/provider and moves
  * independently of Gezel, so embedding version numbers there creates cosmetic
  * drift even though the actual model selection remains current.
+ *
+ * Effort ranges and defaults describe what the aliases resolve to on the
+ * Anthropic API (Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5). The default is
+ * only the picker's "Model default" label — Gezel passes no `--effort` when
+ * the user leaves it unset — so it must match Claude Code's own default.
  */
+const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
 const HARDCODED_MODELS: ModelInfo[] = [
   { id: 'default', name: 'Recommended for your account' },
   {
     id: 'best',
     name: 'Best available — Most capable model your account can use',
     supportsReasoning: true,
-    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    defaultReasoningEffort: 'xhigh',
+    reasoningEfforts: CLAUDE_EFFORTS,
+    defaultReasoningEffort: 'high',
   },
   {
     id: 'fable',
-    name: 'Claude Fable 5 — Highest capability for demanding, long-running work',
+    name: 'Claude Fable — Highest capability for demanding, long-running work',
     supportsReasoning: true,
-    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    reasoningEfforts: CLAUDE_EFFORTS,
     defaultReasoningEffort: 'high',
     contextWindow: 1_000_000,
   },
@@ -46,37 +62,43 @@ const HARDCODED_MODELS: ModelInfo[] = [
     id: 'sonnet',
     name: 'Claude Sonnet — Balanced speed and capability for daily work',
     supportsReasoning: true,
-    reasoningEfforts: ['low', 'medium', 'high', 'max'],
-    defaultReasoningEffort: 'high',
+    reasoningEfforts: CLAUDE_EFFORTS,
+    defaultReasoningEffort: 'medium',
   },
   {
     id: 'sonnet[1m]',
     name: 'Claude Sonnet with 1M context — For long sessions and large codebases',
     supportsReasoning: true,
-    reasoningEfforts: ['low', 'medium', 'high', 'max'],
-    defaultReasoningEffort: 'high',
+    reasoningEfforts: CLAUDE_EFFORTS,
+    defaultReasoningEffort: 'medium',
   },
   {
     id: 'opus',
     name: 'Claude Opus — Deep reasoning for complex work',
     supportsReasoning: true,
-    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    defaultReasoningEffort: 'xhigh',
+    reasoningEfforts: CLAUDE_EFFORTS,
+    defaultReasoningEffort: 'medium',
   },
   {
     id: 'opus[1m]',
     name: 'Claude Opus with 1M context — Deep reasoning for long sessions',
     supportsReasoning: true,
-    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    defaultReasoningEffort: 'xhigh',
+    reasoningEfforts: CLAUDE_EFFORTS,
+    defaultReasoningEffort: 'medium',
   },
-  { id: 'haiku', name: 'Claude Haiku — Fastest for simple tasks' },
+  {
+    id: 'haiku',
+    name: 'Claude Haiku — Fastest for simple tasks',
+    supportsReasoning: true,
+    reasoningEfforts: CLAUDE_EFFORTS,
+    defaultReasoningEffort: 'medium',
+  },
   {
     id: 'opusplan',
     name: 'Plan with Opus, build with Sonnet — For complex implementation work',
     supportsReasoning: true,
-    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-    defaultReasoningEffort: 'xhigh',
+    reasoningEfforts: CLAUDE_EFFORTS,
+    defaultReasoningEffort: 'medium',
   },
 ];
 

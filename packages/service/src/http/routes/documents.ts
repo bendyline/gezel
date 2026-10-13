@@ -4,9 +4,9 @@ import {
   SearchDocumentsRequestSchema,
   WriteDocumentRequestSchema,
 } from '@bendyline/gezel';
+import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { Hono } from 'hono';
 import { DocumentPathExistsError, DocumentPathNotFoundError } from '../../fs/documents-store.js';
-import { realpathContained, safeJoin } from '../../fs/safe-paths.js';
 import type { ServiceContext } from '../context.js';
 
 export function documentRoutes(ctx: ServiceContext): Hono {

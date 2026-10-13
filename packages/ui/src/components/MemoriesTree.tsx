@@ -252,7 +252,7 @@ export function ProjectMemoriesEditor({
       sectionClassName="project-about-section project-about-anchor"
       title="Project memories"
       hint="Notes shared by every gezel working in this project. Changes are saved to the project’s memory files and used in future recall."
-      emptyText="No project memories yet. Gezels add shared notes here as work progresses."
+      emptyText="No project memories yet. Gezellen add shared notes here as work progresses."
     />
   );
 }
@@ -266,8 +266,8 @@ export function UserMemoriesEditor() {
       ownerName="About you"
       sectionId="settings-about-you"
       title="About you"
-      hint="What your gezels have learned about you, shared by all of them. Correct or remove anything here; gezels read the new version from their next message."
-      emptyText="Nothing yet. As you work together, gezels note what they learn about you here."
+      hint="What your gezellen have learned about you, shared by all of them. Correct or remove anything here; gezellen read the new version from their next message."
+      emptyText="Nothing yet. As you work together, gezellen note what they learn about you here."
     />
   );
 }

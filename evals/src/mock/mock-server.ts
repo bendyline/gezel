@@ -176,9 +176,14 @@ export async function startMockServices(
     (mock): mock is Extract<MockService, { kind: 'http' | 'webhook' | 'mcp' }> =>
       mock.kind === 'http' || mock.kind === 'webhook' || mock.kind === 'mcp',
   );
-  if (live.length === 0) return null;
+  // A cli-only spec still needs a runtime: setupMockServices seeds the shim
+  // scripts from it, and returning null skipped them, so chapter-narration-run
+  // and three other media books ran with no probe to call (2026-10-10).
+  if (live.length === 0 && !mocks.some((mock) => mock.kind === 'cli')) return null;
 
   const pems = await selfsigned.generate([{ name: 'commonName', value: '127.0.0.1' }], {
+    // Rust TLS clients reject selfsigned's default SHA-1 even when explicitly trusted.
+    algorithm: 'sha256',
     keySize: 2048,
     extensions: [
       {

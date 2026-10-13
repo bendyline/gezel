@@ -25,9 +25,9 @@ import {
   seedParamDefaults,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import { makeCraftbookResolver } from '../craftbook/resolve.js';
-import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { installProjectTypeScripts } from '../scripts/install.js';
 import { parseCron } from '../tasks/cron.js';

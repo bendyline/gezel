@@ -1,16 +1,16 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
-import { describe, expect, it, vi } from 'vitest';
-import { LlamaCppProvider } from '../llama-cpp/index.js';
 import {
   buildDs4Provider,
   ds4RuntimeArgs,
   ds4VisionArgs,
   resolveDs4VisionLaunch,
-} from './build-provider.js';
-import { Ds4Provider } from './provider.js';
-import { classifyDs4Line } from './stdout-parser.js';
+} from '@bendyline/gezel-inference/internal/providers/ds4/build-provider';
+import { Ds4Provider } from '@bendyline/gezel-inference/internal/providers/ds4/provider';
+import { classifyDs4Line } from '@bendyline/gezel-inference/internal/providers/ds4/stdout-parser';
+import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/index';
+import { describe, expect, it, vi } from 'vitest';
 
 // Provider wiring is independent of the CI runner's physical memory. Give
 // local-launch tests a deterministic workstation-sized host so they exercise
@@ -19,7 +19,9 @@ vi.mock('node:os', async (importOriginal) => ({
   ...(await importOriginal<typeof import('node:os')>()),
   totalmem: () => 128 * 1024 ** 3,
 }));
-vi.mock('../native/port.js', () => ({ pickFreePort: vi.fn().mockResolvedValue(51_147) }));
+vi.mock('@bendyline/gezel-inference/internal/providers/native/port', () => ({
+  pickFreePort: vi.fn().mockResolvedValue(51_147),
+}));
 
 /**
  * A minimal stand-in for the inner llama.cpp engine. Ds4Provider is a

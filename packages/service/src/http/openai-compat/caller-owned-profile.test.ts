@@ -1,6 +1,6 @@
+import { profileForCallerOwnedInference } from '@bendyline/gezel-inference/internal/http/openai-compat/caller-owned-profile';
+import type { ResolvedModelProfile } from '@bendyline/gezel-inference/internal/model-profile/types';
 import { describe, expect, it } from 'vitest';
-import type { ResolvedModelProfile } from '../../model-profile/types.js';
-import { profileForCallerOwnedInference } from './caller-owned-profile.js';
 
 function profileWith(...behaviorIds: string[]): ResolvedModelProfile {
   return {

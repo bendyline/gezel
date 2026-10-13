@@ -21,8 +21,8 @@
  */
 
 import { type ObservationTableManifest, createLogger } from '@bendyline/gezel';
+import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { corpusDirFor } from '../connectors/manager.js';
-import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { DEFAULT_DUCK_TIMEOUT_MS, type DuckRunner, sqlLiteral } from './duck.js';
 import {

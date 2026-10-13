@@ -1,6 +1,6 @@
+import type { ProcessListEntry } from '@bendyline/gezel-inference/internal/system/gezel-process-memory';
 import { describe, expect, it, vi } from 'vitest';
 import { reapOrphanedGezelEngineProcesses } from './gezel-process-cleanup.js';
-import type { ProcessListEntry } from './gezel-process-memory.js';
 
 const HOME = '/Users/test/.gezel-dev';
 

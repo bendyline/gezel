@@ -16,7 +16,7 @@ import {
   type GitHubReposResponse,
   ModelDownloadPreflightRequestSchema,
   ModelDownloadPreflightResponseSchema,
-  PNPM_HOISTED_NODE_LINKER,
+  PNPM_MANAGED_TREE_EXEC_CONFIG,
   PerfSnapshotSchema,
   SystemDiagnosticsSchema,
   type SystemHomeInfo,
@@ -24,9 +24,16 @@ import {
   createLogger,
   isUserCreatedProject,
 } from '@bendyline/gezel';
+import { modelStorageRoots } from '@bendyline/gezel-inference/internal/models/storage-roots';
+import {
+  perfSnapshot,
+  recordClientPerfReport,
+} from '@bendyline/gezel-inference/internal/perf/responsiveness';
+import { isLocalProvider } from '@bendyline/gezel-inference/internal/providers/native/engine-key';
 import { Octokit } from '@octokit/rest';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { installedModelsFitNow } from '../../chat/model-fit-now.js';
 import {
   clearGitHubToken,
   fetchGitHubIdentity,
@@ -40,19 +47,17 @@ import {
   InvalidGitHubUrlError,
   previewGitHubRepo,
 } from '../../github/repo-preview.js';
-import { modelStorageRoots } from '../../models/storage-roots.js';
 import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
-import { perfSnapshot, recordClientPerfReport } from '../../perf/responsiveness.js';
 import { resolveCopilotAvailability } from '../../providers/copilot-availability.js';
 import { resolveDefaultProviderName } from '../../providers/default-provider.js';
 import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
 
 import { collectSystemDiagnosticsCached } from '../../system/diagnostics.js';
 
-import { detectMemoryProfile } from '../../system/memory.js';
-import { checkDiskSpace } from '../../utils/disk-space.js';
+import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
+import { detectMemoryProfile } from '@bendyline/gezel-inference/internal/system/memory';
+import { checkDiskSpace } from '@bendyline/gezel-inference/internal/utils/disk-space';
 import type { ServiceContext } from '../context.js';
-import { machineEngineProxy } from './machine-engine-proxy.js';
 
 const log = createLogger('http');
 
@@ -95,6 +100,17 @@ export function systemRoutes(ctx: ServiceContext): Hono {
   app.get('/memory', async (c) => {
     const profile = await detectMemoryProfile();
     return c.json(profile);
+  });
+
+  /**
+   * Whether each installed on-device model would start with the memory free
+   * now, by the launch check's own arithmetic. Settings labels read it.
+   */
+  app.get('/models-fit-now', async (c) => {
+    const provider = c.req.query('provider') ?? 'llama-cpp';
+    if (!isLocalProvider(provider)) return c.json({ error: 'not an on-device provider' }, 400);
+    const fit = await installedModelsFitNow({ chat: ctx.chat, catalog: ctx.catalog }, provider);
+    return fit ? c.json(fit) : c.json({ error: 'not an on-device provider' }, 400);
   });
 
   /**
@@ -313,7 +329,12 @@ export function systemRoutes(ctx: ServiceContext): Hono {
       const extendedPath = nodeDir
         ? `${nodeDir}${delimiter}${process.env.PATH ?? ''}`
         : (process.env.PATH ?? '');
-      const pnpm = resolvePnpmCommand([PNPM_HOISTED_NODE_LINKER, 'exec', 'copilot', 'login']);
+      const pnpm = resolvePnpmCommand([
+        ...PNPM_MANAGED_TREE_EXEC_CONFIG,
+        'exec',
+        'copilot',
+        'login',
+      ]);
       const child = spawnPnpm(pnpm, {
         cwd: installDir,
         env: { ...process.env, PATH: extendedPath, FORCE_COLOR: '0' },

@@ -3,19 +3,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CURRENT_DATE_TIME_PREFIX, stripCurrentDateTimeLine } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import type { LlamaCppModelManager } from '@bendyline/gezel-inference/internal/providers/llama-cpp/index';
+import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';
+import { CapacityBroker } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { EngineRouter } from '@bendyline/gezel-inference/internal/providers/native/engine-router';
+import {
+  type ProviderBuilder,
+  ProviderPool,
+} from '@bendyline/gezel-inference/internal/providers/native/provider-pool';
+import { ProviderDisposedError } from '@bendyline/gezel-inference/internal/providers/provider-disposal';
+import type { LLMSession, SessionOpts } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { PreviewLogBuffer } from '../preview-log/buffer.js';
-import type { LlamaCppModelManager } from '../providers/llama-cpp/index.js';
-import { LlamaCppProvider } from '../providers/llama-cpp/provider.js';
 import { MockProvider } from '../providers/mock.js';
-import { CapacityBroker } from '../providers/native/capacity-broker.js';
-import { EngineRouter } from '../providers/native/engine-router.js';
-import { type ProviderBuilder, ProviderPool } from '../providers/native/provider-pool.js';
-import { ProviderDisposedError } from '../providers/provider-disposal.js';
-import type { LLMSession, SessionOpts } from '../providers/types.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ChatEventBus } from './events.js';
 import { ChatManager } from './manager.js';

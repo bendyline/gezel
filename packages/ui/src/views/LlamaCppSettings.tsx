@@ -917,6 +917,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           <input
             type="text"
             placeholder="e.g. http://127.0.0.1:8080  (leave blank to use the supervised engine)"
+            aria-label="External engine URL"
             value={baseUrlDraft}
             onChange={(e) => setBaseUrlDraft(e.target.value)}
             style={{ flex: 1 }}
@@ -937,6 +938,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           <input
             type="text"
             placeholder="Absolute path to a .gguf file (overrides the local-models default)"
+            aria-label="Override model path"
             value={modelPathDraft}
             onChange={(e) => setModelPathDraft(e.target.value)}
             style={{ flex: 1 }}

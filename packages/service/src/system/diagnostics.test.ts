@@ -1,7 +1,7 @@
 import { SystemDiagnosticsSchema } from '@bendyline/gezel';
+import type { ModelInfo } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
-import type { ModelInfo } from '../providers/types.js';
 import {
   collectSystemDiagnostics,
   collectSystemDiagnosticsCached,

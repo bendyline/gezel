@@ -77,6 +77,7 @@ const FRONTMATTER_KEYS = [
   'models',
   'services',
   'paramSchema',
+  'samples',
   'cliWorkflow',
   'hooks',
   // Whole-book declarations that are NOT step fields. Omitting one here is

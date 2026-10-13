@@ -5,14 +5,17 @@ import {
   createLogger,
   nowIso,
 } from '@bendyline/gezel';
+import {
+  type RecognitionMode,
+  resolveImageStrategy,
+} from '@bendyline/gezel-inference/internal/chat/vision-capability';
+import type { ImageAttachment } from '@bendyline/gezel-inference/internal/providers/types';
 import type { Store } from '../fs/store.js';
 import { readImageStaticMeta } from '../index-store/image-meta.js';
 import type { RecognitionManager } from '../providers/recognition/manager.js';
 import { resolveAutoMode } from '../providers/recognition/prompts.js';
-import type { ImageAttachment } from '../providers/types.js';
 import { type ResolvedImage, extractResolvedImages } from './image-attachments.js';
 import { toMessageDigest } from './recognition-splice.js';
-import { type RecognitionMode, resolveImageStrategy } from './vision-capability.js';
 
 const log = createLogger('chat');
 

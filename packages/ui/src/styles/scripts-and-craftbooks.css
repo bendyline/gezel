@@ -455,7 +455,7 @@
 
 .new-craftbook-field-label {
   font-size: 0.85rem;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .new-craftbook-picker-list {

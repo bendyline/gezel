@@ -2,15 +2,15 @@ import type { Stats } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative } from 'node:path';
 import { type ProjectFileEntry, isOutsideInInternalPath } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { type ExternalFolders, gezelPaths } from '@bendyline/gezel/paths';
 import type { HistoryManager } from '../history/manager.js';
 import { convertDocToMarkdown, isConvertibleDoc } from '../index-store/docs.js';
-import { writeFileAtomic } from './atomic.js';
 import { looksBinaryText } from './binary-text.js';
 import { DocumentAuditCoalescer } from './document-audit.js';
 import { mimeTypeForFilename } from './media-types.js';
 import { resolveOwnedMutationPath } from './mutation-path-refusal.js';
-import { safeJoin } from './safe-paths.js';
 import {
   type WalkDirResult,
   listDirEntries,

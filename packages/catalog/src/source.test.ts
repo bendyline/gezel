@@ -1196,6 +1196,16 @@ describe('BundledSource — file-bundle index', () => {
     expect(items.map((i) => i.manifest.id)).toEqual(['aa-tool']);
   });
 
+  it('refreshes a cached listing after an index edit without sharing mutable results', async () => {
+    await writeFileIndex('toolsets', 'toolset', [toolsetEntry('aa-tool')]);
+    const source = new BundledSource({ dataDir: root });
+    const first = await source.list('toolset');
+    first[0]!.manifest.name = 'Changed by caller';
+    expect((await source.list('toolset'))[0]?.manifest.name).toBe('aa-tool');
+    await writeFileIndex('toolsets', 'toolset', [toolsetEntry('bb-tool')]);
+    expect((await source.list('toolset')).map((item) => item.manifest.id)).toEqual(['bb-tool']);
+  });
+
   it('reads a version its snapshot does not carry from the item folder', async () => {
     const dir = await writeIdentity(root, 'toolset', 'aa-tool', baseToolsetIdentity('aa-tool'));
     await writeVersion(dir, '1.0.0', { ...baseToolsetVersion('1.0.0'), notes: 'from the folder' });
@@ -1215,10 +1225,11 @@ describe('BundledSource — file-bundle index', () => {
       },
     ]);
     // A build below 2.0.0's floor picks 1.0.0, which only the folder has.
-    const [item] = await new BundledSource({ dataDir: root, gezelVersion: '1.26200.3' }).list(
-      'toolset',
-    );
+    const source = new BundledSource({ dataDir: root, gezelVersion: '1.26200.3' });
+    const [item] = await source.list('toolset');
     expect(item?.manifest).toMatchObject({ version: '1.0.0', notes: 'from the folder' });
+    await writeVersion(dir, '1.0.0', { ...baseToolsetVersion('1.0.0'), notes: 'edited on disk' });
+    expect((await source.list('toolset'))[0]?.manifest).toMatchObject({ notes: 'edited on disk' });
   });
 
   it('ignores what this build does not understand inside an entry', async () => {

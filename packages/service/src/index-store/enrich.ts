@@ -6,12 +6,15 @@ import {
   createLogger,
   isLocalProvider,
 } from '@bendyline/gezel';
+import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import {
+  EngineBusyError,
+  isEngineBusyError,
+} from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
 import { CompletionBlockedError } from '../chat/large-content.js';
 import type { ChatManager } from '../chat/manager.js';
-import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
-import { EngineBusyError, isEngineBusyError } from '../providers/native/capacity-broker.js';
 import { shadowDocFilesPaths } from './docs.js';
 import { type EnrichOutcome, classifyEnrichFailure } from './enrich-breaker.js';
 import {
@@ -25,6 +28,7 @@ import {
 import { parseFrontmatter } from './frontmatter.js';
 import type { FileRecord, IndexProvenance } from './index-store-types.js';
 import { type IndexStore, MAX_ENRICH_ATTEMPTS } from './index-store.js';
+import { retryOnContention } from './sqlite-driver.js';
 
 /**
  * Per-file semantic enrichment (the boekwachter's unit of work): produce an
@@ -351,7 +355,7 @@ export async function buildEnrichDeps(
     onOutcome?: (outcome: EnrichOutcome) => void;
   } = {},
 ): Promise<EnrichDeps> {
-  const { embedBatch } = await import('../memory/embeddings.js');
+  const { embedBatch } = await import('@bendyline/gezel-inference/internal/memory/embeddings');
   const embed = (texts: string[]) => embedBatch(texts);
 
   const target = await resolveEnrichTarget(store, opts);
@@ -829,13 +833,16 @@ export async function enrichFile(
       failureReason = err instanceof Error ? err.message : String(err);
     }
     if (summary) {
-      store.upsertSummary({
+      // The summary cost a model call; a static-index write holding the lock
+      // for longer than the main thread's busy budget must not discard it.
+      const record = {
         contentHash: file.hash,
         filePath: file.path,
         summaryMd: summary,
         model: completion?.model ?? deps.model ?? 'unknown',
         ...(completion?.provenance ? { provenance: completion.provenance } : {}),
-      });
+      };
+      await retryOnContention(() => store.upsertSummary(record));
       result.summarized = true;
     }
   }

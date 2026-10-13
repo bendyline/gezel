@@ -501,7 +501,7 @@ Deep dive: [secrets-security.md](secrets-security.md). Summary of the controls:
 
 ## 10. Path-safety primitives
 
-`packages/service/src/fs/safe-paths.ts` — every user/model-supplied path funnels through these:
+`packages/inference/src/fs/safe-paths.ts` — every user/model-supplied path funnels through these:
 
 - `safeJoin(base, rel)` — lexical containment with a **trailing-separator terminator** (so
   `/home/foo` doesn't match `/home/foobar`) and platform-correct case folding. Blocks `..`,
@@ -705,7 +705,7 @@ app):
 - `packages/service/src/scripts/runner.ts`, `dispatcher.ts` — capability gating, credential resolution.
 
 **fs / secrets / ssrf**
-- `packages/service/src/fs/safe-paths.ts`, `fs/store.ts`, `fs/atomic.ts`.
+- `packages/inference/src/fs/safe-paths.ts`, `fs/store.ts`, `fs/atomic.ts`.
 - `packages/service/src/secrets/file-store.ts`, `secrets/registry.ts`.
 - `packages/service/src/utils/ssrf.ts`.
 

@@ -2,8 +2,11 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import {
+  ReadOnlyModelError,
+  hashModelPayloadFiles,
+} from '@bendyline/gezel-inference/internal/models/storage-roots';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ReadOnlyModelError, hashModelPayloadFiles } from '../../models/storage-roots.js';
 import { VideoModelManager } from './models.js';
 
 const tempRoots: string[] = [];

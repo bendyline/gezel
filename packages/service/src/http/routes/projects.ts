@@ -15,7 +15,7 @@ import {
   InsertAtMarkerInProjectWorkspaceFileRequestSchema,
   InstallPackageRequestSchema,
   NpmInstallRequestSchema,
-  PNPM_HOISTED_NODE_LINKER,
+  PNPM_MANAGED_TREE_EXEC_CONFIG,
   ProjectAboutPreviewRequestSchema,
   type ProjectAboutPreviewResponse,
   ProjectFolderPreviewRequestSchema,
@@ -34,6 +34,14 @@ import {
   resolveSecurityPolicy,
   starterCraftbookIds,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import {
+  PathSafetyError,
+  intoWorkspaceRelative,
+  realpathContained,
+  resolveMutationPath,
+  safeJoin,
+} from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { playwrightBrowsersDir, projectThumbnailsDir } from '@bendyline/gezel/paths';
 import { type Context, Hono } from 'hono';
 import { previewFolder } from '../../about/folder-preview.js';
@@ -42,7 +50,6 @@ import {
   listProjectCraftbookOffer,
   suggestedCraftbookIdsForType,
 } from '../../craftbook/applicable.js';
-import { writeFileAtomic } from '../../fs/atomic.js';
 import { MutationPathRefusedError } from '../../fs/mutation-path-refusal.js';
 import {
   ArtifactPathExistsError,
@@ -54,13 +61,6 @@ import {
   TaskInputPathWriteDeniedError,
   normalizeArtifactPath,
 } from '../../fs/project-artifacts-store.js';
-import {
-  PathSafetyError,
-  intoWorkspaceRelative,
-  realpathContained,
-  resolveMutationPath,
-  safeJoin,
-} from '../../fs/safe-paths.js';
 import { ProjectDeleteError } from '../../fs/store.js';
 import { isOfficeLockName } from '../../fs/sync-junk.js';
 import { resolveProjectBoekwachter } from '../../gezels/autonomous-roles.js';
@@ -1691,7 +1691,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         const configPath = join(testConfigDir, 'playwright.config.mjs');
         await writeFileAtomic(configPath, playwrightTestConfigSource(scriptAbs));
         args = [
-          PNPM_HOISTED_NODE_LINKER,
+          ...PNPM_MANAGED_TREE_EXEC_CONFIG,
           '--dir',
           playwright.installPath,
           'exec',
@@ -1702,7 +1702,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         ];
       } else {
         args = [
-          PNPM_HOISTED_NODE_LINKER,
+          ...PNPM_MANAGED_TREE_EXEC_CONFIG,
           '--dir',
           playwright.installPath,
           'exec',

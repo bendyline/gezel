@@ -1,7 +1,6 @@
 import type {
   ActiveImagePull,
   CatalogItemSummary,
-  ImageModelHardwareTier,
   ImageModelManifest,
   ImageModelPullEvent,
   InstalledImageModel,
@@ -11,15 +10,20 @@ import { api } from '../api.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { LicenseButton } from './LicenseButton.js';
+import {
+  HiddenModelsToggle,
+  MediaFitNote,
+  fitConfirmMessage,
+  hiddenByFit,
+  useMediaModelFit,
+} from './media-model-fit.js';
 
 /**
  * Install / pull / delete flow for `image-model` catalog entries.
  * Mirrors {@link OllamaModelManager}'s structure: a list of installed
  * models, the generic {@link CatalogBrowser} for the catalog picker,
- * and a per-entry action button wired to the pull SSE stream. Simpler
- * than Ollama's version — no memory-budget filtering yet (VRAM
- * detection is nontrivial cross-platform) and no auto-resume of
- * interrupted pulls.
+ * and a per-entry action button wired to the pull SSE stream. Models the
+ * daemon says this machine cannot run are hidden (docs/media-model-memory.md).
  */
 
 function formatSize(bytes: number): string {
@@ -29,17 +33,9 @@ function formatSize(bytes: number): string {
   return `${bytes} B`;
 }
 
-function hardwareTierLabel(tier: ImageModelHardwareTier, minRamGB: number): string {
-  switch (tier) {
-    case 'low':
-      return `Runs on ${minRamGB} GB`;
-    case 'mid':
-      return `${minRamGB} GB+`;
-    case 'high':
-      return `${minRamGB} GB+ recommended`;
-    case 'workstation':
-      return `${minRamGB} GB+ workstation`;
-  }
+/** The download: the weights plus every auxiliary file they need. */
+function downloadBytes(m: ImageModelManifest): number {
+  return m.approxSizeBytes + m.auxiliaryFiles.reduce((n, f) => n + f.approxSizeBytes, 0);
 }
 
 interface ActivePull {
@@ -88,6 +84,9 @@ export function ImageModelManager({
   const [installedError, setInstalledError] = useState<string | null>(null);
   const [pulls, setPulls] = useState<Map<string, ActivePull>>(new Map());
   const [toDelete, setToDelete] = useState<string | null>(null);
+  const fit = useMediaModelFit('image');
+  const [showAll, setShowAll] = useState(false);
+  const [fitConfirm, setFitConfirm] = useState<{ id: string; message: string } | null>(null);
   const pullsRef = useRef(pulls);
   pullsRef.current = pulls;
 
@@ -280,6 +279,13 @@ export function ImageModelManager({
   }, [toDelete, refresh, onModelsChanged]);
 
   const installedIds = useMemo(() => new Set(installed.map((m) => m.id)), [installed]);
+  const hiddenCount = useMemo(
+    () =>
+      fit.byId
+        ? [...fit.byId.values()].filter((f) => hiddenByFit(f) && !installedIds.has(f.id)).length
+        : 0,
+    [fit.byId, installedIds],
+  );
 
   // The model sd-server actually binds: the configured default when it's
   // still installed, else the first installed model (the engine's own
@@ -381,9 +387,19 @@ export function ImageModelManager({
 
       <div className="ollama-section ollama-section--flat ollama-section--download">
         <h4>Download a model</h4>
+        <HiddenModelsToggle
+          hiddenCount={hiddenCount}
+          showAll={showAll}
+          onToggle={() => setShowAll((v) => !v)}
+        />
         <CatalogBrowser
           kind="image-model"
           emptyMessage="No image models in the catalog yet. Remote catalog sources can add entries without an app update."
+          filter={(item: CatalogItemSummary) =>
+            showAll ||
+            installedIds.has(item.manifest.id) ||
+            !hiddenByFit(fit.byId?.get(item.manifest.id))
+          }
           action={(item: CatalogItemSummary) => {
             if (item.manifest.kind !== 'image-model') return null;
             const m = item.manifest as ImageModelManifest;
@@ -394,6 +410,8 @@ export function ImageModelManager({
               active && active.totalBytes > 0
                 ? Math.min(100, Math.round((active.bytesWritten / active.totalBytes) * 100))
                 : null;
+            const modelFit = fit.byId?.get(m.id);
+            const tooLarge = !already && hiddenByFit(modelFit);
             return (
               <div className="catalog-ollama-action">
                 <div className="catalog-ollama-meta">
@@ -407,8 +425,7 @@ export function ImageModelManager({
                         <span>{m.quantization}</span>
                       </>
                     )}
-                    <span>·</span>
-                    <span>{hardwareTierLabel(m.hardwareTier, m.minRamGB)}</span>
+                    <MediaFitNote fit={modelFit} />
                   </div>
                   <div className="catalog-ollama-pills">
                     <LicenseButton manifest={m} />
@@ -416,9 +433,13 @@ export function ImageModelManager({
                 </div>
                 <button
                   type="button"
-                  disabled={already || pulling || Boolean(disabledReason)}
-                  title={disabledReason ?? undefined}
-                  onClick={() => void startPull(m.id)}
+                  disabled={already || pulling || tooLarge || Boolean(disabledReason)}
+                  title={(tooLarge ? modelFit?.reason : disabledReason) ?? undefined}
+                  onClick={() => {
+                    const message = fitConfirmMessage(m.name, modelFit, downloadBytes(m));
+                    if (message) setFitConfirm({ id: m.id, message });
+                    else void startPull(m.id);
+                  }}
                 >
                   {already
                     ? 'On device'
@@ -426,7 +447,9 @@ export function ImageModelManager({
                       ? pct !== null
                         ? `Downloading… ${pct}%`
                         : 'Downloading…'
-                      : 'Download'}
+                      : tooLarge
+                        ? 'Too large'
+                        : 'Download'}
                 </button>
               </div>
             );
@@ -446,6 +469,18 @@ export function ImageModelManager({
         danger
         onCancel={() => setToDelete(null)}
         onConfirm={confirmDelete}
+      />
+
+      <ConfirmDialog
+        open={fitConfirm !== null}
+        title="This model may not fit"
+        message={fitConfirm?.message}
+        confirmLabel="Download anyway"
+        onCancel={() => setFitConfirm(null)}
+        onConfirm={() => {
+          if (fitConfirm) void startPull(fitConfirm.id);
+          setFitConfirm(null);
+        }}
       />
     </div>
   );

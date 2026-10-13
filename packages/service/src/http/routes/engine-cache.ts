@@ -1,9 +1,9 @@
 import { totalmem } from 'node:os';
+import { defaultCacheBudgetMb } from '@bendyline/gezel-inference/internal/cache/budget';
+import { usesMachineEngine } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import { Hono } from 'hono';
-import { defaultCacheBudgetMb } from '../../cache/budget.js';
 import type { EngineContext } from '../engine-context.js';
 import { sanitizeBrokerCacheStats } from './engine-queues.js';
-import { usesMachineEngine } from './machine-engine-proxy.js';
 
 export function engineCacheRoutes(ctx: EngineContext): Hono {
   const app = new Hono();

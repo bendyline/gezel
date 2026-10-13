@@ -1,4 +1,4 @@
-import type { OfficeSetupStatusResponse } from '@bendyline/gezel';
+import type { LocalHarnessSetupState, OfficeSetupStatusResponse } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
@@ -79,7 +79,13 @@ function MacFirstOpenDialog({ apps, onClose }: { apps: string[]; onClose: () => 
  * certificate, the connection, and the add-in files. Outside the desktop app
  * this card only shows status.
  */
-export function OfficeSetupCard({ onChanged }: { onChanged?: () => void | Promise<void> }) {
+export function OfficeSetupCard({
+  onChanged,
+  onStateChange,
+}: {
+  onChanged?: () => void | Promise<void>;
+  onStateChange?: (state: LocalHarnessSetupState) => void;
+}) {
   const bridge = window.__GEZEL__?.officeHost;
   const localDesktop = isLocalDesktopMode() && Boolean(bridge);
   const remoteMode = window.__GEZEL__?.mode === 'remote';
@@ -120,6 +126,11 @@ export function OfficeSetupCard({ onChanged }: { onChanged?: () => void | Promis
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const state = status?.state;
+  useEffect(() => {
+    if (state) onStateChange?.(state);
+  }, [state, onStateChange]);
 
   const run = async (
     action: () => Promise<
@@ -194,7 +205,7 @@ export function OfficeSetupCard({ onChanged }: { onChanged?: () => void | Promis
       </div>
 
       <p className="muted small harness-setup-intro">
-        Adds a Gezel button to the Home tab. It opens a pane where your gezels chat with you about
+        Adds a Gezel button to the Home tab. It opens a pane where your gezellen chat with you about
         the document you have open, and can read it and make the edits you ask for. Everything stays
         on this computer.
       </p>

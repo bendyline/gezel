@@ -14,8 +14,8 @@ import {
 } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import type { SearchFilesMatch, SearchFilesRequest, SearchFilesResponse } from '@bendyline/gezel';
+import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
-import { resolveInside } from '../fs/safe-paths.js';
 
 const DEFAULT_MAX_RESULTS = 50;
 const DEFAULT_TIMEOUT_MS = 10_000;

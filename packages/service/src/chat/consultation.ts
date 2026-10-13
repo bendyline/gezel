@@ -11,7 +11,7 @@ import {
   isLocalProvider,
   pronounFormsForGender,
 } from '@bendyline/gezel';
-import type { ProviderName } from '../providers/types.js';
+import type { ProviderName } from '@bendyline/gezel-inference/internal/providers/types';
 
 /**
  * Maximum chain depth for sync `ask_gezel` calls. A chain like A→B→C is

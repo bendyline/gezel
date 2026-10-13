@@ -1,5 +1,5 @@
+import type { ResolvedTuning } from '@bendyline/gezel-inference/internal/model-profile/tuning';
 import { describe, expect, it } from 'vitest';
-import type { ResolvedTuning } from '../model-profile/tuning.js';
 import {
   anthropicDefaultReasoningEffort,
   anthropicReasoningEfforts,
@@ -103,7 +103,112 @@ describe('Sonnet 5.5 request options', () => {
   });
 });
 
+describe('current-generation request options', () => {
+  it.each([
+    ['claude-opus-5-5', 'medium'],
+    ['claude-fable-5-1', 'high'],
+    ['claude-fable-5', 'high'],
+    ['claude-mythos-5-1', 'high'],
+    ['claude-opus-5', 'high'],
+    ['claude-opus-4-8', 'high'],
+    ['claude-opus-4-7', 'high'],
+    ['claude-haiku-5-5', 'medium'],
+  ])('sends %s adaptive thinking at its documented default effort', (model, effort) => {
+    expect(anthropicReasoningEfforts(model)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(anthropicDefaultReasoningEffort(model)).toBe(effort);
+    expect(buildAnthropicGenerationOptions(model)).toEqual({
+      model,
+      max_tokens: 16384,
+      thinking: { type: 'adaptive', display: 'summarized' },
+      output_config: { effort },
+    });
+  });
+
+  it('never sends a thinking budget or sampling to Opus 4.7 and later', () => {
+    const request = buildAnthropicGenerationOptions(
+      'claude-opus-4-8',
+      'high',
+      tuning({ sampling: { temperature: 0.7, topP: 0.9 }, reasoning: { thinkingBudget: 4096 } }),
+    );
+    expect(request).toEqual({
+      model: 'claude-opus-4-8',
+      max_tokens: 16384,
+      thinking: { type: 'adaptive', display: 'summarized' },
+      output_config: { effort: 'high' },
+    });
+  });
+
+  it.each(['claude-opus-5-5', 'claude-fable-5-1'])(
+    'keeps %s thinking on when a setting asks to disable it',
+    (model) => {
+      const request = buildAnthropicGenerationOptions(
+        model,
+        'low',
+        tuning({ reasoning: { enableThinking: false } }),
+      );
+      expect(request.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+      expect(request.output_config).toEqual({ effort: 'low' });
+    },
+  );
+
+  it.each(['claude-opus-5', 'claude-haiku-5-5'])(
+    'disables %s thinking only at high effort or below',
+    (model) => {
+      const off = tuning({ reasoning: { enableThinking: false } });
+      expect(buildAnthropicGenerationOptions(model, 'high', off).thinking).toEqual({
+        type: 'disabled',
+      });
+      expect(() => buildAnthropicGenerationOptions(model, 'max', off)).toThrow(
+        'requires adaptive thinking at max effort',
+      );
+    },
+  );
+
+  it('accepts disabled thinking on Opus 4.8 at any effort', () => {
+    expect(
+      buildAnthropicGenerationOptions(
+        'claude-opus-4-8',
+        'max',
+        tuning({ reasoning: { enableThinking: false } }),
+      ).thinking,
+    ).toEqual({ type: 'disabled' });
+  });
+
+  it.each([
+    ['claude-opus-5-5', 'auto'],
+    ['claude-fable-5-1', 'auto'],
+    ['claude-fable-5', 'any'],
+    ['claude-opus-5', 'any'],
+  ])('sends %s a required tool choice as %s', (model, type) => {
+    expect(
+      buildAnthropicGenerationOptions(model, undefined, tuning({ toolChoice: 'required' }))
+        .tool_choice,
+    ).toEqual({ type });
+  });
+
+  it('shares a family contract with its dated snapshot but not with a newer point release', () => {
+    expect(anthropicDefaultReasoningEffort('claude-opus-5-20260301')).toBe('high');
+    expect(anthropicDefaultReasoningEffort('claude-opus-5-5')).toBe('medium');
+  });
+
+  it('leaves an unrecognized future model on its API defaults', () => {
+    expect(anthropicReasoningEfforts('claude-opus-6')).toBeUndefined();
+    expect(buildAnthropicGenerationOptions('claude-opus-6', 'high')).toEqual({
+      model: 'claude-opus-6',
+      max_tokens: 16384,
+    });
+  });
+});
+
 describe('older Anthropic model compatibility', () => {
+  it('raises max_tokens above a high thinking budget', () => {
+    expect(buildAnthropicGenerationOptions('claude-sonnet-4-5', 'high')).toEqual({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 16384 + 8192,
+      thinking: { type: 'enabled', budget_tokens: 16384 },
+    });
+  });
+
   it('retains manual thinking budgets on Sonnet 4.6', () => {
     expect(buildAnthropicGenerationOptions('claude-sonnet-4-6', 'medium')).toEqual({
       model: 'claude-sonnet-4-6',

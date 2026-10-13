@@ -2,8 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join, parse, sep } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { publishStagedModel } from './bundle-storage.js';
+import { publishStagedModel } from '@bendyline/gezel-inference/internal/models/bundle-storage';
 import {
   assertModelStorePathSafe,
   findModelRoot,
@@ -17,7 +16,8 @@ import {
   reclaimAbandonedModelDownloads,
   removeModelDir,
   verifyReadOnlyModelPayload,
-} from './storage-roots.js';
+} from '@bendyline/gezel-inference/internal/models/storage-roots';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const tempRoots: string[] = [];
 

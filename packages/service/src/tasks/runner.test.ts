@@ -2,10 +2,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MAX_RESTART_RESUMES, type TaskCraftbook, type TaskCraftbookStep } from '@bendyline/gezel';
+import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import type {
+  LLMProvider,
+  ProviderName,
+} from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
-import { ProviderQueue } from '../providers/queue.js';
-import type { LLMProvider, ProviderName } from '../providers/types.js';
 import { TaskManager } from './manager.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';
 import { retryPausedTask } from './retry.js';

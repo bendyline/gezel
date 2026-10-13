@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { MLX_DEFAULT_PACKAGE_SPEC, mlxVenvPackages } from './venv.js';
+import {
+  MLX_DEFAULT_PACKAGE_SPEC,
+  mlxVenvPackages,
+} from '@bendyline/gezel-inference/internal/providers/mlx/venv';
 
 /**
  * MTP speculative decoding crosses the same untyped argv boundary the
@@ -13,7 +16,7 @@ import { MLX_DEFAULT_PACKAGE_SPEC, mlxVenvPackages } from './venv.js';
  * asks for. These are text-level assertions because nothing type-checks
  * across the two languages.
  */
-const HERE = join(import.meta.dirname, '.');
+const HERE = join(import.meta.dirname, '../../../../inference/src/providers/mlx');
 const BUILDER = readFileSync(join(HERE, 'build-provider.ts'), 'utf8');
 const SIDECAR = readFileSync(join(HERE, 'python', 'gezel_mlx_server.py'), 'utf8');
 const SPEC = readFileSync(join(HERE, 'python', 'spec_decode.py'), 'utf8');

@@ -5,7 +5,7 @@ import {
   type ModelStorageRoots,
   assertModelStorePathSafe,
   findModelRoot,
-} from './storage-roots.js';
+} from '@bendyline/gezel-inference/internal/models/storage-roots';
 
 /**
  * One-shot rename of installs whose id predates the quant-suffix convention.

@@ -1,6 +1,13 @@
+import {
+  EngineBinaryRegistry,
+  engineInstallPhase,
+} from '@bendyline/gezel-inference/internal/engines/registry';
+import type {
+  EngineResolveEvent,
+  EngineResolveResult,
+  ResolveEngineOptions,
+} from '@bendyline/gezel-inference/internal/engines/resolver';
 import { describe, expect, it } from 'vitest';
-import { EngineBinaryRegistry } from './registry.js';
-import type { EngineResolveEvent, EngineResolveResult, ResolveEngineOptions } from './resolver.js';
 
 type ResolveImpl = (
   opts: ResolveEngineOptions,
@@ -85,6 +92,55 @@ describe('EngineBinaryRegistry', () => {
     expect(events.some((e) => e.type === 'done')).toBe(true);
     expect(reg.get(key)?.binPath).toBe('/cache/llama-server');
     reg.clear();
+  });
+
+  it('records unpacking progress on the snapshot', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const reg = new EngineBinaryRegistry({
+      home: '/tmp/x',
+      resolveImpl: async function* () {
+        yield { type: 'progress', bytesWritten: 100, totalBytes: 100 };
+        yield { type: 'extracting', bytesWritten: 30, totalBytes: 120 };
+        await gate;
+        yield { type: 'done', binPath: '/cache/llama-server', cached: false };
+        return {
+          binPath: '/cache/llama-server',
+          cached: false,
+          signature: { status: 'unsigned' },
+          version: '9',
+          assetPlatformKey: 'k',
+        };
+      },
+    });
+    const { key } = reg.ensure('llama-server', 'cuda');
+    await new Promise((r) => setTimeout(r, 0));
+
+    const snapshot = reg.get(key);
+    expect(snapshot).toMatchObject({
+      phase: 'extracting',
+      extracted: { bytesWritten: 30, totalBytes: 120 },
+    });
+    expect(snapshot && engineInstallPhase(snapshot)).toBe('is unpacking (25%)');
+
+    release();
+    await collect(reg, key);
+    reg.clear();
+  });
+
+  it('describes each install phase in plain words', () => {
+    const base = { bytesWritten: 40, totalBytes: 160 };
+    expect(engineInstallPhase({ ...base, phase: 'downloading' })).toBe('is downloading (25%)');
+    expect(engineInstallPhase({ ...base, phase: 'verifying' })).toBe('is being checked');
+    expect(
+      engineInstallPhase({
+        ...base,
+        phase: 'extracting',
+        extracted: { bytesWritten: 0, totalBytes: 0 },
+      }),
+    ).toBe('is unpacking');
   });
 
   it('surfaces a terminal error on the snapshot', async () => {

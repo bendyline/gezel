@@ -6,12 +6,8 @@ import {
   toolActivityLabel,
   turnCancelledMessage,
 } from '@bendyline/gezel';
-import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
-import type { QuotaBucket } from '../chat/usage.js';
-import { resolveCopilotCliPath } from './copilot-cli.js';
-import { isStdioSpec } from './mcp-bridge.js';
-import { ProviderQueue, runInQueue } from './queue.js';
-import { StreamingSessionBase } from './streaming-session.js';
+import { ProviderQueue, runInQueue } from '@bendyline/gezel-inference/internal/providers/queue';
+import { StreamingSessionBase } from '@bendyline/gezel-inference/internal/providers/streaming-session';
 import {
   ExternalToolsUnsupportedError,
   type ImageAttachment,
@@ -24,8 +20,12 @@ import {
   SessionResumeError,
   type ToolCallEvent,
   type TurnUsage,
-} from './types.js';
-import { buildTurnUsage } from './usage-builder.js';
+} from '@bendyline/gezel-inference/internal/providers/types';
+import { buildTurnUsage } from '@bendyline/gezel-inference/internal/providers/usage-builder';
+import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
+import type { QuotaBucket } from '../chat/usage.js';
+import { resolveCopilotCliPath } from './copilot-cli.js';
+import { isStdioSpec } from './mcp-bridge.js';
 
 const log = createLogger('copilot');
 

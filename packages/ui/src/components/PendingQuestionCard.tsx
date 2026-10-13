@@ -12,6 +12,7 @@ import { formatNightShiftSummary, parseTaskRef } from '@bendyline/gezel';
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { openAddFolder } from './AddFolderSheet.js';
+import { CardNavigation, QuestionPrompt } from './QuestionPrompt.js';
 import { PermissionIcon, WorkspacePermissionForm } from './WorkspacePermissionForm.js';
 import { RenderedMarkdown } from './chat-bubbles.js';
 import { navigateToTab, openProjectFileActions, runNavActions } from './nav-actions.js';
@@ -76,6 +77,8 @@ export function PendingQuestionCard(props: {
   onOpenInChat?: (question: Question) => void;
   /** Keep documents in the context strip in a narrow Activity panel. */
   compact?: boolean;
+  /** After the card opens a file, its task or its document. */
+  onNavigate?: () => void;
 }) {
   const { question } = props;
   const body = <QuestionBody {...props} />;
@@ -89,21 +92,23 @@ export function PendingQuestionCard(props: {
     !question.documentPath ||
     !isProseDocument(question.documentPath)
   ) {
-    return body;
+    return <CardNavigation.Provider value={props.onNavigate}>{body}</CardNavigation.Provider>;
   }
   return (
-    <div className="pending-question-splitwrap">
-      <div className="pending-question-split">
-        <div className="pending-question-split-main">
-          <DocumentHoisted.Provider value={true}>{body}</DocumentHoisted.Provider>
+    <CardNavigation.Provider value={props.onNavigate}>
+      <div className="pending-question-splitwrap">
+        <div className="pending-question-split">
+          <div className="pending-question-split-main">
+            <DocumentHoisted.Provider value={true}>{body}</DocumentHoisted.Provider>
+          </div>
+          <DocumentContext
+            projectId={question.projectId}
+            documentPath={question.documentPath}
+            layout="panel"
+          />
         </div>
-        <DocumentContext
-          projectId={question.projectId}
-          documentPath={question.documentPath}
-          layout="panel"
-        />
       </div>
-    </div>
+    </CardNavigation.Provider>
   );
 }
 
@@ -355,6 +360,11 @@ function NightShiftReviewCard({
   onAnswered?: (q: Question) => void;
 }) {
   const intent = question.intent as NightShiftReviewIntent;
+  const onNavigate = useContext(CardNavigation);
+  const go = (navigate: () => void) => {
+    navigate();
+    onNavigate?.();
+  };
   const [submitting, setSubmitting] = useQuestionDraft(question.id, 'submitting', () => false);
   const [error, setError] = useQuestionDraft<string | null>(question.id, 'error', () => null);
   const [review, setReview] = useState<NightShiftReviewResponse | null>(null);
@@ -451,7 +461,7 @@ function NightShiftReviewCard({
               key={`${pack.projectId}:${pack.packId}`}
               type="button"
               className="pending-question-night-row"
-              onClick={() => navigateToTab({ kind: 'project', id: pack.projectId })}
+              onClick={() => go(() => navigateToTab({ kind: 'project', id: pack.projectId }))}
             >
               <span className="pending-question-night-row-title">{pack.title}</span>
               <span className="muted small">
@@ -477,12 +487,14 @@ function NightShiftReviewCard({
               // hunting the artifacts drawer for the file we just named is
               // a step the user shouldn't have to take.
               onClick={() =>
-                runNavActions(
-                  openProjectFileActions({
-                    projectId: r.projectId,
-                    path: r.path,
-                    source: 'artifacts',
-                  }),
+                go(() =>
+                  runNavActions(
+                    openProjectFileActions({
+                      projectId: r.projectId,
+                      path: r.path,
+                      source: 'artifacts',
+                    }),
+                  ),
                 )
               }
             >
@@ -509,7 +521,7 @@ function NightShiftReviewCard({
               key={t.ref}
               type="button"
               className="pending-question-night-row"
-              onClick={() => navigateToTab({ kind: 'task', ref: t.ref })}
+              onClick={() => go(() => navigateToTab({ kind: 'task', ref: t.ref }))}
             >
               <span className="pending-question-night-row-title">{t.title}</span>
               <span className="muted small">
@@ -527,12 +539,14 @@ function NightShiftReviewCard({
             type="button"
             className="pending-question-night-row"
             onClick={() =>
-              runNavActions(
-                openProjectFileActions({
-                  projectId: 'default',
-                  path: intent.weeklyRecap!.path,
-                  source: 'artifacts',
-                }),
+              go(() =>
+                runNavActions(
+                  openProjectFileActions({
+                    projectId: 'default',
+                    path: intent.weeklyRecap!.path,
+                    source: 'artifacts',
+                  }),
+                ),
               )
             }
           >
@@ -702,9 +716,7 @@ function TaskPausedCard({
   return (
     <div className="pending-question pending-question-pending">
       <ContextStrip question={question} />
-      <div className="pending-question-prompt">
-        <RenderedMarkdown markdown={question.prompt} />
-      </div>
+      <QuestionPrompt question={question} />
       {held && <p className="pending-question-hold muted">{held}</p>}
       {error && <p className="pending-question-error">{error}</p>}
       <div className="pending-question-actions">
@@ -763,9 +775,7 @@ function TaskFinishedCard({
   return (
     <div className="pending-question pending-question-pending">
       <ContextStrip question={question} />
-      <div className="pending-question-prompt">
-        <RenderedMarkdown markdown={question.prompt} />
-      </div>
+      <QuestionPrompt question={question} />
       {error && <p className="pending-question-error">{error}</p>}
       <div className="pending-question-actions">
         <OpenInChatButton question={question} onOpenInChat={onOpenInChat} disabled={submitting} />
@@ -1419,9 +1429,7 @@ function PendingForm({
     <div className="pending-question pending-question-pending">
       <ContextStrip question={question} />
       {kicker && <span className="pending-question-label muted">{kicker}</span>}
-      <div className="pending-question-prompt" id={promptId}>
-        <RenderedMarkdown markdown={question.prompt} />
-      </div>
+      <QuestionPrompt question={question} id={promptId} />
       {choices.length > 0 && (
         <fieldset
           className={`pending-question-choices${multi ? ' is-multi' : ''}`}
@@ -1720,6 +1728,7 @@ function ContextStrip({ question }: { question: Question }) {
 }
 
 function TaskContext({ taskRef }: { taskRef: string }) {
+  const onNavigate = useContext(CardNavigation);
   const [task, setTask] = useState<Task | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -1767,7 +1776,10 @@ function TaskContext({ taskRef }: { taskRef: string }) {
       <button
         type="button"
         className="pending-question-context-link"
-        onClick={() => navigateToTab({ kind: 'task', ref: taskRef })}
+        onClick={() => {
+          navigateToTab({ kind: 'task', ref: taskRef });
+          onNavigate?.();
+        }}
       >
         Open task
       </button>
@@ -1802,6 +1814,7 @@ function DocumentContext({
    */
   layout?: 'inline' | 'panel' | 'full';
 }) {
+  const onNavigate = useContext(CardNavigation);
   const panel = layout === 'panel';
   const fullDocument = layout !== 'inline';
   const [content, setContent] = useState<string | null>(null);
@@ -1878,13 +1891,12 @@ function DocumentContext({
       runNavActions(
         openProjectFileActions({ projectId: owner, path, source: 'artifacts', fromQuestion: true }),
       );
-      return;
-    }
-    if (resolvedKind === 'project-document') {
+    } else if (resolvedKind === 'project-document') {
       navigateToTab({ kind: 'project', id: owner });
-      return;
+    } else {
+      navigateToTab({ kind: 'document', path: documentPath });
     }
-    navigateToTab({ kind: 'document', path: documentPath });
+    onNavigate?.();
   };
 
   return (

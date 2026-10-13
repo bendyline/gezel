@@ -3,13 +3,13 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fetch as undiciFetch } from 'undici';
-import { describe, expect, it } from 'vitest';
 import {
   WhisperCppProvider,
   inlineAudioFilename,
   normalizeWhisperTranscript,
-} from './whisper-cpp.js';
+} from '@bendyline/gezel-inference/internal/providers/audio/whisper-cpp';
+import { fetch as undiciFetch } from 'undici';
+import { describe, expect, it } from 'vitest';
 
 describe('WhisperCppProvider', () => {
   it('removes MediaRecorder codec parameters from the upload filename', () => {

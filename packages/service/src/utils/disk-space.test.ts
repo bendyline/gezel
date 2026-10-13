@@ -1,8 +1,12 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  checkDiskSpace,
+  describeDiskShortfall,
+  requiredSlackBytes,
+} from '@bendyline/gezel-inference/internal/utils/disk-space';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { checkDiskSpace, describeDiskShortfall, requiredSlackBytes } from './disk-space.js';
 
 const GIB = 1024 ** 3;
 

@@ -1,7 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { chmod } from 'node:fs/promises';
+import {
+  readSecurityJson,
+  writeSecurityJson,
+} from '@bendyline/gezel-inference/internal/fs/security-json';
 import { tokensFile as defaultTokensFile } from '@bendyline/gezel/paths';
-import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
 
 /**
  * The scope vocabulary the daemon recognizes.

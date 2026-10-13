@@ -12,6 +12,7 @@ import {
   isProactiveAllowed,
   isSchedulingAllowed,
 } from '@bendyline/gezel';
+import { copyFileAtomic, writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   ambientDashboardLatestFile,
   ambientDashboardStateFile,
@@ -19,7 +20,6 @@ import {
 } from '@bendyline/gezel/paths';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ActivityTracker } from '../fs/activity-tracker.js';
-import { copyFileAtomic, writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import {

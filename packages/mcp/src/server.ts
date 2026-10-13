@@ -3,6 +3,8 @@ import {
   AdvanceTaskStepInputSchema,
   AppendToFileInputSchema,
   AskUserQuestionInputSchema,
+  type BriefRoutableType,
+  type BriefTypeMatch,
   CreateTaskInputSchema,
   type DiffpackDraftOperation,
   EmptyInputSchema,
@@ -20,6 +22,7 @@ import {
   ListProjectGezelsInputSchema,
   ListScriptsInputSchema,
   ListTasksInputSchema,
+  MIN_TASK_DESCRIPTION_LENGTH,
   ManageTaskInputSchema,
   MessageGezelInputSchema,
   ReadDocumentInputSchema,
@@ -42,8 +45,11 @@ import {
   formatMediaClock,
   gezelNotFoundMessage,
   gezelRosterHint,
+  matchProjectTypeForBrief,
   normalizeArtifactPath,
   projectNotFoundMessage,
+  projectTypeNamedByBrief,
+  roleWithGloss,
 } from '@bendyline/gezel';
 /**
  * Gezel MCP Server
@@ -177,6 +183,11 @@ import {
 import { extractPageElementsFromYaml, scorePageElementMatch } from './browser-page-elements.js';
 import { commandResultIsError } from './command-result.js';
 import {
+  registerConnectorTools,
+  registerEmailTools,
+  registerSocialTools,
+} from './connector-action-tools.js';
+import {
   RootTurnInvocationCache,
   rootTurnIdFromMessages,
   rootTurnInvocationKey,
@@ -207,9 +218,14 @@ import {
   scriptFileCandidates,
 } from './installed-script-miss.js';
 import {
+  briefIsWrittenWork,
   buildKickoffStepDescription,
   buildKickoffTaskDescription,
+  buildTypedKickoffStep,
+  defaultDeliverableForBrief,
+  documentProducerRole,
   inferSourceDeliverablePath,
+  kickoffTaskTitle,
   shouldPromoteStartJobToProject,
 } from './kickoff-text.js';
 import {
@@ -248,7 +264,6 @@ import {
   taskStepMutationRejection,
 } from './task-step-authority.js';
 import {
-  ActionToolOutputSchema,
   ExecutionToolOutputSchema,
   GitToolOutputSchema,
   ListToolOutputSchema,
@@ -1126,345 +1141,20 @@ server.tool(
   },
 );
 
-// ── email (projects with a mail-type connector binding) ──────────────────
-// Reading email is done by reading the synced markdown files like any other
-// file. These three tools are the WRITE path over the connector action
-// surface: drafting stages a `send` action under the mail binding's corpus,
-// and send_email commits it through the daemon-enforced recipient-allowlist
-// consent scope (deny-by-default; night shift defers to the outbox).
-// Registered only when the chat manager set GEZEL_MAIL_ENABLED (i.e. the
-// project has a mail-type connector binding).
-async function connectorActionApi(
-  path: string,
-  method: string,
-  body?: unknown,
-): Promise<{ ok: boolean; data: Record<string, unknown> }> {
-  const url = `${baseUrl}/api/projects/${projectId}/connectors${path ? `/${path}` : ''}`;
-  const res = await fetchImpl(url, {
-    method,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
-  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  return { ok: res.ok, data };
-}
-
-/** Mail-type bindings on the project (accountId narrows to one). */
-async function resolveMailBinding(accountId?: string): Promise<string | null> {
-  const { ok, data } = await connectorActionApi('', 'GET');
-  if (!ok) throw new Error(String(data.error ?? 'failed to list connector bindings'));
-  const bindings = (data.bindings ?? []) as { id: string; type: string }[];
-  const mail = bindings.filter((b) => typeof b.type === 'string' && b.type.startsWith('mail-'));
-  if (accountId) {
-    const match = mail.find((b) => b.id === accountId)?.id;
-    if (!match) throw new Error(`mail connector binding "${accountId}" was not found`);
-    return match;
-  }
-  return mail[0]?.id ?? null;
-}
-
-function registerEmailTools() {
-  server.tool(
-    'draft_email',
-    "Compose an email draft and save it for review. This does NOT send — it stages a send action under the mail connector's corpus. Use queue_email to stage it for approval and send_email to actually transmit (sending is restricted to allowlisted recipients).",
-    {
-      to: z.array(z.string()).describe('Recipient email addresses'),
-      cc: z.array(z.string()).optional().describe('CC recipients'),
-      bcc: z.array(z.string()).optional().describe('BCC recipients'),
-      subject: z.string().describe('Subject line'),
-      body: z.string().describe('Email body (markdown; sent as plain text)'),
-      inReplyTo: z.string().optional().describe('Message-ID being replied to, to thread the send'),
-      accountId: z
-        .string()
-        .optional()
-        .describe('Which mail connector binding to send from (defaults to the first)'),
-    },
-    async (args) => {
-      try {
-        const bindingId = await resolveMailBinding(args.accountId);
-        if (!bindingId) return errorResult('This project has no linked mail connector.');
-        const { accountId: _drop, ...input } = args;
-        const { ok, data } = await connectorActionApi(
-          `${encodeURIComponent(bindingId)}/actions`,
-          'POST',
-          { action: 'send', input },
-        );
-        if (!ok) return errorResult(String(data.error ?? 'Email draft failed.'));
-        const draftId = typeof data.draftId === 'string' ? data.draftId : undefined;
-        const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
-        const summary = `Draft saved${draftId ? ` (id: ${draftId})` : ''}${relPath ? ` at ${relPath}` : ''}. Review it, then call queue_email then send_email.`;
-        return okResult(
-          ActionToolOutputSchema,
-          {
-            summary,
-            status: 'drafted',
-            ...(draftId ? { draftId } : {}),
-            ...(relPath ? { relPath } : {}),
-          },
-          { text: summary },
-        );
-      } catch (err) {
-        return errorResult(`draft_email failed: ${unwrapApiError(err)}`);
-      }
-    },
-  );
-
-  server.tool(
-    'queue_email',
-    'Stage a saved draft for sending by moving it to the outbox. Does not transmit.',
-    { draftId: z.string().describe('The draft id returned by draft_email') },
-    async ({ draftId }) => {
-      try {
-        const { ok, data } = await connectorActionApi(
-          `actions/${encodeURIComponent(draftId)}/queue`,
-          'POST',
-        );
-        if (!ok) return errorResult(String(data.error ?? 'Email queue failed.'));
-        const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
-        const summary = `Queued draft ${draftId}${relPath ? ` (${relPath})` : ''}.`;
-        return okResult(
-          ActionToolOutputSchema,
-          {
-            summary,
-            status: 'queued',
-            draftId,
-            ...(relPath ? { relPath } : {}),
-          },
-          { text: summary },
-        );
-      } catch (err) {
-        return errorResult(`queue_email failed: ${unwrapApiError(err)}`);
-      }
-    },
-  );
-
-  server.tool(
-    'send_email',
-    'Transmit a drafted/queued email. The daemon enforces the recipient allowlist on the mail connector (sending to a non-allowlisted address is refused) and will NOT send during night shift (the message is staged for daytime approval instead).',
-    { draftId: z.string().describe('The draft id to send') },
-    async ({ draftId }) => {
-      try {
-        const { ok, data } = await connectorActionApi(
-          `actions/${encodeURIComponent(draftId)}/commit`,
-          'POST',
-        );
-        if (!ok) {
-          const message = String(data.error ?? 'Email send failed.');
-          const hint = /allowlist/i.test(message)
-            ? "Ask the user to add the recipient to the connector's allowed recipients/domains."
-            : undefined;
-          return errorResult(message, { ...(hint ? { hint } : {}) });
-        }
-        if (data.status === 'queued-night-shift') {
-          const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
-          const summary = `Night shift is active — not sending unattended. The message is staged in the outbox${relPath ? ` (${relPath})` : ''} and will require explicit approval.`;
-          return okResult(
-            ActionToolOutputSchema,
-            {
-              summary,
-              status: 'queued-night-shift',
-              draftId,
-              ...(relPath ? { relPath } : {}),
-            },
-            { text: summary },
-          );
-        }
-        const result = (data.result ?? {}) as { messageId?: string };
-        const summary = `Sent.${result.messageId ? ` Message-ID: ${result.messageId}` : ''}`;
-        return okResult(
-          ActionToolOutputSchema,
-          {
-            summary,
-            status: 'sent',
-            draftId,
-            ...(result.messageId ? { messageId: result.messageId } : {}),
-          },
-          { text: summary },
-        );
-      } catch (err) {
-        return errorResult(`send_email failed: ${unwrapApiError(err)}`);
-      }
-    },
-  );
-}
-
+const connectorActionDependencies = {
+  server,
+  baseUrl,
+  token,
+  projectId,
+  fetchImpl,
+  unwrapApiError,
+};
 if (process.env.GEZEL_MAIL_ENABLED === '1') {
-  registerEmailTools();
-}
-
-// ── social posts (projects with a social-type connector binding) ──────────
-// Reading synced posts/mentions/stats is done by reading the corpus files.
-// These three tools are the WRITE path over the connector action surface:
-// drafting stages a `publish` action under the social binding's corpus, and
-// publish_post commits it through the daemon-enforced social-publish consent
-// scope (deny-by-default; night shift defers to the outbox). Registered only
-// when the chat manager set GEZEL_SOCIAL_ENABLED (i.e. the project has a
-// social-type connector binding).
-const SOCIAL_TYPE_PREFIXES = ['bluesky-', 'x-', 'instagram-', 'linkedin-'];
-
-/** Social-type bindings on the project (accountId narrows to one). */
-async function resolveSocialBinding(accountId?: string): Promise<string | null> {
-  const { ok, data } = await connectorActionApi('', 'GET');
-  if (!ok) throw new Error(String(data.error ?? 'failed to list connector bindings'));
-  const bindings = (data.bindings ?? []) as { id: string; type: string }[];
-  const social = bindings.filter(
-    (b) =>
-      typeof b.type === 'string' &&
-      SOCIAL_TYPE_PREFIXES.some((prefix) => b.type.startsWith(prefix)),
-  );
-  if (accountId) {
-    const match = social.find((b) => b.id === accountId)?.id;
-    if (!match) throw new Error(`social connector binding "${accountId}" was not found`);
-    return match;
-  }
-  return social[0]?.id ?? null;
-}
-
-function registerSocialTools() {
-  server.tool(
-    'draft_post',
-    "Compose a social post draft and save it for review. This does NOT publish — it stages a publish action under the social connector's corpus. Use queue_post to stage it for approval and publish_post to publish. Works with any connected social account: Bluesky, X, and LinkedIn publish directly once the user enables publishing on the connection; Instagram additionally requires a publicly hosted https image URL (Meta's servers fetch the media). Every publish clears the user's consent gate.",
-    {
-      text: z.string().describe('The post text (Bluesky limit: 300 characters)'),
-      replyToUri: z
-        .string()
-        .optional()
-        .describe('at:// URI of the post being replied to, to thread the reply'),
-      langs: z
-        .array(z.string())
-        .optional()
-        .describe('BCP-47 language codes for the post, e.g. ["en"]'),
-      images: z
-        .array(
-          z.object({
-            path: z
-              .string()
-              .describe(
-                "Project-relative image path, resolved against the project's artifacts directory first, then its workspace",
-              ),
-            alt: z.string().optional().describe('Alt text describing the image for accessibility'),
-          }),
-        )
-        .max(4)
-        .optional()
-        .describe(
-          'Up to 4 images to embed (png/jpg/jpeg/webp/gif, at most 1,000,000 bytes each; paths resolve against project artifacts first, then the workspace). ALWAYS write meaningful alt text for every image — never leave it blank.',
-        ),
-      accountId: z
-        .string()
-        .optional()
-        .describe('Which social connector binding to post from (defaults to the first)'),
-    },
-    async (args) => {
-      try {
-        const bindingId = await resolveSocialBinding(args.accountId);
-        if (!bindingId) return errorResult('This project has no linked social connector.');
-        const { accountId: _drop, ...input } = args;
-        const { ok, data } = await connectorActionApi(
-          `${encodeURIComponent(bindingId)}/actions`,
-          'POST',
-          { action: 'publish', input },
-        );
-        if (!ok) return errorResult(String(data.error ?? 'Post draft failed.'));
-        const draftId = typeof data.draftId === 'string' ? data.draftId : undefined;
-        const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
-        const summary = `Draft saved${draftId ? ` (id: ${draftId})` : ''}${relPath ? ` at ${relPath}` : ''}. Review it, then call queue_post then publish_post.`;
-        return okResult(
-          ActionToolOutputSchema,
-          {
-            summary,
-            status: 'drafted',
-            ...(draftId ? { draftId } : {}),
-            ...(relPath ? { relPath } : {}),
-          },
-          { text: summary },
-        );
-      } catch (err) {
-        return errorResult(`draft_post failed: ${unwrapApiError(err)}`);
-      }
-    },
-  );
-
-  server.tool(
-    'queue_post',
-    'Stage a saved post draft for publishing by moving it to the outbox. Does not publish.',
-    { draftId: z.string().describe('The draft id returned by draft_post') },
-    async ({ draftId }) => {
-      try {
-        const { ok, data } = await connectorActionApi(
-          `actions/${encodeURIComponent(draftId)}/queue`,
-          'POST',
-        );
-        if (!ok) return errorResult(String(data.error ?? 'Post queue failed.'));
-        const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
-        const summary = `Queued draft ${draftId}${relPath ? ` (${relPath})` : ''}.`;
-        return okResult(
-          ActionToolOutputSchema,
-          {
-            summary,
-            status: 'queued',
-            draftId,
-            ...(relPath ? { relPath } : {}),
-          },
-          { text: summary },
-        );
-      } catch (err) {
-        return errorResult(`queue_post failed: ${unwrapApiError(err)}`);
-      }
-    },
-  );
-
-  server.tool(
-    'publish_post',
-    'Publish a drafted/queued social post. The daemon enforces per-binding publish consent (publishing must be enabled on the connector, and each publish clears the social-publish consent scope) and will NOT publish during night shift (the post is staged for daytime approval instead).',
-    { draftId: z.string().describe('The draft id to publish') },
-    async ({ draftId }) => {
-      try {
-        const { ok, data } = await connectorActionApi(
-          `actions/${encodeURIComponent(draftId)}/commit`,
-          'POST',
-        );
-        if (!ok) {
-          const message = String(data.error ?? 'Post publish failed.');
-          const hint = /publishing is disabled/i.test(message)
-            ? "Ask the user to enable 'Allow publishing' on the connector's settings."
-            : undefined;
-          return errorResult(message, { ...(hint ? { hint } : {}) });
-        }
-        if (data.status === 'queued-night-shift') {
-          const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
-          const summary = `Night shift is active — not publishing unattended. The post is staged in the outbox${relPath ? ` (${relPath})` : ''} and will require explicit approval.`;
-          return okResult(
-            ActionToolOutputSchema,
-            {
-              summary,
-              status: 'queued-night-shift',
-              draftId,
-              ...(relPath ? { relPath } : {}),
-            },
-            { text: summary },
-          );
-        }
-        const result = (data.result ?? {}) as { uri?: string; permalink?: string };
-        const summary = `Published.${result.permalink ? ` ${result.permalink}` : result.uri ? ` ${result.uri}` : ''}`;
-        return okResult(
-          ActionToolOutputSchema,
-          {
-            summary,
-            status: 'published',
-            draftId,
-          },
-          { text: summary },
-        );
-      } catch (err) {
-        return errorResult(`publish_post failed: ${unwrapApiError(err)}`);
-      }
-    },
-  );
+  registerEmailTools(connectorActionDependencies);
 }
 
 if (process.env.GEZEL_SOCIAL_ENABLED === '1') {
-  registerSocialTools();
+  registerSocialTools(connectorActionDependencies);
 }
 
 // ── Project-type script tools (dynamic, per-session) ──
@@ -1482,51 +1172,8 @@ if (process.env.GEZEL_SCRIPT_TOOLS) {
   });
 }
 
-// ── connectors (write actions) ───────────────────────────────────────────
-// Reading a connector's synced data is done by reading its files. This is the
-// WRITE path: the gezel can DRAFT an action; committing (the live write) is a
-// USER action and is never exposed here (ingest-bound; the mail send tools
-// above are the one exception, gated by their daemon-enforced consent scope).
-// Registered when the project has bound connectors (GEZEL_CONNECTORS_ENABLED).
-function registerConnectorTools() {
-  server.tool(
-    'draft_connector_action',
-    'Draft a write action on a bound connector (e.g. post a comment, create an event) for the USER to review and commit. This does NOT execute — committing the live write is a human action you cannot perform. Reading a connector is done by reading its synced files.',
-    {
-      bindingId: z.string().describe('Connector binding id (see the project Connections)'),
-      action: z.string().describe('Action name declared by the connector type'),
-      input: z.record(z.string(), z.unknown()).optional().describe('Action payload'),
-    },
-    async (args) => {
-      try {
-        const { ok, data } = await connectorActionApi(
-          `${encodeURIComponent(args.bindingId)}/actions`,
-          'POST',
-          { action: args.action, input: args.input },
-        );
-        if (!ok) return errorResult(String(data.error ?? 'Connector action draft failed.'));
-        const draftId = typeof data.draftId === 'string' ? data.draftId : undefined;
-        const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
-        const summary = `Action drafted${draftId ? ` (id: ${draftId})` : ''}${relPath ? ` at ${relPath}` : ''}. The user reviews and commits it — you cannot commit it yourself.`;
-        return okResult(
-          ActionToolOutputSchema,
-          {
-            summary,
-            status: 'drafted',
-            ...(draftId ? { draftId } : {}),
-            ...(relPath ? { relPath } : {}),
-          },
-          { text: summary },
-        );
-      } catch (err) {
-        return errorResult(`draft_connector_action failed: ${unwrapApiError(err)}`);
-      }
-    },
-  );
-}
-
 if (process.env.GEZEL_CONNECTORS_ENABLED === '1') {
-  registerConnectorTools();
+  registerConnectorTools(connectorActionDependencies);
 }
 
 // ── Observation tables (the tabular connector corpus) ───────────────────────
@@ -4879,18 +4526,13 @@ server.tool(
       };
     }
     try {
-      // The type's own about/mission templates (if any) overwrite these
-      // during apply; the placeholders exist only to satisfy the create
-      // request's minimum-length validation.
-      const project = await api.createProject({
+      // One atomic create: a create-then-apply left a half-made project (and
+      // an extra generic voorman) behind whenever the apply failed.
+      const { project, applied } = await api.createTypedProject({
         name,
-        about: `${manifestDesc} This project is set up with the "${manifestName}" project type, which tailors the workspace, gezel, and tools for this kind of work.`,
-        missionObjectives: `Make steady progress using the "${manifestName}" project type. See the project's about for scope and the dashboard for status.`,
+        projectType: { typeId, ...(params ? { params } : {}) },
       });
-      const applied = await api.applyProjectType(project.id, {
-        typeId,
-        ...(params ? { params } : {}),
-      });
+      void manifestDesc;
       const voorman = applied.gezelsCreated.find((g) => g.voorman) ?? applied.gezelsCreated[0];
       let voormanNote = '';
       if (voorman) {
@@ -7385,7 +7027,7 @@ function resolveMacroBrief(input: {
   const about = usefulMacroText(input.about);
   const mission = usefulMacroText(input.missionObjectives);
   const task = usefulMacroText(input.taskDescription);
-  const fallbackScope = task ?? about ?? `Build "${input.name}" as requested.`;
+  const fallbackScope = task ?? about ?? `Work on "${input.name}" as requested.`;
   const resolvedAbout =
     about ??
     `A focused local-first project for "${input.name}". Scope: ${fallbackScope} Keep the work concrete, inspectable, and contained to this project workspace.`;
@@ -7565,7 +7207,15 @@ async function pickCraftbookForBrief(
 async function buildRetargetedBuildLoop(
   deliverablePath: string,
   briefText: string,
-  opts: { collapseToGezelId?: string } = {},
+  opts: {
+    collapseToGezelId?: string;
+    /**
+     * The deliverable is a written document the brief did not name (a trip
+     * plan, a summary): the role that writes it replaces the loop's
+     * Developer on every step, and the entry step is told it is a document.
+     */
+    documentRole?: string;
+  } = {},
 ): Promise<{ steps: NewCraftbookStep[]; entryStepId: string } | null> {
   try {
     const { craftbook } = await api.getCraftbook('build-loop');
@@ -7612,6 +7262,9 @@ async function buildRetargetedBuildLoop(
         if (suggestedProducerRole && step.id === craftbook.entryStepId) {
           step.suggestedRole = suggestedProducerRole;
         }
+        if (opts.documentRole && step.suggestedRole === 'developer') {
+          step.suggestedRole = opts.documentRole;
+        }
       }
       // Crafting half of the arcade fix: the gate enforces `html-game`, but a
       // weak model needs to be told HOW to clear it. Steer the build step to a
@@ -7627,6 +7280,9 @@ async function buildRetargetedBuildLoop(
       }
       if (policy.isData && step.id === craftbook.entryStepId && step.prompt) {
         step.prompt = `${step.prompt}\n\n**This deliverable is derived data — produce it by executing a script.** Use derive_file({ script, outputPath: "${deliverablePath}" }) with a Node script that reads the inputs via fs.readFileSync and writes the output via fs.writeFileSync (or write scripts/derive.mjs and run it with run_nodejs_script). Do not hand-type rows into ${deliverablePath} — hand-typed derived data loses records. The gate holds this step until ${deliverablePath} parses as a real data table.`;
+      }
+      if (opts.documentRole && step.id === craftbook.entryStepId && step.prompt) {
+        step.prompt = `${step.prompt}\n\n**This deliverable is a written document, \`${deliverablePath}\` — not a web page.** Write it with \`write_file\` as Markdown: a short opening line, then headed sections with the concrete specifics the brief gives (names, dates, places, numbers). The workflow moves you on when you write \`${deliverablePath}\`.`;
       }
       if (isRasterImage && step.id === craftbook.entryStepId && step.prompt) {
         step.prompt = `${step.prompt}\n\n**This deliverable is a raster image — render it with the image tool.** Call \`generate_image({ prompt, saveAs: "${deliverablePath}" })\` with a prompt faithful to the task brief. Do not call \`write_file\` for this path, encode image bytes as text/base64, install an image package, or substitute SVG/canvas code. The gate holds this step until a real image exists at \`${deliverablePath}\`.`;
@@ -7679,9 +7335,11 @@ function buildSoloLoopSteps(
   specialistId: string,
   deliverablePath: string,
   briefText: string,
+  documentRole?: string,
 ): Promise<{ steps: NewCraftbookStep[]; entryStepId: string } | null> {
   return buildRetargetedBuildLoop(deliverablePath, briefText, {
     collapseToGezelId: specialistId,
+    ...(documentRole ? { documentRole } : {}),
   });
 }
 
@@ -7695,8 +7353,11 @@ function buildSoloLoopSteps(
 function buildCrewLoopSteps(
   deliverablePath: string,
   briefText: string,
+  documentRole?: string,
 ): Promise<{ steps: NewCraftbookStep[]; entryStepId: string } | null> {
-  return buildRetargetedBuildLoop(deliverablePath, briefText);
+  return buildRetargetedBuildLoop(deliverablePath, briefText, {
+    ...(documentRole ? { documentRole } : {}),
+  });
 }
 
 /**
@@ -7898,24 +7559,26 @@ async function runPromotedStartJobAsProject(input: {
     // petshop promotes here and got no gate). Same crew
     // treatment as start_project: roles intact, gate on the real
     // deliverable. Best-effort: no match → ad-hoc task, as before.
-    const sourceDeliverablePath = inferSourceDeliverablePath({
+    const deliverable = defaultDeliverableForBrief({
       ...brief,
       taskDescription: effectiveTaskDescription,
     });
-    const craftbookPick = await pickCraftbookForBrief(project.id, brief);
-    const crewLoop = craftbookPick
-      ? await buildCrewLoopSteps(
-          sourceDeliverablePath ?? 'index.html',
-          `${brief.name} ${brief.about ?? ''} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
-        )
-      : null;
+    // No file to gate on (unnamed code work) → the ad-hoc task below.
+    const craftbookPick = deliverable ? await pickCraftbookForBrief(project.id, brief) : null;
+    const crewLoop =
+      craftbookPick && deliverable
+        ? await buildCrewLoopSteps(
+            deliverable.path,
+            `${brief.name} ${brief.about ?? ''} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
+          )
+        : null;
     // Single-channel kickoff: `dispatchEntry` hands the entry step to its
     // resolved gezel as a task-scoped handoff — there is no separate chat
     // notification. All kickoff steering lives in the task/step text above.
     const task = crewLoop
       ? await api.createTask(project.id, {
           ...sessionTaskNamingMode,
-          title: input.taskTitle ?? `Build ${brief.name}`,
+          title: input.taskTitle ?? kickoffTaskTitle(brief),
           description: effectiveTaskDescription,
           assignee: { kind: 'gezel', gezelId: voorman.id },
           steps: crewLoop.steps,
@@ -7924,7 +7587,7 @@ async function runPromotedStartJobAsProject(input: {
         })
       : await api.createTask(project.id, {
           ...sessionTaskNamingMode,
-          title: input.taskTitle ?? `Build ${brief.name}`,
+          title: input.taskTitle ?? kickoffTaskTitle(brief),
           description: effectiveTaskDescription,
           assignee: { kind: 'gezel', gezelId: voorman.id },
           steps: [
@@ -7954,6 +7617,240 @@ async function runPromotedStartJobAsProject(input: {
   }
 }
 
+interface RoutableProjectType extends BriefRoutableType {
+  description?: string;
+  tools?: ReadonlyArray<{ name: string; description?: string }>;
+  pages?: {
+    reads?: ReadonlyArray<{ source: string; path: string }>;
+    /** Tools only the page calls; a session never has them. */
+    tools?: readonly string[];
+  };
+}
+
+/**
+ * The catalog's project types, listed at most once a minute: every kickoff
+ * routes against them and they do not change between kickoffs.
+ */
+let routableTypesCache: { at: number; types: RoutableProjectType[] } | null = null;
+
+async function listRoutableProjectTypes(): Promise<RoutableProjectType[]> {
+  if (routableTypesCache && Date.now() - routableTypesCache.at < 60_000) {
+    return routableTypesCache.types;
+  }
+  const res = await api.listCatalogItems('project-type');
+  const types = res.items
+    .filter((item) => !item.unavailableReason)
+    .map((item) => item.manifest as unknown as RoutableProjectType);
+  routableTypesCache = { at: Date.now(), types };
+  return types;
+}
+
+/**
+ * The project type this goal belongs to, when its words name one clearly
+ * (see matchProjectTypeForBrief). Null for everything else, and on any
+ * failure: the ordinary kickoff is always there to fall back to.
+ */
+async function routeBriefToProjectType(brief: {
+  name: string;
+  about: string;
+  taskDescription?: string;
+}): Promise<{ match: BriefTypeMatch; type: RoutableProjectType } | null> {
+  if (process.env.GEZEL_DISABLE_TYPE_ROUTING === '1') return null;
+  const text = [brief.name, brief.taskDescription, brief.about]
+    .filter((part): part is string => Boolean(part?.trim()))
+    .join('\n');
+  try {
+    const types = await listRoutableProjectTypes();
+    // The person's own sentence fills the details when the brief names the
+    // same type: they are theirs, and a meester brief for "a week of meals
+    // for two adults and a toddler" dropped the household, so it no longer
+    // routed and a build crew got the job (2026-10-12). Only the same type:
+    // "a trip to Lisbon, and a website for my bakery" briefs two goals, and
+    // the bakery's must not become a trip.
+    const said = await personsLatestRequest();
+    const fromSaid = said ? matchProjectTypeForBrief(said, types) : null;
+    const match =
+      fromSaid && fromSaid.typeId === projectTypeNamedByBrief(text, types)
+        ? fromSaid
+        : matchProjectTypeForBrief(text, types);
+    const type = match ? types.find((t) => t.id === match.typeId) : undefined;
+    return match && type ? { match, type } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The person's latest message in this session, when it is a plain request. */
+async function personsLatestRequest(): Promise<string | undefined> {
+  if (!sessionId) return undefined;
+  try {
+    const session = await api.getChatSession(sessionId);
+    const said = [...session.messages]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === 'user' &&
+          !m.hidden &&
+          !m.from &&
+          m.origin !== 'system' &&
+          m.content.trim().length > 0,
+      )
+      ?.content.trim();
+    return said && said.length <= 2000 ? said : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The person's latest message in this session, when it alone names the goal
+ * the brief was routed to. The meester's own brief for "Plan a trip to Lisbon
+ * next spring" added hotels, dining and a budget, which the default posture
+ * cannot research and the board then never showed.
+ */
+async function personsRequestFor(typeId: string): Promise<string | undefined> {
+  const said = await personsLatestRequest();
+  if (!said) return undefined;
+  try {
+    return matchProjectTypeForBrief(said, await listRoutableProjectTypes())?.typeId === typeId
+      ? said
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * How far the page's data must grow past its seed before the kickoff step
+ * counts as a first draft. One byte let a details edit pass: a Reisleider
+ * that only recorded "4 people" and a date finished the task with no days on
+ * the board (2026-10-12). A day, a guest or a card is longer than this; a
+ * date or a head count is not.
+ */
+const TYPED_KICKOFF_MIN_GROWTH_BYTES = 64;
+
+/**
+ * Kick off a goal as a typed project: the type brings its lead, tools and
+ * Output page in one atomic create, and the lead gets one step — make the
+ * first draft with those tools. The step finishes when the page's data
+ * file grows past its seed: the type's script tools write it, which the
+ * edit gate (`requireChange`) does not count as an edit, so growth is the
+ * honest signal that something was made.
+ *
+ * Returns null when the create fails, so the caller falls back to the
+ * ordinary kickoff rather than leaving the person with nothing.
+ */
+async function runTypedKickoff(
+  brief: { name: string; about: string; missionObjectives: string; taskDescription?: string },
+  routed: { match: BriefTypeMatch; type: RoutableProjectType },
+  opts: { cacheTool: 'start_project' | 'start_job'; taskTitle?: string; kickoffMessage?: string },
+): Promise<{ content: { type: 'text'; text: string }[] } | null> {
+  const idempotent = lookupMacroIdempotent(brief.name);
+  if (idempotent) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `[runtime] A \`${idempotent.tool}\` call for "${brief.name}" completed moments ago — replaying the original result instead of creating a duplicate. END YOUR TURN; the lead from the original call is already on it.\n\n${idempotent.resultText}`,
+        },
+      ],
+    };
+  }
+  const existing = await findActiveMacroProject(brief.name);
+  if (existing) return duplicateMacroProjectNotice(opts.cacheTool, existing);
+  const { match, type } = routed;
+  let created: Awaited<ReturnType<typeof api.createTypedProject>>;
+  try {
+    created = await api.createTypedProject({
+      name: brief.name,
+      projectType: { typeId: type.id, params: match.params },
+    });
+  } catch (err) {
+    process.stderr.write(
+      `gezel-mcp: typed kickoff for ${type.id} fell back: ${unwrapApiError(err)}\n`,
+    );
+    return null;
+  }
+  const project = created.project;
+  // From here the project exists, so falling back would let the ordinary
+  // kickoff's dedupe find it and report its lead already at work, with no
+  // task behind the claim. Say what happened instead.
+  const startedWithoutTask = (reason: string) => {
+    process.stderr.write(
+      `gezel-mcp: typed kickoff for ${type.id} made ${project.id} but no task: ${reason}\n`,
+    );
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `[runtime] Created the ${type.name} project "${project.name}" (${project.id}), but its first task could not start: ${reason}. Nobody is working in it yet. Tell the person that, and do not call ${opts.cacheTool} again for it.`,
+        },
+      ],
+    };
+  };
+  try {
+    const crew = created.applied.gezelsCreated;
+    const lead = crew.find((g) => g.voorman) ?? crew[0];
+    if (!lead) return startedWithoutTask('the project type recruited no lead');
+    let advanceWhen: { file: string; minBytes: number; requireChange: false } | undefined;
+    if (match.dataFile) {
+      const seed = await api.readProjectWorkspaceFile(project.id, match.dataFile).catch(() => null);
+      advanceWhen = {
+        file: match.dataFile,
+        minBytes: (seed?.content.length ?? 0) + TYPED_KICKOFF_MIN_GROWTH_BYTES,
+        requireChange: false,
+      };
+    }
+    const known = Object.entries(match.params)
+      .filter(([key, value]) => !match.assumed.includes(key) && value.trim().length > 0)
+      .map(([key, value]) => ({ title: type.params?.properties?.[key]?.title ?? key, value }));
+    const request = await personsRequestFor(type.id);
+    const step = buildTypedKickoffStep({
+      typeName: type.name,
+      brief,
+      ...(request ? { request } : {}),
+      ...(match.dataFile ? { dataFile: match.dataFile } : {}),
+      unsaid: match.assumed.map((key) => type.params?.properties?.[key]?.title ?? key),
+      known,
+      tools: (type.tools ?? []).filter((t) => !(type.pages?.tools ?? []).includes(t.name)),
+    });
+    const note = opts.kickoffMessage?.trim()
+      ? `\n\nNote from the meester: ${opts.kickoffMessage.trim()}`
+      : '';
+    const task = await api.createTask(project.id, {
+      ...sessionTaskNamingMode,
+      title: opts.taskTitle ?? brief.name,
+      // The person's words, padded with one plain sentence only when they
+      // are too short for the task minimum ("yes, go ahead" is a valid brief).
+      description: `${padToTaskMinimum(request ?? brief.taskDescription ?? brief.about, type.name)}${note}`,
+      assignee: { kind: 'gezel', gezelId: lead.id },
+      steps: [
+        {
+          ...step,
+          assignee: { kind: 'gezel', gezelId: lead.id },
+          ...(advanceWhen ? { advanceWhen } : {}),
+          // The page's data is written through the type's tools, in the shape
+          // the page reads; the file tools would let the lead invent one.
+          toolPolicy: { outputMedium: 'none', disallowBuiltinToolsets: ['workspace-fs-write'] },
+        },
+      ],
+      dispatchEntry: true,
+    });
+    const role = (await api.getGezel(lead.id).catch(() => null))?.role;
+    const resultText = `Started "${project.name}" (${project.id}) as a ${type.name} project. ${lead.name}${role ? ` (${roleWithGloss(role)})` : ''} leads it and is making the first draft now in a task-scoped session (task ${task.ref}); the project's Output page shows it as it fills in. No reply lands in this thread. Tell the person in a sentence or two that ${lead.name} is on it.`;
+    recordMacroResult(opts.cacheTool, brief.name, project.id, resultText);
+    return { content: [{ type: 'text' as const, text: resultText }] };
+  } catch (err) {
+    return startedWithoutTask(unwrapApiError(err));
+  }
+}
+
+function padToTaskMinimum(words: string, typeName: string): string {
+  return words.length >= MIN_TASK_DESCRIPTION_LENGTH
+    ? words
+    : `${words}\n\nMake the first version of this ${typeName} project.`;
+}
+
 server.tool(
   'start_project',
   GEZEL_TOOL_DESCRIPTIONS.start_project,
@@ -7967,6 +7864,15 @@ server.tool(
         binaryRequest,
         'start_project',
       );
+    }
+    const routed = await routeBriefToProjectType(brief);
+    if (routed) {
+      const typed = await runTypedKickoff(brief, routed, {
+        cacheTool: 'start_project',
+        ...(taskTitle ? { taskTitle } : {}),
+        ...(kickoffMessage ? { kickoffMessage } : {}),
+      });
+      if (typed) return typed;
     }
     if (process.env.GEZEL_GENERALIST_KICKOFF === 'on') {
       return runFlatProject({ ...brief, taskTitle, kickoffMessage }, 'start_project');
@@ -8034,24 +7940,32 @@ server.tool(
       // deliverables (wild-caught: interface-contract / tool-routing
       // pinned but auto-advanced 0×). Best-effort: no match (or build-loop
       // unavailable) → an ad-hoc plan-and-execute task, exactly as before.
-      const sourceDeliverablePath = inferSourceDeliverablePath({
+      const deliverable = defaultDeliverableForBrief({
         ...brief,
         taskDescription: effectiveTaskDescription,
       });
-      const craftbookPick = await pickCraftbookForBrief(project.id, brief);
-      const crewLoop = craftbookPick
-        ? await buildCrewLoopSteps(
-            sourceDeliverablePath ?? 'index.html',
-            `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
-          )
-        : null;
+      const briefText = `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`;
+      // A document nobody named still gets the loop's gates and one writer:
+      // without a pin the voorman plans freely and hires a crew in silence.
+      const craftbookPick =
+        !deliverable || deliverable.document
+          ? null
+          : await pickCraftbookForBrief(project.id, brief);
+      const crewLoop =
+        deliverable && (craftbookPick || deliverable.document)
+          ? await buildCrewLoopSteps(
+              deliverable.path,
+              briefText,
+              deliverable.document ? documentProducerRole(briefText) : undefined,
+            )
+          : null;
       // Single-channel kickoff: `dispatchEntry` hands the entry step to its
       // resolved gezel as a task-scoped handoff (step prompt + gate contract
       // in-prompt from turn 1) — there is no separate chat notification.
       const task = crewLoop
         ? await api.createTask(project.id, {
             ...sessionTaskNamingMode,
-            title: taskTitle ?? `Build ${brief.name}`,
+            title: taskTitle ?? kickoffTaskTitle(brief),
             description: effectiveTaskDescription,
             assignee: { kind: 'gezel', gezelId: voorman.id },
             steps: crewLoop.steps,
@@ -8060,7 +7974,7 @@ server.tool(
           })
         : await api.createTask(project.id, {
             ...sessionTaskNamingMode,
-            title: taskTitle ?? `Build ${brief.name}`,
+            title: taskTitle ?? kickoffTaskTitle(brief),
             description: effectiveTaskDescription,
             assignee: { kind: 'gezel', gezelId: voorman.id },
             steps: [
@@ -8121,15 +8035,28 @@ async function runFlatProject(
       cacheTool,
     );
   }
+  const routed = await routeBriefToProjectType(brief);
+  if (routed) {
+    const typed = await runTypedKickoff(brief, routed, {
+      cacheTool,
+      ...(taskTitle ? { taskTitle } : {}),
+      ...(kickoffMessage ? { kickoffMessage } : {}),
+    });
+    if (typed) return typed;
+  }
   const primaryDeliverablePath = inferSourceDeliverablePath(brief);
+  const briefSummaryText = `${brief.name} ${brief.about} ${brief.taskDescription ?? ''}`;
   const inferredProducerRole =
     !specialistRole && primaryDeliverablePath
-      ? policyForDeliverable(
-          primaryDeliverablePath,
-          `${brief.name} ${brief.about} ${brief.taskDescription ?? ''}`,
-        ).suggestedProducerRole
+      ? policyForDeliverable(primaryDeliverablePath, briefSummaryText).suggestedProducerRole
       : undefined;
-  const effectiveSpecialistRole = inferredProducerRole ?? normalizeSpecialistRole(specialistRole);
+  // A goal with no file to build is written up, by the role that writes it.
+  const documentRole =
+    !specialistRole && !primaryDeliverablePath && briefIsWrittenWork(brief)
+      ? documentProducerRole(briefSummaryText)
+      : undefined;
+  const effectiveSpecialistRole =
+    inferredProducerRole ?? documentRole ?? normalizeSpecialistRole(specialistRole);
   const repoRedirect = repoFetchRedirectForMacro({
     tool: cacheTool,
     ...brief,
@@ -8198,18 +8125,23 @@ async function runFlatProject(
     // book would try to recruit (step-role resolution is server-side),
     // which contradicts solo; collapsing keeps phase + gate discipline for
     // one worker. No confident match (or build-loop unavailable) → ad-hoc.
-    const sourceDeliverablePath = inferSourceDeliverablePath({
+    const deliverable = defaultDeliverableForBrief({
       ...brief,
       taskDescription: effectiveTaskDescription,
     });
-    const craftbookPick = await pickCraftbookForBrief(project.id, brief);
-    const soloLoop = craftbookPick
-      ? await buildSoloLoopSteps(
-          builder.id,
-          sourceDeliverablePath ?? 'index.html',
-          `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
-        )
-      : null;
+    const sourceDeliverablePath =
+      deliverable && !deliverable.document ? deliverable.path : undefined;
+    const craftbookPick =
+      !deliverable || deliverable.document ? null : await pickCraftbookForBrief(project.id, brief);
+    const soloLoop =
+      deliverable && (craftbookPick || deliverable.document)
+        ? await buildSoloLoopSteps(
+            builder.id,
+            deliverable.path,
+            `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
+            deliverable.document ? effectiveSpecialistRole : undefined,
+          )
+        : null;
     // Single-channel kickoff: `dispatchEntry` hands the entry step to the
     // Builder as a task-scoped handoff — no separate chat notify. The
     // old notify's advisory expectedDeliverable becomes an ENFORCED step
@@ -8217,7 +8149,7 @@ async function runFlatProject(
     const task = soloLoop
       ? await api.createTask(project.id, {
           ...sessionTaskNamingMode,
-          title: taskTitle ?? `Build ${brief.name}`,
+          title: taskTitle ?? kickoffTaskTitle(brief),
           description: effectiveTaskDescription,
           assignee: { kind: 'gezel', gezelId: builder.id },
           steps: soloLoop.steps,
@@ -8226,7 +8158,7 @@ async function runFlatProject(
         })
       : await api.createTask(project.id, {
           ...sessionTaskNamingMode,
-          title: taskTitle ?? `Build ${brief.name}`,
+          title: taskTitle ?? kickoffTaskTitle(brief),
           description: effectiveTaskDescription,
           assignee: { kind: 'gezel', gezelId: builder.id },
           steps: [

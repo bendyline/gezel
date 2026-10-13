@@ -13,9 +13,9 @@ import {
   formatNpmRegistrySpec,
   resolveDistributionProfile,
 } from '@bendyline/gezel';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { projectPrivateDir } from '@bendyline/gezel/paths';
 import type { ChatEventBus } from '../chat/events.js';
-import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
 import { runPnpm } from '../packages/pnpm.js';
 import { WorkspaceWriteDeniedError } from './errors.js';

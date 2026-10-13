@@ -165,7 +165,7 @@ export function ChannelsSettings({ config, onConfigChanged }: Props) {
       <section className="provider-card">
         <h3>Webhook</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          A generic HTTP channel. Gezels (and the service itself) can POST a message here, and
+          A generic HTTP channel. Gezellen (and the service itself) can POST a message here, and
           whatever listens on the other end decides what to do with it — push to your phone via
           ntfy.sh, drop into a Slack channel via an incoming webhook, forward to Discord, or relay
           through a self-hosted service.
@@ -181,11 +181,13 @@ export function ChannelsSettings({ config, onConfigChanged }: Props) {
             <input
               type="url"
               placeholder="https://ntfy.sh/your-topic"
+              aria-label="Webhook endpoint"
               value={urlDraft}
               onChange={(e) => setUrlDraft(e.target.value)}
               style={{ flex: '1 1 260px' }}
             />
             <select
+              aria-label="HTTP method"
               value={methodDraft}
               onChange={(e) => setMethodDraft(e.target.value as 'POST' | 'PUT')}
             >
@@ -206,6 +208,7 @@ export function ChannelsSettings({ config, onConfigChanged }: Props) {
             </label>
             <textarea
               placeholder={'{"message":{{message}}}'}
+              aria-label="Body template (optional)"
               value={bodyTemplateDraft}
               onChange={(e) => setBodyTemplateDraft(e.target.value)}
               rows={3}
@@ -218,6 +221,7 @@ export function ChannelsSettings({ config, onConfigChanged }: Props) {
             <input
               type="text"
               placeholder="application/json"
+              aria-label="Content-Type (optional)"
               value={contentTypeDraft}
               onChange={(e) => setContentTypeDraft(e.target.value)}
               style={{ width: '100%' }}

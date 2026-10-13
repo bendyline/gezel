@@ -6,7 +6,7 @@ import { type RunningService, startService } from '../service.js';
 
 // Deterministic, dependency-free embeddings so the memory manager doesn't
 // pull a real model (mirrors integration.test.ts).
-vi.mock('../memory/embeddings.js', () => {
+vi.mock('@bendyline/gezel-inference/internal/memory/embeddings', () => {
   const vectorFor = (text: string): number[] => {
     const vector = new Array<number>(16).fill(0);
     for (let i = 0; i < text.length; i++) vector[i % vector.length]! += text.charCodeAt(i) / 255;

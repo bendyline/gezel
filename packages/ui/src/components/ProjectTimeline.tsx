@@ -54,7 +54,10 @@ export function ProjectTimeline({
   onWorkspaceReference?: (path: string, projectId?: string) => void;
   onWorkspaceSeen?: (path: string, projectId?: string) => void;
   onOpenReference?: (reference: OpenChatReference) => void;
-  onTaskReference?: (ref: string, opts?: { scoped?: boolean; focus?: boolean }) => void;
+  onTaskReference?: (
+    ref: string,
+    opts?: { scoped?: boolean; focus?: boolean; wrappedUp?: boolean },
+  ) => void;
   emptyPlaceholder?: string;
   onTerminalWorkingDirChanged?: (threadId: string, newWorkingDir: string) => void;
   terminalRefreshKey?: number;

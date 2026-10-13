@@ -71,7 +71,7 @@ Earlier E4B postmortems proposed both decreasing 96 to 64 and increasing it to
 ## Runtime correction
 
 The pinned server also accepts per-request `reasoning_budget_tokens`, but Gezel's
-[llama.cpp tuning map](../../packages/service/src/model-profile/tuning.ts)
+[llama.cpp tuning map](../../packages/inference/src/model-profile/tuning.ts)
 discarded this field. The working change now forwards resolved profile/user
 budgets, records the effective request budget, preserves explicit experiment
 overrides, and excludes the incompatible DS4 request path. This correction makes
