@@ -5,7 +5,13 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
 
-const roots = ['packages/app/src', 'packages/service/src', 'packages/eval-viewer', 'scripts'];
+const roots = [
+  'packages/app/src',
+  'packages/inference/src',
+  'packages/service/src',
+  'packages/eval-viewer',
+  'scripts',
+];
 
 const allowlistedFiles = new Set([
   'packages/inference/src/fs/safe-paths.ts',

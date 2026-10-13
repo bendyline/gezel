@@ -114,6 +114,9 @@ const DEFAULT_SAMPLE_STEPS = 20;
  * the same server launch default for endpoints that ignore request steps.
  */
 export const MODEL_SAMPLE_STEP_DEFAULTS = new Map<string, number>([
+  // FLUX.1 is still in the pinned catalog and on people's disks: keep its
+  // settings until no supported catalog offers it.
+  ['flux-1-schnell-q4', 4],
   ['flux-2-klein-4b-q4', 4],
   ['sd-turbo', 4],
   ['sdxl-lightning-4step', 4],
@@ -146,6 +149,8 @@ export const MODEL_CFG_DEFAULTS = new Map<string, number>([
   ['krea-2-turbo-q4', 1],
   ['krea-2-turbo-q6', 1],
   ['krea-2-turbo-q8', 1],
+  ['flux-1-schnell-q4', 1],
+  ['flux-1-dev-q4', 1],
   ['flux-2-klein-4b-q4', 1],
   ['sd-turbo', 1],
   ['sdxl-turbo', 1],

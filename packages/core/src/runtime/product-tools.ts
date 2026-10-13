@@ -265,7 +265,7 @@ export async function portableToolSurface(
         'get_script_run',
         'search',
         'read_document',
-        'load_memory',
+        'search_memory',
         'save_memory',
       ]);
       for (const name of roleGrants) if (!keep.has(name)) roleGrants.delete(name);

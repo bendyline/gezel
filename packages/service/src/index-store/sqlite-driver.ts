@@ -236,6 +236,29 @@ export function isTransientIndexError(error: unknown): boolean {
   );
 }
 
+/**
+ * Run a write that may lose a busy race, retrying with the event loop free
+ * between tries. The main thread's busy handler gives up after 25 ms, which is
+ * right for reads and cheap writes; a write carrying work that is expensive to
+ * redo (a model-written summary) must outlast a static-index transaction
+ * without sleeping on the daemon's thread. About 3.7 s in all, then the error.
+ */
+export async function retryOnContention<T>(
+  write: () => T,
+  opts: { attempts?: number; delayMs?: number } = {},
+): Promise<T> {
+  const attempts = opts.attempts ?? 20;
+  const delayMs = opts.delayMs ?? 50;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return write();
+    } catch (error) {
+      if (!isTransientIndexError(error) || attempt >= attempts) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs * Math.min(attempt, 4)));
+    }
+  }
+}
+
 async function quarantineCorruptDatabase(dbPath: string): Promise<void> {
   const suffix = `.corrupt-${Date.now()}`;
   for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {

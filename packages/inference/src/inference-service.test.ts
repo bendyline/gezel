@@ -4,7 +4,11 @@ import { join } from 'node:path';
 import { StreamingSessionBase } from '@bendyline/gezel/local-loop';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type RunningInferenceService, startService } from './inference-service.js';
-import type { LLMProvider, SendAndWaitOpts } from './providers/types.js';
+import type { LLMProvider } from './providers/types.js';
+vi.mock('./memory/embeddings.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./memory/embeddings.js')>()),
+  embedBatch: async (texts: string[]) => texts.map((text) => [text.length, 1]),
+}));
 let running: RunningInferenceService | undefined;
 let home: string | undefined;
 afterEach(async () => {
@@ -28,6 +32,9 @@ describe('in-process inference host', () => {
         this.emitDelta('Hello from inference');
         return 'Hello from inference';
       }
+      providerState() {
+        return {};
+      }
       async disconnect() {
         disconnected++;
       }
@@ -49,11 +56,9 @@ describe('in-process inference host', () => {
     expect(running.profile).toBe('embedded-inference');
     expect(running.port).toBe(0);
     expect((await request('/v1/models', undefined, 'invalid')).status).toBe(401);
-    const models = await (await request('/v1/models')).json();
+    const models = (await (await request('/v1/models')).json()) as { data: { id: string }[] };
     expect(models.data.length).toBeGreaterThan(10);
-    expect(models.data.some((model: { id: string }) => model.id === 'llama-cpp:fixture')).toBe(
-      true,
-    );
+    expect(models.data.some((model) => model.id === 'llama-cpp:fixture')).toBe(true);
     const response = await request('/v1/chat/completions', {
       model: 'llama-cpp:fixture',
       messages: [{ role: 'user', content: 'Hello' }],
@@ -71,6 +76,42 @@ describe('in-process inference host', () => {
       ).status,
     ).toBe(403);
     expect((await request('/api/projects')).status).toBe(404);
+    const responses = await request('/v1/responses', {
+      model: 'llama-cpp:fixture',
+      input: 'Hello',
+      store: false,
+    });
+    expect(responses.status).toBe(200);
+    expect(await responses.json()).toMatchObject({ output_text: 'Hello from inference' });
+    expect(
+      (await request('/v1/responses', { model: 'openai:any', input: 'Hello', store: false }))
+        .status,
+    ).toBe(403);
+    const embedded = await request('/v1/embeddings', {
+      model: 'gezel:embeddings',
+      input: ['hi', 'there'],
+    });
+    expect(embedded.status).toBe(200);
+    expect(await embedded.json()).toMatchObject({
+      object: 'list',
+      model: 'Xenova/bge-small-en-v1.5',
+      data: [
+        { index: 0, embedding: [2, 1] },
+        { index: 1, embedding: [5, 1] },
+      ],
+    });
+    const chatModelEmbedding = await request('/v1/embeddings', {
+      model: 'llama-cpp:fixture',
+      input: 'hi',
+    });
+    expect(chatModelEmbedding.status).toBe(400);
+    expect(await chatModelEmbedding.json()).toMatchObject({
+      error: { code: 'embeddings_not_supported' },
+    });
+    expect(
+      (await request('/v1/embeddings', { model: 'gezel:embeddings', input: 'hi', dimensions: 384 }))
+        .status,
+    ).toBe(400);
     expect((await request('/v1/knowledge/state')).status).toBe(200);
     expect(await readdir(home)).not.toContain('gezels');
     expect(await readdir(home)).not.toContain('projects');
@@ -82,17 +123,23 @@ describe('in-process inference host', () => {
   it('cancels an active stream when its host closes and releases the home lock', async () => {
     home = await mkdtemp(join(tmpdir(), 'gezel-inference-stop-'));
     let disconnected = false;
+    // The route cancels a turn by disconnecting its session; SendAndWaitOpts
+    // carries no abort signal, so the turn ends when disconnect() runs.
     class Session extends StreamingSessionBase {
-      async sendAndWait(_prompt: string, opts?: SendAndWaitOpts) {
+      private release?: () => void;
+      async sendAndWait() {
         this.emitDelta('partial');
         await new Promise<void>((resolve) => {
-          if (opts?.signal?.aborted) resolve();
-          else opts?.signal?.addEventListener('abort', () => resolve(), { once: true });
+          this.release = resolve;
         });
         return 'partial';
       }
+      providerState() {
+        return {};
+      }
       async disconnect() {
         disconnected = true;
+        this.release?.();
       }
     }
     const provider: LLMProvider = {

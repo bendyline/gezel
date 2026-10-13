@@ -87,7 +87,7 @@ export function renderFailedTurnActions(args: {
         {errorDetail?.code === 'capacity-denied' ? (
           <CapacityDeniedActions
             sessionId={sessionId}
-            busy={busy !== undefined}
+            busy={busy}
             onRetry={() => void retryFailedTurn(sessionId, setSessionAction)}
             onError={(message) => setSessionAction(sessionId, { error: message })}
           />

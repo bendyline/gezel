@@ -13,7 +13,7 @@ Gezel does not need it. Kokoro consumes phoneme ids, and the daemon produces
 those with the shared frontend in `@bendyline/gezel/kokoro`, reading the same
 pronunciation dictionary the mobile voice pack carries. Synthesis then calls
 `generate_from_ids`, which performs no text handling. See
-`packages/service/src/providers/audio/kokoro-frontend.ts`.
+`packages/inference/src/providers/audio/kokoro-frontend.ts`.
 
 Any call into this stub throws `GEZEL_PHONEMIZER_UNSUPPORTED`, so a future code
 path that reaches for eSpeak fails loudly instead of quietly reintroducing the

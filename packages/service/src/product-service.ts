@@ -210,7 +210,7 @@ import {
 import { ScriptRunner } from './scripts/runner.js';
 import { buildExtraSearchCatalogs } from './search/extra-catalogs.js';
 import { CATALOG_RELEVANT_HISTORY_KINDS, SearchService } from './search/search-service.js';
-import { MemorySecretStore, openSecretStore } from './secrets/index.js';
+import { openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
 import type { RunningService, StartServiceOptions } from './service-options.js';
 import { observeShutdownStep } from './shutdown-progress.js';
@@ -264,7 +264,6 @@ export async function startProductService(
   opts: StartServiceOptions & { role: 'user' | 'legacy-full' },
 ): Promise<RunningService> {
   const home = opts.home ?? gezelHome();
-  const embeddedInferenceOnly = opts.embeddedInferenceOnly === true;
   // A previous service in this process (an embedded host restarting) closed
   // the shared model workers on its way out.
   openModelWorkers();
@@ -541,19 +540,17 @@ export async function startProductService(
   // embedded inference profile never opens the OS keychain, never writes a
   // secrets file into the app's home, and never ingests an env file of
   // provider keys.
-  const secrets = embeddedInferenceOnly ? new MemorySecretStore() : await openSecretStore(home);
+  const secrets = await openSecretStore(home);
   log.info(`[secrets] backend=${secrets.backend}`);
   // The engine broker needs its device-identity key, but must never ingest
   // cloud/provider credentials from an install-time env file. Those remain
   // exclusively in each account's user daemon.
-  if (!embeddedInferenceOnly) await seedSecretsFromEnvFile(secrets);
+  await seedSecretsFromEnvFile(secrets);
   // Stable device identity (Ed25519) + the registry of servers this device has
   // paired with — both for remote model execution. Identity needs the secret
   // store (private key lives there); the registry is plain 0600 JSON. The
   // embedded profile offers no remote connectivity, so it has no identity.
-  const deviceIdentity = embeddedInferenceOnly
-    ? null
-    : await loadOrCreateDeviceIdentity(home, secrets);
+  const deviceIdentity = await loadOrCreateDeviceIdentity(home, secrets);
   const remotes = await createRemotesRegistry({ home });
   const systemStatus = new SystemStatusBus();
   const mlxRuntimeStatus = new MlxRuntimeStatusBus();
@@ -1363,8 +1360,7 @@ export async function startProductService(
   // bridge publishes the verified remote before invoking this single drain,
   // so new work routes machine-wide while existing local work finishes.
   const machineEngineDiscovery =
-    !embeddedInferenceOnly &&
-    (opts.machineEngineDiscovery ?? process.env.GEZEL_DISABLE_MACHINE_ENGINE !== '1');
+    opts.machineEngineDiscovery ?? process.env.GEZEL_DISABLE_MACHINE_ENGINE !== '1';
   if (serviceRole === 'user' && !machineEngineDiscovery) {
     log.info('[machine-engine] discovery disabled; native inference stays in this user daemon');
   }
@@ -2390,7 +2386,6 @@ export async function startProductService(
     onUnexpectedHttpError: opts.onUnexpectedHttpError,
     previewCapabilities,
     previewBrowserOrigin: () => previewBrowser.origin,
-    embeddedInferenceOnly,
   });
   const remoteApp = buildRemoteApp(context);
   remoteFetchRef.value = remoteApp.fetch.bind(remoteApp);
@@ -2463,78 +2458,74 @@ export async function startProductService(
   // a broker defers so 6229 isn't double-bound and peers don't pay a second
   // streaming hop. A broker that is installed-but-down at this boot leaves
   // the user daemon serving until its next restart — logged, accepted.
-  if (!embeddedInferenceOnly) {
-    const lanServingDelegatedToBroker =
-      serviceRole === 'user' && machineEngine?.isRequired() === true;
-    if (!lanServingDelegatedToBroker) {
-      await remoteServing.reconfigure(config.remoteServing).catch((err) => {
-        log.error(
-          `[service] failed to start remote serving: ${err instanceof Error ? err.message : err}`,
-        );
-      });
-    } else if (config.remoteServing?.enabled) {
-      log.info(
-        '[service] LAN model serving is owned by the machine engine broker; per-user listener not started',
-      );
-    }
-    await ollamaEmulation.reconfigure(config.openaiEndpoints).catch((err) => {
-      log.warn(
-        `[service] ollama emulation not started: ${err instanceof Error ? err.message : err}`,
+  const lanServingDelegatedToBroker =
+    serviceRole === 'user' && machineEngine?.isRequired() === true;
+  if (!lanServingDelegatedToBroker) {
+    await remoteServing.reconfigure(config.remoteServing).catch((err) => {
+      log.error(
+        `[service] failed to start remote serving: ${err instanceof Error ? err.message : err}`,
       );
     });
-    await codexSetup.reconcile().catch((err) => {
-      log.warn(
-        `[service] Codex local-model bridge not started: ${err instanceof Error ? err.message : err}`,
-      );
-    });
-    await opencodeSetup.reconcile().catch((err) => {
-      log.warn(
-        `[service] OpenCode local-model bridge not started: ${err instanceof Error ? err.message : err}`,
-      );
-    });
-    await piSetup.reconcile().catch((err) => {
-      log.warn(
-        `[service] pi local-model bridge not started: ${err instanceof Error ? err.message : err}`,
-      );
-    });
-    await vscodeSetup.reconcile().catch((err) => {
-      log.warn(
-        `[service] VS Code local-model bridge not started: ${err instanceof Error ? err.message : err}`,
-      );
-    });
-    await officeIntegrations.reconcile();
-    scheduler.start();
-    nightShift.start();
-    await ensureNightShiftOversightTask(store, tasks).catch((err) => {
-      log.warn('[night-shift] oversight ensure failed:', err instanceof Error ? err.message : err);
-    });
-    // `afterRestart` is what charges each resumed step to its restart
-    // budget; the night-shift and per-project rehydrations below/elsewhere
-    // are a running process re-reading its own queue and must not count.
-    await taskRunner.rehydrateFromStore({ afterRestart: true }).catch((err) => {
-      log.warn('[task-runner] rehydrate failed:', err instanceof Error ? err.message : err);
-    });
-    taskRunner.start();
-    // Chat's half of the same recovery, and deliberately after the runner's:
-    // a task session is rehydrated from its task record, and
-    // `resumeInterruptedTurns` skips those so the two never drive one
-    // session at once. Handoffs replay first — a message still parked when
-    // the process stopped has no session-side trace for the resume pass to
-    // find, so it has to be re-issued rather than resumed.
-    await chat.replayPendingHandoffs().catch((err) => {
-      log.warn('[chat] handoff replay failed:', err instanceof Error ? err.message : err);
-    });
-    // Detached: the resume pass reads every session summary to find the
-    // stamps, and boot readiness is the splash screen the user is watching.
-    // The turns it starts are background-lane anyway.
-    void chat.resumeInterruptedTurns().catch((err) => {
-      log.warn('[chat] interrupted-turn resume failed:', err instanceof Error ? err.message : err);
-    });
-    await ensureIndexingJobTask(store, tasks).catch((err) => {
-      log.warn('[indexing-job] ensure failed:', err instanceof Error ? err.message : err);
-    });
-    await channels.start();
+  } else if (config.remoteServing?.enabled) {
+    log.info(
+      '[service] LAN model serving is owned by the machine engine broker; per-user listener not started',
+    );
   }
+  await ollamaEmulation.reconfigure(config.openaiEndpoints).catch((err) => {
+    log.warn(`[service] ollama emulation not started: ${err instanceof Error ? err.message : err}`);
+  });
+  await codexSetup.reconcile().catch((err) => {
+    log.warn(
+      `[service] Codex local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+    );
+  });
+  await opencodeSetup.reconcile().catch((err) => {
+    log.warn(
+      `[service] OpenCode local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+    );
+  });
+  await piSetup.reconcile().catch((err) => {
+    log.warn(
+      `[service] pi local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+    );
+  });
+  await vscodeSetup.reconcile().catch((err) => {
+    log.warn(
+      `[service] VS Code local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+    );
+  });
+  await officeIntegrations.reconcile();
+  scheduler.start();
+  nightShift.start();
+  await ensureNightShiftOversightTask(store, tasks).catch((err) => {
+    log.warn('[night-shift] oversight ensure failed:', err instanceof Error ? err.message : err);
+  });
+  // `afterRestart` is what charges each resumed step to its restart
+  // budget; the night-shift and per-project rehydrations below/elsewhere
+  // are a running process re-reading its own queue and must not count.
+  await taskRunner.rehydrateFromStore({ afterRestart: true }).catch((err) => {
+    log.warn('[task-runner] rehydrate failed:', err instanceof Error ? err.message : err);
+  });
+  taskRunner.start();
+  // Chat's half of the same recovery, and deliberately after the runner's:
+  // a task session is rehydrated from its task record, and
+  // `resumeInterruptedTurns` skips those so the two never drive one
+  // session at once. Handoffs replay first — a message still parked when
+  // the process stopped has no session-side trace for the resume pass to
+  // find, so it has to be re-issued rather than resumed.
+  await chat.replayPendingHandoffs().catch((err) => {
+    log.warn('[chat] handoff replay failed:', err instanceof Error ? err.message : err);
+  });
+  // Detached: the resume pass reads every session summary to find the
+  // stamps, and boot readiness is the splash screen the user is watching.
+  // The turns it starts are background-lane anyway.
+  void chat.resumeInterruptedTurns().catch((err) => {
+    log.warn('[chat] interrupted-turn resume failed:', err instanceof Error ? err.message : err);
+  });
+  await ensureIndexingJobTask(store, tasks).catch((err) => {
+    log.warn('[indexing-job] ensure failed:', err instanceof Error ? err.message : err);
+  });
+  await channels.start();
 
   // System-toolset bootstrap — installs pinned packages (e.g. @playwright/mcp)
   // and downloads Chromium in the background. Status progress is emitted on
@@ -2550,7 +2541,6 @@ export async function startProductService(
   // download executable code at all". The published phase is still `ready` —
   // nothing is pending, and the toolsets are simply absent.
   const skipBootstrap =
-    embeddedInferenceOnly ||
     !distribution.allowRuntimeCodeDownloads ||
     process.env.GEZEL_SKIP_SYSTEM_BOOTSTRAP === '1' ||
     process.env.GEZEL_MOCK_PROVIDER === '1';
@@ -2611,7 +2601,7 @@ export async function startProductService(
   // self-heals any indexes left empty by the previously-broken vector
   // wrapper. No-op if embeddings are disabled.
   const memoryHealth = new MemoryHealthMonitor({ memory, store });
-  if (!embeddedInferenceOnly) memoryHealth.start();
+  memoryHealth.start();
 
   // Periodic Klerk-driven memory compaction — dedups/merges aged daily
   // memory files (and refreshes each gezel's lessons.md) so the corpus
@@ -2624,7 +2614,7 @@ export async function startProductService(
     growth,
     oneShot: (prompt, timeoutMs, opts) => chat.oneShotCompletion(prompt, timeoutMs, opts),
   });
-  if (!embeddedInferenceOnly) memoryCompactor.start();
+  memoryCompactor.start();
 
   // Weekly "what changed" digests per project — commits + history + sessions
   // distilled by the Klerk into reports/digest-YYYY-Www.md. Same gating
@@ -2644,15 +2634,13 @@ export async function startProductService(
     },
   });
   const promptDraftSweeper = new PromptDraftSweeper({ store, drafts: promptDrafts });
-  if (!embeddedInferenceOnly) {
-    promptDraftSweeper.start();
-    inputStaging.startSweeping(store);
-    digestGenerator.start();
-    gildeUpdates.startScheduler();
-    activityTracker.start();
-    meesterStatus.start();
-    ambientDashboard.start();
-  }
+  promptDraftSweeper.start();
+  inputStaging.startSweeping(store);
+  digestGenerator.start();
+  gildeUpdates.startScheduler();
+  activityTracker.start();
+  meesterStatus.start();
+  ambientDashboard.start();
 
   // Keurmeester harvest digest: aggregates supervision case records into
   // daily findings + proposed systemic improvements. Self-throttled
@@ -2664,37 +2652,31 @@ export async function startProductService(
     home,
     oneShot: (prompt, timeoutMs, opts) => chat.oneShotCompletion(prompt, timeoutMs, opts),
   });
-  if (!embeddedInferenceOnly) {
-    keurmeesterDigest.start();
-    workspaceIndex.start();
-    workspaceWatch.start();
-  }
+  keurmeesterDigest.start();
+  workspaceIndex.start();
+  workspaceWatch.start();
   // Benchmarks (evals) disable the background tick and drive enrichment
   // explicitly via POST /:id/index/enrich, so tick-vs-drive contention can't
   // double-pay summarizer calls or skew cost measurements.
-  if (!embeddedInferenceOnly && process.env.GEZEL_DISABLE_BACKGROUND_ENRICH !== '1') {
+  if (process.env.GEZEL_DISABLE_BACKGROUND_ENRICH !== '1') {
     indexEnrichment.start();
   }
-  if (!embeddedInferenceOnly) {
-    globalIndexManager.start();
-    connectorSync.start();
-  }
+  globalIndexManager.start();
+  connectorSync.start();
 
   // Idle-session summarization sweep: every hour, distill any non-archived
   // session that's been quiet for `config.summarization.idleHours` (default
   // 24h) into project memory. First pass runs ~60s after boot so a fresh
   // process doesn't block startup.
-  const idleSummarizerTimer = embeddedInferenceOnly
-    ? null
-    : setInterval(
-        () => {
-          chat.runIdleSummarizationSweep().catch((err) => {
-            log.warn('[summarize] idle sweep crashed:', err instanceof Error ? err.message : err);
-          });
-        },
-        60 * 60 * 1000,
-      );
-  idleSummarizerTimer?.unref();
+  const idleSummarizerTimer = setInterval(
+    () => {
+      chat.runIdleSummarizationSweep().catch((err) => {
+        log.warn('[summarize] idle sweep crashed:', err instanceof Error ? err.message : err);
+      });
+    },
+    60 * 60 * 1000,
+  );
+  idleSummarizerTimer.unref();
   // Give back the provider sessions and MCP subprocesses of quiet sessions;
   // finished task sessions otherwise hold theirs until the daemon stops.
   const idleSessionTimer = setInterval(
@@ -2710,40 +2692,35 @@ export async function startProductService(
   // Cancelled by stop(): deferred work that starts during shutdown can load a
   // model worker that process.exit then aborts mid-load (see boot-work.ts).
   const cancelBootWork: Array<() => void> = [];
-  if (!embeddedInferenceOnly) {
-    cancelBootWork.push(
-      deferBootWork(
-        60_000,
-        () => {
-          chat.runIdleSummarizationSweep().catch(() => {
-            /* swallow */
-          });
-        },
-        () => stopping,
-      ),
-    );
-  }
+  cancelBootWork.push(
+    deferBootWork(
+      60_000,
+      () => {
+        chat.runIdleSummarizationSweep().catch(() => {
+          /* swallow */
+        });
+      },
+      () => stopping,
+    ),
+  );
   // Load the embedding pipeline before an interactive caller needs it. The
   // titlebar search fans out over content on every query, so without this
   // the model's one-time load lands on somebody's first keystroke. Deferred
   // so it never competes with boot or the first-run model download.
-  if (!embeddedInferenceOnly) {
-    cancelBootWork.push(
-      deferBootWork(
-        20_000,
-        () => {
-          void warmEmbeddings().then((warmed) => {
-            if (warmed) log.debug('[memory] embedding pipeline warmed');
-          });
-          void relevance.bootWarm().catch(() => {});
-          void mediaSearch.bootWarm().catch(() => {});
-        },
-        () => stopping,
-      ),
-    );
-  }
+  cancelBootWork.push(
+    deferBootWork(
+      20_000,
+      () => {
+        void warmEmbeddings().then((warmed) => {
+          if (warmed) log.debug('[memory] embedding pipeline warmed');
+        });
+        void relevance.bootWarm().catch(() => {});
+        void mediaSearch.bootWarm().catch(() => {});
+      },
+      () => stopping,
+    ),
+  );
 
-  if (embeddedInferenceOnly) log.info('[service] embedded inference ready');
   return {
     context,
     server,
@@ -2751,13 +2728,7 @@ export async function startProductService(
     clientToken,
     cert,
     webUiToken,
-    profile: embeddedInferenceOnly ? 'embedded-inference' : 'full',
-    ...(embeddedInferenceOnly
-      ? {
-          fetch: ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
-            app.fetch(new Request(input, init))) as typeof fetch,
-        }
-      : {}),
+    profile: 'full',
     async stop() {
       stopping = true;
       for (const cancel of cancelBootWork) cancel();
@@ -2821,7 +2792,7 @@ export async function startProductService(
       await shutdownStep('video provider', () => videoProvider.shutdown());
       await shutdownStep('speech recognition', () => stt.shutdown());
       await shutdownStep('speech synthesis', () => tts.shutdown());
-      if (idleSummarizerTimer) clearInterval(idleSummarizerTimer);
+      clearInterval(idleSummarizerTimer);
       clearInterval(idleSessionTimer);
       stopMemoryDiagnostics();
       await shutdownStep('channels', () => channels.stop());

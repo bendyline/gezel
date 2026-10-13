@@ -25,6 +25,8 @@ export interface InferenceContext {
   catalog: CatalogService;
   chat: {
     getProviderForModel(name: ProviderName, model?: string): Promise<LLMProvider>;
+    /** Look a provider up without binding (and so possibly starting) a model. */
+    getProvider?(name: ProviderName): Promise<LLMProvider>;
     listModelsForProvider(name: ProviderName): Promise<ModelInfo[]>;
     resolveModelSessionDefaults(
       name: ProviderName,

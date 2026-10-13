@@ -25,7 +25,8 @@ export function CapacityDeniedActions({
   onError,
 }: {
   sessionId: string;
-  busy: boolean;
+  /** Which failed-turn action is running; Retry says "Retrying…" only for its own. */
+  busy?: 'acknowledge' | 'retry' | undefined;
   onRetry: () => void;
   onError: (message: string) => void;
 }) {
@@ -76,7 +77,7 @@ export function CapacityDeniedActions({
   const canRetry = fit === null || fit.startsNow !== false;
   const alternative =
     fit && fit.startsNow === false && fit.followsDefault ? fit.alternative : undefined;
-  const disabled = busy || switching;
+  const disabled = busy !== undefined || switching;
   return (
     <>
       {alternative && fit && (
@@ -98,7 +99,7 @@ export function CapacityDeniedActions({
           disabled={disabled}
           onClick={onRetry}
         >
-          {busy ? 'Retrying…' : 'Retry'}
+          {busy === 'retry' ? 'Retrying…' : 'Retry'}
         </button>
       )}
     </>

@@ -7563,13 +7563,15 @@ async function runPromotedStartJobAsProject(input: {
       ...brief,
       taskDescription: effectiveTaskDescription,
     });
-    const craftbookPick = await pickCraftbookForBrief(project.id, brief);
-    const crewLoop = craftbookPick
-      ? await buildCrewLoopSteps(
-          deliverable.path,
-          `${brief.name} ${brief.about ?? ''} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
-        )
-      : null;
+    // No file to gate on (unnamed code work) → the ad-hoc task below.
+    const craftbookPick = deliverable ? await pickCraftbookForBrief(project.id, brief) : null;
+    const crewLoop =
+      craftbookPick && deliverable
+        ? await buildCrewLoopSteps(
+            deliverable.path,
+            `${brief.name} ${brief.about ?? ''} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`,
+          )
+        : null;
     // Single-channel kickoff: `dispatchEntry` hands the entry step to its
     // resolved gezel as a task-scoped handoff — there is no separate chat
     // notification. All kickoff steering lives in the task/step text above.
@@ -7757,15 +7759,39 @@ async function runTypedKickoff(
   const existing = await findActiveMacroProject(brief.name);
   if (existing) return duplicateMacroProjectNotice(opts.cacheTool, existing);
   const { match, type } = routed;
+  let created: Awaited<ReturnType<typeof api.createTypedProject>>;
   try {
-    const created = await api.createTypedProject({
+    created = await api.createTypedProject({
       name: brief.name,
       projectType: { typeId: type.id, params: match.params },
     });
-    const project = created.project;
+  } catch (err) {
+    process.stderr.write(
+      `gezel-mcp: typed kickoff for ${type.id} fell back: ${unwrapApiError(err)}\n`,
+    );
+    return null;
+  }
+  const project = created.project;
+  // From here the project exists, so falling back would let the ordinary
+  // kickoff's dedupe find it and report its lead already at work, with no
+  // task behind the claim. Say what happened instead.
+  const startedWithoutTask = (reason: string) => {
+    process.stderr.write(
+      `gezel-mcp: typed kickoff for ${type.id} made ${project.id} but no task: ${reason}\n`,
+    );
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `[runtime] Created the ${type.name} project "${project.name}" (${project.id}), but its first task could not start: ${reason}. Nobody is working in it yet. Tell the person that, and do not call ${opts.cacheTool} again for it.`,
+        },
+      ],
+    };
+  };
+  try {
     const crew = created.applied.gezelsCreated;
     const lead = crew.find((g) => g.voorman) ?? crew[0];
-    if (!lead) return null;
+    if (!lead) return startedWithoutTask('the project type recruited no lead');
     let advanceWhen: { file: string; minBytes: number; requireChange: false } | undefined;
     if (match.dataFile) {
       const seed = await api.readProjectWorkspaceFile(project.id, match.dataFile).catch(() => null);
@@ -7795,14 +7821,8 @@ async function runTypedKickoff(
       ...sessionTaskNamingMode,
       title: opts.taskTitle ?? brief.name,
       // The person's words, padded with one plain sentence only when they
-      // are too short for the task minimum.
-      description: `${
-        request
-          ? request.length >= MIN_TASK_DESCRIPTION_LENGTH
-            ? request
-            : `${request}\n\nMake the first version of this ${type.name} project.`
-          : (brief.taskDescription ?? brief.about)
-      }${note}`,
+      // are too short for the task minimum ("yes, go ahead" is a valid brief).
+      description: `${padToTaskMinimum(request ?? brief.taskDescription ?? brief.about, type.name)}${note}`,
       assignee: { kind: 'gezel', gezelId: lead.id },
       steps: [
         {
@@ -7821,11 +7841,14 @@ async function runTypedKickoff(
     recordMacroResult(opts.cacheTool, brief.name, project.id, resultText);
     return { content: [{ type: 'text' as const, text: resultText }] };
   } catch (err) {
-    process.stderr.write(
-      `gezel-mcp: typed kickoff for ${type.id} fell back: ${unwrapApiError(err)}\n`,
-    );
-    return null;
+    return startedWithoutTask(unwrapApiError(err));
   }
+}
+
+function padToTaskMinimum(words: string, typeName: string): string {
+  return words.length >= MIN_TASK_DESCRIPTION_LENGTH
+    ? words
+    : `${words}\n\nMake the first version of this ${typeName} project.`;
 }
 
 server.tool(
@@ -7924,11 +7947,12 @@ server.tool(
       const briefText = `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`;
       // A document nobody named still gets the loop's gates and one writer:
       // without a pin the voorman plans freely and hires a crew in silence.
-      const craftbookPick = deliverable.document
-        ? null
-        : await pickCraftbookForBrief(project.id, brief);
+      const craftbookPick =
+        !deliverable || deliverable.document
+          ? null
+          : await pickCraftbookForBrief(project.id, brief);
       const crewLoop =
-        craftbookPick || deliverable.document
+        deliverable && (craftbookPick || deliverable.document)
           ? await buildCrewLoopSteps(
               deliverable.path,
               briefText,
@@ -8105,12 +8129,12 @@ async function runFlatProject(
       ...brief,
       taskDescription: effectiveTaskDescription,
     });
-    const sourceDeliverablePath = deliverable.document ? undefined : deliverable.path;
-    const craftbookPick = deliverable.document
-      ? null
-      : await pickCraftbookForBrief(project.id, brief);
+    const sourceDeliverablePath =
+      deliverable && !deliverable.document ? deliverable.path : undefined;
+    const craftbookPick =
+      !deliverable || deliverable.document ? null : await pickCraftbookForBrief(project.id, brief);
     const soloLoop =
-      craftbookPick || deliverable.document
+      deliverable && (craftbookPick || deliverable.document)
         ? await buildSoloLoopSteps(
             builder.id,
             deliverable.path,

@@ -312,7 +312,10 @@ const TIME_WORDS = new Set([
   'soon',
 ]);
 
-const PLACE_WORD = "[\\p{Lu}][\\p{L}'’.-]*";
+// A period belongs to a place word only as an abbreviation ("St. Louis") or
+// an initialism ("D.C."). Allowing it anywhere kept a sentence's full stop
+// ("Lisbon.") and ran across sentences ("Rome. I want…" read as "Rome. I").
+const PLACE_WORD = "(?:(?:St|Ste|Mt|Ft|Pt)\\.|\\p{Lu}(?:\\.\\p{Lu})+\\.?|[\\p{Lu}][\\p{L}'’-]*)";
 const PLACE_JOIN = '(?:of|de|del|di|da|la|le|du|on|upon|am|an)';
 // A place stays on one line: the brief joins the project name and its about
 // with a newline, and "Portugal\nPlan a family trip" is not "Portugal Plan".
@@ -331,22 +334,103 @@ function titleCase(words: string): string {
     .join(' ');
 }
 
+/**
+ * Words that open "trip to …" without naming a place: an infinitive ("trip to
+ * see my grandparents"), a count ("trip in two weeks"), or a plural span.
+ */
+const NOT_A_PLACE = new Set([
+  'a',
+  'one',
+  'two',
+  'three',
+  'four',
+  'five',
+  'six',
+  'seven',
+  'eight',
+  'nine',
+  'ten',
+  'few',
+  'couple',
+  'several',
+  'days',
+  'weeks',
+  'weekends',
+  'months',
+  'years',
+  'see',
+  'visit',
+  'meet',
+  'celebrate',
+  'attend',
+  'explore',
+  'discover',
+  'find',
+  'go',
+  'get',
+  'do',
+  'make',
+  'watch',
+  'play',
+  'hike',
+  'ski',
+  'surf',
+  'relax',
+  'unwind',
+  'rest',
+  'stay',
+  'spend',
+  'enjoy',
+  'catch',
+  'learn',
+  'shop',
+  'eat',
+  'try',
+  'take',
+  'bring',
+  'show',
+  'help',
+  'escape',
+  'reconnect',
+  'recharge',
+]);
+
 function readPlace(brief: string): string | null {
   for (const match of brief.matchAll(PLACE_RE)) {
     const phrase = match[1]!.trim();
     const words = phrase.split(/\s+/);
-    // Trim a trailing time word ("Portugal Next" only if capitalised mid-sentence).
-    while (words.length > 0 && TIME_WORDS.has(words[words.length - 1]!.toLowerCase())) words.pop();
+    // Trim a trailing time word ("Portugal Next" only if capitalised mid-sentence),
+    // and the pronoun that opens the next sentence after an initialism ("D.C. I").
+    while (
+      words.length > 0 &&
+      (TIME_WORDS.has(words[words.length - 1]!.toLowerCase()) || words[words.length - 1] === 'I')
+    )
+      words.pop();
     const head = words.find((w) => w.toLowerCase() !== 'the');
     if (!head || TIME_WORDS.has(head.toLowerCase())) continue;
     if (QUERY_STOP_WORDS.has(head.toLowerCase())) continue;
     return words.join(' ');
   }
   for (const match of brief.matchAll(LOWER_PLACE_RE)) {
-    const words = match[1]!
-      .split(/\s+/)
-      .filter((w) => !TIME_WORDS.has(w) && !QUERY_STOP_WORDS.has(w));
-    if (words.length > 0) return titleCase(words.join(' '));
+    const words = match[1]!.split(/\s+/);
+    if (words[0] === 'the') words.shift();
+    // Judged by its first word: dropping only the offending word turned
+    // "trip to visit grandma" into "Grandma" and "trip to my parents" into
+    // "Parents". "new" is a search stop word but opens real places.
+    const [first, second] = words;
+    if (
+      !first ||
+      TIME_WORDS.has(first) ||
+      NOT_A_PLACE.has(first) ||
+      (QUERY_STOP_WORDS.has(first) && first !== 'new')
+    )
+      continue;
+    const keepSecond =
+      second !== undefined &&
+      !TIME_WORDS.has(second) &&
+      !NOT_A_PLACE.has(second) &&
+      !QUERY_STOP_WORDS.has(second);
+    return titleCase(keepSecond ? `${first} ${second}` : first);
   }
   return null;
 }
@@ -364,10 +448,13 @@ function readWhen(brief: string): string | null {
   for (const match of brief.matchAll(dated)) {
     const phrase = match[0].trim();
     const month = match[1]!;
-    const bare = phrase.toLowerCase() === month.toLowerCase();
-    // "may" is usually the verb, and lowercase "mar"/"sep" are words.
+    const bare = phrase.replace(/\.$/, '').toLowerCase() === month.toLowerCase();
+    // Alone, "may" is usually the verb, lowercase "mar"/"sep"/"june" are words,
+    // and a capitalised abbreviation is as often a name ("with Jan"). Beside a
+    // day or a year ("june 12", "Jan 2027") each is a date.
     if (bare && month.toLowerCase() === 'may' && month !== 'May') continue;
-    if (/^[a-z]/.test(month) && month.length <= 4 && month.toLowerCase() !== 'may') continue;
+    if (bare && /^[a-z]/.test(month) && month.length <= 4) continue;
+    if (bare && month !== 'May' && new RegExp(`^${MONTH_ABBREV}$`).test(month)) continue;
     return phrase;
   }
   const season = brief.match(

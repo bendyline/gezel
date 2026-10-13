@@ -81,18 +81,20 @@ export interface HostOptions {
    */
   mode?: 'child' | 'in-process';
   /**
-   * Use @bendyline/gezel-inference in in-process mode for only the inference
-   * and model-management surface needed by an
-   * embedding app. This skips the standalone product's schedulers, channels,
-   * editor bridges, indexing, and background maintenance.
+   * Host only the inference surface, owned by `@bendyline/gezel-inference`:
+   * on-device model listing and installation, OpenAI-compatible chat and
+   * Responses, embeddings (`gezel:embeddings`) and knowledge search. No
+   * product API (projects, chats, app tools), schedulers, channels, editor
+   * bridges, indexing or background maintenance.
    *
    * It also keeps the daemon out of everything a standalone Gezel needs for
    * remote connectivity: it opens no secret store (nothing reaches the OS
    * keychain or a secrets file), creates no device identity, and offers no
    * pairing, identity, or LAN-serving endpoints.
    *
-   * Honored in both modes. In `in-process` mode it also removes the need for a
-   * separate Node executable.
+   * Both modes serve the same surface. `in-process` loads
+   * `@bendyline/gezel-inference` and needs no separate Node executable;
+   * `child` runs it inside `gezeld`, so it needs `@bendyline/gezel-service`.
    */
   inferenceOnly?: boolean;
   /**

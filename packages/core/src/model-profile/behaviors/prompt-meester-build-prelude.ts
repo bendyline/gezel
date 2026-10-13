@@ -40,11 +40,25 @@ const BUILD_VERBS = [
   'whip\\s+up',
   'prototype',
   'scaffold',
-  // A goal to organize is a kickoff too: "plan a family trip to Portugal"
-  // went unrouted, so the meester improvised a crew in chat.
-  'plan',
-  'organi[sz]e',
-  'arrange',
+];
+
+/**
+ * A goal to organize is a kickoff too ("plan a family trip to Portugal" went
+ * unrouted, so the meester improvised a crew in chat), but only for an
+ * occasion. Paired with the build nouns these verbs read "plan a team
+ * meeting" and "organize the files in my workspace" as new projects.
+ */
+const PLAN_VERBS = ['plan', 'organi[sz]e', 'arrange'];
+const OCCASION_NOUNS = [
+  'trip',
+  'vacation',
+  'holiday',
+  'itinerary',
+  'getaway',
+  'event',
+  'party',
+  'wedding',
+  'reunion',
 ];
 
 /**
@@ -92,21 +106,26 @@ const BUILD_NOUNS = [
   'reunion',
 ];
 
-const BUILD_REQUEST_RE = new RegExp(
-  String.raw`\b(?:can\s+(?:we|you)\s+(?:please\s+)?|let'?s\s+|please\s+|i\s+(?:want\s+to|need\s+to|'?d\s+like\s+to)\s+|i\s+wanna\s+|help\s+me\s+)?` +
-    String.raw`(?:` +
-    BUILD_VERBS.join('|') +
-    String.raw`)\s+(?:me\s+)?(?:a|an|the|some|my|our)?\s*` +
-    // Allow up to 5 qualifier words between the article and the noun
-    // ("a new Space Invaders game", "a small Stripe webhooks service",
-    // "an internal admin dashboard"). Lazy so the noun anchor wins
-    // over a greedy span.
-    String.raw`(?:[\w'-]+\s+){0,5}?` +
-    String.raw`(?:` +
-    BUILD_NOUNS.join('|') +
-    String.raw`)\b`,
-  'i',
-);
+function requestPattern(verbs: readonly string[], nouns: readonly string[]): RegExp {
+  return new RegExp(
+    String.raw`\b(?:can\s+(?:we|you)\s+(?:please\s+)?|let'?s\s+|please\s+|i\s+(?:want\s+to|need\s+to|'?d\s+like\s+to)\s+|i\s+wanna\s+|help\s+me\s+)?` +
+      String.raw`(?:` +
+      verbs.join('|') +
+      String.raw`)\s+(?:me\s+)?(?:a|an|the|some|my|our)?\s*` +
+      // Allow up to 5 qualifier words between the article and the noun
+      // ("a new Space Invaders game", "a small Stripe webhooks service",
+      // "an internal admin dashboard"). Lazy so the noun anchor wins
+      // over a greedy span.
+      String.raw`(?:[\w'-]+\s+){0,5}?` +
+      String.raw`(?:` +
+      nouns.join('|') +
+      String.raw`)\b`,
+    'i',
+  );
+}
+
+const BUILD_REQUEST_RE = requestPattern(BUILD_VERBS, BUILD_NOUNS);
+const PLAN_REQUEST_RE = requestPattern(PLAN_VERBS, OCCASION_NOUNS);
 
 /**
  * Detect a "build something substantive" request in user prose. The
@@ -116,7 +135,7 @@ const BUILD_REQUEST_RE = new RegExp(
  * task` is excluded by leaving `task` off the noun list.
  */
 export function looksLikeNewBuildRequest(text: string): boolean {
-  return BUILD_REQUEST_RE.test(text);
+  return BUILD_REQUEST_RE.test(text) || PLAN_REQUEST_RE.test(text);
 }
 
 /**

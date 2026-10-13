@@ -160,8 +160,8 @@ function ensureWorker(): Worker | null {
     w.on('exit', (code) => {
       if (code !== 0) onWorkerDown(`worker exited with code ${code}`);
     });
-    // Background, best-effort work — never hold the event loop open or block
-    // process shutdown waiting on the embedder.
+    // An idle embedder must never hold the event loop open; sendToWorker refs
+    // it only while a request is in flight.
     w.unref();
     worker = w;
     return w;
@@ -180,6 +180,7 @@ function onMessage(msg: WorkerReply): void {
     return;
   }
   pending.delete(msg.id);
+  if (pending.size === 0) worker?.unref();
   if (msg.error) {
     if (p.profileId) {
       if (!p.localFilesOnly && (msg.fatal || msg.retryable))
@@ -239,6 +240,11 @@ function sendToWorker(
       ...(profile ? { profileId: profile.id } : {}),
       ...(onDownloadProgress ? { onDownloadProgress } : {}),
     });
+    // A request in flight must keep the process alive. The daemon's listener
+    // always did; the in-process inference host has none, so an embedding
+    // awaited from a plain Node process exited mid-await (same failure as the
+    // knowledge worker, see knowledge/worker-host.ts).
+    w.ref();
     w.postMessage(
       profile
         ? {

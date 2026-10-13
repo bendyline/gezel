@@ -80,7 +80,7 @@ packages/core/src/gezel-md.ts                   # if present
 
 packages/service/src/fs/store.ts                # the one disk gateway
 packages/service/src/chat/manager.ts            # session lifecycle
-packages/service/src/providers/types.ts
+packages/inference/src/providers/types.ts
 packages/service/src/providers/copilot.ts
 packages/service/src/providers/openai.ts
 packages/service/src/providers/mock.ts

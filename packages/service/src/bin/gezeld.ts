@@ -12,6 +12,7 @@ import {
 // every tarball (2026-09-26 npm ship audit), and made two bundles whose
 // import.meta.url-relative asset probes both had to stay correct.
 import { startService } from '@bendyline/gezel-service';
+import { gezelHome } from '@bendyline/gezel/paths';
 import { type DaemonLogFile, installDaemonLogFile } from './daemon-log-file.js';
 import { applyAutostartRuntimeArguments } from './runtime-args.js';
 
@@ -120,7 +121,7 @@ async function main() {
   const scheme = running.cert ? 'https' : 'http';
   writeProcessOutput(
     process.stderr,
-    `gezeld listening on ${scheme}://127.0.0.1:${running.port} (home=${running.context.home})\n`,
+    `gezeld listening on ${scheme}://127.0.0.1:${running.port} (home=${gezelHome()})\n`,
   );
   // Web mode: surface the one-time browser URL on the daemon's own
   // stdout so foreground (`gezel start --web --foreground`) users see it

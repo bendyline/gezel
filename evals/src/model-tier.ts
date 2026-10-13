@@ -9,7 +9,7 @@
  * mis-route a trial.
  *
  * The service owns the runtime classifier
- * (`packages/service/src/chat/local-model-tier.ts`) but its `exports` map
+ * (`packages/inference/src/chat/local-model-tier.ts`) but its `exports` map
  * is closed to the eval package, so the two `parseBillions*` helpers and
  * the breakpoints below are copied verbatim from it — keep them in sync.
  */
@@ -18,7 +18,7 @@ import type { ModelTier } from '@bendyline/gezel';
 import { modelParameterSize } from './chat-model-manifest.ts';
 import { type ChatProvider, categorizeProvider, isLocalEngine } from './providers.ts';
 
-// mirrors packages/service/src/chat/local-model-tier.ts:parseBillionsFromModelId
+// mirrors packages/inference/src/chat/local-model-tier.ts:parseBillionsFromModelId
 function parseBillionsFromModelId(modelId: string | undefined): number | undefined {
   if (!modelId) return undefined;
   const m = modelId.match(/(?:^|[:_\-/])(e)?(\d+(?:\.\d+)?)b(?![A-Za-z0-9])/i);
@@ -27,7 +27,7 @@ function parseBillionsFromModelId(modelId: string | undefined): number | undefin
   return m[1] ? billions * 2 : billions; // Gemma "effective params" → double
 }
 
-// mirrors packages/service/src/chat/local-model-tier.ts:parseBillionsFromParameterSize
+// mirrors packages/inference/src/chat/local-model-tier.ts:parseBillionsFromParameterSize
 function parseBillionsFromParameterSize(parameterSize: string | undefined): number | undefined {
   if (!parameterSize) return undefined;
   const match = parameterSize.match(/(\d+(?:\.\d+)?)\s*([BMK]?)/i);

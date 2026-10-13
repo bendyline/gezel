@@ -4080,8 +4080,14 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     ref: ScriptRef,
     detail: string,
   ): Promise<Task> {
+    // Whether earlier steps ran tells a reader (and the eval classifier) if the
+    // script choked on runtime-owned setup or on work a model produced: a
+    // later step's hook can merge files fanout workers wrote.
+    const after = task.craftbook.steps.some((s) => s.id !== step.id && s.completedAt)
+      ? 'after completed steps'
+      : 'before any step completed';
     log.error(
-      `[tasks] step onEnter script failed for ${task.ref}/${step.id} (${ref.name}): ${detail}`,
+      `[tasks] step onEnter script failed for ${task.ref}/${step.id} (${ref.name}, ${after}): ${detail}`,
     );
     await this.appendNote(projectId, task.num, {
       text: `# Step setup failed — task paused\n\nThe \`onEnter\` script \`${ref.name}\` could not prepare step "${step.name}" (\`${step.id}\`). The assignee was not dispatched because the step's promised inputs may be missing.\n\n${detail}\n\nFix the script/runtime problem, then use Try again so setup runs before the next handoff.`,

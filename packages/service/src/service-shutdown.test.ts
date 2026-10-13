@@ -32,17 +32,19 @@ describe('service shutdown', () => {
     process.env.GEZEL_MOCK_PROVIDER = '1';
     process.env.GEZEL_SECRETS_BACKEND = 'file';
     home = await mkdtemp(join(tmpdir(), 'gezel-service-embedded-'));
-    service = await startService({ home, embeddedInferenceOnly: true });
+    const inference = await startService({ home, embeddedInferenceOnly: true });
 
-    expect(service.port).toBeGreaterThan(0);
-    expect(service.profile).toBe('embedded-inference');
-    expect(service.fetch).toBeTypeOf('function');
-    const models = await service.fetch?.(`https://127.0.0.1:${service.port}/v1/models`, {
-      headers: { Authorization: `Bearer ${service.clientToken}` },
+    expect(inference.port).toBeGreaterThan(0);
+    expect(inference.profile).toBe('embedded-inference');
+    const models = await inference.fetch(`https://127.0.0.1:${inference.port}/v1/models`, {
+      headers: { Authorization: `Bearer ${inference.clientToken}` },
     });
-    expect(models?.status).toBe(200);
-    await service.stop();
-    stopped = true;
+    expect(models.status).toBe(200);
+    await inference.stop();
+    // Stopping twice is a no-op, and the home's lock is free again.
+    await inference.stop();
+    const again = await startService({ home, embeddedInferenceOnly: true });
+    await again.stop();
   }, 30_000);
 
   it('drains chat background work exactly once', async () => {

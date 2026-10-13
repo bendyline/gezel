@@ -271,12 +271,15 @@ export async function buildLlamaCppProvider(opts: {
     // surface its progress as an actionable error this turn. A later turn
     // — once the resolver stamps GEZEL_LLAMA_SERVER_BIN — skips this branch.
     const ensured = opts.ensureEngine?.();
-    // With no model on disk the turn has nothing to answer with, whatever
-    // the engine is doing. Saying "the engine will be ready shortly" sent a
-    // first-run person to retry into the same failure. The download above
-    // still started, so the engine is in place by the time the model is.
+    // With no model on disk the turn has nothing to answer with while the
+    // engine downloads. Saying "the engine will be ready shortly" sent a
+    // first-run person to retry into the same failure; the download above is
+    // under way, so the engine is in place by the time the model is. An engine
+    // that failed or cannot be fetched is the real problem: naming the model
+    // instead sent people to a multi-GB download that could never run.
     const pinnedPath = process.env.GEZEL_LLAMA_CPP_MODEL ?? config.llamaCppModelPath;
-    if (!opts.modelOverride && !pinnedPath && opts.llamaCppModels) {
+    const engineOnItsWay = ensured !== undefined && !ensured.failed;
+    if (engineOnItsWay && !opts.modelOverride && !pinnedPath && opts.llamaCppModels) {
       const installed = await opts.llamaCppModels.listInstalled().catch(() => null);
       if (installed?.length === 0) {
         throw notReadyError(

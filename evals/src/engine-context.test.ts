@@ -7,7 +7,7 @@ import { extractEngineContext } from './engine-context.ts';
  * truth, in lockstep with which these fixtures must change:
  *
  * - launch line: packages/service/src/chat/manager.ts `[llama-server] launch`
- * - clamp reason: packages/service/src/providers/native/capacity-broker.ts
+ * - clamp reason: packages/inference/src/providers/native/capacity-broker.ts
  *   `clampCtxTokensForMemory`
  * - denial text: capacity-broker.ts `formatContextCapacityDenial`
  * - swa decline: manager.ts `buildLlamaCppProvider` (Gemma auto-default gate)

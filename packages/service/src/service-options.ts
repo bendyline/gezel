@@ -33,8 +33,12 @@ export const DEFAULT_PORT = 6228;
 
 export interface StartServiceOptions {
   /**
-   * Embedded apps that need only OpenAI-compatible inference and model
-   * management set this to skip standalone-product background systems.
+   * Start `@bendyline/gezel-inference`'s host behind this service's loopback
+   * listener instead of the product daemon: OpenAI-compatible inference,
+   * embeddings, knowledge and model management, with no product state,
+   * secrets, device identity or background work. The same surface an app
+   * hosting inference in-process gets. Only `home`, `port`,
+   * `preferCanonicalPort` and `onUnexpectedHttpError` apply.
    */
   embeddedInferenceOnly?: boolean;
   /**
@@ -151,10 +155,8 @@ export interface RunningService<C extends EngineContext = ServiceContext> {
    * CLI to compose the printed browser URL.
    */
   webUiToken: string | null;
-  /** The product surface that was actually started. */
-  profile?: 'full' | 'embedded-inference';
-  /** Direct request transport for in-process embedders. */
-  fetch?: typeof fetch;
+  /** The product surface that was started; the inference-only profile has its own type. */
+  profile?: 'full';
   stop: () => Promise<void>;
 }
 export type RunningEngineService = RunningService<EngineContext>;

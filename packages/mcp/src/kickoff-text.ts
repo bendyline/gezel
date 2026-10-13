@@ -185,19 +185,21 @@ export function inferSourceDeliverablePath(input: {
 
 /**
  * Where a kickoff's work lands when the brief names no file: `index.html`
- * for a recognizable browser build, otherwise a written document named
- * after the project. Every goal used to default to `index.html`, so a
- * family trip was handed to a Developer as a web page.
+ * for a recognizable browser build, a written document named after the
+ * project for written work, and `null` for other making work ("fix the bug
+ * in my backup script"), which names no file to gate on. Every goal used to
+ * default to `index.html`, so a family trip was handed to a Developer as a
+ * web page and a script fix got a web-page gate that could never pass.
  */
 export function defaultDeliverableForBrief(input: {
   name: string;
   about: string;
   missionObjectives: string;
   taskDescription?: string;
-}): { path: string; document: boolean } {
+}): { path: string; document: boolean } | null {
   const inferred = inferSourceDeliverablePath(input);
   if (inferred) return { path: inferred, document: false };
-  if (!briefIsWrittenWork(input)) return { path: 'index.html', document: false };
+  if (!briefIsWrittenWork(input)) return null;
   return { path: documentDeliverablePath(input.name), document: true };
 }
 

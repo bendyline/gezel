@@ -40,6 +40,21 @@ test('allows type-only imports and unrelated specifiers', () => {
   assert.equal(findForbiddenImports(source, FORBIDDEN).length, 0);
 });
 
+test('treats an inference internal subpath as the same layer', () => {
+  const source = [
+    "import { LlamaCppProvider } from '@bendyline/gezel-inference/internal/providers/llama-cpp/provider';",
+    "import type { LLMProvider } from '@bendyline/gezel-inference/internal/providers/types';",
+    "import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';",
+    '',
+  ].join('\n');
+  const failures = findForbiddenImports(source, FORBIDDEN);
+  assert.equal(failures.length, 1);
+  assert.equal(
+    failures[0].specifier,
+    '@bendyline/gezel-inference/internal/providers/llama-cpp/provider',
+  );
+});
+
 test('flags re-exports but not type-only re-exports', () => {
   assert.equal(
     findForbiddenImports(`export { thing } from '../http/routes.js';\n`, FORBIDDEN).length,

@@ -1,5 +1,10 @@
 export { startService } from './service.js';
-export type { RunningService, RunningEngineService, StartServiceOptions } from './service.js';
+export type {
+  RunningService,
+  RunningEngineService,
+  RunningInferenceOnlyService,
+  StartServiceOptions,
+} from './service.js';
 export type {
   UnexpectedHttpErrorEvent,
   UnexpectedHttpErrorHandler,

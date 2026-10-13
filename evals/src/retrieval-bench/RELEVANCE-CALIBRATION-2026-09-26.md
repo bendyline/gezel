@@ -1,6 +1,6 @@
 # Relevance calibration — ms-marco-minilm-l6@1, 2026-09-26
 
-The thresholds in `packages/service/src/relevance/registry.ts` for
+The thresholds in `packages/inference/src/relevance/registry.ts` for
 `ms-marco-minilm-l6@1` come from this record. Run directories under
 `evals/runs/` are not committed; this file is.
 

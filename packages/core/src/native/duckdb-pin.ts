@@ -16,7 +16,7 @@
  *
  *   - `packages/app/scripts/fetch-duckdb.mjs` stages the binary into the
  *     Electron installer at build time.
- *   - `packages/service/src/engines/resolver.ts` downloads it at runtime for
+ *   - `packages/inference/src/engines/resolver.ts` downloads it at runtime for
  *     npm / CLI installs that have no Electron payload.
  *
  * Both verify against {@link DUCKDB_ARCHIVE_SHA256} (the published archive)

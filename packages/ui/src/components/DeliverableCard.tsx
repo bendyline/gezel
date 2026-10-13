@@ -137,11 +137,16 @@ export function DeliverableCard({
         </p>
       )}
       {covered && (
+        // A larger target for the pointer only: the face below opens the same
+        // file with a proper name. Focusable, this was a second, unnamed tab
+        // stop, and an invisible one while the cover was loading or empty.
         <button
           type="button"
           className="deliverable-card-cover-button"
           onClick={open}
           disabled={!open}
+          tabIndex={-1}
+          aria-hidden="true"
           title={open ? `Open ${deliverable.path}` : deliverable.path}
         >
           <DeliverableCover deliverable={deliverable} projectId={projectId} />

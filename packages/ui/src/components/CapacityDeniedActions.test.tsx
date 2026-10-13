@@ -10,11 +10,21 @@ const { api } = await import('../api.js');
 function renderActions() {
   const onRetry = vi.fn();
   const onError = vi.fn();
-  render(<CapacityDeniedActions sessionId="s1" busy={false} onRetry={onRetry} onError={onError} />);
+  render(<CapacityDeniedActions sessionId="s1" onRetry={onRetry} onError={onError} />);
   return { onRetry, onError };
 }
 
 describe('CapacityDeniedActions', () => {
+  it('says Retrying only while its own retry runs', async () => {
+    // The daemon cannot say whether the model fits, so Retry is offered.
+    vi.mocked(api.getSessionModelFit).mockResolvedValue(null as never);
+    const props = { sessionId: 's1', onRetry: vi.fn(), onError: vi.fn() };
+    const { rerender } = render(<CapacityDeniedActions {...props} busy="acknowledge" />);
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeDisabled();
+    rerender(<CapacityDeniedActions {...props} busy="retry" />);
+    expect(screen.getByRole('button', { name: 'Retrying…' })).toBeDisabled();
+  });
+
   beforeEach(() => {
     vi.mocked(api.getConfig).mockResolvedValue({
       defaultModel: { 'llama-cpp': 'qwen3.6-35b-a3b-q4', openai: 'gpt-5' },

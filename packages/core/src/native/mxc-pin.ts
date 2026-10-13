@@ -21,7 +21,7 @@
  *     keep every pinned value a single-quoted literal.
  *   - `packages/app/src/supervisor/extract-mxc.ts` installs that bundle into
  *     {@link mxcInstallDir} on first launch.
- *   - `packages/service/src/engines/resolver.ts` (`resolveVendoredMxc`)
+ *   - `packages/inference/src/engines/resolver.ts` (`resolveVendoredMxc`)
  *     downloads the same tarball for npm / CLI installs into the same
  *     directory, so a machine with both shares one verified copy.
  *   - `scripts/bump-mxc.mjs`, `scripts/check-notice.mjs` and

@@ -10,7 +10,7 @@ import { readCapacityDenialFromLog } from './runner.ts';
  * Contract test for the capacity-denial log line (Theme E / E4).
  *
  * `capacityDenialLogLine(key, reason)` in
- * packages/service/src/providers/native/provider-pool.ts:40 is the SOURCE
+ * packages/inference/src/providers/native/provider-pool.ts:40 is the SOURCE
  * OF TRUTH — it emits `capacity broker denied <key>: <reason>` at both
  * deny sites, where `reason` is CapacityBroker.denialReason's
  * `budget exhausted: would commit <N> against <M>`. Three eval-side

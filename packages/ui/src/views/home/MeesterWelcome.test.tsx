@@ -257,6 +257,34 @@ describe('MeesterWelcome', () => {
       expect(onModelInstalled).not.toHaveBeenCalled();
     });
 
+    it('shows a failed engine fetch and waits for the person instead of retrying', async () => {
+      vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+        models: [{ id: 'qwen3.8-27b-q4', name: 'Qwen 3.8 (27B)' }],
+      } as never);
+      vi.mocked(api.getNativeEngineStatus).mockResolvedValue({
+        release: 'native-v1',
+        pinned: true,
+        platformKey: 'win32-x64',
+        engines: [{ name: 'llama-server', installed: false }],
+      } as never);
+      // The daemon reports a failed fetch as an event on a stream that ends normally.
+      vi.mocked(api.ensureNativeEngine).mockImplementation((async (
+        _engine: string,
+        onEvent: (ev: unknown) => void,
+      ) => {
+        onEvent({ type: 'error', error: 'GitHub API rate limit exceeded' });
+      }) as never);
+      render(<FirstRun cfg={config()} />);
+
+      expect(await screen.findByText(/GitHub API rate limit exceeded/)).toBeInTheDocument();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(api.ensureNativeEngine).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(/GitHub API rate limit exceeded/)).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      await waitFor(() => expect(api.ensureNativeEngine).toHaveBeenCalledTimes(2));
+    });
+
     it('fetches the engine beside the model when the person taps', async () => {
       vi.mocked(api.getNativeEngineStatus).mockResolvedValue({
         release: 'native-v1',

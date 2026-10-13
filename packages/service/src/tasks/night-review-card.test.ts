@@ -2,7 +2,10 @@ import { DEFAULT_NIGHT_SHIFT_WINDOW, type GezelConfig, type Question } from '@be
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { type NightShiftReviewCardDeps, postNightShiftReviewCard } from './night-review-card.js';
 
-const review = vi.hoisted(() => ({ tasksCompleted: [] as unknown[] }));
+const review = vi.hoisted(() => ({
+  tasksCompleted: [] as unknown[],
+  oversight: null as { num: number; status: string } | null,
+}));
 const WINDOW_KEY = '2026-10-13';
 
 vi.mock('./night-review.js', () => ({
@@ -20,7 +23,7 @@ vi.mock('./night-tally.js', () => ({
 }));
 vi.mock('../digest/weekly-recap.js', () => ({ writeWeeklyRecap: async () => null }));
 vi.mock('../meester/night-shift-oversight.js', () => ({
-  findNightShiftOversightTask: async () => null,
+  findNightShiftOversightTask: async () => review.oversight,
 }));
 
 const settledAt = new Date('2026-10-14T07:00:00.000Z');
@@ -62,6 +65,7 @@ function deps(config: Partial<GezelConfig>): NightShiftReviewCardDeps {
 
 beforeEach(() => {
   review.tasksCompleted = [];
+  review.oversight = null;
   written = [];
   logged = [];
 });
@@ -81,6 +85,12 @@ describe('the morning card during first use', () => {
 
   it('reports a quiet night on an established install', async () => {
     await postNightShiftReviewCard(deps({}), WINDOW_KEY);
+    expect(written).toHaveLength(1);
+  });
+
+  it('still tells a new install that its night review is paused', async () => {
+    review.oversight = { num: 1, status: 'paused' };
+    await postNightShiftReviewCard(deps({ firstUseAt: hoursBefore(2) }), WINDOW_KEY);
     expect(written).toHaveLength(1);
   });
 

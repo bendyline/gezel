@@ -1,9 +1,13 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
 import {
+  GEZEL_API_GENERATION,
+  GEZEL_API_GENERATION_FLOOR,
+  GEZEL_VERSION,
   GezelConfigSchema,
   type ProviderName,
   createLogger,
+  nowIso,
   startSuspendMonitor,
   stopSuspendMonitor,
 } from '@bendyline/gezel';
@@ -19,12 +23,14 @@ import { ensurePrivateUserHome } from './fs/home-permissions.js';
 import { enginesRoutes } from './http/routes/engines.js';
 import { modelBundleRoutes } from './http/routes/model-bundles.js';
 import { v1ChatRoutes } from './http/routes/v1-chat.js';
+import { v1EmbeddingsRoutes } from './http/routes/v1-embeddings.js';
 import { v1KnowledgeRoutes } from './http/routes/v1-knowledge.js';
 import { v1ModelsEnsureRoutes } from './http/routes/v1-models-ensure.js';
 import { v1ModelsRoutes } from './http/routes/v1-models.js';
+import { v1ResponsesRoutes } from './http/routes/v1-responses.js';
 import { KnowledgeManager } from './knowledge/manager.js';
 import { createWorkerCatalogHost } from './knowledge/worker-host.js';
-import { openEmbeddings, shutdownEmbeddings } from './memory/embeddings.js';
+import { embeddingsHealth, openEmbeddings, shutdownEmbeddings } from './memory/embeddings.js';
 import { AppleFoundationModelsProvider } from './providers/apple-foundation-models/provider.js';
 import { EngineInference } from './providers/native/inference.js';
 import { resolveModelSessionDefaults } from './providers/session-defaults.js';
@@ -33,14 +39,24 @@ import { MlxRuntimeStatusBus } from './python/mlx-runtime-status-bus.js';
 import { RelevanceModelManager } from './relevance/manager.js';
 import { relevanceScorer } from './relevance/relevance-model.js';
 import { acquireSingleInstanceLock } from './runtime-lock.js';
+import { HF_CACHE_DIR_ENV, transformersCacheDir } from './transformers-cache.js';
 import { findServiceBundleResource } from './utils/service-worker-entry.js';
 import './http/auth-context.js';
 const log = createLogger('inference');
+/** Same shape the full service reports, so one handler serves either host. */
+export interface InferenceHttpErrorEvent {
+  kind: 'unhandled_exception';
+  requestId: string;
+  method: string;
+  path: string;
+  status: number;
+  detail: string;
+}
 export interface InferenceServiceOptions {
   home?: string;
   /** Host-provided local providers, useful for testing without downloading weights. */
   providers?: ReadonlyMap<ProviderName, LLMProvider>;
-  onUnexpectedHttpError?: (event: unknown) => void;
+  onUnexpectedHttpError?: (event: InferenceHttpErrorEvent) => void;
 }
 export interface RunningInferenceService {
   readonly profile: 'embedded-inference';
@@ -56,6 +72,11 @@ export async function startService(
 ): Promise<RunningInferenceService> {
   const home = options.home ?? gezelHome();
   await ensurePrivateUserHome(home);
+  // Model files must land in this home's managed cache: unset, transformers.js
+  // falls back to a module-relative cache that is read-only inside a packaged
+  // app, and the embed worker (which reads this env) has no other view of home.
+  process.env[HF_CACHE_DIR_ENV] ??= transformersCacheDir(home);
+  const startedAt = nowIso();
   const runtimeDir = join(home, 'runtime');
   const lock = await acquireSingleInstanceLock({ runtimeDir, lockPath: join(runtimeDir, 'lock') });
   const cleanup: Array<() => void | Promise<void>> = [() => lock.release()];
@@ -168,12 +189,34 @@ export async function startService(
     app.onError((error, c) => {
       if (error instanceof ZodError)
         return c.json({ error: { code: 'invalid_request', message: error.message } }, 400);
-      options.onUnexpectedHttpError?.({ error });
-      log.error(String(error));
+      const detail = error instanceof Error ? error.message : String(error);
+      try {
+        options.onUnexpectedHttpError?.({
+          kind: 'unhandled_exception',
+          requestId: randomUUID(),
+          method: c.req.method,
+          path: c.req.path,
+          status: 500,
+          detail,
+        });
+      } catch (handlerError) {
+        log.error(`onUnexpectedHttpError threw: ${String(handlerError)}`);
+      }
+      log.error(`${c.req.method} ${c.req.path}: ${detail}`);
       return c.json({ error: { code: 'internal_error', message: error.message } }, 500);
     });
     app.get('/api/health', (c) =>
-      c.json({ ok: true, serviceRole: 'user', profile: 'embedded-inference' }),
+      c.json({
+        ok: true,
+        version: GEZEL_VERSION,
+        apiCompat: { floor: GEZEL_API_GENERATION_FLOOR, current: GEZEL_API_GENERATION },
+        serviceRole: 'user',
+        profile: 'embedded-inference',
+        startedAt,
+        nodeVersion: process.versions.node,
+        platform: process.platform,
+        embeddings: embeddingsHealth(),
+      }),
     );
     app.use('*', async (c, next) => {
       const candidate = Buffer.from(c.req.header('authorization')?.replace(/^Bearer /, '') ?? '');
@@ -182,13 +225,11 @@ export async function startService(
       c.set('auth', { appId: 'host', scopes: ['openai', 'knowledge'] });
       return next();
     });
+    const allowedProviders = ['llama-cpp', 'mlx', 'ds4', 'apple-foundation-models'] as const;
     app.use('/v1/chat/*', bodyLimit({ maxSize: 4 * 1024 * 1024 }));
-    app.route(
-      '/v1/chat',
-      v1ChatRoutes(context, {
-        allowedProviders: ['llama-cpp', 'mlx', 'ds4', 'apple-foundation-models'],
-      }),
-    );
+    app.route('/v1/chat', v1ChatRoutes(context, { allowedProviders }));
+    app.route('/v1/responses', v1ResponsesRoutes(context, { allowedProviders }));
+    app.route('/v1/embeddings', v1EmbeddingsRoutes(context));
     app.route('/v1/models/ensure', v1ModelsEnsureRoutes(context));
     app.route('/v1/models', v1ModelsRoutes(context, { localOnly: true }));
     app.route('/v1/knowledge', v1KnowledgeRoutes(context));

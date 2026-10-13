@@ -73,9 +73,21 @@ function ensureLoaded(): void {
 if (typeof window !== 'undefined') {
   window.addEventListener('gezel:config-updated', (e: Event) => {
     const detail = (e as CustomEvent).detail as
-      | { inlineSpellChecking?: boolean; inlineGrammarChecking?: boolean }
+      | { inlineSpellChecking?: boolean | null; inlineGrammarChecking?: boolean | null }
       | undefined;
-    if (detail) broadcast(fromConfig(detail));
+    // Other screens broadcast partial updates (interests, a provider switch).
+    // A missing key means "not part of this change", never "on": reading it
+    // as on turned proofing back on whenever an interest key was pressed.
+    const hasSpelling = detail !== undefined && 'inlineSpellChecking' in detail;
+    const hasGrammar = detail !== undefined && 'inlineGrammarChecking' in detail;
+    if (!hasSpelling && !hasGrammar) return;
+    // Without a cached value the other preference is unknown; the pending
+    // config read reports both.
+    if (!cached && !(hasSpelling && hasGrammar)) return;
+    broadcast({
+      spelling: hasSpelling ? detail.inlineSpellChecking !== false : (cached?.spelling ?? true),
+      grammar: hasGrammar ? detail.inlineGrammarChecking !== false : (cached?.grammar ?? true),
+    });
   });
 }
 

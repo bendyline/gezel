@@ -81,7 +81,7 @@ For each engine the user named (or all, if they said "update the native binaries
    ```
    This rewrites `NATIVE_ENGINE_RELEASE`, the `SHA256SUMS` digest, every
    per-archive SHA256, and the standalone macOS-notarization declaration in
-   `packages/service/src/engines/native-manifest.ts`. Use
+   `packages/inference/src/engines/native-manifest.ts`. Use
    `--macos-notarized` only for releases produced by the current tag workflow,
    where missing signing/notary credentials fail the build and every macOS
    payload is accepted by Apple before packaging.
@@ -167,7 +167,7 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 | CI matrix + version-pin env (runner-drift fixes) | `.github/workflows/build-native.yml` |
 | Cut a release (tag + push) — *user runs* | `scripts/cut-native-release.mjs` |
 | Pin release digest + archive hashes + notarization state | `scripts/pin-native-release.mjs` |
-| Runtime release trust manifest | `packages/service/src/engines/native-manifest.ts` |
+| Runtime release trust manifest | `packages/inference/src/engines/native-manifest.ts` |
 | Fetch built binaries locally | `scripts/fetch-native-binaries.mjs` |
 | Build scripts (rarely touched) | `native/engines/<engine>/build.{sh,ps1}` |
 

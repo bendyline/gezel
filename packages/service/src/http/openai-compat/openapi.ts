@@ -267,7 +267,8 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
       },
       '/v1/embeddings': {
         post: {
-          summary: 'OpenAI-compatible embeddings.',
+          summary:
+            'OpenAI-compatible embeddings. Model "gezel:embeddings" runs the on-device text embedder.',
           security: [{ bearerAuth: ['openai'] }],
           requestBody: {
             required: true,
@@ -287,8 +288,11 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
               },
             },
             '400': {
-              description: 'Provider does not support embeddings or encoding_format not supported.',
+              description:
+                'Provider does not support embeddings, or encoding_format/dimensions not supported.',
             },
+            '404': { description: 'Unknown model.' },
+            '503': { description: 'The on-device embedder is not installed or not available yet.' },
           },
         },
       },

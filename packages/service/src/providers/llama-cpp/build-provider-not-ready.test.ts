@@ -76,6 +76,26 @@ describe('a llama.cpp chat that cannot answer yet', () => {
     expect(err.message).toContain('is downloading');
   });
 
+  it('reports a failed engine download even before a model is installed', async () => {
+    const err = await failure({
+      models: inventory([]),
+      ensureEngine: () => ({
+        detail: "On-device engine couldn't be downloaded: GitHub API rate limit exceeded",
+        failed: true,
+      }),
+    });
+    expect(err.code).toBeUndefined();
+    expect(err.isActionable).toBe(true);
+    expect(err.message).toContain('rate limit');
+  });
+
+  it('says no engine is available when none can be fetched, model or not', async () => {
+    // Auto-download off, or no pinned release: nothing is on its way.
+    const err = await failure({ models: inventory([]), ensureEngine: () => undefined });
+    expect(err.code).toBeUndefined();
+    expect(err.message).toContain('no local engine is available');
+  });
+
   it('keeps a failed engine download a fault', async () => {
     const err = await failure({
       models: inventory([{ id: MODEL }]),

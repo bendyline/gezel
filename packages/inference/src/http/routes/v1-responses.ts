@@ -1,28 +1,21 @@
 import { createLogger } from '@bendyline/gezel';
-import { appendCallerOwnedActionLedger } from '@bendyline/gezel-inference/internal/http/openai-compat/action-ledger';
-import { profileForCallerOwnedInference } from '@bendyline/gezel-inference/internal/http/openai-compat/caller-owned-profile';
-import {
-  type ChatTarget,
-  resolveChatTarget,
-} from '@bendyline/gezel-inference/internal/http/openai-compat/chat-target';
-import {
-  flattenTranscriptIntoPrompt,
-  parseGezelModelRef,
-  resolveModelTarget,
-} from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
-import type { ResolvedTuning } from '@bendyline/gezel-inference/internal/model-profile/tuning';
-import {
-  ExternalToolsUnsupportedError,
-  ModelNotInstalledError,
-  type SessionOpts,
-  type TurnUsage,
-} from '@bendyline/gezel-inference/internal/providers/types';
-import type { LLMSession } from '@bendyline/gezel-inference/internal/providers/types';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { ZodError } from 'zod';
-import type { ServiceContext } from '../context.js';
+import type { ResolvedTuning } from '../../model-profile/tuning.js';
+import {
+  ExternalToolsUnsupportedError,
+  ModelNotInstalledError,
+  type ProviderName,
+  type SessionOpts,
+  type TurnUsage,
+} from '../../providers/types.js';
+import type { LLMSession } from '../../providers/types.js';
+import type { InferenceContext } from '../inference-context.js';
+import { appendCallerOwnedActionLedger } from '../openai-compat/action-ledger.js';
+import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
+import { type ChatTarget, resolveChatTarget } from '../openai-compat/chat-target.js';
 import {
   runResponsesNonStreaming,
   runResponsesStreaming,
@@ -32,6 +25,11 @@ import {
   type TranslatedResponsesRequest,
   translateResponsesRequest,
 } from '../openai-compat/responses-translate.js';
+import {
+  flattenTranscriptIntoPrompt,
+  parseGezelModelRef,
+  resolveModelTarget,
+} from '../openai-compat/translate.js';
 
 const log = createLogger('v1-responses');
 const MAX_RESPONSES_BODY_BYTES = 16 * 1024 * 1024;
@@ -45,11 +43,16 @@ const NATIVE_AGENT_LOOP_PROVIDERS = new Set(['anthropic-cli', 'codex-cli']);
  * and returns assistant text/tool calls in Responses wire shapes. The route
  * intentionally does not create a Gezel chat session or attach Gezel MCP.
  *
- * Auth is mounted in `server.ts`: the Connected Apps master switch, bearer
- * authentication, and the `openai` scope all apply. Codex can therefore use
+ * In the full service, auth is mounted in `server.ts`: the Connected Apps
+ * master switch, bearer authentication, and the `openai` scope all apply. Codex can therefore use
  * an app-scoped token without ever learning the daemon's root credential.
  */
-export function v1ResponsesRoutes(ctx: ServiceContext): Hono {
+export interface V1ResponsesRouteOptions {
+  /** Refuse every other provider; the in-process inference host serves only on-device models. */
+  allowedProviders?: readonly ProviderName[];
+}
+
+export function v1ResponsesRoutes(ctx: InferenceContext, opts: V1ResponsesRouteOptions = {}): Hono {
   const app = new Hono();
 
   app.post(
@@ -132,6 +135,18 @@ export function v1ResponsesRoutes(ctx: ServiceContext): Hono {
         return c.json({ error: { message, type: 'invalid_request_error', code } }, 404);
       }
 
+      if (opts.allowedProviders && !opts.allowedProviders.includes(target.provider)) {
+        return c.json(
+          {
+            error: {
+              code: 'provider_not_allowed',
+              message: 'This host only serves on-device models.',
+            },
+          },
+          403,
+        );
+      }
+
       if (NATIVE_AGENT_LOOP_PROVIDERS.has(target.provider)) {
         return invalidRequest(
           c,
@@ -206,12 +221,12 @@ export function v1ResponsesRoutes(ctx: ServiceContext): Hono {
         const usageRef: { value: TurnUsage | null } = { value: null };
         session.onUsage((usage) => {
           usageRef.value = usage;
-          ctx.chat.recordExternalUsage(target.provider, usage);
+          ctx.chat.recordExternalUsage?.(target.provider, usage);
         });
         const appId = c.get('auth')?.appId ?? 'root';
         const logOutcome = (outcome: 'completed' | 'incomplete' | 'failed'): void => {
           void ctx.history
-            .log({
+            ?.log({
               kind: 'v1.chat.completion',
               summary: `${appId} · Responses ${outcome} (${parsed.model})`,
               details: {
@@ -365,7 +380,7 @@ export function v1ResponsesRoutes(ctx: ServiceContext): Hono {
   return app;
 }
 
-async function resolveResponsesTarget(model: string, ctx: ServiceContext): Promise<ChatTarget> {
+async function resolveResponsesTarget(model: string, ctx: InferenceContext): Promise<ChatTarget> {
   const gezelRef = parseGezelModelRef(model);
   if (gezelRef !== null) {
     return resolveChatTarget({ kind: 'gezel', ref: gezelRef }, ctx);

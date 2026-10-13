@@ -6,7 +6,7 @@
  * downloaded and hashed), with the architecture and score activation read
  * from `config.json` and the license checked against the allowlist — on the
  * repo, or on the upstream a port names. Nothing is written: a person reviews
- * the entry and pastes it into packages/service/src/relevance/registry.ts.
+ * the entry and pastes it into packages/inference/src/relevance/registry.ts.
  */
 import { createHash } from 'node:crypto';
 import { parseArgs } from './args.ts';

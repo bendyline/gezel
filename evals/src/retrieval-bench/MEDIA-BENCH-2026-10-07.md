@@ -1,7 +1,7 @@
 # Media bench — EmbeddingGemma 2, 2026-10-07
 
 The `embeddinggemma-2-512@1` entries in
-`packages/service/src/knowledge/vector-floors.ts` come from this record: the
+`packages/inference/src/knowledge/vector-floors.ts` come from this record: the
 text floor and the `#image`, `#video` and `#audio` floors that decide when a
 photo, a video window or a sound window counts as vector evidence. The
 decision itself is [ADR 0019](../../../docs/decisions/0019-multimodal-embeddings.md).

@@ -203,6 +203,35 @@ describe('fillProjectTypeParams', () => {
       'Norway',
     );
   });
+
+  it('stops a place at the end of its sentence', () => {
+    const place = (brief: string) => fillProjectTypeParams(trip, brief)?.params.destination;
+    expect(place('Plan a trip to Lisbon.')).toBe('Lisbon');
+    expect(place('Plan a trip to Rome. I want to see the Vatican')).toBe('Rome');
+    expect(place('Plan a trip to St. Louis in May')).toBe('St. Louis');
+    expect(place('Plan a trip to Washington D.C. next spring')).toBe('Washington D.C.');
+    expect(place('Plan a trip to D.C. I want museums')).toBe('D.C.');
+  });
+
+  it('never makes a place out of what follows "trip to" when it is not one', () => {
+    // A guess presented as the person's answer is the failure this module avoids.
+    expect(fillProjectTypeParams(trip, 'Plan a trip to see my grandparents')).toBeNull();
+    expect(fillProjectTypeParams(trip, 'Plan a trip to visit grandma')).toBeNull();
+    expect(fillProjectTypeParams(trip, 'Plan a trip in two weeks')).toBeNull();
+    expect(fillProjectTypeParams(trip, 'plan a trip to my parents')).toBeNull();
+    expect(fillProjectTypeParams(trip, 'plan a trip to lisbon please')?.params.destination).toBe(
+      'Lisbon',
+    );
+    expect(fillProjectTypeParams(trip, 'plan a trip to new york')?.params.destination).toBe(
+      'New York',
+    );
+  });
+
+  it('reads a lowercase month beside a day, and not a bare abbreviation', () => {
+    expect(fillProjectTypeParams(trip, 'trip to Oslo on june 12')?.params.start).toBe('june 12');
+    expect(fillProjectTypeParams(trip, 'trip to Oslo with Jan')?.params.start).toBe('soon');
+    expect(fillProjectTypeParams(trip, 'trip to Oslo on Jan 12')?.params.start).toBe('Jan 12');
+  });
 });
 
 describe('projectTypeNamedByBrief', () => {

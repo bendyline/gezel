@@ -76,6 +76,13 @@ describe('PromptMeesterBuildPrelude', () => {
       expect(out).toContain('for anything else name no file');
     }
     expect(looksLikeNewBuildRequest('Can you plan a meeting for Tuesday?')).toBe(false);
+    // Planning verbs kick off occasions, never the build nouns.
+    expect(looksLikeNewBuildRequest('Can you plan a team meeting on Tuesday?')).toBe(false);
+    expect(looksLikeNewBuildRequest('Can you organize the files in my workspace?')).toBe(false);
+    expect(looksLikeNewBuildRequest('Plan the project timeline for next week')).toBe(false);
+    expect(looksLikeNewBuildRequest('Can you plan a team trip to Lisbon?')).toBe(true);
+    expect(looksLikeNewBuildRequest("Let's arrange a holiday party")).toBe(true);
+    expect(looksLikeNewBuildRequest('Set up a team workspace')).toBe(true);
   });
 
   it('matches its effective tool surface', () => {

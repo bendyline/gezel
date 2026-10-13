@@ -62,6 +62,7 @@
   ],
   "scripts": {
     "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && node scripts/stage-assets.mjs",
+    "dev": "node scripts/stage-assets.mjs && tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rm -rf dist"

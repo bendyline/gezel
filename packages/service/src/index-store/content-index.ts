@@ -2599,7 +2599,19 @@ export class ContentIndex {
       if (isTransientIndexError(error)) return null;
       index = null;
     }
-    if (index) await this.syncFindingLifecycle(projectId, index, false);
+    if (index) {
+      try {
+        await this.syncFindingLifecycle(projectId, index, false);
+      } catch (error) {
+        // The lifecycle mirror is rebuilt from Store state on the next open, so
+        // a busy write only skips it this time. Anything else fails the open,
+        // and never with the handle left open.
+        if (!isTransientIndexError(error)) {
+          index.close();
+          throw error;
+        }
+      }
+    }
     return index
       ? { index, workspaceDir, artifactsDir, dbPath, isLibrary, workspaceWritable }
       : null;

@@ -1,6 +1,7 @@
 /**
- * `@bendyline/gezel-service/native-release` — the native engine release this
- * service build pins, as data.
+ * `@bendyline/gezel-inference/native-release` (re-exported as
+ * `@bendyline/gezel-service/native-release`) — the native engine release this
+ * build pins, as data.
  *
  * An application that hosts Gezel (`@bendyline/gezel-app-sdk/host`) can ship
  * the engines beside the daemon and pass them as `host.nativeBinDir`, so a

@@ -1,5 +1,6 @@
 export {
   startService,
+  type InferenceHttpErrorEvent,
   type InferenceServiceOptions,
   type RunningInferenceService,
 } from './inference-service.js';

@@ -97,6 +97,8 @@ describe('portable tool authority and durable effects', () => {
     });
     const tools = (await portableToolSurface(store, session)).map((tool) => tool.name);
     expect(tools).toEqual(expect.arrayContaining(['write_artifact', 'read_artifact', 'read_file']));
+    // Memory survives every narrowing, recall as much as saving.
+    expect(tools).toEqual(expect.arrayContaining(['search_memory', 'save_memory']));
     expect(tools).not.toContain('write_file');
     await expect(
       executePortableTool(store, session, 'write_file', { path: 'x.md', content: 'x' }, actions),

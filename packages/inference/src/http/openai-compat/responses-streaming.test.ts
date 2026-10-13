@@ -1,10 +1,10 @@
+import { describe, expect, it } from 'vitest';
 import type {
   ExternalToolCall,
   LLMSession,
   SendAndWaitOpts,
   TurnUsage,
-} from '@bendyline/gezel-inference/internal/providers/types';
-import { describe, expect, it } from 'vitest';
+} from '../../providers/types.js';
 import {
   type ResponsesIdKind,
   type ResponsesSSEMessage,

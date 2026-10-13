@@ -788,9 +788,41 @@ describe('McpBridge', () => {
       const projectId = create.match(/\(([a-z0-9-]+)\)/)?.[1];
       expect(projectId).toBeTruthy();
       expect((await svc.context.store.getProject(projectId!))?.mode).toBe('solo');
+
+      // "Fix" reads as making work, but a brief that names no file says
+      // nothing about index.html, so a gate on it could never pass.
+      const fix = await flatBridge.callTool('start_project', {
+        name: 'Backup Script Repair',
+        about:
+          'Fix the bug in my nightly backup script so it stops skipping the photos folder and reports what it copied.',
+        missionObjectives: '- The backup copies every folder\n- The summary lists what it copied',
+        taskDescription: 'Fix the bug in my backup script that skips the photos folder.',
+      });
+      const fixProjectId = fix.match(/\(([a-z0-9-]+)\)/)?.[1];
+      expect(fixProjectId).toBeTruthy();
+      const [fixSummary] = await svc.context.tasks.list({ projectId: fixProjectId! });
+      const fixTask = await svc.context.tasks.get(fixProjectId!, fixSummary!.num);
+      const gates = fixTask?.craftbook.steps.map((step) => [step.advanceWhen, step.gate]);
+      expect(gates?.length).toBeGreaterThan(0);
+      expect(JSON.stringify(gates)).not.toContain('index.html');
     } finally {
       await flatBridge.stop();
     }
+  });
+
+  it('start_project starts a typed project with its first task', async () => {
+    const create = await bridge.callTool('start_project', {
+      name: 'Lisbon Weekend',
+      about: 'Plan a trip to Lisbon next spring for the two of us.',
+      missionObjectives: '- A day-by-day plan\n- Where to stay',
+      taskDescription: 'Plan a long weekend in Lisbon next spring for the two of us.',
+    });
+    expect(create).toContain('as a ');
+    expect(create).not.toContain('could not start');
+    const projectId = create.match(/\(([a-z0-9-]+)\)/)?.[1];
+    expect(projectId).toBeTruthy();
+    const [task] = await svc.context.tasks.list({ projectId: projectId! });
+    expect(task).toBeTruthy();
   });
 
   it('start_project kickoff keeps build deliverable and image guidance on the task (D1: no chat notify)', async () => {

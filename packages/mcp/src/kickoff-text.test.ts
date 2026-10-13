@@ -171,6 +171,16 @@ describe('a goal with nothing to build', () => {
     expect(kickoffTaskTitle(BUILD_BRIEF)).toBe('Build Snake Game');
     const verb = { ...TRIP, about: 'Build the requested small deliverable.' };
     expect(briefIsWrittenWork(verb)).toBe(false);
+    // Making work that names no file and is not a browser build has nothing
+    // to gate on; an index.html gate would never pass.
+    expect(defaultDeliverableForBrief(verb)).toBeNull();
+    expect(
+      defaultDeliverableForBrief({
+        name: 'Backup Script Repair',
+        about: 'Fix the bug in my nightly backup script.',
+        missionObjectives: '- The backup copies every folder',
+      }),
+    ).toBeNull();
   });
 
   it('names the document plainly, whatever the characters', () => {

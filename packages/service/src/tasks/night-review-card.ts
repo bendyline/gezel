@@ -105,8 +105,14 @@ export async function postNightShiftReviewCard(
     !swept;
   // A new install hears about the nights that produced something, never the
   // ones that didn't: on day one the "night before" predates the crew, and
-  // for a few days after there is rarely anything it was owed.
-  if (empty && isWithinFirstUse(config.firstUseAt, settledAt.getTime(), QUIET_NIGHT_GRACE_MS)) {
+  // for a few days after there is rarely anything it was owed. A paused
+  // review is still news: it waits for the person and this card is where
+  // they hear about it.
+  if (
+    empty &&
+    !pausedReview &&
+    isWithinFirstUse(config.firstUseAt, settledAt.getTime(), QUIET_NIGHT_GRACE_MS)
+  ) {
     log.debug(`[night-shift] ${windowKey}: quiet night during first use; no card`);
     return;
   }

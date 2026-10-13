@@ -32,6 +32,10 @@ export const MODEL_IMG2IMG_SUPPORT = new Map<string, boolean>([
   ['sdxl-turbo', true],
   ['sdxl-lightning-4step', true],
   ['animagine-xl-4', true],
+  // FLUX.1 — img2img documented working in upstream stable-diffusion.cpp.
+  // Still in the pinned catalog and on people's disks.
+  ['flux-1-schnell-q4', true],
+  ['flux-1-dev-q4', true],
   // FLUX.2 Klein — LLM-text-encoder flow model; img2img unverified on the
   // pinned sd-server. Treat as txt2img-only until assessed.
   ['flux-2-klein-4b-q4', false],

@@ -4,6 +4,10 @@ import { profileForCallerOwnedInference } from '@bendyline/gezel-inference/inter
 import type { ChatTarget } from '@bendyline/gezel-inference/internal/http/openai-compat/chat-target';
 import { resolveChatTarget } from '@bendyline/gezel-inference/internal/http/openai-compat/chat-target';
 import {
+  MAX_EMBEDDING_INPUTS,
+  createEmbeddings,
+} from '@bendyline/gezel-inference/internal/http/openai-compat/embeddings';
+import {
   type OllamaRequestOptions,
   overlayOllamaRequestTuning,
 } from '@bendyline/gezel-inference/internal/http/openai-compat/request-tuning';
@@ -132,7 +136,7 @@ const OllamaGenerateRequestSchema = z.object({
 
 const OllamaEmbedRequestSchema = z.object({
   model: z.string().min(1),
-  input: z.union([z.string(), z.array(z.string()).min(1)]),
+  input: z.union([z.string(), z.array(z.string()).min(1).max(MAX_EMBEDDING_INPUTS)]),
 });
 
 const OllamaLegacyEmbeddingsRequestSchema = z.object({
@@ -488,8 +492,9 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
 
   /**
    * `POST /embed` (and the legacy `POST /embeddings` single-prompt
-   * form) — Ollama's embeddings endpoints, backed by
-   * `LLMProvider.createEmbedding` like `/v1/embeddings`.
+   * form) — Ollama's embeddings endpoints, served by the same
+   * `createEmbeddings` as `/v1/embeddings` (the bare embedder name, e.g.
+   * `bge-small-en-v1.5`, selects the on-device embedder).
    */
   app.post('/embed', async (c) => {
     let parsed: z.infer<typeof OllamaEmbedRequestSchema>;
@@ -498,21 +503,9 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
     } catch {
       return c.json({ error: 'invalid request body' }, 400);
     }
-    const target = resolveModelTarget(parsed.model);
-    if (!target) return c.json({ error: `model "${parsed.model}" not found` }, 404);
-    try {
-      const provider = await ctx.chat.getProvider(target.provider);
-      if (!provider.createEmbedding) {
-        return c.json({ error: `provider "${target.provider}" does not support embeddings` }, 400);
-      }
-      const result = await provider.createEmbedding({
-        input: parsed.input,
-        ...(target.model ? { model: target.model } : {}),
-      });
-      return c.json({ model: parsed.model, embeddings: result.vectors });
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
-    }
+    const outcome = await createEmbeddings(ctx, parsed.model, parsed.input);
+    if (!outcome.ok) return c.json({ error: outcome.message }, outcome.status);
+    return c.json({ model: parsed.model, embeddings: outcome.vectors });
   });
 
   app.post('/embeddings', async (c) => {
@@ -522,21 +515,9 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
     } catch {
       return c.json({ error: 'invalid request body' }, 400);
     }
-    const target = resolveModelTarget(parsed.model);
-    if (!target) return c.json({ error: `model "${parsed.model}" not found` }, 404);
-    try {
-      const provider = await ctx.chat.getProvider(target.provider);
-      if (!provider.createEmbedding) {
-        return c.json({ error: `provider "${target.provider}" does not support embeddings` }, 400);
-      }
-      const result = await provider.createEmbedding({
-        input: parsed.prompt,
-        ...(target.model ? { model: target.model } : {}),
-      });
-      return c.json({ embedding: result.vectors[0] ?? [] });
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
-    }
+    const outcome = await createEmbeddings(ctx, parsed.model, parsed.prompt);
+    if (!outcome.ok) return c.json({ error: outcome.message }, outcome.status);
+    return c.json({ embedding: outcome.vectors[0] ?? [] });
   });
 
   /**

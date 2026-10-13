@@ -18,9 +18,9 @@ import {
   AppleFmError,
   type AppleFmGenerateRequest,
   AppleFmHelper,
-} from '../../../packages/service/src/providers/apple-foundation-models/helper.js';
-import { AppleFoundationModelsProvider } from '../../../packages/service/src/providers/apple-foundation-models/provider.js';
-import type { TurnUsage } from '../../../packages/service/src/providers/types.js';
+} from '../../../packages/inference/src/providers/apple-foundation-models/helper.js';
+import { AppleFoundationModelsProvider } from '../../../packages/inference/src/providers/apple-foundation-models/provider.js';
+import type { TurnUsage } from '../../../packages/inference/src/providers/types.js';
 
 const helper = new AppleFmHelper({
   binaryPath:

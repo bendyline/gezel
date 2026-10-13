@@ -50,6 +50,12 @@ describe('the finished-work card', () => {
     expect(screen.getByTestId('portrait')).toHaveAttribute('data-name', 'Mira');
     await waitFor(() => expect(screen.getByText('Ten days in Portugal')).toBeInTheDocument());
     expect(api.readProjectWorkspaceFile).toHaveBeenCalledWith('trip', 'family-trip.md');
+    // The cover only enlarges the pointer target; the face is the one named key.
+    const cover = screen.getByText('Ten days in Portugal').closest('button');
+    expect(cover).toHaveAttribute('tabindex', '-1');
+    expect(cover).toHaveAttribute('aria-hidden', 'true');
+    const openKeys = screen.getAllByRole('button').filter((b) => b.title.startsWith('Open '));
+    expect(openKeys).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Make changes' }));
     expect(onMakeChanges).toHaveBeenCalled();
   });

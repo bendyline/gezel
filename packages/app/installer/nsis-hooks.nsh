@@ -879,7 +879,7 @@ FunctionEnd
   ; area (or from the pre-asset-store private model tree) arrives carrying its
   ; old private ACL and stays invisible to every other account.  gezeld fixes
   ; that with `icacls <model> /reset /T` — see makeSharedModelReadable in
-  ; packages/service/src/models/storage-roots.ts.
+  ; packages/inference/src/models/storage-roots.ts.
   ;
   ; `/reset` REWRITES A DACL, so it needs WRITE_DAC, and Modify does not
   ; include WRITE_DAC.  With (M) alone the broker could not publish any bundle

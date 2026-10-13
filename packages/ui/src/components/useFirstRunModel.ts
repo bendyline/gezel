@@ -145,7 +145,7 @@ export function useFirstRunModel({
   const copilotAvailability = useCopilotAvailability();
   // One engine fetch at a time. The daemon's job is idempotent and outlives
   // this request, so a second ensure would only attach to the same download.
-  const engineFetchRef = useRef<Promise<void> | null>(null);
+  const engineFetchRef = useRef<Promise<boolean> | null>(null);
   const [engineProgress, setEngineProgress] = useState<{
     bytesWritten: number;
     totalBytes: number;
@@ -164,10 +164,16 @@ export function useFirstRunModel({
   const firstRunInstallError = config?.firstRunInstallError;
 
   const backendOverride = config?.llamaCppBackendOverride;
-  /** Start (or attach to) the engine download; resolves when it settles. */
-  const fetchEngine = useCallback((variant: string | undefined): Promise<void> => {
+  /**
+   * Start (or attach to) the engine download. Resolves `true` when it landed:
+   * a failure arrives as an `error` event on a stream that still ends
+   * normally, and treating that as done re-checked, re-fetched and cleared
+   * the error before its card could show — a request loop with no way out.
+   */
+  const fetchEngine = useCallback((variant: string | undefined): Promise<boolean> => {
     if (engineFetchRef.current) return engineFetchRef.current;
     setEngineError(null);
+    let failed = false;
     const run = api
       .ensureNativeEngine(
         'llama-server',
@@ -175,13 +181,16 @@ export function useFirstRunModel({
           if (ev.type === 'progress') {
             setEngineProgress({ bytesWritten: ev.bytesWritten, totalBytes: ev.totalBytes });
           } else if (ev.type === 'error') {
+            failed = true;
             setEngineError(ev.error);
           }
         },
         variant,
       )
+      .then(() => !failed)
       .catch((err: unknown) => {
         setEngineError(err instanceof Error ? err.message : String(err));
+        return false;
       })
       .finally(() => {
         engineFetchRef.current = null;
@@ -227,7 +236,10 @@ export function useFirstRunModel({
           });
           if (need) {
             setState({ kind: 'engine', provider, modelId: targetModel, progress: null });
-            void fetchEngine(need.variant).then(() => setState({ kind: 'checking' }));
+            // On failure stay here: the error card's Try again re-checks.
+            void fetchEngine(need.variant).then((landed) => {
+              if (landed) setState({ kind: 'checking' });
+            });
             return;
           }
           setState({ kind: 'ready' });

@@ -186,6 +186,19 @@ describe('classifyTrial — log-signature rules (stall-gated)', () => {
     expect(c).toMatchObject({ failureClass: 'infra', rule: 'onenter-script-failed' });
   });
 
+  it('an onEnter script that rejected model-written work is not booked as infra', () => {
+    const log =
+      '2026-10-13T20:40:54Z ERROR [tasks] step onEnter script failed for pr/1/collect (mergeCorpusCoverage, after completed steps): shard 3 is not valid JSON';
+    const c = classifyTrial({
+      success: false,
+      failureMode: 'success-check-false',
+      reason: 'attributed craftbook task ended paused at collect',
+      daemonLog: log,
+    });
+    expect(c.rule).not.toBe('onenter-script-failed');
+    expect(c.failureClass).not.toBe('infra');
+  });
+
   it('a gate the runtime could not evaluate → infra gate-unevaluable', () => {
     const log =
       '2026-09-23T03:00:00Z WARN [gate] p/4 step "verify" could not be evaluated — pausing without consuming an attempt: unresolved {{reviewId}}';

@@ -7,8 +7,8 @@
  *   - FileSecretStore:    AES-256-GCM encrypted file with a 0600 key.
  *     Fallback when the OS keyring is unavailable (headless CI, locked
  *     session, missing libsecret on bare Linux, etc).
- *   - MemorySecretStore:  process memory only, nothing at rest. For the
- *     embedded inference profile, which keeps no credentials.
+ *   - MemorySecretStore:  process memory only, nothing at rest. (The
+ *     inference-only profile opens no secret store at all.)
  *
  * Toolset secrets are keyed globally by `(toolsetId, fieldId)` — there's
  * one config per toolset regardless of which scope uses it. Per-scope

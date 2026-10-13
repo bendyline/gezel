@@ -1354,8 +1354,8 @@ an A/B arm without them is not evidence.
 **Mechanism (per engine)**
 - `packages/inference/src/providers/llama-cpp/cache-adapter.ts` — slots, `cache_prompt`+`id_slot`, disk save/restore, 501 latch.
 - `packages/inference/src/providers/mlx/cache-adapter.ts` — `cache_id`/`prefix_cache_id`, warm/prefix-warm, `flushAll`.
-- `packages/service/src/providers/mlx/python/gezel_mlx_server.py` — the cache-preserving fork; lookup cascade, warm, in-engine LRU.
-- `packages/service/src/providers/mlx/python/cache_persist.py` — safetensors disk persistence + fingerprint firewall.
+- `packages/inference/src/providers/mlx/python/gezel_mlx_server.py` — the cache-preserving fork; lookup cascade, warm, in-engine LRU.
+- `packages/inference/src/providers/mlx/python/cache_persist.py` — safetensors disk persistence + fingerprint firewall.
 
 **Orchestration / prompt harnessing**
 - `packages/service/src/chat/manager.ts` — `buildInstructions` (3-band ordering ~`:10652`), `recordTurn` (`:4064`), invalidation routing, `prewarmSession`, launch-flag assembly (llama ~`:11192`, MLX ~`:11646`), slot SoT (`:10901`).

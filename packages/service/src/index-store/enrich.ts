@@ -28,6 +28,7 @@ import {
 import { parseFrontmatter } from './frontmatter.js';
 import type { FileRecord, IndexProvenance } from './index-store-types.js';
 import { type IndexStore, MAX_ENRICH_ATTEMPTS } from './index-store.js';
+import { retryOnContention } from './sqlite-driver.js';
 
 /**
  * Per-file semantic enrichment (the boekwachter's unit of work): produce an
@@ -832,13 +833,16 @@ export async function enrichFile(
       failureReason = err instanceof Error ? err.message : String(err);
     }
     if (summary) {
-      store.upsertSummary({
+      // The summary cost a model call; a static-index write holding the lock
+      // for longer than the main thread's busy budget must not discard it.
+      const record = {
         contentHash: file.hash,
         filePath: file.path,
         summaryMd: summary,
         model: completion?.model ?? deps.model ?? 'unknown',
         ...(completion?.provenance ? { provenance: completion.provenance } : {}),
-      });
+      };
+      await retryOnContention(() => store.upsertSummary(record));
       result.summarized = true;
     }
   }
