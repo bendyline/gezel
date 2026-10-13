@@ -251,9 +251,12 @@ Use `JAVA_HOME` for JDK 21 and `ANDROID_HOME` for the installed SDK. `GEZEL_MOBI
 The phone icons are generated, not hand-edited:
 `pnpm --filter @bendyline/gezel-app generate:icon:mobile` writes the iOS app
 icon and Android's adaptive-icon layers (`gezel_icon_background.png`,
-`gezel_icon.png`) from the desktop's `packages/app/assets/icon-mac.png`, and
-`check:icon:mobile` verifies them. The desktop art is a macOS icon, a rounded
-card on a transparent margin, so it cannot be copied over: iOS fills that
-margin into a border, and Android's mask cuts into the card. The generator
-draws the paper full-bleed and places the bench where each platform's mask
-leaves room for it.
+`gezel_icon.png`, and `gezel_icon_monochrome.png`) from the shared vector
+artwork in `packages/app/scripts/icon-artwork.mjs`. `check:icon:mobile`
+verifies them. iOS receives a full-bleed RGB image; Android receives separate
+background, foreground and themed layers, with the bench inside the central
+66-dp safe circle. Neither is extracted from a resized desktop bitmap.
+
+`pnpm --filter @bendyline/gezel-app generate:icons` regenerates the entire
+family, including Windows ICO frames, macOS ICNS, Linux, menu-bar templates,
+and Office icons. `check:icons` verifies every generated asset.

@@ -92,8 +92,9 @@ files:
   # the main process via nativeImage.createFromPath (see src/tray.ts).
   # Windows uses the multi-resolution icon.ico above so the shell can select
   # native 16–48 px taskbar frames or vector-derived 64–256 px Explorer frames;
-  # Linux derives its tray icon from icon.png.
+  # Linux uses its own native-size color export.
   - assets/trayTemplate.png
+  - assets/tray.png
   - assets/trayTemplate@2x.png
   # Five indeterminate activity frames. The main process cycles these only
   # while a chat turn is live; each base PNG picks up its @2x sibling.

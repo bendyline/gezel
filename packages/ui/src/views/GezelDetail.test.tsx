@@ -174,6 +174,7 @@ describe('GezelDetail', () => {
 
     expect(screen.queryByRole('tab', { name: 'Toolsets' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Memories' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Settings' })).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByText('Image · FLUX.1 Schnell')).toBeInTheDocument();
   });
@@ -189,7 +190,9 @@ describe('GezelDetail', () => {
   it('hides advanced tuning while the gezel inherits the default model', async () => {
     render(<GezelDetail gezelId="gz-maya" />);
     await screen.findByRole('heading', { name: 'Maya' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
 
+    expect(screen.getByRole('radiogroup', { name: 'Context' })).toBeInTheDocument();
     expect(screen.queryByText('Advanced tuning')).not.toBeInTheDocument();
   });
 
@@ -201,8 +204,80 @@ describe('GezelDetail', () => {
     } as GezelDetailData);
     render(<GezelDetail gezelId="gz-maya" />);
     await screen.findByRole('heading', { name: 'Maya' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
 
     expect(screen.getByText('Advanced tuning')).toBeInTheDocument();
+  });
+
+  it('keeps model, context and sources off the header and in the Settings tab', async () => {
+    render(<GezelDetail gezelId="gz-maya" />);
+    await screen.findByRole('heading', { name: 'Maya' });
+
+    expect(screen.queryByText('Model:')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Context' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Sources' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+    expect(screen.getByRole('radiogroup', { name: 'Context' })).toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', { name: 'Sources' })).toBeInTheDocument();
+  });
+
+  it('saves a context choice from the Settings tab', async () => {
+    vi.mocked(api.updateGezelSettings).mockResolvedValue({
+      ...DETAIL,
+      retrieval: { mode: 'deep' },
+    } as GezelDetailData);
+    render(<GezelDetail gezelId="gz-maya" />);
+    await screen.findByRole('heading', { name: 'Maya' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+
+    const context = screen.getByRole('radiogroup', { name: 'Context' });
+    expect(within(context).getByRole('radio', { name: 'Inherit' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    fireEvent.click(within(context).getByRole('radio', { name: 'Deep' }));
+
+    await waitFor(() =>
+      expect(api.updateGezelSettings).toHaveBeenCalledWith('gz-maya', {
+        retrieval: { mode: 'deep' },
+      }),
+    );
+    await waitFor(() =>
+      expect(within(context).getByRole('radio', { name: 'Deep' })).toHaveAttribute(
+        'aria-checked',
+        'true',
+      ),
+    );
+  });
+
+  it('names an overridden model in the header and opens Settings from it', async () => {
+    vi.mocked(api.getGezel).mockResolvedValue({
+      ...DETAIL,
+      provider: 'openai',
+      model: 'gpt-5',
+    } as GezelDetailData);
+    render(<GezelDetail gezelId="gz-maya" />);
+    await screen.findByRole('heading', { name: 'Maya' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'gpt-5' }));
+    expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('shows an on-device override by its catalog name', async () => {
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+      models: [{ id: 'qwen3.8-27b-q4', name: 'Qwen 3.8 (27B, Q4)' }],
+    } as unknown as Awaited<ReturnType<typeof api.listLlamaCppModels>>);
+    vi.mocked(api.getGezel).mockResolvedValue({
+      ...DETAIL,
+      provider: 'llama-cpp',
+      model: 'qwen3.8-27b-q4',
+    } as GezelDetailData);
+    render(<GezelDetail gezelId="gz-maya" />);
+    await screen.findByRole('heading', { name: 'Maya' });
+
+    expect(await screen.findByRole('button', { name: 'Qwen 3.8 (27B, Q4)' })).toBeInTheDocument();
+    expect(screen.queryByText('qwen3.8-27b-q4')).not.toBeInTheDocument();
   });
 
   it('returns to Chat when switching from Toolsets to a fixed-function gezel', async () => {

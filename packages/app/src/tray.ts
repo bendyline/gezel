@@ -256,9 +256,10 @@ export class TrayController {
       const ico = join(this.deps.assetsDir, 'icon.ico');
       if (existsSync(ico)) return ico;
     }
-    // Linux (and platform fallbacks): a small color icon derived from the
-    // app icon. Resize it so the full-resolution logo isn't squashed by the
-    // platform at draw time.
+    // Linux (and platform fallbacks): use the native-size vector export so
+    // the small vise stays sharp in the status area.
+    const trayPng = join(this.deps.assetsDir, 'tray.png');
+    if (existsSync(trayPng)) return nativeImage.createFromPath(trayPng);
     const png = join(this.deps.assetsDir, 'icon.png');
     if (existsSync(png)) {
       return nativeImage.createFromPath(png).resize({ width: 22, height: 22 });

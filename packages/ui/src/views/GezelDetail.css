@@ -290,37 +290,74 @@
   margin-top: 0.35rem;
 }
 
-/* Each labelled control wraps as one unit, so a label never ends a line while
-   its keys start the next, and a wrapped group starts flush left. */
-.provider-override-grouped {
-  column-gap: 1.05rem;
+/* The header names the model only when the gezel overrides the default;
+   the name opens the Settings tab, where it is changed. */
+.gezel-header-model {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+  min-width: 0;
 }
 
-.provider-override-group {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.3rem;
-}
-
-.provider-chip {
-  padding: 0.15rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+.gezel-header-model-name {
+  appearance: none;
+  padding: 0;
+  border: none;
   background: transparent;
   color: var(--text);
-  font-size: 0.75rem;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.gezel-header-model-name {
   cursor: pointer;
 }
 
-.provider-chip-active {
-  border-color: var(--accent);
-  background: rgba(176, 114, 76, 0.15);
-  color: var(--text);
+button.gezel-header-model-name:hover {
+  color: var(--accent-text);
+  text-decoration: underline;
 }
 
-.provider-chip:hover:not(.provider-chip-active):not(:disabled) {
-  border-color: var(--accent);
+/* The Settings tab: a card like the character editor, one labelled row per
+   setting with its explanation beneath. */
+.gezel-settings {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.gezel-settings-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  max-width: 44rem;
+}
+
+.gezel-settings-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.gezel-settings-row .gz-tray {
+  flex-wrap: wrap;
+}
+
+.gezel-settings-model {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 /* The editor toolbar leaves this key a sliver on a phone, where the words

@@ -1,42 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <!--
-    Pixel-aligned artwork for the 24 px frame in icon.ico.
-
-    The 24 px taskbar frame needs its own geometry: reducing the detailed
-    artwork makes the vise mask collapse and lets the grain change the
-    apparent weight of the two legs. Both leg paths use reflected coordinates
-    around x=14 and the same winding direction.
-  -->
-  <rect width="24" height="24" fill="#849577" />
-
-  <defs>
-    <path id="leg" d="M8 10h3l-1 11H7z" />
-    <g id="leg-openings">
-      <circle cx="9.5" cy="12.5" r=".75" />
-      <circle cx="8.5" cy="18.5" r=".75" />
-    </g>
-  </defs>
-
-  <g fill="#faf9f3">
-    <!-- Bench top and stretcher. -->
-    <rect x="6" y="5" width="16" height="4" rx=".5" />
-    <rect x="10" y="15" width="8" height="2" rx=".5" />
-
-    <!-- Equal-width legs reflected exactly around the bench center (x=14). -->
-    <use href="#leg" />
-    <use href="#leg" transform="translate(28 0) scale(-1 1)" />
-
-    <!-- Vise: a full-pixel spindle, substantial knobs, and a separate jaw. -->
-    <rect x="3" y="2" width="1" height="10" />
-    <circle cx="3.5" cy="2" r="1.5" />
-    <circle cx="3.5" cy="12" r="1.5" />
-    <rect x="1" y="5" width="4" height="4" rx=".5" />
-  </g>
-
-  <!-- Openings are painted directly instead of masked so they survive 24 px. -->
-  <g fill="#849577">
-    <circle cx="3.5" cy="7" r="1" />
-    <use href="#leg-openings" />
-    <use href="#leg-openings" transform="translate(28 0) scale(-1 1)" />
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 64 64">
+<defs><linearGradient id="sage" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#526346"/><stop offset="1" stop-color="#3e4e34"/></linearGradient></defs>
+<rect x="2" y="2" width="60" height="60" rx="13" fill="#48583c"/>
+<path d="M18.666666666666664 24L24 24L21.333333333333332 50.666666666666664L13.333333333333332 50.666666666666664Z" fill="#f3ede0"/>
+<path d="M42.666666666666664 24L50.666666666666664 24L53.33333333333333 50.666666666666664L48 50.666666666666664Z" fill="#f3ede0"/>
+<rect x="21.333333333333332" y="40" width="26.666666666666668" height="5.333333333333329" rx="1" fill="#f3ede0"/>
+<rect x="13.333333333333332" y="18.666666666666664" width="42.66666666666667" height="8" rx="1.3333333333333333" fill="#f3ede0"/>
+<rect x="8" y="21.333333333333332" width="5.333333333333332" height="5.333333333333332" rx="1" fill="#f3ede0"/>
+<rect x="8" y="24" width="2.666666666666666" height="2.6666666666666643" rx="0.6" fill="#f3ede0"/>
+<path d="M6.666666666666666 22.666666666666664V30.666666666666664" fill="none" stroke="#f3ede0" stroke-width="2.6666666666666665" stroke-linecap="round"/>
 </svg>

@@ -47,11 +47,12 @@ import { useSocialMode } from '../components/useSocialMode.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { type ItemSlot, Poppetje, PoppetjeItem } from '../poppetje/index.js';
 import { Dialog, Select, Tabs } from '../primitives/index.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
 import './GezelDetail.css';
 
-type DetailTab = 'about' | 'appearance' | 'growth' | 'chat' | 'toolsets' | 'memories';
+type DetailTab = 'about' | 'appearance' | 'growth' | 'chat' | 'toolsets' | 'memories' | 'settings';
 
 interface GezelDetailProps {
   gezelId: string;
@@ -91,9 +92,13 @@ export function GezelDetail({
   // Growth is on display only in social mode; XP keeps accruing either way.
   const social = useSocialMode();
   const growthVisible = runtimeCapabilities().growth && social;
+  // Fixed-function gezels skip the LLM, so the model / context / sources
+  // controls don't apply to them.
+  const settingsVisible = runtimeCapabilities().daemonSettings && !isFixedFunction;
   const activeDetailTab =
     (isFixedFunction && (detailTab === 'toolsets' || detailTab === 'memories')) ||
-    (detailTab === 'growth' && !growthVisible)
+    (detailTab === 'growth' && !growthVisible) ||
+    (detailTab === 'settings' && !settingsVisible)
       ? 'chat'
       : detailTab;
   const generationEngineLabel = useGenerationEngineLabel(selected?.fixedFunction);
@@ -301,8 +306,12 @@ export function GezelDetail({
                 </span>
               )}
             </div>
-          ) : runtimeCapabilities().daemonSettings ? (
-            <ProviderOverride gezel={selected} onUpdated={applyUpdate} />
+          ) : selected.model ? (
+            <HeaderModelName
+              provider={selected.provider}
+              model={selected.model}
+              {...(settingsVisible ? { onOpenSettings: () => setDetailTab('settings') } : {})}
+            />
           ) : null}
         </div>
         <output className="status" aria-live="polite">
@@ -363,6 +372,7 @@ export function GezelDetail({
             {runtimeCapabilities().memories && !isFixedFunction && (
               <Tabs.Trigger value="memories">Memories</Tabs.Trigger>
             )}
+            {settingsVisible && <Tabs.Trigger value="settings">Settings</Tabs.Trigger>}
           </Tabs.List>
         </Tabs.Root>
       </div>
@@ -492,6 +502,9 @@ export function GezelDetail({
       )}
       {!isFixedFunction && activeDetailTab === 'memories' && (
         <MemoriesTree gezelId={selected.id} gezelName={selected.name} />
+      )}
+      {settingsVisible && activeDetailTab === 'settings' && (
+        <GezelSettingsPanel gezel={selected} onUpdated={applyUpdate} />
       )}
     </section>
   );
@@ -1157,7 +1170,121 @@ function IterateIconDialog({
   );
 }
 
-function ProviderOverride({
+/**
+ * The header's model line, shown only when the gezel overrides the
+ * default model. On-device ids resolve to their catalog name through the
+ * engine's own installed-model listing; the generic model route can reach
+ * out to a provider (and auto-start Ollama), which is too much to spend on
+ * a label. Cloud ids are already the names people use for those models.
+ */
+function HeaderModelName({
+  provider,
+  model,
+  onOpenSettings,
+}: {
+  provider: ProviderName | undefined;
+  model: string;
+  onOpenSettings?: () => void;
+}) {
+  const onDevice = provider === 'mlx' || provider === 'llama-cpp' || provider === 'ds4';
+  const [resolved, setResolved] = useState<{ key: string; name: string } | null>(null);
+  const key = `${provider ?? ''}:${model}`;
+
+  useEffect(() => {
+    if (!onDevice) return;
+    let cancelled = false;
+    void (async () => {
+      let name = model;
+      try {
+        const res =
+          provider === 'mlx'
+            ? await api.listMlxModels()
+            : provider === 'ds4'
+              ? await api.listDs4Models()
+              : await api.listLlamaCppModels();
+        name = (res.models ?? []).find((m) => m.id === model)?.name ?? model;
+      } catch {
+        /* the id is still a usable label */
+      }
+      if (!cancelled) setResolved({ key, name });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [onDevice, provider, model, key]);
+
+  const name = !onDevice ? model : resolved?.key === key ? resolved.name : null;
+  if (!name) return null;
+  return (
+    <div className="gezel-header-model">
+      <span className="muted small">Model:</span>
+      {onOpenSettings ? (
+        <button
+          type="button"
+          className="gezel-header-model-name"
+          onClick={onOpenSettings}
+          title="Change this gezel's model in Settings"
+        >
+          {name}
+        </button>
+      ) : (
+        <span className="gezel-header-model-name">{name}</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One labelled row of keys in the gezel Settings tab. Keys stay focusable
+ * while a save is in flight (aria-disabled, not disabled) so arrow-key
+ * navigation keeps its place.
+ */
+function SettingKeys<T extends string>({
+  label,
+  description,
+  options,
+  value,
+  onChange,
+  busy,
+}: {
+  label: string;
+  description: string;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  value: T;
+  onChange: (value: T) => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="gezel-settings-row">
+      <span className="gezel-settings-label">{label}</span>
+      <div className="gz-tray" role="radiogroup" aria-label={label} onKeyDown={onRadioKeyDown}>
+        {options.map((option) => {
+          const active = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+              role="radio"
+              aria-checked={active}
+              aria-disabled={busy || undefined}
+              tabIndex={active ? 0 : -1}
+              className={`gz-key${active ? ' gz-key-active' : ''}`}
+              onClick={() => {
+                if (!busy && !active) onChange(option.value);
+              }}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+      <span className="muted small">{description}</span>
+    </div>
+  );
+}
+
+function GezelSettingsPanel({
   gezel,
   onUpdated,
 }: {
@@ -1165,6 +1292,7 @@ function ProviderOverride({
   onUpdated: (detail: GezelDetailData) => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [globalProvider, setGlobalProvider] = useState<ProviderName>('copilot');
 
   useEffect(() => {
@@ -1174,43 +1302,14 @@ function ProviderOverride({
       .catch(() => {});
   }, []);
 
-  const setProviderAndModel = useCallback(
-    async (nextProvider: ProviderName | null, nextModel: string | undefined) => {
-      // One PUT, both fields. The previous chip-row UI updated
-      // provider and model via separate calls — that briefly left
-      // the gezel in an inconsistent state ("OpenAI provider, Ollama
-      // model") between the two writes, surfaced as a "model not in
-      // the new provider's list, falling back to default" warning
-      // in the bridge log. Atomic update kills that race.
-      //
-      // Reasoning-effort is provider-keyed too, so clear it whenever
-      // the provider changes — the same effort name on a different
-      // provider doesn't necessarily map (Copilot's `low/med/high`
-      // vs OpenAI's `minimal/low/medium/high`).
-      const providerChanged = (gezel.provider ?? null) !== (nextProvider ?? null);
+  const persist = useCallback(
+    async (patch: Parameters<typeof api.updateGezelSettings>[1]) => {
       setSaving(true);
+      setError(null);
       try {
-        const updated = await api.updateGezelSettings(gezel.id, {
-          provider: nextProvider ?? null,
-          model: nextModel ?? null,
-          ...(providerChanged || !nextModel ? { reasoningEffort: null } : {}),
-        });
-        onUpdated(updated);
-      } finally {
-        setSaving(false);
-      }
-    },
-    [gezel.id, gezel.provider, onUpdated],
-  );
-
-  const saveEffort = useCallback(
-    async (value: string | undefined) => {
-      setSaving(true);
-      try {
-        const updated = await api.updateGezelSettings(gezel.id, {
-          reasoningEffort: value ?? null,
-        });
-        onUpdated(updated);
+        onUpdated(await api.updateGezelSettings(gezel.id, patch));
+      } catch (err) {
+        setError((err as Error).message);
       } finally {
         setSaving(false);
       }
@@ -1218,65 +1317,28 @@ function ProviderOverride({
     [gezel.id, onUpdated],
   );
 
-  const saveSandbox = useCallback(
-    async (value: 'default' | 'on' | 'off') => {
-      setSaving(true);
-      try {
-        const updated = await api.updateGezelSettings(gezel.id, {
-          sandboxCopilot: value === 'default' ? null : value === 'on',
-        });
-        onUpdated(updated);
-      } finally {
-        setSaving(false);
-      }
-    },
-    [gezel.id, onUpdated],
-  );
-
-  const saveCodexPermission = useCallback(
-    async (value: CodexPermissionMode | 'inherit') => {
-      setSaving(true);
-      try {
-        const updated = await api.updateGezelSettings(gezel.id, {
-          codexPermissionMode: value === 'inherit' ? null : value,
-        });
-        onUpdated(updated);
-      } finally {
-        setSaving(false);
-      }
-    },
-    [gezel.id, onUpdated],
-  );
-
-  const saveRetrieval = useCallback(
-    async (value: RetrievalMode | 'inherit') => {
-      setSaving(true);
-      try {
-        const updated = await api.updateGezelSettings(gezel.id, {
-          retrieval: value === 'inherit' ? null : { ...gezel.retrieval, mode: value },
-        });
-        onUpdated(updated);
-      } finally {
-        setSaving(false);
-      }
-    },
-    [gezel.id, gezel.retrieval, onUpdated],
-  );
-
-  const saveFactual = useCallback(
-    async (value: 'role' | 'on' | 'off') => {
-      setSaving(true);
-      try {
-        const updated = await api.updateGezelSettings(gezel.id, {
-          factualWriting: value === 'role' ? null : value === 'on',
-        });
-        onUpdated(updated);
-      } finally {
-        setSaving(false);
-      }
-    },
-    [gezel.id, onUpdated],
-  );
+  const setProviderAndModel = (
+    nextProvider: ProviderName | null,
+    nextModel: string | undefined,
+  ) => {
+    // One PUT, both fields. The previous chip-row UI updated
+    // provider and model via separate calls — that briefly left
+    // the gezel in an inconsistent state ("OpenAI provider, Ollama
+    // model") between the two writes, surfaced as a "model not in
+    // the new provider's list, falling back to default" warning
+    // in the bridge log. Atomic update kills that race.
+    //
+    // Reasoning-effort is provider-keyed too, so clear it whenever
+    // the provider changes — the same effort name on a different
+    // provider doesn't necessarily map (Copilot's `low/med/high`
+    // vs OpenAI's `minimal/low/medium/high`).
+    const providerChanged = (gezel.provider ?? null) !== (nextProvider ?? null);
+    void persist({
+      provider: nextProvider ?? null,
+      model: nextModel ?? null,
+      ...(providerChanged || !nextModel ? { reasoningEffort: null } : {}),
+    });
+  };
 
   const effectiveProvider = gezel.provider ?? globalProvider;
   const factualCurrent: 'role' | 'on' | 'off' =
@@ -1290,118 +1352,93 @@ function ProviderOverride({
   const retrievalCurrent: RetrievalMode | 'inherit' = gezel.retrieval?.mode ?? 'inherit';
 
   return (
-    <div className="provider-override provider-override-grouped">
-      <span className="provider-override-group">
-        <span className="muted small">Model:</span>
-        <ProviderModelSelect
-          provider={gezel.provider ?? null}
-          model={gezel.model}
-          onChange={(p, m) => void setProviderAndModel(p, m)}
-          globalProvider={globalProvider}
-          disabled={saving}
-        />
-        <EffortPicker
-          provider={effectiveProvider}
-          model={gezel.model}
-          value={gezel.reasoningEffort}
-          onChange={(v) => void saveEffort(v)}
-        />
-      </span>
-      <span className="provider-override-group">
-        <span
-          className="muted small"
-          title="How much relevant indexed project knowledge is added to each substantive turn. Search remains available in Off mode."
-        >
-          Context:
-        </span>
-        {(['inherit', 'off', 'lean', 'balanced', 'deep'] as const).map((value) => (
-          <button
-            key={value}
-            type="button"
-            className={`provider-chip${retrievalCurrent === value ? ' provider-chip-active' : ''}`}
-            onClick={() => void saveRetrieval(value)}
+    <section className="gezel-settings" aria-label="Settings">
+      <div className="gezel-settings-row">
+        <span className="gezel-settings-label">Model</span>
+        <div className="gezel-settings-model">
+          <ProviderModelSelect
+            provider={gezel.provider ?? null}
+            model={gezel.model}
+            onChange={setProviderAndModel}
+            globalProvider={globalProvider}
             disabled={saving}
-          >
-            {value === 'inherit'
-              ? 'Inherit'
-              : value === 'off'
-                ? 'Off'
-                : value[0]!.toUpperCase() + value.slice(1)}
-          </button>
-        ))}
-      </span>
-      <span className="provider-override-group">
-        <span
-          className="muted small"
-          title="Cite a source for every name, date and number, look up what is missing, and never fill gaps from memory. Writers, researchers and reviewers do this by role, and so does anyone writing into an open document."
-        >
-          Sources:
+          />
+          <EffortPicker
+            provider={effectiveProvider}
+            model={gezel.model}
+            value={gezel.reasoningEffort}
+            onChange={(value) => void persist({ reasoningEffort: value ?? null })}
+          />
+        </div>
+        <span className="muted small">
+          The model {gezel.name} thinks with. Inherit uses the app's default model.
         </span>
-        {(['role', 'on', 'off'] as const).map((value) => (
-          <button
-            key={value}
-            type="button"
-            className={`provider-chip${factualCurrent === value ? ' provider-chip-active' : ''}`}
-            onClick={() => void saveFactual(value)}
-            disabled={saving}
-          >
-            {value === 'role'
-              ? `By role (${factualByRole ? 'cites' : 'free'})`
-              : value === 'on'
-                ? 'Always cite'
-                : 'Off'}
-          </button>
-        ))}
-      </span>
+      </div>
+      <SettingKeys
+        label="Context"
+        description="How much relevant indexed project knowledge is added to each substantive turn. Search remains available in Off mode."
+        options={[
+          { value: 'inherit', label: 'Inherit' },
+          { value: 'off', label: 'Off' },
+          { value: 'lean', label: 'Lean' },
+          { value: 'balanced', label: 'Balanced' },
+          { value: 'deep', label: 'Deep' },
+        ]}
+        value={retrievalCurrent}
+        onChange={(value) =>
+          void persist({
+            retrieval: value === 'inherit' ? null : { ...gezel.retrieval, mode: value },
+          })
+        }
+        busy={saving}
+      />
+      <SettingKeys
+        label="Sources"
+        description="Cite a source for every name, date and number, look up what is missing, and never fill gaps from memory. Writers, researchers and reviewers do this by role, and so does anyone writing into an open document."
+        options={[
+          { value: 'role', label: `By role (${factualByRole ? 'cites' : 'free'})` },
+          { value: 'on', label: 'Always cite' },
+          { value: 'off', label: 'Off' },
+        ]}
+        value={factualCurrent}
+        onChange={(value) =>
+          void persist({ factualWriting: value === 'role' ? null : value === 'on' })
+        }
+        busy={saving}
+      />
       {effectiveProvider === 'copilot' && (
-        <span className="provider-override-group">
-          <span
-            className="muted small"
-            title="Deny the Copilot CLI's built-in tools (bash, web_fetch, file edit, grep) and force this gezel through our MCP tools."
-          >
-            Sandbox:
-          </span>
-          {(['default', 'on', 'off'] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              className={`provider-chip${sandboxCurrent === value ? ' provider-chip-active' : ''}`}
-              onClick={() => void saveSandbox(value)}
-              disabled={saving}
-            >
-              {value === 'default' ? 'Inherit' : value === 'on' ? 'On' : 'Off'}
-            </button>
-          ))}
-        </span>
+        <SettingKeys
+          label="Sandbox"
+          description="Deny the Copilot CLI's built-in tools (bash, web_fetch, file edit, grep) and force this gezel through our MCP tools."
+          options={[
+            { value: 'default', label: 'Inherit' },
+            { value: 'on', label: 'On' },
+            { value: 'off', label: 'Off' },
+          ]}
+          value={sandboxCurrent}
+          onChange={(value) =>
+            void persist({ sandboxCopilot: value === 'default' ? null : value === 'on' })
+          }
+          busy={saving}
+        />
       )}
       {effectiveProvider === 'codex-cli' && (
-        <span className="provider-override-group">
-          <span
-            className="muted small"
-            title="Override this gezel's Codex execution posture. A project-level choice still takes precedence."
-          >
-            Access:
-          </span>
-          {(['inherit', 'plan', 'edit', 'reviewed', 'full'] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              className={`provider-chip${codexCurrent === value ? ' provider-chip-active' : ''}`}
-              onClick={() => void saveCodexPermission(value)}
-              disabled={saving}
-            >
-              {value === 'inherit'
-                ? 'Inherit'
-                : value === 'plan'
-                  ? 'Plan'
-                  : value === 'edit'
-                    ? 'Edit'
-                    : value === 'reviewed'
-                      ? 'Reviewed'
-                      : 'Full'}
-            </button>
-          ))}
-        </span>
+        <SettingKeys
+          label="Access"
+          description="Override this gezel's Codex execution posture. A project-level choice still takes precedence."
+          options={[
+            { value: 'inherit', label: 'Inherit' },
+            { value: 'plan', label: 'Plan' },
+            { value: 'edit', label: 'Edit' },
+            { value: 'reviewed', label: 'Reviewed' },
+            { value: 'full', label: 'Full' },
+          ]}
+          value={codexCurrent}
+          onChange={(value) =>
+            void persist({ codexPermissionMode: value === 'inherit' ? null : value })
+          }
+          busy={saving}
+        />
       )}
       {gezel.model && (
         <AdvancedTuningDisclosure
@@ -1410,14 +1447,15 @@ function ProviderOverride({
           onUpdated={onUpdated}
         />
       )}
-    </div>
+      {error && <p className="error small">{error}</p>}
+    </section>
   );
 }
 
 /**
  * `<details>` wrapper around `GezelTuningEditor`. Defaults closed so
- * the header stays compact; opening it loads the catalog tuning defaults
- * for the resolved model id, then renders the Squisq form.
+ * the Settings tab stays compact; opening it loads the catalog tuning
+ * defaults for the resolved model id, then renders the Squisq form.
  */
 function AdvancedTuningDisclosure({
   gezel,
@@ -1455,7 +1493,7 @@ function AdvancedTuningDisclosure({
   return (
     <details
       className="gezel-tuning-disclosure"
-      style={{ flexBasis: '100%', marginTop: '0.5rem' }}
+      style={{ alignSelf: 'stretch' }}
       onToggle={(e) => {
         if ((e.target as HTMLDetailsElement).open) void fetchInherited();
       }}

@@ -256,14 +256,20 @@ Do not switch through intermediate modes while a pointer moves along the
 track: Chat only and Off can stop a running Night Shift. Night Shift stays
 below the spectrum as its own section, never as a fifth stop.
 
-The icon family is one three-gezel constellation, with stable positions,
-scale, and stroke weight. Off has three hollow resting nodes; Chat only
-has an incoming cue and one answering node; Tasks + chat activates the
-crew along a branching path; Proactive closes the connections and adds an
-initiative spark. The nodes stand for a crew, not a literal count of active
-gezels. Labels and descriptions always explain the mode; color alone never
-does. Reuse `EngagementModeIcon` and the shared mode copy in the titlebar,
-menu, and Settings so this vocabulary remains consistent.
+The icon family is the crew at the workbench: one bench that never moves,
+with up to three poppetje figures standing behind it in fixed places, the
+lead in the middle a little taller. Off leaves the bench empty with the
+hammer lying on it; Chat only brings the lead to the bench; Tasks + chat
+brings the whole crew; Proactive has the lead raise the hammer unasked. The
+figures stand for a crew, not a literal count of active gezels. Three shapes
+are deliberate. The H-frame legs make it a workbench; a plain table reads as
+a desk or a meeting table. The hammer has a flat face and a rounded peen and
+is held upright in the lead's fist: a symmetric mallet raised behind a bench
+reads as a gavel, and a hooked claw tilted over a neighbour reads as an axe.
+And initiative is a raised tool, never a raised hand, which reads as waiting
+to be called on. Labels and descriptions always explain the mode; color alone
+never does. Reuse `EngagementModeIcon` and the shared mode copy in the
+titlebar, menu, and Settings so this vocabulary remains consistent.
 
 ## Controls: budget sliders
 
