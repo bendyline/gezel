@@ -70,10 +70,38 @@ async function sha256File(path) {
   return hash.digest('hex');
 }
 
+// One registry connection reset (ECONNRESET) failed a whole CI build, so
+// transient failures retry the way fetch-node's do; a 404 still fails at once.
+const DOWNLOAD_ATTEMPTS = 3;
+const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429]);
+
 async function downloadBytes(url) {
-  const res = await fetch(url, { redirect: 'follow' });
-  if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
-  return Buffer.from(await res.arrayBuffer());
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const res = await fetch(url, { redirect: 'follow' });
+      if (!res.ok) {
+        const error = new Error(`HTTP ${res.status} from ${url}`);
+        error.httpStatus = res.status;
+        throw error;
+      }
+      const bytes = Buffer.from(await res.arrayBuffer());
+      if (attempt > 1) {
+        console.log(`[fetch-pnpm] download recovered on attempt ${attempt}/${DOWNLOAD_ATTEMPTS}`);
+      }
+      return bytes;
+    } catch (error) {
+      const status = error?.httpStatus;
+      const retryable =
+        status === undefined || RETRYABLE_HTTP_STATUSES.has(status) || status >= 500;
+      if (!retryable || attempt === DOWNLOAD_ATTEMPTS) throw error;
+
+      const delayMs = 500 * 2 ** (attempt - 1);
+      console.warn(
+        `[fetch-pnpm] download attempt ${attempt}/${DOWNLOAD_ATTEMPTS} failed for ${url}: ${error instanceof Error ? error.message : String(error)}; retrying in ${delayMs}ms`,
+      );
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+    }
+  }
 }
 
 async function isFile(path) {

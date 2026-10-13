@@ -511,14 +511,23 @@ try {
   await page.getByRole('tab', { name: 'Chat', exact: true }).first().click();
   const largeTextDraft = page.locator('.chat-composer [contenteditable="true"]');
   await largeTextDraft.focus();
-  await largeTextDraft.scrollIntoViewIfNeeded();
+  // Reachable means a scroll brings the draft into view once layout settles.
+  // Settled, it ends 17 px above the edge; a single sample taken mid-relayout
+  // after the resize and the font change has caught it past the edge in CI.
+  let draftBounds;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await largeTextDraft.scrollIntoViewIfNeeded();
+    draftBounds = await largeTextDraft.evaluate((element) => {
+      const { top, bottom } = element.getBoundingClientRect();
+      return { top, bottom, innerHeight };
+    });
+    // Scrolling lands on whole pixels; a fractional box can end just past the edge.
+    if (draftBounds.top >= 0 && draftBounds.bottom <= draftBounds.innerHeight + 1) break;
+    await page.waitForTimeout(250);
+  }
   assert(
-    await largeTextDraft.evaluate((element) => {
-      const bounds = element.getBoundingClientRect();
-      // Scrolling lands on whole pixels; a fractional box can end just past the edge.
-      return bounds.top >= 0 && bounds.bottom <= innerHeight + 1;
-    }),
-    'The draft must remain reachable at 200% text size',
+    draftBounds.top >= 0 && draftBounds.bottom <= draftBounds.innerHeight + 1,
+    `The draft must remain reachable at 200% text size: ${JSON.stringify(draftBounds)}`,
   );
   await checkpoint('phone-large-text-project');
   await (await navigation()).getByRole('button', { name: 'Settings', exact: true }).click();
