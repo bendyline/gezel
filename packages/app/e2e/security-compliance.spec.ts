@@ -5,8 +5,9 @@ import { fileURLToPath } from 'node:url';
 /**
  * Security & Compliance UX driver — exercises the new centralized
  * security policy surfaces:
- *   1. First-run "Security & compliance" level step on the Home tab
- *      (shown before provider setup on a fresh, unconfigured install).
+ *   1. First run: the welcome asks no posture question, so its one
+ *      "Change what I'm allowed to do" link must reach the level presets
+ *      on a fresh, unconfigured install.
  *   2. The Settings → Security & Compliance panel (level slider +
  *      per-capability toggles, with the level snapping to "Custom").
  *
@@ -41,8 +42,8 @@ test.describe('Security & Compliance — first run', () => {
     // provider that already has creds). Leaving `provider` unset would
     // default to copilot, whose probe *succeeds* on any host that has
     // GitHub Copilot auth — flipping the app to "configured" and
-    // rendering the workshop instead of the first-run Intro → Security →
-    // Setup flow this spec exercises.
+    // rendering the workshop instead of the first-run welcome this spec
+    // exercises.
     await writeFile(
       join(home, 'config.json'),
       JSON.stringify({ firstRunCompleted: true, provider: 'openai' }),
@@ -74,11 +75,13 @@ test.describe('Security & Compliance — first run', () => {
     await rm(home, { recursive: true, force: true }).catch(() => {});
   });
 
-  test('first-run shows the security level step with pills', async () => {
-    // The section heading is "Security & compliance" (sentence case in
-    // the first-run framing).
-    const heading = page.getByRole('heading', { name: /Security & compliance/i });
-    await expect(heading).toBeVisible({ timeout: 20000 });
+  test('first-run welcome links to the security level presets', async () => {
+    const welcome = page.getByTestId('meester-welcome');
+    await expect(welcome).toHaveAttribute('data-welcome-state', 'connect', { timeout: 20000 });
+    await welcome.getByRole('button', { name: "Change what I'm allowed to do" }).click();
+
+    const heading = page.getByRole('heading', { name: /Security & Compliance/i });
+    await expect(heading).toBeVisible({ timeout: 10000 });
 
     // All three level pills are present. Anchor the match — "Lockdown"
     // is a substring of "Super Lockdown", so an unanchored regex is

@@ -710,6 +710,7 @@
   flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
+  margin: 0;
 }
 
 .interest-tray-key {

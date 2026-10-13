@@ -1,5 +1,5 @@
-import type { Task } from './schemas/task.js';
 import { type ToolCallCard, ToolCallCardSchema, type ToolCardStep } from './schemas/gezel.js';
+import type { Task } from './schemas/task.js';
 
 /** The slice of a completed tool call a card is read from. */
 export interface ToolCardSource {

@@ -20,7 +20,7 @@ export function InterestTray({
     onChange(selected.includes(id) ? selected.filter((a) => a !== id) : [...selected, id]);
   };
   return (
-    <div className="gz-tray interest-tray" role="group" aria-label={label}>
+    <fieldset className="gz-tray interest-tray" aria-label={label}>
       {shippedInterestAreas().map((area) => {
         const on = selected.includes(area.id);
         return (
@@ -37,6 +37,6 @@ export function InterestTray({
           </button>
         );
       })}
-    </div>
+    </fieldset>
   );
 }

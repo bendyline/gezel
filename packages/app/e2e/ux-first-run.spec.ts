@@ -108,6 +108,10 @@ test('03 - the title bar stays quiet until the workshop is running', async () =>
 
 test('04 - the tour opens in place, without leaving the welcome', async () => {
   const welcome = page.getByTestId('meester-welcome');
+  // A new install is asked what it wants help with first, and the question
+  // holds the tour's place until it is answered or set aside.
+  await expect(welcome.getByRole('group', { name: 'What you would like help with' })).toBeVisible();
+  await welcome.getByRole('button', { name: 'Not now' }).click();
   await welcome.getByRole('button', { name: 'Take the 1-minute tour' }).click();
   await expect(welcome.getByTestId('home-intro-article')).toBeVisible({ timeout: 20_000 });
   await page.waitForTimeout(400);

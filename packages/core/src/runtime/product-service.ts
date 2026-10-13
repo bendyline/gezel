@@ -4,11 +4,6 @@ import {
   resolveSocialMode,
   withCharacterChatCap,
 } from '../character/index.js';
-import {
-  LIVE_CRAFTBOOK_LAUNCH_STATUSES,
-  chatLaunchInvocationKeyAsync,
-} from '../craftbook-invocation-key.js';
-import { composeCraftbookLaunch, stringifyCraftbookParamValues } from '../craftbook-launch.js';
 import { sampleCommonDir } from '../craftbook-samples.js';
 import { isEngagementAllowed, isTaskWorkAllowed } from '../engagement.js';
 import { displayName } from '../gezel-display.js';
@@ -66,20 +61,14 @@ import {
   type RuntimeCapabilities,
 } from '../schemas/runtime-capabilities.js';
 import type { ChatSession, ExpectedDeliverable, TurnMessageOrigin } from '../schemas/session.js';
-import {
-  CreateChatSessionRequestSchema,
-  InterruptSessionRequestSchema,
-  LaunchTaskFromSessionRequestSchema,
-  SendToSessionRequestSchema,
-} from '../schemas/session.js';
+import { InterruptSessionRequestSchema, SendToSessionRequestSchema } from '../schemas/session.js';
 import type { Task } from '../schemas/task.js';
 import { resolveSecurityPolicy } from '../security/policy.js';
 import { taskSessionCanContinue } from '../task-execution.js';
 import { renderTaskContextBlock } from '../tasks/prompt-context.js';
 import { buildStepDispatchSeed } from '../tasks/step-dispatch-seed.js';
 import { stepTurnSteering, tuningForStepAction } from '../tasks/step-turn-steering.js';
-import { NEW_THREAD_TITLE, deriveThreadTitleFromMessages } from '../thread-title.js';
-import { craftbookStartCardForTask } from '../tool-cards.js';
+import { deriveThreadTitleFromMessages } from '../thread-title.js';
 import { roleHasTeamScope } from '../tools/access.js';
 import type { NativeToolBinding } from '../tools/native-tools.js';
 import { ChatEventBus } from './chat-events.js';
@@ -139,6 +128,7 @@ import type { PortableScripts } from './script-host.js';
 import { handlePortableScriptRoute } from './script-routes.js';
 import { createPortableScriptTaskActions } from './script-tasks.js';
 import { portableScriptTools } from './script-tools.js';
+import { type PortableSessionRouteHost, handlePortableSessionRoute } from './session-routes.js';
 import { type QueuedSendOptions, SessionSendQueue } from './session-send-queue.js';
 import { runSharedLoopTurn } from './shared-loop-turn.js';
 import { PortableSpeechRoutes } from './speech-routes.js';
@@ -146,7 +136,6 @@ import type { PortableSpeech } from './speech.js';
 import type { PortableStore } from './store.js';
 import { assertPortableTaskSessionActive } from './task-authority.js';
 import { evaluatePortableTaskGate, portableDeliverableReady } from './task-gates.js';
-import { PortableTaskInputError } from './task-inputs.js';
 import { PortableTaskRunner } from './task-routes.js';
 import { taskActiveAssignee } from './tasks.js';
 import {
@@ -224,14 +213,6 @@ type PortableQueuedSend = QueuedSendOptions & {
 };
 type SessionScope = Pick<ChatSession, 'id' | 'gezelId' | 'projectId'>;
 type KnownSession = SessionScope & { providerName?: ProviderName };
-/** The message a turn is answering; a finished turn has appended its reply after it. */
-function lastUserText(session: ChatSession): string {
-  for (let i = session.messages.length - 1; i >= 0; i--) {
-    const message = session.messages[i]!;
-    if (message.role === 'user') return message.content;
-  }
-  return '';
-}
 /** A phone holds a handful of prompts in memory at most. */
 const MAX_ACTIVE_TURNS = 16;
 const MAX_QUEUED_PER_SESSION = 20;
@@ -1568,151 +1549,6 @@ export class PortableProductService {
     );
   }
 
-  /**
-   * The composer's attached task (`POST /api/sessions/:id/launch-task`): the
-   * craftbook task starts from this message with no model turn, and the
-   * thread gets the message and a launch receipt, exactly as on the desktop.
-   */
-  private async launchTaskFromSession(session: ChatSession, body: unknown): Promise<Response> {
-    const request = LaunchTaskFromSessionRequestSchema.parse(body);
-    const { launch } = request;
-    this.assertNoConflict();
-    // A running turn holds its own copy of the session and rewrites it.
-    if (this.sessionBusy(session.id))
-      throw new ProductError(
-        'Wait for the current response in this conversation to finish, or stop it first.',
-        409,
-      );
-    if (!isEngagementAllowed(await this.store.readConfig()))
-      throw new ProductError('AI engagement is off. Turn it on in Settings to start work.', 403);
-    if (launch.tonight)
-      throw new ProductError('Running a task tonight needs the desktop app.', 501);
-    const text = request.draftId
-      ? rewritePromptDraftFileRefs(request.message, request.draftId)
-      : request.message;
-    const book = await this.resolveBundledCraftbook(
-      launch.craftbookId,
-      launch.craftbookSourceId,
-      undefined,
-      session.projectId,
-    );
-    if (!book) {
-      return json({ error: `craftbook "${launch.craftbookId}" is not on this device` }, 404);
-    }
-    const composed = composeCraftbookLaunch({
-      message: text,
-      craftbookName: book.name,
-      paramSchema: book.paramSchema,
-      params: stringifyCraftbookParamValues(launch.params),
-    });
-    const key = await chatLaunchInvocationKeyAsync({
-      sessionId: session.id,
-      ...(request.draftId ? { draftId: request.draftId } : {}),
-      message: request.message,
-      launch: launch as unknown as Record<string, unknown>,
-    });
-    // A retried POST finds the live task it made. With its receipt in the
-    // thread nothing is written twice; without one (a write that failed after
-    // the task existed) the receipt is written now instead of a second task.
-    const prior = (await this.store.listTasks({ projectId: session.projectId })).find(
-      (t) =>
-        t.origin?.kind === 'craftbook-invocation' &&
-        t.origin.key === key &&
-        LIVE_CRAFTBOOK_LAUNCH_STATUSES.has(t.status),
-    );
-    if (prior) {
-      let at = -1;
-      for (let i = session.messages.length - 1; i >= 0 && at < 0; i--) {
-        const m = session.messages[i]!;
-        if (
-          m.synthetic === 'craftbook-launch' &&
-          m.toolCalls?.some((call) => call.card?.taskRef === prior.ref)
-        )
-          at = i;
-      }
-      const userMessage = at > 0 ? session.messages[at - 1] : undefined;
-      if (at >= 0 && userMessage?.role === 'user') {
-        return json({ task: prior, userMessage, receipt: session.messages[at], reused: true });
-      }
-    }
-    if (request.draftId) {
-      const draft = await this.store.getPromptDraft(session.projectId, request.draftId);
-      if (!draft) throw new ProductError('Draft not found', 404);
-      if (draft.status !== 'draft' || !draftMatchesSession(draft, session))
-        throw new ProductError('This draft is not available to send in this conversation', 409);
-    }
-    let task: Task;
-    if (prior) task = prior;
-    else {
-      try {
-        task = await this.tasks.create(session.projectId, {
-          title: launch.title?.trim() || book.name,
-          description: composed.description,
-          craftbookId: launch.craftbookId,
-          ...(launch.craftbookSourceId ? { craftbookSourceId: launch.craftbookSourceId } : {}),
-          ...(Object.keys(composed.params).length > 0 ? { craftbookParams: composed.params } : {}),
-          ...(launch.inputs && Object.keys(launch.inputs).length > 0
-            ? { inputs: launch.inputs }
-            : {}),
-          ...(launch.assignee ? { assignee: launch.assignee } : {}),
-          createdBy: { kind: 'user' },
-          launchSessionId: session.id,
-          craftbookInvocationKey: key,
-        });
-      } catch (error) {
-        if (error instanceof PortableTaskInputError) {
-          return json({ error: error.message, code: 'task-input', param: error.param }, 422);
-        }
-        throw error;
-      }
-    }
-    const at = new Date().toISOString();
-    const userMessage: ChatMessage = {
-      role: 'user',
-      content: text,
-      at,
-      ...(request.draftId ? { draftId: request.draftId } : {}),
-    };
-    const card = craftbookStartCardForTask(task);
-    const receipt: ChatMessage = {
-      role: 'assistant',
-      synthetic: 'craftbook-launch',
-      content: `Started the "${task.craftbook.name}" craftbook — task ${task.ref}.`,
-      at: new Date().toISOString(),
-      toolCalls: [
-        {
-          name: 'invoke_craftbook',
-          at,
-          durationMs: 0,
-          success: true,
-          argsSummary: `${task.craftbook.name} · ${task.ref}`,
-          ...(card ? { card } : {}),
-        },
-      ],
-    };
-    session.messages.push(userMessage, receipt);
-    if (!session.title || session.title === NEW_THREAD_TITLE)
-      session.title = deriveThreadTitleFromMessages([userMessage]) ?? book.name;
-    try {
-      await this.store.writeSession(
-        session,
-        request.draftId ? { sentDraftId: request.draftId } : {},
-      );
-    } catch (error) {
-      session.messages.splice(-2, 2);
-      throw error;
-    }
-    if (request.draftId) {
-      const draft = await this.store.getPromptDraft(session.projectId, request.draftId);
-      if (draft) this.draftChanged(draft);
-    }
-    this.emit(session, { type: 'user_message', message: userMessage });
-    this.emit(session, { type: 'complete', message: receipt });
-    this.emit(session, { type: 'done' });
-    void this.tasks.run(task.ref).catch(() => {});
-    return json({ task, userMessage, receipt, reused: false }, 201);
-  }
-
   private async submit(
     id: string,
     body: Record<string, unknown>,
@@ -1866,6 +1702,25 @@ export class PortableProductService {
       assertSessionsFree: (match) => this.assertSessionsFree(match),
       draftChanged: (draft, deleted) => this.draftChanged(draft, deleted),
       createGezel: (input) => this.createGezel(input),
+    };
+  }
+  private sessionRouteHost(): PortableSessionRouteHost {
+    return {
+      store: this.store,
+      inference: this.inference,
+      tasks: this.tasks,
+      turns: this.turns,
+      admissions: this.admissions,
+      session: (id) => this.session(id),
+      submit: (id, body) => this.submit(id, body),
+      interrupt: (id, body) => this.interrupt(id, body),
+      assertNoConflict: () => this.assertNoConflict(),
+      sessionBusy: (sessionId) => this.sessionBusy(sessionId),
+      assertSessionsFree: (match) => this.assertSessionsFree(match),
+      resolveCraftbook: (id, source, version, projectId) =>
+        this.resolveBundledCraftbook(id, source, version, projectId),
+      draftChanged: (draft) => this.draftChanged(draft),
+      emit: (session, event) => this.emit(session, event),
     };
   }
   /** Claim a session synchronously, before any await lets another send in. */
@@ -2882,109 +2737,14 @@ export class PortableProductService {
         id,
         query,
       );
-    if (resource === 'sessions') {
-      if (!id) {
-        if (method === 'GET')
-          return json({
-            sessions: await this.store.listSessions({
-              gezelId: query.get('gezel') ?? undefined,
-              projectId: query.get('project') ?? undefined,
-            }),
-          });
-        if (method === 'POST') {
-          const input = CreateChatSessionRequestSchema.parse(body);
-          const gezel = await this.store.getGezel(input.gezelId);
-          const config = await this.store.readConfig();
-          const providerName = MobileProviderIdSchema.parse(
-            gezel?.provider ?? config.provider ?? 'llama-cpp',
-          );
-          const inventory =
-            providerName === 'llama-cpp' ? await this.inference.models?.() : undefined;
-          const model =
-            gezel?.parsed.frontmatter.model ?? inventory?.selectedModelId ?? providerName;
-          if (inventory && !inventory.models.some((item) => item.id === model))
-            throw new ProductError(
-              gezel?.parsed.frontmatter.model
-                ? `The model assigned to ${gezel.name} is not installed. Import it in Settings → Artificial Intelligence, or change this gezel's model.`
-                : inventory.models.length === 0
-                  ? 'No chat model is installed on this device. Download or import one in Settings → Artificial Intelligence, then send your message again.'
-                  : 'Choose an available chat model in Settings → Artificial Intelligence, then send your message again.',
-              409,
-            );
-          return json(await this.store.createSession({ ...input, providerName, model }));
-        }
-      }
-      if (id === 'inflight') {
-        // A send is in flight from the moment it is accepted, as on desktop:
-        // while it is set up, while it waits for the engine, and while it runs.
-        const entries = [
-          ...[...this.turns.values()].map((t) => ({ session: t.session, startedAt: t.startedAt })),
-          ...(
-            await Promise.all(
-              [...this.admissions.values()]
-                .filter((a) => !this.turns.has(a.sessionId))
-                .map(async (a) => {
-                  const session = await this.session(a.sessionId).catch(() => undefined);
-                  return session ? [{ session, startedAt: a.startedAt }] : [];
-                }),
-            )
-          ).flat(),
-        ];
-        return json({
-          inflight: entries
-            .filter(
-              ({ session }) =>
-                (!query.get('project') || query.get('project') === session.projectId) &&
-                (!query.get('gezel') || query.get('gezel') === session.gezelId),
-            )
-            .map(({ session, startedAt }) => ({
-              sessionId: session.id,
-              gezelId: session.gezelId,
-              projectId: session.projectId,
-              ...(session.taskRef ? { taskRef: session.taskRef } : {}),
-              providerName: session.providerName,
-              ...(session.model ? { model: session.model } : {}),
-              userText: lastUserText(session),
-              startedAt,
-              elapsedMs: Date.now() - startedAt,
-            })),
-        });
-      }
-      if (id) {
-        const session = await this.session(id);
-        if (!action && method === 'GET') return json(session);
-        if (action === 'inflight') {
-          const turn = this.turns.get(id);
-          const startedAt = turn?.startedAt ?? this.admissions.get(id)?.startedAt;
-          return json({
-            inflight:
-              startedAt === undefined
-                ? null
-                : {
-                    userText: lastUserText(turn?.session ?? session),
-                    startedAt,
-                    elapsedMs: Date.now() - startedAt,
-                  },
-          });
-        }
-        if (action === 'send' && method === 'POST') return json(await this.submit(id, body));
-        if (action === 'launch-task' && method === 'POST')
-          return this.launchTaskFromSession(session, body);
-        if (action === 'interrupt' && method === 'POST')
-          return json(await this.interrupt(id, body));
-        if (action === 'archive' && method === 'POST') {
-          this.assertSessionsFree((scope) => scope.id === id);
-          session.archived = true;
-          await this.store.writeSession(session);
-          return json(session);
-        }
-        if (!action && method === 'DELETE') {
-          this.assertSessionsFree((scope) => scope.id === id);
-          await this.store.deleteSession(session.gezelId, id);
-          return json({ ok: true });
-        }
-      }
-    }
+    const sessionResponse = await handlePortableSessionRoute(
+      this.sessionRouteHost(),
+      request,
+      url,
+      body,
+      parts,
+    );
+    if (sessionResponse) return sessionResponse;
     if (resource === 'timeline' || action === 'timeline')
       return json(
         await portableTimeline(

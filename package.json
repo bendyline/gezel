@@ -38,6 +38,8 @@
     "app:unleased": "node scripts/dev-fresh-runtime.mjs && pnpm build && pnpm --filter @bendyline/gezel-app exec electron . --no-sandbox",
     "app:clean": "node scripts/run-with-dependency-lease.mjs app:clean:unleased",
     "app:clean:unleased": "node scripts/dev-fresh-runtime.mjs && pnpm rebuild && pnpm --filter @bendyline/gezel-app exec electron . --no-sandbox",
+    "app:new": "node scripts/run-with-dependency-lease.mjs app:new:unleased",
+    "app:new:unleased": "node scripts/app-new.mjs",
     "cli": "node scripts/run-with-dependency-lease.mjs cli:unleased",
     "cli:unleased": "pnpm bootstrap && pnpm --filter @bendyline/gezel-cli... run build && GEZEL_DEV=1 node packages/cli/dist/bin/gezel.js",
     "cli:fresh": "node scripts/run-with-dependency-lease.mjs cli:fresh:unleased",

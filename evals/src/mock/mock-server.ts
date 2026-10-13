@@ -182,6 +182,8 @@ export async function startMockServices(
   if (live.length === 0 && !mocks.some((mock) => mock.kind === 'cli')) return null;
 
   const pems = await selfsigned.generate([{ name: 'commonName', value: '127.0.0.1' }], {
+    // Rust TLS clients reject selfsigned's default SHA-1 even when explicitly trusted.
+    algorithm: 'sha256',
     keySize: 2048,
     extensions: [
       {

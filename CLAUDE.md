@@ -775,6 +775,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
 - `pnpm test:ci` — same suites, one package at a time. What CI runs: the 4-vCPU runner cannot absorb several package worker pools at once, and the contention starves fixed test timeouts. Use locally only to reproduce a CI-only timing failure.
 - `pnpm test:e2e` — Playwright Electron suite. ~25s.
 - `pnpm app` — build then launch the Electron shell (embedded mode by default).
+- `pnpm app:new` — the same, against a brand-new home (`~/.gezel-new`, wiped every run) to walk first-run flows as a new install sees them; `-- --keep` relaunches into it without wiping, `-- --home=<path>` moves it. Models download fresh unless `GEZEL_READONLY_MODEL_HOMES=$HOME/.gezel-dev` is set. ([scripts/app-new.mjs](scripts/app-new.mjs))
 - `pnpm dev` — watch-mode build across every gezel package.
 
 ### Supervisor env flags

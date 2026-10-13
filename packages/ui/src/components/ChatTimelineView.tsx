@@ -30,12 +30,9 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { api } from '../api.js';
-import { isUserCancelledTurnError } from '../error-report.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
-import { requestSettingsSection } from '../settings-nav.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
-import { CapacityDeniedActions } from './CapacityDeniedActions.js';
 import { ChatStickyHeader } from './ChatStickyHeader.js';
 import { getReadonlyGezelMediaProvider } from './GezelMediaProvider.js';
 import {
@@ -47,7 +44,6 @@ import {
   writeIndexingReceipts,
 } from './IndexingReceipt.js';
 import { QueuedTaskBubble } from './QueuedTaskBubble.js';
-import { ReportErrorLink } from './ReportErrorLink.js';
 import { TerminalBubble } from './TerminalBubble.js';
 import { TerminalStreamingBubble } from './TerminalStreamingBubble.js';
 import { WorkingNotes } from './WorkingNotes.js';
@@ -60,6 +56,7 @@ import {
   type ToolActivity,
 } from './chat-bubbles.js';
 import { humanizeChatError } from './chat-error-copy.js';
+import { type FailedTurnActionState, renderFailedTurnActions } from './chat-failed-turn-actions.js';
 import type { LiveSegment, LiveSlot, TerminalLiveSlot } from './chat-live-slot.js';
 import {
   erroredSlotsWithPersistedTwin,
@@ -81,9 +78,6 @@ import {
   cssAttrValue,
   findLastForSession,
   formatProviderLabel,
-  isExpectedAvailabilityError,
-  isModelUnavailableError,
-  isRetryableFailedTurn,
   latestWrapUpKey,
   mergeTerminalEntries,
   mergeTimelineMessages,
@@ -93,7 +87,6 @@ import {
 } from './chat-timeline-helpers.js';
 import { FrameCoalescedItem, FrameCoalescedLiveStickyHeader } from './frame-coalesced-item.js';
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
-import { modelSetupAction } from './model-setup-action.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
 import type { QueuedTaskEntry } from './queued-task-entries.js';
 import { nestChildSessionThreads } from './session-thread-nesting.js';
@@ -145,8 +138,6 @@ const TERMINAL_SESSION_GAP_MS = 2 * 60 * 60 * 1000;
  * the conversation they annotate.
  */
 const MAX_QUEUED_TASK_CARDS = 4;
-/** A local metadata reset should settle promptly, even if an HTTP socket stalls. */
-const FAILED_TURN_ACTION_TIMEOUT_MS = 10_000;
 
 function messageAskedUserQuestion(message: TimelineMessage): boolean {
   return (
@@ -610,7 +601,7 @@ export function ChatTimelineView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sessionErrorActions, setSessionErrorActions] = useState<
-    Map<string, { busy?: 'acknowledge' | 'retry'; error?: string }>
+    Map<string, FailedTurnActionState>
   >(new Map());
   // A timeline fetch already in flight when Acknowledge completes can still
   // return the pre-clear row. Suppress that stale snapshot until a genuinely
@@ -3286,10 +3277,7 @@ export function ChatTimelineView({
     </>
   );
 
-  const setSessionAction = (
-    sessionId: string,
-    state: { busy?: 'acknowledge' | 'retry'; error?: string } | null,
-  ) => {
+  const setSessionAction = (sessionId: string, state: FailedTurnActionState | null) => {
     setSessionErrorActions((prev) => {
       const next = new Map(prev);
       if (state) next.set(sessionId, state);
@@ -3298,141 +3286,22 @@ export function ChatTimelineView({
     });
   };
 
-  const acknowledgeFailedTurn = async (sessionId: string, projectId: string) => {
-    setSessionAction(sessionId, { busy: 'acknowledge' });
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), FAILED_TURN_ACTION_TIMEOUT_MS);
-    try {
-      await api.clearProjectErrors(projectId, controller.signal);
-      window.dispatchEvent(
-        new CustomEvent('gezel:session-error-cleared', { detail: { projectId } }),
-      );
-    } catch {
-      setSessionAction(sessionId, {
-        error: controller.signal.aborted
-          ? 'Clearing the alert took too long. Check the connection and try again.'
-          : 'Could not clear the alert. Check the connection and try again.',
-      });
-    } finally {
-      window.clearTimeout(timeout);
-    }
-  };
-
-  const retryFailedTurn = async (sessionId: string) => {
-    setSessionAction(sessionId, { busy: 'retry' });
-    try {
-      await api.retryChatSessionTurn(sessionId);
-      // Keep the action disabled until the normal complete/error event settles
-      // the attempt. A hidden retry seed will replace a preserved failed live
-      // slot with the new thinking bubble as soon as the daemon starts it.
-    } catch {
-      setSessionAction(sessionId, {
-        error: 'Retry could not start. Check the connection or settings, then try again.',
-      });
-    }
-  };
-
   const failedTurnActions = (
     sessionId: string,
     errorMessage: string,
     errorDetail: ChatTurnErrorDetail | undefined,
     projectId: string | null,
     reportSurface: 'session-error' | 'chat-turn',
-  ) => {
-    const action = sessionErrorActions.get(sessionId);
-    const busy = action?.busy;
-    const retryable = isRetryableFailedTurn(errorMessage, errorDetail);
-    const setup = modelSetupAction(errorMessage);
-    return (
-      <>
-        <div className="timeline-session-error-actions" aria-label="Failed turn actions">
-          {errorDetail?.code === 'capacity-denied' ? (
-            <CapacityDeniedActions
-              sessionId={sessionId}
-              busy={busy !== undefined}
-              onRetry={() => void retryFailedTurn(sessionId)}
-              onError={(message) => setSessionAction(sessionId, { error: message })}
-            />
-          ) : (
-            retryable && (
-              <button
-                type="button"
-                className="timeline-session-error-action timeline-session-error-action-primary"
-                disabled={busy !== undefined}
-                onClick={() => void retryFailedTurn(sessionId)}
-              >
-                {busy === 'retry' ? 'Retrying…' : 'Retry'}
-              </button>
-            )
-          )}
-          {setup && (
-            <button
-              type="button"
-              className="timeline-session-error-action secondary"
-              disabled={busy !== undefined}
-              onClick={() => {
-                const { target } = setup;
-                if (target.kind === 'home') {
-                  window.dispatchEvent(
-                    new CustomEvent('gezel:navigate', { detail: { view: 'home' } }),
-                  );
-                  return;
-                }
-                requestSettingsSection(target.section);
-                window.dispatchEvent(
-                  new CustomEvent('gezel:navigate', {
-                    detail: { view: 'settings', section: target.section },
-                  }),
-                );
-              }}
-            >
-              {setup.label}
-            </button>
-          )}
-          {!setup && isModelUnavailableError(errorMessage) && (
-            <button
-              type="button"
-              className="timeline-session-error-action secondary"
-              disabled={busy !== undefined}
-              onClick={() =>
-                window.dispatchEvent(
-                  new CustomEvent('gezel:navigate', {
-                    detail: { view: 'settings', section: 'defaults' },
-                  }),
-                )
-              }
-            >
-              Open Settings
-            </button>
-          )}
-          {projectId && (
-            <button
-              type="button"
-              className="timeline-session-error-action secondary"
-              title="Clear this project's failed-turn alerts without rerunning the work"
-              disabled={busy !== undefined}
-              onClick={() => void acknowledgeFailedTurn(sessionId, projectId)}
-            >
-              {busy === 'acknowledge' ? 'Acknowledging…' : 'Acknowledge'}
-            </button>
-          )}
-          {!setup &&
-            !isUserCancelledTurnError(errorMessage) &&
-            !isExpectedAvailabilityError(errorDetail) && (
-              <ReportErrorLink
-                className="timeline-session-error-link"
-                report={{ surface: reportSurface, message: errorMessage, detail: errorDetail }}
-              />
-            )}
-        </div>
-        {action?.error && (
-          <p className="timeline-session-error-action-error" role="alert">
-            {action.error}
-          </p>
-        )}
-      </>
-    );
-  };
+  ) =>
+    renderFailedTurnActions({
+      sessionId,
+      errorMessage,
+      errorDetail,
+      projectId,
+      reportSurface,
+      action: sessionErrorActions.get(sessionId),
+      setSessionAction,
+    });
 
   if (loading && messages.length === 0) {
     return <div className="chat-timeline chat-timeline-loading" aria-busy="true" />;
