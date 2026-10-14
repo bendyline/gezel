@@ -293,7 +293,7 @@ What the person said they want help with: `config.interests.areas`, ids from
 (software, data, work, business, content, home, learning, play; health and
 legal are held, with ids but no key). The welcome asks only a new install
 (`shouldAskInterests`: a `firstUseAt` within the week, not yet answered or
-skipped); Settings → General holds the same tray. The answer **orders** what
+skipped); Settings → General holds the same picker. The answer **orders** what
 is offered (the welcome's `firstProjectsFor`, Make something's `pickWithRange`,
 New Task's For you shelf, New Project's rail, Knowledge's suggestions through
 `orderByInterests`) and **never hides** anything or enters a prompt. An item's
@@ -766,6 +766,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
 - **Use the logger, not `console`.** Production code logs through [packages/core/src/log.ts](packages/core/src/log.ts) (`createLogger('chat')`, `.debug/.info/.warn/.error`). Levels are gated by `GEZEL_LOG_LEVEL` (`debug|info|warn|error|silent`, default `info`). `console.*` is reserved for one-shot CLI output and tests.
 - **Electron changes require a full rebuild**. The service is bundled into the Electron bundle at build time; `pnpm app` does `pnpm build && electron .`.
 - **No emojis in committed files** unless a user explicitly requested one (the ⭐ Meester badge in the sidebar is the exception — the user asked for it).
+- **American English spelling in anything a person reads** — UI, Handboek, prompts (*practice*, *color*, *organize*, *labeled*). Input matchers still accept British spellings. See [docs/ux.md](docs/ux.md).
 - **No trailing comments explaining what code does.** Prefer naming + structure. Reserve comments for *why* — hidden constraints, past incidents.
 
 ## Development

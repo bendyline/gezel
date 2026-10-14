@@ -9,13 +9,12 @@ import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { apiErrorMessage } from '../../api-error.js';
 import { api } from '../../api.js';
 import {
-  type FilteredPick,
   type PickedSet,
-  filterPick,
   pickFromDirectoryInput,
   pickFromDrop,
   pickFromFileInput,
 } from './pick-files.js';
+import { stageInputUpload } from './stage-upload.js';
 
 /** What the launcher knows about one input: what to send, and what to show. */
 export interface CraftbookInputValue {
@@ -138,53 +137,19 @@ export function CraftbookInputField({
   const upload = async (pick: PickedSet) => {
     uploadAbort.current?.abort();
     discardUpload(valueRef.current.source);
-    const filtered: FilteredPick = filterPick(input.spec, pick);
-    if (filtered.error) {
-      onChange({
-        source: null,
-        label: filtered.label,
-        error: filtered.error,
-        skipped: filtered.skipped,
-      });
-      return;
-    }
     const abort = new AbortController();
     uploadAbort.current = abort;
-    const total = filtered.accepted.length;
-    onChange({ source: null, label: filtered.label, busy: true, progress: { done: 0, total } });
-    let stagingId: string | null = null;
     try {
-      const staged = await api.taskInputs.createInputStaging(projectId, {
+      const next = await stageInputUpload({
+        projectId,
         craftbookId,
         ...(craftbookVersion ? { craftbookVersion } : {}),
-        param: input.key,
-        label: filtered.label,
+        input,
+        pick,
+        signal: abort.signal,
+        onProgress: onChange,
       });
-      stagingId = staged.stagingId;
-      let done = 0;
-      for (const picked of filtered.accepted) {
-        if (abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
-        await api.taskInputs.uploadInputStagingFile(
-          projectId,
-          staged.stagingId,
-          picked.relPath,
-          picked.file,
-          abort.signal,
-        );
-        done += 1;
-        onChange({ source: null, label: filtered.label, busy: true, progress: { done, total } });
-      }
-      onChange({
-        source: { from: 'upload', stagingId: staged.stagingId },
-        label: filtered.label,
-        fileCount: total,
-        totalBytes: filtered.totalBytes,
-        skipped: filtered.skipped,
-      });
-    } catch (err) {
-      if (stagingId) void api.taskInputs.deleteInputStaging(projectId, stagingId).catch(() => {});
-      if (abort.signal.aborted) return;
-      onChange({ source: null, label: filtered.label, error: apiErrorMessage(err) });
+      if (next) onChange(next);
     } finally {
       if (uploadAbort.current === abort) uploadAbort.current = null;
     }

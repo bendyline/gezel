@@ -47,7 +47,7 @@ gap.
 beside it is how many pieces that opinion covers. It only grades work that
 was actually produced, so a model that fails often is judged on its
 successes alone — `6.5/10 (18 pieces)` is a weaker claim than `6.5/10 (26
-pieces)`. Treat it as colour next to the pass rate, never as a substitute
+pieces)`. Treat it as color next to the pass rate, never as a substitute
 for it.
 
 **Performance** shows two measured speeds on the machine named above: output
@@ -72,7 +72,7 @@ machine, so each round says which one it measured:
   read far below what the model really uses.
 
 Treat these as a rough guide from one machine, not a promise about yours. The
-Models catalogue in the app is the better check for whether a model fits your
+Models catalog in the app is the better check for whether a model fits your
 computer. When the engine reported its KV-cache precision, it appears beside
 the model name — for example, `(kv: q8_0)`.
 
@@ -93,5 +93,5 @@ you want a gezel writing or fixing code, and the engineering set, where a round
 has it, is the stricter test of that.
 
 If a model you're considering isn't listed, it hasn't been measured here yet
-— which is not a verdict on it either way. The Models catalogue in the app
+— which is not a verdict on it either way. The Models catalog in the app
 will still tell you whether it fits this machine.

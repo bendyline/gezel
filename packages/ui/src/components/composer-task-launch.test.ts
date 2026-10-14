@@ -12,8 +12,11 @@ import {
   launchRequestBody,
   mergeSuggestedLaunch,
   paramAlternativesMessage,
+  pickableInputs,
+  sampleInputLabel,
   taskLaunchFromDialog,
   uploadStagingIds,
+  withPickedInput,
 } from './composer-task-launch.js';
 
 const deck = {
@@ -65,6 +68,41 @@ const applyFindings = {
   steps: [{ id: 'triage', name: 'Triage' }],
   entryStepId: 'triage',
 } as unknown as CraftbookTemplateManifest;
+
+const findings = {
+  kind: 'craftbook-template',
+  id: 'spreadsheet-findings',
+  name: 'Spreadsheet Findings',
+  paramSchema: {
+    type: 'object',
+    required: ['source'],
+    properties: {
+      source: {
+        type: 'string',
+        title: 'Spreadsheet',
+        input: { kind: 'file', accept: ['.csv', '.xlsx'] },
+      },
+      extra: { type: 'string', title: 'Extra sheet', input: { kind: 'file' } },
+    },
+  },
+  samples: [
+    {
+      id: 'shop-sales',
+      title: "a small shop's monthly sales",
+      param: 'source',
+      files: ['samples/shop-sales/sales.csv'],
+    },
+  ],
+  steps: [{ id: 'read', name: 'Read' }],
+  entryStepId: 'read',
+} as unknown as CraftbookTemplateManifest;
+
+const onSample: PromptDraftTaskLaunch = {
+  craftbookId: 'spreadsheet-findings',
+  params: {},
+  inputs: { source: { from: 'sample', sampleId: 'shop-sales' } },
+  origin: 'suggested',
+};
 
 const item = { sourceId: 'bundled', kind: 'craftbook-template' } as unknown as CatalogItemSummary;
 
@@ -299,6 +337,56 @@ describe('formatTaskLaunchPreview', () => {
       null,
     );
     expect(many.short).toBe('src: Notes (2 files) · a: 1 · b: 2 · +3 more');
+  });
+});
+
+describe('sample inputs', () => {
+  it("names a sample by the book's own title, marked as a sample", () => {
+    expect(sampleInputLabel(findings, 'shop-sales')).toBe("a small shop's monthly sales (sample)");
+    expect(sampleInputLabel(findings, 'gone')).toBe('a sample');
+    expect(sampleInputLabel(null, 'shop-sales', 'Sales')).toBe('Sales');
+  });
+
+  it('shows the whole sample name in the readout, never clipped', () => {
+    expect(formatTaskLaunchPreview(onSample, findings).short).toBe(
+      "source: a small shop's monthly sales (sample)",
+    );
+    expect(formatTaskLaunchPreview(onSample, null).short).toBe('source: a sample');
+  });
+
+  it('offers a pick for a sample and for a missing required input, not for a chosen one', () => {
+    expect(pickableInputs(onSample, findings).map((p) => [p.input.key, p.sample])).toEqual([
+      ['source', true],
+    ]);
+    const { inputs: _inputs, ...empty } = onSample;
+    expect(pickableInputs(empty, findings).map((p) => [p.input.key, p.sample])).toEqual([
+      ['source', false],
+    ]);
+    const chosen: PromptDraftTaskLaunch = {
+      ...onSample,
+      inputs: { source: { from: 'workspace', path: 'data/sales.csv' } },
+    };
+    expect(pickableInputs(chosen, findings)).toEqual([]);
+    expect(pickableInputs(onSample, null)).toEqual([]);
+    expect(pickableInputs(onSample, deck)).toEqual([]);
+  });
+
+  it("replaces the sample with the pick and makes the launch the person's own", () => {
+    const picked = withPickedInput(
+      { ...onSample, inputLabels: { source: { label: 'the sample' } }, tonight: true },
+      'source',
+      { source: { from: 'upload', stagingId: 'stg-abcdefgh' }, label: 'q3.xlsx', fileCount: 1 },
+    );
+    expect(picked).toEqual({
+      craftbookId: 'spreadsheet-findings',
+      params: {},
+      inputs: { source: { from: 'upload', stagingId: 'stg-abcdefgh' } },
+      inputLabels: { source: { label: 'q3.xlsx', fileCount: 1 } },
+      origin: 'user',
+      tonight: true,
+    });
+    expect(pickableInputs(picked, findings)).toEqual([]);
+    expect(formatTaskLaunchPreview(picked, findings).short).toBe('source: q3.xlsx (1 file)');
   });
 });
 

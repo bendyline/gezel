@@ -51,11 +51,11 @@
 }
 .activity-panel.gz-dialog {
   position: fixed;
-  inset: 56px 12px auto auto;
+  inset: 46px 12px auto auto;
   transform: none;
   width: min(600px, calc(100vw - 24px));
   max-width: calc(100vw - 24px);
-  max-height: calc(100dvh - 72px);
+  max-height: calc(100dvh - 62px);
   padding: 0;
   min-width: 0;
   gap: 0;

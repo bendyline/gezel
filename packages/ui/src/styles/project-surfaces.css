@@ -403,6 +403,10 @@
 /* ── Pending question card (in-chat + Home pane) ──────────────── */
 
 .pending-question {
+  /* The text inset of the card's inner panels (context strip, prompt body,
+     answer field), so their text shares one left edge. */
+  --pending-question-inset-block: 0.5rem;
+  --pending-question-inset-inline: 0.6rem;
   margin-top: 0.5rem;
   padding: 0.75rem 0.9rem;
   border: 1px solid var(--accent);
@@ -417,7 +421,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  padding: 0.4rem 0.55rem;
+  padding: 0.4rem var(--pending-question-inset-inline, 0.6rem);
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 6px;
   background: color-mix(in srgb, var(--surface, #fff) 92%, transparent);
@@ -569,6 +573,26 @@
   margin-inline: 0 !important;
 }
 
+/* Thin margins leave the inset to the host but still paint Squisq's reading
+   surface, so the body read as a box with its text against the side edges
+   and 1.5rem of air above and below every section. Inset it like the answer
+   field (that field's padding plus its 1px border), so the prompt and "Type
+   your answer…" start on one line. The section rules must outrank Squisq's
+   own `.squisq-page--thin` ones, which load later from inside the view. */
+.pending-question-prompt > .squisq-linear {
+  border-radius: var(--radius-md);
+}
+.pending-question-prompt .squisq-page--thin {
+  padding: calc(var(--pending-question-inset-block, 0.5rem) + 1px)
+    calc(var(--pending-question-inset-inline, 0.6rem) + 1px);
+}
+.pending-question-prompt .squisq-page--thin .squisq-page-section {
+  padding-block: 0;
+}
+.pending-question-prompt .squisq-page--thin .squisq-page-section + .squisq-page-section {
+  padding-top: 1.1rem;
+}
+
 /* Long question bodies must not push the choices, note field, and submit
    controls below the Updates drawer's viewport. The body is the one region
    that gives: the drawer's flex chain (app-shell.css) shrinks it to
@@ -626,7 +650,7 @@
 
 .pending-question-write-in {
   width: 100%;
-  padding: 0.5rem 0.6rem;
+  padding: var(--pending-question-inset-block, 0.5rem) var(--pending-question-inset-inline, 0.6rem);
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 6px;
   background: color-mix(in srgb, var(--surface, #fff) 96%, transparent);

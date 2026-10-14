@@ -353,11 +353,18 @@ describe('sweepReparsePoints', () => {
     expect(lstatSync(join(shared, 'dep')).isSymbolicLink()).toBe(true);
   });
 
-  it.skipIf(isWindows)('judges relative link text from the link’s own directory', () => {
+  it('judges relative link text from the link’s own directory', (ctx) => {
     mkdirSync(join(root, 'x'));
     mkdirSync(join(root, 'b'));
-    symlinkSync('../b', join(root, 'x', 'rel-in'));
-    symlinkSync('../../elsewhere', join(root, 'x', 'rel-out'));
+    try {
+      // pnpm 11 makes relative directory symlinks on Windows wherever it may
+      // (Developer Mode, an elevated runner); only its junctions are absolute.
+      symlinkSync('../b', join(root, 'x', 'rel-in'), 'dir');
+      symlinkSync('../../elsewhere', join(root, 'x', 'rel-out'), 'dir');
+    } catch (err) {
+      if (isWindows && (err as NodeJS.ErrnoException).code === 'EPERM') ctx.skip();
+      throw err;
+    }
 
     const result = sweepReparsePoints({ root, mode: 'fix' });
 

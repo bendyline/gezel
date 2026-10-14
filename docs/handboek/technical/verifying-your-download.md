@@ -105,7 +105,7 @@ it in transit, and it was not built on someone's laptop.
 It does not tell you the software is free of bugs, and it does not replace
 reading what Gezel actually does with your data — [the security
 model](security-model.md) covers that. It also cannot help if you downloaded
-from somewhere other than our releases page: a checksum file that travelled
+from somewhere other than our releases page: a checksum file that traveled
 with a bad installer proves only that the two agree with each other. Get
 `SHA256SUMS` from
 [the release you are installing](https://github.com/bendyline/gezel/releases),

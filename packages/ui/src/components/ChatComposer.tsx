@@ -1775,6 +1775,9 @@ export function ChatComposer({
           art={taskLaunch.art}
           readiness={taskLaunch.readiness}
           stale={taskLaunch.stale}
+          pickable={taskLaunch.pickable}
+          picking={taskLaunch.picking}
+          onPickInput={(key, pick) => void taskLaunch.pickInput(key, pick)}
           onOpen={() => setTaskDialogOpen(true)}
           onDismiss={() => void taskLaunch.dismiss()}
           {...(runtimeCapabilities().background &&

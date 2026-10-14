@@ -99,7 +99,7 @@ export const CRAFTBOOK_CATEGORY_META: ReadonlyArray<{
     id: 'media',
     family: 'creative',
     label: 'Images, audio & video',
-    description: 'generate, transcribe, edit, and organise media',
+    description: 'generate, transcribe, edit, and organize media',
   },
   {
     id: 'design',

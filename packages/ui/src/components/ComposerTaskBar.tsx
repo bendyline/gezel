@@ -1,10 +1,21 @@
 import type { PromptDraftTaskLaunch } from '@bendyline/gezel';
 import { planDisplayName } from '@bendyline/gezel';
+import { useRef } from 'react';
 import { ProjectGlyph } from '../views/projects/new-project-meta.js';
 import { craftbookGlyph } from '../views/tasks/new-task-meta.js';
 import { CatalogArtwork } from './CatalogArtwork.js';
-import { type LaunchReadiness, formatTaskLaunchPreview } from './composer-task-launch.js';
+import {
+  type LaunchReadiness,
+  type PickableInput,
+  formatTaskLaunchPreview,
+} from './composer-task-launch.js';
 import type { CraftbookCatalogArt } from './craftbook-catalog-art.js';
+import {
+  type PickedSet,
+  pickFromDirectoryInput,
+  pickFromFileInput,
+} from './craftbook-input/pick-files.js';
+import type { InputPickState } from './useComposerTaskLaunch.js';
 
 /** A quiet routing spark — the daemon proposed this task from the text. */
 export function TurnIntentGlyph() {
@@ -27,13 +38,17 @@ export function TurnIntentGlyph() {
  * craftbook's artwork and name, a one-line readout of its parameters, and
  * one dismiss key. Clicking the strip reopens the New Task dialog on that
  * craftbook's configuration. A daemon suggestion uses the same strip,
- * drawn dashed so it reads as tentative.
+ * drawn dashed so it reads as tentative. An input that a sample stands in
+ * for, or that nothing fills yet, gets a key that opens the file picker.
  */
 export function ComposerTaskBar({
   launch,
   art,
   readiness,
   stale,
+  pickable = [],
+  picking = null,
+  onPickInput,
   onOpen,
   onDismiss,
   onToggleTonight,
@@ -42,6 +57,9 @@ export function ComposerTaskBar({
   art: CraftbookCatalogArt | null;
   readiness: LaunchReadiness;
   stale: string[];
+  pickable?: PickableInput[];
+  picking?: InputPickState | null;
+  onPickInput?: (key: string, pick: PickedSet) => void;
   onOpen: () => void;
   onDismiss: () => void;
   /** Run the task in tonight's Night Shift instead of now. Absent where there is no night shift. */
@@ -51,7 +69,15 @@ export function ComposerTaskBar({
   const name = manifest ? planDisplayName(manifest) : (launch.craftbookName ?? launch.craftbookId);
   const preview = formatTaskLaunchPreview(launch, manifest);
   const suggested = launch.origin === 'suggested';
-  const note = stale.length > 0 ? 'files need re-picking' : readiness.ready ? null : 'needs setup';
+  const uploading = picking !== null && !picking.error;
+  const note = uploading
+    ? null
+    : stale.length > 0
+      ? 'files need re-picking'
+      : readiness.ready || pickable.some((p) => !p.sample)
+        ? null
+        : 'needs setup';
+  const pickError = picking?.error ? picking.error : null;
   const summary = [name, preview.full].filter(Boolean).join(' — ');
   return (
     <fieldset
@@ -91,14 +117,33 @@ export function ComposerTaskBar({
             )}
           </span>
           <span className="chat-composer-task-bar-name">{name}</span>
-          {preview.short && (
-            <span className="chat-composer-task-bar-params" title={preview.full}>
-              {preview.short}
+          {pickError ? (
+            <span
+              className="chat-composer-task-bar-params chat-composer-task-bar-error"
+              role="alert"
+            >
+              {pickError}
             </span>
+          ) : (
+            preview.short && (
+              <span className="chat-composer-task-bar-params" title={preview.full}>
+                {preview.short}
+              </span>
+            )
           )}
         </span>
         {note && <span className="chat-composer-task-bar-note">{note}</span>}
       </button>
+      {onPickInput &&
+        pickable.map((p) => (
+          <InputPickKey
+            key={p.input.key}
+            pickable={p}
+            picking={picking?.key === p.input.key ? picking : null}
+            disabled={uploading && picking?.key !== p.input.key}
+            onPick={(pick) => onPickInput(p.input.key, pick)}
+          />
+        ))}
       {onToggleTonight && (
         <button
           type="button"
@@ -124,5 +169,70 @@ export function ComposerTaskBar({
         ×
       </button>
     </fieldset>
+  );
+}
+
+/**
+ * The strip's file key for one input: the system file picker (a folder
+ * picker for a folder input), filtered to the types the plan reads. The pick
+ * uploads into the task's input staging, the same place the New Task
+ * dialog's "From your computer" puts it.
+ */
+function InputPickKey({
+  pickable,
+  picking,
+  disabled,
+  onPick,
+}: {
+  pickable: PickableInput;
+  picking: InputPickState | null;
+  disabled: boolean;
+  onPick: (pick: PickedSet) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { input, sample } = pickable;
+  const isFolder = input.spec.kind === 'folder';
+  const noun = isFolder ? 'folder' : 'file';
+  const uploading = picking !== null && !picking.error;
+  const label = uploading
+    ? picking.progress && picking.progress.total > 1
+      ? `Uploading ${picking.progress.done} of ${picking.progress.total}…`
+      : 'Uploading…'
+    : sample
+      ? `Use your own ${noun}…`
+      : `Choose ${noun}…`;
+  const title = sample
+    ? `${input.title}: pick your own ${noun} instead of the sample`
+    : `${input.title}: choose the ${noun} this plan works on`;
+  return (
+    <>
+      <button
+        type="button"
+        className="gz-key chat-composer-task-bar-pick"
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading || disabled}
+        title={title}
+      >
+        {label}
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        hidden
+        {...(isFolder
+          ? // React has no typed prop for these; both engines honor them.
+            ({ webkitdirectory: '', directory: '' } as Record<string, string>)
+          : input.spec.accept
+            ? { accept: input.spec.accept.join(',') }
+            : {})}
+        onChange={(e) => {
+          const files = e.target.files;
+          if (files?.length) {
+            onPick(isFolder ? pickFromDirectoryInput(files) : pickFromFileInput(files));
+          }
+          e.target.value = '';
+        }}
+      />
+    </>
   );
 }

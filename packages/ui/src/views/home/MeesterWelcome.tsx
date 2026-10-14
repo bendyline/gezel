@@ -6,7 +6,7 @@ import {
 } from '@bendyline/gezel';
 import { type ReactNode, useEffect, useState } from 'react';
 import { GezelIcon } from '../../components/GezelIcon.js';
-import { InterestTray } from '../../components/InterestTray.js';
+import { InterestPicker } from '../../components/InterestPicker.js';
 import { ReportErrorLink } from '../../components/ReportErrorLink.js';
 import { queueComposerPrefill } from '../../components/composer-prefill.js';
 import {
@@ -74,6 +74,9 @@ function welcomeState(setup: WelcomeSetup | null, justReady: boolean): string {
   return setup.model.state.kind === 'off' ? 'connect' : setup.model.state.kind;
 }
 
+const IDEAS_WHILE_FETCHING =
+  "While tools are downloading, let's get ready for our first conversation. Here are some ideas for things the crew can help you with.";
+
 /** "I'm Florian", or "I'm your meester" when names are hidden. */
 function introduce(meesterName: string): string {
   const name = meesterName.trim();
@@ -122,6 +125,16 @@ export function MeesterWelcome({
   useEffect(() => {
     if (interests.ask) setAsking(true);
   }, [interests.ask]);
+  // The intro plays for all of first run, whatever state the tools are in
+  // (keyed to a running download it came and went with page reloads and
+  // models already on disk). Latched, so the tools landing never pulls the
+  // video from under someone watching it. A phone draws its own model list
+  // here and keeps its welcome as it was.
+  const firstRun = waitingForTools && !setup?.hostModels;
+  const [showIntro, setShowIntro] = useState(false);
+  useEffect(() => {
+    if (firstRun) setShowIntro(true);
+  }, [firstRun]);
   const capabilities = runtimeCapabilities();
   const firsts = firstProjectsFor({
     interests: interests.areas,
@@ -163,10 +176,10 @@ export function MeesterWelcome({
           <div className="meester-welcome-interests">
             <p className="meester-welcome-line">
               {fetching
-                ? 'While I fetch my tools: what would you like help with? Pick any.'
+                ? 'What would you like help with? Pick any.'
                 : 'What would you like help with? Pick any, and I will suggest a start.'}
             </p>
-            <InterestTray
+            <InterestPicker
               label="What you would like help with"
               selected={interests.areas}
               onChange={(next) => void interests.save(next)}
@@ -183,30 +196,37 @@ export function MeesterWelcome({
             </button>
           </div>
         ) : fetching ? (
-          <p className="meester-welcome-line">
-            While I wait — what would you like to get done? Write it below and I'll start as soon as
-            I'm ready.
-          </p>
+          <p className="meester-welcome-line">{IDEAS_WHILE_FETCHING}</p>
         ) : (
           <p className="meester-welcome-line">
             Tell me what you want to get done. I'll bring on the gezellen it needs — a writer, a
-            planner, a researcher — and they'll work on it together.{' '}
-            <button
-              type="button"
-              className="gz-link-button meester-welcome-quiet-link"
-              aria-expanded={tourOpen}
-              onClick={() => setTourOpen((open) => !open)}
-            >
-              {tourOpen ? 'Hide the tour' : 'Take the 1-minute tour'}
-            </button>
+            planner, a researcher — and they'll work on it together.
+            {/* The intro already plays further down; a second copy of it is noise. */}
+            {!showIntro && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className="gz-link-button meester-welcome-quiet-link"
+                  aria-expanded={tourOpen}
+                  onClick={() => setTourOpen((open) => !open)}
+                >
+                  {tourOpen ? 'Hide the tour' : 'Take the 1-minute tour'}
+                </button>
+              </>
+            )}
           </p>
         )}
 
-        {tourOpen && !fetching && (
+        {tourOpen && !fetching && !showIntro && (
           <div className="meester-welcome-tour">
             <IntroHandboekArticle />
           </div>
         )}
+
+        {/* Under the picker while it is up; once it is put away this same line
+            moves up to lead the welcome, above the first projects. */}
+        {asking && fetching && <p className="meester-welcome-line">{IDEAS_WHILE_FETCHING}</p>}
 
         {/* First projects prefill the composer rather than sending, so the
             person makes the sentence theirs first. A typed one ends on a board
@@ -226,6 +246,15 @@ export function MeesterWelcome({
           ))}
         </fieldset>
         <p className="meester-welcome-alternatives">Or tell me in your own words, below.</p>
+
+        {showIntro && (
+          <section className="meester-welcome-intro" aria-labelledby="meester-welcome-intro-lead">
+            <p id="meester-welcome-intro-lead" className="meester-welcome-intro-lead">
+              Also, here is a bit more info about gezel:
+            </p>
+            <IntroHandboekArticle variant="player" />
+          </section>
+        )}
 
         {helpers.length > 0 && <WelcomeHelpers helpers={helpers} />}
 
@@ -263,10 +292,7 @@ function startFirstProject(projectId: string, first: FirstProject): void {
       craftbookName: first.title,
       params: {},
       ...(first.sample
-        ? {
-            inputs: { [first.sample.param]: { from: 'sample', sampleId: first.sample.sampleId } },
-            inputLabels: { [first.sample.param]: { label: 'the sample' } },
-          }
+        ? { inputs: { [first.sample.param]: { from: 'sample', sampleId: first.sample.sampleId } } }
         : {}),
     },
     { replace: true },

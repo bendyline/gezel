@@ -1,5 +1,6 @@
 import {
   type CatalogItemSummary,
+  type CraftbookInputParam,
   type CraftbookTemplateManifest,
   type LaunchTaskFromSessionRequest,
   type PromptDraftTaskLaunch,
@@ -69,6 +70,69 @@ export function taskLaunchFromDialog(args: {
     ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
     ...(Object.keys(inputLabels).length > 0 ? { inputLabels } : {}),
     origin: args.origin,
+  };
+}
+
+/**
+ * What a sample input is called wherever a launch is shown: the book's own
+ * words for it, marked as a sample so nobody mistakes it for their file.
+ */
+export function sampleInputLabel(
+  manifest: CraftbookTemplateManifest | null,
+  sampleId: string,
+  fallback?: string,
+): string {
+  const title = manifest?.samples?.find((sample) => sample.id === sampleId)?.title;
+  return title ? `${title} (sample)` : (fallback ?? 'a sample');
+}
+
+export interface PickableInput {
+  input: CraftbookInputParam;
+  /** A sample stands in for it now; a pick replaces the sample. */
+  sample: boolean;
+}
+
+/**
+ * The inputs the composer strip offers to fill from the person's computer:
+ * one a bundled sample is standing in for, and a required one nothing fills
+ * yet. A source the person chose themselves is changed in the dialog.
+ */
+export function pickableInputs(
+  launch: PromptDraftTaskLaunch,
+  manifest: CraftbookTemplateManifest | null,
+): PickableInput[] {
+  if (!manifest || manifest.id !== launch.craftbookId) return [];
+  const out: PickableInput[] = [];
+  for (const input of craftbookInputParams(manifest.paramSchema)) {
+    const source = launch.inputs?.[input.key];
+    if (source?.from === 'sample') out.push({ input, sample: true });
+    else if (!source && input.required) out.push({ input, sample: false });
+  }
+  return out;
+}
+
+/**
+ * The launch with one input replaced by a pick. A pick is the person's own
+ * choice, so a suggested launch becomes theirs and no later suggestion can
+ * replace it (and strand the upload's staging area).
+ */
+export function withPickedInput(
+  launch: PromptDraftTaskLaunch,
+  key: string,
+  value: CraftbookInputValue & { source: TaskInputSource },
+): PromptDraftTaskLaunch {
+  const { [key]: _old, ...otherLabels } = launch.inputLabels ?? {};
+  const label: { label?: string; fileCount?: number } = {};
+  if (value.label) label.label = value.label;
+  if (value.fileCount !== undefined) label.fileCount = value.fileCount;
+  const inputLabels =
+    Object.keys(label).length > 0 ? { ...otherLabels, [key]: label } : otherLabels;
+  const { inputLabels: _labels, ...rest } = launch;
+  return {
+    ...rest,
+    origin: 'user',
+    inputs: { ...launch.inputs, [key]: value.source },
+    ...(Object.keys(inputLabels).length > 0 ? { inputLabels } : {}),
   };
 }
 
@@ -208,15 +272,24 @@ export function formatTaskLaunchPreview(
     ...Object.keys(launch.params).filter((key) => !declared.includes(key) && !unasked.has(key)),
   ];
   const inputKeys = Object.keys(launch.inputs ?? {});
-  const entries: Array<{ key: string; value: string }> = [];
-  for (const key of inputKeys) {
+  // A sample's name is the book's own short phrase; clipping it would cut
+  // off the "(sample)" that says it is not the person's file.
+  const entries: Array<{ key: string; value: string; whole?: boolean }> = [];
+  for (const [key, source] of Object.entries(launch.inputs ?? {})) {
     const label = launch.inputLabels?.[key];
-    const name = label?.label ?? key;
+    const name =
+      source.from === 'sample'
+        ? sampleInputLabel(manifest, source.sampleId, label?.label)
+        : (label?.label ?? key);
     const count =
       label?.fileCount !== undefined
         ? ` (${label.fileCount} file${label.fileCount === 1 ? '' : 's'})`
         : '';
-    entries.push({ key, value: `${name}${count}` });
+    entries.push({
+      key,
+      value: `${name}${count}`,
+      ...(source.from === 'sample' ? { whole: true } : {}),
+    });
   }
   for (const key of paramKeys) {
     if (inputKeys.includes(key)) continue;
@@ -227,7 +300,7 @@ export function formatTaskLaunchPreview(
   const full = entries.map((entry) => `${entry.key}: ${entry.value}`).join(' · ');
   const shown = entries
     .slice(0, PREVIEW_ENTRY_MAX)
-    .map((entry) => `${entry.key}: ${clip(entry.value)}`);
+    .map((entry) => `${entry.key}: ${entry.whole ? entry.value : clip(entry.value)}`);
   const rest = entries.length - shown.length;
   const short = [...shown, ...(rest > 0 ? [`+${rest} more`] : [])].join(' · ');
   return { short, full };

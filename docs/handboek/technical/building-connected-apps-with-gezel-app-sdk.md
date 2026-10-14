@@ -204,7 +204,7 @@ await project.registerTools({
   tools: [
     {
       name: 'add_travel_points',
-      description: 'Award travel points to the traveller.',
+      description: 'Award travel points to the traveler.',
       inputSchema: {
         type: 'object',
         properties: { points: { type: 'number' } },

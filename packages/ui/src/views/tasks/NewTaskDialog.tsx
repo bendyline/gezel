@@ -35,6 +35,7 @@ import { MarkdownField } from '../../components/MarkdownField.js';
 import {
   inputValuesFromLaunch,
   paramAlternativesMessage,
+  sampleInputLabel,
   taskLaunchFromDialog,
   uploadStagingIds,
 } from '../../components/composer-task-launch.js';
@@ -1111,6 +1112,15 @@ export function NewTaskDialog({
       density="comfortable"
     />
   );
+  const inputValueFor = (key: string): CraftbookInputValue => {
+    const value = inputValues[key] ?? EMPTY_INPUT_VALUE;
+    return value.source?.from === 'sample' && selectedBook
+      ? {
+          ...value,
+          label: sampleInputLabel(selectedBook.manifest, value.source.sampleId, value.label),
+        }
+      : value;
+  };
   const renderInput = (input: ReturnType<typeof craftbookInputParams>[number]) =>
     selectedBook && (
       <CraftbookInputField
@@ -1119,7 +1129,7 @@ export function NewTaskDialog({
         craftbookId={selectedBook.manifest.id}
         input={input}
         allowUpload={creationMode !== 'scheduled'}
-        value={inputValues[input.key] ?? EMPTY_INPUT_VALUE}
+        value={inputValueFor(input.key)}
         onChange={(next) => {
           setInputValues((prev) => ({ ...prev, [input.key]: next }));
           setError('');

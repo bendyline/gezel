@@ -126,6 +126,47 @@ describe('Windows machine-service installer security', () => {
     );
   });
 
+  // Regression: RUNNING is reported by gezel-service-host as soon as it spawns
+  // gezeld, and the host keeps restarting a failing daemon for ~11 s before it
+  // reports STOPPED. A daemon that could not bind 127.0.0.1:6228 therefore
+  // passed the RUNNING check and the install recorded a working engine.
+  it('records the engine only once its daemon is serving, not when the host reports RUNNING', () => {
+    const success = position(
+      'WriteRegDWORD SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}" "MachineServiceInstalled" 1',
+    );
+    // customInstall's own start, not the abort-rollback macro's earlier one.
+    const start = hook.lastIndexOf('sc.exe" start ${GEZEL_SERVICE_NAME}', success);
+    expect(start).toBeGreaterThan(position('!macro customInstall'));
+    const block = hook.slice(start, success);
+    const running = block.indexOf('find.exe" "RUNNING"');
+    const ready = block.indexOf('${FileExists} "${GEZEL_DATA_DIR}\\runtime\\port"');
+    expect(running, 'the RUNNING wait must stay').toBeGreaterThanOrEqual(0);
+    expect(ready, 'success must wait for gezeld to publish runtime\\port').toBeGreaterThan(running);
+
+    // The wait fails as soon as the service leaves RUNNING, and is bounded.
+    const wait = block.slice(ready);
+    expect(wait).toContain('find.exe" "RUNNING"');
+    expect(wait).toContain('${GEZEL_SERVICE_READY_POLL_SECONDS}');
+    expect(wait).toContain('${IfNot} ${FileExists} "${GEZEL_DATA_DIR}\\runtime\\port"');
+    expect(wait).toContain('Goto SkipNssm');
+
+    // A port file left by an earlier daemon must not pass for this one.
+    expect(position('!insertmacro ClearGezelRuntime')).toBeLessThan(start);
+
+    // gezeld writes the port only after its main listener is bound, in both
+    // the machine-engine role and the legacy full-product role.
+    for (const [source, bind] of [
+      ['../../service/src/engine-service.ts', 'await listenLoopback('],
+      ['../../service/src/product-service.ts', 'await bindMainListener('],
+    ] as const) {
+      const code = readFileSync(fileURLToPath(new URL(source, import.meta.url)), 'utf8');
+      const listen = code.indexOf(bind);
+      const publish = code.indexOf('await writeRuntime(');
+      expect(listen, `${source} must bind its main listener`).toBeGreaterThanOrEqual(0);
+      expect(publish, `${source} must publish runtime after binding`).toBeGreaterThan(listen);
+    }
+  });
+
   it('publishes migrated product data through a separate shared ACL boundary', () => {
     expect(hook).toContain('migrate-legacy-shared.js');
     expect(hook).toContain('--source="${GEZEL_DATA_DIR}" --dest="${GEZEL_SHARED_DIR}"');

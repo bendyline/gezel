@@ -88,6 +88,7 @@ The Handboek exists to make gezel approachable for people who are not engineers.
 - **Say when something is opt-in, and why.** Users trust software that tells them what it will not do without being asked.
 - **No marketing.** No "delighted to announce", no "powerful", no "seamless". State the change; let it be good on its own.
 - **No emojis** (repo-wide rule).
+- **American spelling** (repo-wide rule): *practice*, *color*, *organize*, *labeled*, *gray*, *catalog*.
 - **Don't hard-wrap prose** — one paragraph is one line, per `docs/handboek/README.md`.
 - Close with a **"Things to see and do after update"** section naming the one or two settings worth a visit. Never open it by saying there is nothing to do: that line was identical on every release, so it was removed from all of them — the pointers are the section's whole reason to exist.
 

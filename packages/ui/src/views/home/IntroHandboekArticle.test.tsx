@@ -32,8 +32,12 @@ vi.mock('@bendyline/squisq-react', () => ({
       <a href="https://gezelgilde.com">external link</a>
     </div>
   ),
-  DocPlayer: ({ audioMode }: { audioMode?: string }) => (
-    <div data-testid="doc-player" data-audio-mode={audioMode ?? ''}>
+  DocPlayer: ({ audioMode, autoPlay }: { audioMode?: string; autoPlay?: boolean }) => (
+    <div
+      data-testid="doc-player"
+      data-audio-mode={audioMode ?? ''}
+      data-autoplay={String(autoPlay ?? false)}
+    >
       player
     </div>
   ),
@@ -101,6 +105,18 @@ describe('IntroHandboekArticle', () => {
 
     await user.click(screen.getByRole('radio', { name: 'Read' }));
     expect(screen.getByTestId('linear-doc-view')).toBeInTheDocument();
+  });
+
+  // The welcome shows it before anyone asked to watch, so it must not start
+  // playing on its own.
+  it('plays as a video alone, without autoplay, with Open in Handboek beneath', async () => {
+    render(<IntroHandboekArticle variant="player" />);
+    const player = await screen.findByTestId('doc-player');
+    expect(player).toHaveAttribute('data-autoplay', 'false');
+    expect(screen.queryByTestId('linear-doc-view')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'View as' })).not.toBeInTheDocument();
+    const open = screen.getByRole('button', { name: /Open in Handboek/ });
+    expect(player.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('keeps Open in Handboek in the view tray, outside the Read/Watch choice', async () => {

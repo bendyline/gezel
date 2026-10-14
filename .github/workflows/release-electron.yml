@@ -651,14 +651,20 @@ jobs:
           Set-Content -LiteralPath (Join-Path $patchDir 'marker.txt') -Value 'inside' -NoNewline
           New-Junction $minorLink $patchDir
 
-          # (b) Out of the data root, to a directory with a protected DACL, so
-          # a followed /setowner /T or /reset /T would visibly rewrite it.
+          # (b) Out of the data root. The sweep runs with /L, so a followed
+          # junction rewrites the target's children, not the directory itself,
+          # and a child holding only inherited ACEs comes out of /reset with
+          # the same SDDL (its owner is already Administrators on the runner).
+          # The marker therefore carries an explicit ACE of its own: a
+          # followed /reset /T strips it, which the SDDL check below sees.
           $outside = Join-Path $env:RUNNER_TEMP 'gezel-upgrade-smoke-outside'
           New-Item -ItemType Directory -Path $outside -Force | Out-Null
           $outsideMarker = Join-Path $outside 'marker.txt'
           Set-Content -LiteralPath $outsideMarker -Value 'outside' -NoNewline
           & icacls.exe $outside /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' '*S-1-1-0:(OI)(CI)(RX)' | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "icacls could not protect $outside (exit $LASTEXITCODE)" }
+          & icacls.exe $outsideMarker /grant '*S-1-5-32-546:(R)' | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "icacls could not mark $outsideMarker (exit $LASTEXITCODE)" }
           $outsideSddl = (Get-Acl -LiteralPath $outside).Sddl
           $outsideMarkerSddl = (Get-Acl -LiteralPath $outsideMarker).Sddl
           $escapeLink = Join-Path $dataRoot 'appdata\gezel-upgrade-smoke-escape'

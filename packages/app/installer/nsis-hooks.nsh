@@ -71,6 +71,13 @@ Var GezelServiceStoppedForInstall
 !define GEZEL_SERVICE_STOP_POLL_ATTEMPTS 40
 !define GEZEL_SERVICE_STOP_POLL_INTERVAL_MS 500
 
+; How long customInstall waits, once GezelService reports RUNNING, for gezeld
+; itself to start serving. A healthy install stops waiting the moment the
+; daemon publishes runtime\port, usually within seconds, so this budget is spent
+; only when the daemon never comes up. It is generous because a first boot over
+; a preserved home migrates model stores before the listener binds.
+!define GEZEL_SERVICE_READY_POLL_SECONDS 120
+
 ; electron-builder 26's PowerShell app-running probe ignores the executable
 ; name and treats every process whose image lives below $INSTDIR as the app.
 ; An exact image-name check is not sufficient either: GezelService launches
@@ -1065,9 +1072,44 @@ FunctionEnd
     DetailPrint "WARNING: GezelService was registered but did not reach RUNNING; Gezel will use an account-local model engine."
     Goto SkipNssm
   ${EndIf}
+
+  ; RUNNING proves only that gezel-service-host is up, not gezeld. The host
+  ; reports RUNNING as soon as it spawns the daemon, restarts a daemon that
+  ; keeps exiting, and reports STOPPED only once its budget (3 crashes in
+  ; 60 s) is spent. A daemon that cannot bind 127.0.0.1:6228 exits within
+  ; ~3 s, so the first RUNNING arrived while it was already failing: this
+  ; install recorded a working engine that stopped ~11 s later, and the app
+  ; never showed its fallback notice (2026-10-14, with another process holding
+  ; the port). Believe the daemon's own proof of life instead: it writes
+  ; runtime\port only once its listener is bound, and ClearGezelRuntime removed
+  ; the previous one before this start. Leaving RUNNING first is a failure.
+  StrCpy $8 0
+  ${Do}
+    ${If} ${FileExists} "${GEZEL_DATA_DIR}\runtime\port"
+      ${ExitDo}
+    ${EndIf}
+    nsExec::ExecToLog '"$SYSDIR\cmd.exe" /D /C ""$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME} | "$SYSDIR\find.exe" "RUNNING" >NUL"'
+    Pop $9
+    ${If} $9 != 0
+      ${ExitDo}
+    ${EndIf}
+    IntOp $8 $8 + 1
+    ${If} $8 >= ${GEZEL_SERVICE_READY_POLL_SECONDS}
+      ${ExitDo}
+    ${EndIf}
+    Sleep 1000
+  ${Loop}
+  ${IfNot} ${FileExists} "${GEZEL_DATA_DIR}\runtime\port"
+    ${If} $9 != 0
+      DetailPrint "WARNING: GezelService stopped during startup (see ${GEZEL_DATA_DIR}\logs\service-stderr.log); Gezel will use an account-local model engine."
+    ${Else}
+      DetailPrint "WARNING: GezelService did not start serving within ${GEZEL_SERVICE_READY_POLL_SECONDS} seconds; Gezel will use an account-local model engine until it does."
+    ${EndIf}
+    Goto SkipNssm
+  ${EndIf}
   DetailPrint "GezelService installed under restricted LocalService."
 
-  ; Registered AND running. Clear any breadcrumb a prior failed install left
+  ; Registered AND serving. Clear any breadcrumb a prior failed install left
   ; behind so the app stops reporting a fallback that no longer applies.
   ; 64-bit view explicitly, so the 64-bit Electron app finds the key even if
   ; a caller changed the view. Restores are `lastused`, never a hardcoded
@@ -1088,10 +1130,12 @@ FunctionEnd
   ; Record that this install fell back to the per-user daemon.
   ;
   ; Most paths reaching this label have already shown the user a dialog. The
-  ; two startup paths above deliberately have not: a registration that did not
+  ; startup paths above deliberately have not: a registration that did not
   ; come up is recoverable on the next boot (it stays `start= auto`) and the app
   ; degrades cleanly to its per-user daemon, so a modal would be noise. They
-  ; still have to land here, because the flag is what the app reads.
+  ; still have to land here, because the flag is what the app reads. A 0 never
+  ; hides a working engine: the supervisor adopts a healthy GezelService first
+  ; and consults this flag only when it has already fallen back.
   ;
   ; And no path shows a dialog under `/S` — electron-updater runs the NSIS
   ; installer silently for every Windows auto-update, and NSIS skips MessageBox
