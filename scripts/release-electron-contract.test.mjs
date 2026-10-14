@@ -428,6 +428,32 @@ test('PR and release gates share serialized unit and CLI TUI stability contracts
   assert.match(publish, /run: xvfb-run -a pnpm validate/);
 });
 
+test('npm release builds every workspace package the test-embedder prewarm imports', async () => {
+  const [publish, prewarm] = await Promise.all([
+    readFile(join(root, '.github', 'workflows', 'publish-npm.yml'), 'utf8'),
+    readFile(
+      join(root, 'packages', 'service', 'src', 'test-support', 'prewarm-test-embedder.ts'),
+      'utf8',
+    ),
+  ]);
+  const build = publish.match(/name: Build the test embedder's dependencies\n\s+run: (.+)/)?.[1];
+  assert.ok(build, 'the release job must build the prewarm closure, not the whole workspace');
+  assert.ok(
+    publish.indexOf(build) < publish.indexOf('uses: ./.github/actions/setup-test-embedder'),
+    'the prewarm closure must be built before the embedder is verified',
+  );
+  const imported = [...prewarm.matchAll(/(?:from |import\()'(@bendyline\/[^/']+)/g)].map(
+    (match) => match[1],
+  );
+  assert.ok(imported.length > 0, 'the prewarm must load the embedder from a workspace package');
+  for (const pkg of imported) {
+    assert.ok(
+      build.includes(`--filter "${pkg}..."`),
+      `the prewarm resolves ${pkg} through its built dist/, so the release job must build it`,
+    );
+  }
+});
+
 test('PR CI runs the full browser and Electron suites the release gates on', async () => {
   const [quality, release] = await Promise.all([
     readFile(join(root, '.github', 'workflows', 'quality.yml'), 'utf8'),
