@@ -709,8 +709,10 @@ and the meester's lines in the chat register (serif body). Rules:
   waiting on its tools, in any state (before the download, during it, while
   getting ready, or with a cloud AI to connect), "Also, here is a bit more
   info about gezel:" and the "What is gezel?" Handboek article as a video
-  (`IntroHandboekArticle` `variant="player"`: the player alone, never
-  autoplaying, Open in Handboek beneath) sit under the first projects. Keying
+  (`IntroHandboekArticle` `variant="player"`: the player alone at the
+  video's own 16:9 height with its controls over the frame's foot, standard
+  closed captions, never autoplaying, Open in Handboek beneath) sit under the
+  first projects. Keying
   it to a running download made it come and go with page reloads and models
   already on disk. It stays for the visit after the tools land, so they never
   pull the video from under someone watching, and the "Take the 1-minute

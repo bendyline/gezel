@@ -225,14 +225,18 @@ export function IntroHandboekArticle({
       <MediaContext.Provider value={mediaProvider}>
         {(stacked || playerOnly || mode === 'video') && (
           <div className="home-intro-page home-intro-page-player">
-            <div className="home-intro-player">
+            <div
+              className={
+                playerOnly ? 'home-intro-player home-intro-player--fit' : 'home-intro-player'
+              }
+            >
               <DocPlayer
                 doc={playerDoc ?? doc}
                 theme={gezelChatThemeForMode(effectiveTheme)}
                 displayMode="video"
                 audioMode="synthetic"
                 captionsEnabled
-                captionStyle="social"
+                captionStyle="standard"
                 autoPlay={!stacked && !playerOnly}
                 showControls
                 showScrubber

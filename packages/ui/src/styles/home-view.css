@@ -736,6 +736,15 @@
   min-height: 0;
 }
 
+/* The welcome's player takes the video's own 16:9 height, with squisq's
+   controls over the frame's foot. Stretched into the fixed box above, the
+   frame kept its height at the top and the controls dropped to the bottom,
+   leaving a dark band between them. */
+.home-intro-player--fit {
+  display: block;
+  height: auto;
+}
+
 /* The artisan-bench brand mark inside the article ships at figure resolution;
    in document views it reads as a small editorial mark, not a hero. Width is
    explicit rather than a max-height cap so the frame below can shrink-wrap it

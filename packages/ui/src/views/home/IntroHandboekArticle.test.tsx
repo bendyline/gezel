@@ -32,11 +32,20 @@ vi.mock('@bendyline/squisq-react', () => ({
       <a href="https://gezelgilde.com">external link</a>
     </div>
   ),
-  DocPlayer: ({ audioMode, autoPlay }: { audioMode?: string; autoPlay?: boolean }) => (
+  DocPlayer: ({
+    audioMode,
+    autoPlay,
+    captionStyle,
+  }: {
+    audioMode?: string;
+    autoPlay?: boolean;
+    captionStyle?: string;
+  }) => (
     <div
       data-testid="doc-player"
       data-audio-mode={audioMode ?? ''}
       data-autoplay={String(autoPlay ?? false)}
+      data-caption-style={captionStyle ?? ''}
     >
       player
     </div>
@@ -113,6 +122,9 @@ describe('IntroHandboekArticle', () => {
     render(<IntroHandboekArticle variant="player" />);
     const player = await screen.findByTestId('doc-player');
     expect(player).toHaveAttribute('data-autoplay', 'false');
+    // Ordinary closed captions, and the frame's own height rather than a fixed box.
+    expect(player).toHaveAttribute('data-caption-style', 'standard');
+    expect(player.parentElement).toHaveClass('home-intro-player--fit');
     expect(screen.queryByTestId('linear-doc-view')).not.toBeInTheDocument();
     expect(screen.queryByRole('radiogroup', { name: 'View as' })).not.toBeInTheDocument();
     const open = screen.getByRole('button', { name: /Open in Handboek/ });
