@@ -85,10 +85,15 @@ test('01 - first boot opens on the meester, who asks for their tools with one ke
   });
   await expect(welcome.getByRole('heading', { name: /I run this workshop/ })).toBeVisible();
   await expect(welcome.getByRole('button', { name: /^Fetch my tools/ })).toBeVisible();
-  // One surface: no setup form, no posture tray, no preference switches.
+  // One surface: no setup form, no posture tray, no preference switches. The
+  // interest picker's cards are the only boxes on it.
   await expect(page.getByText('First run setup')).toHaveCount(0);
   await expect(page.getByRole('radiogroup', { name: 'Security posture' })).toHaveCount(0);
-  await expect(welcome.getByRole('checkbox')).toHaveCount(0);
+  const interests = welcome.getByRole('group', { name: 'What you would like help with' });
+  await expect(interests).toBeVisible();
+  await expect(welcome.getByRole('checkbox')).toHaveCount(
+    await interests.getByRole('checkbox').count(),
+  );
   await shot('01-first-run-home.png');
 });
 
@@ -106,17 +111,19 @@ test('03 - the title bar stays quiet until the workshop is running', async () =>
   await expect(header.getByRole('button', { name: /^Activity/ })).toHaveCount(0);
 });
 
-test('04 - the tour opens in place, without leaving the welcome', async () => {
+test('04 - the intro plays in place, without leaving the welcome', async () => {
   const welcome = page.getByTestId('meester-welcome');
-  // A new install is asked what it wants help with first, and the question
-  // holds the tour's place until it is answered or set aside.
-  await expect(welcome.getByRole('group', { name: 'What you would like help with' })).toBeVisible();
+  // A new install is asked what it wants help with first; setting the
+  // question aside leaves the intro, which plays for all of first run.
+  const interests = welcome.getByRole('group', { name: 'What you would like help with' });
+  await expect(interests).toBeVisible();
   await welcome.getByRole('button', { name: 'Not now' }).click();
-  await welcome.getByRole('button', { name: 'Take the 1-minute tour' }).click();
+  await expect(interests).toHaveCount(0);
   await expect(welcome.getByTestId('home-intro-article')).toBeVisible({ timeout: 20_000 });
+  // The tour link would only open a second copy of the same intro.
+  await expect(welcome.getByRole('button', { name: 'Take the 1-minute tour' })).toHaveCount(0);
   await page.waitForTimeout(400);
   await shot('03-first-run-intro.png');
-  await welcome.getByRole('button', { name: 'Hide the tour' }).click();
 });
 
 test('05 - first-run in dark mode', async () => {
