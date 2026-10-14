@@ -44,10 +44,11 @@ export const CLOUD_ONLY_META_KEY = 'cloud_only';
 /**
  * Bump when the structural extraction OUTPUT SHAPE changes (new columns, new
  * per-file derivations). Hash gating means existing rows never re-extract on
- * their own; a version mismatch forces one full re-extract pass over CODE
- * files (docs/images keep their gates — no re-conversion). The stamp is
- * written only after a complete walk, so an interrupted pass redoes next tick
- * (idempotent: all per-file writes are replace-by-file).
+ * their own; a version mismatch forces one re-extract of every CODE file
+ * (docs/images keep their gates — no re-conversion). The stamp is written only
+ * after a complete walk; until then `redoSince` remembers which files were
+ * already redone, so an interrupted or capped pass resumes rather than starting
+ * over (idempotent: all per-file writes are replace-by-file).
  * v2: named import bindings on dependency edges.
  * v3: html/css/vue/svelte classify as code — existing rows hold the old
  *     'other' kind, and only this bump re-extracts them (the mtime/size gate
@@ -59,7 +60,9 @@ export const CLOUD_ONLY_META_KEY = 'cloud_only';
 const EXTRACTOR_VERSION = 4;
 /**
  * Bump when the image tier stores new metadata, so photos indexed before it
- * are re-read once. 2: capture date and camera (`taken_at`, `camera_*`).
+ * are re-read once (resumably, like EXTRACTOR_VERSION). A re-read of unchanged
+ * bytes refreshes metadata and keeps any AI description's chunks and vectors.
+ * 2: capture date and camera (`taken_at`, `camera_*`).
  * 3: HEIC and camera RAW, lens and location (`lens`, `gps_lat`, `gps_lon`).
  */
 const IMAGE_META_VERSION = 3;
@@ -122,8 +125,8 @@ export async function indexWorkspaceContent(
   };
   const seen = new Set<string>();
   const indexedAt = nowIso();
-  const forceCode = store.getMeta('extractor_version') !== String(EXTRACTOR_VERSION);
-  const forceImages = store.getMeta('image_meta_version') !== String(IMAGE_META_VERSION);
+  const codeRedoSince = redoSince(store, 'extractor_version', EXTRACTOR_VERSION, indexedAt);
+  const imageRedoSince = redoSince(store, 'image_meta_version', IMAGE_META_VERSION, indexedAt);
 
   const maxFiles = opts.maxFiles ?? MAX_FILES;
   const { files: walkedFiles, capped } = await discoverWorkspaceFiles(workspaceDir, {
@@ -143,10 +146,11 @@ export async function indexWorkspaceContent(
     seen.add(file.path);
 
     const cls = classifyFile(file.path, file.size);
-    const forceThis =
-      (forceCode && cls.kind === 'code') || (forceImages && cls.modality === 'image');
-
     const existing = store.getFile(file.path);
+    const redoneSince =
+      cls.kind === 'code' ? codeRedoSince : cls.modality === 'image' ? imageRedoSince : null;
+    const forceThis =
+      redoneSince !== null && existing !== undefined && existing.indexedAt < redoneSince;
     if (file.cloudOnly && !cls.trivial) {
       // Only in the cloud: reading it would download it. Record it by name,
       // size and date, and drop the hash so no AI tier reads it either. The
@@ -296,14 +300,19 @@ export async function indexWorkspaceContent(
       // it in makes generated images findable by what they were asked to be,
       // long before any captioning model runs.
       const provenance = embeddablePngText(meta.pngText);
-      store.putChunks(file.path, hash, [
+      const chunks = [
         {
           kind: 'image',
           lineStart: 1,
           lineEnd: 1,
           text: `${nameWords}${dimText}${provenance}`,
         },
-      ]);
+      ];
+      if (existing?.hash === hash) {
+        store.putStaticChunksUnlessDescribed(file.path, hash, chunks);
+      } else {
+        store.putChunks(file.path, hash, chunks);
+      }
       continue;
     }
 
@@ -588,12 +597,58 @@ export async function indexWorkspaceContent(
     await sweepShadowOrphans(artifactsDir, seen);
   }
 
-  // Stamp only after a complete walk so an interrupted (or capped) forced
-  // pass retries — rows past a cap may hold old-version extractions.
-  if (forceCode && !capped) store.setMeta('extractor_version', String(EXTRACTOR_VERSION));
-  if (forceImages && !capped) store.setMeta('image_meta_version', String(IMAGE_META_VERSION));
+  // Stamp only after a complete walk: rows past a cap may hold old-version
+  // extractions. Files this redo already covered are skipped meanwhile.
+  if (codeRedoSince !== null && !capped) {
+    finishRedo(store, 'extractor_version', EXTRACTOR_VERSION);
+  }
+  if (imageRedoSince !== null && !capped) {
+    finishRedo(store, 'image_meta_version', IMAGE_META_VERSION);
+  }
 
   return stats;
+}
+
+/**
+ * When a version bump requires redoing files indexed under the old version:
+ * the moment the redo began, or null when none is due. A file indexed at or
+ * after it has been redone, so a walk the file cap cuts short every time (a
+ * library past MAX_FILES) re-reads each file once instead of on every pass.
+ * Recorded per version, so a later bump starts its own redo. Never earlier
+ * than the newest row already indexed: with the clock set back, a file indexed
+ * "later" under the old version would otherwise count as redone.
+ */
+function redoSince(
+  store: IndexStore,
+  key: string,
+  version: number,
+  passStartedAt: string,
+): string | null {
+  if (store.getMeta(key) === String(version)) return null;
+  const progressKey = redoProgressKey(key);
+  const [recordedVersion, recordedSince] = (store.getMeta(progressKey) ?? '').split('@');
+  if (recordedVersion === String(version) && recordedSince) return recordedSince;
+  const newest = Date.parse(store.newestIndexedAt() ?? '');
+  const since =
+    Number.isFinite(newest) && newest >= Date.parse(passStartedAt)
+      ? new Date(newest + 1).toISOString()
+      : passStartedAt;
+  store.setMeta(progressKey, `${version}@${since}`);
+  return since;
+}
+
+/**
+ * Stamp the version and forget the redo's progress. Kept, the progress would
+ * outlive a downgrade: the older build re-reads files after it, and a later
+ * upgrade to this version would count them as redone.
+ */
+function finishRedo(store: IndexStore, key: string, version: number): void {
+  store.setMeta(key, String(version));
+  store.deleteMeta(redoProgressKey(key));
+}
+
+function redoProgressKey(key: string): string {
+  return `${key}_redo_since`;
 }
 
 const SHADOW_SWEEP_MAX_DIRS = 50_000;

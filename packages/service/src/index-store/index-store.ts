@@ -7,6 +7,7 @@ import {
 } from '@bendyline/gezel';
 import { imageEmbedModelId } from '../memory/image-embed-core.js';
 import { reconcileEmbedModel, reconcileImageEmbedModel } from './embed-model-reconcile.js';
+import { FACE_WIPED_AT_META_KEY } from './face/constants.js';
 import type {
   ChunkInput,
   CurrentFileReviewIssues,
@@ -248,6 +249,15 @@ export class IndexStore {
       .prepare('SELECT * FROM files WHERE collection_id = ? ORDER BY path')
       .all<FileRow>(this.collectionId)
       .map(rowToFile);
+  }
+
+  /** The latest `indexed_at` stamp in this collection, or null when it has no files. */
+  newestIndexedAt(): string | null {
+    return (
+      this.db
+        .prepare('SELECT max(indexed_at) AS at FROM files WHERE collection_id = ?')
+        .get<{ at: string | null }>(this.collectionId)?.at ?? null
+    );
   }
 
   /** Total indexed file count for this collection. */
@@ -1183,40 +1193,88 @@ export class IndexStore {
 
   /** Replace all chunks for a file and return the inserted chunk ids. */
   putChunks(filePath: string, contentHash: string | null, chunks: ChunkInput[]): number[] {
+    return this.db.transaction(() => this.replaceChunks(filePath, contentHash, chunks));
+  }
+
+  /**
+   * Replace an image or audio file's static-pass chunks, unless the AI-shadow
+   * tier has already described this content. Its chunks then carry the
+   * description and are embedded under their ids, and the shadow gate never
+   * revisits an unchanged hash: replacing them would leave the file findable
+   * by name only, with its vectors orphaned. Checked in the same transaction
+   * as the write, because the static pass runs on its own connection beside
+   * the AI tier. Returns whether the chunks were written.
+   */
+  putStaticChunksUnlessDescribed(
+    filePath: string,
+    contentHash: string,
+    chunks: ChunkInput[],
+  ): boolean {
     return this.db.transaction(() => {
-      this.db
-        .prepare('DELETE FROM chunks WHERE collection_id = ? AND file_path = ?')
-        .run(this.collectionId, filePath);
-      if (this.caps.fts) {
-        this.db
-          .prepare('DELETE FROM fts_docs WHERE file_path = ? AND collection_id = ?')
-          .run(filePath, this.collectionId);
-      }
-      const ins = this.db.prepare(
-        `INSERT INTO chunks (collection_id, file_path, content_hash, kind, line_start, line_end, text)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      );
-      const fts = this.caps.fts
-        ? this.db.prepare(
-            'INSERT INTO fts_docs (body, file_path, line_start, chunk_id, collection_id) VALUES (?, ?, ?, ?, ?)',
-          )
-        : null;
-      const ids: number[] = [];
-      for (const c of chunks) {
-        const { lastInsertRowid } = ins.run(
-          this.collectionId,
-          filePath,
-          contentHash,
-          c.kind,
-          c.lineStart,
-          c.lineEnd,
-          c.text,
-        );
-        ids.push(lastInsertRowid);
-        fts?.run(c.text, filePath, c.lineStart, lastInsertRowid, this.collectionId);
-      }
-      return ids;
+      const described = this.db
+        .prepare("SELECT 1 AS ok FROM shadow_state WHERE content_hash = ? AND state = 'ok'")
+        .get(contentHash);
+      if (described) return false;
+      this.replaceChunks(filePath, contentHash, chunks);
+      return true;
     });
+  }
+
+  /**
+   * Index an AI shadow (a photo description, a transcript) and consume the
+   * shadow gate in one transaction. Written apart, a static pass on its own
+   * connection could replace the chunks between the two, and the gate, then
+   * 'ok', would never send the file back.
+   */
+  putAiShadowChunks(
+    filePath: string,
+    contentHash: string,
+    chunks: ChunkInput[],
+    model?: string,
+  ): void {
+    this.db.transaction(() => {
+      this.replaceChunks(filePath, contentHash, chunks);
+      this.markAiShadowOk(contentHash, filePath, model);
+    });
+  }
+
+  private replaceChunks(
+    filePath: string,
+    contentHash: string | null,
+    chunks: ChunkInput[],
+  ): number[] {
+    this.db
+      .prepare('DELETE FROM chunks WHERE collection_id = ? AND file_path = ?')
+      .run(this.collectionId, filePath);
+    if (this.caps.fts) {
+      this.db
+        .prepare('DELETE FROM fts_docs WHERE file_path = ? AND collection_id = ?')
+        .run(filePath, this.collectionId);
+    }
+    const ins = this.db.prepare(
+      `INSERT INTO chunks (collection_id, file_path, content_hash, kind, line_start, line_end, text)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const fts = this.caps.fts
+      ? this.db.prepare(
+          'INSERT INTO fts_docs (body, file_path, line_start, chunk_id, collection_id) VALUES (?, ?, ?, ?, ?)',
+        )
+      : null;
+    const ids: number[] = [];
+    for (const c of chunks) {
+      const { lastInsertRowid } = ins.run(
+        this.collectionId,
+        filePath,
+        contentHash,
+        c.kind,
+        c.lineStart,
+        c.lineEnd,
+        c.text,
+      );
+      ids.push(lastInsertRowid);
+      fts?.run(c.text, filePath, c.lineStart, lastInsertRowid, this.collectionId);
+    }
+    return ids;
   }
 
   /**
@@ -2499,14 +2557,21 @@ export class IndexStore {
     return next;
   }
 
-  /** The data-erasure path: every face row and person entity in this index. */
-  wipeFaceData(): void {
+  /**
+   * The data-erasure path: every face row and person entity in this index.
+   * Records when, so copies of the index set aside earlier are erased to
+   * match; returns that time.
+   */
+  wipeFaceData(): string {
+    const at = nowIso();
     this.db.transaction(() => {
       this.db.prepare('DELETE FROM face_vectors WHERE collection_id = ?').run(this.collectionId);
       this.db.prepare('DELETE FROM face_clusters WHERE collection_id = ?').run(this.collectionId);
       this.db.prepare('DELETE FROM face_state WHERE collection_id = ?').run(this.collectionId);
       this.deleteEntitiesOfKind('person');
+      this.setMeta(FACE_WIPED_AT_META_KEY, at);
     });
+    return at;
   }
 
   /** Delete every entity of a kind plus its mentions. */
@@ -3401,6 +3466,9 @@ export class IndexStore {
   getMeta(key: string): string | undefined {
     return this.db.prepare('SELECT value FROM meta WHERE key = ?').get<{ value: string }>(key)
       ?.value;
+  }
+  deleteMeta(key: string): void {
+    this.db.prepare('DELETE FROM meta WHERE key = ?').run(key);
   }
 
   // ── helpers ────────────────────────────────────────────────────────────

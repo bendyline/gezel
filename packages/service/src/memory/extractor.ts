@@ -4,7 +4,7 @@
  * fire-and-forget — it never blocks the chat.
  */
 
-import { type ChatMessage, createLogger } from '@bendyline/gezel';
+import { type ChatMessage, type ChatSession, createLogger } from '@bendyline/gezel';
 import { EmbeddingsDisabledError } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import {
   type MemoryKind,
@@ -188,7 +188,51 @@ export interface ExtractMemoriesArgs {
   memory: MemoryManager;
   gezelId: string;
   projectId: string;
+  /**
+   * Whether lines about the person may land in their own memory. Every gezel
+   * reads that memory in every project, cloud providers included, so only the
+   * person's own conversation may write it ({@link mayWritePersonMemory}).
+   * Otherwise those lines go to this gezel's memory, as they did before
+   * person memory existed.
+   */
+  personMemory?: boolean;
   debug?: { isEnabled(): boolean };
+}
+
+/** The session fields that decide whether an extraction may write person memory. */
+export type PersonMemorySession = Pick<
+  ChatSession,
+  'messages' | 'extractedUpTo' | 'taskRef' | 'visitorAccess' | 'source' | 'consultationMode'
+>;
+
+/**
+ * Whether extracting this session's unextracted messages may write notes
+ * about the person: only their own conversation with a gezel does. A task
+ * step, a visitor, a consultation, or a conversation mirrored from another
+ * app does not, and neither does a window holding any turn the person did
+ * not start — another gezel's message, the runtime's own seed or replay.
+ * Those transcripts carry what a gezel read at work (a web page, an email),
+ * which must not become something every gezel is told about the person.
+ */
+export function mayWritePersonMemory(session: PersonMemorySession): boolean {
+  if (session.taskRef || session.visitorAccess || session.source || session.consultationMode) {
+    return false;
+  }
+  const { messages } = session;
+  let start = Math.min(Math.max(0, session.extractedUpTo ?? 0), messages.length);
+  // A reply just past the cursor answers the user message before it.
+  while (start > 0 && messages[start]?.role !== 'user') start--;
+  const turns = messages.slice(start).filter((m) => m.role === 'user');
+  return turns.length > 0 && turns.every(isPersonMessage);
+}
+
+/**
+ * `nudge` is deliberately not a machine marker: it is a message the person
+ * typed while the previous turn was still running. The runtime's own
+ * continuation nudges are re-prompts inside a turn and never persist.
+ */
+function isPersonMessage(message: ChatMessage): boolean {
+  return !message.from && !message.hidden && message.origin !== 'system';
 }
 
 function renderMessages(messages: ChatMessage[], budget: number): string {
@@ -249,7 +293,10 @@ export async function extractMemories(args: ExtractMemoriesArgs): Promise<void> 
       .filter((m): m is TaggedMemory => m !== null)
       // A partial echo still hands back the examples verbatim. They parse
       // cleanly, so nothing downstream would catch them.
-      .filter((m) => !EXAMPLE_TEXTS.has(m.text.trim().toLowerCase()));
+      .filter((m) => !EXAMPLE_TEXTS.has(m.text.trim().toLowerCase()))
+      .map((m) =>
+        m.scope === 'user' && !args.personMemory ? { ...m, scope: 'gezel' as const } : m,
+      );
     let saved = 0;
     let deduped = 0;
     for (const m of parsed) {

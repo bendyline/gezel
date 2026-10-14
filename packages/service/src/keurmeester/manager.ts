@@ -112,7 +112,7 @@ export interface KeurmeesterChatPort {
   send(
     sessionId: string,
     text: string,
-    opts?: { lane?: 'interactive' | 'background' },
+    opts?: { lane?: 'interactive' | 'background'; messageOrigin?: 'system' },
   ): Promise<unknown>;
 }
 
@@ -1202,7 +1202,9 @@ export class KeurmeesterManager {
         stepPrompt: step?.prompt ?? '',
         ...(step?.advanceWhen?.file ? { deliverable: step.advanceWhen.file } : {}),
       }),
-      { lane: 'background' },
+      // The runtime wrote this prompt, not the person: marked so memory
+      // extraction never reads its lines as something they said.
+      { lane: 'background', messageOrigin: 'system' },
     );
 
     // Verify through the task's own machinery — deliverable check +

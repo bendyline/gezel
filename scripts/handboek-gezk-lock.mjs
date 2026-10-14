@@ -46,6 +46,9 @@ export function handboekGezkPaths(repoRoot = REPO_ROOT) {
 function listFiles(dir, out = []) {
   if (!existsSync(dir)) return out;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    // Untracked dotfiles such as Finder's .DS_Store would make a lock written
+    // on a Mac disagree with CI's checkout, which then rebuilds on every run.
+    if (entry.name.startsWith('.')) continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name !== 'node_modules' && entry.name !== 'dist') listFiles(path, out);

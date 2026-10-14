@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  PERSON_MEMORY_NEEDS_USER_TURN_CODE,
+  PERSON_MEMORY_NEEDS_USER_TURN_HINT,
   type TaskStatusLookup,
   type TokenScopeMode,
   gezelScopeGuard,
@@ -775,6 +777,71 @@ describe('sessionRouteGuard', () => {
     expect((await worker.request('/api/projects/proj-a/workspace/../terminals/run')).status).toBe(
       403,
     );
+  });
+
+  describe('notes about the person', () => {
+    // What lands in the person's memory is put in front of every gezel in
+    // every project, so a worker that read something in a page, an email,
+    // or an Office selection must not be able to write it there on its own.
+    const saveTo = (scope: 'user' | 'gezel' | 'project', id: string) =>
+      jsonPost({
+        scope,
+        id,
+        text: 'Lives in Utrecht.',
+        source: { project: 'proj-a', gezel: 'gz-1' },
+      });
+
+    it('refuses a session outside the person’s own turn, coordinators included', async () => {
+      const turns: string[] = [];
+      const notUserTurn = (sessionId: string) => {
+        turns.push(sessionId);
+        return false;
+      };
+      for (const auth of [session('proj-a'), session('proj-a', true)]) {
+        const app = sessionPolicyApp(auth, undefined, notUserTurn);
+        const refused = await app.request('/api/memory/save', saveTo('user', 'user'));
+        expect(refused.status).toBe(403);
+        expect(await refused.json()).toEqual({
+          error: PERSON_MEMORY_NEEDS_USER_TURN_CODE,
+          hint: PERSON_MEMORY_NEEDS_USER_TURN_HINT,
+        });
+        // Its own memory and the project's stay open on any turn.
+        expect((await app.request('/api/memory/save', saveTo('gezel', 'gz-1'))).status).toBe(200);
+        expect((await app.request('/api/memory/save', saveTo('project', 'proj-a'))).status).toBe(
+          200,
+        );
+      }
+      expect(turns).toEqual(['proj-a', 'proj-a']);
+      expect(PERSON_MEMORY_NEEDS_USER_TURN_HINT).toContain('scope "gezel"');
+    });
+
+    it('fails closed when the turn check is not wired', async () => {
+      const app = sessionPolicyApp(session('proj-a'));
+      expect((await app.request('/api/memory/save', saveTo('user', 'user'))).status).toBe(403);
+    });
+
+    it('admits the same session while the person is talking with it', async () => {
+      const userTurn = (sessionId: string) => sessionId === 'proj-a';
+      for (const auth of [session('proj-a'), session('proj-a', true)]) {
+        const app = sessionPolicyApp(auth, undefined, userTurn);
+        expect((await app.request('/api/memory/save', saveTo('user', 'user'))).status).toBe(200);
+      }
+    });
+
+    it('keeps reads open to sessions: the notes are already in their prompt', async () => {
+      const app = sessionPolicyApp(session('proj-a'), undefined, () => false);
+      expect((await app.request('/api/memory/recent?scope=user&id=user')).status).toBe(200);
+    });
+
+    it('leaves the person’s own “About you” editor to first-party clients', async () => {
+      for (const auth of [
+        { appId: 'desktop-client', scopes: ['ui'] },
+        { appId: 'root', scopes: ['root'] },
+      ]) {
+        const app = sessionPolicyApp(auth, undefined, () => false);
+        expect((await app.request('/api/memory/save', saveTo('user', 'user'))).status).toBe(200);
+      }
+    });
   });
 
   it('binds memory, history, and transcript search to the session identity', async () => {

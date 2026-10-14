@@ -78,6 +78,33 @@ const ALL_SOURCES: readonly RetrievalSource[] = [
 ];
 
 /**
+ * What a visitor's turn may retrieve: an anonymous stranger chatting on a
+ * site published from Gezel (app-serve), not the owner. An allowlist, so a
+ * source added to {@link ALL_SOURCES} later stays private until someone
+ * decides a visitor may see it.
+ *
+ * Empty on purpose. A served site shows its pages and the data files its
+ * manifest declares (`pages.reads`), nothing more; the workspace and the
+ * artifacts drawer hold everything else the owner keeps there (task folders,
+ * prompt drafts, reports). Memory, history, and the shared library are the
+ * owner's by definition, and an installed knowledge catalog can be one the
+ * owner built from their own folder (`gezel knowledge build`).
+ */
+export const VISITOR_RETRIEVAL_SOURCES: readonly RetrievalSource[] = [];
+
+/** A resolved policy narrowed to what the session's audience may see. */
+function forSessionAudience(
+  policy: ResolvedRetrievalPolicy,
+  record: RetrievalSessionRef,
+): ResolvedRetrievalPolicy {
+  if (!record.visitorAccess) return policy;
+  return {
+    ...policy,
+    sources: policy.sources.filter((source) => VISITOR_RETRIEVAL_SOURCES.includes(source)),
+  };
+}
+
+/**
  * Knowledge-specific injection ceilings (knowledge-catalogs WS-H): Lean
  * injects citations only (zero body text), Balanced ≤2 chunks within 25%
  * of the turn's retrieval budget, Deep ≤4 within 35%. Ceilings, never
@@ -104,10 +131,10 @@ export interface ResolvedRetrievalPolicy {
   inheritedFrom: 'override' | 'craftbook-step' | 'gezel' | 'install' | 'default' | 'legacy-off';
 }
 
-/** The session fields retrieval reads: scope, owner, and task-step identity. */
+/** The session fields retrieval reads: scope, owner, audience, and task-step identity. */
 export type RetrievalSessionRef = Pick<
   ChatSession,
-  'id' | 'projectId' | 'gezelId' | 'taskRef' | 'stepId'
+  'id' | 'projectId' | 'gezelId' | 'taskRef' | 'stepId' | 'visitorAccess'
 >;
 
 export interface ProjectRetrievalHit {
@@ -213,13 +240,16 @@ export async function resolveSessionRetrievalPolicy(args: {
   override?: RetrievalPolicy;
 }): Promise<ResolvedRetrievalPolicy> {
   const taskContext = await resolveTaskContext(args.store, args.record);
-  return resolveRetrievalPolicy({
-    ...(args.override ? { override: args.override } : {}),
-    step: taskContext?.step.retrieval,
-    gezel: args.gezel,
-    config: args.config,
-    ...(args.contextWindow ? { contextWindow: args.contextWindow } : {}),
-  });
+  return forSessionAudience(
+    resolveRetrievalPolicy({
+      ...(args.override ? { override: args.override } : {}),
+      step: taskContext?.step.retrieval,
+      gezel: args.gezel,
+      config: args.config,
+      ...(args.contextWindow ? { contextWindow: args.contextWindow } : {}),
+    }),
+    args.record,
+  );
 }
 
 /**
@@ -323,13 +353,18 @@ export async function retrieveProjectContext(args: {
   citeHit?: (hit: ProjectRetrievalHit) => number;
 }): Promise<ProjectRetrievalResult | null> {
   const taskContext = await resolveTaskContext(args.store, args.record);
-  const resolvedPolicy = resolveRetrievalPolicy({
-    ...(args.policyOverride ? { override: args.policyOverride } : {}),
-    step: taskContext?.step.retrieval,
-    gezel: args.gezel,
-    config: args.config,
-    contextWindow: args.contextWindow,
-  });
+  // Narrowed before anything else reads the policy — a preview's override
+  // included — so no later branch can widen what a visitor's turn sees.
+  const resolvedPolicy = forSessionAudience(
+    resolveRetrievalPolicy({
+      ...(args.policyOverride ? { override: args.policyOverride } : {}),
+      step: taskContext?.step.retrieval,
+      gezel: args.gezel,
+      config: args.config,
+      contextWindow: args.contextWindow,
+    }),
+    args.record,
+  );
   const excluded = new Set(args.excludeSources ?? []);
   const policy =
     excluded.size > 0

@@ -9,6 +9,7 @@
  * rest once the day's allowance is spent.
  */
 
+import { hasNightShiftIndexing } from '../night-shift.js';
 import type { ChatEventEnvelope } from '../schemas/gezel.js';
 import {
   DEFAULT_NOTIFICATION_DAILY_CAP,
@@ -19,6 +20,7 @@ import {
   REMINDER_MAX_AHEAD_DAYS,
   REMINDER_TITLE_MAX,
 } from '../schemas/notifications.js';
+import type { NightShiftReviewIntent } from '../schemas/question.js';
 import type { Task } from '../schemas/task.js';
 
 /** Items that arrive this close together become one notification. */
@@ -76,6 +78,23 @@ export function isOwnerLaunchedCompletion(task: Task, outcome: 'complete' | 'can
   return true;
 }
 
+/**
+ * The heading a morning card's notification carries, or null when the card
+ * should not reach anyone. A quiet night's card explains why nothing
+ * happened: it waits for the person to look, it never interrupts them. Every
+ * other heading follows what the card holds, so "worked overnight" never sits
+ * over a body saying no work was done (the intent does not count proposals,
+ * so a card holding only those gets the neutral one).
+ */
+function morningTitle(intent: NightShiftReviewIntent): string | null {
+  if (intent.quiet) return null;
+  const worked =
+    intent.tasksCompleted > 0 ||
+    intent.reports.length > 0 ||
+    hasNightShiftIndexing(intent.indexing);
+  return worked ? 'Your crew worked overnight' : 'Your morning review is ready';
+}
+
 function firstLine(text: string, max = 140): string {
   const line = (text.split('\n').find((l) => l.trim()) ?? '').replace(/\s+/g, ' ').trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
@@ -83,7 +102,8 @@ function firstLine(text: string, max = 140): string {
 
 /**
  * The notification an event earns, or null. Only questions, finished
- * owner-launched work and level-ups qualify; every other event — heartbeats,
+ * owner-launched work, the morning card of a night that did something, and
+ * level-ups qualify; every other event — heartbeats,
  * night-shift switches, task ticks — earns nothing. Social mode decides the
  * register: a gezel's name and voice, or plain status text. Growth stays out
  * of sight with social mode off, so a level-up says nothing then.
@@ -97,12 +117,14 @@ export function earnedItemFor(envelope: ChatEventEnvelope, ctx: EarnedContext): 
     if (question.intent?.kind === 'task-finished') return null;
     if (question.intent?.kind === 'night-shift-review') {
       if (!ctx.morningNotification) return null;
+      const title = morningTitle(question.intent);
+      if (!title) return null;
       return {
         key: `morning:${question.id}`,
         kind: 'morning',
-        title: 'Your crew worked overnight',
+        title,
         body: firstLine(question.prompt, 200),
-        line: 'Your crew worked overnight',
+        line: title,
         view: 'home',
       };
     }

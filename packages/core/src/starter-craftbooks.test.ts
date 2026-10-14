@@ -82,6 +82,42 @@ describe('output summaries', () => {
     expect(planOutputSummary(book)).toBe('A slide deck');
     expect(planOutputSummary({ ...book, steps: [] })).toBeNull();
   });
+
+  const gated = (...files: string[]) =>
+    ({
+      steps: files.map((file, index) => ({
+        id: `step-${index}`,
+        name: `Step ${index}`,
+        advanceWhen: { file },
+        gate: { checks: [{ kind: 'minBytes', file, minBytes: 200 }] },
+      })),
+    }) as unknown as CraftbookTemplateManifest;
+
+  it('gives the broad report and website labels to starters only', () => {
+    const report = gated('{{workPath}}/scope.md', '{{workPath}}/report.md');
+    const site = gated('design/brand-system.md', 'index.html');
+    expect(planOutputSummary(report, { starter: true })).toBe('A written report');
+    expect(planOutputSummary(site, { starter: true })).toBe('A website');
+    expect(planOutputSummary(report)).toBeNull();
+    expect(planOutputSummary(site, { starter: false })).toBeNull();
+  });
+
+  it('never calls an HTML deck or a scratch note a website or a report', () => {
+    const htmlDeck = gated('{{workPath}}/narrative.md', '{{workPath}}/design.md', 'index.html');
+    const extension = gated('{{workPath}}/scope.md', 'index.html', 'manifest.json');
+    expect(planOutputSummary(htmlDeck)).toBeNull();
+    expect(planOutputSummary(extension)).toBeNull();
+  });
+
+  it('still names a deliverable whose file type says what it is', () => {
+    expect(planOutputSummary(gated('notes.md', 'deck.pptx'))).toBe('A slide deck');
+    expect(planOutputSummary(gated('notes.md', 'report.docx'))).toBe('An editable Word document');
+    expect(planOutputSummary(gated('notes.md', 'report.pdf'))).toBe('A PDF document');
+    expect(planOutputSummary(gated('report.pdf'), { starter: true })).toBe('A PDF report');
+    expect(planOutputSummary(gated('scope.md', 'renders/rough-cut.mp4'))).toBe('A video');
+    expect(planOutputSummary(gated('clip.mp4', 'clip.gif'))).toBe('A video and animated GIF');
+    expect(planOutputSummary(gated('loop.gif'))).toBe('An animated GIF');
+  });
 });
 
 describe('local duration estimates', () => {

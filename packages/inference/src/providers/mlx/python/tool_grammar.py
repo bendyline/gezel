@@ -96,8 +96,15 @@ class SafeToolGrammarProcessor:
     salvage layer is still there as the post-hoc safety net.
     """
 
-    def __init__(self, inner: Any) -> None:
+    def __init__(
+        self,
+        inner: Any,
+        label: str = "tool-grammar",
+        fallback: str = "unconstrained + TS salvage",
+    ) -> None:
         self._inner = inner
+        self._label = label
+        self._fallback = fallback
         self.disabled = False
 
     def __call__(self, input_ids: Any, logits: Any) -> Any:
@@ -107,8 +114,8 @@ class SafeToolGrammarProcessor:
             return self._inner(input_ids, logits)
         except Exception as exc:  # noqa: BLE001 - defensive: any matcher fault
             print(
-                f"[tool-grammar] matcher error; disabling grammar for the rest of "
-                f"this turn (falling back to unconstrained + TS salvage): {exc}",
+                f"[{self._label}] matcher error; disabling grammar for the rest of "
+                f"this turn (falling back to {self._fallback}): {exc}",
                 flush=True,
             )
             self.disabled = True

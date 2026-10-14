@@ -11,11 +11,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
-import {
-  DEFAULT_NIGHT_SHIFT_WINDOW,
-  type NightShiftReviewIntent,
-  nightShiftWindowKey,
-} from '@bendyline/gezel';
+import { DEFAULT_NIGHT_SHIFT_WINDOW, nightShiftWindowKey } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { isGitInstalled, runGit } from '../git/git.js';
@@ -25,8 +21,8 @@ import { type RunningService, startService } from '../service.js';
 
 // A whole night against a booted daemon: a person adds a Pictures folder and a
 // code folder, the window opens with no task waiting, the sweep indexes both,
-// the shift drains, and the morning brings one card and one history record.
-// The folders come out of it untouched.
+// the shift drains, and the morning records the night once. The folders come
+// out of it untouched.
 
 const machine = vi.hoisted(() => ({ homedir: '' }));
 
@@ -145,7 +141,7 @@ async function snapshot(dir: string): Promise<Map<string, string>> {
 }
 
 describe('a night in the life', () => {
-  it('runs with nothing queued, sweeps the added folders, and leaves one morning card', async () => {
+  it('runs with nothing queued, sweeps the added folders, and records the night once', async () => {
     const ctx = svc.context;
     const windowKey = nightShiftWindowKey(new Date(clock), DEFAULT_NIGHT_SHIFT_WINDOW)!;
     const oversight = await findNightShiftOversightTask(ctx.store);
@@ -182,18 +178,18 @@ describe('a night in the life', () => {
         (q) => q.intent?.kind === 'night-shift-review',
       );
     const settled = () =>
-      ctx.history.listEntries({ kinds: ['night-shift.window-settled'], include: 'events' });
-    await until(async () => (await reviewCards()).length === 1 && (await settled()).length === 1);
+      ctx.history.listEvents({ kinds: ['night-shift.window-settled'], projectId: 'default' });
+    await until(async () => (await settled()).length === 1);
 
-    const [card] = await reviewCards();
-    const intent = card!.intent as NightShiftReviewIntent;
-    expect(intent.windowKey).toBe(windowKey);
-    expect(intent.pausedReview).toEqual({ projectId: 'default', num: oversight!.num });
-    expect(card!.prompt).toContain("Your nightly review didn't finish");
+    const [record] = await settled();
+    expect(record!.details).toMatchObject({ windowKey, ran: true });
+    // The sweep read both folders but made nothing a person reads, and the
+    // paused review resumes itself tonight: nothing earned a morning card.
+    expect(await reviewCards()).toEqual([]);
 
     // A restart replaying the settle (here, another tick) adds nothing.
     await ctx.nightShift.tick();
-    expect(await reviewCards()).toHaveLength(1);
+    expect(await reviewCards()).toEqual([]);
     expect(await settled()).toHaveLength(1);
 
     expect(await snapshot(pictures)).toEqual(before.pictures);

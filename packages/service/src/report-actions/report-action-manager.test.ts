@@ -295,6 +295,22 @@ describe('fire', () => {
   });
 });
 
+describe('moveReport', () => {
+  it('carries what the person did to the report’s new name and frees the old one', async () => {
+    const dated = 'reports/night-2026-10-07.md';
+    await store.writeProjectArtifact(projectId, REPORT, reportWith(CREATE_TASK_BLOCK));
+    await manager.dismiss(projectId, REPORT, 'fix-headers');
+    await store.renameProjectArtifactPath(projectId, REPORT, dated);
+    await store.writeProjectArtifact(projectId, REPORT, reportWith(CREATE_TASK_BLOCK));
+
+    expect(await manager.moveReport(projectId, REPORT, dated)).toBe(1);
+
+    expect((await manager.listForReport(projectId, dated)).actions[0]?.state).toBe('dismissed');
+    expect((await manager.listForReport(projectId, REPORT)).actions[0]?.state).toBe('suggested');
+    expect(await manager.moveReport(projectId, REPORT, dated)).toBe(0);
+  });
+});
+
 describe('settleForTask', () => {
   it('stamps the outcome on a fired record found by taskRef in any project', async () => {
     await store.createGezel({ name: 'Ada', role: 'software developer' });

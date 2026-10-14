@@ -1,8 +1,11 @@
 import type { Project, StepGate, Task } from '@bendyline/gezel';
 import {
+  DEFAULT_NIGHT_SHIFT_WINDOW,
+  type NightShiftWindow,
   REPORT_ACTION_AUTHORING_GUIDE,
   createLogger,
   isSharedLibraryProject,
+  nightShiftDayKey,
   projectAllowsAmbientWork,
   projectNightWorkEnabled,
 } from '@bendyline/gezel';
@@ -18,6 +21,8 @@ const log = createLogger('night-shift');
 const OVERSIGHT_TITLE = 'Night-shift oversight: project review';
 const OVERSIGHT_STEP_ID = 'oversight';
 const OVERSIGHT_REPORT_PATH = 'night-shift-report.md';
+/** Earlier nights' reports, dated aside in Default's artifacts by {@link prepareReviewForNight}. */
+const ARCHIVED_REPORT = /^night-shift-report-[^/]+\.md$/i;
 
 /**
  * `advanceWhen` alone drives the auto-advance watcher; it is not consulted
@@ -58,8 +63,9 @@ const OVERSIGHT_GATE: StepGate = {
 export const OVERSIGHT_QUESTION_DECLINED =
   'Nobody is awake to answer during the nightly review, so this question was not posted. Write what blocked you in the report, then finish the run with advance_task_step.';
 
-function oversightPrompt(projects: Project[]): string {
-  const projectIds = projects
+/** The projects the nightly review looks at: active, with overnight work on. */
+export function nightShiftReviewScope(projects: Project[]): string[] {
+  return projects
     .filter(
       (project) =>
         projectAllowsAmbientWork(project) &&
@@ -68,6 +74,20 @@ function oversightPrompt(projects: Project[]): string {
     )
     .map((project) => project.id)
     .sort();
+}
+
+/** The review's own report: Default's `night-shift-report.md`. */
+export function isNightShiftOversightReport(projectId: string, path: string): boolean {
+  return projectId === 'default' && path === OVERSIGHT_REPORT_PATH;
+}
+
+/** An earlier night's report the review dated aside; never tonight's work. */
+export function isNightShiftReportArchive(projectId: string, path: string): boolean {
+  return projectId === 'default' && ARCHIVED_REPORT.test(path);
+}
+
+function oversightPrompt(projects: Project[]): string {
+  const projectIds = nightShiftReviewScope(projects);
   return `You are running the nightly **Meester oversight** review. The machine is idle and this is low-priority background work — be thorough but do not kick any project back into action.
 
 Review ONLY these project IDs: ${JSON.stringify(projectIds)}.
@@ -131,11 +151,15 @@ export async function prepareReviewForNight(
       Store,
       | 'listProjectTasks'
       | 'listSessions'
-      | 'readProjectArtifact'
-      | 'writeProjectArtifact'
-      | 'deleteProjectArtifact'
+      | 'readConfig'
+      | 'statProjectArtifactPath'
+      | 'renameProjectArtifactPath'
+      | 'listProjectQuestions'
+      | 'writeQuestion'
     >;
     archiveSession: (sessionId: string) => Promise<unknown>;
+    /** Carry the report's action records to its dated name. */
+    moveReportActions?: (fromPath: string, toPath: string) => Promise<unknown>;
   },
   windowKey: string,
 ): Promise<void> {
@@ -147,15 +171,98 @@ export async function prepareReviewForNight(
     await deps.archiveSession(session.id);
     archived++;
   }
-  const previous = await deps.store.readProjectArtifact('default', OVERSIGHT_REPORT_PATH);
-  if (previous !== null) {
-    const day = task.nightShift?.lastRunDay ?? 'earlier';
-    await deps.store.writeProjectArtifact('default', `night-shift-report-${day}.md`, previous);
-    await deps.store.deleteProjectArtifact('default', OVERSIGHT_REPORT_PATH);
+  const datedAs = await dateReportAside(deps.store, windowKey);
+  if (datedAs) {
+    await deps
+      .moveReportActions?.(OVERSIGHT_REPORT_PATH, datedAs)
+      .catch((err) =>
+        log.warn(`[night-shift] could not move the report's actions to ${datedAs}: ${String(err)}`),
+      );
+    await relinkMorningCards(deps.store, datedAs).catch((err) =>
+      log.warn(`[night-shift] could not point the morning cards at ${datedAs}: ${String(err)}`),
+    );
   }
   log.info(
-    `[night-shift] review ready for ${windowKey}: ${archived} earlier session(s) archived${previous !== null ? ', last report dated aside' : ''}`,
+    `[night-shift] review ready for ${windowKey}: ${archived} earlier session(s) archived${datedAs ? `, last report dated aside as ${datedAs}` : ''}`,
   );
+}
+
+/**
+ * Move the previous report to `night-shift-report-<night>.md`, named for the
+ * night it was written in. A rename, not a copy: the morning review and the
+ * other mtime readers find what was written in a window by its mtime, and a
+ * copy made at window open read as tonight's report, its actions as
+ * suggested again. A report written since tonight's window opened is
+ * tonight's own (a restart reopened the window mid-review) and stays put,
+ * and an earlier dated copy is never overwritten.
+ */
+async function dateReportAside(
+  store: Pick<Store, 'readConfig' | 'statProjectArtifactPath' | 'renameProjectArtifactPath'>,
+  windowKey: string,
+): Promise<string | null> {
+  const report = await store.statProjectArtifactPath('default', OVERSIGHT_REPORT_PATH);
+  const writtenMs = report.kind === 'file' && report.mtime ? Date.parse(report.mtime) : Number.NaN;
+  if (!Number.isFinite(writtenMs)) return null;
+  const config = await store.readConfig().catch(() => null);
+  const window = config?.nightShift?.window ?? DEFAULT_NIGHT_SHIFT_WINDOW;
+  const opened = windowOpenedAt(windowKey, window);
+  if (opened !== null && writtenMs >= opened) return null;
+  const night = nightShiftDayKey(new Date(writtenMs), window);
+  for (let n = 1; n <= 50; n++) {
+    const path = n === 1 ? `night-shift-report-${night}.md` : `night-shift-report-${night}-${n}.md`;
+    if ((await store.statProjectArtifactPath('default', path)).kind !== 'missing') continue;
+    await store.renameProjectArtifactPath('default', OVERSIGHT_REPORT_PATH, path);
+    return path;
+  }
+  log.warn(`[night-shift] no free name to date the ${night} report aside; left in place`);
+  return null;
+}
+
+const UNDATED_ATTACHMENT = `projects/default/artifacts/${OVERSIGHT_REPORT_PATH}`;
+
+/**
+ * Point the unanswered morning cards that link the report at its dated name.
+ * A card stays until the person dismisses it, often for days, and the
+ * undated name always holds the newest night's report: left alone, Monday's
+ * card opened Tuesday's report, or nothing while tonight's was unwritten.
+ * Every rename relinks the cards before it, so the cards still naming the
+ * undated report are the ones for the night just dated.
+ */
+async function relinkMorningCards(
+  store: Pick<Store, 'listProjectQuestions' | 'writeQuestion'>,
+  datedAs: string,
+): Promise<number> {
+  let relinked = 0;
+  for (const question of await store.listProjectQuestions('default')) {
+    const intent = question.intent;
+    if (question.answer || intent?.kind !== 'night-shift-review') continue;
+    const linksReport = intent.reports.some((r) =>
+      isNightShiftOversightReport(r.projectId, r.path),
+    );
+    const attached = question.documentPath === UNDATED_ATTACHMENT;
+    if (!linksReport && !attached) continue;
+    await store.writeQuestion({
+      ...question,
+      ...(attached ? { documentPath: `projects/default/artifacts/${datedAs}` } : {}),
+      intent: {
+        ...intent,
+        reports: intent.reports.map((r) =>
+          isNightShiftOversightReport(r.projectId, r.path) ? { ...r, path: datedAs } : r,
+        ),
+      },
+    });
+    relinked++;
+  }
+  return relinked;
+}
+
+/** When the window keyed `windowKey` opened, local time; null for a malformed key. */
+function windowOpenedAt(windowKey: string, window: NightShiftWindow): number | null {
+  const [year, month, day] = windowKey.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  // An always-on window (equal bounds) is keyed by the local date it covers.
+  const hour = window.startHour === window.endHour ? 0 : window.startHour;
+  return new Date(year, month - 1, day, hour, 0, 0, 0).getTime();
 }
 
 /**

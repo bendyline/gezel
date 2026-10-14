@@ -1,7 +1,13 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type ChatSession, NIGHT_WORK_PROPERTY, normalizeStepGate } from '@bendyline/gezel';
+import {
+  type ChatSession,
+  NIGHT_WORK_PROPERTY,
+  type NightShiftReviewIntent,
+  type Question,
+  normalizeStepGate,
+} from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
@@ -298,15 +304,159 @@ describe('night-shift oversight task', () => {
       return { archived, archiveSession };
     };
 
+    // Local wall-clock instants, the way the window is defined (22:00 → 06:00).
+    const local = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute);
+    const artifact = (path: string) => join(store.projectArtifactsDir('default'), path);
+    const writtenAt = (path: string, at: Date) => utimes(artifact(path), at, at);
+
     it("archives last night's session and dates last night's report aside", async () => {
       const { archived, archiveSession } = await lastNight('2026-10-07');
+      const written = local(7, 23, 30);
+      await writtenAt('night-shift-report.md', written);
 
-      await prepareReviewForNight({ store, archiveSession }, '2026-10-08');
+      const moves: Array<[string, string]> = [];
+      await prepareReviewForNight(
+        {
+          store,
+          archiveSession,
+          moveReportActions: async (from, to) => {
+            moves.push([from, to]);
+          },
+        },
+        '2026-10-08',
+      );
 
       expect(archived).toEqual(['review-session']);
+      expect(moves).toEqual([['night-shift-report.md', 'night-shift-report-2026-10-07.md']]);
       expect(await store.readProjectArtifact('default', 'night-shift-report.md')).toBeNull();
       expect(await store.readProjectArtifact('default', 'night-shift-report-2026-10-07.md')).toBe(
         '# Last night\n',
+      );
+      // Moved, not copied: a copy's fresh mtime falls inside tonight's window,
+      // and the morning review read it as tonight's report.
+      expect((await stat(artifact('night-shift-report-2026-10-07.md'))).mtimeMs).toBe(
+        written.getTime(),
+      );
+    });
+
+    const morningCard = (windowKey: string, answered = false): Question => ({
+      id: `card-${windowKey}`,
+      projectId: 'default',
+      gezelId: 'wren',
+      sessionId: '',
+      prompt: 'The night shift left 2 reports for you.',
+      choices: ['Dismiss'],
+      allowWriteIn: false,
+      multiSelect: false,
+      createdAt: new Date().toISOString(),
+      documentPath: 'projects/default/artifacts/night-shift-report.md',
+      intent: {
+        kind: 'night-shift-review',
+        windowKey,
+        tasksCompleted: 0,
+        reports: [
+          { projectId: 'default', path: 'night-shift-report.md', title: 'Review', actionCount: 1 },
+          { projectId: 'shop', path: 'reports/security.md', title: 'Security', actionCount: 0 },
+        ],
+      },
+      ...(answered ? { answer: { selectedChoices: [0], at: new Date().toISOString() } } : {}),
+    });
+    const cardById = async (id: string) =>
+      (await store.listProjectQuestions('default')).find((q) => q.id === id)!;
+
+    it('points an unanswered morning card at the dated report it showed', async () => {
+      const { archiveSession } = await lastNight('2026-10-07');
+      await writtenAt('night-shift-report.md', local(7, 23, 30));
+      await store.writeQuestion(morningCard('2026-10-07'));
+      await store.writeQuestion(morningCard('2026-10-06', true));
+
+      await prepareReviewForNight({ store, archiveSession }, '2026-10-08');
+
+      const card = await cardById('card-2026-10-07');
+      expect(card.documentPath).toBe('projects/default/artifacts/night-shift-report-2026-10-07.md');
+      expect((card.intent as NightShiftReviewIntent).reports.map((r) => r.path)).toEqual([
+        'night-shift-report-2026-10-07.md',
+        'reports/security.md',
+      ]);
+      // A card already dismissed is history; nothing reopens it.
+      expect((await cardById('card-2026-10-06')).documentPath).toBe(
+        'projects/default/artifacts/night-shift-report.md',
+      );
+
+      // Tonight's report is written and dated aside the next night; the
+      // earlier card keeps the copy it already points at.
+      await store.writeProjectArtifact('default', 'night-shift-report.md', '# The 8th\n');
+      await writtenAt('night-shift-report.md', local(8, 23, 30));
+      await store.writeQuestion(morningCard('2026-10-08'));
+      await prepareReviewForNight({ store, archiveSession }, '2026-10-09');
+
+      expect((await cardById('card-2026-10-07')).documentPath).toBe(
+        'projects/default/artifacts/night-shift-report-2026-10-07.md',
+      );
+      expect((await cardById('card-2026-10-08')).documentPath).toBe(
+        'projects/default/artifacts/night-shift-report-2026-10-08.md',
+      );
+    });
+
+    it("leaves the cards alone when tonight's report stays put", async () => {
+      const { archiveSession } = await lastNight('2026-10-07');
+      await writtenAt('night-shift-report.md', local(8, 23, 10));
+      await store.writeQuestion(morningCard('2026-10-07'));
+
+      await prepareReviewForNight({ store, archiveSession }, '2026-10-08');
+
+      expect((await cardById('card-2026-10-07')).documentPath).toBe(
+        'projects/default/artifacts/night-shift-report.md',
+      );
+    });
+
+    it("keeps tonight's report through a restart mid-window, and the dated copy too", async () => {
+      const { archiveSession } = await lastNight('2026-10-07');
+      await store.writeProjectArtifact(
+        'default',
+        'night-shift-report-2026-10-07.md',
+        '# Last night\n',
+      );
+      await store.writeProjectArtifact('default', 'night-shift-report.md', '# Tonight, so far\n');
+      await writtenAt('night-shift-report.md', local(8, 23, 10));
+
+      await prepareReviewForNight({ store, archiveSession }, '2026-10-08');
+
+      expect(await store.readProjectArtifact('default', 'night-shift-report.md')).toBe(
+        '# Tonight, so far\n',
+      );
+      expect(await store.readProjectArtifact('default', 'night-shift-report-2026-10-07.md')).toBe(
+        '# Last night\n',
+      );
+    });
+
+    it('dates a report from a review that never finished by its own night, never over a copy', async () => {
+      const { archiveSession } = await lastNight('2026-10-06');
+      await store.writeProjectArtifact(
+        'default',
+        'night-shift-report-2026-10-06.md',
+        '# The 6th\n',
+      );
+      await store.writeProjectArtifact(
+        'default',
+        'night-shift-report-2026-10-07.md',
+        '# The 7th\n',
+      );
+      await store.writeProjectArtifact('default', 'night-shift-report.md', '# The 7th, again\n');
+      // Written after midnight: still the night that began on the 7th.
+      await writtenAt('night-shift-report.md', local(8, 2, 15));
+
+      await prepareReviewForNight({ store, archiveSession }, '2026-10-08');
+
+      expect(await store.readProjectArtifact('default', 'night-shift-report.md')).toBeNull();
+      expect(await store.readProjectArtifact('default', 'night-shift-report-2026-10-06.md')).toBe(
+        '# The 6th\n',
+      );
+      expect(await store.readProjectArtifact('default', 'night-shift-report-2026-10-07.md')).toBe(
+        '# The 7th\n',
+      );
+      expect(await store.readProjectArtifact('default', 'night-shift-report-2026-10-07-2.md')).toBe(
+        '# The 7th, again\n',
       );
     });
 

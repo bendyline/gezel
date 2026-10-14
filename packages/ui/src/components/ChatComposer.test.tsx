@@ -3,7 +3,7 @@
 import type { GezelSummary, TurnIntentPlan } from '@bendyline/gezel';
 import { OFFLINE_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import { GezelApiError, streamChatEvents } from '@bendyline/gezel-client';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api.js';
 import { takePendingSettingsSection } from '../settings-nav.js';
@@ -444,6 +444,45 @@ describe('ChatComposer attached task', () => {
     vi.mocked(api.createChatSession)
       .mockReset()
       .mockResolvedValue({} as never);
+  });
+
+  it('offers Tonight on the attached task only while the Night Shift is on', async () => {
+    vi.mocked(api.previewTurnIntent).mockResolvedValue(powerpointPlan);
+    const { unmount } = render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId={undefined}
+        taskLaunch={taskLaunch}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Please make a PowerPoint about Mongolia.' },
+    });
+    const strip = await screen.findByRole('group', { name: 'Attached task: Slide deck' });
+    expect(await within(strip).findByRole('button', { name: /tonight/i })).toBeVisible();
+    unmount();
+
+    vi.mocked(api.getConfig).mockResolvedValueOnce({
+      provider: 'mock',
+      nightShift: { enabled: false },
+    } as never);
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId={undefined}
+        taskLaunch={taskLaunch}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Please make a PowerPoint about Mongolia.' },
+    });
+    const offStrip = await screen.findByRole('group', { name: 'Attached task: Slide deck' });
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+    expect(within(offStrip).queryByRole('button', { name: /tonight/i })).toBeNull();
   });
 
   it('turns the daemon plan into a suggested task strip above the To line', async () => {

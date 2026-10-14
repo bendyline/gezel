@@ -679,6 +679,26 @@ describe('applyTuning — mlx', () => {
     expect(target.frequency_penalty).toBeUndefined();
     expect(target.presence_penalty).toBeUndefined();
   });
+
+  it('sends structured output to the sidecar, a schema winning over json_object', () => {
+    // Mapped to null until 2026-10: MLX answered every schema request with free text.
+    const schema = { type: 'array', items: { type: 'string' } };
+    for (const output of [
+      { jsonSchema: schema },
+      { responseFormat: 'json_object' as const, jsonSchema: schema },
+    ]) {
+      const target: Record<string, unknown> = {};
+      applyTuning(target, resolveTuning({ catalog: { output } }), MLX_TUNING_MAP);
+      expect(target.response_format).toEqual({ type: 'json_schema', json_schema: { schema } });
+    }
+    const object: Record<string, unknown> = {};
+    applyTuning(
+      object,
+      resolveTuning({ catalog: { output: { responseFormat: 'json_object' } } }),
+      MLX_TUNING_MAP,
+    );
+    expect(object.response_format).toEqual({ type: 'json_object' });
+  });
 });
 
 describe('applyTuning — anthropic', () => {

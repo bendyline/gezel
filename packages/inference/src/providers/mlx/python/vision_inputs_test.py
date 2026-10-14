@@ -66,6 +66,7 @@ class VisionTests(unittest.TestCase):
                 return checks > 2
             ns = dict(asyncio=asyncio, json=json, uuid=uuid, MODEL=object(), PROCESSOR=object(),
                       vision_inputs=vision_inputs,
+                      response_format=NS(build_response_format_processor=lambda *a, **kw: None),
                       ARGS=NS(prefill_step_size=128), _kv_quant_kwargs=lambda:{},
                       _build_prompt=lambda *args:'prompt', stream_generate=generate,
                       _get_generation_lock=lambda:lock, _scrub_leaked_markers=lambda s:s,

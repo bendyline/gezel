@@ -1,9 +1,33 @@
+import type { AppleFoundationModelsStatus } from '@bendyline/gezel';
 import type { AppModel } from '@bendyline/gezel/app-models';
 import { appleFoundationModelsStatus } from '../../providers/apple-foundation-models/status.js';
 
+/**
+ * How long listings reuse Apple's readiness. Each check launches the
+ * `gezel-apple-fm` helper for one handshake (26-59 ms measured), and the SDK's
+ * `streamText` lists models before every call, so a fresh check per listing
+ * cost a process launch per chat. Short enough that Apple Intelligence
+ * enabled in System Settings shows up almost at once.
+ */
+const STATUS_TTL_MS = 10_000;
+let cachedStatus: { at: number; status: Promise<AppleFoundationModelsStatus> } | null = null;
+
+/** Concurrent listings share one in-flight check. */
+function appleStatus(): Promise<AppleFoundationModelsStatus> {
+  const now = Date.now();
+  if (!cachedStatus || now - cachedStatus.at > STATUS_TTL_MS)
+    cachedStatus = { at: now, status: appleFoundationModelsStatus() };
+  return cachedStatus.status;
+}
+
+/** @internal Lets tests list models under a changed Apple status. */
+export function resetAppleStatusCache(): void {
+  cachedStatus = null;
+}
+
 /** Inventory owns system readiness, so embedders never speak the native helper protocol. */
 export async function appleSystemModel(created: number): Promise<AppModel[]> {
-  const status = await appleFoundationModelsStatus();
+  const status = await appleStatus();
   if (!status.supported || !status.installed) return [];
   return [
     {

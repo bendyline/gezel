@@ -13,12 +13,18 @@ import {
   type GezelConfig,
   type GezelDetail,
   MEMORY_NOTES_HEADER,
+  type RetrievalSource,
   type UnifiedSearchResult,
 } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { bootstrapWorkspace } from '../workspace/template.js';
-import { resolveRetrievalPolicy, retrieveProjectContext } from './project-retrieval.js';
+import {
+  VISITOR_RETRIEVAL_SOURCES,
+  resolveRetrievalPolicy,
+  resolveSessionRetrievalPolicy,
+  retrieveProjectContext,
+} from './project-retrieval.js';
 import type { SearchService } from './search-service.js';
 import { MERGE_WEIGHTS, scoreResult } from './search-service.js';
 
@@ -405,6 +411,124 @@ describe('memory hits', () => {
     );
     expect(result?.prompt.startsWith(MEMORY_NOTES_HEADER)).toBe(true);
     expect(result?.prompt).not.toContain('untrusted evidence');
+  });
+});
+
+describe('a visitor of a shared mini-site', () => {
+  // An anonymous stranger chatting on a site published from Gezel is not the
+  // owner: no memory, no shared library, no workspace or artifacts beyond
+  // what the site's own pages show.
+  const VISITOR = { ...RECORD, visitorAccess: true } as unknown as ChatSession;
+  const userMemory: UnifiedSearchResult = {
+    kind: 'memory',
+    id: 'memory:user:1',
+    title: 'Lives in Utrecht and cuts joints by hand.',
+    snippet: 'Lives in Utrecht and cuts joints by hand.',
+    retrievalSource: 'user-memory',
+    arm: 'vector',
+    memory: { day: '2026-10-01', kind: 'fact' },
+    ...scoreResult('memory', 0.9),
+  };
+
+  function recordingSearch(results: UnifiedSearchResult[]) {
+    const calls: Array<{ sources?: readonly string[]; includeShared?: boolean }> = [];
+    const search = {
+      searchProject: async (
+        _query: string,
+        opts: { sources?: readonly string[]; includeShared?: boolean },
+      ) => {
+        calls.push(opts);
+        return { results, truncated: false };
+      },
+    } as unknown as SearchService;
+    return { search, calls };
+  }
+
+  it('retrieves nothing private, whatever the policy asks for', async () => {
+    const { search, calls } = recordingSearch([userMemory, workspaceHit(1)]);
+    const result = await retrieveProjectContext({
+      store: STORE,
+      search,
+      record: VISITOR,
+      gezel: { parsed: { frontmatter: { retrieval: { mode: 'deep' } } } } as unknown as GezelDetail,
+      config: CONFIG,
+      userText: 'how do I cut strong corner joints by hand?',
+      messageOrigin: 'direct-user',
+      // A source this build does not know yet is not a visitor's either.
+      policyOverride: {
+        mode: 'deep',
+        sources: [
+          'workspace',
+          'artifacts',
+          'project-memory',
+          'gezel-memory',
+          'user-memory',
+          'shared',
+          'knowledge',
+          'future-source' as RetrievalSource,
+        ],
+      },
+    });
+    expect(result).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  it('resolves the session policy with no sources, so library recall stays silent too', async () => {
+    const policy = await resolveSessionRetrievalPolicy({
+      store: STORE,
+      record: VISITOR,
+      gezel: GEZEL,
+      config: CONFIG,
+    });
+    expect(policy.sources).toEqual([]);
+  });
+
+  it('allows no source that holds the owner’s memory, library, or files', () => {
+    for (const source of [
+      'user-memory',
+      'gezel-memory',
+      'project-memory',
+      'shared',
+      'workspace',
+      'artifacts',
+    ] as const) {
+      expect(VISITOR_RETRIEVAL_SOURCES).not.toContain(source);
+    }
+  });
+
+  it('leaves the owner’s own turn unchanged', async () => {
+    const { search, calls } = recordingSearch([userMemory]);
+    const result = await retrieveProjectContext({
+      store: STORE,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'how do I cut strong corner joints by hand?',
+      messageOrigin: 'direct-user',
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.sources).toEqual([
+      'workspace',
+      'artifacts',
+      'project-memory',
+      'gezel-memory',
+      'user-memory',
+      'shared',
+      'knowledge',
+    ]);
+    expect(calls[0]?.includeShared).toBe(true);
+    expect(result?.hits.map((hit) => hit.source)).toEqual(['user-memory']);
+    expect(
+      (
+        await resolveSessionRetrievalPolicy({
+          store: STORE,
+          record: RECORD,
+          gezel: GEZEL,
+          config: CONFIG,
+        })
+      ).sources,
+    ).toContain('user-memory');
   });
 });
 

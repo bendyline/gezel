@@ -28,8 +28,8 @@ export function KnowledgeCatalogsDialog({
           </Dialog.Title>
           <Dialog.Description className="muted small">
             Searchable, citable reference libraries — encyclopedias, manuals, your own notes. Your
-            gezellen can search every enabled catalog and cite their sources. Everything stays on
-            this device.
+            gezellen can search every enabled catalog and cite their sources. Catalogs are stored
+            and searched on this device.
           </Dialog.Description>
           <div className="knowledge-catalogs-dialog-body">
             <KnowledgeCatalogManager />

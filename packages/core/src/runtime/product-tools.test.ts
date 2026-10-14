@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { portableToolResultText } from './portable-tool-results.js';
 import {
+  PERSON_MEMORY_NEEDS_USER_TURN_HINT,
   type PortableToolActions,
   executePortableTool,
+  personDirectedSession,
   portableToolSurface,
 } from './product-tools.js';
 import { portableFixture } from './test-files.js';
@@ -823,4 +825,93 @@ describe('portable tool authority and durable effects', () => {
         expect(result.text).toContain(outcome);
       else expect(result.text).toContain('another step');
     });
+});
+
+describe('notes about the person on the phone', () => {
+  // Person memory reaches every gezel's prompt in every project, so the phone
+  // writes it only from the person's own turn, as the desktop does.
+  const said = (text: string) => ({ role: 'user' as const, content: text, at: '2026-10-13' });
+
+  it('saves one the person told the gezel in their own turn', async () => {
+    const { store, session } = await fixture();
+    session.messages.push(said('I just moved to Utrecht.'));
+    const saveMemory = vi.spyOn(store, 'saveMemory');
+    await executePortableTool(
+      store,
+      session,
+      'save_memory',
+      { text: 'Lives in Utrecht.', scope: 'user' },
+      actions,
+    );
+    expect(saveMemory).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: 'user', text: 'Lives in Utrecht.' }),
+    );
+  });
+
+  it('refuses one from a turn the host says the person did not start', async () => {
+    const { store, session } = await fixture();
+    session.messages.push(said('I just moved to Utrecht.'));
+    const saveMemory = vi.spyOn(store, 'saveMemory');
+    await expect(
+      executePortableTool(
+        store,
+        session,
+        'save_memory',
+        { text: 'Lives in Utrecht.', scope: 'user' },
+        { ...actions, userDirectedTurn: false },
+      ),
+    ).rejects.toThrow(PERSON_MEMORY_NEEDS_USER_TURN_HINT);
+    expect(saveMemory).not.toHaveBeenCalled();
+    // Its own memory stays open on any turn.
+    await executePortableTool(
+      store,
+      session,
+      'save_memory',
+      { text: 'Lives in Utrecht.', scope: 'gezel' },
+      { ...actions, userDirectedTurn: false },
+    );
+    expect(saveMemory).toHaveBeenCalledWith(expect.objectContaining({ scope: 'gezel' }));
+  });
+
+  it('refuses one from a task step or another gezel’s message when the host does not say', async () => {
+    const { store, gezel, session } = await fixture();
+    const task = await store.createTask('default', {
+      title: 'Read the inbox',
+      description: 'Read the inbox and summarize what the owner needs to answer.',
+      steps: [{ name: 'Read', prompt: 'Read the inbox.' }],
+    });
+    const step = await store.createSession({
+      gezelId: gezel.id,
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+      providerName: 'llama-cpp',
+    });
+    step.messages.push(said('Work the read step.'));
+    session.messages.push({
+      ...said('Summarize the inbox.'),
+      from: { gezelId: 'meester', gezelName: 'Bram' },
+    });
+    for (const target of [step, session]) {
+      await expect(
+        executePortableTool(
+          store,
+          target,
+          'save_memory',
+          { text: 'Lives in Utrecht.', scope: 'user' },
+          actions,
+        ),
+      ).rejects.toThrow(PERSON_MEMORY_NEEDS_USER_TURN_HINT);
+    }
+    expect(await store.personMemoryEntries()).toEqual([]);
+  });
+
+  it('counts a message the person typed while the last turn ran as theirs', () => {
+    expect(
+      personDirectedSession({ messages: [{ ...said('Also: short replies.'), nudge: true }] }),
+    ).toBe(true);
+    expect(personDirectedSession({ messages: [] })).toBe(false);
+    expect(
+      personDirectedSession({ messages: [{ ...said('Seed.'), origin: 'system' as const }] }),
+    ).toBe(false);
+  });
 });

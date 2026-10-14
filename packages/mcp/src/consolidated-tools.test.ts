@@ -310,6 +310,26 @@ describe('consolidated MCP tools', () => {
     expect(JSON.stringify(result.content)).toContain('req-memory-123');
   });
 
+  it('passes a refused note about the person back as a non-retryable error', async () => {
+    const hint =
+      'notes about the person can be saved only while they are talking with you. Save this to your own memory instead (scope "gezel"), and do not retry with scope "user".';
+    handler = (url) => {
+      expect(url.pathname).toBe('/api/memory/save');
+      return { __status: 403, body: { error: 'person_memory_needs_user_turn', hint } };
+    };
+
+    const result = await client.callTool({
+      name: 'save_memory',
+      arguments: { text: 'Lives in Utrecht', scope: 'user' },
+    });
+
+    expect(result.isError).toBe(true);
+    const text = JSON.stringify(result.content);
+    expect(text).toContain('person_memory_needs_user_turn');
+    expect(text).toContain('Save this to your own memory instead');
+    expect(text).toMatch(/[Rr]etryable: false|"retryable":false/);
+  });
+
   it('keeps duplicate memory saves as a structured successful outcome', async () => {
     handler = (url) => {
       expect(url.pathname).toBe('/api/memory/save');

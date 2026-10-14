@@ -671,33 +671,114 @@ describe('Windows machine-service installer security', () => {
     );
   });
 
-  it('guards the data-root and shared-product sweeps against descendant junctions', () => {
-    // The data root and the world-writable shared product tree had no descendant
-    // reparse guard, so a planted child junction made SanitizeDescendants' elevated
-    // /setowner /T and /reset /T act on the junction's target outside ProgramData.
-    for (const path of ['"${GEZEL_DATA_DIR}"', '"${GEZEL_SHARED_DIR}"']) {
+  // The data root and the world-writable shared product tree first had no
+  // descendant guard, so a planted child junction made SanitizeDescendants'
+  // elevated /setowner /T and /reset /T act on its target outside ProgramData.
+  // The fix then refused ANY reparse point there, which broke every upgrade:
+  // uv's Python minor-version link and pnpm toolset trees are legitimate
+  // junctions, and the refusal ran after the old GezelService had been
+  // removed, so the shared engine silently disappeared under auto-update.
+  // Each sweep now has a target-aware guard directly before it: the private
+  // data root may delete unsafe links, the world-writable shared tree may only
+  // verify (an elevated delete where Users can write is an arbitrary-delete).
+  it('guards each sweep with a target-aware descendant pass, immediately before it', () => {
+    const guardFor: Record<string, string> = {
+      '"${GEZEL_DATA_DIR}"': '!insertmacro NeutralizeReparseDescendants "${GEZEL_DATA_DIR}"',
+      '"${GEZEL_SHARED_DIR}"': '!insertmacro AssertReparseDescendantsClean "${GEZEL_SHARED_DIR}"',
+    };
+    for (const [path, guardMacro] of Object.entries(guardFor)) {
+      const sweep = position(`!insertmacro SanitizeDescendants ${path} `);
+      const guard = hook.lastIndexOf(guardMacro, sweep);
+      expect(guard, `${path} sweep must be guarded by ${guardMacro}`).toBeGreaterThan(
+        hook.lastIndexOf(`!insertmacro TakeTrustedOwnership ${path} `, sweep),
+      );
+      // Nothing may run between the guard and the sweep it protects.
       expect(
-        hook.indexOf(`!insertmacro RejectReparseDescendants ${path} `),
-        `${path} sweep must be guarded by RejectReparseDescendants`,
-      ).toBeLessThan(position(`!insertmacro SanitizeDescendants ${path} `));
+        hook.slice(guard, sweep).split(/\r?\n/),
+        `${path} guard must directly precede its sweep`,
+      ).toHaveLength(2);
+      // The old all-or-nothing reject guard is gone from both link-bearing trees.
+      expect(hook).not.toContain(`!insertmacro RejectReparseDescendants ${path} `);
     }
+    // The data-root sweep may delete; the shared sweep must only check.
+    expect(hook).toContain(
+      '!insertmacro NeutralizeReparseDescendants "${GEZEL_DATA_DIR}" "Gezel machine-service data" SkipNssm "${GEZEL_SHARED_DIR}"',
+    );
+    expect(hook).not.toMatch(/!insertmacro NeutralizeReparseDescendants "\$\{GEZEL_SHARED_DIR}"/);
+  });
+
+  it('removes unsafe links through bundled Node, never inside the user-writable tree', () => {
+    expect(hook).toContain(
+      '!define GEZEL_REPARSE_CLI "$INSTDIR\\resources\\app.asar.unpacked\\dist\\neutralize-reparse-points.js"',
+    );
+
+    // The removing macro: refuse to sweep without the helper, run fix with
+    // --no-remove-under so it never deletes in the shared tree, then re-check.
+    const start = position(
+      '!macro NeutralizeReparseDescendants PATH DESCRIPTION FAILURE_LABEL PROTECT',
+    );
+    const macro = hook.slice(start, hook.indexOf('!macroend', start));
+    const missing = macro.indexOf('${IfNot} ${FileExists} "${GEZEL_REPARSE_CLI}"');
+    const fix = macro.indexOf(
+      `nsExec::ExecToLog '"\${GEZEL_INTERPRETER}" "\${GEZEL_REPARSE_CLI}" --root="\${PATH}" --no-remove-under="\${PROTECT}"'`,
+    );
+    const check = macro.indexOf(
+      `nsExec::ExecToLog '"\${GEZEL_INTERPRETER}" "\${GEZEL_REPARSE_CLI}" --root="\${PATH}" --check'`,
+    );
+    expect(missing, 'a build without the helper must not sweep unguarded').toBeGreaterThanOrEqual(
+      0,
+    );
+    expect(fix, 'the removing pass must pass --no-remove-under').toBeGreaterThan(missing);
+    expect(check, 'a read-only pass must follow the removing one').toBeGreaterThan(fix);
+    expect(macro.slice(missing, fix)).toContain('Goto ${FAILURE_LABEL}');
+    // LogicLib's == and != compare strings, so nsExec's "error" and "timeout"
+    // results fail closed exactly like a non-zero exit code.
+    expect(macro.slice(fix, check)).toContain('${If} $0 == 0');
+    const verdict = macro.slice(check);
+    expect(verdict).toContain('${If} $0 != 0');
+    expect(verdict).toContain('Goto ${FAILURE_LABEL}');
+    expect(macro).not.toMatch(/\b(?:RMDir|Delete)\b/);
+    expect(macro).not.toContain('SetRegView');
+
+    // The check-only macro for the world-writable tree never passes a fix run.
+    const checkStart = position(
+      '!macro AssertReparseDescendantsClean PATH DESCRIPTION FAILURE_LABEL',
+    );
+    const checkMacro = hook.slice(checkStart, hook.indexOf('!macroend', checkStart));
+    expect(checkMacro).toContain(
+      `nsExec::ExecToLog '"\${GEZEL_INTERPRETER}" "\${GEZEL_REPARSE_CLI}" --root="\${PATH}" --check'`,
+    );
+    // No run WITHOUT --check: it must never delete in a user-writable tree.
+    expect(checkMacro).not.toMatch(/--root="\$\{PATH}"'(?![^\n]*--check)/);
+    expect(checkMacro).not.toContain('--no-remove-under');
+    expect(checkMacro).toContain('${If} $0 != 0');
+    expect(checkMacro).toContain('Goto ${FAILURE_LABEL}');
+    expect(checkMacro).not.toMatch(/\b(?:RMDir|Delete)\b/);
   });
 
   it('precedes every recursive sweep with a same-path descendant reparse guard', () => {
     // The recursive /T sweep follows a descendant junction to its target under
     // elevation, so no call site may run it on a path it has not first proven
-    // reparse-free. This pins the invariant for every current and future site.
+    // free of links that lead elsewhere. This pins the invariant for every
+    // current and future site.
     const sweeps = [...hook.matchAll(/!insertmacro SanitizeDescendants ("[^"]*")/g)];
     expect(sweeps.length, 'expected SanitizeDescendants call sites').toBeGreaterThanOrEqual(4);
     for (const sweep of sweeps) {
       const path = sweep[1];
       const sweepAt = sweep.index ?? -1;
-      const guardAt = hook.indexOf(`!insertmacro RejectReparseDescendants ${path} `);
+      const guardAt = Math.max(
+        hook.lastIndexOf(`!insertmacro RejectReparseDescendants ${path} `, sweepAt),
+        hook.lastIndexOf(`!insertmacro NeutralizeReparseDescendants ${path} `, sweepAt),
+        hook.lastIndexOf(`!insertmacro AssertReparseDescendantsClean ${path} `, sweepAt),
+      );
       expect(
         guardAt,
-        `SanitizeDescendants ${path} must be preceded by RejectReparseDescendants ${path}`,
+        `SanitizeDescendants ${path} must be preceded by a descendant guard on ${path}`,
       ).toBeGreaterThanOrEqual(0);
-      expect(guardAt, `guard for ${path} must precede its sweep`).toBeLessThan(sweepAt);
+      expect(
+        hook.slice(guardAt, sweepAt),
+        `the guard for ${path} must sit in the same macro as its sweep`,
+      ).not.toContain('!macroend');
     }
   });
 
@@ -740,5 +821,10 @@ describe('Windows machine-service installer security', () => {
       }
     }
     expect(open, 'unbalanced SetRegView bracket at end of hooks').toBe(false);
+    // Six brackets: the tree attestation (withdraw + record), the VC++ probe,
+    // both install-state breadcrumb writes, and the uninstall removing that key.
+    // Deliberately exact, so a new one gets a deliberate look at the restore
+    // rule above.
+    expect(sequence.filter((view) => view === '64')).toHaveLength(6);
   });
 });

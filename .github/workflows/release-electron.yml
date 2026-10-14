@@ -249,8 +249,9 @@ jobs:
     needs: [quality, release-preflight]
     runs-on: windows-latest
     # Unproven end-to-end: the signing sweep plus NSIS and installer
-    # signing have never both completed. Sized off the Linux build.
-    timeout-minutes: 60
+    # signing have never both completed. Sized off the Linux build, plus
+    # headroom for the upgrade smoke's second full silent install.
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -383,6 +384,13 @@ jobs:
           node scripts/verify-service-host-contract.mjs $host_exe
           if ($LASTEXITCODE -ne 0) { throw '[service-host] launch contract mismatch — the pinned native release is stale' }
 
+      # The NSIS hook's link helper decides what an elevated recursive ACL
+      # sweep may follow, and only Windows has junctions. Run its suite against
+      # real ones before packaging, so a change in how libuv stats, reads, or
+      # deletes a junction fails here instead of in the upgrade smoke below.
+      - name: Test the installer link helper against real junctions
+        run: pnpm --filter @bendyline/gezel-app exec vitest run src/reparse-sweep.test.ts
+
       - name: Install Trusted Signing SDK
         shell: pwsh
         env:
@@ -449,7 +457,8 @@ jobs:
             (Join-Path $installRoot 'gezel.exe'),
             (Join-Path $installRoot 'gezel-service-host.exe'),
             (Join-Path $installRoot 'resources/app.asar.unpacked/dist/node-bundle/node.exe'),
-            (Join-Path $installRoot 'resources/app.asar.unpacked/dist/extract-service-bundle.js')
+            (Join-Path $installRoot 'resources/app.asar.unpacked/dist/extract-service-bundle.js'),
+            (Join-Path $installRoot 'resources/app.asar.unpacked/dist/neutralize-reparse-points.js')
           )) {
             if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
               throw "Installed Windows payload is missing $required"
@@ -594,6 +603,178 @@ jobs:
             throw "Packaged Electron smoke test failed with exit code $($process.ExitCode)"
           }
           Write-Host "[packaged-smoke] Windows app imported and reached ready"
+
+      # The first install above lands on an empty ProgramData. A real upgrade
+      # does not: it inherits whatever the broker left under C:\ProgramData\Gezel,
+      # including legitimate junctions (uv's Python minor-version link, pnpm
+      # toolset trees in project workspaces). An RC refused any reparse point
+      # there, and so silently dropped GezelService on every such upgrade.
+      # Re-run this installer the way electron-updater does over three planted
+      # junctions: (a) uv's link in the private appdata tree, which must
+      # survive; (b) one leading out of the data root, which must be removed
+      # before the elevated recursive ACL sweep with its target untouched; and
+      # (c) a pnpm-style link inside the world-writable shared tree, which must
+      # survive because the installer only CHECKS that tree and never deletes
+      # in it. A link leading OUT of the shared tree now fails the install
+      # closed by design (unit-tested in reparse-sweep.test.ts); asserting that
+      # fallback here would need a second full install, so the kept case — the
+      # actual upgrade regression — is what this step pins.
+      - name: Smoke-test Windows upgrade over planted junctions
+        shell: pwsh
+        env:
+          GEZEL_EXPECTED_VERSION: ${{ needs.release-preflight.outputs.version }}
+        run: |
+          $installer = Get-ChildItem 'packages/app/dist/installers/*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'No Windows installer produced' }
+          $dataRoot = 'C:\ProgramData\Gezel'
+          $sharedProjects = Join-Path $dataRoot 'shared\projects'
+          foreach ($required in @($dataRoot, $sharedProjects)) {
+            if (-not (Test-Path -LiteralPath $required -PathType Container)) {
+              throw "$required is missing after the first install"
+            }
+          }
+
+          # The entry itself, never its target: Test-Path follows a junction.
+          function Get-Entry([string]$path) {
+            Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+          }
+          function New-Junction([string]$path, [string]$target) {
+            New-Item -ItemType Junction -Path $path -Target $target -ErrorAction Stop | Out-Null
+            if ((Get-Entry $path).LinkType -ne 'Junction') { throw "Could not plant a junction at $path" }
+          }
+
+          # (a) uv's minor-version link. The service's APPDATA is <home>\appdata.
+          $python = Join-Path $dataRoot 'appdata\uv\python'
+          $patchDir = Join-Path $python 'cpython-3.12.13-windows-x86_64-none'
+          $minorLink = Join-Path $python 'cpython-3.12-windows-x86_64-none'
+          New-Item -ItemType Directory -Path $patchDir -Force | Out-Null
+          Set-Content -LiteralPath (Join-Path $patchDir 'marker.txt') -Value 'inside' -NoNewline
+          New-Junction $minorLink $patchDir
+
+          # (b) Out of the data root, to a directory with a protected DACL, so
+          # a followed /setowner /T or /reset /T would visibly rewrite it.
+          $outside = Join-Path $env:RUNNER_TEMP 'gezel-upgrade-smoke-outside'
+          New-Item -ItemType Directory -Path $outside -Force | Out-Null
+          $outsideMarker = Join-Path $outside 'marker.txt'
+          Set-Content -LiteralPath $outsideMarker -Value 'outside' -NoNewline
+          & icacls.exe $outside /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' '*S-1-1-0:(OI)(CI)(RX)' | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "icacls could not protect $outside (exit $LASTEXITCODE)" }
+          $outsideSddl = (Get-Acl -LiteralPath $outside).Sddl
+          $outsideMarkerSddl = (Get-Acl -LiteralPath $outsideMarker).Sddl
+          $escapeLink = Join-Path $dataRoot 'appdata\gezel-upgrade-smoke-escape'
+          New-Junction $escapeLink $outside
+
+          # (c) A pnpm-style junction inside the world-writable shared tree,
+          # pointing to a sibling inside it (how a project workspace links a
+          # dependency out of its .pnpm store). It stays inside shared, so both
+          # the data-root check and the shared-tree check keep it — this is the
+          # junction the regression wrongly deleted. The installer never
+          # deletes in this tree, so the keep also proves it does not try.
+          $proj = Join-Path $sharedProjects 'p1\node_modules'
+          $pnpmStore = Join-Path $proj '.pnpm\dep@1.0.0\node_modules\dep'
+          New-Item -ItemType Directory -Path $pnpmStore -Force | Out-Null
+          Set-Content -LiteralPath (Join-Path $pnpmStore 'index.js') -Value 'dep' -NoNewline
+          $sharedLink = Join-Path $proj 'dep'
+          New-Junction $sharedLink $pnpmStore
+
+          # electron-updater's silent invocation. A wait with a deadline rather
+          # than -Wait, so a wedged installer fails this step instead of the job.
+          $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList '--updated', '/S' -PassThru
+          $null = $process.Handle
+          if (-not $process.WaitForExit(1200000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw 'Windows upgrade installer did not finish within 20 minutes'
+          }
+          if ($process.ExitCode -ne 0) {
+            throw "Windows upgrade installer failed with exit code $($process.ExitCode)"
+          }
+          Write-Host "[upgrade-smoke] silent upgrade finished in $([int]$stopwatch.Elapsed.TotalSeconds)s"
+
+          $failures = @()
+          $installed = Get-ItemPropertyValue `
+            -LiteralPath 'HKLM:\Software\Bendyline\Gezel' `
+            -Name MachineServiceInstalled `
+            -ErrorAction SilentlyContinue
+          if ($installed -ne 1) {
+            $failures += "MachineServiceInstalled is '$installed' after the upgrade, expected 1"
+          }
+          $service = Get-Service -Name GezelService -ErrorAction SilentlyContinue
+          if (-not $service) {
+            $failures += 'GezelService is not registered after the upgrade'
+          } elseif ($service.Status -ne 'Running') {
+            $failures += "GezelService is $($service.Status) after the upgrade, expected Running"
+          } else {
+            $runtime = Join-Path $dataRoot 'runtime'
+            $deadline = (Get-Date).AddSeconds(90)
+            $health = $null
+            do {
+              $portFile = Join-Path $runtime 'port'
+              $cert = Join-Path $runtime 'cert.pem'
+              if ((Test-Path -LiteralPath $portFile) -and (Test-Path -LiteralPath $cert)) {
+                $port = (Get-Content -LiteralPath $portFile -Raw).Trim()
+                if ($port -match '^\d+$') {
+                  $json = & curl.exe `
+                    --fail `
+                    --silent `
+                    --show-error `
+                    --connect-timeout 2 `
+                    --max-time 5 `
+                    --cacert $cert `
+                    "https://127.0.0.1:$port/api/health" 2>$null
+                  if ($LASTEXITCODE -eq 0) {
+                    try { $health = $json | ConvertFrom-Json } catch { $health = $null }
+                  }
+                }
+              }
+              if (-not $health) { Start-Sleep -Seconds 1 }
+            } while (-not $health -and (Get-Date) -lt $deadline)
+            if (-not $health) {
+              $failures += 'The upgraded GezelService did not publish a healthy TLS runtime'
+            } elseif ($health.serviceRole -ne 'machine-engine' -or $health.version -ne $env:GEZEL_EXPECTED_VERSION) {
+              $failures += "Unexpected upgraded service health: $($health | ConvertTo-Json -Compress)"
+            }
+          }
+
+          $minor = Get-Entry $minorLink
+          if (-not $minor -or $minor.LinkType -ne 'Junction') {
+            $failures += "The in-tree junction $minorLink did not survive the upgrade"
+          } elseif ((Get-Content -LiteralPath (Join-Path $minorLink 'marker.txt') -Raw -ErrorAction SilentlyContinue) -ne 'inside') {
+            $failures += "$minorLink no longer resolves to $patchDir"
+          }
+          if (Get-Entry $escapeLink) {
+            $failures += "The junction leading out of the data root survived: $escapeLink"
+          }
+          $shared = Get-Entry $sharedLink
+          if (-not $shared -or $shared.LinkType -ne 'Junction') {
+            $failures += "The in-shared pnpm junction $sharedLink did not survive the upgrade"
+          } elseif ((Get-Content -LiteralPath (Join-Path $sharedLink 'index.js') -Raw -ErrorAction SilentlyContinue) -ne 'dep') {
+            $failures += "$sharedLink no longer resolves to its store directory"
+          }
+          $outsideIntact = (Get-Content -LiteralPath $outsideMarker -Raw -ErrorAction SilentlyContinue) -eq 'outside'
+          if (-not $outsideIntact) {
+            $failures += "Removing $escapeLink touched its target: $outsideMarker changed"
+          } else {
+            if ((Get-Acl -LiteralPath $outside).Sddl -ne $outsideSddl) {
+              $failures += "The elevated sweep rewrote the owner or DACL of $outside through $escapeLink"
+            }
+            if ((Get-Acl -LiteralPath $outsideMarker).Sddl -ne $outsideMarkerSddl) {
+              $failures += "The elevated sweep rewrote the owner or DACL of $outsideMarker through $escapeLink"
+            }
+          }
+
+          if ($failures.Count -gt 0) {
+            Write-Host '::group::Planted junctions after the upgrade'
+            foreach ($path in @($minorLink, $escapeLink, $sharedLink)) {
+              $entry = Get-Entry $path
+              if ($entry) { Write-Host "$path -> $($entry.LinkType) $($entry.Target)" } else { Write-Host "$path (absent)" }
+            }
+            & icacls.exe $outside 2>&1 | Write-Host
+            Write-Host '::endgroup::'
+            throw ($failures -join [Environment]::NewLine)
+          }
+          Write-Host '[upgrade-smoke] silent upgrade kept the uv and pnpm in-tree junctions, removed the escaping one, and left its target untouched'
+          exit 0
 
       - name: Collect Windows installer-smoke diagnostics
         if: failure()
@@ -1572,7 +1753,7 @@ jobs:
             Linux installers require glibc 2.38 or newer and a C++ runtime
             providing `GLIBCXX_3.4.32` and `CXXABI_1.3.15` (GCC 14.1 or newer),
             on x64 and arm64.
-            Ubuntu 24.04 LTS and Debian 13 meet these runtime requirements;
+            Ubuntu 24.04 LTS with current updates and Debian 13 meet these runtime requirements;
             Ubuntu 22.04, Debian 12 and RHEL 9 do not. The package manager
             enforces these dependencies for the complete desktop installation.
             [Runtime requirements](https://github.com/bendyline/gezel/blob/main/docs/native-runtime-requirements.md).

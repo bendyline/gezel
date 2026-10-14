@@ -240,9 +240,22 @@ function writeOllamaJsonSchema(target: Record<string, unknown>, value: unknown):
 
 function writeMlxResponseFormat(target: Record<string, unknown>, value: unknown): void {
   if (value === 'text') return;
-  if (value === 'json_object') {
+  // A schema, when also set, is the more specific ask: never replace it.
+  if (value === 'json_object' && target.response_format === undefined) {
     target.response_format = { type: 'json_object' };
   }
+}
+
+/**
+ * The MLX sidecar enforces OpenAI's `json_schema` shape with an llguidance
+ * JSON grammar (`providers/mlx/python/response_format.py`). This was mapped
+ * to null, and the sidecar also lacked the field, so every structured-output
+ * request on MLX — gezel's default engine on Apple silicon — came back as
+ * unconstrained text with no error.
+ */
+function writeMlxJsonSchema(target: Record<string, unknown>, value: unknown): void {
+  if (value === undefined || value === null) return;
+  target.response_format = { type: 'json_schema', json_schema: { schema: value } };
 }
 
 function writeDrySplit(target: Record<string, unknown>, value: unknown): void {
@@ -370,7 +383,7 @@ export const MLX_TUNING_MAP: TuningMap = {
   'reasoning.enableThinking': { write: writeChatTemplateKwarg('enable_thinking') },
   'reasoning.templateKwargs': { write: writeChatTemplateKwargs },
   'output.responseFormat': { write: writeMlxResponseFormat },
-  'output.jsonSchema': null,
+  'output.jsonSchema': { write: writeMlxJsonSchema },
   'output.grammar': null,
   toolChoice: { key: 'tool_choice' },
 };

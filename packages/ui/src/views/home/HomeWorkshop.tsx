@@ -32,13 +32,20 @@ import {
  * Home greets once per launch. Coming back from Settings reopened the band
  * over a conversation whose last turn had failed, and its Retry could not be
  * reached (2026-10-11). Module state, so it lasts as long as the window does.
+ * The morning card opens the band once per card the same way: Home unmounts
+ * on every navigation, so a per-mount latch reopened it on each return.
  */
-const homeVisit: { greeted: boolean; leftAt: string | null } = { greeted: false, leftAt: null };
+const homeVisit: { greeted: boolean; leftAt: string | null; openedMorningFor: string | null } = {
+  greeted: false,
+  leftAt: null,
+  openedMorningFor: null,
+};
 
 /** Test seam: a fresh launch. */
 export function resetHomeVisit(): void {
   homeVisit.greeted = false;
   homeVisit.leftAt = null;
+  homeVisit.openedMorningFor = null;
 }
 
 /**
@@ -300,21 +307,22 @@ export function HomeWorkshop({
     };
   }, []);
 
-  // The unanswered morning card opens Home on "Night shift", once per card,
-  // whatever the band's saved collapse. It stays until the person dismisses
-  // it: a night they have not looked at does not expire.
+  // The unanswered morning card opens Home on "Night shift" once per card per
+  // launch, whatever the band's saved collapse. The card stays under its tab
+  // until the person dismisses it: a night they have not looked at does not
+  // expire. Not while the welcome holds the front door, where the band is not
+  // drawn and the opening would be spent unseen.
   const morningQuestion = useMemo(
     () => questions.find((q) => !q.answer && q.intent?.kind === 'night-shift-review') ?? null,
     [questions],
   );
-  const openedMorningFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!morningQuestion || openedMorningFor.current === morningQuestion.id) return;
-    openedMorningFor.current = morningQuestion.id;
+    if (!morningQuestion || welcoming || homeVisit.openedMorningFor === morningQuestion.id) return;
+    homeVisit.openedMorningFor = morningQuestion.id;
     reconciledCollapse.current = true;
     setCollapsed(false);
     setTab('night');
-  }, [morningQuestion]);
+  }, [morningQuestion, welcoming]);
   useEffect(() => {
     if (!morningQuestion && !nightReview && tab === 'night') setTab('greeting');
   }, [morningQuestion, nightReview, tab]);

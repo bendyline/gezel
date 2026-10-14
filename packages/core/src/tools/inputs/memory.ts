@@ -20,7 +20,7 @@ export const SaveMemoryInputSchema = z
     scope: z
       .enum(MEMORY_SCOPES)
       .describe(
-        'Where to save: "user" for something about the person you work for (every gezel reads it), "gezel" for how you do your own work well, "project" for project-shared context',
+        'Where to save: "user" for something the person tells you about themselves while talking with you (every gezel reads it; refused outside their turn), "gezel" for how you do your own work well, "project" for project-shared context',
       ),
     kind: z
       .enum(MEMORY_KINDS)

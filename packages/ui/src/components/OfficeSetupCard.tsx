@@ -225,8 +225,8 @@ export function OfficeSetupCard({
 
       <p className="muted small harness-setup-intro">
         Adds a Gezel button to the Home tab. It opens a pane where your gezellen chat with you about
-        the document you have open, and can read it and make the edits you ask for. Everything stays
-        on this computer.
+        the document you have open, and can read it and make the edits you ask for. The pane runs
+        from this computer, and the document goes only to the model your gezel uses.
       </p>
 
       {!status && !error && <p className="muted small">Checking the setup…</p>}

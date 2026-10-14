@@ -214,6 +214,12 @@ export interface PortableToolActions {
   assertHandoffAllowed(gezelId?: string): void;
   /** The session project's type tools, run as project scripts (see `portableProjectScriptTools`). */
   projectTools?: readonly ProjectTypeTool[];
+  /**
+   * Whether the person started this turn: typed it or answered a question.
+   * Notes about the person are saved only then. When the host does not say,
+   * the turn's own message decides ({@link personDirectedSession}).
+   */
+  userDirectedTurn?: boolean;
   message(gezelId: string, projectId: string, message: string): Promise<unknown>;
   startProject(input: {
     name: string;
@@ -326,6 +332,38 @@ export class PortableToolArgumentError extends Error {
     super(message);
     this.name = 'PortableToolArgumentError';
   }
+}
+
+/**
+ * The refusal a model reads for a note about the person outside the person's
+ * own turn — the same words the desktop's scope guard answers with. It names
+ * the move that works, because a refusal that only says no is retried.
+ */
+export const PERSON_MEMORY_NEEDS_USER_TURN_HINT =
+  'notes about the person can be saved only while they are talking with you. Save this to your own memory instead (scope "gezel"), and do not retry with scope "user".';
+
+/**
+ * Whether a session's current turn reads as the person's own conversation,
+ * for a host that does not report the turn's origin. Never a task step, a
+ * consultation, a visitor, or a conversation mirrored from another app; and
+ * its latest message is neither another gezel's, the runtime's, nor hidden.
+ * Every gezel reads person memory in every project, so what one read at work
+ * must not land there.
+ */
+export function personDirectedSession(
+  session: Pick<
+    ChatSession,
+    'messages' | 'taskRef' | 'consultationMode' | 'visitorAccess' | 'source'
+  >,
+): boolean {
+  if (session.taskRef || session.consultationMode || session.visitorAccess || session.source)
+    return false;
+  for (let i = session.messages.length - 1; i >= 0; i--) {
+    const message = session.messages[i]!;
+    if (message.role !== 'user') continue;
+    return !message.from && !message.hidden && message.origin !== 'system';
+  }
+  return false;
 }
 
 /** Called only after durable call admission. All mutable grants are checked again. */
@@ -642,6 +680,12 @@ export async function executePortableTool(
     const scope = isMemoryScope(args.scope as string) ? (args.scope as MemoryScope) : 'gezel';
     const id =
       scope === 'project' ? session.projectId : scope === 'user' ? USER_MEMORY_ID : session.gezelId;
+    if (
+      name === 'save_memory' &&
+      scope === 'user' &&
+      !(actions.userDirectedTurn ?? personDirectedSession(session))
+    )
+      throw new Error(PERSON_MEMORY_NEEDS_USER_TURN_HINT);
     if (name === 'save_memory')
       return store.saveMemory({
         scope,

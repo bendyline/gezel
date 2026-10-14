@@ -456,6 +456,11 @@ def spec_mode(request, grammar) -> Tuple[Optional[str], str]:
     """
     if bool(getattr(request, "disable_speculation", False)):
         return None, "request disabled speculative decoding after a grammar-contract violation"
+    # The assisted walk once let a required-argument tool grammar slip; a
+    # response format promises its caller exact JSON, so it decodes
+    # sequentially rather than risk the same on a schema's required keys.
+    if getattr(request, "response_format", None):
+        return None, "response formats decode sequentially so the JSON stays exact"
 
     t = getattr(request, "temperature", None)
     greedy = t in (None, 0, 0.0)

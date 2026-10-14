@@ -43,6 +43,7 @@
 !define GEZEL_INTERPRETER "$INSTDIR\resources\app.asar.unpacked\dist\node-bundle\node.exe"
 !define GEZEL_EXTRACT_CLI "$INSTDIR\resources\app.asar.unpacked\dist\extract-service-bundle.js"
 !define GEZEL_MIGRATE_SHARED_CLI "$INSTDIR\resources\app.asar.unpacked\dist\migrate-legacy-shared.js"
+!define GEZEL_REPARSE_CLI "$INSTDIR\resources\app.asar.unpacked\dist\neutralize-reparse-points.js"
 !define GEZEL_BUNDLE_TARBALL "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.tar.gz"
 !define GEZEL_BUNDLE_META "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.meta.json"
 ; The first-party service host is GezelService's ImagePath.  It spawns
@@ -343,10 +344,17 @@ FunctionEnd
 ; its target under elevation (the /L flag protects only the link object, not
 ; traversal through it), so a planted child junction turns this sweep into an
 ; arbitrary-location owner/DACL rewrite.  Every call site MUST therefore
-; precede this with RejectReparseDescendants on the same PATH.  The guard is
-; deliberately external: it fails the machine-service install closed when a
-; reparse point is planted, while this macro stays best-effort so a single
-; MAX_PATH file never aborts the install.
+; precede this, with nothing in between, by a descendant guard on the same
+; PATH that leaves no link leading outside it:
+;   - NeutralizeReparseDescendants in the private data root, where legitimate
+;     links live (uv, pnpm) and the installer may delete the unsafe ones;
+;   - AssertReparseDescendantsClean on the world-writable shared product tree,
+;     which it only verifies, never deletes inside;
+;   - RejectReparseDescendants on the service tree and the asset store, where
+;     no link should ever appear.
+; The guard is deliberately external: it fails the machine-service install
+; closed when an unsafe link survives, while this macro stays best-effort so a
+; single MAX_PATH file never aborts the install.
 !macro SanitizeDescendants PATH SUBJECT
   ; /Q keeps a per-file success line out of the log, but a big preserved home
   ; still takes a while with real-time scanning on, so say what is happening.
@@ -469,12 +477,92 @@ FunctionEnd
 ; one descendant exists. The tree itself is checked separately above; this
 ; closes the upgrade case where an old broadly-writable service directory
 ; contains a planted child junction before elevated recursive replacement.
+;
+; Strict on purpose, and only for trees nothing legitimately links inside: the
+; service tree is our own extraction of the shipped bundle, and the asset store
+; holds downloaded model files.  A link in either is tampering.  Trees that do
+; hold legitimate links use NeutralizeReparseDescendants.
 !macro RejectReparseDescendants PATH DESCRIPTION FAILURE_LABEL
   nsExec::ExecToLog '"$SYSDIR\cmd.exe" /D /C "dir /A:L /S /B \"${PATH}\" >NUL 2>&1"'
   Pop $0
   ${If} $0 == 0
     DetailPrint "ERROR: ${DESCRIPTION} contains a reparse point; refusing machine-service install."
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel found an unsafe reparse point below ${PATH}. The shared model engine will not be installed; remove or inspect that path before retrying." /SD IDOK
+    Goto ${FAILURE_LABEL}
+  ${EndIf}
+!macroend
+
+; Make a tree safe for SanitizeDescendants without refusing the links that
+; belong in it.  uv links cpython-3.12-<triple> to the patch-version directory
+; beside it, and the video venv's pyvenv.cfg `home` goes through that link;
+; pnpm trees under system-toolsets\ and in shared project workspaces are
+; junction farms.  RejectReparseDescendants refused all of them, and because
+; it ran after the previous GezelService had been removed, every upgrade of a
+; machine that had generated video dropped the shared engine: silently under
+; auto-update, and again on every later upgrade.
+;
+; neutralize-reparse-points.js keeps a link whose target stays inside PATH
+; (the sweep reaches that target at its real location anyway) and removes one
+; that leads outside, cannot be resolved, or closes a traversal cycle: the
+; link itself, never its target, never recursively.  It follows a link's chain
+; by TEXT, hop by hop, opening nothing, so it never performs the elevated read
+; that a planted link's target name would redirect (a symlink to \\host\share
+; would otherwise authenticate to that host); packages/app/src/reparse-sweep.ts
+; has the rules.
+;
+; PROTECT names a subtree the removing pass must not delete inside, because an
+; unprivileged principal can still write it at sweep time (the shared product
+; tree grants Users Modify): a parent component could be swapped for a junction
+; between the check and the unlink, turning an elevated delete into an
+; arbitrary-file delete.  An unsafe link found there is refused, not removed,
+; and the refusal fails the install closed.  Deletion therefore only runs in
+; the private area of PATH (SYSTEM/Administrators/service SID, service stopped).
+;
+; Fails closed twice.  The removing pass exits non-zero if an unsafe link
+; survives, is refused under PROTECT, or a directory cannot be read (an
+; unreadable directory can hide a junction that the sweep's own /reset then
+; exposes).  A read-only pass then runs immediately before the sweep, so a link
+; planted after the first one still blocks it.
+!macro NeutralizeReparseDescendants PATH DESCRIPTION FAILURE_LABEL PROTECT
+  ${IfNot} ${FileExists} "${GEZEL_REPARSE_CLI}"
+    DetailPrint "ERROR: neutralize-reparse-points.js is missing; ${DESCRIPTION} cannot be swept safely."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel was built without its link-safety tool. The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
+    Goto ${FAILURE_LABEL}
+  ${EndIf}
+  DetailPrint "Checking links under ${PATH}..."
+  nsExec::ExecToLog '"${GEZEL_INTERPRETER}" "${GEZEL_REPARSE_CLI}" --root="${PATH}" --no-remove-under="${PROTECT}"'
+  Pop $0
+  ${If} $0 == 0
+    nsExec::ExecToLog '"${GEZEL_INTERPRETER}" "${GEZEL_REPARSE_CLI}" --root="${PATH}" --check'
+    Pop $0
+  ${EndIf}
+  ${If} $0 != 0
+    DetailPrint "ERROR: ${DESCRIPTION} still holds a link leading outside ${PATH}, one under a user-writable area, or a folder that could not be inspected (exit $0); refusing machine-service install."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel found a link below ${PATH} that leads outside it and could not be safely removed, or a folder there it could not inspect. The shared model engine will not be installed; the installer details name the path. Remove or inspect it before retrying." /SD IDOK
+    Goto ${FAILURE_LABEL}
+  ${EndIf}
+!macroend
+
+; Read-only variant for a world-writable tree the installer must never delete
+; inside.  The migrated shared product tree grants Users Modify on projects\
+; and gezels\, so the installer only VERIFIES it is safe to sweep: a link that
+; stays inside (a project workspace's own pnpm junctions) is fine, and any link
+; that leads outside, cannot be resolved, or closes a cycle fails the install
+; closed with its path in the log — exactly what the old reject-only guard did,
+; but target-aware.  The data-root pass above has already refused to delete
+; under this tree; this is the post-migration recheck of what migration moved.
+!macro AssertReparseDescendantsClean PATH DESCRIPTION FAILURE_LABEL
+  ${IfNot} ${FileExists} "${GEZEL_REPARSE_CLI}"
+    DetailPrint "ERROR: neutralize-reparse-points.js is missing; ${DESCRIPTION} cannot be checked safely."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel was built without its link-safety tool. The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
+    Goto ${FAILURE_LABEL}
+  ${EndIf}
+  DetailPrint "Checking links under ${PATH} (read-only)..."
+  nsExec::ExecToLog '"${GEZEL_INTERPRETER}" "${GEZEL_REPARSE_CLI}" --root="${PATH}" --check'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: ${DESCRIPTION} holds a link leading outside ${PATH}, or a folder that could not be inspected (exit $0); refusing machine-service install."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel found a link below ${PATH} that leads outside it, or a folder there it could not inspect. The shared model engine will not be installed; the installer details name the path. Remove or inspect it before retrying." /SD IDOK
     Goto ${FAILURE_LABEL}
   ${EndIf}
 !macroend
@@ -598,9 +686,19 @@ FunctionEnd
   ; A standard user can pre-create children under ProgramData, so a planted
   ; descendant junction would make the elevated /setowner /T and /reset /T in
   ; SanitizeDescendants act on its target, outside ProgramData, even though the
-  ; data root itself is a normal directory. Refuse the machine broker before any
-  ; recursive icacls, exactly as the asset store does below.
-  !insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}" "Gezel machine-service data" SkipNssm
+  ; data root itself is a normal directory. Remove every link that leads out of
+  ; the data root before any recursive icacls. Links that stay inside are the
+  ; broker's own (uv's Python minor-version link, pnpm toolset trees) and are
+  ; kept; refusing them here dropped the shared engine on every upgrade. This
+  ; pass covers the service tree and the asset store too; their own guards
+  ; below stay strict, so a link that stays inside them still refuses.
+  ;
+  ; The one place the removing pass must NOT delete is the world-writable
+  ; shared product tree (Users get Modify on its projects\ and gezels\), where
+  ; a parent could be swapped for a junction between the check and the unlink.
+  ; An unsafe link found there is refused and fails the install closed; the
+  ; private area is where deletion actually runs, and the service is stopped.
+  !insertmacro NeutralizeReparseDescendants "${GEZEL_DATA_DIR}" "Gezel machine-service data" SkipNssm "${GEZEL_SHARED_DIR}"
   !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}" "existing machine-service data"
 
   ; Private root: SYSTEM + Administrators only until the per-service SID exists.
@@ -648,12 +746,16 @@ FunctionEnd
   ; so users can read but cannot replace it. Product scope directories receive
   ; inherited Modify access and are operated on only by per-user daemons.
   !insertmacro TakeTrustedOwnership "${GEZEL_SHARED_DIR}" "its machine-shared product directory" SkipNssm
-  ; Same no-follow rule as the data root and the asset store. The shared tree is
-  ; world-writable by design (Users get Modify on projects/ and gezels/ below),
-  ; so a standard user can plant a descendant junction between installs, and the
-  ; migration just above may have moved one in. Reject before the recursive
-  ; sweep rather than letting /setowner /T and /reset /T act on its target.
-  !insertmacro RejectReparseDescendants "${GEZEL_SHARED_DIR}" "Gezel machine-shared product" SkipNssm
+  ; Check-only here, because this tree is world-writable (Users get Modify on
+  ; projects/ and gezels/ below): the elevated installer must never delete
+  ; inside it, or a user swapping a parent for a junction between the check and
+  ; the unlink would make it an arbitrary-file delete. A link that stays inside
+  ; (a project workspace's own pnpm junctions) is kept; any link that leads out
+  ; of this tree — including one into the private data root, whose target the
+  ; sweep would otherwise reset to inherited permissions — fails the install
+  ; closed with its path in the log. The migration just above refuses symlinked
+  ; entries, so this is the recheck of what it moved.
+  !insertmacro AssertReparseDescendantsClean "${GEZEL_SHARED_DIR}" "Gezel machine-shared product" SkipNssm
   !insertmacro SanitizeDescendants "${GEZEL_SHARED_DIR}" "machine-shared product"
   nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SHARED_DIR}" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /L'
   Pop $0

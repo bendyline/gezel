@@ -181,6 +181,8 @@ type Turn = {
   taskOwned: boolean;
   /** Carries a question answer, whose seed must survive a turn that never ran. */
   answered: boolean;
+  /** Whether the person started this turn (typed it or answered a question); gates notes about them. */
+  userDirected: boolean;
   /** Stops a task run's awake budget while the step waits for the engine. */
   holdBudget?: () => () => void;
   /** Reads the message's photos once the turn holds the engine, before the model runs. */
@@ -1435,6 +1437,7 @@ export class PortableProductService {
         providerId,
         taskOwned,
         answered: !!answer,
+        userDirected: origin === 'direct-user' || origin === 'question-answer',
         ...(placement.holdBudget ? { holdBudget: placement.holdBudget } : {}),
         ...(photos.length
           ? {
@@ -1883,6 +1886,7 @@ export class PortableProductService {
               this.emit(session, { type: 'delta', content: text });
             },
             actions: {
+              userDirectedTurn: turn.userDirected,
               askQuestion: async (input) => {
                 const result = await this.store.askQuestion({
                   ...input,

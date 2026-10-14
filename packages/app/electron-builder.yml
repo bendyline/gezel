@@ -65,6 +65,7 @@ files:
   - dist/preload.cjs
   - dist/extract-service-bundle.js
   - dist/migrate-legacy-shared.js
+  - dist/neutralize-reparse-points.js
   - dist/service-bundle.tar.gz
   - dist/service-bundle.meta.json
   - dist/pnpm-bundle/**/*
@@ -138,7 +139,9 @@ files:
 # it in a plain Node environment (the bundled node.exe on Windows, and
 # ELECTRON_RUN_AS_NODE on macOS/Linux). Neither path has Electron's patched fs,
 # so a path inside `app.asar` would fail to resolve. Keeping the CLI as a real
-# file on disk sidesteps every "does asar work here?" question.
+# file on disk sidesteps every "does asar work here?" question. The same holds
+# for `migrate-legacy-shared.js` and for `neutralize-reparse-points.js`, which
+# the NSIS hook runs before each elevated recursive ACL sweep.
 asarUnpack:
   # main.js, preload.cjs, and package.json are asar-unpacked to work
   # around an electron-builder 26.x packing bug that drops the first ~13
@@ -154,6 +157,7 @@ asarUnpack:
   - package.json
   - dist/extract-service-bundle.js
   - dist/migrate-legacy-shared.js
+  - dist/neutralize-reparse-points.js
   - dist/service-bundle.tar.gz
   - dist/service-bundle.meta.json
   - dist/pnpm-bundle/**/*

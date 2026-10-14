@@ -48,6 +48,13 @@ describe('handboekInputsHash', () => {
     expect(handboekInputsHash(root, env)).not.toBe(before);
   });
 
+  it('ignores untracked dotfiles such as Finder metadata', async () => {
+    const before = handboekInputsHash(root, env);
+    await put('docs/handboek/.DS_Store', 'finder');
+    await put('packages/catalog/src/.DS_Store', 'finder');
+    expect(handboekInputsHash(root, env)).toBe(before);
+  });
+
   it('moves with the Gilde content it renders', () => {
     const pinned = handboekInputsHash(root, env);
     const linked = handboekInputsHash(root, { GEZEL_GILDE_DATA_DIR: '/checkout/gilde/data' });

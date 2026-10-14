@@ -75,6 +75,7 @@ import cache_persist  # noqa: E402
 import think_budget  # noqa: E402
 import cache_seed  # noqa: E402
 import tool_grammar  # noqa: E402
+import response_format  # noqa: E402
 import spec_decode  # noqa: E402
 import tool_call_stream  # noqa: E402
 import template_stability  # noqa: E402
@@ -1562,6 +1563,12 @@ def _store_snapshot(sub, snapshot) -> None:
         sub.band_snapshot = snapshot
 
 
+
+def _pass_through_logits(tokens, logits):
+    """A no-op logits processor that keeps BatchGenerator's per-sequence
+    processor lists aligned (see the comment where waves are inserted)."""
+    return logits
+
 class _Sub:
     """One in-flight batched request: its decode queue, accumulated tokens,
     and the bits needed to build its sequence + persist its KV on finish."""
@@ -2358,7 +2365,16 @@ class BatchEngine:
                 caches.append(c)
                 alltoks.append(at)
                 samplers.append(self._sampler_for(sub.request))
-                lps.append(self._processors_for(sub.request, sub.grammar))
+                # Never an empty list here. mlx_lm's GenerationBatch.filter()
+                # trims logits_processors only `if any(...)`, so once every
+                # live sequence had [] the finished ones' entries stayed, and
+                # the next sequence's processors were appended after them at
+                # the wrong index. Its tool grammar, think budget or response
+                # format then never ran past the first token (in a mixed wave,
+                # one sequence's grammar could land on another). Caught
+                # 2026-10-13: a JSON-schema request right after a plain one
+                # came back as free text. A pass-through keeps any() true.
+                lps.append(self._processors_for(sub.request, sub.grammar) or [_pass_through_logits])
                 maxtoks.append(int(sub.request.max_tokens) if sub.request.max_tokens else 2048)
             try:
                 uids = self._gen.insert_segments(
@@ -3232,6 +3248,10 @@ class ChatRequest(BaseModel):
     # function name of any tool call to the known tools — see
     # `build_tool_grammar_processor`. Shape: {"format": "...", "mode": "name-only"}.
     tool_grammar: Optional[Dict[str, Any]] = None
+    # OpenAI `response_format` (`json_object` / `json_schema`), enforced by
+    # an llguidance JSON grammar — see response_format.py. Before it was
+    # declared here, pydantic dropped it and the answer came back unconstrained.
+    response_format: Optional[Dict[str, Any]] = None
     # Per-request circuit breaker for a session that observed the assisted
     # speculative path violate a required-argument grammar. The TS provider
     # latches this after the first impossible call and leaves the drafter
@@ -3970,7 +3990,7 @@ def _serial_prompt_token_variants(prompt_text: str) -> "List[List[int]]":
     return variants
 
 
-async def _vision_stream(request, http_request, images):
+async def _vision_stream(request, http_request, images, response_grammar=None):
     """One full-tower vision request. Never share text-prefix KV or speculate."""
     request_id = f"chatcmpl-{uuid.uuid4()}"
     generator = None
@@ -3996,6 +4016,10 @@ async def _vision_stream(request, http_request, images):
                 opens_in_think=prompt.rstrip().endswith("<think>"))
             if processor is not None:
                 processors.append(processor)
+        processor = response_format.build_response_format_processor(
+            tokenizer, response_grammar, thinking=prompt.rstrip().endswith("<think>"))
+        if processor is not None:
+            processors.append(processor)
         if processors:
             kwargs["logits_processors"] = processors
         last = None
@@ -4057,6 +4081,20 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             detail="gezel-mlx-server only supports streaming completions",
         )
 
+    # Compiled before any generation, so a schema this engine cannot enforce
+    # (or one sent alongside tools) fails as a 422 instead of coming back as
+    # unconstrained text.
+    response_grammar = None
+    if request.response_format:
+        try:
+            response_grammar = response_format.compile_response_grammar(
+                getattr(PROCESSOR, "tokenizer", None) or PROCESSOR,
+                request.response_format,
+                request.tools,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     if any(message.images for message in request.messages):
         if not _VISION_ENABLED:
             raise HTTPException(status_code=422, detail="This MLX engine has no enabled vision tower")
@@ -4064,7 +4102,7 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             images = vision_inputs.decode_images(request.messages)
         except Exception as exc:
             raise HTTPException(status_code=422, detail=f"Invalid image input: {exc}") from exc
-        return StreamingResponse(_vision_stream(request, http_request, images),
+        return StreamingResponse(_vision_stream(request, http_request, images, response_grammar),
                                  media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -4097,6 +4135,11 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             # the prompt tail.
             opens_in_think=prompt_text.rstrip().endswith("<think>"),
         )
+    response_processor = response_format.build_response_format_processor(
+        getattr(PROCESSOR, "tokenizer", None) or PROCESSOR,
+        response_grammar,
+        thinking=prompt_text.rstrip().endswith("<think>"),
+    )
 
     # Look up or initialize cache state. Cascade:
     #   1. In-memory hit on cache_id           — best case, no I/O.
@@ -4151,7 +4194,9 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             request=request,
             prompt_tokens=prompt_tokens,
             grammar=[
-                p for p in (tool_grammar_processor, think_budget_processor) if p is not None
+                p
+                for p in (tool_grammar_processor, think_budget_processor, response_processor)
+                if p is not None
             ]
             or None,
             seed_state=cache_state,
@@ -4255,7 +4300,9 @@ async def chat_completions(request: ChatRequest, http_request: Request):
                     request.repetition_context_size
                 )
             _lps = [
-                p for p in (tool_grammar_processor, think_budget_processor) if p is not None
+                p
+                for p in (tool_grammar_processor, think_budget_processor, response_processor)
+                if p is not None
             ]
             if _lps:
                 # Forwarded through stream_generate(**kwargs) → generate_step,

@@ -189,6 +189,11 @@ jobs:
           src/http/mutation-authority.test.ts
           src/chat/manager-machine-shared-mcp.test.ts
           src/machine-engine/bridge.integration.test.ts
+      # The installer's link helper decides what an elevated recursive ACL sweep
+      # may follow, and only Windows has junctions; a release-only run would
+      # find a regression after the merge.
+      - name: Test the installer link helper against real junctions
+        run: pnpm --filter @bendyline/gezel-app exec vitest run src/reparse-sweep.test.ts
       - name: Stage the Windows sandbox launcher
         working-directory: packages/app
         run: node scripts/fetch-mxc.mjs

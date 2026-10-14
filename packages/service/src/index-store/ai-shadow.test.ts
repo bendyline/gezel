@@ -10,6 +10,8 @@ import { ContentIndex } from './content-index.js';
 import { runWorkspaceContentIndex } from './content-indexer.js';
 import type { EnrichDeps } from './enrich.js';
 import { parseFrontmatter } from './frontmatter.js';
+import { IndexStore } from './index-store.js';
+import { TEXT_EMBED_DIM } from './schema.js';
 
 let dir: string;
 let home: string;
@@ -230,5 +232,123 @@ describe('no describer set up', () => {
     available = true;
     expect(await ci.aiShadows('c', deps)).toMatchObject({ produced: 1, called: 1 });
     expect(describeImage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a forced image metadata re-read', () => {
+  const photo = 'photos/cat-sunset.png';
+  const dbPath = () => projectContentIndexDbFile(home, 'c', dir);
+  const openStore = async () =>
+    (await IndexStore.open(dbPath(), { collectionId: 'c', kind: 'workspace', rootPath: dir }))!;
+  /** A unit vector per text, so a chunk's own text finds it again. */
+  const vectorFor = (text: string): number[] => {
+    const v = new Array<number>(TEXT_EMBED_DIM).fill(0);
+    for (let i = 0; i < text.length; i++) v[(text.charCodeAt(i) * 31 + i) % TEXT_EMBED_DIM]! += 1;
+    const norm = Math.hypot(...v) || 1;
+    return v.map((x) => x / norm);
+  };
+  /** As if a newer build bumped the image tier's metadata version. */
+  const rollBackImageMetaVersion = async () => {
+    const store = await openStore();
+    store.setMeta('image_meta_version', '2');
+    store.close();
+  };
+
+  it('keeps the AI description searchable, by keyword and by vector, without a model call', async () => {
+    await seedMedia();
+    const describeImage = vi.fn(async (_abs: string) => ({
+      body: 'A cat silhouetted against an orange sunset.',
+      model: 'vision-x',
+    }));
+    await ci.aiShadows('c', { describeImage }, 10);
+    await ci.enrich(
+      'c',
+      { summarize: async () => '', embed: async (texts) => texts.map(vectorFor) },
+      10,
+    );
+    let store = await openStore();
+    const before = store.chunksForFile(photo);
+    const description = before.find((c) => c.text.includes('orange sunset'))!;
+    expect(description).toBeDefined();
+    store.close();
+
+    await rollBackImageMetaVersion();
+    const reread = await runWorkspaceContentIndex(dir, 'c', artifacts, { dbPath: dbPath() });
+    expect(reread!.changed).toBe(1);
+
+    store = await openStore();
+    try {
+      expect(store.getMeta('image_meta_version')).toBe('3');
+      expect(store.getMetadata(photo)).toMatchObject({ format: 'png', width: '800' });
+      expect(store.chunksForFile(photo)).toEqual(before);
+      expect(store.searchDocs('sunset', 5).map((h) => h.filePath)).toContain(photo);
+      if (store.vecAvailable) {
+        const [hit] = store.searchTextVectors(vectorFor(description.text), 1);
+        expect(hit?.chunkId).toBe(description.id);
+      }
+      // Nothing is left for a tier to redo: no shadow, no summary pass, no embedding.
+      expect(store.filesNeedingAiShadow(10).map((f) => f.path)).not.toContain(photo);
+      expect(store.countNeedingEnrichment()).toBe(0);
+      expect(store.countNeedingEmbedOnly()).toBe(0);
+    } finally {
+      store.close();
+    }
+    expect(await ci.aiShadows('c', { describeImage }, 10)).toEqual({
+      files: 0,
+      produced: 0,
+      called: 0,
+    });
+    expect(describeImage).toHaveBeenCalledTimes(1);
+  });
+
+  it('still refreshes the name chunk of a photo no model has described', async () => {
+    await seedMedia();
+    let store = await openStore();
+    const hash = store.getFile(photo)!.hash!;
+    store.putChunks(photo, hash, [{ kind: 'image', lineStart: 1, lineEnd: 1, text: 'stale' }]);
+    store.close();
+
+    await rollBackImageMetaVersion();
+    await runWorkspaceContentIndex(dir, 'c', artifacts, { dbPath: dbPath() });
+
+    store = await openStore();
+    try {
+      expect(store.chunksForFile(photo).map((c) => c.text)).toEqual([
+        'photos cat sunset png 800x600',
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe('indexing an AI shadow', () => {
+  it('writes the description chunks and the shadow gate together or not at all', async () => {
+    await seedMedia();
+    const store = (await IndexStore.open(projectContentIndexDbFile(home, 'c', dir), {
+      collectionId: 'c',
+      kind: 'workspace',
+      rootPath: dir,
+    }))!;
+    try {
+      const photo = 'photos/cat-sunset.png';
+      const hash = store.getFile(photo)!.hash!;
+      const before = store.chunksForFile(photo);
+      const chunks = [{ kind: 'image', lineStart: 1, lineEnd: 1, text: 'a described cat' }];
+      const markOk = vi.spyOn(store, 'markAiShadowOk').mockImplementationOnce(() => {
+        throw new Error('simulated failure after the chunk write');
+      });
+
+      expect(() => store.putAiShadowChunks(photo, hash, chunks, 'vision-x')).toThrow(/simulated/);
+      expect(store.chunksForFile(photo)).toEqual(before);
+      expect(store.filesNeedingAiShadow(10).map((f) => f.path)).toContain(photo);
+
+      markOk.mockRestore();
+      store.putAiShadowChunks(photo, hash, chunks, 'vision-x');
+      expect(store.chunksForFile(photo).map((c) => c.text)).toEqual(['a described cat']);
+      expect(store.filesNeedingAiShadow(10).map((f) => f.path)).not.toContain(photo);
+    } finally {
+      store.close();
+    }
   });
 });

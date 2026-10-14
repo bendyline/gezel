@@ -170,12 +170,15 @@ it, or dismiss it, right from the page. Nothing a report suggests ever
 runs on its own: firing is always your click, and Gezel records the
 resulting task and observed tool activity in History.
 
-Every night gets a morning card, including a quiet one, and it says why:
-the computer was asleep or Gezel wasn't running, you stopped the shift, it
-ran on battery, the quota reserve held the work, or there was simply
-nothing to do. If the nightly project review paused after failing, the
-card says so and offers **Resume nightly review**, which queues it for
-the next night.
+A night gets a morning card when your crew made something: a change
+proposal, a report, or finished work. A night held back for a reason you
+can fix also gets one, once: it ran on battery, or the quota reserve held
+the work. The card says why and offers the fix. A night when the computer
+was asleep, Gezel wasn't running, or there was nothing to do gets no card
+and no notification. A card with reports or finished work stays until you
+dismiss it; a newer card replaces an older one only when it shows the same
+things again. If the nightly project review didn't finish, the card says
+so; it tries again the next night on its own.
 
 ## Keeping the computer ready
 

@@ -13,6 +13,10 @@ import {
 } from '@bendyline/gezel';
 import type { DiffpackManager } from '../diffpack/manager.js';
 import type { Store } from '../fs/store.js';
+import {
+  isNightShiftOversightTask,
+  isNightShiftReportArchive,
+} from '../meester/night-shift-oversight.js';
 import type { ReportActionManager } from '../report-actions/report-action-manager.js';
 import type { TaskManager } from '../tasks/manager.js';
 
@@ -25,7 +29,8 @@ import type { TaskManager } from '../tasks/manager.js';
  *     task that COMPLETED inside the window;
  *   - report artifacts: the MARKDOWN step deliverables (`advanceWhen`
  *     with `artifact: true`) of those tasks, plus a bounded mtime sweep
- *     for markdown written during the window (`reports/**`, `*report*.md`);
+ *     for markdown written during the window (`reports/**`, `*report*.md`),
+ *     never the review's dated copies of earlier nights' reports;
  *   - each report parsed for gezel-action blocks + the lifecycle overlay
  *     for the action tally.
  *
@@ -84,8 +89,9 @@ export async function buildNightShiftReview(
       if (!ranThisWindow && !completedInWindow) continue;
 
       // Spawn hosts stay active — list the WORK (children/workables), not
-      // the host machinery.
-      if (!task.spawnsCraftbook) {
+      // the host machinery. The nightly review is the runtime's own run;
+      // the report it leaves is what the person reads.
+      if (!task.spawnsCraftbook && !isNightShiftOversightTask(task)) {
         tasksCompleted.push({
           ref: task.ref,
           title: task.title,
@@ -125,6 +131,9 @@ export async function buildNightShiftReview(
       if (file.isDirectory || file.mtimeMs === undefined) continue;
       if (file.mtimeMs < startMs || file.mtimeMs >= endMs) continue;
       if (!isReportShaped(file.path)) continue;
+      // Dated aside when the window opened, so its mtime can fall inside the
+      // window: counting it read yesterday's report, and its actions, as new.
+      if (isNightShiftReportArchive(project.id, file.path)) continue;
       addCandidate(project.id, file.path);
     }
   }

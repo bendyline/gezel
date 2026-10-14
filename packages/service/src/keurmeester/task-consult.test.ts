@@ -28,6 +28,7 @@ let oneShotReplies: string[];
 let oneShotCalls: string[];
 let messaged: Array<{ from: string; to: string; text: string }>;
 let takeoverSends: string[];
+let takeoverOpts: Array<{ lane?: string; messageOrigin?: string } | undefined>;
 let onTakeoverSend: (() => Promise<void>) | undefined;
 
 const NOW = new Date('2026-05-01T12:00:00Z');
@@ -61,6 +62,7 @@ beforeEach(async () => {
   oneShotCalls = [];
   messaged = [];
   takeoverSends = [];
+  takeoverOpts = [];
   onTakeoverSend = undefined;
   km = new KeurmeesterManager({
     store,
@@ -85,8 +87,9 @@ beforeEach(async () => {
       };
     },
     ensureOrCreateSession: async () => ({ id: 'keurmeester-session' }),
-    send: async (_sessionId, text) => {
+    send: async (_sessionId, text, opts) => {
       takeoverSends.push(text);
+      takeoverOpts.push(opts);
       await onTakeoverSend?.();
       return {};
     },
@@ -424,6 +427,8 @@ describe('takeover ladder (Phase 3)', () => {
     expect(oneShotCalls[1]).toContain('takeover_step');
     expect(takeoverSends).toHaveLength(1);
     expect(takeoverSends[0]).toContain('taking over ONE failing step');
+    // Runtime-authored: memory extraction must never read it as the person's words.
+    expect(takeoverOpts[0]).toMatchObject({ lane: 'background', messageOrigin: 'system' });
     // Verified through the task's own machinery: step advanced.
     const updated = await store.readTask('cron', num);
     expect(updated!.activeStepId).toBe(nextStepId);
