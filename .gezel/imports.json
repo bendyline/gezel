@@ -1,7 +1,7 @@
 {
   "version": 1,
   "about": {
-    "hash": "97bb71ff9336db7e50eefb8fe352d90e8ab0e650b67f8de9b01d29774ddc9591",
+    "hash": "6d72b0041294be113a62d1a62006dde147dc8da53f058fb886fbf3fd352dfdca",
     "sourceFile": "AGENTS.md"
   },
   "craftbooks": {
@@ -46,12 +46,12 @@
       "scriptNames": []
     },
     ".claude/skills/release-note/SKILL.md": {
-      "hash": "d78d6a267a45e0cd2efcdb4200a5f762f8489b098d0e235b45414ab87c0575b9",
+      "hash": "ca659036dac06204e139cc62f157bfaa5dde64935852a0848a40aa8bc0f27eed",
       "craftbookId": "proj-skill-release-note",
       "scriptNames": []
     },
     ".claude/skills/tune-model/SKILL.md": {
-      "hash": "b53a96a8eb5f04688429d2d7b2848c5bdd9e21b91260243273563c2839a7561e",
+      "hash": "fe15cc0c379d39035f1d274417b0143ff44794d4c5c5f20226ad7779a60052d7",
       "craftbookId": "proj-skill-tune-model",
       "scriptNames": []
     },

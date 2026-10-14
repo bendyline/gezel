@@ -325,6 +325,14 @@ const CONSTRAINED_TOOL_NO_SIGNAL_MS = 45_000;
 // Keep the normal guard tight for models that honor no-think mode.
 const EXPANDED_CONSTRAINED_TOOL_REASONING_CHAR_LIMIT = 3_072;
 const EXPANDED_CONSTRAINED_TOOL_NO_SIGNAL_MS = 90_000;
+// Engine-side cap for a constrained turn whose template ignores
+// enable_thinking. Without it the model reasons past the char limit above and
+// the turn is cancelled before its tool call: every repair attempt on the
+// 2026-10-14 failing-tests-spec run died at ~3,073 chars. llama-server closes
+// the <think> block at this budget and the model goes on to the call (a
+// 128-token probe still wrote a valid file). 512 tokens is ~2,250 chars at
+// LFM2.5's ~4.4 chars/token, below the 3,072-char guard.
+const CONSTRAINED_TURN_ENGINE_REASONING_BUDGET_TOKENS = 512;
 
 function isDeepSeekR1Model(model: string | undefined): boolean {
   return model === 'deepseek-r1-8b-q4';
@@ -1297,6 +1305,14 @@ function disableThinkingForConstrainedTurn(
   // and so declares no dial for the loop above to find.
   if (isGptOss20bModel(model)) {
     setChatTemplateKwarg(body, 'reasoning_effort', 'low');
+  }
+  // Only llama-server accepts a per-request budget; DS4 strips the field.
+  if (shape === 'chat-template' && isLfm25A2bModel(model)) {
+    const current = body.reasoning_budget_tokens;
+    body.reasoning_budget_tokens =
+      typeof current === 'number' && current > 0
+        ? Math.min(current, CONSTRAINED_TURN_ENGINE_REASONING_BUDGET_TOKENS)
+        : CONSTRAINED_TURN_ENGINE_REASONING_BUDGET_TOKENS;
   }
   if (shape === 'deepseek') {
     body.think = false;
