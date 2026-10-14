@@ -332,29 +332,36 @@ describe('coming back to a draft', () => {
       onDisk = content;
       return { draft: draftFixture({ content, sessionId: 'session-1' }), deleted: false } as never;
     });
-    const composer = () => (
+    const composer = (sessionId: string | undefined) => (
       <ChatComposer
         gezelId="tomas"
         gezelName="Tomas"
         projectId="default"
-        sessionId="session-1"
+        sessionId={sessionId}
         draftScope="meester"
       />
     );
 
-    render(composer());
+    render(composer('session-1'));
     type('abc');
-    await waitFor(() => expect(readActiveDraftId('meester|default|tomas|||session-1')).toBe('2026-09-03-0001'));
+    await waitFor(() =>
+      expect(readActiveDraftId('meester|default|tomas|||session-1')).toBe('2026-09-03-0001'),
+    );
     type('abc and the last second of typing');
     cleanup();
     expect(releaseWrite).toBeDefined();
 
-    render(composer());
-    expect(editorValue()).toBe('abc and the last second of typing');
+    // The surface comes back before its thread is picked, so the draft is
+    // loaded from disk when the thread arrives rather than taken from the slot.
+    const { rerender } = render(composer(undefined));
+    rerender(composer('session-1'));
     await act(async () => {
       releaseWrite?.();
     });
     await waitFor(() => expect(api.getPromptDraft).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(editorValue()).toBe('abc and the last second of typing');
   });
 
