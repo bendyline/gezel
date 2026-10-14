@@ -12,6 +12,9 @@ export default defineConfig({
     // Bundled as a sibling to main.js so every installer has a stable path.
     'extract-service-bundle': 'src/extract-service-bundle.ts',
     'migrate-legacy-shared': 'src/migrate-legacy-shared.ts',
+    // Windows-only: run by the NSIS hook before each elevated recursive ACL
+    // sweep to remove links that lead out of the swept tree.
+    'neutralize-reparse-points': 'src/neutralize-reparse-points.ts',
   },
   format: ['esm'],
   dts: false,

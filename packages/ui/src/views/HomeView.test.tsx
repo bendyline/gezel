@@ -1138,6 +1138,45 @@ describe('HomeView', () => {
     expect(screen.getByRole('tabpanel', { name: GREETING_TAB })).toBeVisible();
   });
 
+  // Home unmounts on every navigation, and a per-mount latch threw the sheet
+  // open over the conversation on each return.
+  it('opens on a morning card once per launch, and again for the next card', async () => {
+    const card = (id: string, windowKey: string) => ({
+      id,
+      projectId: 'default',
+      gezelId: 'gz-meester',
+      sessionId: '',
+      prompt: 'The night shift finished 1 task.',
+      createdAt: new Date().toISOString(),
+      intent: { kind: 'night-shift-review', windowKey, reports: [], tasksCompleted: 1 },
+    });
+    vi.mocked(api.listQuestions).mockResolvedValue({
+      questions: [card('night-1', '2026-07-28')],
+    } as never);
+    const first = render(<HomeView />);
+    expect(await screen.findByTestId('morning-panel')).toBeVisible();
+    first.unmount();
+
+    render(<HomeView />);
+    expect(await screen.findByRole('tab', { name: 'Night shift' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand the greeting' })).toBeInTheDocument();
+    expect(screen.queryByTestId('morning-panel')).toBeNull();
+
+    const next = card('night-2', '2026-07-29');
+    vi.mocked(api.listQuestions).mockResolvedValue({ questions: [next] } as never);
+    events.push({
+      sessionId: '',
+      gezelId: 'gz-meester',
+      projectId: 'default',
+      event: { type: 'question_asked', question: next },
+    });
+    expect(await screen.findByTestId('morning-panel')).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Night shift' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
   it('cycles the tip of the day', async () => {
     render(<HomeView />);
     await waitFor(() => {

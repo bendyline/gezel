@@ -223,7 +223,14 @@ export type EnsureProgressEvent =
 export type EnsureModelSource = 'present' | 'bundle' | 'download';
 
 export interface EnsureModelResult {
+  /** The catalog id, as requested. */
   model: string;
+  /**
+   * The id to pass to `gezel.openai.chat()`: the model qualified with its
+   * engine (`llama-cpp:qwen3.5-0.8b-q4`). A bare id works only while it is the
+   * pinned default.
+   */
+  chatModel: string;
   engine: EnsureModelEngine;
   source: EnsureModelSource;
   pinned: boolean;

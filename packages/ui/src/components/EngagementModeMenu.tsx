@@ -1,6 +1,6 @@
 import type { AIEngagementMode } from '@bendyline/gezel';
-import type { KeyboardEvent } from 'react';
-import { DropdownMenu } from '../primitives/index.js';
+import { type KeyboardEvent, useState } from 'react';
+import { DropdownMenu, Tooltip } from '../primitives/index.js';
 import { EngagementModeIcon } from './EngagementModeIcon.js';
 import { ENGAGEMENT_MODES } from './engagement-modes.js';
 
@@ -23,29 +23,48 @@ export function EngagementModeMenu({
   onSelect: (mode: AIEngagementMode) => void;
 }) {
   const current = ENGAGEMENT_MODES.find((option) => option.mode === mode);
+  // The latched key is already explained by the readout beneath the tray, so
+  // only the other keys carry a tooltip.
+  const [hinted, setHinted] = useState<AIEngagementMode | null>(null);
   return (
     <>
       <DropdownMenu.Label className="app-engagement-heading">Crew activity</DropdownMenu.Label>
       <p className="app-engagement-intro">How much your gezellen do on their own.</p>
-      <DropdownMenu.RadioGroup
-        className={`gz-tray gz-tray--described app-engagement-tray engagement-mode-${mode}`}
-        aria-label="Crew activity"
-        value={mode}
-        onKeyDown={moveAlongTray}
-      >
-        {ENGAGEMENT_MODES.map((option) => (
-          <DropdownMenu.RadioItem
-            key={option.mode}
-            value={option.mode}
-            textValue={option.label}
-            className={`gz-key app-engagement-key${option.mode === mode ? ' gz-key-active' : ''}`}
-            onSelect={() => onSelect(option.mode)}
-          >
-            <EngagementModeIcon mode={option.mode} />
-            <span className="gz-key-label">{option.label}</span>
-          </DropdownMenu.RadioItem>
-        ))}
-      </DropdownMenu.RadioGroup>
+      <Tooltip.Provider delayDuration={200}>
+        <DropdownMenu.RadioGroup
+          className={`gz-tray gz-tray--described app-engagement-tray engagement-mode-${mode}`}
+          aria-label="Crew activity"
+          value={mode}
+          onKeyDown={moveAlongTray}
+        >
+          {ENGAGEMENT_MODES.map((option) => (
+            <Tooltip.Root
+              key={option.mode}
+              open={hinted === option.mode && option.mode !== mode}
+              onOpenChange={(open) =>
+                setHinted((was) => (open ? option.mode : was === option.mode ? null : was))
+              }
+            >
+              <Tooltip.Trigger asChild>
+                <DropdownMenu.RadioItem
+                  value={option.mode}
+                  textValue={option.label}
+                  className={`gz-key app-engagement-key${option.mode === mode ? ' gz-key-active' : ''}`}
+                  onSelect={(event) => {
+                    // Stay open so the readout can confirm what was applied.
+                    event.preventDefault();
+                    onSelect(option.mode);
+                  }}
+                >
+                  <EngagementModeIcon mode={option.mode} />
+                  <span className="gz-key-label">{option.label}</span>
+                </DropdownMenu.RadioItem>
+              </Tooltip.Trigger>
+              <Tooltip.Content>{option.description}</Tooltip.Content>
+            </Tooltip.Root>
+          ))}
+        </DropdownMenu.RadioGroup>
+      </Tooltip.Provider>
       {current && (
         <p className="gz-tray-description app-engagement-readout">
           <strong>{current.label}</strong> — {current.description}

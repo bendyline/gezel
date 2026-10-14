@@ -1611,7 +1611,11 @@ export async function startProductService(
   nightShift.setOnWindowOpened(async (windowKey) => {
     await ensureNightShiftOversightTask(store, tasks);
     await prepareReviewForNight(
-      { store, archiveSession: (id) => chat.archiveSession(id, { summarize: false }) },
+      {
+        store,
+        archiveSession: (id) => chat.archiveSession(id, { summarize: false }),
+        moveReportActions: (from, to) => reportActions.moveReport('default', from, to),
+      },
       windowKey,
     ).catch((err) =>
       log.warn(`[night-shift] could not prepare the nightly review: ${String(err)}`),

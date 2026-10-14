@@ -19,6 +19,12 @@ export const ActivityItemSchema = z.object({
   since: z.string().optional(),
   /** Links to the existing activity setting; changing it is always explicit. */
   heldByActivity: z.boolean().optional(),
+  /**
+   * Parked until a time (a cron tick, the Night Shift window), not waiting on
+   * anything. Listed under Next, never counted in the header: the Meester's
+   * nightly review is always here, so counting it reads as something to check.
+   */
+  scheduled: z.boolean().optional(),
 });
 export type ActivityItem = z.infer<typeof ActivityItemSchema>;
 

@@ -21,7 +21,11 @@ import {
 import type { InferenceContext as ServiceContext } from '../inference-context.js';
 import { appendCallerOwnedActionLedger } from '../openai-compat/action-ledger.js';
 import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
-import { resolveChatTarget, resolveFallbackGezelId } from '../openai-compat/chat-target.js';
+import {
+  resolveChatTarget,
+  resolveFallbackGezelId,
+  resolvePinnedModelTarget,
+} from '../openai-compat/chat-target.js';
 import type { ChatTarget } from '../openai-compat/chat-target.js';
 import { overlayOpenAiRequestTuning } from '../openai-compat/request-tuning.js';
 import {
@@ -287,7 +291,10 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
         target = await resolveChatTarget({ kind: 'gezel', ref: gezelRef }, ctx);
       } else {
         const modelTarget = resolveModelTarget(parsed.model);
-        if (!modelTarget) {
+        const pinnedTarget = modelTarget ? null : await resolvePinnedModelTarget(ctx, parsed.model);
+        if (pinnedTarget) {
+          target = pinnedTarget;
+        } else if (!modelTarget) {
           // Unknown model string (e.g. a client's hardcoded "gpt-4o").
           // Route through the configured fallback gezel, or the Meester
           // when no explicit override is set. Persona + tuning apply
@@ -299,7 +306,7 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
             return c.json(
               {
                 error: {
-                  message: `Unknown model "${parsed.model}", and no gezel is available to answer it.`,
+                  message: `Unknown model "${parsed.model}", and no gezel is available to answer it. Use a <provider>:<model> id from GET /v1/models, such as "llama-cpp:${parsed.model}".`,
                   type: 'invalid_request_error',
                   code: 'gezel_not_found',
                 },

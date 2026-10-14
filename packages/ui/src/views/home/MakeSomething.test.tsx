@@ -74,6 +74,41 @@ it('honors an empty server starter set instead of reintroducing fallback ids', a
   expect(screen.queryByRole('button', { name: /Research report/ })).not.toBeInTheDocument();
 });
 
+it('labels a starter by what comes back and keeps other plans’ own descriptions', async () => {
+  const withGates = (id: string, tags: string[], description: string, ...files: string[]) => {
+    const book = item(id);
+    Object.assign(book.manifest, {
+      tags,
+      description,
+      steps: files.map((file, index) => ({ id: `s${index}`, name: 'Step', advanceWhen: { file } })),
+    });
+    return book;
+  };
+  vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+    items: [
+      withGates('research-report', ['starter'], 'A long research brief', 'scope.md', 'report.md'),
+      withGates(
+        'tidy-spreadsheet',
+        ['first-project'],
+        'Clean up a messy sheet',
+        'plan.md',
+        'index.html',
+      ),
+    ],
+    starterIds: ['research-report'],
+    missingToolsets: {},
+    projectType: null,
+    suggestedIds: [],
+    establishedCodebase: false,
+  });
+  render(<MakeSomething projectId="garden" projects={projects} />);
+  const starter = await screen.findByRole('button', { name: /Research report/ });
+  expect(starter).toHaveTextContent('A written report');
+  const firstProject = screen.getByRole('button', { name: /tidy-spreadsheet/ });
+  expect(firstProject).toHaveTextContent('Clean up a messy sheet');
+  expect(firstProject).not.toHaveTextContent('A website');
+});
+
 it('offers retry after a failed catalog request', async () => {
   vi.mocked(api.listProjectCraftbooks).mockRejectedValueOnce(new Error('Offline'));
   render(<MakeSomething projectId="default" projects={projects} />);

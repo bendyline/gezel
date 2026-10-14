@@ -2793,9 +2793,27 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 /* The attached task's Tonight key: a latching key (gz-key) sized to the bar,
    pressed while the task waits for tonight's night shift. */
-.chat-composer-task-bar-tonight {
+.chat-composer-task-bar-tonight,
+.chat-composer-task-bar-pick {
   flex: 0 0 auto;
   align-self: center;
   padding: 0.2rem 0.55rem;
   font-size: var(--text-xs);
+}
+
+/* Square, and exactly as tall as the keys beside it (one 1.2 line of
+   --text-xs plus their padding and border). Left to the bar's stretch, it
+   grows to the full height of the task's two-line readout. */
+.chat-composer-task-bar-dismiss {
+  align-self: center;
+  inline-size: calc(var(--text-xs) * 1.2 + 0.4rem + 2px);
+  block-size: calc(var(--text-xs) * 1.2 + 0.4rem + 2px);
+  padding: 0;
+  font-size: var(--text-sm);
+}
+
+/* A pick the plan cannot use takes the readout's line until the next pick. */
+.chat-composer-task-bar-error {
+  color: var(--danger-text, var(--danger));
+  white-space: normal;
 }

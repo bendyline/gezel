@@ -26,6 +26,7 @@ function morningCard(id = 'q1'): ChatEventEnvelope {
           windowKey: '2026-10-07',
           tasksCompleted: 0,
           reports: [],
+          indexing: { filesIndexed: 1204, filesReviewed: 0, mediaDescribed: 0 },
         },
       } as Question,
     },

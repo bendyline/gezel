@@ -41,6 +41,13 @@ const STDLIB_SUITES: ReadonlyArray<{ file: string; ranMarker: RegExp }> = [
   // Contract assertions are stdlib-only; grammar compilation runs too when
   // the local MLX venv's llguidance package is available.
   { file: 'tool_grammar_test.py', ranMarker: /PASS / },
+  // Same shape: request contracts on stdlib; with llguidance and an installed
+  // model's tokenizer it also proves the JSON grammar accepts and rejects.
+  { file: 'response_format_test.py', ranMarker: /PASS / },
+  // Pure stdlib for the list contract; with the MLX venv it also drives
+  // mlx_lm's real BatchGenerator to prove a grammar survives the wave after
+  // an unconstrained one.
+  { file: 'batch_processors_test.py', ranMarker: /PASS / },
   // cache_seed_test.py predates this runner and was never executed by
   // anything — its own docstring says "No pytest harness is wired for the
   // MLX python sidecar". It is pure stdlib, so it can simply gate.

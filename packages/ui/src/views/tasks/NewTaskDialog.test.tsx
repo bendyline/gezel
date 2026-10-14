@@ -1,7 +1,13 @@
-import type { CatalogItemSummary, GezelSummary, Project, Task } from '@bendyline/gezel';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import {
+  type CatalogItemSummary,
+  DESKTOP_RUNTIME_CAPABILITIES,
+  type GezelSummary,
+  type Project,
+  type Task,
+} from '@bendyline/gezel';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../../test-utils/mockApi.js';
 import { primitivesMock } from '../../test-utils/primitivesMock.js';
 
@@ -1228,5 +1234,157 @@ describe('NewTaskDialog', () => {
         }),
       ),
     );
+  });
+
+  describe('Tonight', () => {
+    const created = { ref: 'pj-alpha/12', projectId: 'pj-alpha', num: 12 } as Task;
+    const launchProps = {
+      defaultProjectId: 'pj-alpha',
+      projects: PROJECTS,
+      gezels: GEZELS,
+      initialCraftbookId: 'code-review',
+      quickLaunch: true,
+      projectLocked: true,
+      onClose: vi.fn(),
+    };
+    const originalBridge = window.__GEZEL__;
+    afterEach(() => {
+      window.__GEZEL__ = originalBridge;
+    });
+
+    it('lets Enter in a field start the task now, never queue it', async () => {
+      vi.mocked(api.createTask).mockResolvedValue(created);
+      renderDialog({ initialCraftbookId: 'code-review', quickLaunch: true });
+      const user = userEvent.setup();
+      expect(await screen.findByRole('button', { name: 'Tonight' })).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start now' })).toBeEnabled());
+      await user.type(
+        screen.getByRole('textbox', { name: 'Title' }),
+        'Review the login flow{Enter}',
+      );
+      await waitFor(() => expect(api.createTask).toHaveBeenCalledTimes(1));
+      const request = vi.mocked(api.createTask).mock.calls[0]?.[1];
+      expect(request).toMatchObject({ title: 'Review the login flow', dispatchEntry: true });
+      expect(request).not.toHaveProperty('nightShift');
+    });
+
+    it('queues for tonight, and a later open starts now', async () => {
+      vi.mocked(api.createTask).mockResolvedValue(created);
+      const { rerender } = render(<NewTaskDialog open {...launchProps} />);
+      const user = userEvent.setup();
+      const tonight = await screen.findByRole('button', { name: 'Tonight' });
+      await waitFor(() => expect(tonight).toBeEnabled());
+      // A double press: the second lands while the first is still sending,
+      // before the key has re-rendered as disabled, and must leave nothing
+      // behind for the next open.
+      act(() => {
+        fireEvent.click(tonight);
+        fireEvent.click(tonight);
+      });
+      await waitFor(() => expect(api.createTask).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(api.createTask).mock.calls[0]?.[1]).toMatchObject({
+        craftbookId: 'code-review',
+        nightShift: { enabled: true },
+        dispatchEntry: true,
+      });
+
+      rerender(<NewTaskDialog open={false} {...launchProps} />);
+      rerender(<NewTaskDialog open {...launchProps} />);
+      const start = await screen.findByRole('button', { name: 'Start now' });
+      await waitFor(() => expect(start).toBeEnabled());
+      await user.click(start);
+      await waitFor(() => expect(api.createTask).toHaveBeenCalledTimes(2));
+      expect(vi.mocked(api.createTask).mock.calls[1]?.[1]).toMatchObject({ dispatchEntry: true });
+      expect(vi.mocked(api.createTask).mock.calls[1]?.[1]).not.toHaveProperty('nightShift');
+    });
+
+    it('is not offered while the Night Shift is off', async () => {
+      const { rerender } = render(<NewTaskDialog open {...launchProps} />);
+      expect(await screen.findByRole('button', { name: 'Tonight' })).toBeInTheDocument();
+      expect(
+        screen.getByText('Your crew can make this now or during the next Night Shift.'),
+      ).toBeInTheDocument();
+
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'mock',
+        nightShift: { enabled: false },
+      } as never);
+      rerender(<NewTaskDialog open={false} {...launchProps} />);
+      rerender(<NewTaskDialog open {...launchProps} />);
+      await waitFor(() =>
+        expect(screen.queryByRole('button', { name: 'Tonight' })).not.toBeInTheDocument(),
+      );
+      expect(screen.queryByText(/during the next Night Shift/)).not.toBeInTheDocument();
+      expect(
+        screen.getByText('Your crew starts on this as soon as you press Start now.'),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Start now' })).toBeInTheDocument();
+    });
+
+    it('is not offered on a host that cannot work in the background', async () => {
+      const { rerender } = render(<NewTaskDialog open {...launchProps} />);
+      expect(await screen.findByRole('button', { name: 'Tonight' })).toBeInTheDocument();
+
+      window.__GEZEL__ = {
+        ...(originalBridge ?? { token: 'test' }),
+        capabilities: { ...DESKTOP_RUNTIME_CAPABILITIES, background: false },
+      };
+      rerender(<NewTaskDialog open {...launchProps} />);
+      expect(screen.queryByRole('button', { name: 'Tonight' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/during the next Night Shift/)).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Start now' })).toBeInTheDocument();
+    });
+  });
+
+  describe('plan cards', () => {
+    const gated = (...files: string[]) => ({
+      steps: files.map((file, index) => ({
+        id: `step-${index}`,
+        name: `Step ${index}`,
+        advanceWhen: { file },
+        gate: { checks: [{ kind: 'minBytes', file, minBytes: 200 }] },
+      })),
+    });
+    beforeEach(() => {
+      vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+        items: [
+          bookItem('research-report', 'Cited Research Report', {
+            tags: ['starter'],
+            ...gated('{{workPath}}/scope.md', '{{workPath}}/report.md'),
+          }),
+          bookItem('board-deck', 'Board Meeting Deck', {
+            ...gated('{{workPath}}/narrative.md', 'index.html'),
+          }),
+          bookItem('alt-text-pass', 'Alt Text Pass', {
+            ...gated('{{workPath}}/caption.md', 'index.html'),
+          }),
+        ],
+        starterIds: ['research-report'],
+        missingToolsets: {},
+        projectType: null,
+        suggestedIds: [],
+      } as never);
+    });
+
+    it('shows each plan’s own description on the All plans shelf', async () => {
+      renderDialog();
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: /All plans/ }));
+      const deck = screen.getByRole('radio', { name: 'Board Meeting Deck' });
+      expect(within(deck).getByText('Board Meeting Deck description')).toBeInTheDocument();
+      const altText = screen.getByRole('radio', { name: 'Alt Text Pass' });
+      expect(within(altText).getByText('Alt Text Pass description')).toBeInTheDocument();
+      expect(screen.queryByText('A website')).not.toBeInTheDocument();
+      // A starter still says in a few words what comes back.
+      const starter = screen.getByRole('radio', { name: 'Research report' });
+      expect(within(starter).getByText('A written report')).toBeInTheDocument();
+    });
+
+    it('does not promise a website for an HTML slide deck', async () => {
+      renderDialog({ initialCraftbookId: 'board-deck', quickLaunch: true });
+      expect(await screen.findByText('Board Meeting Deck description')).toBeInTheDocument();
+      expect(screen.queryByText('You’ll get:')).not.toBeInTheDocument();
+      expect(screen.queryByText('A website')).not.toBeInTheDocument();
+    });
   });
 });

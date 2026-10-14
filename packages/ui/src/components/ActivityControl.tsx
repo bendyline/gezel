@@ -84,7 +84,10 @@ export function ActivityControl() {
   const { liveTurns, preparingTurns, onDeviceProvider } = useQueueLiveTurns(open, snapshot?.queues);
   const needs = countSection(allItems, 'needs-you');
   const working = countSection(allItems, 'working');
-  const next = countSection(allItems, 'next');
+  const next = countSection(
+    allItems.filter((item) => !item.scheduled),
+    'next',
+  );
   const ready = countSection(allItems, 'ready');
   const held = allItems.some((item) => item.heldByActivity);
   const headline = activity?.stale

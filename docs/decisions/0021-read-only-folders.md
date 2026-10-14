@@ -63,9 +63,40 @@ opens any index:
    the legacy files, then `.gezel/index/` and `.gezel/` only if empty. A
    `.gezel/` folder can hold a person's own committed definitions, so removal is
    never recursive.
-4. Not the sole owner: `VACUUM INTO` a home-side snapshot and leave the original;
-   the next boot finds the home-side copy and removes the original once it can.
-5. A home-side index already exists: keep it and drop the folder copy.
+4. Not the sole owner and no home-side index yet: `VACUUM INTO` a home-side
+   snapshot, record the folder copy's fingerprint (row counts and newest
+   `indexed_at`) in the snapshot, and leave the original for a later boot.
+   With a home-side index already present, a held folder copy is left in place
+   and never snapshotted over it.
+5. A home-side index already exists: never delete either copy. Score both by
+   model work and the person's decisions (summaries, reviews, embeddings,
+   described photos, faces and named people; file count breaks a tie, file
+   size decides when a copy can't be read). The richer copy goes live; the
+   other is kept beside it as `index.db.superseded-<timestamp>`, home-side,
+   and only then are the folder's files removed. Older builds minted near-empty
+   home-side fallbacks on a misread busy error, and a boot whose move fails
+   still creates an empty home-side index when the project opens, so "the
+   home-side copy is current" is not a safe assumption (v1.26287.92 audit, D21).
+   A home-side index made from a folder copy that stayed in the folder stays
+   live while that copy's fingerprint is unchanged, whatever the counts say,
+   so a frozen copy cannot revert later model work. When the two are
+   reconciled, each honours the other's face-data erasures (a wipe, forgotten
+   people matched by cluster id or face).
+6. An unreadable folder copy is moved home-side as `index.db.corrupt-<ms>`;
+   nothing is created in the folder. A cross-volume copy whose source cannot
+   be removed is dropped on the `cleaned` path, or stays live with its
+   fingerprint recorded when it was adopted.
+
+Set-aside copies are bounded and erasable. A boot sweep keeps only the newest
+`index.db.superseded-<ts>` per project and removes superseded, corrupt and
+orphaned-`-wal` copies older than 30 days. Face wipe and forget-person reach
+every set-aside copy, and a wipe deletes corrupt and orphaned files outright,
+since they cannot be erased row by row.
+
+Copies across volumes and every snapshot go to `index.db.migrating`, are
+fsynced, renamed into place, and the directory fsynced, before any source is
+removed. An orphaned `-wal` is renamed aside before a new file takes its name,
+because SQLite replays any `-wal` it finds beside a database.
 
 The new location is Device storage (`core/src/storage-tiers.ts`) and excluded
 from backups (`core/src/backup-policy.ts`), like every other derived index.
@@ -114,9 +145,14 @@ therefore the person's act, never a side effect.
   shadows, the map and `git status`, after a stat-only change that makes git
   want to rewrite its index, and asserts every entry's size, mtime and content
   hash is unchanged.
-- `index-store/index-placement.test.ts` covers move, clean, snapshot-then-clean
-  while another connection holds the file, a person's files under `.gezel/`,
-  and the library skip.
+- `index-store/index-placement.test.ts` covers move, the richer-copy-wins
+  reconcile in both directions with the loser preserved, failed and retried
+  boots that lose nothing, cross-volume moves with fsync before removal and
+  with a source that cannot be removed, fingerprinted snapshots, a corrupt
+  folder copy moved home-side, erasures exchanged across copies, a person's
+  files under `.gezel/`, and the library skip.
+- `index-store/preserved-indexes.test.ts` covers retention of set-aside copies
+  and face erasure reaching them, including for a project with no live index.
 - `connectors/writer.test.ts` asserts quarantined bodies land in the private
   folder and not in the workspace.
 - `projects/recruit-crew.test.ts` covers each kind's lead, the person's own

@@ -53,9 +53,9 @@ export const FIRST_PROJECT_CANDIDATES: readonly FirstProject[] = [
     kind: 'type',
     id: 'language',
     area: 'learning',
-    title: 'Practise a language',
+    title: 'Practice a language',
     hint: 'Short role-play scenes with a patient tutor.',
-    prompt: 'Start a project to practise Spanish with a language tutor. I know the basics.',
+    prompt: 'Start a project to practice Spanish with a language tutor. I know the basics.',
     typeId: 'language-trainer',
   },
   {

@@ -7,10 +7,14 @@ from types import SimpleNamespace as NS
 from typing import Any, Dict, List, Optional
 import unittest
 
+import think_budget
+
 
 SOURCE = Path(__file__).with_name('gezel_mlx_server.py').read_text()
 FUNCTION = next(n for n in ast.parse(SOURCE).body
                 if isinstance(n, ast.FunctionDef) and n.name == '_build_prompt')
+HEADERS = next(n for n in ast.parse(SOURCE).body
+               if isinstance(n, ast.FunctionDef) and n.name == '_stream_headers')
 
 
 class Tokenizer:
@@ -104,9 +108,44 @@ class PromptThinkingTests(unittest.TestCase):
             self.assertEqual(len(fallback), 1)
 
 
+class ReasoningOpenTests(unittest.TestCase):
+    # The client seeds its live reasoning split from this; a wrong answer
+    # streams the model's thoughts as its reply.
+    def test_rendered_prompt_tails(self):
+        cases = {
+            # Qwen 3.5 0.8B renders this only for an explicit enable_thinking=True.
+            '<|im_start|>assistant\n<think>\n': True,
+            '<|im_start|>assistant\n<think>\n\n</think>\n\n': False,
+            # Gemma 4 after a tool response, thinking on.
+            '<|turn>model\n<|channel>thought\n': True,
+            # Gemma 4 12B, thinking off.
+            '<|turn>model\n<|channel>thought\n<channel|>': False,
+            '<|turn>model\n': False,
+            '[INST]hi[/INST][THINK]': True,
+            '': False,
+        }
+        for prompt, expected in cases.items():
+            with self.subTest(prompt=prompt[-24:]):
+                self.assertIs(think_budget.prompt_opens_reasoning(prompt), expected)
+
+    def test_every_stream_reports_it(self):
+        namespace = dict(Dict=Dict, think_budget=think_budget)
+        exec(compile(ast.Module(body=[HEADERS], type_ignores=[]), '<headers>', 'exec'), namespace)
+        headers = namespace['_stream_headers']
+        self.assertEqual(headers('assistant\n<think>\n')['X-Gezel-Reasoning-Open'], '1')
+        self.assertEqual(headers('assistant\n')['X-Gezel-Reasoning-Open'], '0')
+        self.assertEqual(headers('')['Cache-Control'], 'no-cache')
+        # Text (batched + serial) and vision responses all carry it.
+        self.assertEqual(SOURCE.count('headers=_stream_headers(prompt_text)'), 2)
+        self.assertEqual(SOURCE.count('headers=_stream_headers(prompt)'), 1)
+        self.assertNotIn('headers={"Cache-Control"', SOURCE)
+
+
 if __name__ == '__main__':
-    result = unittest.TextTestRunner(verbosity=2).run(
-        unittest.defaultTestLoader.loadTestsFromTestCase(PromptThinkingTests))
+    loader = unittest.defaultTestLoader
+    suite = unittest.TestSuite([loader.loadTestsFromTestCase(PromptThinkingTests),
+                                loader.loadTestsFromTestCase(ReasoningOpenTests)])
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful():
         raise SystemExit(1)
     print('PASS prompt reasoning controls')

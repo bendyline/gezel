@@ -47,6 +47,30 @@ interface V1ModelsRouteOptions {
 
 type OpenAIModelEntry = AppModel;
 
+/**
+ * Engines that enforce `response_format` with a grammar: llama-server's
+ * `json_schema`, and the MLX sidecar's llguidance JSON grammar
+ * (`providers/mlx/python/response_format.py`). ds4 shares llama.cpp's request
+ * map, but nothing here shows its server enforces a schema, so it is not
+ * advertised.
+ */
+function enforcesResponseFormat(provider: string): boolean {
+  return provider === 'llama-cpp' || provider === 'mlx';
+}
+
+function catalogCapabilities(
+  manifest: ChatModelManifest,
+  provider: string,
+): NonNullable<AppModel['capabilities']> {
+  return {
+    text: true,
+    tools: manifest.supportsTools,
+    structuredOutput: enforcesResponseFormat(provider),
+    images: false,
+    foregroundOnly: false,
+  };
+}
+
 function catalogBackend(manifest: ChatModelManifest): 'llama-cpp' | 'mlx' | 'ds4' | null {
   // Store hosts have no provisioned Python runtime. Only advertise models
   // backed by bundled native engines until a frozen MLX runtime ships.
@@ -62,11 +86,10 @@ function catalogBackend(manifest: ChatModelManifest): 'llama-cpp' | 'mlx' | 'ds4
 }
 
 async function downloadableCatalogEntries(
-  ctx: ServiceContext,
+  items: Awaited<ReturnType<ServiceContext['catalog']['list']>>,
   created: number,
   existingIds: ReadonlySet<string>,
 ): Promise<OpenAIModelEntry[]> {
-  const items = await ctx.catalog.list('chat-model').catch(() => []);
   return items
     .flatMap<{ entry: OpenAIModelEntry; manifest: ChatModelManifest }>((item) => {
       const manifest = item.manifest;
@@ -91,13 +114,7 @@ async function downloadableCatalogEntries(
             locality: 'on-device',
             download_bytes: manifest.approxSizeBytes,
             ...(manifest.contextWindow ? { context_window: manifest.contextWindow } : {}),
-            capabilities: {
-              text: true,
-              tools: manifest.supportsTools,
-              structuredOutput: false,
-              images: false,
-              foregroundOnly: false,
-            },
+            capabilities: catalogCapabilities(manifest, provider),
           },
         },
       ];
@@ -147,6 +164,13 @@ async function buildModelEntries(
       }));
   }
 
+  const catalogItems = await ctx.catalog.list('chat-model').catch(() => []);
+  // An installed model carries the capabilities its catalog entry
+  // advertised before download; a model with no entry stays unflagged
+  // rather than guessing its tools or images support.
+  const manifests = new Map<string, ChatModelManifest>();
+  for (const item of catalogItems)
+    if (item.manifest.kind === 'chat-model') manifests.set(item.manifest.id, item.manifest);
   const providers = (options.localOnly ? LOCAL_PROVIDERS : PROVIDERS_TO_ENUMERATE).filter(
     (provider) =>
       provider !== 'mlx' || resolveDistributionProfile().pythonProvisioning !== 'frozen-only',
@@ -169,6 +193,9 @@ async function buildModelEntries(
             : {}),
           ...(m.contextWindow ? { context_window: m.contextWindow } : {}),
           ...(m.supportsReasoning ? { supports_reasoning: true } : {}),
+          ...(enforcesResponseFormat(provider) && manifests.has(m.id)
+            ? { capabilities: catalogCapabilities(manifests.get(m.id)!, provider) }
+            : {}),
         }));
       } catch {
         // Provider not configured / not available on this host —
@@ -179,7 +206,7 @@ async function buildModelEntries(
   );
   const availableEntries = buckets.flat();
   const existingIds = new Set([...gezelEntries, ...availableEntries].map((entry) => entry.id));
-  const downloadable = await downloadableCatalogEntries(ctx, created, existingIds);
+  const downloadable = await downloadableCatalogEntries(catalogItems, created, existingIds);
   const apple = await appleSystemModel(created);
   return [...gezelEntries, ...apple, ...availableEntries, ...downloadable];
 }

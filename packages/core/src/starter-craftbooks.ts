@@ -104,9 +104,17 @@ export function planBriefLabel(book: Pick<CraftbookTemplateManifest, 'paramSchem
   return typeof label === 'string' && label.trim() ? label : 'What should this be about?';
 }
 
-/** Declared output files, including publishing steps before an ungated Finish. */
+/**
+ * What a plan hands back, read from its declared output files (publishing
+ * steps before an ungated Finish included). The broad labels were written
+ * for the starter forms, whose names are just as broad. Any other book's
+ * .md or .html gate is as often a working note or an HTML slide deck as a
+ * report or a site, so there only a file type that names the deliverable
+ * on its own earns a label; otherwise the book's own description speaks.
+ */
 export function planOutputSummary(
   book: Pick<CraftbookTemplateManifest, 'steps' | 'paramSchema'>,
+  options: { starter?: boolean } = {},
 ): string | null {
   const defaults = book.paramSchema?.properties as
     | Record<string, { default?: unknown }>
@@ -135,9 +143,11 @@ export function planOutputSummary(
   const has = (extension: string) => files.some((file) => file.toLowerCase().endsWith(extension));
   if (has('.pptx')) return 'A slide deck';
   if (has('.docx')) return 'An editable Word document';
-  if (has('.pdf')) return 'A PDF report';
+  if (has('.pdf')) return options.starter ? 'A PDF report' : 'A PDF document';
   if (has('.mp4') && has('.gif')) return 'A video and animated GIF';
   if (has('.mp4')) return 'A video';
+  if (has('.gif')) return 'An animated GIF';
+  if (!options.starter) return null;
   if (has('.html')) return 'A website';
   if (has('.md')) return 'A written report';
   return null;

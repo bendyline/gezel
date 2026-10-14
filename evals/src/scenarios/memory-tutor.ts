@@ -17,7 +17,7 @@ import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts'
  */
 
 const TURNS = [
-  'Hola! I want to practise for my trip. Can we do a short role-play?',
+  'Hola! I want to practice for my trip. Can we do a short role-play?',
   'Sí. Yo soy cansado del viaje y yo gusto el café con leche.',
   'What should I focus on this week?',
 ] as const;

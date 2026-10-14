@@ -98,8 +98,7 @@ export async function aiShadowFile(
   if (existing !== null) {
     const fm = parseFrontmatter(existing);
     if (fm.data.source_hash === file.hash) {
-      indexShadowBody(store, file, fm.body);
-      store.markAiShadowOk(file.hash, file.path, fm.data.model);
+      indexShadowBody(store, file, fm.body, fm.data.model);
       return { produced: true, skipped: false, called: false };
     }
   }
@@ -116,8 +115,7 @@ export async function aiShadowFile(
       paths,
       withFrontmatter({ ...twin.data, source: file.path }, twin.body),
     );
-    indexShadowBody(store, file, twin.body);
-    store.markAiShadowOk(file.hash, file.path, twin.data.model);
+    indexShadowBody(store, file, twin.body, twin.data.model);
     return { produced: true, skipped: false, called: false };
   }
 
@@ -176,8 +174,7 @@ export async function aiShadowFile(
     result.body.trim(),
   );
   await writeConvertedMarkdownAt(paths, md);
-  indexShadowBody(store, file, result.body.trim());
-  store.markAiShadowOk(file.hash, file.path, result.model);
+  indexShadowBody(store, file, result.body.trim(), result.model);
   return { produced: true, skipped: false, called: true };
 }
 
@@ -201,10 +198,16 @@ async function twinShadow(
 
 /**
  * Replace the file's chunks with the shadow body so descriptions/transcripts
- * become searchable. The filename-derived line the static pass indexed is
- * folded back in as the first chunk — name search must keep working.
+ * become searchable, and mark the shadow done in the same write. The
+ * filename-derived line the static pass indexed is folded back in as the
+ * first chunk — name search must keep working.
  */
-function indexShadowBody(store: IndexStore, file: FileRecord, body: string): void {
+function indexShadowBody(
+  store: IndexStore,
+  file: FileRecord,
+  body: string,
+  model: string | undefined,
+): void {
   if (!file.hash) return;
   const nameWords = file.path
     .replace(/\.[^.]+$/, '')
@@ -215,8 +218,13 @@ function indexShadowBody(store: IndexStore, file: FileRecord, body: string): voi
   const dims = meta.width && meta.height ? ` ${meta.width}x${meta.height}` : '';
   const head = `${nameWords}${dims}`.trim();
   const kind = file.modality === 'image' ? 'image' : 'audio';
-  store.putChunks(file.path, file.hash, [
-    ...(head ? [{ kind, lineStart: 1, lineEnd: 1, text: head }] : []),
-    ...chunkMarkdown(body).map((c) => ({ ...c, kind })),
-  ]);
+  store.putAiShadowChunks(
+    file.path,
+    file.hash,
+    [
+      ...(head ? [{ kind, lineStart: 1, lineEnd: 1, text: head }] : []),
+      ...chunkMarkdown(body).map((c) => ({ ...c, kind })),
+    ],
+    model,
+  );
 }

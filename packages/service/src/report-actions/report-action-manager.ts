@@ -269,6 +269,26 @@ export class ReportActionManager {
     return changed;
   }
 
+  /**
+   * Follow a report that was renamed. Records are keyed by report path, so
+   * the Night Shift's nightly report, dated aside before tonight's is written
+   * under the same name, would otherwise leave last night's fired and
+   * dismissed actions attached to tonight's report and its dated copy reading
+   * every action as suggested again. Returns how many records moved.
+   */
+  async moveReport(projectId: string, fromPath: string, toPath: string): Promise<number> {
+    if (fromPath === toPath) return 0;
+    return this.mutate(projectId, async (rows) => {
+      let moved = 0;
+      for (const row of rows) {
+        if (row.reportPath !== fromPath) continue;
+        row.reportPath = toPath;
+        moved++;
+      }
+      return { record: moved, changed: moved > 0 };
+    });
+  }
+
   /* ─── Execution ─────────────────────────────────────────────────── */
 
   private async createCraftbookTask(

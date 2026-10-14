@@ -28,6 +28,7 @@ import { v1KnowledgeRoutes } from './http/routes/v1-knowledge.js';
 import { v1ModelsEnsureRoutes } from './http/routes/v1-models-ensure.js';
 import { v1ModelsRoutes } from './http/routes/v1-models.js';
 import { v1ResponsesRoutes } from './http/routes/v1-responses.js';
+import { InFlightRequests } from './in-flight-requests.js';
 import { KnowledgeManager } from './knowledge/manager.js';
 import { createWorkerCatalogHost } from './knowledge/worker-host.js';
 import { embeddingsHealth, openEmbeddings, shutdownEmbeddings } from './memory/embeddings.js';
@@ -80,13 +81,13 @@ export async function startService(
   const runtimeDir = join(home, 'runtime');
   const lock = await acquireSingleInstanceLock({ runtimeDir, lockPath: join(runtimeDir, 'lock') });
   const cleanup: Array<() => void | Promise<void>> = [() => lock.release()];
-  const requests = new Set<AbortController>();
+  const requests = new InFlightRequests();
   let stopping: Promise<void> | undefined;
   let closed = false;
   const stop = () => {
     stopping ??= (async () => {
       closed = true;
-      for (const controller of requests) controller.abort();
+      requests.abortAll();
       const errors: unknown[] = [];
       for (const close of cleanup.reverse())
         try {

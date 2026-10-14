@@ -1,6 +1,7 @@
+import { resetAppleStatusCache } from '@bendyline/gezel-inference/internal/http/openai-compat/apple-model';
 import { v1ModelsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-models';
 import { appleFoundationModelsStatus } from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/status';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServiceContext } from '../context.js';
 vi.mock('@bendyline/gezel-inference/internal/providers/apple-foundation-models/status', () => ({
   appleFoundationModelsStatus: vi.fn(async () => ({
@@ -9,6 +10,9 @@ vi.mock('@bendyline/gezel-inference/internal/providers/apple-foundation-models/s
     available: false,
   })),
 }));
+
+// Listings cache Apple's readiness; each test starts from a fresh check.
+beforeEach(() => resetAppleStatusCache());
 
 function modelContext(): ServiceContext {
   return {
@@ -78,6 +82,44 @@ describe('GET /v1/models catalog metadata', () => {
     );
   });
 
+  it('advertises structured output for engines that enforce a schema', async () => {
+    const ctx = modelContext();
+    ctx.chat.listModelsForProvider = vi.fn(async (provider: string) =>
+      provider === 'llama-cpp'
+        ? [
+            { id: 'small-writer', name: 'Small Writer', contextWindow: 32_768 },
+            { id: 'custom-gguf', name: 'Custom', contextWindow: 8192 },
+          ]
+        : [],
+    );
+    const response = await v1ModelsRoutes(ctx, { localOnly: true }).request('http://localhost/');
+    const body = (await response.json()) as { data: Array<Record<string, unknown>> };
+    const byId = new Map(body.data.map((entry) => [entry.id, entry]));
+    // Installed with a catalog entry: the entry's capabilities, schemas included.
+    expect(byId.get('llama-cpp:small-writer')?.capabilities).toEqual({
+      text: true,
+      tools: true,
+      structuredOutput: true,
+      images: false,
+      foregroundOnly: false,
+    });
+    // No catalog entry: unflagged rather than a guess about tools or images.
+    expect(byId.get('llama-cpp:custom-gguf')).not.toHaveProperty('capabilities');
+
+    const downloadable = modelContext();
+    downloadable.chat.listModelsForProvider = vi.fn(async () => []);
+    const listed = (await (
+      await v1ModelsRoutes(downloadable, { localOnly: true }).request('http://localhost/')
+    ).json()) as { data: Array<Record<string, unknown>> };
+    expect(listed.data).toContainEqual(
+      expect.objectContaining({
+        id: 'llama-cpp:small-writer',
+        availability: 'download-required',
+        capabilities: expect.objectContaining({ structuredOutput: true }),
+      }),
+    );
+  });
+
   it('offers native catalog weights and never enumerates Python engines in store hosts', async () => {
     vi.stubEnv('GEZEL_DISTRIBUTION_PROFILE', 'store');
     const ctx = modelContext();
@@ -119,6 +161,20 @@ describe('GET /v1/models catalog metadata', () => {
   });
 });
 
+it('reuses one Apple readiness check across listings instead of launching the helper each time', async () => {
+  const status = vi.mocked(appleFoundationModelsStatus);
+  status.mockClear();
+  await Promise.all([
+    v1ModelsRoutes(modelContext(), { localOnly: true }).request('http://localhost/'),
+    v1ModelsRoutes(modelContext(), { localOnly: true }).request('http://localhost/'),
+  ]);
+  await v1ModelsRoutes(modelContext(), { localOnly: true }).request('http://localhost/');
+  expect(status).toHaveBeenCalledTimes(1);
+  resetAppleStatusCache();
+  await v1ModelsRoutes(modelContext(), { localOnly: true }).request('http://localhost/');
+  expect(status).toHaveBeenCalledTimes(2);
+});
+
 it('enumerates Apple readiness and context through the public inventory without granting product access', async () => {
   vi.mocked(appleFoundationModelsStatus).mockResolvedValueOnce({
     supported: true,
@@ -139,6 +195,7 @@ it('enumerates Apple readiness and context through the public inventory without 
       recovery_actions: ['open-system-settings'],
     }),
   );
+  resetAppleStatusCache();
   vi.mocked(appleFoundationModelsStatus).mockResolvedValueOnce({
     supported: true,
     installed: true,

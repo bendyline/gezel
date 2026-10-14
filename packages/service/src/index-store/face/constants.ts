@@ -35,3 +35,10 @@ export const FACE_DETECT_SCORE = 0.6;
 
 /** IoU above which two detections are the same face (NMS). */
 export const FACE_NMS_IOU = 0.3;
+
+/**
+ * Meta key recording when an index's face data was last wiped. Preserved
+ * copies of the index are erased to match it, so a copy set aside before the
+ * wipe never brings a person's faces back.
+ */
+export const FACE_WIPED_AT_META_KEY = 'face_data_wiped_at';

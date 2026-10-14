@@ -177,7 +177,7 @@ describe('matchProjectTypeForBrief', () => {
 
   it('reads a language by name', () => {
     expect(
-      matchProjectTypeForBrief('A language tutor so I can practise Japanese', TYPES)?.params,
+      matchProjectTypeForBrief('A language tutor so I can practice Japanese', TYPES)?.params,
     ).toEqual({ language: 'Japanese' });
   });
 });

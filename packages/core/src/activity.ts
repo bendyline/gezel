@@ -79,6 +79,7 @@ export function resolveActivity(input: {
     };
     if (task.cron) {
       item.detail = task.cron.nextTickAt ? `Scheduled · ${task.cron.nextTickAt}` : 'Scheduled.';
+      item.scheduled = true;
     } else if (assignee.kind === 'user') {
       item.section = 'needs-you';
       item.detail = step
@@ -102,9 +103,11 @@ export function resolveActivity(input: {
           item.detail = queues.taskRunner.nightShift?.opensAt
             ? `Scheduled for Night Shift · ${queues.taskRunner.nightShift.opensAt}`
             : 'Scheduled for the next Night Shift.';
+          item.scheduled = true;
           break;
         case 'night-quota':
           item.detail = 'Waiting for the cloud quota reserve to free up.';
+          item.scheduled = true;
           break;
         case 'provider-busy':
           item.detail = 'Waiting for other work to finish using the model.';
@@ -156,6 +159,7 @@ export function resolveActivity(input: {
       questionIds: [],
       since: new Date(turn.startedAt).toISOString(),
       heldByActivity: false,
+      scheduled: false,
     });
   }
 
@@ -184,6 +188,7 @@ export function resolveActivity(input: {
         existing.section = 'working';
         existing.sessionId = row.sessionId;
         existing.heldByActivity = false;
+        existing.scheduled = false;
         continue;
       }
       const owner = sessionOwners.get(row.sessionId);
@@ -213,6 +218,7 @@ export function resolveActivity(input: {
           existing.detail = 'Waiting for a free model slot.';
           existing.sessionId = row.sessionId;
           existing.heldByActivity = false;
+          existing.scheduled = false;
         }
         continue;
       }

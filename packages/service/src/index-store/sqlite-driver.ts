@@ -86,7 +86,17 @@ function wrapStatement(stmt: NodeStmt): SqliteStatement {
  * sqlite-vec is non-fatal: the driver comes back with `vecAvailable === false`
  * and structural + FTS features still work.
  */
-export async function openIndexDatabase(dbPath: string): Promise<SqliteDriver | null> {
+export async function openIndexDatabase(
+  dbPath: string,
+  opts: {
+    /**
+     * Rename a corrupt file aside and start a fresh one (the default). False
+     * throws instead, for a file that must not be replaced where it lies: a
+     * legacy index inside a person's folder, or a preserved copy.
+     */
+    quarantineCorrupt?: boolean;
+  } = {},
+): Promise<SqliteDriver | null> {
   let DatabaseSync: new (path: string, opts?: { allowExtension?: boolean }) => NodeDb;
   try {
     ({ DatabaseSync } = nodeRequire('node:sqlite') as {
@@ -112,7 +122,11 @@ export async function openIndexDatabase(dbPath: string): Promise<SqliteDriver | 
     setBusyTimeout(db);
     assertReadableHeader(db);
   } catch (error) {
-    if (dbPath === ':memory:' || !isCorruptDatabaseError(error)) {
+    if (
+      dbPath === ':memory:' ||
+      opts.quarantineCorrupt === false ||
+      !isCorruptDatabaseError(error)
+    ) {
       try {
         db?.close();
       } catch {
@@ -198,7 +212,7 @@ function setBusyTimeout(db: NodeDb): void {
   }
 }
 
-function isCorruptDatabaseError(error: unknown): boolean {
+export function isCorruptDatabaseError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /SQLITE_CORRUPT|SQLITE_NOTADB|database disk image is malformed|file is not a database/i.test(
     message,

@@ -66,17 +66,20 @@ class VisionTests(unittest.TestCase):
                 return checks > 2
             ns = dict(asyncio=asyncio, json=json, uuid=uuid, MODEL=object(), PROCESSOR=object(),
                       vision_inputs=vision_inputs,
+                      response_format=NS(build_response_format_processor=lambda *a, **kw: None,
+                                         covers_tool_calls=lambda g: False),
                       ARGS=NS(prefill_step_size=128), _kv_quant_kwargs=lambda:{},
-                      _build_prompt=lambda *args:'prompt', stream_generate=generate,
+                      stream_generate=generate,
                       _get_generation_lock=lambda:lock, _scrub_leaked_markers=lambda s:s,
                       _reclaim_mlx_buffer_cache=lambda *a, **kw:None,
                       log_contained_exception=lambda tag:self.fail(tag))
             exec(compile(ast.Module(body=[function], type_ignores=[]), '<vision>', 'exec'), ns)
             request=NS(messages=[], tools=None, chat_template_override=None, chat_template_kwargs=None,
                        model='test', max_tokens=8, tool_grammar=None, max_thinking_tokens=None)
-            parts=[p async for p in ns['_vision_stream'](request, NS(is_disconnected=disconnected), [image])]
+            parts=[p async for p in ns['_vision_stream'](request, NS(is_disconnected=disconnected), [image], 'prompt')]
             self.assertEqual(len(parts), 1)
             self.assertEqual(calls[0]['image'], [image])
+            self.assertEqual(calls[0]['prompt'], 'prompt')
             self.assertNotIn('prompt_cache_state', calls[0])
             self.assertEqual(closed, ['generator','image'])
             self.assertFalse(lock.locked())

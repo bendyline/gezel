@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_NIGHT_SHIFT_WINDOW, type Question } from '@bendyline/gezel';
@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ChatManager } from '../chat/manager.js';
 import { DiffpackManager } from '../diffpack/manager.js';
 import { Store } from '../fs/store.js';
+import { prepareReviewForNight } from '../meester/night-shift-oversight.js';
 import { ReportActionManager } from '../report-actions/report-action-manager.js';
 import { TaskManager } from './manager.js';
 import {
@@ -171,6 +172,87 @@ describe('buildNightShiftReview', () => {
     );
     expect(review.tasksCompleted).toHaveLength(0);
     expect(review.reports).toHaveLength(0);
+  });
+});
+
+describe("the nightly review's own reports", () => {
+  const ACTION_REPORT = [
+    '# Night shift report',
+    '',
+    '```gezel-action',
+    'kind: create-task',
+    'id: tidy-readme',
+    'title: Tidy the README',
+    'prompt: Tidy the project README.',
+    '```',
+    '',
+  ].join('\n');
+
+  async function installReview(lastRunDay: string): Promise<void> {
+    await store.ensureDefaultProject();
+    const created = await tasks.create('default', {
+      title: 'Night-shift oversight: project review',
+      assignee: { kind: 'user' },
+      steps: [
+        {
+          id: 'oversight',
+          name: 'Review active projects',
+          advanceWhen: { file: 'night-shift-report.md', artifact: true },
+        },
+      ],
+      nightShift: { enabled: true, onceADay: true },
+    });
+    const record = await store.readTask('default', created.num);
+    await store.writeTask({
+      ...record!,
+      status: 'active',
+      nightShift: { enabled: true, onceADay: true, lastRunDay },
+    });
+  }
+
+  const writtenAt = (path: string, at: Date) =>
+    utimes(join(store.projectArtifactsDir('default'), path), at, at);
+
+  it('does not count the report dated aside as the window opened', async () => {
+    await installReview('2026-06-19');
+    await store.writeProjectArtifact('default', 'night-shift-report.md', ACTION_REPORT);
+    await writtenAt('night-shift-report.md', new Date(2026, 5, 19, 23, 30));
+    // The window that opened at 22:00 on the 20th, and a review that never ran.
+    await prepareReviewForNight({ store, archiveSession: async () => {} }, '2026-06-20');
+    expect(await store.readProjectArtifact('default', 'night-shift-report-2026-06-19.md')).toBe(
+      ACTION_REPORT,
+    );
+
+    const review = await buildNightShiftReview(
+      { store, tasks, reportActions, diffpacks },
+      DEFAULT_NIGHT_SHIFT_WINDOW,
+      NOW,
+    );
+    expect(review.reports).toEqual([]);
+    expect(review.tasksCompleted).toEqual([]);
+  });
+
+  it('never reads a dated copy written inside the window as new, nor its actions', async () => {
+    await installReview('2026-06-20');
+    // Earlier builds copied the report aside, so the copy's mtime is tonight's.
+    await store.writeProjectArtifact('default', 'night-shift-report-2026-06-19.md', ACTION_REPORT);
+    await writtenAt('night-shift-report-2026-06-19.md', new Date(IN_WINDOW));
+    await store.writeProjectArtifact(
+      'default',
+      'night-shift-report.md',
+      '# Tonight\n\nAll healthy.\n',
+    );
+    await writtenAt('night-shift-report.md', new Date(IN_WINDOW));
+
+    const review = await buildNightShiftReview(
+      { store, tasks, reportActions, diffpacks },
+      DEFAULT_NIGHT_SHIFT_WINDOW,
+      NOW,
+    );
+    expect(review.reports.map((r) => r.path)).toEqual(['night-shift-report.md']);
+    expect(review.reports[0]?.actionCounts.total).toBe(0);
+    // The review is the runtime's own run; the report it left is the work.
+    expect(review.tasksCompleted).toEqual([]);
   });
 });
 

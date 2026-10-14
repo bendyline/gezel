@@ -246,6 +246,95 @@
   font-weight: 600;
 }
 
+/* ==========================================================================
+   Checkbox cards — the standard for choices where several may be picked at
+   once (docs/ux.md → "Controls: checkbox cards"). A latched key reads as
+   "the one chosen", so a multi-select keeps a visible checkbox per option and
+   marks a ticked card with an accent edge and a faint tint, never a full
+   accent fill. Cards share one width per grid, and `grid-auto-rows: 1fr`
+   gives every row the tallest card's height so a long hint never leaves a
+   ragged row. A surface narrows or widens the columns through
+   `--gz-check-card-min`. Ticked, disabled and focus states read the input
+   through :has(), so markup needs no state class. */
+.gz-check-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--gz-check-card-min, 14rem), 1fr));
+  grid-auto-rows: 1fr;
+  gap: 0.5rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.gz-check-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 140ms ease-out, background 140ms ease-out;
+}
+
+.gz-check-card:where(:hover) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.gz-check-card:where(:has(input:checked)) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.gz-check-card:where(:has(input:disabled)) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* The card carries the ring, so the checkbox's own outline would double it. */
+.gz-check-card:where(:has(input:focus-visible)) {
+  box-shadow: var(--focus-ring);
+}
+.gz-check-card input[type="checkbox"]:focus-visible {
+  outline: none;
+}
+
+.gz-check-card input[type="checkbox"] {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin: 0.1rem 0 0;
+  cursor: inherit;
+}
+
+.gz-check-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.gz-check-card-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.gz-check-card-hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+@media (any-pointer: coarse) {
+  .gz-check-card {
+    min-height: 44px;
+  }
+}
+
 /* Link buttons: a button set in text as a link. */
 .link-button {
   background: none;
@@ -697,8 +786,9 @@
   white-space: normal;
 }
 
-/* Interest keys are short labels, so unlike the openers they wrap in a row.
-   Several can be latched at once (aria-pressed); none is required. */
+/* Interest areas are checkbox cards (several can be ticked, none is
+   required). Without hints they are bare labels, so the welcome's narrow
+   column still fits two to a row. */
 .meester-welcome-interests {
   display: flex;
   flex-direction: column;
@@ -706,23 +796,13 @@
   gap: 0.5rem;
 }
 
-.interest-tray {
-  flex-wrap: wrap;
-  gap: 4px;
-  min-width: 0;
-  margin: 0;
+.interest-picker {
+  align-self: stretch;
+  --gz-check-card-min: 11rem;
 }
 
-.interest-tray-key {
-  font-size: var(--text-sm);
-  white-space: nowrap;
-}
-
-.interest-tray-key.gz-key--stacked {
-  flex: 1 1 14rem;
-  justify-content: flex-start;
-  text-align: left;
-  white-space: normal;
+.interest-picker--hints {
+  --gz-check-card-min: 14rem;
 }
 
 .meester-welcome-helpers {
@@ -759,6 +839,21 @@
 
 .meester-welcome-tour {
   min-width: 0;
+}
+
+/* The "What is gezel?" video under the first projects while the tools
+   download; its lead reads like the helpers' lead below it. */
+.meester-welcome-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.meester-welcome-intro-lead {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 /* A conversation with history keeps it; the meester's ask for tools sits

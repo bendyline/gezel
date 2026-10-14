@@ -35,6 +35,7 @@ import { MarkdownField } from '../../components/MarkdownField.js';
 import {
   inputValuesFromLaunch,
   paramAlternativesMessage,
+  sampleInputLabel,
   taskLaunchFromDialog,
   uploadStagingIds,
 } from '../../components/composer-task-launch.js';
@@ -196,7 +197,12 @@ export function NewTaskDialog({
   const submissionFingerprint = useRef('');
   const briefInput = useRef<HTMLTextAreaElement>(null);
   const submitting = useRef(false);
+  // Set only while the Tonight key's own submit dispatches. Enter submits
+  // the form through Start now, so a flag left behind would turn the next
+  // Enter into a Night Shift task.
   const submitTonight = useRef(false);
+  // Unknown until config answers; Tonight is not offered in the meantime.
+  const [nightShiftOn, setNightShiftOn] = useState(false);
   const craftbookLoadSequence = useRef(0);
   const loadedCraftbookSequence = useRef(0);
   const [missingToolsets, setMissingToolsets] = useState<Record<string, CraftbookToolsetNeed[]>>(
@@ -285,6 +291,7 @@ export function NewTaskDialog({
     setStep(initialCraftbookId ? 'configure' : 'pick');
     submissionKey.current = `craftbook-root-v1:${(crypto.randomUUID() + crypto.randomUUID()).replaceAll('-', '')}`;
     submitting.current = false;
+    submitTonight.current = false;
     setQuery('');
     setActiveRail('all');
     setRailInitialized(false);
@@ -317,6 +324,24 @@ export function NewTaskDialog({
       seedPendingRef.current = restore.craftbookId;
     }
   }, [open, defaultProjectId, launchMode, initialCraftbookId]);
+
+  // Tonight queues work for the Night Shift, so it is offered only while the
+  // Night Shift is on. Read per open: the switch lives in Settings.
+  useEffect(() => {
+    if (!open) return;
+    let canceled = false;
+    void api
+      .getConfig()
+      .then((config) => {
+        if (!canceled) setNightShiftOn(config.nightShift?.enabled !== false);
+      })
+      .catch(() => {
+        if (!canceled) setNightShiftOn(false);
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [open]);
 
   // Files uploaded for a launch that never happened would otherwise sit in
   // staging until the daemon's sweep. After a successful launch the upload
@@ -482,7 +507,9 @@ export function NewTaskDialog({
   const mainKey = selectedBook ? mainContentParamKey(selectedBook.manifest.paramSchema) : null;
   const needsBrief = !!selectedBook && (starterSelected || mainKey !== null);
   const briefValue = mainKey ? String(params[mainKey] ?? '') : description;
-  const outputSummary = selectedBook ? planOutputSummary(selectedBook.manifest) : null;
+  const outputSummary = selectedBook
+    ? planOutputSummary(selectedBook.manifest, { starter: starterSelected })
+    : null;
   const durationMs = selectedBook ? durationEstimates[selectedBook.manifest.id] : undefined;
   useEffect(() => {
     if (open && step === 'configure' && selectedBookId && booksLoaded) briefInput.current?.focus();
@@ -1050,6 +1077,14 @@ export function NewTaskDialog({
   const pendingBook = Boolean(selectedBookId && (!selectedBook || !booksLoaded));
   const createDisabled =
     busy || inputBusy || pendingBook || (selectedBook !== null && selectedNeeds.length > 0);
+  // A host that cannot run work in the background (a phone) refuses Night
+  // Shift tasks outright, so Tonight would only lead to an error there.
+  const offerTonight =
+    !composeMode &&
+    selectedBook !== null &&
+    creationMode === 'one-time' &&
+    nightShiftOn &&
+    runtimeCapabilities().background;
   const compactLaunch =
     quickLaunch ||
     Boolean(
@@ -1077,6 +1112,15 @@ export function NewTaskDialog({
       density="comfortable"
     />
   );
+  const inputValueFor = (key: string): CraftbookInputValue => {
+    const value = inputValues[key] ?? EMPTY_INPUT_VALUE;
+    return value.source?.from === 'sample' && selectedBook
+      ? {
+          ...value,
+          label: sampleInputLabel(selectedBook.manifest, value.source.sampleId, value.label),
+        }
+      : value;
+  };
   const renderInput = (input: ReturnType<typeof craftbookInputParams>[number]) =>
     selectedBook && (
       <CraftbookInputField
@@ -1085,7 +1129,7 @@ export function NewTaskDialog({
         craftbookId={selectedBook.manifest.id}
         input={input}
         allowUpload={creationMode !== 'scheduled'}
-        value={inputValues[input.key] ?? EMPTY_INPUT_VALUE}
+        value={inputValueFor(input.key)}
         onChange={(next) => {
           setInputValues((prev) => ({ ...prev, [input.key]: next }));
           setError('');
@@ -1257,9 +1301,10 @@ export function NewTaskDialog({
                               <GalleryCard
                                 key={b.manifest.id}
                                 label={planDisplayName(b.manifest)}
-                                description={
-                                  planOutputSummary(b.manifest) ?? b.manifest.description
-                                }
+                                description={planCardDescription(
+                                  b,
+                                  starterIds.includes(b.manifest.id),
+                                )}
                                 glyph={craftbookGlyph(b.manifest)}
                                 {...(b.item.iconSvg ? { iconSvg: b.item.iconSvg } : {})}
                                 {...(b.item.logoUrl ? { logoUrl: b.item.logoUrl } : {})}
@@ -1622,7 +1667,9 @@ export function NewTaskDialog({
                       {composeMode
                         ? 'Nothing runs yet. It attaches to your message and starts when you send.'
                         : creationMode === 'one-time' && selectedBook
-                          ? 'Your crew can make this now or during the next Night Shift.'
+                          ? offerTonight
+                            ? 'Your crew can make this now or during the next Night Shift.'
+                            : 'Your crew starts on this as soon as you press Start now.'
                           : modeCopy.footnote}
                     </p>
                   )}
@@ -1630,12 +1677,21 @@ export function NewTaskDialog({
                     <button type="button" onClick={onClose} disabled={busy}>
                       Cancel
                     </button>
-                    {!composeMode && selectedBook && creationMode === 'one-time' && (
+                    {offerTonight && (
+                      // Not a submit key: implicit submission (Enter in any
+                      // field) clicks the first one, and that must be Start
+                      // now. Tonight goes through the same submit, flagged
+                      // only for this one synchronous dispatch.
                       <button
-                        type="submit"
+                        type="button"
                         disabled={createDisabled}
-                        onClick={() => {
+                        onClick={(event) => {
                           submitTonight.current = true;
+                          try {
+                            event.currentTarget.form?.requestSubmit();
+                          } finally {
+                            submitTonight.current = false;
+                          }
                         }}
                       >
                         Tonight
@@ -1678,6 +1734,16 @@ function discardStagedInputs(
       void api.taskInputs.deleteInputStaging(projectId, value.source.stagingId).catch(() => {});
     }
   }
+}
+
+/**
+ * A starter card says in a few words what comes back; every other card keeps
+ * the plan's own description, which a file-type label would only flatten.
+ */
+function planCardDescription(book: BookItem, starter: boolean): string {
+  return (
+    (starter ? planOutputSummary(book.manifest, { starter }) : null) ?? book.manifest.description
+  );
 }
 
 function craftbookSearchRank(book: BookItem, query: string): number {

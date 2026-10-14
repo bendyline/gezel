@@ -199,6 +199,36 @@ export function useFirstRunModel({
     return run;
   }, []);
 
+  /**
+   * The model is on disk; fetch the engine that runs it if that is still
+   * missing. A picked installed model must end here too: it once jumped
+   * straight to `ready`, Home held first run for the missing engine, and
+   * nothing ever fetched it, so the welcome said "Getting ready…" forever.
+   */
+  const settleOnDisk = useCallback(
+    async (target: OnDeviceProvider, modelId: string) => {
+      const need = await llamaEngineNeed({
+        provider: target,
+        ...(backendOverride ? { llamaCppBackendOverride: backendOverride } : {}),
+      });
+      if (need) {
+        setState({ kind: 'engine', provider: target, modelId, progress: null });
+        // On failure stay here: the error card's Try again re-checks.
+        void fetchEngine(need.variant).then((landed) => {
+          if (landed) setState({ kind: 'checking' });
+        });
+        return;
+      }
+      setState({ kind: 'ready' });
+      if (!installedNotifiedRef.current) {
+        installedNotifiedRef.current = true;
+        announceModelInventoryChanged(target);
+        onModelInstalled?.();
+      }
+    },
+    [backendOverride, fetchEngine, onModelInstalled],
+  );
+
   const check = useCallback(async () => {
     if (!isOnDevice(provider)) return;
     // An inventory answer can take minutes on first adoption of shared
@@ -230,24 +260,7 @@ export function useFirstRunModel({
           api.getCatalogItem('chat-model', targetModel).catch(() => null),
         ]);
         if (modelsRes.models.some((m) => m.id === targetModel)) {
-          const need = await llamaEngineNeed({
-            provider,
-            ...(backendOverride ? { llamaCppBackendOverride: backendOverride } : {}),
-          });
-          if (need) {
-            setState({ kind: 'engine', provider, modelId: targetModel, progress: null });
-            // On failure stay here: the error card's Try again re-checks.
-            void fetchEngine(need.variant).then((landed) => {
-              if (landed) setState({ kind: 'checking' });
-            });
-            return;
-          }
-          setState({ kind: 'ready' });
-          if (!installedNotifiedRef.current) {
-            installedNotifiedRef.current = true;
-            announceModelInventoryChanged(provider);
-            onModelInstalled?.();
-          }
+          await settleOnDisk(provider, targetModel);
           return;
         }
         const sizeBytes = readSizeFromCatalog(catalog, provider);
@@ -289,15 +302,7 @@ export function useFirstRunModel({
     } finally {
       checkInFlightRef.current = false;
     }
-  }, [
-    provider,
-    defaultModel,
-    firstRunInstallError,
-    backendOverride,
-    fetchEngine,
-    onConfigChanged,
-    onModelInstalled,
-  ]);
+  }, [provider, defaultModel, firstRunInstallError, settleOnDisk, onConfigChanged]);
 
   useEffect(() => {
     // Poll only while checking. 'needs-download' and 'failed' are set by the
@@ -473,16 +478,15 @@ export function useFirstRunModel({
           defaultModel: { ...defaultModel, [provider]: modelId },
         });
         onConfigChanged(next);
-        announceModelInventoryChanged(provider);
-        setState({ kind: 'ready' });
-        onModelInstalled?.();
+        installedNotifiedRef.current = false;
+        await settleOnDisk(provider, modelId);
       } catch (err) {
         setState(failedFromCaught(err, provider, modelId));
       } finally {
         setBusy(false);
       }
     },
-    [provider, defaultModel, onConfigChanged, onModelInstalled],
+    [provider, defaultModel, onConfigChanged, settleOnDisk],
   );
 
   /**

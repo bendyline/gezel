@@ -641,17 +641,28 @@ export function ChatComposer({
   const [engagementMode, setEngagementMode] = useState<
     'proactive' | 'scheduled' | 'reactive' | 'off'
   >('proactive');
+  // A task queued for tonight never runs while the Night Shift is off, so
+  // Tonight is offered only once the config says the shift is on.
+  const [nightShiftOn, setNightShiftOn] = useState(false);
   useEffect(() => {
     api
       .getConfig()
-      .then((cfg) => setEngagementMode(cfg.aiEngagementMode ?? 'proactive'))
+      .then((cfg) => {
+        setEngagementMode(cfg.aiEngagementMode ?? 'proactive');
+        setNightShiftOn(cfg.nightShift?.enabled !== false);
+      })
       .catch(() => {});
     const onConfigUpdated = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { aiEngagementMode?: string } | undefined;
+      const detail = (e as CustomEvent).detail as
+        | { aiEngagementMode?: string; nightShift?: { enabled?: boolean } }
+        | undefined;
       if (detail?.aiEngagementMode) {
         setEngagementMode(
           detail.aiEngagementMode as 'proactive' | 'scheduled' | 'reactive' | 'off',
         );
+      }
+      if (detail?.nightShift && typeof detail.nightShift.enabled === 'boolean') {
+        setNightShiftOn(detail.nightShift.enabled);
       }
     };
     window.addEventListener('gezel:config-updated', onConfigUpdated);
@@ -1764,9 +1775,13 @@ export function ChatComposer({
           art={taskLaunch.art}
           readiness={taskLaunch.readiness}
           stale={taskLaunch.stale}
+          pickable={taskLaunch.pickable}
+          picking={taskLaunch.picking}
+          onPickInput={(key, pick) => void taskLaunch.pickInput(key, pick)}
           onOpen={() => setTaskDialogOpen(true)}
           onDismiss={() => void taskLaunch.dismiss()}
-          {...(runtimeCapabilities().background
+          {...(runtimeCapabilities().background &&
+          (nightShiftOn || taskLaunch.attached.tonight === true)
             ? {
                 onToggleTonight: () => {
                   const current = taskLaunch.attached;

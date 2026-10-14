@@ -1076,6 +1076,15 @@ server.tool(
         }),
       });
       if (!res.ok) {
+        const refusal = await personMemoryRefusal(res.clone());
+        if (refusal) {
+          // The daemon refuses this on purpose outside a person's turn; a retry
+          // with the same scope can only fail again.
+          return errorResult(`save_memory refused: ${refusal}`, {
+            code: 'person_memory_needs_user_turn',
+            retryable: false,
+          });
+        }
         return errorResult(`save_memory failed: ${await responseErrorMessage(res)}`);
       }
       const data = (await res.json().catch(() => ({}))) as {
@@ -3209,6 +3218,17 @@ function unwrapApiError(err: unknown): string {
 }
 
 /** Recover a concise daemon error from a non-2xx fetch response. */
+async function personMemoryRefusal(res: Response): Promise<string | null> {
+  try {
+    const body = (await res.json()) as { error?: unknown; hint?: unknown };
+    return body.error === 'person_memory_needs_user_turn' && typeof body.hint === 'string'
+      ? body.hint
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function responseErrorMessage(res: Response): Promise<string> {
   const body = await res.text().catch(() => '');
   if (body) {

@@ -34,6 +34,7 @@ describe('ensureModel', () => {
       ),
     ).resolves.toEqual({
       model: 'ready-model',
+      chatModel: 'llama-cpp:ready-model',
       engine: 'llama-cpp',
       source: 'present',
       pinned: false,
@@ -95,6 +96,7 @@ describe('ensureModel', () => {
       ),
     ).resolves.toEqual({
       model: 'new-model',
+      chatModel: 'llama-cpp:new-model',
       engine: 'llama-cpp',
       source: 'download',
       pinned: true,

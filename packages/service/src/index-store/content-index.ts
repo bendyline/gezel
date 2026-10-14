@@ -108,6 +108,7 @@ import {
 import type { SecuritySeverity, SymbolHit } from './index-store-types.js';
 import { IndexStore } from './index-store.js';
 import { listPhotos, onThisDay, photoGroups } from './photo-intel.js';
+import { erasePreservedFaceData } from './preserved-indexes.js';
 import { searchTokens } from './query-terms.js';
 import { type DecodableRaster, canNormalizeRaster, toDecodableRaster } from './raster-normalize.js';
 import {
@@ -2420,29 +2421,52 @@ export class ContentIndex {
   async forgetPerson(projectId: string, entityId: number): Promise<boolean> {
     const opened = await this.open(projectId);
     if (!opened) return false;
+    let forgotten: { id: string; centroid: Float32Array | null };
     try {
       const entity = opened.index.entityById(entityId);
       if (!entity || entity.kind !== 'person') return false;
       opened.index.deleteEntity(entityId);
       opened.index.markFaceClusterForgotten(entity.canonical);
-      return true;
+      const cluster = opened.index.faceClusters().find((c) => c.id === entity.canonical);
+      forgotten = { id: entity.canonical, centroid: cluster?.centroid ?? null };
     } finally {
       opened.index.close();
     }
+    await erasePreservedFaceData(fallbackProjectIndexDir(this.home, projectId), {
+      forgotten: [forgotten],
+    }).catch((err: unknown) =>
+      log.warn(
+        `could not forget a person in ${projectId}'s set-aside index copies: ${String(err)}`,
+      ),
+    );
+    return true;
   }
 
-  /** Data erasure: face vectors, clusters, gates, and person entities everywhere. */
+  /**
+   * Data erasure: face vectors, clusters, gates, and person entities
+   * everywhere, including copies of an index the move set aside.
+   */
   async wipeAllFaceData(projectIds: string[]): Promise<number> {
     let wiped = 0;
     for (const projectId of projectIds) {
+      let wipedAt = nowIso();
       const opened = await this.open(projectId).catch(() => null);
-      if (!opened) continue;
-      try {
-        opened.index.wipeFaceData();
-        wiped++;
-      } finally {
-        opened.index.close();
+      if (opened) {
+        try {
+          wipedAt = opened.index.wipeFaceData();
+          wiped++;
+        } finally {
+          opened.index.close();
+        }
       }
+      await erasePreservedFaceData(fallbackProjectIndexDir(this.home, projectId), {
+        wipedAt,
+        forgotten: [],
+      }).catch((err: unknown) =>
+        log.error(
+          `could not erase face data in ${projectId}'s set-aside index copies: ${String(err)}`,
+        ),
+      );
     }
     return wiped;
   }

@@ -1,6 +1,8 @@
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { StreamingSessionBase } from '@bendyline/gezel/local-loop';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type RunningInferenceService, startService } from './inference-service.js';
@@ -121,6 +123,119 @@ describe('in-process inference host', () => {
     await running.stop();
     await expect(request('/v1/models')).rejects.toThrow('stopped');
   });
+  it('answers the bare id ensureModel pins, and names the qualified form otherwise', async () => {
+    home = await mkdtemp(join(tmpdir(), 'gezel-inference-'));
+    const models: Array<string | undefined> = [];
+    class Session extends StreamingSessionBase {
+      async sendAndWait() {
+        return 'pinned reply';
+      }
+      providerState() {
+        return {};
+      }
+      async disconnect() {}
+    }
+    const provider: LLMProvider = {
+      name: 'llama-cpp',
+      supportsPriorMessages: true,
+      initialize: async () => {},
+      shutdown: async () => {},
+      listModels: async () => [{ id: 'fixture', name: 'Fixture' }],
+      createSession: async (opts) => {
+        models.push(opts.model);
+        return new Session();
+      },
+    };
+    running = await startService({ home, providers: new Map([['llama-cpp', provider]]) });
+    const request = (path: string, body: unknown, method = 'POST') =>
+      running!.fetch(`http://gezel.local${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${running!.clientToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+    const chat = { model: 'fixture', messages: [{ role: 'user', content: 'Hello' }] };
+
+    const unpinned = await request('/v1/chat/completions', chat);
+    expect(unpinned.status).toBe(404);
+    const refusal = (await unpinned.json()) as { error: { message: string } };
+    expect(refusal.error.message).toContain('"llama-cpp:fixture"');
+
+    // What ensureModel writes on a daemon the app hosts.
+    expect(
+      (
+        await request(
+          '/api/config',
+          { provider: 'llama-cpp', defaultModel: { 'llama-cpp': 'fixture' } },
+          'PUT',
+        )
+      ).status,
+    ).toBe(200);
+    const pinned = await request('/v1/chat/completions', chat);
+    expect(pinned.status).toBe(200);
+    const answer = (await pinned.json()) as { choices: { message: { content: string } }[] };
+    expect(answer.choices[0]?.message.content).toBe('pinned reply');
+    const responses = await request('/v1/responses', {
+      model: 'fixture',
+      input: 'Hello',
+      store: false,
+    });
+    expect(responses.status).toBe(200);
+    expect(models).toEqual(['fixture', 'fixture']);
+  });
+
+  it('keeps plain Node running while a request waits on unreferenced work', () => {
+    // Vitest's own handles keep this process alive whatever the host does, so
+    // the check runs in a child Node with nothing else on its event loop. The
+    // provider waits on an unreferenced timer, as an engine cold start does.
+    const entry = fileURLToPath(new URL('../dist/inference-service.js', import.meta.url));
+    const script = `
+      import { mkdtemp, rm } from 'node:fs/promises';
+      import { tmpdir } from 'node:os';
+      import { join } from 'node:path';
+      import { StreamingSessionBase } from '@bendyline/gezel/local-loop';
+      import { startService } from ${JSON.stringify(entry)};
+      class Session extends StreamingSessionBase {
+        async sendAndWait() {
+          await new Promise((resolve) => setTimeout(resolve, 200).unref());
+          return 'warm';
+        }
+        providerState() { return {}; }
+        async disconnect() {}
+      }
+      const provider = {
+        name: 'llama-cpp', supportsPriorMessages: true,
+        initialize: async () => {}, shutdown: async () => {},
+        listModels: async () => [{ id: 'fixture', name: 'Fixture' }],
+        createSession: async () => new Session(),
+      };
+      const home = await mkdtemp(join(tmpdir(), 'gezel-inference-node-'));
+      const running = await startService({ home, providers: new Map([['llama-cpp', provider]]) });
+      const response = await running.fetch('http://gezel.local/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + running.clientToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'llama-cpp:fixture', messages: [{ role: 'user', content: 'Hi' }] }),
+      });
+      const reply = (await response.json()).choices[0].message.content;
+      await running.stop();
+      await rm(home, { recursive: true, force: true });
+      console.log(reply);
+    `;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      encoding: 'utf8',
+      env: { ...process.env, VITEST: undefined, GEZEL_LOG_LEVEL: 'error' },
+      timeout: 60_000,
+    });
+    expect({
+      status: child.status,
+      stdout: child.stdout.trim(),
+      stderr: child.stderr,
+    }).toMatchObject({ status: 0, stdout: 'warm' });
+  });
+
   it('cancels an active stream when its host closes and releases the home lock', async () => {
     home = await mkdtemp(join(tmpdir(), 'gezel-inference-stop-'));
     let disconnected = false;

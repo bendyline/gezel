@@ -1,6 +1,6 @@
 import type { ChatMessage } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { extractMemories, parseExtractedLine } from './extractor.js';
+import { extractMemories, mayWritePersonMemory, parseExtractedLine } from './extractor.js';
 import type { MemoryManager } from './manager.js';
 
 describe('parseExtractedLine', () => {
@@ -131,6 +131,7 @@ describe('extractMemories routing', () => {
       memory,
       gezelId: 'ada',
       projectId: 'proj-1',
+      personMemory: true,
     });
     expect(sources).toEqual([
       { project: 'proj-1', gezel: 'ada' },
@@ -151,6 +152,45 @@ describe('extractMemories routing', () => {
         kind: 'pref',
       },
       { scope: 'user', id: 'user', text: 'The user lives in Utrecht.', kind: 'fact' },
+    ]);
+  });
+
+  it('keeps lines about the person with the gezel unless person memory is allowed', async () => {
+    // Person memory reaches every gezel's prompt in every project, so a
+    // transcript that is not the person's own conversation (a task step, a
+    // third-party app's chat) writes what it learned to the gezel instead —
+    // where it went before person memory existed. Off is the default.
+    const reply = 'USER/FACT: The user lives in Utrecht.\nPREF: Short commit messages.\n';
+    for (const personMemory of [undefined, false]) {
+      const { memory, saves } = recordingMemory();
+      await extractMemories({
+        messages,
+        extractedUpTo: 0,
+        oneShot: async () => reply,
+        memory,
+        gezelId: 'ada',
+        projectId: 'proj-1',
+        ...(personMemory === undefined ? {} : { personMemory }),
+      });
+      expect(saves).toEqual([
+        { scope: 'gezel', id: 'ada', text: 'The user lives in Utrecht.', kind: 'fact' },
+        { scope: 'gezel', id: 'ada', text: 'Short commit messages.', kind: 'pref' },
+      ]);
+    }
+
+    const { memory, saves } = recordingMemory();
+    await extractMemories({
+      messages,
+      extractedUpTo: 0,
+      oneShot: async () => reply,
+      memory,
+      gezelId: 'ada',
+      projectId: 'proj-1',
+      personMemory: true,
+    });
+    expect(saves.map((s) => [s.scope, s.id])).toEqual([
+      ['user', 'user'],
+      ['user', 'user'],
     ]);
   });
 
@@ -357,5 +397,78 @@ describe('extractMemories when the one-shot does not answer', () => {
       }),
     ).resolves.toBeUndefined();
     expect(saves).toEqual([]);
+  });
+});
+
+describe('mayWritePersonMemory', () => {
+  const chat = (overrides: Partial<Parameters<typeof mayWritePersonMemory>[0]> = {}) => ({
+    messages: [msg('user', 'I just moved to Utrecht.'), msg('assistant', 'Welcome to Utrecht!')],
+    ...overrides,
+  });
+
+  it('allows the person’s own conversation', () => {
+    expect(mayWritePersonMemory(chat())).toBe(true);
+  });
+
+  it('refuses task steps, visitors, consultations, and mirrored app conversations', () => {
+    expect(mayWritePersonMemory(chat({ taskRef: 'default/4' }))).toBe(false);
+    expect(mayWritePersonMemory(chat({ visitorAccess: true }))).toBe(false);
+    expect(mayWritePersonMemory(chat({ consultationMode: true }))).toBe(false);
+    expect(
+      mayWritePersonMemory(
+        chat({
+          source: {
+            kind: 'external',
+            appId: 'pi',
+            appName: 'Pi',
+            externalConversationId: 'pi-1',
+            readOnly: true,
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses a window holding any turn the person did not start', () => {
+    const answered = (user: ChatMessage): ChatMessage[] => [
+      msg('user', 'I just moved to Utrecht.'),
+      msg('assistant', 'Welcome!'),
+      user,
+      msg('assistant', 'Noted.'),
+    ];
+    const machine: ChatMessage[] = [
+      { ...msg('user', 'Summarize the inbox.'), from: { gezelId: 'meester', gezelName: 'Bram' } },
+      { ...msg('user', 'Seed the reaction.'), origin: 'system' },
+      { ...msg('user', 'Resume the turn.'), hidden: true },
+    ];
+    for (const user of machine) {
+      expect(mayWritePersonMemory({ messages: answered(user) })).toBe(false);
+    }
+  });
+
+  it('counts a message the person typed while the last turn ran as their own', () => {
+    // `nudge` marks a message queued mid-turn from the composer, not a
+    // runtime nudge: someone typing ahead of a slow local model is still
+    // the person talking.
+    const messages: ChatMessage[] = [
+      msg('user', 'I just moved to Utrecht.'),
+      { ...msg('user', 'Also, keep commit messages short.'), nudge: true },
+      msg('assistant', 'Noted, both.'),
+    ];
+    expect(mayWritePersonMemory({ messages })).toBe(true);
+  });
+
+  it('judges only the unextracted window, starting at the turn its first reply answers', () => {
+    const messages: ChatMessage[] = [
+      { ...msg('user', 'Summarize the inbox.'), from: { gezelId: 'meester', gezelName: 'Bram' } },
+      msg('assistant', 'The inbox says the owner lives in Utrecht.'),
+      msg('user', 'Thanks. I prefer short replies.'),
+      msg('assistant', 'Understood.'),
+    ];
+    // Past the other gezel's turn: the window is the person's alone.
+    expect(mayWritePersonMemory({ messages, extractedUpTo: 2 })).toBe(true);
+    // A cursor between that turn and its reply still counts the turn it answers.
+    expect(mayWritePersonMemory({ messages, extractedUpTo: 1 })).toBe(false);
+    expect(mayWritePersonMemory({ messages, extractedUpTo: 0 })).toBe(false);
   });
 });

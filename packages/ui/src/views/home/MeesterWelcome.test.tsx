@@ -15,7 +15,9 @@ vi.mock('../../components/GezelIcon.js', () => ({
 }));
 // The Handboek page pulls in the squisq renderers, which jsdom can't drive.
 vi.mock('./IntroHandboekArticle.js', () => ({
-  IntroHandboekArticle: () => <div data-testid="home-intro-article" />,
+  IntroHandboekArticle: ({ variant }: { variant?: string }) => (
+    <div data-testid="home-intro-article" data-variant={variant ?? 'toggle'} />
+  ),
 }));
 
 const { api } = await import('../../api.js');
@@ -65,8 +67,12 @@ function FirstRun({
 describe('MeesterWelcome', () => {
   beforeEach(() => {
     prefill.mockClear();
+    // An established install by default, so a test that asks never leaks the picker into the next.
+    vi.mocked(api.getConfig).mockResolvedValue(config());
     vi.mocked(api.listLlamaCppModels).mockResolvedValue({ models: [] } as never);
     vi.mocked(api.listLlamaCppActiveInstalls).mockResolvedValue({ installs: [] } as never);
+    // No engine to fetch unless a test says so; a missing one holds first run.
+    vi.mocked(api.getNativeEngineStatus).mockResolvedValue({} as never);
     vi.mocked(api.getCatalogItem).mockResolvedValue({
       manifest: { kind: 'chat-model', llamaCpp: { approxSizeBytes: 16 * GB } },
     } as never);
@@ -85,14 +91,22 @@ describe('MeesterWelcome', () => {
       expect(screen.getByText(/bring on the gezellen it needs/)).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Fetch my tools/ })).not.toBeInTheDocument();
       expect(screen.queryByText(/Change what I'm allowed to do/)).not.toBeInTheDocument();
+      // Past first run the intro waits behind the tour link.
+      expect(screen.queryByTestId('home-intro-article')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Take the 1-minute tour' })).toBeInTheDocument();
     });
 
     it('offers first projects that prefill the composer instead of sending', () => {
       render(<MeesterWelcome {...figure} projectId="alpha" />);
       const trip = screen.getByRole('button', { name: /Plan a trip/ });
       expect(trip).toHaveTextContent('on a trip board');
-      expect(screen.getByRole('button', { name: /Plan a celebration/ })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Practise a language/ })).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /Turn meeting notes into actions/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /Make sense of a spreadsheet/ }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Practice a language/ })).toBeInTheDocument();
       fireEvent.click(trip);
       // Prefill, not send — the person makes the sentence theirs first.
       // A pick replaces the draft, so a second pick never sends both sentences.
@@ -104,24 +118,21 @@ describe('MeesterWelcome', () => {
       );
     });
 
-    it('asks a new install what it wants help with, and saves each key pressed', async () => {
+    it('asks a new install what it wants help with, and saves each box ticked', async () => {
       vi.mocked(api.getConfig).mockResolvedValue(
         config({ firstUseAt: new Date().toISOString() } as Partial<ConfigResponse>),
       );
       vi.mocked(api.updateConfig).mockResolvedValue({} as never);
       render(<MeesterWelcome {...figure} />);
-      const data = await screen.findByRole('button', { name: 'Data and spreadsheets' });
+      const data = await screen.findByRole('checkbox', { name: 'Data and spreadsheets' });
       fireEvent.click(data);
       await waitFor(() =>
         expect(api.updateConfig).toHaveBeenCalledWith({
           interests: { areas: ['data'], askedAt: expect.any(String) },
         }),
       );
-      // The tray stays for the visit, latched, rather than vanishing on the first press.
-      expect(screen.getByRole('button', { name: 'Data and spreadsheets' })).toHaveAttribute(
-        'aria-pressed',
-        'true',
-      );
+      // The picker stays for the visit, ticked, rather than vanishing on the first choice.
+      expect(screen.getByRole('checkbox', { name: 'Data and spreadsheets' })).toBeChecked();
     });
 
     it('never asks an established install', async () => {
@@ -137,10 +148,24 @@ describe('MeesterWelcome', () => {
       );
       render(<MeesterWelcome {...figure} />);
       await waitFor(() =>
-        expect(screen.getAllByRole('button', { name: /Plan a|Practise/ })[0]).toHaveTextContent(
-          'Practise a language',
+        expect(screen.getAllByRole('button', { name: /Plan a|Practice/ })[0]).toHaveTextContent(
+          'Practice a language',
         ),
       );
+    });
+
+    it('re-chooses the first projects from the area ticked in the picker', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue(
+        config({ firstUseAt: new Date().toISOString() } as Partial<ConfigResponse>),
+      );
+      vi.mocked(api.updateConfig).mockResolvedValue({} as never);
+      render(<MeesterWelcome {...figure} />);
+      fireEvent.click(await screen.findByRole('checkbox', { name: 'Writing software' }));
+      const openers = screen.getByRole('group', { name: 'Something to start with' });
+      await waitFor(() => {
+        const titles = [...openers.querySelectorAll('.gz-key-label')].map((el) => el.textContent);
+        expect(titles.slice(0, 2)).toEqual(['Explain a code folder', 'Review a code folder']);
+      });
     });
 
     it('says it is ready when the model landed during this visit', () => {
@@ -222,8 +247,34 @@ describe('MeesterWelcome', () => {
       expect(vi.mocked(api.installLlamaCppModel).mock.calls[0]?.[0]).toBe('qwen3.8-27b-q4');
       expect(await screen.findByText('Fetching my tools')).toBeInTheDocument();
       expect(
-        screen.getByText(/While I wait — what would you like to get done/),
+        screen.getByText(/While tools are downloading, let's get ready for our first conversation/),
       ).toBeInTheDocument();
+    });
+
+    it('puts the ideas line under the interest picker, and leads with it once the picker is put away', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue(
+        config({ firstUseAt: new Date().toISOString() } as Partial<ConfigResponse>),
+      );
+      vi.mocked(api.updateConfig).mockResolvedValue({} as never);
+      vi.mocked(api.installLlamaCppModel).mockReturnValue(new Promise(() => {}) as never);
+      render(<FirstRun cfg={config()} />);
+      fireEvent.click(await screen.findByRole('button', { name: /Fetch my tools/ }));
+      expect(await screen.findByText('Fetching my tools')).toBeInTheDocument();
+
+      const picker = await screen.findByRole('group', { name: 'What you would like help with' });
+      const ideas = screen.getByText(/Here are some ideas for things the crew can help you with/);
+      const openers = screen.getByRole('group', { name: 'Something to start with' });
+      expect(picker.compareDocumentPosition(ideas) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(
+        ideas.compareDocumentPosition(openers) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+      expect(screen.queryByRole('group', { name: 'What you would like help with' })).toBeNull();
+      expect(
+        screen.getAllByText(/Here are some ideas for things the crew can help you with/),
+      ).toHaveLength(1);
+      expect(screen.queryByText(/what would you like help with/i)).toBeNull();
     });
 
     // The daemon fetches the engine lazily, so the first message after
@@ -366,6 +417,54 @@ describe('MeesterWelcome', () => {
         />,
       );
       expect(screen.getByText(/^Fetching my tools · 25%$/)).toBeInTheDocument();
+    });
+
+    it('plays the intro under the first projects while the tools download, and keeps it once they land', () => {
+      const model = {
+        state: {
+          kind: 'installing',
+          provider: 'llama-cpp',
+          modelId: 'qwen3.8-27b-q4',
+          sizeBytes: 16 * GB,
+          progress: null,
+        },
+        rate: { samples: [], bytesPerSecond: null, lastMovedAt: null },
+        now: Date.now(),
+        busy: false,
+        copilotAvailable: null,
+      } as unknown as FirstRunModel;
+      const { rerender } = render(<MeesterWelcome {...figure} setup={{ model }} />);
+      const lead = screen.getByText('Also, here is a bit more info about gezel:');
+      const intro = screen.getByTestId('home-intro-article');
+      expect(intro).toHaveAttribute('data-variant', 'player');
+      const openers = screen.getByRole('group', { name: 'Something to start with' });
+      expect(openers.compareDocumentPosition(lead) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+      // The download finishing must not pull the video from under a viewer,
+      // and the tour link would only open a second copy of it.
+      rerender(<MeesterWelcome {...figure} justReady />);
+      expect(screen.getByTestId('home-intro-article')).toHaveAttribute('data-variant', 'player');
+      expect(screen.queryByRole('button', { name: 'Take the 1-minute tour' })).toBeNull();
+    });
+
+    // Keyed to a running download, it was missing whenever the tools were
+    // already on disk or the page reloaded after they landed.
+    it('plays the intro in every first-run state, not only while downloading', async () => {
+      render(<FirstRun cfg={config()} />);
+      await screen.findByRole('button', { name: /Fetch my tools/ });
+      expect(screen.getByText('Also, here is a bit more info about gezel:')).toBeInTheDocument();
+      expect(screen.getByTestId('home-intro-article')).toHaveAttribute('data-variant', 'player');
+
+      const ready = {
+        state: { kind: 'ready' },
+        rate: { samples: [], bytesPerSecond: null, lastMovedAt: null },
+        now: Date.now(),
+        busy: false,
+        copilotAvailable: null,
+      } as unknown as FirstRunModel;
+      const { unmount } = render(<MeesterWelcome {...figure} setup={{ model: ready }} />);
+      expect(screen.getAllByTestId('home-intro-article')).toHaveLength(2);
+      unmount();
     });
 
     it('offers to fetch anyway when Hugging Face republished the file', async () => {

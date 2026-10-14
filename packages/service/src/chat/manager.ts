@@ -179,7 +179,11 @@ import { inspectGitWorkdir } from '../git/inspect.js';
 import type { KeurmeesterManager } from '../keurmeester/manager.js';
 import { isSilentStallAbort, isTransportErrorMessage } from '../keurmeester/manager.js';
 import { USER_MEMORY_ID } from '../memory/daily-markdown.js';
-import { extractMemories, isCancelledExtraction } from '../memory/extractor.js';
+import {
+  extractMemories,
+  isCancelledExtraction,
+  mayWritePersonMemory,
+} from '../memory/extractor.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { renderRecallBlock, runAutoRecall } from '../memory/recall.js';
 import {
@@ -708,6 +712,28 @@ function engineTurnPriority(
 ): 'interactive' | 'background' {
   if (isAskTarget) return 'interactive';
   return origin === 'direct-user' || origin === 'question-answer' ? 'interactive' : 'background';
+}
+
+/**
+ * The project as a visitor of its shared mini-site may hear it described:
+ * what it is (name, mode, about text), never how the owner runs it. Mission
+ * objectives are the owner's plans; the voorman and linked projects are crew
+ * and workspace structure for a session that has neither; the GitHub block
+ * names a local checkout path; connector bindings name the owner's mail and
+ * calendars; the working-folder line describes files a visitor cannot reach.
+ */
+function visitorPromptProject(
+  project: NonNullable<Awaited<ReturnType<Store['getProject']>>>,
+): NonNullable<Awaited<ReturnType<Store['getProject']>>> {
+  return {
+    ...project,
+    missionObjectives: undefined,
+    voormanGezelId: undefined,
+    linkedProjectIds: undefined,
+    github: undefined,
+    connectors: undefined,
+    workingDir: undefined,
+  };
 }
 
 function buildUserTurnMessage(
@@ -2448,9 +2474,11 @@ export class ChatManager extends LocalEngineRuntime {
    * they typed or an answer they gave. Nudges, handoffs, and other gezels'
    * messages are not. Actions that exist to stop a model looping on its own
    * (restarting a task that paused for help) require this, so a coordinator
-   * can do them for the user but never on its own initiative.
+   * can do them for the user but never on its own initiative. A visitor of a
+   * shared mini-site types their own messages, but they are not the user.
    */
   isUserDirectedTurn(sessionId: string): boolean {
+    if (this.states.get(sessionId)?.record.visitorAccess) return false;
     const origin = this.inflight.get(sessionId)?.origin;
     return origin === 'direct-user' || origin === 'question-answer';
   }
@@ -9205,6 +9233,7 @@ export class ChatManager extends LocalEngineRuntime {
             memory: this.memory,
             gezelId: snap.gezelId,
             projectId: snap.projectId,
+            personMemory: mayWritePersonMemory(snap),
             debug: this.debug,
           })
             .then(async () => {
@@ -10234,6 +10263,8 @@ export class ChatManager extends LocalEngineRuntime {
     // have not wired SearchService; running both duplicates the same evidence.
     if (this.searchServiceRef) return;
     const record = state.record;
+    // Memory and the shared library are the owner's; a visitor reads neither.
+    if (record.visitorAccess) return;
     try {
       const config = await this.store.readConfig();
       const gezel = await this.store.getGezel(record.gezelId).catch(() => null);
@@ -11988,6 +12019,9 @@ export class ChatManager extends LocalEngineRuntime {
                 memory: this.memory,
                 gezelId: snap.gezelId,
                 projectId: snap.projectId,
+                // Another app's transcript is not the person talking to their
+                // crew; what it says about them stays with this gezel.
+                personMemory: false,
                 debug: this.debug,
               });
               await this.store.mutateSession(snap.gezelId, snap.id, (fresh) => {
@@ -14030,9 +14064,12 @@ export class ChatManager extends LocalEngineRuntime {
     },
   ): Promise<BuiltSessionOpts> {
     const project = await this.store.getProject(record.projectId);
-    const workspaceListing = project
-      ? await this.store.listProjectWorkspaceRecursiveDetailed(record.projectId)
-      : { entries: [], truncated: false };
+    // A visitor on a shared mini-site sees only what the site's pages show; a
+    // listing of the owner's files would hand a stranger every file name.
+    const workspaceListing =
+      project && !record.visitorAccess
+        ? await this.store.listProjectWorkspaceRecursiveDetailed(record.projectId)
+        : { entries: [], truncated: false };
     const workspaceFiles = workspaceListing.entries;
     // Artifacts are intentionally NOT enumerated in the prompt. They drift
     // every time anyone (including a parallel gezel) writes one, and a
@@ -14048,9 +14085,10 @@ export class ChatManager extends LocalEngineRuntime {
     // block would render the same inventory twice.
     const libraryProjectId = await this.store.sharedProjectId().catch(() => null);
     const sessionIsLibrary = libraryProjectId !== null && record.projectId === libraryProjectId;
-    const documentListing = sessionIsLibrary
-      ? { entries: [], truncated: false }
-      : await this.store.listDocumentsRecursiveDetailed();
+    const documentListing =
+      sessionIsLibrary || record.visitorAccess
+        ? { entries: [], truncated: false }
+        : await this.store.listDocumentsRecursiveDetailed();
     const documentFiles = documentListing.entries.filter(
       (entry) => !isOutsideInInternalPath(entry.path),
     );
@@ -14058,8 +14096,11 @@ export class ChatManager extends LocalEngineRuntime {
     const config = await this.store.readConfig();
     // Curated cross-project lessons distilled by the memory compactor's
     // sweep. Loaded fresh on every session (re)build like about.md — a
-    // live session keeps its prompt until its next natural rebuild.
-    const lessonsMd = await this.store.readMemoryLessons(record.gezelId).catch(() => '');
+    // live session keeps its prompt until its next natural rebuild. Distilled
+    // from the gezel's memory of working for the owner, so never a visitor's.
+    const lessonsMd = record.visitorAccess
+      ? ''
+      : await this.store.readMemoryLessons(record.gezelId).catch(() => '');
     // Social mode shows the gezel's character; off, the prompt is unchanged.
     const socialCharacter = resolveSocialMode(config, 'desktop')
       ? gezel?.parsed.frontmatter.character
@@ -14069,9 +14110,10 @@ export class ChatManager extends LocalEngineRuntime {
     const personEntries = record.visitorAccess
       ? []
       : await this.memory.allEntries?.('user', USER_MEMORY_ID).catch(() => []);
-    const voorman = project?.voormanGezelId
-      ? await this.store.getGezel(project.voormanGezelId).catch(() => null)
-      : null;
+    const voorman =
+      project?.voormanGezelId && !record.visitorAccess
+        ? await this.store.getGezel(project.voormanGezelId).catch(() => null)
+        : null;
 
     // Resolve task context if the session is scoped to one.
     let taskContext: PromptTaskContext | undefined;
@@ -14116,9 +14158,10 @@ export class ChatManager extends LocalEngineRuntime {
     // currently owned by them) in the same project as the session, so
     // the gezel doesn't have to call `list_tasks` to discover what
     // they're supposed to work on. Skipped when this session is itself
-    // task-scoped (taskContext above already injects the relevant task).
+    // task-scoped (taskContext above already injects the relevant task),
+    // and for a visitor: the owner's task titles are not the site's to show.
     let assignedTasks: Task[] = [];
-    if (!record.taskRef) {
+    if (!record.taskRef && !record.visitorAccess) {
       try {
         const all = withEffectiveTaskStatuses(await this.store.listProjectTasks(record.projectId));
         assignedTasks = all.filter((t) => {
@@ -14150,7 +14193,8 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
 
-    const recallBlock = record.recall ? renderRecallBlock(record.recall.hits) : '';
+    const recallBlock =
+      record.recall && !record.visitorAccess ? renderRecallBlock(record.recall.hits) : '';
     // Tier the localHints block by the model's actual parameter count.
     // <5B (or unknown local) → full cookbook + strict rules (Gemma 4
     // 4B and friends). 5–12B → condensed anti-fabrication only (Llama
@@ -14254,8 +14298,11 @@ export class ChatManager extends LocalEngineRuntime {
     // retrieval-first steer, both marker behaviors resolved here and
     // rendered/gated inside buildInstructions.
     const retrievalFirstActive = profileHasBehavior(modelProfile, 'prompt.retrieval-first');
+    // The gestalt summarizes the owner's workspace from its index — the same
+    // inventory the file listing is withheld from a visitor for.
     const workspaceGestaltActive =
       Boolean(project) &&
+      !record.visitorAccess &&
       roleGetsWorkspaceOrientation(gezel?.role) &&
       profileHasBehavior(modelProfile, 'prompt.workspace-gestalt');
     const documentDescriptions =
@@ -14815,8 +14862,8 @@ export class ChatManager extends LocalEngineRuntime {
       role: gezel?.role,
       providerName: record.providerName,
       generalistKickoff,
-      project,
-      hasObservationTables: hasTables,
+      project: project && record.visitorAccess ? visitorPromptProject(project) : project,
+      hasObservationTables: hasTables && !record.visitorAccess,
       workspaceFiles,
       ...(workspaceListing.truncated ? { workspaceFilesTruncated: true } : {}),
       documentFiles,

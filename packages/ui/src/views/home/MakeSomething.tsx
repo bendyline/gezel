@@ -34,6 +34,7 @@ const NewTaskDialog = lazy(() =>
 /** A first request uses the same project offer and launch form as Tasks. */
 export function MakeSomething({ projectId, projects }: { projectId: string; projects: Project[] }) {
   const [pool, setPool] = useState<BookItem[]>([]);
+  const [starterIds, setStarterIds] = useState<ReadonlySet<string>>(new Set());
   const [failed, setFailed] = useState(false);
   const [retry, retryLoad] = useReducer((value: number) => value + 1, 0);
   const [selection, setSelection] = useState<string | null | undefined>(undefined);
@@ -71,6 +72,7 @@ export function MakeSomething({ projectId, projects }: { projectId: string; proj
             (book.manifest.tags ?? []).includes('first-project') && !starters.includes(book),
         );
         setPool([...starters, ...firstProjects]);
+        setStarterIds(new Set(starters.map((book) => book.manifest.id)));
       })
       .catch(() => {
         if (!canceled) setFailed(true);
@@ -114,6 +116,7 @@ export function MakeSomething({ projectId, projects }: { projectId: string; proj
             <MakeSomethingCard
               key={book.manifest.id}
               book={book}
+              starter={starterIds.has(book.manifest.id)}
               onOpen={() => setSelection(book.manifest.id)}
             />
           ))}
@@ -140,8 +143,20 @@ export function MakeSomething({ projectId, projects }: { projectId: string; proj
   );
 }
 
-/** The card takes the paper its artwork is drawn on, so the mark bleeds into it. */
-function MakeSomethingCard({ book, onOpen }: { book: BookItem; onOpen: () => void }) {
+/**
+ * The card takes the paper its artwork is drawn on, so the mark bleeds into
+ * it. A starter says in a few words what comes back; a first-project plan
+ * keeps its own description.
+ */
+function MakeSomethingCard({
+  book,
+  starter,
+  onOpen,
+}: {
+  book: BookItem;
+  starter: boolean;
+  onOpen: () => void;
+}) {
   const [paper, setPaper] = useState<string | null>(null);
   return (
     <button
@@ -160,7 +175,8 @@ function MakeSomethingCard({ book, onOpen }: { book: BookItem; onOpen: () => voi
       </span>
       <span className="home-make-name">{planDisplayName(book.manifest)}</span>
       <span className="home-make-description">
-        {planOutputSummary(book.manifest) ?? book.manifest.description}
+        {(starter ? planOutputSummary(book.manifest, { starter }) : null) ??
+          book.manifest.description}
       </span>
     </button>
   );

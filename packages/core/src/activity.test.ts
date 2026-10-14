@@ -172,7 +172,43 @@ describe('Activity reflects execution rather than task lifecycle', () => {
     expect(resolve({ tasks: [recurring] }).items[0]).toMatchObject({
       section: 'next',
       detail: 'Scheduled · 2026-10-02T22:00:00Z',
+      scheduled: true,
     });
+  });
+  it.each<[TaskWaitReason, boolean]>([
+    ['night-shift', true],
+    ['night-quota', true],
+    ['provider-busy', false],
+    ['engagement-paused', false],
+  ])('marks work parked by %s as scheduled: %s', (reason, scheduled) => {
+    const result = resolve({ waiting: [{ ref: 'shop/1', gezelId: 'maya', reason, since: at }] });
+    expect(Boolean(result.items[0]?.scheduled)).toBe(scheduled);
+  });
+  it('a scheduled task that reaches the engine is no longer scheduled', () => {
+    const waiting = [
+      {
+        ref: 'shop/1',
+        gezelId: 'maya',
+        reason: 'night-shift' as const,
+        since: at,
+        sessionId: turn.sessionId,
+      },
+    ];
+    const queue = queues();
+    queue.providers.openai = {
+      running: 0,
+      queuedInteractive: 0,
+      queuedBackground: 1,
+      concurrency: 1,
+      active: [],
+      pending: [{ sessionId: turn.sessionId, id: 1, lane: 'background', waitedMs: 10 }],
+    };
+    expect(resolve({ waiting, queues: queue }).items).toMatchObject([
+      { section: 'next', detail: 'Waiting for a free model slot.', scheduled: false },
+    ]);
+    expect(resolve({ waiting, inflight: [turn] }).items).toMatchObject([
+      { section: 'working', scheduled: false },
+    ]);
   });
   it('a question waiting inside a live approval turn takes precedence', () => {
     const result = resolve({ inflight: [turn], questions: [question] });

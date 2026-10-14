@@ -1,8 +1,8 @@
-import { InterestTray } from '../components/InterestTray.js';
+import { InterestPicker } from '../components/InterestPicker.js';
 import { useInterests } from '../components/useInterests.js';
 
 /**
- * Settings → General: what the person uses gezel for. The same keys the
+ * Settings → General: what the person uses gezel for. The same checkboxes the
  * welcome asks with; the choice orders the welcome's first projects, Make
  * something and the New Task and New Project galleries, and never hides
  * anything.
@@ -17,7 +17,7 @@ export function SettingsInterests() {
         away.
       </p>
       {interests.loaded && (
-        <InterestTray
+        <InterestPicker
           label="What you use gezel for"
           selected={interests.areas}
           onChange={(next) => void interests.save(next)}

@@ -141,6 +141,16 @@ export type StaleStepSessionLookup = (
 /** Error code the MCP task tools recognize as "this turn is stale; end it". */
 export const STALE_TASK_STEP_CODE = 'stale_task_step';
 
+/** A session tried to write a note about the person outside the person's own turn. */
+export const PERSON_MEMORY_NEEDS_USER_TURN_CODE = 'person_memory_needs_user_turn';
+
+/**
+ * Read by the model through `save_memory`'s error. It names the move that
+ * works, because a refusal that only says no is retried word for word.
+ */
+export const PERSON_MEMORY_NEEDS_USER_TURN_HINT =
+  'notes about the person can be saved only while they are talking with you. Save this to your own memory instead (scope "gezel"), and do not retry with scope "user".';
+
 type SessionRouteDecision = { ok: true } | { ok: false; reason: string; code?: string };
 const SESSION_ALLOW: SessionRouteDecision = { ok: true };
 
@@ -501,6 +511,16 @@ async function isSessionRouteAllowed(
     if (path === '/api/memory/lessons' && method !== 'GET') {
       return sessionDeny('editing lessons requires a first-party client');
     }
+    // Notes about the person reach every gezel's prompt in every project, so
+    // only the person's own turn may write one — coordinators included. A
+    // worker that read something about them in a page, an email, or a
+    // document would otherwise pass it to the whole crew as fact.
+    if (path === '/api/memory/save' && method === 'POST') {
+      const body = await readJsonSafe(c);
+      if (body?.scope === 'user' && isUserDirectedTurn?.(sessionId(auth)) !== true) {
+        return sessionDeny(PERSON_MEMORY_NEEDS_USER_TURN_HINT, PERSON_MEMORY_NEEDS_USER_TURN_CODE);
+      }
+    }
     if (auth.team) return SESSION_ALLOW;
     if (path === '/api/memory/search' && method === 'POST') {
       const body = await readJsonSafe(c);
@@ -510,8 +530,9 @@ async function isSessionRouteAllowed(
     }
     if (path === '/api/memory/save' && method === 'POST') {
       const body = await readJsonSafe(c);
-      // Every gezel may write down something about the person. A source, when
-      // given, must name this session: it decides who growth credits.
+      // Every gezel may write down something about the person while they are
+      // talking with it (checked above). A source, when given, must name this
+      // session: it decides who growth credits.
       const source = body?.source as { project?: unknown; gezel?: unknown } | undefined;
       const honestSource =
         (source?.project === undefined || source.project === auth.projectId) &&

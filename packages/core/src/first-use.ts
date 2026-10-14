@@ -3,7 +3,8 @@
  *
  * Only a home that was empty at its first boot carries the stamp. An install
  * without it is established: it predates the stamp, or it was seeded with
- * gezels before it ever booted, and none of these grace periods apply to it.
+ * gezels before it ever booted, and these grace periods apply to it only
+ * where one says so.
  */
 
 /**
@@ -17,7 +18,9 @@ export const FIRST_USE_INDEXING_GRACE_MS = 30 * 60_000;
 /**
  * A night that produced nothing is not reported until the install is this
  * old. On day one, "your crew couldn't work last night" describes a night
- * before the crew existed.
+ * before the crew existed. The one grace that also reaches an established
+ * install: the morning card measures it from the first night the install
+ * recorded, so an upgrade does not open on a run of quiet-night cards.
  */
 export const QUIET_NIGHT_GRACE_MS = 3 * 24 * 60 * 60_000;
 

@@ -86,6 +86,11 @@ pacing of a transition. If a first-time user can't quite put a finger on
   dialogs keep headings, descriptions, labels, and control text non-selectable;
   editable fields plus copyable values such as paths, commands, and code opt
   back into selection explicitly.
+- **Spelling is American English** everywhere a person reads it: UI
+  strings, Handboek articles, starter prompts, and prompt text a model may
+  echo back. *Practice*, *color*, *organize*, *labeled*, *catalog*, *gray*.
+  Code that recognizes what a person typed (brief routing, intent matchers)
+  keeps accepting British spellings too.
 - **No emojis in committed UI** (repeating the rule from CLAUDE.md). The
   ⭐ Meester badge is the single sanctioned exception.
 
@@ -257,7 +262,11 @@ tray in the same order with the same copy (`engagement-modes.ts`).
 
 These are discrete menu radio choices, not a continuous range. Left and
 right arrows walk the tray (Radix menus only move up and down, so the tray
-adds them); Enter, Space, or a click commits one mode and closes the menu.
+adds them); Enter, Space, or a click commits one mode and leaves the menu
+open, so the readout confirms what was just applied. The menu shows the pick
+at once and falls back if the save fails. Each unlatched key describes itself
+in a tooltip on hover or focus, while the latched key has the readout instead.
+The first Escape dismisses a showing tooltip and the next closes the menu.
 Chat only and Off can stop a running Night Shift. Night Shift stays below
 the tray as its own section, never as a fifth key.
 
@@ -296,6 +305,31 @@ All of this wording is decided in one place, `nightShiftSummary` in
 Name times plainly ("Instead of waiting until 10:00 PM", "It starts again
 tomorrow at 10:00 PM") and never the machinery ("deferred indexing",
 "scheduled window").
+
+## Controls: checkbox cards
+
+Keys latch **one** choice. When several options may be picked at once — the
+interest areas (`InterestPicker`), the meester's folder question — each
+option is a **checkbox card**: a bordered card with a native checkbox, a
+label, and an optional muted hint. A whole key turning accent says "this is
+the one", which is the wrong message for a set, and a row of latched keys
+reads as a wall of orange. The checkbox says "on" by itself.
+
+- **The recipe** is the "Checkbox cards" block in
+  [styles/controls-handbook-and-admin.css](../packages/ui/src/styles/controls-handbook-and-admin.css):
+  `.gz-check-cards` is the grid, `.gz-check-card` the `<label>`, with
+  `.gz-check-card-text` → `.gz-check-card-label` + `.gz-check-card-hint`.
+- **Every card in a group is the same size.** The grid fixes the column
+  width and `grid-auto-rows: 1fr` gives every row the tallest card's height.
+  A surface changes the column width only through `--gz-check-card-min`.
+- **Ticked = accent edge plus a faint tint**, never a full accent fill.
+  States come from the input through `:has()`, so markup carries no state
+  class. The card takes the focus ring; the checkbox's own outline is off.
+- **A hint describes, it does not name.** When a card has a hint, point the
+  checkbox's `aria-labelledby` at the label and `aria-describedby` at the
+  hint, so a screen reader hears "Data and spreadsheets, checkbox" and the
+  hint after it rather than both lines as one name.
+- **Nothing starts ticked** unless the person ticked it earlier.
 
 ## Controls: budget sliders
 
@@ -657,14 +691,33 @@ and the meester's lines in the chat register (serif body). Rules:
   phone offers only the ones that also passed on the phone (`phone: true`).
 - **The welcome asks what the person wants help with.** A new install (a
   `firstUseAt` within the week) that has not answered sees the interest
-  tray under the meester's question, "While I fetch my tools: what would
-  you like help with? Pick any." (`InterestTray`, plain keys, several can be
-  latched, none required). When the model is already on the machine the same
-  tray sits inline above the first projects. Each press saves at once and the
-  first projects re-order under it; the tray stays for the visit rather than
-  vanishing on the first press, and "Not now" (or "Done") puts it away. An
-  established install is never interrupted to ask; Settings → General → What
-  you use gezel for holds the same tray, with each area's hint.
+  picker under the meester's question, "What would you like help with? Pick
+  any." (`InterestPicker`, checkbox cards with bare
+  labels, several can be ticked, none required; see
+  [Controls: checkbox cards](#controls-checkbox-cards)). When the model is
+  already on the machine the same picker sits inline above the first
+  projects. Each tick saves at once and the first projects re-order under it;
+  the picker stays for the visit rather than vanishing on the first tick, and
+  "Not now" (or "Done") puts it away. While the tools download, one line
+  sits between the picker and the first projects: "While tools are
+  downloading, let's get ready for our first conversation. Here are some
+  ideas for things the crew can help you with." Once the picker is put away,
+  that line moves up and leads the welcome. An established install is never
+  interrupted to ask; Settings → General → What you use gezel for holds the
+  same picker, with each area's hint.
+- **The intro plays through first run.** Whenever the welcome is still
+  waiting on its tools, in any state (before the download, during it, while
+  getting ready, or with a cloud AI to connect), "Also, here is a bit more
+  info about gezel:" and the "What is gezel?" Handboek article as a video
+  (`IntroHandboekArticle` `variant="player"`: the player alone at the
+  video's own 16:9 height with its controls over the frame's foot, standard
+  closed captions, never autoplaying, Open in Handboek beneath) sit under the
+  first projects. Keying
+  it to a running download made it come and go with page reloads and models
+  already on disk. It stays for the visit after the tools land, so they never
+  pull the video from under someone watching, and the "Take the 1-minute
+  tour" link is left out while it is there. Past first run the intro waits
+  behind that link. A phone, which draws its own model list, does not show it.
 
 ### The first request: crew, working notes, the finished thing
 
@@ -769,9 +822,17 @@ the title from the topic and choose the crew automatically. Required inputs
 stay visible; optional inputs, additional fields, Title, Assign to, and step
 roles live in a closed **More options** disclosure. Plans with nothing to
 ask show a single confirmation. Keep launch errors beside the action keys.
+Enter in a field always means **Start now**: Tonight is a plain button, never
+the form's default. Offer **Tonight**, here and on the composer's task strip,
+only while the Night Shift is on and the host can work in the background; a
+task queued for a shift that never runs is a silent failure.
 
 Output summaries come from declared output files, including publishing steps
-before a final Finish step. **Usually about N minutes here** appears only
+before a final Finish step. They stand in for the description only on the six
+starters; every other plan card shows its own description, and its
+**You'll get** line appears only for a deliverable the type names (a deck,
+document, PDF, video or GIF). A scratch `.md` or `.html` file says nothing
+about what the person receives. **Usually about N minutes here** appears only
 when this install has completed runs of the same plan. Use the median elapsed
 time, ending at the last completed step; exclude overnight waits, recurring
 hosts, and child tasks. Do not infer time from a later task edit or collect
@@ -831,6 +892,9 @@ across projects. It stays available when quiet. **Needs you**, **Working**,
 scheduled work, and finished results. A task’s saved “active” lifecycle is not
 evidence that it is running; runtime queue and conversation facts decide that.
 Link the task, handoff, and conversation by identity so they appear as one job.
+Work parked until a time (a recurring schedule, the Night Shift window) is listed
+under **Next** but never counted on the key: the Meester's nightly review is
+always waiting, so a count there would only send the person looking for nothing.
 The key uses the title bar's sage face, cream ink, and subtle border, matching
 its neighboring status controls in both themes. A small indicator light carries
 attention in amber; the whole key does not change color when something needs you.
@@ -1276,6 +1340,20 @@ beside a pick, and dismissing it is remembered for that text — the daemon is
 told not to re-derive the route when the plain message goes. This retired the
 read-only sparkle chip in the toolbar, which showed the route and could not be
 acted on.
+
+**The strip names a sample and offers the person's own file.** A starter that
+launches on a book's bundled sample reads `source: a small shop's monthly sales
+(sample)`, the book's own title for it, never a generic "the sample", and that
+entry is never clipped, so "(sample)" always shows. An input that a sample
+fills, or a required one that nothing fills yet, gets a `gz-key` beside
+Tonight: **Use your own file…** / **Choose file…** (*folder* for a folder
+input). It opens the system picker filtered to the types the plan reads and
+uploads into the task's input staging, exactly as the dialog's "From your
+computer" does. It is not the composer's paperclip, because message
+attachments never reach a task's inputs. While it uploads, the key counts
+progress and Send waits. A refused pick replaces the readout line with the
+reason. A source the person chose themselves gets no key; they change it in
+the dialog.
 
 **Task is a secondary word key beside Send, offered only on a fresh thread.**
 The key attaches a craftbook to the message; it never fires one. Send stays
@@ -2087,13 +2165,24 @@ first-night estimate when it runs to hours, and the "Work on this folder
 overnight" switch. That switch is the folder's one off-switch for night work;
 there is no second place to look for it.
 
-**The morning leads with decisions.** While the night's review card is
-unanswered, Home opens on **Night shift** whatever the band's saved
-collapse, and the tab stays until the card is dismissed — an unread night
-does not expire. The card leads (proposals, then reports, then what finished,
-a paused review's Resume, the quiet night's reason with its one fix), then the
-main report reads in place, then what is already queued for tonight. One
-desktop notification announces it; the renderer never raises a second.
+**The morning leads with decisions.** A night earns a review card when it
+made something (a proposal sealed, a report written, a task finished) or when
+it was held back for a reason the person can fix (on battery, the quota
+reserve), and the same reason is not repeated until a night has run. An
+ordinary quiet night (the computer slept, gezel was closed, nothing to do)
+earns nothing: a card every morning saying nothing happened teaches people to
+ignore the card. A newer card retires an older unanswered one only when it
+repeats it (an older quiet card, or one showing only proposals, which stay
+on every card until decided); a card with reports or finished work stays until
+dismissed, because no later card lists that night again. While the card
+is unanswered, Home opens on **Night shift** once per card per launch,
+whatever the band's saved collapse, and the tab stays until the card is
+dismissed — an unread night does not expire. The card leads (proposals, then
+reports, then what finished, the held night's reason with its one fix), then
+the main report reads in place, then what is already queued for tonight. One
+desktop notification announces a night that made something, titled for what
+is on the card; a quiet card never notifies, and the renderer never raises a
+second.
 Both the unanswered review and the recent night summary use the available width beside the
 Meester's figure. The review uses the intro's 90% overlay, leaving the shadowed
 chat strip available to return to the conversation. Keep the tabs and collapse

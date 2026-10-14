@@ -342,6 +342,58 @@ describe('capped walk', () => {
   });
 });
 
+describe('image metadata version bump', () => {
+  // Minimal valid PNG header declaring 800x600.
+  const png = (seed: number) =>
+    Buffer.concat([
+      Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x03, 0x20, 0x00, 0x00, 0x02, 0x58, 0x08, 0x02, 0x00, 0x00, 0x00,
+      ]),
+      Buffer.alloc(8, seed),
+    ]);
+  const dbPath = () => join(dir, '.gezel', 'index', 'index.db');
+  const openStore = async () =>
+    (await IndexStore.open(dbPath(), { collectionId: 'c', kind: 'workspace', rootPath: dir }))!;
+
+  it('re-reads each photo once even when every walk is capped', async () => {
+    for (const n of [1, 2, 3]) await writeFile(join(dir, `p${n}.png`), png(n));
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    let store = await openStore();
+    store.setMeta('image_meta_version', '2');
+    store.close();
+
+    // A library past the file cap: every walk stops short, so the version
+    // stamp cannot be written, and each pass used to re-read every photo.
+    let rereads = 0;
+    for (let pass = 0; pass < 3; pass++) {
+      rereads += (await runWorkspaceContentIndex(dir, 'c', artifacts, { maxFiles: 2 }))!.changed;
+    }
+    store = await openStore();
+    expect(store.getMeta('image_meta_version')).toBe('2');
+    store.close();
+
+    // A complete walk re-reads only what the capped ones never reached.
+    rereads += (await runWorkspaceContentIndex(dir, 'c', artifacts))!.changed;
+    expect(rereads).toBe(3);
+    store = await openStore();
+    expect(store.getMeta('image_meta_version')).not.toBe('2');
+    store.close();
+    expect((await runWorkspaceContentIndex(dir, 'c', artifacts))!.changed).toBe(0);
+  });
+
+  it('starts over when the version moves again after a downgrade', async () => {
+    await writeFile(join(dir, 'p1.png'), png(1));
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    for (const version of ['2', '1']) {
+      const store = await openStore();
+      store.setMeta('image_meta_version', version);
+      store.close();
+      expect((await runWorkspaceContentIndex(dir, 'c', artifacts))!.changed).toBe(1);
+    }
+  });
+});
+
 describe('exifTakenAt', () => {
   it('reads the camera time and refuses the all-zero placeholder', () => {
     expect(exifTakenAt('2019:07:04 18:22:01')).toBe('2019-07-04T18:22:01');

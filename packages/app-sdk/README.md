@@ -226,6 +226,29 @@ await gezel.close();
 - **Its own port.** A hosted daemon always listens on an ephemeral port, never the canonical 6228 that the machine broker or the user's own Gezel expects to own.
 - **An inference-only profile.** `host: { inferenceOnly: true }` serves on-device model listing and installation, OpenAI-compatible chat and Responses, embeddings (`model: 'gezel:embeddings'` runs the on-device text embedder) and knowledge search — and nothing of the product: no projects, chats or app tools, so `ensureProject` and `openChat` need a full host. It starts no schedulers, channels, editor bridges, machine-service discovery, indexing or maintenance jobs, and sets up no remote connectivity: no secret store (nothing in the OS keychain), no device identity, and no pairing or LAN-serving endpoints. Both host modes serve the same surface. In-process, the SDK calls `@bendyline/gezel-inference` through its direct Fetch handler, so Electron needs neither a separate Node executable nor a loopback client connection.
 
+An inference-only app ensures its model and chats with the id `ensureModel` returns as `chatModel`, which names the engine as well as the model:
+
+```ts
+const gezel = await connectOrHost({
+  appId: 'acme.editor',
+  appName: 'Acme Editor',
+  scopes: ['openai'],
+  host: { mode: 'in-process', inferenceOnly: true },
+});
+
+const { chatModel } = await gezel.ensureModel({ model: 'qwen3.5-0.8b-q4' });
+
+const reply = await gezel.openai.chat({
+  model: chatModel, // 'mlx:qwen3.5-0.8b-q4' on Apple Silicon, 'llama-cpp:…' elsewhere
+  messages: [{ role: 'user', content: 'Suggest a title for these notes: …' }],
+});
+console.log(reply.choices[0].message.content);
+
+await gezel.close();
+```
+
+A bare id such as `qwen3.5-0.8b-q4` also works while it is the pinned default, which `ensureModel` sets on a daemon your app hosts.
+
 Install `@bendyline/gezel-inference` alongside this SDK for inference-only in-process hosting, or `@bendyline/gezel-service` for full or child-process hosting. Both are optional peer dependencies, so apps that only connect never download either.
 Keep the SDK and the hosting package on compatible releases. Inference-only hosting verifies
 that the host actually started the embedded profile and supplied its direct

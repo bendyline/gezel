@@ -939,7 +939,7 @@ function NightShiftGlyph({ active }: { active: boolean }) {
  * the shift runs, and the animated moon temporarily becomes the trigger icon.
  */
 function TaskSpeedMenu({
-  mode,
+  mode: savedMode,
   nightShift: state,
   onNightShiftChange: onChange,
 }: {
@@ -947,6 +947,13 @@ function TaskSpeedMenu({
   nightShift: NightShiftState;
   onNightShiftChange: (s: NightShiftState) => void;
 }) {
+  // The menu stays open after a pick, so show it at once rather than after
+  // the config save round-trips; a failed save falls back to the saved mode.
+  const [picked, setPicked] = useState<EngagementMode | null>(null);
+  const mode = picked ?? savedMode;
+  useEffect(() => {
+    setPicked((was) => (was === savedMode ? null : was));
+  }, [savedMode]);
   const current = ENGAGEMENT_MODES.find((o) => o.mode === mode) ?? ENGAGEMENT_MODES[0]!;
   const title = state.active
     ? `Crew activity: ${current.label}. Night Shift running. Click to change.`
@@ -965,13 +972,15 @@ function TaskSpeedMenu({
 
   const handleModeSelect = (next: EngagementMode) => {
     if (next !== mode) {
+      setPicked(next === savedMode ? null : next);
       void api
         .updateConfig({ aiEngagementMode: next })
         .then((res) => {
           window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
         })
         .catch(() => {
-          /* the trigger stays on the previous mode and the user can retry */
+          // Back to the saved mode; the user can retry.
+          setPicked((was) => (was === next ? null : was));
         });
     }
 

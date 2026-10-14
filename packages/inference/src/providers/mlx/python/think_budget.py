@@ -22,7 +22,25 @@ disables enforcement for the rest of the turn rather than killing it.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
+
+# An opener the chat template left as the last thing before generation: the
+# model then starts inside reasoning and only ever streams the closer. Gemma 4
+# names its channel on the opener's line (`<|channel>thought\n`).
+_OPEN_TAIL = re.compile(r"(?:<think>|<reasoning>|\[THINK\]|<\|channel>[A-Za-z_][\w-]*)\s*$", re.IGNORECASE)
+
+
+def prompt_opens_reasoning(prompt: str) -> bool:
+    """Whether the rendered prompt leaves generation inside a reasoning block.
+
+    The client splits live reasoning from the reply and cannot get this from
+    the template text: Qwen 3.5's small models open `<think>` only when
+    `enable_thinking` is explicitly true, and Gemma 4 opens its thought
+    channel only after a tool response. Guessing wrong streams the model's
+    thoughts as its answer.
+    """
+    return bool(_OPEN_TAIL.search(prompt or ""))
 
 
 class ThinkBudgetProcessor:

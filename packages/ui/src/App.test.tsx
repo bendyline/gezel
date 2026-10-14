@@ -304,9 +304,22 @@ describe('Output pane titlebar restore', () => {
 describe('Crew activity menu', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    // The mode tooltips' arrow measures itself.
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
     vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: false, source: null });
     vi.mocked(api.updateConfig).mockImplementation(async (body) => body as never);
     vi.mocked(api.setNightShiftManual).mockResolvedValue({ active: false, source: null });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('combines execution modes and the moon-labelled Night Shift area', async () => {
@@ -378,6 +391,12 @@ describe('Crew activity menu', () => {
       'true',
     );
     expect(api.updateConfig).not.toHaveBeenCalled();
+    // The focused key's tooltip describes it; the first Escape dismisses the
+    // tooltip and the second closes the menu.
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/answer when you ask/);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+    expect(screen.getByRole('menu')).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(trigger).toHaveFocus();
     expect(api.updateConfig).not.toHaveBeenCalled();
@@ -390,10 +409,8 @@ describe('Crew activity menu', () => {
     await waitFor(() =>
       expect(api.updateConfig).toHaveBeenCalledWith({ aiEngagementMode: 'scheduled' }),
     );
-    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-    await user.click(
-      await screen.findByRole('button', { name: 'Crew activity: Tasks + chat. Click to change.' }),
-    );
+    // Committing a mode keeps the menu open so the readout confirms it.
+    expect(screen.getByRole('menu')).toBeInTheDocument();
     expect(screen.getByRole('menuitemradio', { name: /Tasks \+ chat/ })).toHaveAttribute(
       'aria-checked',
       'true',
@@ -402,6 +419,59 @@ describe('Crew activity menu', () => {
       'aria-checked',
       'false',
     );
+    expect(document.querySelector('.app-engagement-readout')).toHaveTextContent(
+      /^Tasks \+ chat — /,
+    );
+    await user.keyboard('{Escape}');
+    expect(
+      await screen.findByRole('button', { name: 'Crew activity: Tasks + chat. Click to change.' }),
+    ).toHaveFocus();
+  });
+
+  it('shows the pick before the save returns and falls back when it fails', async () => {
+    const user = userEvent.setup();
+    let rejectSave!: (error: Error) => void;
+    vi.mocked(api.updateConfig).mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          rejectSave = reject;
+        }),
+    );
+    render(<App />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
+    );
+    await user.click(screen.getByRole('menuitemradio', { name: /Chat only/ }));
+
+    expect(screen.getByRole('menuitemradio', { name: /Chat only/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(document.querySelector('.app-engagement-readout')).toHaveTextContent(/^Chat only — /);
+
+    await act(async () => rejectSave(new Error('offline')));
+    expect(screen.getByRole('menuitemradio', { name: /Proactive/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(document.querySelector('.app-engagement-readout')).toHaveTextContent(/^Proactive — /);
+  });
+
+  it('describes the unlatched modes in tooltips', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
+    );
+
+    await user.hover(screen.getByRole('menuitemradio', { name: /Tasks \+ chat/ }));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      /work through tasks and schedules/,
+    );
+
+    // The latched key is already described by the readout beneath the tray.
+    await user.hover(screen.getByRole('menuitemradio', { name: /Proactive/ }));
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
   });
 
   it.each([

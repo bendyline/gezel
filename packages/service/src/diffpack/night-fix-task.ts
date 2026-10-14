@@ -199,7 +199,7 @@ function hostSteps(args: CreateNightFixTaskArgs): Steps {
         'Read the affected files and decide which leads are real and which belong',
         'together as ONE change. A fix that spans a file and its caller is one cluster,',
         'not two — splitting it would hand the user two half-changes. A lead that no',
-        'longer matches the file, or that needs a judgement only the owner can make, is',
+        'longer matches the file, or that needs a judgment only the owner can make, is',
         'a legitimate thing to leave out; say so rather than editing to satisfy a review.',
         '',
         'Write ONE `write_task_note` starting with the line `## Triage`: per lead, whether',

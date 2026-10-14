@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { type RunReadinessClient, checkRunReadiness } from './run-readiness.js';
+import {
+  type RunReadinessClient,
+  checkRunReadiness,
+  formatRunSetupMessage,
+} from './run-readiness.js';
 
 interface FakeState {
   provider?: string;
@@ -100,5 +104,31 @@ describe('checkRunReadiness', () => {
       GEZEL_MOCK_PROVIDER: '1',
     });
     expect(result).toEqual({ ready: true });
+  });
+});
+
+describe('formatRunSetupMessage', () => {
+  it('offers a model already downloaded before pulling the pinned one', () => {
+    const message = formatRunSetupMessage({
+      provider: 'mlx',
+      engineMissing: false,
+      pinned: 'qwen3.8-27b-q4',
+      installedIds: ['qwen3.5-0.8b-q4'],
+      platformDefault: 'mlx',
+    });
+    expect(message).toContain('gezel model use qwen3.5-0.8b-q4');
+    expect(message).toContain('gezel model pull qwen3.8-27b-q4');
+  });
+
+  it('sends a person with no model to the catalog listing', () => {
+    const message = formatRunSetupMessage({
+      provider: 'llama-cpp',
+      engineMissing: true,
+      pinned: undefined,
+      installedIds: [],
+      platformDefault: 'mlx',
+    });
+    expect(message).toContain('gezel model list --available --provider llama-cpp');
+    expect(message).toContain('gezel model pull <id> --provider llama-cpp');
   });
 });

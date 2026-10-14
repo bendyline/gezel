@@ -31,7 +31,7 @@ Did the cancelled proposal stay cancelled? Is the action assigned to someone
 who actually works here?
 
 Every task is checked the same way for every model, by a program rather than
-a person, so nobody's favourite gets the benefit of the doubt.
+a person, so nobody's favorite gets the benefit of the doubt.
 
 ## Four sets of jobs
 
@@ -50,7 +50,7 @@ reconciled summary.
 | Schema migration (`schema-migration`) | Refactor a small multi-file TypeScript app from one name field to first and last names, preserve every record, add tests and notes, and pass the type check. |
 | Tests as the specification (`failing-tests-spec`) | Work out an order-lifecycle state machine from its tests alone, implement it, and make every test pass without changing the tests. |
 | Debug from symptoms (`symptom-debug`) | Diagnose an undocumented pagination error from the failing output, then fix the implementation without changing the acceptance check. |
-| Data wrangling (`data-wrangle`) | Clean three messy CSV exports, standardise dates and email addresses, remove duplicates, sort the records, and produce the exact required JSON. |
+| Data wrangling (`data-wrangle`) | Clean three messy CSV exports, standardize dates and email addresses, remove duplicates, sort the records, and produce the exact required JSON. |
 | Incident postmortem (`incident-postmortem`) | Read five evidence files and write a structured, blame-free postmortem with accurate facts and citations, without inventing unmeasured impact. |
 | Runbook anomaly (`ops-runbook-anomaly`) | Follow a maintenance checklist step by step, verify and record each action, and stop with a grounded report when a planted backup check fails. |
 | Plan and estimate (`plan-and-estimate`) | Produce an office-relocation plan with valid owners, correctly ordered dependencies, risks, and a checkable definition of done for every task. |
@@ -69,12 +69,12 @@ a Word document.
 | Plan the week (`craftbook-week-plan`) | Turn eight calendar events into a five-day plan, flag meetings that need preparation, resolve a Tuesday conflict, and protect focus time. |
 | A/B test read-out (`craftbook-ab-test-readout`) | Calculate the experiment results correctly and apply a pre-set decision rule, including a safety measure that overrides an otherwise positive result. |
 | Annotated bibliography (`craftbook-annotated-bibliography`) | Produce six consistently formatted source entries, each with a summary, an evaluation of the source, and its relevance to the question. |
-| Records intake (`records-intake`) | Combine registrations from emails, phone notes, and an old CSV into one correctly shaped, deduplicated record set with standardised dates. |
+| Records intake (`records-intake`) | Combine registrations from emails, phone notes, and an old CSV into one correctly shaped, deduplicated record set with standardized dates. |
 | Plan and estimate (`plan-and-estimate`) | Produce an office-relocation plan with valid owners, correctly ordered dependencies, risks, and a checkable definition of done for every task. |
 | Meeting follow-up (`meeting-followup`) | Reconcile a noisy transcript, stale agenda, and current staff list into a decision brief and an exact action register with owners, dates, dependencies, questions, and risks. |
 | Spreadsheet model (`craftbook-spreadsheet-model`) | Calculate the correct roll-ups from seeded records and turn them into a useful spreadsheet-style model and read-out that highlights the main risk. |
 | Conflict synthesis (`conflict-synthesis`) | Reconcile five documents that disagree about a launch date, budget, and owner; show each conflict and use the authoritative answer consistently. |
-| Theme round-trip (`docblocks-theme-roundtrip`) | Read the theme from a brand document, apply it to a presentation, inspect the result, and report only fonts, colours, page counts, and unresolved styles returned by the document tools. |
+| Theme round-trip (`docblocks-theme-roundtrip`) | Read the theme from a brand document, apply it to a presentation, inspect the result, and report only fonts, colors, page counts, and unresolved styles returned by the document tools. |
 | Research to Word (`craftbook-research-to-document`) | Turn reviewed, source-grounded Markdown into a real editable Word document, preview it, and save the finished `.docx` as an artifact. |
 | PowerPoint deck (`craftbook-powerpoint-deck`) | Acquire and cite source material, create an outline, make every slide match it, and save a real editable `.pptx` presentation. |
 | Wikipedia research brief (`wikipedia-research-brief`) | Use a closed local copy of Wikipedia to select the relevant sources and write a cited 700–1,500 word brief with correct chronology and careful treatment of a disputed claim. |
@@ -163,7 +163,7 @@ that track.
 
 **A score is not a recommendation for your machine.** Results come from one
 particular computer. A model that scores well on a large desktop may not fit
-on a laptop at all. The Models catalogue in the app is what knows your
+on a laptop at all. The Models catalog in the app is what knows your
 hardware.
 
 **A score is not a ceiling.** These are tasks we chose. A model that does

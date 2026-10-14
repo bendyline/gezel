@@ -4,16 +4,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import {
   type LaunchReadiness,
+  type PickableInput,
   type SuppressedSuggestion,
   launchReadiness,
   mergeSuggestedLaunch,
+  pickableInputs,
   uploadStagingIds,
+  withPickedInput,
 } from './composer-task-launch.js';
 import {
   type CraftbookCatalogArt,
   useCraftbookCatalogArt,
   useCraftbookCatalogLookup,
 } from './craftbook-catalog-art.js';
+import type { PickedSet } from './craftbook-input/pick-files.js';
+import { stageInputUpload } from './craftbook-input/stage-upload.js';
 import type { PromptDraftController } from './usePromptDraft.js';
 
 /**
@@ -39,12 +44,26 @@ export interface UseComposerTaskLaunchOptions {
   planText: string;
 }
 
+/** A file the person is picking from the strip for one input. */
+export interface InputPickState {
+  key: string;
+  /** Uploaded so far; absent while the staging area is being opened. */
+  progress?: { done: number; total: number };
+  /** The pick could not be used. Shown on the strip until the next pick. */
+  error?: string;
+}
+
 export interface ComposerTaskLaunchController {
   attached: PromptDraftTaskLaunch | null;
   art: CraftbookCatalogArt | null;
   readiness: LaunchReadiness;
   /** Upload inputs whose staging area is gone; the person re-picks them. */
   stale: string[];
+  /** Inputs the strip can fill from the person's computer. */
+  pickable: PickableInput[];
+  picking: InputPickState | null;
+  /** Upload a pick for one input; it replaces the sample or fills the gap. */
+  pickInput: (key: string, pick: PickedSet) => Promise<void>;
   attach: (launch: PromptDraftTaskLaunch) => Promise<void>;
   dismiss: () => Promise<void>;
   /** The launch went out; forget it locally (the sent draft keeps the record). */
@@ -87,6 +106,18 @@ export function useComposerTaskLaunch(
       (candidate) => candidate && attached && candidate.manifest.id === attached.craftbookId,
     ) ?? null;
   const manifest = resolvedArt?.manifest ?? null;
+  const manifestRef = useRef(manifest);
+  manifestRef.current = manifest;
+  const [picking, setPicking] = useState<InputPickState | null>(null);
+  const pickAbortRef = useRef<AbortController | null>(null);
+
+  const cancelPick = useCallback(() => {
+    pickAbortRef.current?.abort();
+    pickAbortRef.current = null;
+    setPicking(null);
+  }, []);
+
+  useEffect(() => () => pickAbortRef.current?.abort(), []);
 
   // Hydrate from the draft only when a different draft arrives: a PATCH
   // round-trip echoing our own write must never repaint over a newer edit.
@@ -100,13 +131,15 @@ export function useComposerTaskLaunch(
       hydratedDraftIdRef.current = null;
       if (attachedRef.current) setAttached(null);
       setStale([]);
+      cancelPick();
       return;
     }
     if (!draft.meta || draft.meta.id !== id) return;
     hydratedDraftIdRef.current = id;
     setAttached(draft.meta.taskLaunch ?? null);
     setStale([]);
-  }, [enabled, draft.draftId, draft.meta]);
+    cancelPick();
+  }, [enabled, draft.draftId, draft.meta, cancelPick]);
 
   const persist = useCallback(async (launch: PromptDraftTaskLaunch | null): Promise<void> => {
     const controller = draftRef.current;
@@ -127,6 +160,7 @@ export function useComposerTaskLaunch(
       const previous = attachedRef.current;
       setAttached(launch);
       setStale([]);
+      setPicking((current) => (current?.error ? null : current));
       const keep = new Set(uploadStagingIds(launch));
       for (const stagingId of uploadStagingIds(previous)) {
         if (!keep.has(stagingId))
@@ -142,12 +176,59 @@ export function useComposerTaskLaunch(
     [persist, projectId],
   );
 
+  const pickInput = useCallback(
+    async (key: string, pick: PickedSet) => {
+      const launch = attachedRef.current;
+      const book = manifestRef.current;
+      if (!launch || !book) return;
+      const target = pickableInputs(launch, book).find((p) => p.input.key === key);
+      if (!target) return;
+      pickAbortRef.current?.abort();
+      const abort = new AbortController();
+      pickAbortRef.current = abort;
+      setPicking({ key });
+      const value = await stageInputUpload({
+        projectId,
+        craftbookId: launch.craftbookId,
+        input: target.input,
+        pick,
+        signal: abort.signal,
+        onProgress: (progress) => {
+          if (pickAbortRef.current === abort && progress.progress) {
+            setPicking({ key, progress: progress.progress });
+          }
+        },
+      });
+      if (pickAbortRef.current !== abort || !value) return;
+      pickAbortRef.current = null;
+      const source = value.source;
+      if (!source) {
+        setPicking({ key, error: value.error ?? 'That file could not be used.' });
+        return;
+      }
+      // Merge into the attachment as it is now (a Tonight toggle may have
+      // landed mid-upload), unless the input is no longer the strip's to fill.
+      const current = attachedRef.current;
+      if (!current || !pickableInputs(current, book).some((p) => p.input.key === key)) {
+        if (source.from === 'upload') {
+          void api.taskInputs.deleteInputStaging(projectId, source.stagingId).catch(() => {});
+        }
+        setPicking(null);
+        return;
+      }
+      setPicking(null);
+      await attach(withPickedInput(current, key, { ...value, source }));
+    },
+    [projectId, attach],
+  );
+
   const dismiss = useCallback(async () => {
     const previous = attachedRef.current;
     if (!previous) return;
     if (previous.origin === 'suggested') {
       suppressedRef.current = { craftbookId: previous.craftbookId };
     }
+    cancelPick();
     setAttached(null);
     setStale([]);
     for (const stagingId of uploadStagingIds(previous)) {
@@ -162,14 +243,15 @@ export function useComposerTaskLaunch(
     if (controller.draftId && !getTextRef.current().trim() && !controller.meta?.hasFiles) {
       await controller.discard();
     }
-  }, [persist, projectId]);
+  }, [persist, projectId, cancelPick]);
 
   const clearAfterSend = useCallback(() => {
     hydratedDraftIdRef.current = null;
     setAttached(null);
     setStale([]);
+    cancelPick();
     suppressedRef.current = null;
-  }, []);
+  }, [cancelPick]);
 
   const suggestionDismissed = useCallback((): boolean => {
     const suppressed = suppressedRef.current;
@@ -255,12 +337,16 @@ export function useComposerTaskLaunch(
 
   const hasMessage = planText.trim().length > 0;
   const attachedMissing = lookup.status === 'missing' && resolvedArt === null;
-  const readiness = useMemo<LaunchReadiness>(
-    () =>
-      attached
-        ? launchReadiness(attached, manifest, { hasMessage, missing: attachedMissing })
-        : { ready: true },
-    [attached, manifest, hasMessage, attachedMissing],
+  const uploading = picking !== null && !picking.error;
+  const readiness = useMemo<LaunchReadiness>(() => {
+    if (!attached) return { ready: true };
+    // Send mid-upload would start the task on the sample the pick replaces.
+    if (uploading) return { ready: false, reason: 'Wait for the file to finish uploading.' };
+    return launchReadiness(attached, manifest, { hasMessage, missing: attachedMissing });
+  }, [attached, manifest, hasMessage, attachedMissing, uploading]);
+  const pickable = useMemo(
+    () => (attached ? pickableInputs(attached, manifest) : []),
+    [attached, manifest],
   );
 
   return {
@@ -268,6 +354,9 @@ export function useComposerTaskLaunch(
     art: resolvedArt,
     readiness,
     stale,
+    pickable: enabled ? pickable : [],
+    picking,
+    pickInput,
     attach,
     dismiss,
     clearAfterSend,

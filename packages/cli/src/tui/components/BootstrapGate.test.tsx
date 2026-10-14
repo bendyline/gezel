@@ -248,7 +248,46 @@ describe('BootstrapGate interactions', () => {
     });
   });
 
-  it('puts the hardware recommendation ahead of an unrelated shared model', async () => {
+  it('leads with an installed model, ahead of downloading the hardware recommendation', async () => {
+    // Enter on the first option used to start a 16 GB download while a usable
+    // model sat on disk.
+    const client = createClient({
+      getConfig: vi.fn().mockResolvedValue({
+        provider: 'llama-cpp',
+        firstRunCompleted: true,
+        defaultModel: { 'llama-cpp': 'missing-provisional' },
+      }),
+      listLlamaCppModels: vi.fn().mockResolvedValue({
+        models: [{ id: 'shared-small', name: 'Shared Small' }],
+      }),
+      listCatalogItems: vi.fn(async (kind: string) =>
+        kind === 'chat-model'
+          ? { items: [chatModel({ id: 'best-fit', name: 'Best Fit', score: 20 })] }
+          : { items: [] },
+      ),
+    });
+    const harness = mountGate(client);
+
+    await vi.waitFor(() => {
+      const text = harness.text();
+      expect(text).toContain('Use Shared Small');
+      expect(text).toContain('Recommended — Download Best Fit');
+      expect(text.indexOf('Use Shared Small')).toBeLessThan(
+        text.indexOf('Recommended — Download Best Fit'),
+      );
+    });
+    await chooseFirst(harness, 'Use Shared Small');
+
+    await vi.waitFor(() => expect(harness.text()).toContain('READY'));
+    expect(client.installLlamaCppModel).not.toHaveBeenCalled();
+    expect(client.updateConfig).toHaveBeenCalledWith({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'shared-small' },
+      firstRunInstallError: null,
+    });
+  });
+
+  it('still offers the hardware recommendation next to an installed model', async () => {
     const client = createClient({
       getConfig: vi.fn().mockResolvedValue({
         provider: 'llama-cpp',
@@ -269,15 +308,7 @@ describe('BootstrapGate interactions', () => {
     });
     const harness = mountGate(client);
 
-    await vi.waitFor(() => {
-      const text = harness.text();
-      expect(text).toContain('Recommended — Download Best Fit');
-      expect(text).toContain('Use Shared Small');
-      expect(text.indexOf('Recommended — Download Best Fit')).toBeLessThan(
-        text.indexOf('Use Shared Small'),
-      );
-    });
-    await chooseFirst(harness, 'Recommended — Download Best Fit');
+    await chooseOption(harness, 'Recommended — Download Best Fit', '2');
 
     await vi.waitFor(() => expect(harness.text()).toContain('READY'));
     expect(client.installLlamaCppModel).toHaveBeenCalledWith(
@@ -286,6 +317,38 @@ describe('BootstrapGate interactions', () => {
       undefined,
       { skipCompanion: true },
     );
+  });
+
+  it('does not lead with an installed model this machine cannot run', async () => {
+    const client = createClient({
+      getConfig: vi.fn().mockResolvedValue({
+        provider: 'llama-cpp',
+        firstRunCompleted: true,
+        defaultModel: { 'llama-cpp': 'missing-provisional' },
+      }),
+      listLlamaCppModels: vi.fn().mockResolvedValue({
+        models: [{ id: 'huge', name: 'Huge' }],
+      }),
+      listCatalogItems: vi.fn(async (kind: string) =>
+        kind === 'chat-model'
+          ? {
+              items: [
+                chatModel({ id: 'best-fit', name: 'Best Fit', score: 20 }),
+                chatModel({ id: 'huge', name: 'Huge', score: 30, bytes: 400 * 1024 ** 3 }),
+              ],
+            }
+          : { items: [] },
+      ),
+    });
+    const harness = mountGate(client);
+
+    await vi.waitFor(() => {
+      const text = harness.text();
+      expect(text).toContain('Use Huge');
+      expect(text.indexOf('Recommended — Download Best Fit')).toBeLessThan(
+        text.indexOf('Use Huge'),
+      );
+    });
   });
 
   it('recommends an installed hardware winner without downloading it again', async () => {

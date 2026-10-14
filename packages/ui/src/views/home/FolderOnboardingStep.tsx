@@ -149,21 +149,20 @@ export function FolderOnboardingStep({
       {choices === null ? (
         <p className="muted">Looking through your folders…</p>
       ) : (
-        <div className="folder-onboarding-cards">
+        <div className="gz-check-cards folder-onboarding-cards">
           {choices.map((choice) => (
-            <label
-              key={choice.path}
-              className={`folder-onboarding-card${choice.selected ? ' is-selected' : ''}`}
-            >
+            <label key={choice.path} className="gz-check-card">
               <input
                 type="checkbox"
                 checked={choice.selected}
                 onChange={() => toggle(choice.path)}
                 disabled={busy}
               />
-              <span className="folder-onboarding-card-text">
-                <span className="folder-onboarding-card-name">{choice.label}</span>
-                <span className="folder-onboarding-card-detail">
+              <span className="gz-check-card-text">
+                <span className="gz-check-card-label folder-onboarding-card-name">
+                  {choice.label}
+                </span>
+                <span className="gz-check-card-hint">
                   {choice.census
                     ? folderCensusLine(
                         choice.census,

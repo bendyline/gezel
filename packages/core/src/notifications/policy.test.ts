@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatEvent, ChatEventEnvelope } from '../schemas/gezel.js';
 import type { ProjectReminder } from '../schemas/notifications.js';
-import type { Question } from '../schemas/question.js';
+import type { NightShiftReviewIntent, Question } from '../schemas/question.js';
 import {
   type EarnedContext,
   type EarnedItem,
@@ -116,19 +116,68 @@ describe('earned notifications', () => {
     expect(earnedItemFor(levelUp, social)).toMatchObject({ title: 'Anna reached level 3' });
   });
 
-  it('says the night’s review once, and not at all when it is turned off', () => {
-    const review = asked(
-      question({ intent: { kind: 'night-shift-review' } as Question['intent'] }),
+  const morningCard = (
+    intent: Partial<NightShiftReviewIntent>,
+    prompt = 'The night shift finished 1 task and left 1 report for you.',
+  ) =>
+    asked(
+      question({
+        id: 'morning-q',
+        prompt,
+        intent: {
+          kind: 'night-shift-review',
+          windowKey: '2026-10-06',
+          tasksCompleted: 0,
+          reports: [],
+          ...intent,
+        },
+      }),
     );
+
+  it('says the night’s review once, and not at all when it is turned off', () => {
+    const review = morningCard({
+      tasksCompleted: 1,
+      reports: [{ projectId: 'default', path: 'night-shift-report.md', actionCount: 0 }],
+    });
     expect(earnedItemFor(review, plain)).toMatchObject({
+      key: 'morning:morning-q',
       kind: 'morning',
       title: 'Your crew worked overnight',
+      body: 'The night shift finished 1 task and left 1 report for you.',
+      view: 'home',
     });
+    expect(earnedItemFor(review, social)).toMatchObject({ title: 'Your crew worked overnight' });
     expect(earnedItemFor(review, { ...plain, morningNotification: false })).toBeNull();
     const finishedCard = asked(
       question({ intent: { kind: 'task-finished', taskRef: 'trip/4' } as Question['intent'] }),
     );
     expect(earnedItemFor(finishedCard, plain)).toBeNull();
+  });
+
+  it('never interrupts anyone about a quiet night', () => {
+    for (const reason of ['asleep', 'on-battery', 'quota-held', 'no-work', 'stopped'] as const) {
+      const quiet = morningCard(
+        { quiet: { reason } },
+        'Your crew waited last night because the computer was running on battery.',
+      );
+      expect(earnedItemFor(quiet, plain)).toBeNull();
+      expect(earnedItemFor(quiet, social)).toBeNull();
+    }
+  });
+
+  it('heads the notification by what the card holds', () => {
+    const swept = morningCard(
+      { indexing: { filesIndexed: 12, filesReviewed: 0, mediaDescribed: 0 } },
+      'Overnight your crew read 12 files.',
+    );
+    expect(earnedItemFor(swept, plain)).toMatchObject({ title: 'Your crew worked overnight' });
+    // Proposals are not counted in the intent; the heading must not claim work it cannot see.
+    const proposalsOnly = morningCard({}, 'The night shift left 1 change proposal for you.');
+    expect(earnedItemFor(proposalsOnly, plain)).toMatchObject({
+      title: 'Your morning review is ready',
+      line: 'Your morning review is ready',
+      body: 'The night shift left 1 change proposal for you.',
+    });
   });
 });
 

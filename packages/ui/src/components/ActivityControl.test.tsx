@@ -201,6 +201,43 @@ describe('Activity', () => {
       await screen.findByRole('button', { name: 'Activity — 1 working · automatic work paused' }),
     ).toBeVisible();
   });
+  it('lists scheduled work under Next without counting it on the key', async () => {
+    const current = snapshot([]);
+    current.items = [
+      {
+        id: 'task:default/1',
+        section: 'next',
+        title: 'Night-shift oversight: project review',
+        detail: 'Scheduled for the next Night Shift.',
+        taskRef: 'default/1',
+        scheduled: true,
+        questionIds: [],
+      },
+    ];
+    vi.mocked(api.getActivityStatus).mockResolvedValue(current);
+    render(
+      <ActivityProvider>
+        <ActivityControl />
+      </ActivityProvider>,
+    );
+    const trigger = await screen.findByRole('button', { name: 'Activity — All quiet' });
+    expect(trigger).toHaveTextContent('·');
+    await userEvent.click(trigger);
+    const next = screen.getByRole('region', { name: 'Next' });
+    expect(within(next).getByRole('heading', { name: 'Next 1' })).toBeVisible();
+    expect(within(next).getByText('Night-shift oversight: project review')).toBeVisible();
+
+    current.items.push({
+      id: 'task:shop/2',
+      section: 'next',
+      title: 'Spring catalog',
+      detail: 'Queued. Waiting for its gezel to be free.',
+      taskRef: 'shop/2',
+      questionIds: [],
+    });
+    await refresh();
+    expect(screen.getByRole('button', { name: 'Activity — 1 waiting or scheduled' })).toBeVisible();
+  });
   it('shows every question with answer controls already visible', async () => {
     vi.mocked(api.getActivityStatus).mockResolvedValue(snapshot([question(), question('q2')]));
     const dialog = await mount();
