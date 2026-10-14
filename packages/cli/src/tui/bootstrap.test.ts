@@ -1,6 +1,12 @@
 import type { CatalogItemSummary, RecoDevice } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { NATIVE_TOOLKIT, pickAccessoryModels, rankChatModels } from './bootstrap.js';
+import {
+  type BootstrapChatModel,
+  NATIVE_TOOLKIT,
+  orderInstalledChatModels,
+  pickAccessoryModels,
+  rankChatModels,
+} from './bootstrap.js';
 
 const GB = 1024 ** 3;
 const DEVICE: RecoDevice = {
@@ -147,6 +153,31 @@ describe('rankChatModels', () => {
     );
 
     expect(ranked.map((model) => model.id)).toEqual(['mlx-ready']);
+  });
+});
+
+describe('orderInstalledChatModels', () => {
+  const model = (id: string, fit: BootstrapChatModel['fit']): BootstrapChatModel => ({
+    id,
+    name: id,
+    provider: 'llama-cpp',
+    approxSizeBytes: 1,
+    residentBytes: 1,
+    recoScore: 1,
+    fit,
+    attribution: 'test',
+  });
+
+  it('follows the ranking, then unranked models, and puts what cannot run last', () => {
+    const candidates = [model('best', 'fits'), model('next', 'fits'), model('huge', 'too-big')];
+    const ranked = [candidates[0]!, candidates[1]!];
+    const installed = [{ id: 'huge' }, { id: 'custom' }, { id: 'next' }, { id: 'best' }];
+    expect(orderInstalledChatModels(installed, ranked, candidates).map((m) => m.id)).toEqual([
+      'best',
+      'next',
+      'custom',
+      'huge',
+    ]);
   });
 });
 

@@ -162,6 +162,9 @@ async function runInWorker(path: string, options?: GgufSummaryOptions): Promise<
   const id = nextId++;
   return new Promise<GgufSummary>((resolveSummary, reject) => {
     pending.set(id, { resolve: resolveSummary, reject });
+    // Held while busy: an unreferenced worker let a plain Node host exit
+    // mid-await during an engine cold start.
+    target.ref();
     target.postMessage({ id, path, ...(options ? { options } : {}) });
   });
 }
@@ -178,6 +181,8 @@ function ensureWorker(): Worker | null {
       if (code !== 0) onWorkerDown(`worker exited with code ${code}`);
       else if (worker === next) worker = null;
     });
+    // An idle reader must never hold the event loop open; runInWorker refs it
+    // only while a request is in flight.
     next.unref();
     worker = next;
     return next;
@@ -195,6 +200,7 @@ function onMessage(reply: WorkerReply): void {
   const request = pending.get(reply.id);
   if (!request) return;
   pending.delete(reply.id);
+  if (pending.size === 0) worker?.unref();
   if (reply.error) request.reject(new Error(reply.error));
   else if (reply.summary) request.resolve(reply.summary);
   else request.reject(new Error('GGUF metadata worker returned no summary'));

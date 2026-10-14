@@ -15,7 +15,11 @@ import type { LLMSession } from '../../providers/types.js';
 import type { InferenceContext } from '../inference-context.js';
 import { appendCallerOwnedActionLedger } from '../openai-compat/action-ledger.js';
 import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
-import { type ChatTarget, resolveChatTarget } from '../openai-compat/chat-target.js';
+import {
+  type ChatTarget,
+  resolveChatTarget,
+  resolvePinnedModelTarget,
+} from '../openai-compat/chat-target.js';
 import {
   runResponsesNonStreaming,
   runResponsesStreaming,
@@ -394,9 +398,11 @@ async function resolveResponsesTarget(model: string, ctx: InferenceContext): Pro
       systemPrefix: '',
     };
   }
+  const pinned = await resolvePinnedModelTarget(ctx, model);
+  if (pinned) return pinned;
 
   throw new Error(
-    `Unknown model "${model}". Use an explicit <provider>:<model> id or advertised gezel:<role>-<name> alias.`,
+    `Unknown model "${model}". Use an explicit <provider>:<model> id, a model pinned as a default, or an advertised gezel:<role>-<name> alias.`,
   );
 }
 

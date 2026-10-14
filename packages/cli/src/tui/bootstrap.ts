@@ -14,6 +14,7 @@ import {
   lowBitScoreFactor,
   pickRecommendedModel,
 } from '@bendyline/gezel';
+import type { GezelClient } from '@bendyline/gezel-client/node';
 
 export type BootstrapChatProvider = 'llama-cpp' | 'mlx';
 
@@ -93,12 +94,26 @@ export const NATIVE_TOOLKIT: ReadonlyArray<NativeEngineName> = [
   'llama-server',
 ];
 
+/** The device facts model ranking reads, from the daemon's memory profile. */
+export function recoDevice(
+  memory: Awaited<ReturnType<GezelClient['getMemoryProfile']>>,
+): RecoDevice {
+  return {
+    platform: memory.platform,
+    gpuVramBytes: memory.gpuVramBytes,
+    ...(memory.gpuMemoryKind ? { gpuMemoryKind: memory.gpuMemoryKind } : {}),
+    totalRamBytes: memory.totalRamBytes,
+    usableBytes: memory.usableBytes,
+    ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),
+  };
+}
+
 /**
- * Device-compatible chat choices with the same first choice as the daemon's
- * first-run picker. Other open models that fit are then ordered by curated
- * score and useful size.
+ * Every open catalog chat model this engine can run, with its fit on this
+ * device. Unranked: {@link rankChatModels} orders them and drops the ones that
+ * do not fit comfortably when any do.
  */
-export function rankChatModels(
+export function chatModelCandidates(
   items: readonly CatalogItemSummary[],
   device: RecoDevice,
   provider: BootstrapChatProvider,
@@ -134,6 +149,48 @@ export function rankChatModels(
       attribution: formatModelAttribution(manifest),
     });
   }
+  return candidates;
+}
+
+/**
+ * Installed chat models in the order the first-run picker offers them: the
+ * ranking's order first, then models the catalog does not rank, and last any
+ * the catalog says this machine cannot run. An installed model that runs leads
+ * the picker, because Enter on the first option used to start a 16 GB download
+ * beside a model already on disk.
+ */
+export function orderInstalledChatModels<T extends { id: string }>(
+  installed: readonly T[],
+  ranked: readonly BootstrapChatModel[],
+  candidates: readonly BootstrapChatModel[],
+): T[] {
+  const fit = new Map(candidates.map((model) => [model.id, model.fit]));
+  const position = (id: string) => {
+    const index = ranked.findIndex((model) => model.id === id);
+    return index < 0 ? Number.POSITIVE_INFINITY : index;
+  };
+  const cannotRun = (id: string) => (fit.get(id) === 'too-big' ? 1 : 0);
+  return [...installed].sort(
+    (a, b) => cannotRun(a.id) - cannotRun(b.id) || position(a.id) - position(b.id),
+  );
+}
+
+/** Whether an installed model can be the picker's default on this machine. */
+export function runsHere(id: string, candidates: readonly BootstrapChatModel[]): boolean {
+  return candidates.find((model) => model.id === id)?.fit !== 'too-big';
+}
+
+/**
+ * Device-compatible chat choices with the same first choice as the daemon's
+ * first-run picker. Other open models that fit are then ordered by curated
+ * score and useful size.
+ */
+export function rankChatModels(
+  items: readonly CatalogItemSummary[],
+  device: RecoDevice,
+  provider: BootstrapChatProvider,
+): BootstrapChatModel[] {
+  const candidates = chatModelCandidates(items, device, provider);
   if (candidates.length === 0) return [];
 
   const picked = pickRecommendedModel(

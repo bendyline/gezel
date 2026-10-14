@@ -75,7 +75,7 @@ export async function ensureModel(
   opts.signal?.throwIfAborted();
   const pinned = await maybePin(deps, engine, opts);
   emit({ phase: 'ready', model: opts.model, engine, source });
-  return { model: opts.model, engine, source, pinned };
+  return { model: opts.model, chatModel: `${engine}:${opts.model}`, engine, source, pinned };
 }
 
 /**

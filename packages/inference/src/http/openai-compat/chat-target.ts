@@ -1,6 +1,7 @@
 import { type GezelDetail, externalGezelModelId } from '@bendyline/gezel';
 import type { ProviderName } from '../../providers/types.js';
 import type { InferenceContext as ServiceContext } from '../inference-context.js';
+import { resolveModelTarget } from './translate.js';
 
 /**
  * Uniform target the `/v1/chat/completions` route uses to drive a
@@ -41,6 +42,32 @@ type GezelDetailForTarget = GezelDetail;
 export type ChatTargetInput =
   | { kind: 'gezel'; ref: string }
   | { kind: 'model'; provider: ProviderName; model: string | undefined };
+
+/**
+ * The on-device model a bare id names, when this install pins it as a default.
+ *
+ * `ensureModel` hands an app the bare id it asked for (`qwen3.5-0.8b-q4`) and
+ * pins it; an inference-only host, which has no gezel to fall back to, then
+ * answered that id with "Unknown model". Only a pin is trusted, so an unpinned
+ * bare id still reaches the serving gezel like any other unknown string. When
+ * several engines pin the same id, the configured provider decides.
+ */
+export async function resolvePinnedModelTarget(
+  ctx: ServiceContext,
+  model: string,
+): Promise<ChatTarget | null> {
+  const id = model.trim();
+  if (!id) return null;
+  const config = await ctx.store.readConfig().catch(() => null);
+  const pins = Object.entries(config?.defaultModel ?? {}).filter(
+    ([provider, pinned]) => pinned === id && resolveModelTarget(`${provider}:${id}`) !== null,
+  );
+  const chosen =
+    pins.find(([provider]) => provider === config?.provider) ??
+    (pins.length === 1 ? pins[0] : undefined);
+  if (!chosen) return null;
+  return { provider: chosen[0] as ProviderName, model: id, systemPrefix: '' };
+}
 
 /**
  * Pick the gezel that guarantees a persona-backed fallback for public

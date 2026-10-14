@@ -1,4 +1,6 @@
 import type { ConfigResponse, GezelClient } from '@bendyline/gezel-client/node';
+import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
+import { providerFlag } from './model-choice.js';
 
 /**
  * Pre-flight for one-shot `gezel run`: is the resolved chat provider able to
@@ -103,14 +105,25 @@ export function formatRunSetupMessage(input: {
   engineMissing: boolean;
   pinned: string | undefined;
   installedIds: readonly string[];
+  platformDefault?: LocalProvider;
 }): string {
   const { provider, engineMissing, pinned, installedIds } = input;
+  const flag = providerFlag(
+    provider,
+    input.platformDefault ?? resolveOnDeviceProvider(process.platform, process.arch),
+  );
   const steps: string[] = [];
   if (engineMissing) steps.push('gezel native install');
   if (pinned && !installedIds.includes(pinned)) {
-    steps.push(`gezel model pull ${pinned}${provider === 'mlx' ? ' --provider mlx' : ''}`);
+    if (installedIds.length > 0) {
+      steps.push(`gezel model use ${installedIds[0]}${flag}    (already downloaded)`);
+    }
+    steps.push(`gezel model pull ${pinned}${flag}`);
+    if (installedIds.length === 0) {
+      steps.push(`gezel model list --available${flag}    (to pick a smaller one)`);
+    }
   } else if (!pinned && installedIds.length === 0) {
-    steps.push('gezel model list        (then: gezel model pull <id>)');
+    steps.push(`gezel model list --available${flag}    (then: gezel model pull <id>${flag})`);
   }
 
   const lines: string[] = [];

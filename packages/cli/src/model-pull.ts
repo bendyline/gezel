@@ -51,6 +51,44 @@ export async function pullChatModel(
   if (pullError) throw new CliError(`download failed: ${pullError}`);
 }
 
+/**
+ * Wait for the MLX Python environment a download starts installing alongside
+ * the weights. It needs torch, transformers and scipy, which take minutes on
+ * a first install and outlast a small model's download, so the first `gezel
+ * run` used to sit silent for about five minutes doing it (2026-10-13 npm
+ * audit). A failure is reported, not thrown: the first chat retries it.
+ */
+export async function waitForMlxRuntime(
+  client: Pick<GezelClient, 'getMlxRuntimeStatus'>,
+  writeProgress: (text: string) => void,
+  options: { pollMs?: number; now?: () => number } = {},
+): Promise<'ready' | 'error' | 'idle'> {
+  const pollMs = options.pollMs ?? 1_000;
+  const now = options.now ?? Date.now;
+  const started = now();
+  let shown = false;
+  for (;;) {
+    const status = await client.getMlxRuntimeStatus();
+    if (status.phase === 'provisioning') {
+      const elapsed = Math.round((now() - started) / 1000);
+      writeProgress(
+        `\rpreparing the MLX Python runtime (one-time, a few minutes): ${Math.floor(elapsed / 60)}m ${String(elapsed % 60).padStart(2, '0')}s`,
+      );
+      shown = true;
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      continue;
+    }
+    if (status.phase === 'error') {
+      writeProgress(
+        `${shown ? '\n' : ''}MLX runtime setup failed; the first chat will retry it: ${status.error ?? 'unknown error'}\n`,
+      );
+      return 'error';
+    }
+    if (shown) writeProgress(`\rMLX runtime ready${' '.repeat(56)}\n`);
+    return status.phase === 'ready' ? 'ready' : 'idle';
+  }
+}
+
 export function formatGb(bytes: number): string {
   return (bytes / 1e9).toFixed(2);
 }
