@@ -152,6 +152,45 @@ export function wasDraftSent(draftId: string): boolean {
   return sentDrafts.has(draftId);
 }
 
+/**
+ * Writes that outlive the composer that started them. A phone's navigation
+ * unmounts the chat, so a person who types and taps away at once leaves while
+ * the draft is still being created or its last edits are still on the wire. A
+ * surface that comes back must wait for those before it asks the daemon, or it
+ * reads the disk a moment too early and opens empty or a second behind.
+ */
+const creatingBySlot = new Map<string, Promise<void>>();
+const flushingByDraft = new Map<string, Promise<void>>();
+
+function track(map: Map<string, Promise<void>>, key: string, work: Promise<unknown>): void {
+  const settled: Promise<void> = work.then(
+    () => {},
+    () => {},
+  );
+  map.set(key, settled);
+  void settled.then(() => {
+    if (map.get(key) === settled) map.delete(key);
+  });
+}
+
+/** A draft is being created for this slot; resolves once it is on disk (or failed). */
+export function noteDraftCreating(slotKey: string, work: Promise<unknown>): void {
+  track(creatingBySlot, slotKey, work);
+}
+
+export function draftCreating(slotKey: string): Promise<void> | undefined {
+  return creatingBySlot.get(slotKey);
+}
+
+/** A closing flush of this draft's latest text is in flight. */
+export function noteDraftFlushing(draftId: string, work: Promise<unknown>): void {
+  track(flushingByDraft, draftId, work);
+}
+
+export function draftFlushing(draftId: string): Promise<void> | undefined {
+  return flushingByDraft.get(draftId);
+}
+
 /** Re-point a slot's draft — used when an address moves under a live composer. */
 export function moveActiveDraftId(
   fromKey: string,
@@ -168,5 +207,7 @@ export function resetComposerDrafts(): void {
   activeDrafts.clear();
   draftText.clear();
   sentDrafts.clear();
+  creatingBySlot.clear();
+  flushingByDraft.clear();
   notifyDraftText();
 }

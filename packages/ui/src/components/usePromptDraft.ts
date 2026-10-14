@@ -7,7 +7,11 @@ import {
 } from '../hooks/useSerializedAutosave.js';
 import {
   type ComposerDraftAddress,
+  draftCreating,
+  draftFlushing,
   forgetDraft,
+  noteDraftCreating,
+  noteDraftFlushing,
   noteDraftSent,
   promptDraftSlotKey,
   readActiveDraftId,
@@ -126,6 +130,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
   const freshThreadRef = useRef(false);
   const creatingRef = useRef<Promise<string> | null>(null);
   const discardedRef = useRef(false);
+  const mountedRef = useRef(true);
   const generationRef = useRef(0);
   const getTextRef = useRef(getText);
   getTextRef.current = getText;
@@ -259,9 +264,14 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
         writeDraftText(created.id, live);
         lane.update(live);
       }
+      // The surface left while the POST was out, so its unmount flush had no
+      // lane to flush. Write the words now rather than a debounce later, and
+      // inside this promise, which the next surface for this slot waits on.
+      if (!mountedRef.current) await lane.flush().catch(() => {});
       return created.id;
     })();
     creatingRef.current = pending;
+    noteDraftCreating(slotKeyRef.current, pending);
     try {
       return await pending;
     } finally {
@@ -383,6 +393,13 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
         onLoadedRef.current(cached, { id } as unknown as PromptDraftSummary);
       }
       try {
+        // The last surface's closing flush may still be on the wire; a read
+        // that beats it would repaint the cached text with an older copy.
+        const flushing = draftFlushing(id);
+        if (flushing) {
+          await flushing;
+          if (generationRef.current !== generation) return;
+        }
         const draft = await api.getPromptDraft(addressRef.current.projectId, id);
         if (generationRef.current !== generation) return;
         if (draft.status !== 'draft' || wasDraftSent(id)) {
@@ -540,12 +557,30 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
       onLoadedRef.current('', { id: '' } as unknown as PromptDraftSummary);
     }
 
+    // A draft the last surface for this slot was still creating when it left.
+    // Its id lands in the slot cache when the create answers.
+    const creating = draftCreating(slotKey);
+
     // With no thread chosen the picker owns the pick — asking here would race
     // its auto-pick and could seed text the user is about to navigate away
     // from. With a thread, its newest open draft is the right one to reopen.
-    if (sessionId === undefined) return;
+    if (sessionId === undefined && !creating) return;
     void (async () => {
       try {
+        if (creating) {
+          await creating;
+          if (generationRef.current !== generation) return;
+          // Typing here since the mount started a draft of its own, and the
+          // words on screen win.
+          if (draftIdRef.current || creatingRef.current || getTextRef.current().trim()) return;
+          const created = readActiveDraftId(slotKey);
+          if (created) {
+            setDraftId(created);
+            await loadDraft(created, generation);
+            return;
+          }
+        }
+        if (sessionId === undefined) return;
         const { drafts } = await api.listPromptDrafts(address.projectId, {
           gezelId: address.gezelId,
           sessionId,
@@ -567,8 +602,11 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
   // typing. Both events fire before teardown; the debounce bounds the loss to
   // whatever arrived after the most recent save.
   useEffect(() => {
+    mountedRef.current = true;
     const flushNow = () => {
-      void controllerRef.current?.flush().catch(() => {});
+      const lane = controllerRef.current;
+      const id = controllerDraftRef.current;
+      if (lane && id) noteDraftFlushing(id, lane.flush());
     };
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') flushNow();
@@ -576,6 +614,7 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
     window.addEventListener('pagehide', flushNow);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
+      mountedRef.current = false;
       window.removeEventListener('pagehide', flushNow);
       document.removeEventListener('visibilitychange', onVisibility);
       flushNow();
