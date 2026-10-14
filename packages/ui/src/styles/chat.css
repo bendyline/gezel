@@ -1149,16 +1149,34 @@
      the gezel is passively waiting, not actively generating. */
   margin-top: 1px;
 }
-/* Wire-pulse dots — accumulating ··· in the streaming bubble's
-   status line for each bare framing chunk Ollama sends with no
-   visible content. Muted so they read as ambient telemetry rather
-   than a status the user has to act on. Tabular numbers in case
-   the count overflow ("(NN)") kicks in. */
+/* Work chunks in the streaming bubble's status line: one per engine
+   chunk that carried nothing visible. Muted so it reads as ambient
+   telemetry rather than a status the user has to act on. */
 .msg-wire-pulse {
   color: var(--text-muted);
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.05em;
+}
+
+/* The crew's hammer with the count as its exponent. Tabular numerals
+   so a climbing count does not jitter what follows it. */
+.msg-work-chunks {
+  display: inline-flex;
+  align-items: flex-start;
+  vertical-align: -0.2em;
+  font-variant-numeric: tabular-nums;
+}
+.msg-work-chunks-hammer {
+  flex: none;
+  width: 1.2em;
+  height: 1.2em;
+}
+.msg-work-chunks-count {
+  font-size: 0.72em;
+  line-height: 1;
+  vertical-align: baseline;
+  margin-left: 0.05em;
+  margin-top: -0.2em;
 }
 .queued-pill {
   display: inline-flex;
@@ -1788,7 +1806,7 @@
   overflow-y: auto;
 }
 
-/* Bottom-of-bubble activity counter — mirrors the header's wire-pulse
+/* Bottom-of-bubble activity counter — mirrors the header's work-chunks
    count next to the blinking stream caret, so "things are happening"
    is visible where the user is actually looking. Tabular numerals so
    the ticking count doesn't jitter the caret. */
@@ -2422,6 +2440,30 @@ body.chat-rail-resizing webview {
      box and measures the active bubble's rendered bounds, so this
      token only owns the in-flow thread geometry. */
   --thread-indent: 1.05rem;
+  /* Width scope for what a bubble header can afford (the `chat-timeline`
+     rules below). Every chat surface renders its timeline in this
+     wrapper — the project chat, Home, a gezel's tab, a task pane, the
+     Office pane — so a header narrows with the conversation itself,
+     wherever it sits. `chat-rail` only exists inside the project chat. */
+  container-type: inline-size;
+  container-name: chat-timeline;
+}
+
+/* A narrow conversation (the Office pane, a side panel, a phone): the
+   author's role gives way first, so the name, the live status and the
+   cancel key keep the row. The role stays in the name's hover text
+   (`authorTitle` in chat-bubbles.tsx). The uppercase name's tracking and
+   the gap before the status tighten for the same reason. */
+@container chat-timeline (max-width: 560px) {
+  .msg-role .msg-role-suffix {
+    display: none;
+  }
+  .msg-role {
+    letter-spacing: 0.03em;
+  }
+  .msg-live-status {
+    margin-left: 0.15rem;
+  }
 }
 
 /* Sticky conversation-context header — pinned above the scroll
@@ -2514,13 +2556,13 @@ body.chat-rail-resizing webview {
   color: var(--text-primary, inherit);
 }
 /* Status line sits IMMEDIATELY after "Ada Developer" so the
-   accumulating wire-pulse dots flow naturally into the empty
+   trailing work-chunks count flows naturally into the empty
    space on the right, instead of being shoved to the far edge
    with a gap in between. */
 .chat-sticky-header-assistant .msg-live-status {
   font-size: 0.78rem;
-  /* Soak up unused horizontal space so the trailing wire-pulse
-     dots can grow rightward without bumping into anything else.
+  /* Soak up unused horizontal space so the trailing work-chunks
+     count can grow rightward without bumping into anything else.
      `min-width: 0` lets the inner text wrap / truncate cleanly
      instead of pushing the row past the bubble width. */
   flex: 1;

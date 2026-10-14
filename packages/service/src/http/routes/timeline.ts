@@ -36,6 +36,8 @@ export async function buildTimeline(
     projectId?: string;
     gezelId?: string;
     taskRef?: string;
+    /** Only threads about these app items (`ChatSession.subject.key`). */
+    subjectKeys?: readonly string[] | undefined;
     rawLimit?: string;
     before?: string;
     excludeScheduledRuns?: boolean;
@@ -46,6 +48,7 @@ export async function buildTimeline(
     ...(opts.projectId ? { projectId: opts.projectId } : {}),
     ...(opts.gezelId ? { gezelId: opts.gezelId } : {}),
     ...(opts.taskRef ? { taskRef: opts.taskRef } : {}),
+    ...(opts.subjectKeys?.length ? { subjectKeys: opts.subjectKeys } : {}),
     ...(opts.excludeScheduledRuns ? { excludeScheduledRuns: true } : {}),
     limit,
     ...(opts.before ? { before: opts.before } : {}),

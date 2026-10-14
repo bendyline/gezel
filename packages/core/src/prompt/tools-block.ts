@@ -130,6 +130,12 @@ export interface RenderToolsBlockOptions {
    * claim a listing exists in that case.
    */
   workspaceListingRendered?: boolean;
+  /**
+   * Tools listed first, under their own heading: the tools of the document
+   * open beside an app's chat. Without it they land last, in "Other tools",
+   * after every converter an installed toolset brings.
+   */
+  leadingGroup?: { name: string; toolNames: ReadonlySet<string> };
 }
 
 /**
@@ -269,7 +275,7 @@ export function renderAvailableToolsBlock(opts: RenderToolsBlockOptions): string
   // Saves ~700 tokens for a typical 60-tool surface on small/medium.
   const verbose = opts.modelTier === 'tiny' || opts.modelTier === undefined;
 
-  const grouped = groupTools(opts.tools);
+  const grouped = groupTools(opts.tools, opts.leadingGroup);
   const lines: string[] = [];
   lines.push('');
   lines.push('---');
@@ -358,10 +364,18 @@ function inferGroupForUnmappedTool(toolName: string): string | undefined {
  * tools keep their input order (which matches `getOpenAITools()`'s
  * own ordering — typically registration order, stable across turns).
  */
-function groupTools(tools: ReadonlyArray<AvailableToolInfo>): GroupedTools[] {
+function groupTools(
+  tools: ReadonlyArray<AvailableToolInfo>,
+  leading?: RenderToolsBlockOptions['leadingGroup'],
+): GroupedTools[] {
   const buckets = new Map<string, AvailableToolInfo[]>();
   const others: AvailableToolInfo[] = [];
+  const first: AvailableToolInfo[] = [];
   for (const t of tools) {
+    if (leading?.toolNames.has(t.name)) {
+      first.push(t);
+      continue;
+    }
     const group =
       BUILTIN_TOOL_TO_GROUP.get(t.name) ?? BUILTIN_TOOL_TO_GROUP.get(canonicalToolName(t.name));
     const groupId = group?.id ?? inferGroupForUnmappedTool(t.name);
@@ -377,6 +391,7 @@ function groupTools(tools: ReadonlyArray<AvailableToolInfo>): GroupedTools[] {
     arr.push(t);
   }
   const out: GroupedTools[] = [];
+  if (leading && first.length > 0) out.push({ groupName: leading.name, tools: first });
   for (const g of BUILTIN_TOOLSETS) {
     const tools = buckets.get(g.id);
     if (tools && tools.length > 0) out.push({ groupName: g.name, tools });

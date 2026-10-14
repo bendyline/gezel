@@ -60,6 +60,7 @@ export * from './voices.js';
 export * from './poppetje/index.js';
 export * from './project-types/taxonomy.js';
 export * from './project-types/composition.js';
+export * from './app-subject.js';
 export * from './project-types/brief-route.js';
 export * from './project-types/page-api-shim.js';
 export * from './json-schema/validate.js';

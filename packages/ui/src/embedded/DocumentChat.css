@@ -1,0 +1,50 @@
+/*
+ * The Office pane's document chat (owned by DocumentChat). A guest surface,
+ * about 320px wide: one slim row naming the document over the conversation.
+ * Wraps rather than truncates, like the pane header above it.
+ */
+
+.document-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: var(--space-xs);
+}
+
+.document-chat-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs) var(--space-sm);
+  font-size: var(--text-sm);
+}
+
+.document-chat-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.document-chat-project,
+.document-chat-back {
+  font-size: var(--text-xs);
+  padding: 2px var(--space-sm);
+  border-radius: var(--radius-md);
+}
+
+.document-chat-body {
+  flex: 1 1 auto;
+}
+
+.document-chat-missing {
+  padding: var(--space-sm);
+  font-size: var(--text-sm);
+}
+
+/* The project view inside the pane keeps one key to come back. */
+.document-chat-return {
+  display: flex;
+  justify-content: flex-end;
+}

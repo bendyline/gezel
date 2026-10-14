@@ -5,6 +5,7 @@ import {
   APP_TOOL_MAX_RELAYS_PER_APP,
   APP_TOOL_RELAY_GRACE_MS,
   APP_TOOL_RELAY_HEARTBEAT_MS,
+  type AppSubject,
   type AppToolCallResultRequest,
   type AppToolDefinition,
   type AppToolRelayCloseReason,
@@ -36,6 +37,8 @@ export interface AppToolBinding {
   gezelIds?: ReadonlySet<string>;
   /** Offered only to sessions whose latest message came through this surface. */
   surfaceId?: string;
+  /** The item the surface's chat is about; only ever set beside `surfaceId`. */
+  subject?: AppSubject;
   tools: readonly AppToolDefinition[];
 }
 
@@ -214,6 +217,23 @@ export class AppToolRelayRegistry {
     request: RegisterAppToolsRequest,
   ): { toolsetId: string; registered: string[] } {
     const relay = this.require(relayId);
+    if (request.subject) {
+      // A subject describes one chat. Without a surface it would reframe
+      // every session of the gezel in the project around the app's item.
+      if (!request.surfaceId) {
+        throw new AppToolRelayError(
+          'a subject needs a surfaceId: it describes one chat, not every session',
+          'subject_needs_surface',
+        );
+      }
+      const stateTool = request.subject.stateTool;
+      if (stateTool && !request.tools.some((tool) => tool.name === stateTool)) {
+        throw new AppToolRelayError(
+          `the subject's stateTool "${stateTool}" is not one of the registered tools`,
+          'subject_state_tool_unknown',
+        );
+      }
+    }
     for (const tool of request.tools) {
       const canonical = canonicalToolName(tool.name);
       if (canonical in TOOL_REGISTRY) {
@@ -238,6 +258,7 @@ export class AppToolRelayRegistry {
       projectId: request.projectId,
       ...(gezelIds ? { gezelIds } : {}),
       ...(request.surfaceId ? { surfaceId: request.surfaceId } : {}),
+      ...(request.subject ? { subject: request.subject } : {}),
       tools: request.tools,
     });
     this.onChange?.(request.projectId);
@@ -295,6 +316,28 @@ export class AppToolRelayRegistry {
   }
 
   /**
+   * The binding that declared an item for this surface, if any. Surface ids
+   * are minted per pane, so at most one binding carries one.
+   */
+  subjectBindingForSurface(surfaceId: string): AppToolBinding | undefined {
+    for (const relay of this.relays.values()) {
+      for (const binding of relay.bindings.values()) {
+        if (binding.surfaceId === surfaceId && binding.subject) return binding;
+      }
+    }
+    return undefined;
+  }
+
+  /** Sessions whose latest message from a person came through `surfaceId`. */
+  sessionsOnSurface(surfaceId: string): string[] {
+    const out: string[] = [];
+    for (const [sessionId, surface] of this.sessionSurfaces) {
+      if (surface === surfaceId) out.push(sessionId);
+    }
+    return out;
+  }
+
+  /**
    * Bindings that apply to one session. A relay inside its grace window still
    * counts: the tools are about to come back, and dropping them would rebuild
    * the session's whole tool surface for a two-second socket blip.
@@ -331,6 +374,7 @@ export class AppToolRelayRegistry {
           projectId: binding.projectId,
           ...(binding.gezelIds ? { gezelIds: [...binding.gezelIds] } : {}),
           tools: binding.tools.map((tool) => tool.name),
+          ...(binding.subject ? { subjectTitle: binding.subject.title } : {}),
         })),
         pendingCalls: relay.pending.size,
       });
@@ -484,7 +528,10 @@ export function appToolBindingsFingerprint(bindings: readonly AppToolBinding[]):
       const tools = binding.tools
         .map((tool) => `${tool.name}:${JSON.stringify(tool.inputSchema)}:${tool.description}`)
         .join('|');
-      return `${binding.relayId}/${binding.appId}/${tools}`;
+      // The subject is in the system prompt (its title, whether edits are
+      // allowed), so a Save As or the edits switch must rebuild it too.
+      const subject = binding.subject ? JSON.stringify(binding.subject) : '';
+      return `${binding.relayId}/${binding.appId}/${tools}/${subject}`;
     })
     .join(';');
 }

@@ -300,6 +300,32 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('list_tasks')).toBe(false);
   });
 
+  it('a thread about an open document keeps the document core, whatever the role', async () => {
+    // The Word pane incident: a Boekwachter beside an empty document held 120
+    // tools — workspace writers, the artifacts drawer, nineteen converters —
+    // asked which file "add some content" meant, and spent 171 s prefilling
+    // the schemas to ask it. The document's own tools ride the bridge beside
+    // this core, so nothing here may write a file or an artifact.
+    const clamps: string[] = [];
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Boekwachter',
+      session: baseSession({}),
+      tier: 'medium',
+      appItemFocus: true,
+      latestUserMessage: 'Can you write a paragraph on why Gezel is awesome?',
+      onClamp: (kind) => clamps.push(kind),
+    });
+    expect(clamps).toEqual(['app-item-focus']);
+    expect(allowlist).not.toBeNull();
+    for (const tool of ['ask_user_question', 'search', 'read_document', 'read_file']) {
+      expect(allowlist!.has(tool)).toBe(true);
+    }
+    for (const tool of ['write_file', 'write_artifact', 'list_tasks', 'browser_navigate']) {
+      expect(allowlist!.has(tool)).toBe(false);
+    }
+  });
+
   it('a default Meester fits under the coordinator diet cap — no trim', async () => {
     // The diet exists to shed the uncurated ~127-tool workspace/execution
     // tail, not to hide half a coordinator's own roster. Before the roster

@@ -28,8 +28,13 @@ Pure modules (`discovery`, `client`, `consent`, `relay`, `chat`, `project`,
 
 ## How it connects
 
-1. Reads `~/.gezel/runtime/port` and `runtime/cert.pem` (`GEZEL_HOME` is
-   honored) and verifies TLS against that per-launch certificate.
+1. Reads `runtime/port` and `runtime/cert.pem` from the Gezel home and
+   verifies TLS against that per-launch certificate. The home is
+   `GEZEL_HOME` when set; otherwise whichever of `~/.gezel` and
+   `~/.gezel-dev` (a development build of the desktop app) has a daemon
+   answering on its published port, preferring the one whose
+   `integrations/libreoffice/setup.json` says it installed this extension.
+   The panel resolves it again on every connect.
 2. Holds a `product` grant as app `libreoffice`, kept at
    `~/.gezel/integrations/libreoffice/token` (0600). Setting LibreOffice up
    in Gezel writes that file; failing that, the extension trades the owner

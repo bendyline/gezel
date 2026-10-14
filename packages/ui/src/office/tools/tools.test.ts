@@ -136,6 +136,30 @@ describe('common tools', () => {
       truncated: false,
     });
   });
+
+  it('says the document is empty when nothing is selected and the host can tell', async () => {
+    // Gezel reads this at the start of each turn: "add a paragraph" into an
+    // empty document needs no question about where it goes.
+    const list = toolsForHost({
+      host: 'word',
+      edits: true,
+      describe: describeDoc,
+      isSupported: () => true,
+      adapters: {
+        word: fakeWord(),
+        readSelection: async () => '',
+        isDocumentEmpty: async () => true,
+        renderDiagram: fakeRenderer(),
+      },
+    });
+    const tool = list.find((t) => t.name === 'office_read_selection')!;
+    expect(JSON.parse(String(await tool.handler({}, CONTEXT)))).toEqual({
+      isEmpty: true,
+      text: '',
+      truncated: false,
+      documentIsEmpty: true,
+    });
+  });
 });
 
 describe('Word tools', () => {

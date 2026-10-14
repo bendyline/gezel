@@ -294,6 +294,11 @@ export async function retrieveProjectContext(args: {
   /** Retrieval preview only: this relevance-model arm instead of the resolved setting. */
   relevanceOverride?: RelevanceModelOverride;
   /**
+   * Corpora this turn leaves out whatever its policy says: a thread about one
+   * open document keeps project files out of its proactive context.
+   */
+  excludeSources?: readonly RetrievalSource[];
+  /**
    * Fired as soon as the scoped search returns — BEFORE the relevance floor
    * and hydration can turn the whole call into `null`. This is the telemetry
    * seam: without it, "every arm scored under the floor" and "retrieval never
@@ -318,14 +323,22 @@ export async function retrieveProjectContext(args: {
   citeHit?: (hit: ProjectRetrievalHit) => number;
 }): Promise<ProjectRetrievalResult | null> {
   const taskContext = await resolveTaskContext(args.store, args.record);
-  const policy = resolveRetrievalPolicy({
+  const resolvedPolicy = resolveRetrievalPolicy({
     ...(args.policyOverride ? { override: args.policyOverride } : {}),
     step: taskContext?.step.retrieval,
     gezel: args.gezel,
     config: args.config,
     contextWindow: args.contextWindow,
   });
-  if (policy.mode === 'off' || policy.maxTokens <= 0) return null;
+  const excluded = new Set(args.excludeSources ?? []);
+  const policy =
+    excluded.size > 0
+      ? {
+          ...resolvedPolicy,
+          sources: resolvedPolicy.sources.filter((source) => !excluded.has(source)),
+        }
+      : resolvedPolicy;
+  if (policy.mode === 'off' || policy.maxTokens <= 0 || policy.sources.length === 0) return null;
 
   const query = retrievalQuery(args.userText, args.messageOrigin, taskContext);
   if (!query) return null;

@@ -1,6 +1,6 @@
 # 0013 — Apps register tools the daemon relays back to them
 
-Status: Accepted (2026-09). Surface scope added 2026-10 (below).
+Status: Accepted (2026-09). Surface scope and subject added 2026-10 (below).
 
 ## Context
 
@@ -100,6 +100,31 @@ match.
 The header rides on the chat's requests rather than on the registration
 because sessions are created lazily on the first send: a pane that learned its
 session id afterwards and re-registered would miss that first turn.
+
+### Subject (added 2026-10)
+
+Scoping the tools to the pane's chat was not enough to make that chat about
+the document. A session offered `doc_insert_text` still carried its project's
+framing ("files go in the workspace or the artifacts drawer"), its role's
+duties, 120 tools and retrieval from project files, and nothing said a
+document was open: a Boekwachter beside an empty Word document asked which
+file "add some content" meant.
+
+A surface-scoped registration may now declare a `subject` — the item its chat
+is about. It is facts only (kind, app, title, path, focus, whether edits are
+allowed, and a `stateTool` among the registered tools); the daemon writes
+every word the model reads about it, so an app still cannot put instructions
+into a prompt. For the sessions that surface drives the daemon names the item
+in the system prompt, replaces the built-in roster with a small document core,
+keeps workspace files out of proactive retrieval, and calls the state tool at
+the start of each turn a person sends to open it with their selection. Threads
+are stamped with the item (`ChatSession.subject`) so the app's chat can list
+only its own, and a changed subject (a Save As) re-stamps them.
+
+A subject requires a `surfaceId`: one describing every session of a gezel
+would reframe the gezel's front-door chat around a document. It rides the
+registration rather than each message for the same reason the surface does —
+the facts are the app's, and the app is the one holding the document.
 
 ### Session tokens may not register
 

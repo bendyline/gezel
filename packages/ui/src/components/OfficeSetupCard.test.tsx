@@ -145,6 +145,30 @@ describe('OfficeSetupCard', () => {
     );
   });
 
+  it('on Windows, points to Developer Add-ins for the first open', async () => {
+    window.__GEZEL__!.platform = 'win32';
+    const bridge = installBridge(status(), configuredWith(['word']));
+    render(<OfficeSetupCard />);
+    await screen.findByText('Not configured');
+    fireEvent.click(screen.getByRole('checkbox', { name: /Excel/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Set up Office…' }));
+    fireEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Set up Office' }),
+    );
+    await waitFor(() => expect(bridge.enable).toHaveBeenCalledWith(['word']));
+
+    const dialog = await screen.findByRole('dialog', { name: 'One more step in Word' });
+    expect(dialog).toHaveTextContent('If Word is open, close and reopen it.');
+    expect(dialog).toHaveTextContent('On the Home tab, choose Add-ins.');
+    expect(dialog).toHaveTextContent('Under Developer Add-ins, choose Gezel.');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Got it' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByText(/Restart Word/)).toHaveTextContent(
+      /choose Add-ins on the Home tab and pick Gezel/,
+    );
+  });
+
   it('on a Mac, names only the apps an update added', async () => {
     window.__GEZEL__!.platform = 'darwin';
     installBridge(configuredWith(['word']), configuredWith(['word', 'excel']));

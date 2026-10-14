@@ -16,8 +16,14 @@ export interface QueuedTaskEntry {
  * for work that will never start is worse than no card, because it
  * reads as progress and buys the stuck task another hour of patience.
  *
- * Ordered oldest-first, matching the FIFO order the runner dispatches in,
- * so the card nearest the composer is the one furthest from starting.
+ * Recurring work earns no card either. The Meester's nightly oversight
+ * review (`nightShift.onceADay`) and cron tasks re-arm themselves and sit
+ * held through the day by design; nobody in this conversation launched
+ * them, so a receipt would be a fixture in every Default chat. The task
+ * strip still lists them.
+ *
+ * Ordered oldest-first, the FIFO order the runner dispatches in and the
+ * order the timeline places them by `wait.since`.
  */
 export function selectQueuedTaskEntries(input: {
   tasks: Task[];
@@ -38,6 +44,7 @@ export function selectQueuedTaskEntries(input: {
     // The list and the queue are read at slightly different moments; a
     // ref with no task in hand is a task that just left `active`.
     if (!task) continue;
+    if (task.cron || task.nightShift?.onceADay) continue;
     entries.push({ task, wait });
   }
   entries.sort((a, b) => Date.parse(a.wait.since) - Date.parse(b.wait.since));

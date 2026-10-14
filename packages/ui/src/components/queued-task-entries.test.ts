@@ -69,6 +69,24 @@ describe('selectQueuedTaskEntries', () => {
     expect(entries.map((e) => e.task.ref)).toEqual(['gezel/7']);
   });
 
+  it('omits recurring work nobody launched from this conversation', () => {
+    // The Meester's nightly oversight review is held all day in Default;
+    // its "Scheduled" card sat under every chat there.
+    const entries = selectQueuedTaskEntries({
+      tasks: [
+        task('default/1', { nightShift: { enabled: true, onceADay: true } }),
+        task('default/2', { cron: { expression: '0 9 * * *' } }),
+        task('default/3', { nightShift: { enabled: true } }),
+      ],
+      waiting: [
+        wait('default/1', { reason: 'night-shift' }),
+        wait('default/2'),
+        wait('default/3', { reason: 'night-shift' }),
+      ],
+    });
+    expect(entries.map((e) => e.task.ref)).toEqual(['default/3']);
+  });
+
   it('orders oldest-enqueued first, matching the runner FIFO', () => {
     const entries = selectQueuedTaskEntries({
       tasks: [task('gezel/6'), task('gezel/7'), task('gezel/8')],

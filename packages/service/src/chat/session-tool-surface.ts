@@ -1,4 +1,5 @@
 import {
+  APP_ITEM_FOCUS_BUILTIN_TOOLS,
   type ChatSession,
   type GezelConfig,
   LEAN_PROFILE_BUILTIN_TOOLS,
@@ -103,6 +104,7 @@ export function taskStepContextualBuiltinTools(
 
 export type SessionToolSurface = 'prompt' | 'bridge';
 export type SessionToolClampKind =
+  | 'app-item-focus'
   | 'project-orchestration'
   | 'exact-craftbook-invocation'
   | 'project-retrieval-first'
@@ -132,6 +134,13 @@ export interface ResolveSessionToolSurfaceOptions {
    * tools plus `ask_user_question`, not the 60-tool developer workbench.
    */
   leanProfile?: boolean;
+  /**
+   * The session's thread is about one item an app's chat has open (the Word
+   * document beside the Office pane). The built-in surface becomes
+   * {@link APP_ITEM_FOCUS_BUILTIN_TOOLS}, whatever the role; the app's own
+   * tools ride the bridge beside it.
+   */
+  appItemFocus?: boolean;
   consultationMode?: boolean;
   rolesAsTools?: boolean;
   /** Current gezel owns this project (`project.voormanGezelId === gezelId`). */
@@ -464,6 +473,37 @@ export async function resolveSessionToolSurface(
   // re-broadens it. The script tools ride through the bridge separately.
   if (opts.leanProfile) {
     rawAllowlist = new Set(LEAN_PROFILE_BUILTIN_TOOLS);
+  }
+  // A thread about one open document. The core is granted through the hard
+  // ceiling, not the role kit: the document is the job whoever was picked to
+  // talk about it, so a Boekwachter gets the same lookups a Copywriter does,
+  // while security, platform and workspace limits still apply. It returns
+  // before the message-shaped clamps, which read "write" or "add" as a file
+  // to create and would rebuild the very file surface this replaces.
+  if (opts.appItemFocus) {
+    const ceiling = computeToolAllowlist({
+      role: opts.role,
+      mode: 'never',
+      provider: opts.provider,
+      ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
+      ...(opts.parameterSize !== undefined ? { parameterSize: opts.parameterSize } : {}),
+      ...(opts.webSearchProvider ? { webSearchProvider: opts.webSearchProvider } : {}),
+      factualWriting: true,
+      githubLinked: opts.githubLinked,
+      isGitRepo: opts.isGitRepo,
+      ...(opts.securityPolicy ? { securityPolicy: opts.securityPolicy } : {}),
+      ...(opts.workspaceWritable !== undefined
+        ? { workspaceWritable: opts.workspaceWritable }
+        : {}),
+    });
+    opts.onClamp?.('app-item-focus');
+    return {
+      allowlist: new Set(
+        APP_ITEM_FOCUS_BUILTIN_TOOLS.filter((name) => ceiling === null || ceiling.has(name)),
+      ),
+      projectOrchestrationConstrained: false,
+      exactCraftbookConstrained: false,
+    };
   }
   const requiredToolHardAllowed = opts.requiredTool
     ? (() => {

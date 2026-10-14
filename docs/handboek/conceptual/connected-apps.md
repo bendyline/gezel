@@ -112,7 +112,7 @@ Office only opens add-ins over a secure connection that your computer trusts. So
 
 Your system asks you to confirm once. On a Mac that means your password, and macOS may also ask whether Gezel may access data from other apps; allow it so Gezel can add itself to Office.
 
-After setup, restart any Office app that was open and choose **Gezel** on the Home tab. On a Mac, the first time, choose **Add-ins** on the Home tab and then **Gezel**: Office shows the button only after an add-in has been opened once from that menu. The pane connects to Gezel on its own, with no connection code to type, because Gezel set it up for your account.
+After setup, restart any Office app that was open. The first time, choose **Add-ins** on the Home tab and then **Gezel** (on Windows it is listed under **Developer Add-ins**): Office shows Gezel's button on the Home tab only after the add-in has been opened once from that menu. From then on, choose **Gezel** on the Home tab. The pane connects to Gezel on its own, with no connection code to type, because Gezel set it up for your account.
 
 The pane works in the project that owns the document's folder. If there isn't one yet, Gezel creates one for that folder. It picks the folder sensibly: your Documents folder for a loose document there, a folder like `engineeringdocs` when the document sits in one of several work folders inside it, or the Default project for a document saved directly in your home folder. Projects created this way are **read-only**: gezels cannot change files in the folder, only the document you have open, through the pane. You can allow file changes later in the project's settings.
 

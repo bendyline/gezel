@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MEMORY_KINDS } from '../runtime/memory-markdown.js';
+import { AppSubjectKindSchema } from './app-tools.js';
 import { ProjectTypeToolSchema } from './catalog.js';
 import { FileTurnIntentSchema } from './file-turn-intent.js';
 import { GateCheckSchema, GateScriptRefSchema } from './gate.js';
@@ -16,6 +17,21 @@ import { SessionLinkSchema, SessionParentSchema } from './session-lineage.js';
 import { TaskLaunchSpecSchema } from './task-launch.js';
 import { TaskSchema } from './task.js';
 import { TerminalTimelineEntrySchema } from './terminal.js';
+
+/**
+ * The item a thread is about, stamped when an app's own chat opened it (the
+ * Office pane's document). `key` is {@link appSubjectKey}'s identity: the
+ * document's path once it is saved, the pane's surface before. It decides
+ * which threads that chat lists; what the model is told about the item comes
+ * from the app's live registration, never from this stamp.
+ */
+export const SessionSubjectSchema = z.object({
+  key: z.string().min(1).max(1100),
+  kind: AppSubjectKindSchema,
+  app: z.string().min(1).max(40),
+  title: z.string().min(1).max(200),
+});
+export type SessionSubject = z.infer<typeof SessionSubjectSchema>;
 
 /**
  * Shape-of-deliverable hint passed by an asker via `ask_specialist` /
@@ -290,6 +306,8 @@ export const ChatSessionSchema = z.object({
    * prompt so the voorman edits it in place.
    */
   craftbookRef: z.string().optional(),
+  /** The item an app's chat opened this thread about. See {@link SessionSubjectSchema}. */
+  subject: SessionSubjectSchema.optional(),
   /**
    * Set when this session was spawned by `askGezelAndWait` /
    * `ask_specialist` to answer a single question from another gezel.
@@ -497,6 +515,8 @@ export const ChatSessionSummarySchema = ChatSessionSchema.pick({
   stepId: true,
   parentSession: true,
   handoffFrom: true,
+  // Lets an app's chat list only the threads about its own document.
+  subject: true,
   // The thread's context policy and last measured fill. Surfaced on the
   // summary so the thread picker's context meter has something to show
   // before (and after) the session's own event stream reports a turn.
@@ -550,6 +570,8 @@ export const CreateChatSessionRequestSchema = z.object({
   taskRef: z.string().optional(),
   stepId: z.string().optional(),
   craftbookRef: z.string().optional(),
+  /** Open the thread about an app's item; the Office pane's focused chat passes it. */
+  subject: SessionSubjectSchema.optional(),
   /**
    * Pin the session's name-rendering mode instead of following
    * `config.roleBasedNameOnlyMode`. Passed by clients whose presentation

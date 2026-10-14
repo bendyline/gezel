@@ -84,6 +84,62 @@ export const OpenAppToolRelayResponseSchema = z.object({
 });
 export type OpenAppToolRelayResponse = z.infer<typeof OpenAppToolRelayResponseSchema>;
 
+/** What kind of thing an app's chat is about, as a person would name it. */
+export const APP_SUBJECT_KINDS = ['document', 'spreadsheet', 'presentation', 'item'] as const;
+export const AppSubjectKindSchema = z.enum(APP_SUBJECT_KINDS);
+export type AppSubjectKind = z.infer<typeof AppSubjectKindSchema>;
+
+/**
+ * **The item an app's own chat is about** — the Word document open beside the
+ * Office pane, say. Declared on a surface-scoped registration, it turns the
+ * sessions that surface drives into conversations about that item: the daemon
+ * names it in the system prompt, narrows the tool list to the app's tools plus
+ * a small core, keeps workspace files out of proactive retrieval, and reads
+ * the person's current selection at the start of each of their turns.
+ *
+ * The app supplies facts only. Every word the model reads about the item is
+ * written by the daemon, so an app cannot put instructions into the prompt.
+ */
+export const AppSubjectSchema = z.object({
+  kind: AppSubjectKindSchema,
+  /** The app that holds it, as a person names it: `Word`. */
+  app: z.string().trim().min(1).max(40),
+  /** What the person calls it: the file name, or `Untitled document`. */
+  title: z.string().trim().min(1).max(200),
+  /** Where it is saved; absent while it is unsaved or lives in the cloud. */
+  path: z.string().min(1).max(1024).optional(),
+  /**
+   * `item`: this item is the whole job of the conversation. `context`: it is
+   * where the person is looking, and the project stays the job.
+   */
+  focus: z.enum(['item', 'context']).optional(),
+  /** Whether the person allows the app's tools to change it. */
+  editable: z.boolean().optional(),
+  /**
+   * A read-only tool of this registration that the daemon calls with `{}` at
+   * the start of each turn a person sends, to learn their current selection.
+   * Its result is a JSON object: see {@link AppSubjectStateSchema}.
+   */
+  stateTool: z.string().regex(APP_TOOL_NAME_RE).optional(),
+});
+export type AppSubject = z.infer<typeof AppSubjectSchema>;
+
+/**
+ * What a subject's `stateTool` answers. Read tolerantly: a field this build
+ * does not know, or a malformed one, is ignored rather than failing the turn.
+ */
+export const AppSubjectStateSchema = z.object({
+  /** The selected text, possibly clipped by the app. */
+  text: z.string().optional().catch(undefined),
+  /** Nothing is selected (the cursor alone). */
+  isEmpty: z.boolean().optional().catch(undefined),
+  /** The app clipped `text`. */
+  truncated: z.boolean().optional().catch(undefined),
+  /** The whole item has no content yet. */
+  documentIsEmpty: z.boolean().optional().catch(undefined),
+});
+export type AppSubjectState = z.infer<typeof AppSubjectStateSchema>;
+
 export const RegisterAppToolsRequestSchema = z.object({
   projectId: z.string().min(1),
   /**
@@ -96,6 +152,11 @@ export const RegisterAppToolsRequestSchema = z.object({
    * {@link APP_TOOL_SURFACE_HEADER}. Combines with `gezelIds`.
    */
   surfaceId: AppToolSurfaceIdSchema.optional(),
+  /**
+   * The item this app's chat is about. Needs `surfaceId`: a subject describes
+   * one chat, never every session of a gezel.
+   */
+  subject: AppSubjectSchema.optional(),
   tools: z.array(AppToolDefinitionSchema).min(1).max(64),
 });
 export type RegisterAppToolsRequest = z.infer<typeof RegisterAppToolsRequestSchema>;
@@ -163,6 +224,8 @@ export const AppToolRelayBindingSummarySchema = z.object({
   projectId: z.string(),
   gezelIds: z.array(z.string()).optional(),
   tools: z.array(z.string()),
+  /** The title of the item the binding's chat is about, when it declared one. */
+  subjectTitle: z.string().optional(),
 });
 export type AppToolRelayBindingSummary = z.infer<typeof AppToolRelayBindingSummarySchema>;
 

@@ -1648,6 +1648,16 @@ reduced motion. The index popover's phase spinners
 for the file scan, a quill writing a line for the AI tiers) are the
 reference; don't reach for a generic rotating ring.
 
+**A live tally is a glyph with an exponent, not a parenthetical.** A
+streaming chat bubble counts the engine chunks that arrived with nothing
+visible (keepalives, bare framing, streamed tool arguments) as the crew's
+hammer with the count as its exponent (`WorkChunksCount`), in the status line
+and beside the thinking dots. A bare "(4)" reads as a footnote; the hammer
+says work landed. The head is the Crew activity drawing (`HAMMER_HEAD`), so
+the hammer has one shape across the product. It stays still, because the
+thinking dots beside it already carry the motion. Hover text and the
+accessible name say what the number means in words.
+
 **A pane that is swapped, not entered, holds its shape.** Switching projects
 remounts the whole chat pane, and for the round-trip it takes to fetch the
 roster the pane knows nothing — including whether the project has a crew at
@@ -2204,6 +2214,23 @@ Before the chat loads, every stopping state (connecting, the one-time
 connection code, declined, expired, Gezel not running) is a short title, one
 sentence, and the next step as a button. The connection code is set large,
 selectable, and beside a Copy button.
+
+**A guest chat is about the document it sits beside.** The Office pane opens
+on one conversation about the open document, not on the project: a single row
+with the document's title and a quiet **Show project** key, over the thread
+and its composer. The thread picker lists only that document's threads; task
+threads, other gezels' chats and the project tabs stay out of it. The project
+is one key away and comes with a **Back to <document>** key, so the person
+never loses the way back. Gezels that run background services (the
+Boekwachter, the Klerk) are not offered as someone to write with.
+
+**A narrow conversation gives up the role first.** Wherever a chat timeline is
+narrower than 560px — the pane, a side panel, a phone — a bubble header drops
+the gezel's role and tightens its spacing, so the name, the live status and
+the cancel key keep the row. The role moves to the name's hover text. The
+rule keys on the timeline's own width (the `chat-timeline` container on
+`.chat-timeline-viewport`), never the window's, so a cramped panel in a wide
+window narrows too.
 
 ## Poppetjes: painted wooden crew
 

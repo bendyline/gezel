@@ -1113,6 +1113,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       before: c.req.query('before'),
       gezelId: c.req.query('gezel'),
       taskRef: c.req.query('task'),
+      subjectKeys: c.req.queries('subject'),
     });
     return c.json(response);
   });

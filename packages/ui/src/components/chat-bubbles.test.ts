@@ -1,12 +1,23 @@
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { describe, expect, it } from 'vitest';
 import {
+  authorTitle,
   countReasoningWords,
   formatDebugBundle,
   isRawHtmlDump,
   isStalledSilence,
   toHtmlCodeFence,
 } from './chat-bubbles.js';
+
+describe('authorTitle', () => {
+  it('leads with the role, which a narrow timeline hides from the header', () => {
+    expect(authorTitle('Researcher', 'Provider: This PC (gemma4-31b)')).toBe(
+      'Researcher · Provider: This PC (gemma4-31b)',
+    );
+    expect(authorTitle(undefined, 'Provider: Copilot')).toBe('Provider: Copilot');
+    expect(authorTitle('  ', undefined)).toBeUndefined();
+  });
+});
 
 /** Parse `md` and run the raw-HTML-dump heuristic the way RenderedMarkdown does. */
 function dump(md: string): boolean {

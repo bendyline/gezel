@@ -38,7 +38,7 @@ export function chatRoutes(ctx: ServiceContext): Hono {
       projectId,
       ...(body.expectedDeliverable ? { expectedDeliverable: body.expectedDeliverable } : {}),
     });
-    noteMessageSurface(ctx, c, session.id);
+    await noteMessageSurface(ctx, c, session.id);
     ctx.chat.trackBackground(
       ctx.chat
         .send(session.id, body.message, { fileTurnIntent: body.fileTurnIntent })

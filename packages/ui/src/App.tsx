@@ -44,6 +44,8 @@ import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-ta
 import { loadHomeViewModule, preloadTabContent } from './components/tab-content-loaders.js';
 import { useHostNotifications } from './components/useHostNotifications.js';
 import { useIsFirstRun } from './components/useIsFirstRun.js';
+import { readAppSurface } from './embedded/app-surface.js';
+import { type DocumentFocus, readDocumentFocus } from './embedded/document-focus.js';
 import { useBackNavigation } from './hooks/useBackNavigation.js';
 import { useResponsiveLayout } from './hooks/useResponsiveLayout.js';
 import { beginNavigation } from './nav-timing.js';
@@ -114,6 +116,7 @@ function readEmbeddedParams(): {
   fg: string | null;
   fontFamily: string | null;
   compact: boolean;
+  documentFocus: DocumentFocus | null;
 } | null {
   if (typeof window === 'undefined') return null;
   const params = new URLSearchParams(window.location.search);
@@ -131,6 +134,8 @@ function readEmbeddedParams(): {
     fontFamily: params.get('fontFamily'),
     // Narrow hosts (the Office task pane) drop the chat's right rail.
     compact: params.get('compact') === '1',
+    // The Office pane's document: one conversation about it, not the project.
+    documentFocus: readDocumentFocus(params, readAppSurface(window.location.search)),
   };
 }
 
@@ -157,6 +162,7 @@ export function App() {
           fg={EMBEDDED_PARAMS.fg}
           fontFamily={EMBEDDED_PARAMS.fontFamily}
           compact={EMBEDDED_PARAMS.compact}
+          documentFocus={EMBEDDED_PARAMS.documentFocus}
         />
       </Suspense>
     );

@@ -346,8 +346,22 @@ function isMuseGlimmerModel(model: string | undefined): boolean {
   return model?.startsWith('muse-glimmer') === true;
 }
 
+// LFM2.5-24B-A2B always opens <think>; its template has no no-think branch.
+// Constrained file work must allow that phase to reach a tool call instead of
+// cancelling it at the ordinary 1,024-character limit. Keep the same bounded
+// allowance as the other models that cannot disable reasoning; sibling quants
+// share the template, while smaller LFM instruct models keep the tight guard.
+function isLfm25A2bModel(model: string | undefined): boolean {
+  return model?.startsWith('lfm2.5-24b-a2b-') === true;
+}
+
 function needsExpandedConstrainedToolReasoning(model: string | undefined): boolean {
-  return isDeepSeekR1Model(model) || isGptOss20bModel(model) || isMuseGlimmerModel(model);
+  return (
+    isDeepSeekR1Model(model) ||
+    isGptOss20bModel(model) ||
+    isMuseGlimmerModel(model) ||
+    isLfm25A2bModel(model)
+  );
 }
 
 export function constrainedToolReasoningCharLimitForModel(model: string): number {

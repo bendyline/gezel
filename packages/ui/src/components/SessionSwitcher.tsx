@@ -44,6 +44,11 @@ interface Props {
   taskRef?: string;
   stepId?: string;
   /**
+   * When set, lists only the threads about these app items
+   * (`ChatSession.subject.key`) — the Office pane's document chat.
+   */
+  subjectKeys?: readonly string[];
+  /**
    * Whether an unselected composer should fall onto the newest thread in
    * scope (default) or stay blank so the next message starts a fresh one.
    * The project chat turns it off when it opens on a gezel whose last
@@ -189,6 +194,7 @@ export function SessionSwitcher({
   refreshKey,
   taskRef,
   stepId,
+  subjectKeys,
   autoPickNewest = true,
   engineLabel,
   activeDraftId,
@@ -196,6 +202,8 @@ export function SessionSwitcher({
   draftScope,
   craftbookRef,
 }: Props) {
+  // A string, so a parent passing a fresh array each render does not refetch.
+  const subjectScope = subjectKeys?.join('\n') ?? '';
   // Inside a narrow composer's toolbar: an icon-only picker plus the meter.
   // New thread and New draft stay reachable as rows in the picker.
   const inToolbar = useContext(ComposerToolbarContext);
@@ -231,11 +239,11 @@ export function SessionSwitcher({
   // the loaded list so the auto-pick below can tell "this list is for the
   // scope I'm looking at" from "this list is the previous scope's, still
   // on screen while the refetch flies".
-  const scopeKey = `${gezelId}:${projectId}:${taskRef ?? ''}`;
+  const scopeKey = `${gezelId}:${projectId}:${taskRef ?? ''}:${subjectScope}`;
   const [sessionsScope, setSessionsScope] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const key = `${gezelId}:${projectId}:${taskRef ?? ''}`;
+    const key = `${gezelId}:${projectId}:${taskRef ?? ''}:${subjectScope}`;
     try {
       let all: ChatSessionSummary[];
       if (taskRef) {
@@ -244,7 +252,11 @@ export function SessionSwitcher({
         const res = await api.listTaskSessions(parsed.projectId, parsed.num);
         all = res.sessions.filter((s) => s.gezelId === gezelId);
       } else {
-        const res = await api.listChatSessions({ gezelId, projectId });
+        const res = await api.listChatSessions({
+          gezelId,
+          projectId,
+          ...(subjectScope ? { subjectKeys: subjectScope.split('\n') } : {}),
+        });
         // The ordinary chat surface is the gezel's lobby conversation.
         // Task-scoped sessions (including night-shift handoffs) have their
         // own task UI and procedure prompt; letting one win this newest-first
@@ -264,7 +276,7 @@ export function SessionSwitcher({
       });
       return [] as ChatSessionSummary[];
     }
-  }, [gezelId, projectId, taskRef]);
+  }, [gezelId, projectId, taskRef, subjectScope]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a bump counter — incrementing it is the re-fetch trigger.
   useEffect(() => {

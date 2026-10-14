@@ -307,6 +307,82 @@ describe('ChatManager + app tools', () => {
     expect(app.seen).toHaveLength(1);
   }, 40_000);
 
+  it('briefs a thread the pane drives about its document, and nothing else', async () => {
+    // The Word pane incident (2026-10-13): beside an empty document, a
+    // Boekwachter in Default heard "Can you add some content on why Gezel is
+    // awesome?", saw 120 tools and a project block about workspace files,
+    // and asked which file to write. A thread about a document must be told
+    // so, keep the document's tools and a small core, and hear the selection.
+    const reads: string[] = [];
+    const { relayId } = relays.open({ appId: 'office', appName: 'Word' });
+    relays.attachStream(relayId, {
+      write(event) {
+        if (event.type !== 'tool_call') return;
+        reads.push(event.tool);
+        queueMicrotask(() =>
+          relays.resolveCall(relayId, event.callId, {
+            ok: true,
+            content: '{"isEmpty":true,"text":"","documentIsEmpty":true}',
+          }),
+        );
+      },
+    });
+    relays.register(relayId, {
+      projectId: 'default',
+      gezelIds: ['ada'],
+      surfaceId: 'pane-surface-1',
+      subject: {
+        kind: 'document',
+        app: 'Word',
+        title: 'Untitled document',
+        editable: true,
+        stateTool: 'office_read_selection',
+      },
+      tools: [
+        {
+          name: 'office_read_selection',
+          description: 'Read the selection in the open document.',
+          inputSchema: { type: 'object', properties: {} },
+        },
+        {
+          name: 'doc_insert_text',
+          description: 'Insert text into the open document.',
+          inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
+        },
+      ],
+    });
+    const thread = await manager.createSession({
+      gezelId: 'ada',
+      subject: {
+        key: 'surface:pane-surface-1',
+        kind: 'document',
+        app: 'Word',
+        title: 'Untitled document',
+      },
+    });
+    relays.noteUserMessage(thread.id, 'pane-surface-1');
+    mock.script('Here is a paragraph.');
+    await manager.send(thread.id, 'Can you add some content on why Gezel is awesome?');
+
+    const created = mock.calls.find((c) => c.kind === 'create');
+    const system = created?.opts?.systemMessage ?? '';
+    expect(system).toContain('## The document open beside this chat');
+    expect(system).toContain('`office_read_selection`, `doc_insert_text`');
+    expect(system).not.toContain('### Where work belongs');
+    const allowed = [...(created?.opts?.toolAllowlist ?? [])];
+    expect(allowed).toContain('search');
+    expect(allowed).not.toContain('write_file');
+    expect(allowed).not.toContain('write_artifact');
+
+    expect(reads).toEqual(['office_read_selection']);
+    const sent = mock.calls.find((c) => c.kind === 'send');
+    expect(sent?.prompt).toBe(
+      '[Word, "Untitled document": the document is empty.]\n\nCan you add some content on why Gezel is awesome?',
+    );
+    const persisted = await store.getSession('ada', thread.id);
+    expect(persisted?.subject?.key).toBe('surface:pane-surface-1');
+  }, 30_000);
+
   it('withholds app tools from a provider that runs its own tool loop', async () => {
     // Copilot and the CLI providers never reach an in-process server, so
     // advertising the tool in their prompt would promise a call they cannot

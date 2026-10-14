@@ -48,8 +48,16 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
   app.get('/', async (c) => {
     const gezelId = c.req.query('gezel') || undefined;
     const projectId = c.req.query('project') || undefined;
+    // `subject` (repeatable): only threads about these app items — the
+    // Office pane asks for its document's path key and its own surface key.
+    const subjectKeys = new Set(c.req.queries('subject') ?? []);
     const sessions = await ctx.chat.listSessions({ gezelId, projectId });
-    return c.json({ sessions });
+    return c.json({
+      sessions:
+        subjectKeys.size > 0
+          ? sessions.filter((s) => s.subject && subjectKeys.has(s.subject.key))
+          : sessions,
+    });
   });
 
   app.post('/', async (c) => {
@@ -237,7 +245,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       }
       text = rewritePromptDraftFileRefs(body.message, body.draftId);
     }
-    noteMessageSurface(ctx, c, id);
+    await noteMessageSurface(ctx, c, id);
     // Accept immediately; the live reply streams over /events/chat.
     // Mentioned gezels (if any) get the same verbatim user text in their
     // own session via the fan-out helper — no `from` metadata, so their
@@ -590,7 +598,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
           log.warn(`[sessions] marking draft sent failed: ${String(err)}`);
         });
     }
-    noteMessageSurface(ctx, c, id);
+    await noteMessageSurface(ctx, c, id);
     ctx.chat.trackBackground(
       ctx.chat
         .interruptWithMessage(id, interruptText, body.draftId ? { draftId: body.draftId } : {})

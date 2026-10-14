@@ -79,6 +79,7 @@ import {
   type SessionDebugSnapshot,
   type SessionLink,
   type SessionParent,
+  type SessionSubject,
   type SessionTelemetry,
   type Task,
   type TaskCraftbookStep,
@@ -94,6 +95,7 @@ import {
   displayName,
   effectiveGeneralistModeSetting,
   isEngagementAllowed,
+  isItemFocus,
   isLocalProvider,
   isOutsideInInternalPath,
   isProactiveAllowed,
@@ -116,6 +118,7 @@ import {
   resolveSandboxCopilot,
   resolveSecurityPolicy,
   roleDeliverableScripts,
+  sameSessionSubject,
   stepDeliverablePath,
   stepTurnSteering,
   taskEffectiveStatus,
@@ -214,6 +217,12 @@ import {
   NON_SANDBOX_EXCLUDED_MCP_TOOLS,
 } from '../providers/copilot.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
+import {
+  promptAppSubjectFor,
+  readAppSubjectStateLine,
+  retrievalExclusionsFor,
+  subjectBinding,
+} from './app-subject-session.js';
 
 import {
   extractReasoning,
@@ -3294,6 +3303,8 @@ export class ChatManager extends LocalEngineRuntime {
     scheduledRun?: boolean;
     /** Craftbook template this session edits (the explicit editor's AI assist). */
     craftbookRef?: string;
+    /** The app item this thread is about (the Office pane's focused chat). */
+    subject?: SessionSubject;
     /**
      * Mark the session as a one-shot consultation spawned by
      * `askGezelAndWait`. Strips team-management + onward-consultation
@@ -3398,6 +3409,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(args.parentSession ? { parentSession: args.parentSession } : {}),
       ...(args.handoffFrom ? { handoffFrom: args.handoffFrom } : {}),
       ...(args.craftbookRef ? { craftbookRef: args.craftbookRef } : {}),
+      ...(args.subject ? { subject: args.subject } : {}),
       ...(args.consultationMode ? { consultationMode: true } : {}),
       ...(args.visitorAccess ? { visitorAccess: true as const } : {}),
       ...(args.roleBasedNameOnlyMode !== undefined
@@ -6496,6 +6508,27 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * Stamp the item an app's chat is about on a thread (`ChatSession.subject`).
+   * Runs on every send from the Office pane, so it writes only when the stamp
+   * changed: the first message, or the first after a Save As moved the
+   * document. A surface registered for one project never stamps another
+   * project's thread.
+   */
+  async setSessionSubject(
+    sessionId: string,
+    subject: SessionSubject,
+    projectId: string,
+  ): Promise<void> {
+    const record = await this.getSessionRecord(sessionId);
+    if (!record || record.projectId !== projectId) return;
+    if (sameSessionSubject(record.subject, subject)) return;
+    record.subject = subject;
+    await this.store.writeSession(record);
+    const live = this.states.get(sessionId);
+    if (live) live.record = record;
+  }
+
+  /**
    * Drop every queued message for `sessionId`, rejecting each
    * waiter's promise with a clear reason. Used by
    * `archiveSession`, `deleteSession`, and `shutdown` — all paths
@@ -7500,6 +7533,18 @@ export class ChatManager extends LocalEngineRuntime {
         }
         return safe;
       };
+      // A person writing beside a document: open their turn with what they
+      // have selected right now, nearest their words, so "this" and "here"
+      // resolve without a read. Asked fresh on every turn of theirs because
+      // the selection moves between messages; a pane that does not answer
+      // in time costs the line, never the turn.
+      const subjectStateLine = await this.readSubjectStateForTurn(
+        state.record,
+        resolveTurnMessageOrigin(opts),
+      );
+      if (subjectStateLine) {
+        promptForTurn = `${subjectStateLine}\n\n${promptForTurn}`;
+      }
       const freshGameState = await this.refreshLeanGameState(
         state.record,
         userText,
@@ -7562,6 +7607,8 @@ export class ChatManager extends LocalEngineRuntime {
             todayIso(),
             self?.name ?? '',
             project?.name ?? '',
+            // The person's own selected text: rewriting it is not inventing it.
+            subjectStateLine ?? '',
           ].join('\n'),
         );
       }
@@ -12970,6 +13017,9 @@ export class ChatManager extends LocalEngineRuntime {
         arms?: unknown[];
       } | null = null;
       let trace: RetrievalDecisionTrace | null = null;
+      const excludeSources = retrievalExclusionsFor(
+        promptAppSubjectFor(state.record, this.appToolBindingsFor(state.record)),
+      );
       const result = await retrieveProjectContext({
         store: this.store,
         search,
@@ -12978,6 +13028,7 @@ export class ChatManager extends LocalEngineRuntime {
         config,
         userText,
         messageOrigin,
+        ...(excludeSources.length > 0 ? { excludeSources } : {}),
         projectIds: [state.record.projectId, ...linkedProjectIds],
         ...(contextWindow ? { contextWindow } : {}),
         availableToolNames: liveTurnToolNames(state.session),
@@ -13132,6 +13183,17 @@ export class ChatManager extends LocalEngineRuntime {
       gezelId: record.gezelId,
       sessionId: record.id,
     });
+  }
+
+  /** The selection line that opens a person's turn beside an app's item, if any. */
+  private async readSubjectStateForTurn(
+    record: ChatSession,
+    origin: TurnMessageOrigin,
+  ): Promise<string | null> {
+    if (origin !== 'direct-user' || !this.appToolRelays) return null;
+    const binding = subjectBinding(this.appToolBindingsFor(record));
+    if (!binding) return null;
+    return readAppSubjectStateLine({ registry: this.appToolRelays, binding, session: record });
   }
 
   /**
@@ -14381,10 +14443,18 @@ export class ChatManager extends LocalEngineRuntime {
       taskContext?.task.craftbook.toolsets,
     );
     const builtinOnlyStep = stepAllowsOnlyBuiltinTools(taskContext?.step);
+    // Tools a connected app registered for this project, and the item its
+    // chat is about. A thread about one document keeps the document's tools
+    // and a small core; installed toolsets (the document converters among
+    // them) drop out of both the prompt and the bridge, the way a
+    // built-in-only step drops them.
+    const appToolBindings = builtinOnlyStep ? [] : this.appToolBindingsFor(record);
+    const appSubject = promptAppSubjectFor(record, appToolBindings);
+    const appItemFocus = isItemFocus(appSubject);
     const activeToolsets = (entries: readonly InstalledToolset[]): InstalledToolset[] =>
       entries.filter(
         (entry) =>
-          (!builtinOnlyStep || entry.runtime.kind === 'builtin') &&
+          (!(builtinOnlyStep || appItemFocus) || entry.runtime.kind === 'builtin') &&
           !stepDisabledToolsetIds.has(entry.toolsetId),
       );
     const activePerGezel = activeToolsets(perGezel);
@@ -14463,10 +14533,9 @@ export class ChatManager extends LocalEngineRuntime {
       installedToolsetIds.add(t.toolsetId);
     }
 
-    // Tools a connected app registered for this project. They are named in the
-    // prompt's toolset listing the same way an installed toolset is; the real
-    // tool names arrive with the post-bridge refresh, from the live server.
-    const appToolBindings = builtinOnlyStep ? [] : this.appToolBindingsFor(record);
+    // App tools are named in the prompt's toolset listing the same way an
+    // installed toolset is; the real tool names arrive with the post-bridge
+    // refresh, from the live server.
     for (const binding of appToolBindings) {
       installedToolsetIds.add(appToolsToolsetId(binding.appId));
     }
@@ -14584,6 +14653,7 @@ export class ChatManager extends LocalEngineRuntime {
       toolsetsGroupOverride,
       ...(project?.mode ? { projectMode: project.mode } : {}),
       ...(leanSession(project, record) ? { leanProfile: true } : {}),
+      ...(appItemFocus ? { appItemFocus: true } : {}),
       ...(rolesAsToolsActive ? { rolesAsTools: true } : {}),
       ...(isProjectVoorman ? { isProjectVoorman: true } : {}),
       ...(globalConfig.webSearch?.provider
@@ -14786,6 +14856,7 @@ export class ChatManager extends LocalEngineRuntime {
       // issues) into the corpus — turn on the provenance-framing block so the
       // model treats it as data, not commands.
       ...(project?.connectors?.length ? { untrustedContentPresent: true } : {}),
+      ...(appSubject ? { appSubject } : {}),
       ...(factualWriting.on
         ? {
             factualWriting: {
@@ -16215,6 +16286,7 @@ export class ChatManager extends LocalEngineRuntime {
       toolsetsGroupOverride,
       ...(project?.mode ? { projectMode: project.mode } : {}),
       ...(leanSession(project, record) ? { leanProfile: true } : {}),
+      ...(appItemFocus ? { appItemFocus: true } : {}),
       ...(record.consultationMode ? { consultationMode: true } : {}),
       ...(rolesAsToolsActive ? { rolesAsTools: true } : {}),
       ...(isProjectVoorman ? { isProjectVoorman: true } : {}),

@@ -29,7 +29,7 @@ vi.mock('./relay.js', () => ({
   startOfficeRelay: (opts: StartRelayOptions) => startOfficeRelay(opts),
 }));
 
-const { OfficePane } = await import('./PaneApp.js');
+const { OfficePane, chatFrameUrl, paneSubject } = await import('./PaneApp.js');
 
 const READY: PaneReady = {
   token: 't',
@@ -102,6 +102,46 @@ describe('OfficePane', () => {
     deferredRelay();
     render(<OfficePane ready={{ ...READY, defaultProvider: 'codex-cli' }} host="word" />);
     expect(await screen.findByText(/Lead runs on Codex CLI/)).toBeInTheDocument();
+  });
+
+  it('tells the daemon what the document is, and opens the chat on it', async () => {
+    listGezels.mockResolvedValue([{ id: 'lead', name: 'Lead' }]);
+    deferredRelay();
+    const { container } = render(<OfficePane ready={READY} host="word" />);
+    await waitFor(() => expect(startOfficeRelay).toHaveBeenCalled());
+    expect(startOfficeRelay.mock.calls[0]![0].subject).toEqual({
+      kind: 'document',
+      app: 'Word',
+      title: 'plan.docx',
+      path: '/docs/plan.docx',
+      focus: 'item',
+      editable: true,
+      stateTool: 'office_read_selection',
+    });
+    const src = container.querySelector('iframe')?.getAttribute('src') ?? '';
+    const params = new URLSearchParams(src.slice(src.indexOf('?')));
+    expect(params.get('focus')).toBe('document');
+    expect(params.get('subjectKey')).toBe('file:/docs/plan.docx');
+    expect(params.get('subjectTitle')).toBe('plan.docx');
+  });
+
+  it('describes an unsaved document by its pane and keeps facts, not prose', () => {
+    expect(paneSubject('excel', null, false)).toEqual({
+      kind: 'spreadsheet',
+      app: 'Excel',
+      title: 'Untitled document',
+      focus: 'item',
+      editable: false,
+      stateTool: 'office_read_selection',
+    });
+    const url = chatFrameUrl('default', 'marek', 'pane-12345', {
+      key: 'surface:pane-12345',
+      kind: 'document',
+      app: 'Word',
+      title: 'Untitled document',
+    });
+    expect(url).toContain('subjectKey=surface%3Apane-12345');
+    expect(chatFrameUrl('default', 'marek', 'pane-12345')).not.toContain('focus=');
   });
 
   it('shows no notice for a gezel that can use the tools', async () => {

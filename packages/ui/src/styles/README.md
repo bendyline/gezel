@@ -62,6 +62,7 @@ an example of restoring the old winner explicitly.
 | `squisq-theme.css` | Rebinds the vendored Squisq editor's `--squisq-*` chrome palette onto gezel's tokens |
 | `handbook.css` | Legacy Handboek master/detail surface, retained for compatibility tests |
 | `knowledge.css` | **On demand:** Knowledge catalog browser (owned by `KnowledgeView`) |
+| `../embedded/DocumentChat.css` | **On demand:** The Office pane's document chat and its way back from the project view (owned by `DocumentChat`) |
 
 ## Editing rules
 

@@ -1,3 +1,9 @@
+import {
+  type PromptAppSubject,
+  appSubjectNoun,
+  isItemFocus,
+  renderAppSubjectBlock,
+} from '../app-subject.js';
 import type { GeneralistMode } from '../generalist-mode.js';
 import { displayName } from '../gezel-display.js';
 import {
@@ -468,6 +474,15 @@ export interface BuildInstructionsOptions {
    * — survive, which is exactly what a small model on a focused task needs.
    */
   leanProfile?: boolean;
+  /**
+   * The item this thread is about, when an app's chat opened it (the Word
+   * document beside the Office pane). Renders its section late in the
+   * prompt; with `focus: 'item'` and the app connected it also stands down
+   * everything that points the model at project files — "Where work
+   * belongs", the workspace inventory, assigned tasks, the routing guardrail
+   * — and condenses the project's about. Absent → byte-identical prompt.
+   */
+  appSubject?: PromptAppSubject;
 }
 
 /**
@@ -655,7 +670,11 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     browserAutomationRoleExcluded,
     browserLocalPreviewOnly,
     inAppWebPreview,
+    appSubject,
   } = opts;
+  // A thread about one document: the document is the job, and the layers
+  // that teach where project files go would send the model looking for one.
+  const itemFocus = isItemFocus(appSubject);
   // Provenance-framing block — present only when the session can surface
   // untrusted external content (mail-enabled projects). Constant + cache-stable.
   const untrustedContentBlock = untrustedContentPresent ? UNTRUSTED_CONTENT_GUIDANCE : '';
@@ -808,15 +827,17 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       : 'the available project/task tools listed below';
   const flatRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou are a router; specialists do the work. For concrete work, route through ${projectPrimaryRoute}; the runtime selects the appropriate lead or team. ${craftbookRoute}${taskOversightRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly who's on it.${routingTail}`;
   const crewRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou do not write code, run shell commands, edit project files, or execute scripts. Route concrete work through ${projectPrimaryRoute}. ${craftbookRoute}${taskOversightRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly which lead is on it.${routingTail}`;
-  const delegationGuardrail = !isDelegationRole
-    ? ''
-    : opts.generalistKickoff === 'on'
-      ? flatRoutingGuardrail
-      : providerNeedsGuardrail
-        ? crewRoutingGuardrail
-        : '';
+  const delegationGuardrail =
+    !isDelegationRole || itemFocus
+      ? ''
+      : opts.generalistKickoff === 'on'
+        ? flatRoutingGuardrail
+        : providerNeedsGuardrail
+          ? crewRoutingGuardrail
+          : '';
   const exactFormatGuidance =
     isDelegationRole &&
+    !itemFocus &&
     (availableToolNameSet.has('suggest_craftbook') ||
       availableToolNameSet.has('invoke_craftbook') ||
       availableToolNameSet.has('convert_document'))
@@ -836,7 +857,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       projectContext +=
         ' The workspace is a real folder on your disk (outside `~/.gezel`) — address files by paths relative to the workspace root (e.g. `package.json`), never by absolute path, and remember writes are permanent.';
     }
-    const linkedProjectIds = project.linkedProjectIds ?? [];
+    const linkedProjectIds = itemFocus ? [] : (project.linkedProjectIds ?? []);
     if (linkedProjectIds.length > 0) {
       const links = linkedProjectIds.map((id) => `- \`../${id}/\``).join('\n');
       projectContext += `\n\n### Linked projects\n\nThis project has one-way access to these linked projects:\n${links}\nThe \`search\` tool already includes their indexed knowledge. Use the ordinary workspace file tools with paths such as \`../<project-id>/src/file.ts\` to list, read, create, edit, rename, or delete linked-project files. A linked project's own workspace-write setting still controls mutations. Links are direct, not transitive. The shared document library is also searched automatically and remains available through the document tools.`;
@@ -852,7 +873,13 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
         ? ` The lead of this project is **${displayedVoormanName}**${voormanPronouns} — ${voormanPronounForms.subject} will handle the project ${voormanPronounForms.reflexive}; team-management tools are intentionally not available here.`
         : ` The voorman of this project is **${displayedVoormanName}**${voormanPronouns}.`;
     }
-    if (project.about && project.about.trim().length > 0) {
+    if (itemFocus && project.about?.trim()) {
+      // Beside a document the project is background: what it is, briefly.
+      projectContext += `\n\n${renderProjectBrief(
+        { about: project.about },
+        PROMPT_FOOTPRINT_POLICY.minimal.projectBriefMaxChars,
+      )}`;
+    } else if (project.about && project.about.trim().length > 0) {
       // For tiny/small/medium local models, slice the imported AGENTS.md
       // down to a task-scoped subset — the full monorepo guide dilutes a
       // small model's attention (see scope-instructions.ts). Large/cloud
@@ -964,7 +991,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     // line per binding, capped) — prompt budget
     // compounds at depth. Absent entirely when no bindings exist, so
     // no-connector prompts stay byte-identical (prefix-cache stability).
-    const bindings = (project.connectors ?? []).filter((b) => !b.disabled);
+    const bindings = itemFocus ? [] : (project.connectors ?? []).filter((b) => !b.disabled);
     if (bindings.length > 0) {
       const shown = bindings.slice(0, 8);
       const lines = shown.map((b) => {
@@ -992,7 +1019,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     // fetched on demand; the prompt budget compounds at depth, and all this
     // has to do is stop the model reaching for `read_artifact` on a Parquet
     // file and route it to the grounding step instead.
-    if (opts.hasObservationTables) {
+    if (opts.hasObservationTables && !itemFocus) {
       projectContext +=
         '\n\n### Data tables\n\nThis project holds **data tables** — spreadsheets and large data files ' +
         'stored in a form you query rather than read. Call `list_tables` to see them, `describe_table` ' +
@@ -1067,7 +1094,10 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       workspaceDelegationTools.length > 0
         ? `Delegate with ${formatToolList(workspaceDelegationTools)}, passing the exact path, requested change, and acceptance criteria.`
         : 'No delegation tool is wired this turn; explain that the workspace change is blocked instead of inventing a handoff.';
-    if (hasReadFile && hasWriteFile) {
+    if (itemFocus) {
+      // No "Where work belongs": the document's own tools are where the
+      // work goes, and this section named file tools as the answer.
+    } else if (hasReadFile && hasWriteFile) {
       const listedPathClause = workspaceListingRendered
         ? ` If a path appears in \`### Workspace files\`, use ${formatToolList([...workspaceReadTools, ...workspaceWriteTools])}; do not use artifact tools for it.`
         : '';
@@ -1168,9 +1198,10 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // Index-derived orientation, rendered upstream (chat/workspace-gestalt.ts)
   // and gated by the `prompt.workspace-gestalt` behavior in buildSessionOpts.
   // Placed before the raw file listing: map first, then inventory.
-  const workspaceGestaltBlock = workspaceOrientationEnabled ? (workspaceGestalt ?? '') : '';
+  const workspaceGestaltBlock =
+    workspaceOrientationEnabled && !itemFocus ? (workspaceGestalt ?? '') : '';
   let workspaceFilesBlock = '';
-  if (workspaceListingRendered) {
+  if (workspaceListingRendered && !itemFocus) {
     const listing = workspacePromptFiles
       .slice(0, WORKSPACE_PROMPT_ENTRY_CAP)
       .map((f) => `${f.isDirectory ? 'dir ' : 'file'} ${f.path}${f.isDirectory ? '/' : ''}`)
@@ -1200,7 +1231,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     const searchDocumentTool = toolsFrom(['search', 'search_documents'])[0];
     const hasSearchDocuments = searchDocumentTool !== undefined;
     const hasReadDocument = toolsFrom(['read_document']).length > 0;
-    if (trimExecutor) {
+    if (trimExecutor || itemFocus) {
       // Executor trim: the full listing is strategic-altitude cross-project
       // context a task-scoped builder doesn't inventory. It still needs to
       // know the library exists — dropping it outright left "consult team
@@ -1416,7 +1447,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // gezel can pattern-match against `get_task` / `read_task_notes`
   // without re-listing first.
   let assignedTasksContext = '';
-  if (!task && assignedTasks && assignedTasks.length > 0) {
+  if (!task && !itemFocus && assignedTasks && assignedTasks.length > 0) {
     const lines: string[] = [
       `### Tasks assigned to you in this project (${assignedTasks.length})`,
       availableToolNameSet.has('read_task_notes')
@@ -1514,15 +1545,25 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     ...(localModelTier ? { modelTier: localModelTier } : {}),
     providerName,
     ...(bridgeFailed ? { bridgeFailed: true } : {}),
-    workspaceListingRendered,
+    workspaceListingRendered: workspaceListingRendered && !itemFocus,
+    ...(appSubject?.connected && appSubject.toolNames.length > 0
+      ? {
+          leadingGroup: {
+            name: `This ${appSubjectNoun(appSubject.kind)} (${appSubject.app})`,
+            toolNames: new Set(appSubject.toolNames),
+          },
+        }
+      : {}),
   });
+  const appSubjectBlock = appSubject ? `\n\n---\n\n${renderAppSubjectBlock(appSubject)}` : '';
 
   // Delegation guardrail goes RIGHT AT THE TOP after the header so it's
   // the first non-trivial prose the model reads — and the longer about
   // body underneath is then read in the context of "you route, you
   // don't build." Suppresses `browsingGuidance` for delegation roles
   // (it talks about writing artifacts they aren't supposed to need).
-  const browsingForRole = isDelegationRole || leanProfile ? '' : `\n\n${browsingGuidance}`;
+  const browsingForRole =
+    isDelegationRole || leanProfile || itemFocus ? '' : `\n\n${browsingGuidance}`;
   // ── Cache-friendly ordering (Phase 2.4) ──
   // We extract the workspace-files listing from projectContext so a
   // file mutation doesn't invalidate the entire stable prefix — that
@@ -1725,7 +1766,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
       'read_file',
     ]).length > 0;
   const freshProjectAddendum =
-    isFreshProject && canSurvey
+    isFreshProject && canSurvey && !itemFocus
       ? `\n\n---\n\n## Fresh project — skip the survey\n\nThis workspace has only ${workspaceFiles?.length ?? 0} bootstrap file(s) (e.g. \`package.json\`, \`tsconfig.json\`). Artifacts, memories, tasks, packages, scripts, and craftbook drawers are nearly empty too on a freshly-started project. **Don't iterate** through \`list_artifacts\` / \`list_memories\` / \`list_packages\` / \`list_scripts\` / \`list_craftbooks\` / \`list_tasks\` looking for hidden state — there is none.\n\nIf you've already called a read tool this turn and got an empty / bootstrap-only result, your NEXT tool call must be either:\n\n${freshProjectAction}\n\nDo NOT loop on reads. The runtime aborts after 5 same-args read calls and the user sees a stuck-loop warning.`
       : '';
 
@@ -1773,6 +1814,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     ['recall (memory)', recall, 'volatile'],
     ['consultationAddendum', consultationAddendum, 'volatile'],
     ['freshProjectAddendum', freshProjectAddendum, 'volatile'],
+    ['appSubject', appSubjectBlock, 'volatile'],
     ['activeTaskAnchor', activeTaskAnchor, 'volatile'],
   ];
   if (process.env.GEZEL_PROMPT_BREAKDOWN === '1') {
@@ -1888,7 +1930,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     // everything up to `taskContext` identically. Concatenation order is
     // unchanged, so `full` stays byte-identical to the single-string form.
     const sharedPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${characterBlock}${lessonsBlock}${personBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}`;
-    const sessionTail = `${taskContext}${assignedTasksContext}${recall}${operationalGuidanceSection}${responseGuidanceSection}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`;
+    const sessionTail = `${taskContext}${assignedTasksContext}${recall}${operationalGuidanceSection}${responseGuidanceSection}${consultationAddendum}${freshProjectAddendum}${appSubjectBlock}${activeTaskAnchor}`;
     return {
       full: `${sharedPrefix}${sessionTail}`,
       sharedPrefix,
@@ -1911,7 +1953,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // self-separates (leading `\n\n---\n\n` or `\n\n###`); strip a leading
   // separator so the standalone message doesn't open with a horizontal rule.
   const volatileContext =
-    `${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}${taskContext}${assignedTasksContext}${recall}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`
+    `${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}${taskContext}${assignedTasksContext}${recall}${consultationAddendum}${freshProjectAddendum}${appSubjectBlock}${activeTaskAnchor}`
       .replace(/^\n+(?:---\n+)?/, '')
       .trim();
 

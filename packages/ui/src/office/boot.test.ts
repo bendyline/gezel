@@ -331,6 +331,26 @@ describe('pickDefaultGezel', () => {
     expect(pickDefaultGezel(project, crew, 'm', 'dev')).toBe('dev');
   });
 
+  it('never defaults to a background-service gezel, though its name reads as a writer', () => {
+    // The Word pane incident: Default's crew listed the Boekwachter first, its
+    // role passes the factual check ("boekwacht"), and the pane opened on it.
+    const crew = [
+      { id: 'andres', name: 'Andres', role: 'Boekwachter', writesFactually: true },
+      { id: 'marek', name: 'Marek', role: 'Copywriter' },
+      { id: 'm', name: 'M', role: 'Meester' },
+    ];
+    const project = {
+      id: 'default',
+      name: 'Default',
+      readOnly: false,
+      gezelIds: ['andres', 'marek'],
+    };
+    expect(pickDefaultGezel(project, crew, 'm', undefined)).toBe('marek');
+    // A person's own earlier choice still stands, and a lone service gezel is still someone.
+    expect(pickDefaultGezel(project, crew, 'm', 'andres')).toBe('andres');
+    expect(pickDefaultGezel(project, [crew[0]!], undefined, undefined)).toBe('andres');
+  });
+
   it('passes over gezels that cannot reach the document tools while anyone else can', () => {
     const crew = [
       { id: 'cw', name: 'Cw', role: 'Copywriter', provider: 'copilot' as const },

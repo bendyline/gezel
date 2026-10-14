@@ -5816,6 +5816,11 @@ export class Store {
     projectId?: string;
     gezelId?: string;
     taskRef?: string;
+    /**
+     * Narrows the scope to threads about these app items
+     * (`ChatSession.subject.key`) — the Office pane's focused chat.
+     */
+    subjectKeys?: readonly string[];
     limit: number;
     before?: string;
     includeArchived?: boolean;
@@ -5839,6 +5844,9 @@ export class Store {
     const limit = Math.max(1, Math.min(500, opts.limit));
     const includeArchived = opts.includeArchived === true;
     const before = opts.before;
+    const subjectKeys = opts.subjectKeys?.length ? new Set(opts.subjectKeys) : null;
+    const aboutSubject = (subject: { key: string } | undefined) =>
+      !subjectKeys || (subject !== undefined && subjectKeys.has(subject.key));
 
     const gezelIds = opts.gezelId
       ? [opts.gezelId]
@@ -5860,6 +5868,7 @@ export class Store {
         if (!scanned) continue;
         if (opts.projectId && scanned.summary.projectId !== opts.projectId) continue;
         if (opts.taskRef && scanned.summary.taskRef !== opts.taskRef) continue;
+        if (!aboutSubject(scanned.summary.subject)) continue;
         if (!includeArchived && scanned.summary.archived) continue;
         const session = scanned.session ?? (await this.readSessionFile(path, label));
         if (!session) continue;
@@ -5869,6 +5878,7 @@ export class Store {
         // under the same ref but a different gezel) in view while
         // dropping every unrelated conversation in the project.
         if (opts.taskRef && session.taskRef !== opts.taskRef) continue;
+        if (!aboutSubject(session.subject)) continue;
         if (!includeArchived && session.archived) continue;
         sessions.push(session);
       }

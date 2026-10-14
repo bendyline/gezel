@@ -47,7 +47,7 @@ import { QueuedTaskBubble } from './QueuedTaskBubble.js';
 import { TerminalBubble } from './TerminalBubble.js';
 import { TerminalStreamingBubble } from './TerminalStreamingBubble.js';
 import { WorkingNotes } from './WorkingNotes.js';
-import { pinActiveThreadLast } from './active-thread-pin.js';
+import { newestActivityMs, pinActiveThreadLast } from './active-thread-pin.js';
 import {
   GhostQueuedBubble,
   type InlineWarning,
@@ -3258,30 +3258,29 @@ export function ChatTimelineView({
   // all, and that is exactly the case the card exists for.
   const shownQueuedTasks = queuedTaskCards.slice(0, MAX_QUEUED_TASK_CARDS);
   const hiddenQueuedTasks = queuedTaskCards.length - shownQueuedTasks.length;
-  const queuedTaskEls = (
-    <>
-      {shownQueuedTasks.map((entry) => (
-        <QueuedTaskBubble
-          key={`queued-task:${entry.task.ref}`}
-          task={entry.task}
-          wait={entry.wait}
-          gezel={gezels.get(entry.wait.gezelId)}
-          onTaskReference={(ref) =>
-            window.dispatchEvent(
-              new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }),
-            )
-          }
-        />
-      ))}
-      {/* A fanout host can enqueue a shard per batch. Naming the
-          remainder keeps the cap from reading as "that's all of it". */}
-      {hiddenQueuedTasks > 0 && (
-        <p className="msg-queued-task-overflow muted small">
-          + {hiddenQueuedTasks} more task{hiddenQueuedTasks === 1 ? '' : 's'} waiting in the queue.
-        </p>
-      )}
-    </>
-  );
+  const renderQueuedTasks = (entries: QueuedTaskEntry[], withOverflow: boolean) => [
+    ...entries.map((entry) => (
+      <QueuedTaskBubble
+        key={`queued-task:${entry.task.ref}`}
+        task={entry.task}
+        wait={entry.wait}
+        gezel={gezels.get(entry.wait.gezelId)}
+        onTaskReference={(ref) =>
+          window.dispatchEvent(new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }))
+        }
+      />
+    )),
+    // A fanout host can enqueue a shard per batch. Naming the remainder
+    // keeps the cap from reading as "that's all of it".
+    ...(withOverflow && hiddenQueuedTasks > 0
+      ? [
+          <p key="queued-task-overflow" className="msg-queued-task-overflow muted small">
+            + {hiddenQueuedTasks} more task{hiddenQueuedTasks === 1 ? '' : 's'} waiting in the
+            queue.
+          </p>,
+        ]
+      : []),
+  ];
 
   const setSessionAction = (sessionId: string, state: FailedTurnActionState | null) => {
     setSessionErrorActions((prev) => {
@@ -3326,7 +3325,7 @@ export function ChatTimelineView({
       <div className="chat-timeline" ref={scrollRef} data-testid="chat-timeline">
         {emptyContent ??
           (emptyPlaceholder ? <p className="placeholder">{emptyPlaceholder}</p> : null)}
-        {queuedTaskEls}
+        {renderQueuedTasks(shownQueuedTasks, true)}
       </div>
     );
   }
@@ -3438,6 +3437,18 @@ export function ChatTimelineView({
         {done.nodes}
       </WorkingNotes>,
     );
+  };
+  // Receipts sit at the moment their hold began, like any other event in
+  // the log, and only between top-level items so they never split a thread
+  // or a subthread tree. Rendered after every thread instead, a card from
+  // this morning sat between a live reply and the composer all day.
+  const pendingQueued = [...shownQueuedTasks];
+  const emitQueuedBefore = (atMs: number) => {
+    let n = 0;
+    while (n < pendingQueued.length && Date.parse(pendingQueued[n]!.wait.since) < atMs) n++;
+    if (n === 0) return;
+    const placed = pendingQueued.splice(0, n);
+    els.push(...renderQueuedTasks(placed, pendingQueued.length === 0));
   };
   const emitSessionErrorBanner = (
     sid: string,
@@ -3833,7 +3844,10 @@ export function ChatTimelineView({
     return nodes;
   };
   for (const item of threadItems) {
-    if (item.kind !== 'thread') flushFold();
+    if (item.kind !== 'thread') {
+      flushFold();
+      emitQueuedBefore(Date.parse(item.at));
+    }
     if (item.kind === 'indexing') {
       els.push(
         <IndexingReceiptRow
@@ -3952,6 +3966,7 @@ export function ChatTimelineView({
       }
     }
     if (!nestedHere) flushFold();
+    if (sessionDepth === 0) emitQueuedBefore(newestActivityMs(item));
     if (nestedHere && !fold) {
       fold = { key: `working-notes:${sid}:${item.at}`, nodes: [], sessions: [], names: [] };
     }
@@ -4151,7 +4166,7 @@ export function ChatTimelineView({
           ? (emptyContent ??
             (emptyPlaceholder ? <p className="placeholder">{emptyPlaceholder}</p> : null))
           : els}
-        {queuedTaskEls}
+        {pendingQueued.length > 0 && renderQueuedTasks(pendingQueued, true)}
         {els.length > 0 &&
           (!trailingContentAfterWrapUp || messages.some((m) => m.synthetic === 'task-wrapup')) &&
           trailingContent}
