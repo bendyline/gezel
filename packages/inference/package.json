@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-inference",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Shared on-device inference, model management and knowledge runtime for Gezel hosts.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "daemon", "server", "llm"],
