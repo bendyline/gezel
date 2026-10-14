@@ -66,23 +66,181 @@ def test_json_object_and_json_schema_shapes():
 def test_malformed_requests_are_errors_not_free_text():
     _raises(lambda: rf.response_schema({"type": "json_schema", "json_schema": {}}), "schema")
     _raises(lambda: rf.response_schema({"type": "xml"}), "Unsupported")
-    tools = [{"type": "function", "function": {"name": "read_file"}}]
-    _raises(
-        lambda: rf.compile_response_grammar(None, {"type": "json_object"}, tools),
-        "cannot be combined with tools",
-    )
 
 
-def _tokenizer():
+def _tokenizer(family=""):
     for root in MODEL_DIRS:
         if not os.path.isdir(root):
             continue
         for name in sorted(os.listdir(root)):
+            if family not in name:
+                continue
             if os.path.exists(os.path.join(root, name, "tokenizer.json")):
                 from transformers import AutoTokenizer
 
                 return AutoTokenizer.from_pretrained(os.path.join(root, name))
     return None
+
+
+WEATHER = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Weather for a city",
+            "parameters": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+            },
+        },
+    }
+]
+ANSWER = {
+    "type": "object",
+    "properties": {"answer": {"type": "string"}},
+    "required": ["answer"],
+    "additionalProperties": False,
+}
+ANSWER_FORMAT = {"type": "json_schema", "json_schema": {"schema": ANSWER}}
+
+
+def test_tools_without_a_call_grammar_keep_calls_free():
+    # No format grammar for this model: the calls must still work, so the
+    # answer goes unenforced rather than the request being refused.
+    try:
+        import llguidance  # noqa: F401
+    except ModuleNotFoundError:
+        print("  (skipped: llguidance not installed)")
+        return
+    tokenizer = _tokenizer()
+    if tokenizer is None:
+        print("  (skipped: no installed MLX model tokenizer)")
+        return
+    assert rf.compile_response_grammar(tokenizer, ANSWER_FORMAT, WEATHER) is None
+    assert rf.compile_response_grammar(tokenizer, ANSWER_FORMAT, WEATHER, {"format": "unknown"}) is None
+    # tool_choice "required" asks for a call: the tool grammar alone applies.
+    assert (
+        rf.compile_response_grammar(tokenizer, ANSWER_FORMAT, WEATHER, {"format": "hermes"}, "required")
+        is None
+    )
+    # "none" asks for the answer alone, and the tool grammar stands down.
+    only = rf.compile_response_grammar(tokenizer, ANSWER_FORMAT, WEATHER, {"format": "hermes"}, "none")
+    assert only is not None and only.covers_tool_calls
+    # A schema it cannot enforce is still the caller's 422, tools or not.
+    _raises(
+        lambda: rf.compile_response_grammar(
+            tokenizer,
+            {"type": "json_schema", "json_schema": {"schema": {"type": "bogus"}}},
+            WEATHER,
+            {"format": "hermes"},
+        ),
+        "cannot be enforced",
+    )
+
+
+class _Msg:
+    """Stands in for the server's pydantic ChatMessageReq."""
+
+    def __init__(self, role, content):
+        self.role, self.content = role, content
+
+    def model_copy(self, update):
+        return _Msg(update.get("role", self.role), update.get("content", self.content))
+
+
+def test_the_model_is_told_the_format_where_its_family_reads_it():
+    assert rf.grounding_note(None) is None
+    assert rf.grounding_note({"type": "json_object"}) == "Reply with a single JSON object."
+    note = rf.grounding_note(ANSWER_FORMAT)
+    assert note.startswith("Reply with a single JSON value") and '"required":["answer"]' in note
+    # No word about tools: it primed qwen3.8-27b to call one it did not need.
+    assert "tool" not in note
+    assert rf.note_placement({"format": "hermes"}) == "system"
+    assert rf.note_placement({"format": "gemma"}) == "user"
+    assert rf.note_placement(None) == "system"
+
+    msgs = [_Msg("user", "hi")]
+    out = rf.ground_messages(msgs, "N", "system")
+    assert [(m.role, m.content) for m in out] == [("system", "N"), ("user", "hi")]
+    out = rf.ground_messages([_Msg("system", "S"), _Msg("user", "hi")], "N", "system")
+    assert [(m.role, m.content) for m in out] == [("system", "S\n\nN"), ("user", "hi")]
+    out = rf.ground_messages([_Msg("user", "a"), _Msg("assistant", "b"), _Msg("user", "c")], "N", "user")
+    assert [m.content for m in out] == ["a", "b", "c\n\nN"]
+    parts = rf.ground_messages([_Msg("user", [{"type": "text", "text": "c"}])], "N", "user")
+    assert parts[0].content[-1] == {"type": "text", "text": "N"}
+    assert rf.ground_messages(msgs, None, "user") is msgs
+
+
+def test_whitespace_runs_are_capped():
+    try:
+        import mlx.core as mx
+    except ModuleNotFoundError:
+        print("  (skipped: mlx not installed)")
+        return
+
+    class Inner:
+        def __call__(self, ids, logits):
+            return logits
+
+    p = rf._BoundedWhitespace(Inner(), {5: 2, 6: 10}, limit=12)
+    p(mx.array([1]), mx.zeros((1, 10)))
+    p(mx.array([1, 6]), mx.zeros((1, 10)))
+    capped = p(mx.array([1, 6, 5]), mx.zeros((1, 10)))
+    assert capped[0, 5].item() == float("-inf") and capped[0, 6].item() == float("-inf")
+    assert capped[0, 0].item() == 0.0
+    reset = p(mx.array([1, 6, 5, 3]), mx.zeros((1, 10)))
+    assert reset[0, 5].item() == 0.0
+
+
+def _answer_or_calls_cases(family, fmt, call, think):
+    try:
+        from llguidance import LLMatcher
+        import tool_grammar
+    except ModuleNotFoundError:
+        print("  (skipped: llguidance not installed)")
+        return
+    tokenizer = _tokenizer(family)
+    if tokenizer is None:
+        print(f"  (skipped: no installed {family} tokenizer)")
+        return
+    grammar = rf.compile_response_grammar(tokenizer, ANSWER_FORMAT, WEATHER, {"format": fmt})
+    assert grammar is not None and grammar.covers_tool_calls
+    llg_tok = tool_grammar._get_llg_tokenizer(tokenizer)
+
+    def accepts(text):
+        matcher = LLMatcher(llg_tok, grammar.text)
+        ids = tokenizer.encode(text, add_special_tokens=False)
+        return matcher.try_consume_tokens(ids) == len(ids) and matcher.is_accepting()
+
+    assert accepts('{"answer": "Sunny"}')
+    assert accepts('{\n  "answer": "Sunny"\n}')
+    assert accepts(think + '{"answer": "Sunny"}')
+    assert accepts(call)
+    assert accepts(call + "\n" + call)
+    assert accepts(think + call)
+    assert not accepts("It is sunny in Paris.")
+    assert not accepts('{"weather": "Sunny"}')
+    assert not accepts(call.replace("get_weather", "get_stock"))
+    assert not accepts("Let me check. " + call)
+
+
+def test_tools_and_a_response_format_combine_on_qwen():
+    _answer_or_calls_cases(
+        "qwen",
+        "hermes",
+        "<tool_call>\n<function=get_weather>\n<parameter=city>\nParis\n</parameter>\n</function>\n</tool_call>",
+        "<think>\nThe user wants weather.\n</think>\n\n",
+    )
+
+
+def test_tools_and_a_response_format_combine_on_gemma():
+    _answer_or_calls_cases(
+        "gemma",
+        "gemma",
+        '<|tool_call>call:get_weather{city:<|"|>Paris<|"|>}<tool_call|>',
+        "<|channel>thought\nThe user wants weather.<channel|>",
+    )
 
 
 def test_grammar_accepts_the_shape_and_rejects_violations():
@@ -99,15 +257,19 @@ def test_grammar_accepts_the_shape_and_rejects_violations():
     grammar = rf.compile_response_grammar(
         tokenizer, {"type": "json_schema", "json_schema": {"schema": REVIEW}}
     )
+    assert not grammar.covers_tool_calls
     llg_tok = tool_grammar._get_llg_tokenizer(tokenizer)
 
     def accepts(text):
-        matcher = LLMatcher(llg_tok, grammar)
+        matcher = LLMatcher(llg_tok, grammar.text)
         ids = tokenizer.encode(text, add_special_tokens=False)
         return matcher.try_consume_tokens(ids) == len(ids) and matcher.is_accepting()
 
     good = [{"quote": "very unique", "severity": "warning", "replacement": None}]
     assert accepts(json.dumps(good, separators=(", ", ": ")))
+    # The layout a model picks is its own: pretty-printed and compact both pass.
+    assert accepts(json.dumps(good, indent=2))
+    assert accepts(json.dumps(good, separators=(",", ":")))
     assert not accepts('Sure! Here is the review: [')
     assert not accepts(json.dumps([{"quote": "x", "severity": "critical", "replacement": None}]))
     assert not accepts(json.dumps([{"quote": "x", "severity": "info"}]))

@@ -69,6 +69,11 @@ function parseNamespaceAllowList(raw: string | undefined): Set<string> | '*' | n
 
 const environment = typeof process === 'undefined' ? undefined : process.env;
 
+// A worker thread has its own globalThis, so it starts from this module's
+// defaults; the environment is what it copies from its parent. Without this a
+// `gezel run` reply on stdout carried an embedding worker's info line.
+const OUTPUT_ENV = 'GEZEL_LOG_OUTPUT';
+
 interface LogState {
   level: LogLevel;
   debugAllow: Set<string> | '*' | null;
@@ -87,7 +92,7 @@ function sharedLogState(): LogState {
     existing = {
       level: parseLevel(environment?.GEZEL_LOG_LEVEL) ?? 'info',
       debugAllow: parseNamespaceAllowList(environment?.GEZEL_LOG_DEBUG),
-      output: 'split',
+      output: environment?.[OUTPUT_ENV] === 'stderr' ? 'stderr' : 'split',
     };
     holder[STATE_KEY] = existing;
   }
@@ -113,10 +118,14 @@ export function getLogOutput(): LogOutput {
  * `split` preserves the process default: info/debug on stdout and
  * warn/error on stderr. `stderr` keeps stdout available for command results.
  * Callers that override this process-wide setting must restore the previous
- * value when their scoped operation completes.
+ * value when their scoped operation completes. Workers and child processes
+ * started while it is set inherit it.
  */
 export function setLogOutput(output: LogOutput): void {
   state.output = output;
+  if (!environment) return;
+  if (output === 'stderr') environment[OUTPUT_ENV] = 'stderr';
+  else delete environment[OUTPUT_ENV];
 }
 
 /**

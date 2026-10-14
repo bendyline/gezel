@@ -392,6 +392,29 @@ def test_glm_name_only_well_formed():
     assert tg.build_grammar_string(TOOLS, {"format": "glm", "mode": "name-and-params"}) == g
 
 
+def test_answer_or_calls_keeps_each_format_call_rules():
+    # Tools plus a response format: optional reasoning, then calls in the
+    # format's own syntax or a JSON answer. The call rules are the format's
+    # own (same NAME pinning), only the top rule changes.
+    schema = {"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"]}
+    for fmt, think in (("hermes", "<think>"), ("gemma", "<|channel>"), ("glm", "<think>")):
+        g = tg.build_answer_or_calls_grammar(TOOLS, {"format": fmt}, schema)
+        assert g is not None, fmt
+        _assert_valid(g)
+        assert "start: think? WS? (calls | answer) WS?" in g, fmt
+        assert "seg:" not in g and "start: (seg)*" not in g, fmt
+        assert "answer: %json" in g and '"whitespace_flexible": true' in g, fmt
+        assert think in g and "create_project" in g, fmt
+        base = tg.build_grammar_string(TOOLS, {"format": fmt})
+        assert base.split("TEXT: /(.|\\n)*/\n", 1)[1] in g, fmt
+    # Thinking off: no reasoning block for the model to escape into.
+    quiet = tg.build_answer_or_calls_grammar(TOOLS, {"format": "gemma"}, schema, allow_think=False)
+    _assert_valid(quiet)
+    assert "start: WS? (calls | answer) WS?" in quiet and "think:" not in quiet
+    assert tg.build_answer_or_calls_grammar(TOOLS, {"format": "made-up"}, schema) is None
+    assert tg.build_answer_or_calls_grammar([], {"format": "hermes"}, schema) is None
+
+
 def test_unsupported_or_empty_inputs_degrade_to_none():
     for fmt in ["json-envelope", "qwen-xml", "mistral-v3", "made-up"]:
         assert tg.build_grammar_string(TOOLS, {"format": fmt}) is None, fmt

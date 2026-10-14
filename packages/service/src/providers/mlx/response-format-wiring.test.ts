@@ -42,14 +42,35 @@ describe('MLX structured-output wiring', () => {
 
   it('declares the field, rejects what it cannot enforce, and constrains every path', () => {
     expect(SERVER_SRC).toMatch(/response_format:\s*Optional\[Dict\[str, Any\]\]/);
-    // Compiled before generation; a bad schema or a tools clash is a 422, not free text.
+    // Compiled before generation; a bad schema is a 422, not free text.
     expect(SERVER_SRC).toMatch(/compile_response_grammar\(/);
     expect(SERVER_SRC).toMatch(/status_code=422, detail=str\(exc\)/);
     // Text paths (batch + serial) and the vision path all add the processor.
     expect(SERVER_SRC).toMatch(
       /tool_grammar_processor, think_budget_processor, response_processor/,
     );
-    expect(SERVER_SRC).toMatch(/_vision_stream\(request, http_request, images, response_grammar\)/);
+    expect(SERVER_SRC).toMatch(
+      /_vision_stream\(request, http_request, images, prompt, response_grammar\)/,
+    );
+    // With tools, one grammar covers the answer and the calls; the tool
+    // grammar stands down on both the text and the vision path, or the two
+    // would leave only JSON and no call could get through.
+    expect(SERVER_SRC).toMatch(/tool_choice:\s*Optional\[Any\]/);
+    // The model is told the format (a grammar alone only masks, and a model
+    // that does not know the schema takes whatever the mask leaves), placed
+    // where its family reads it, and with thinking off it gets no reasoning
+    // block to escape into.
+    expect(SERVER_SRC).toMatch(
+      /request\.messages = response_format\.ground_messages\([\s\S]*?grounding_note\(request\.response_format\)[\s\S]*?note_placement\(request\.tool_grammar\)/,
+    );
+    expect(SERVER_SRC).toMatch(
+      /allow_think=\(request\.chat_template_kwargs or \{\}\)\.get\("enable_thinking", True\) is not False/,
+    );
+    expect(
+      SERVER_SRC.match(
+        /request\.tool_grammar and not response_format\.covers_tool_calls\(response_grammar\)/g,
+      ),
+    ).toHaveLength(2);
     // Exact JSON over speed: no assisted speculation under a response format.
     expect(SPEC_SRC).toMatch(/getattr\(request, "response_format", None\)/);
   });
@@ -59,9 +80,12 @@ describe('MLX structured-output wiring', () => {
     // `if any(...)`: after an unconstrained request finished, the next one's
     // processors sat at the wrong index and never ran past the first token
     // (2026-10-13: a schema request right after a plain one returned prose).
-    // Applies equally to tool grammars and think budgets.
+    // Applies equally to tool grammars and think budgets. The behaviour
+    // itself is proven against mlx_lm's real BatchGenerator in
+    // batch_processors_test.py; this pins that the wave insertion uses it.
     expect(SERVER_SRC).toMatch(
-      /lps\.append\(self\._processors_for\(sub\.request, sub\.grammar\) or \[_pass_through_logits\]\)/,
+      /lps\.append\(\s*batch_processors\.per_sequence_processors\(\s*self\._processors_for\(sub\.request, sub\.grammar\)\s*\)\s*\)/,
     );
+    expect(SERVER_SRC).not.toMatch(/lps\.append\(self\._processors_for\([^)]*\)\)/);
   });
 });

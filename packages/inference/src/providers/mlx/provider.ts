@@ -133,8 +133,10 @@ import { EngineHold, type EngineQueueMarker, engineHoldLabelFor } from './engine
 import { EngineLogRouter } from './engine-log-router.js';
 import { MlxEngineStatsSampler } from './engine-stats-sampler.js';
 import {
+  REASONING_OPEN_HEADER,
   StreamingReasoningSplit,
   type TemplateReasoningOpen,
+  engineOpensReasoning,
   requestOpensReasoning,
 } from './reasoning-stream.js';
 import { applyMlxRequestShape } from './request-shape.js';
@@ -1994,10 +1996,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // `turn.ramble-detection`; per-model thresholds come from
         // the validated config. Absent → detector disabled.
         //
-        // Read from the request, not only the template: a thinking-off
-        // request renders the block already closed, and seeding from the
-        // template streamed a whole `write_file` call into the reasoning pane.
-        const opensInReasoning = requestOpensReasoning(this.deps.templateOpensReasoning, body);
+        // The engine reports what the rendered prompt did; the template guess
+        // is only a fallback. A thinking-off request renders the block already
+        // closed (seeding from the template streamed a whole `write_file` call
+        // into the reasoning pane), and Qwen 3.5 0.8B's template opens it only
+        // when thinking is explicitly on (guessing closed streamed its thoughts
+        // and a stray `</think>` as the reply).
+        const opensInReasoning =
+          engineOpensReasoning(res.headers.get(REASONING_OPEN_HEADER)) ??
+          requestOpensReasoning(this.deps.templateOpensReasoning, body);
         const rambleConfig = profileBehaviorConfig<TurnRambleDetectionConfig>(
           this.deps.profile,
           'turn.ramble-detection',

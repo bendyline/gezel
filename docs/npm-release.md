@@ -235,6 +235,21 @@ bundle checks.
 for inspection. `--tarball-dir <path>` skips packing and tests an existing set
 of candidate artifacts byte-for-byte.
 
+**Real models (opt-in, before a release).** A mocked `gezel run` cannot show
+a model's own output reaching stdout: 1.2.4 printed local models' reasoning
+and their text-form tool calls, while the saved messages were clean. Set
+`GEZEL_CONSUMER_REAL_MODELS` to a comma list of `provider:model` thinking
+models (for example `mlx:qwen3.5-0.8b-q4,mlx:gemma4-12b-q4,llama-cpp:qwen3.5-0.8b-q4`)
+and `GEZEL_CONSUMER_REAL_MODEL_HOME` to a Gezel home kept for this check.
+Prepare that home once with the installed CLI: `gezel --home <dir> model pull`
+for each model (or `GEZEL_READONLY_MODEL_HOMES` to borrow them) and
+`gezel --home <dir> native install --engine llama-server` for llama.cpp. The
+check sets the home's provider and model, asks each one an arithmetic question,
+and fails if stdout carries reasoning tags, tool-call markup or log records, or
+if the saved reply has no reasoning (a model that did not think proves
+nothing). The first MLX run in a fresh home builds its Python environment,
+which takes several minutes.
+
 ### `pnpm check:npm-release-candidate`
 
 [`scripts/rehearse-npm-release.mjs`](../scripts/rehearse-npm-release.mjs) is

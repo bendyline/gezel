@@ -1,5 +1,6 @@
 import {
   StreamingReasoningSplit,
+  engineOpensReasoning,
   requestOpensReasoning,
   templateTextOpensReasoning,
 } from '@bendyline/gezel-inference/internal/providers/mlx/reasoning-stream';
@@ -103,6 +104,15 @@ describe('requestOpensReasoning', () => {
   });
 });
 
+describe('engineOpensReasoning', () => {
+  it('reads the sidecar header and is undefined without one', () => {
+    expect(engineOpensReasoning('1')).toBe(true);
+    expect(engineOpensReasoning('0')).toBe(false);
+    expect(engineOpensReasoning(null)).toBeUndefined();
+    expect(engineOpensReasoning('yes')).toBeUndefined();
+  });
+});
+
 describe('StreamingReasoningSplit', () => {
   it('routes a template-opened block to reasoning and the reply to visible', () => {
     expect(
@@ -175,5 +185,52 @@ describe('StreamingReasoningSplit', () => {
     // `<` could begin `<think>`, so it is held until the next chunk proves otherwise.
     expect(split.push('a < b').visible).toBe('a < b');
     expect(split.push('c').visible).toBe('c');
+  });
+
+  it("routes Gemma's thought channel to reasoning, name and all", () => {
+    // gemma4-12b-q4 on `gezel run` printed the channel markers and its
+    // thoughts as the reply (npm audit, 2026-10-13).
+    const thought = '<|channel>thought\nThe user wants a greeting.<channel|>Hello!';
+    expect(run([thought], { opensInReasoning: false })).toEqual({
+      visible: 'Hello!',
+      reasoning: 'The user wants a greeting.',
+    });
+    // Token chunking splits the marker, the channel name, and the closer.
+    expect(
+      run(['<|chan', 'nel>tho', 'ught', '\nweighing it', '<chan', 'nel|>', 'Done.'], {
+        opensInReasoning: false,
+      }),
+    ).toEqual({ visible: 'Done.', reasoning: 'weighing it' });
+    // Wild-caught Gemma 4 26B drops the opener's leading pipe.
+    expect(run(['<channel>thought\nhmm<channel|>Yes.'], { opensInReasoning: false })).toEqual({
+      visible: 'Yes.',
+      reasoning: 'hmm',
+    });
+  });
+
+  it('closes a channel the prompt opened', () => {
+    // After a tool response Gemma 4's template ends with `<|channel>thought\n`.
+    expect(
+      run(['weighing the result', '<channel|>', 'It is 21°C.'], { opensInReasoning: true }),
+    ).toEqual({ visible: 'It is 21°C.', reasoning: 'weighing the result' });
+  });
+
+  it('drops the blank lines a model leaves after its reasoning', () => {
+    expect(run(['Thinking.', '</think>', '\n\n', 'Hi there.'], { opensInReasoning: true })).toEqual(
+      { visible: 'Hi there.', reasoning: 'Thinking.' },
+    );
+    // Mid-reply, the space between words survives.
+    expect(
+      run(['Sure, ', '<think>', 'x', '</think>', ' done.'], { opensInReasoning: false }),
+    ).toEqual({ visible: 'Sure,  done.', reasoning: 'x' });
+  });
+
+  it('drops a closer that arrives with no opener', () => {
+    // A template-opened block the engine did not report: the text before it
+    // has already streamed, but the bare tag need not follow.
+    expect(run(['Answer.', '</thi', 'nk>', ' More.'], { opensInReasoning: false })).toEqual({
+      visible: 'Answer. More.',
+      reasoning: '',
+    });
   });
 });

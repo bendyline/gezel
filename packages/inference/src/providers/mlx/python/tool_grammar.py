@@ -705,6 +705,58 @@ def build_grammar_string(
     return None
 
 
+# What each format's own grammar opens with, and how its reasoning block
+# reads, for splicing an answer branch in front of the format's call rules.
+_FORMAT_HEADS = {"hermes": _HERMES_HEAD, "gemma": _GEMMA_HEAD, "glm": _GLM_HEAD}
+_THINK_BLOCKS = {
+    "hermes": "<think> TEXT </think>",
+    "glm": "<think> TEXT </think>",
+    "gemma": "<|channel> TEXT <channel|>",
+}
+
+
+def build_answer_or_calls_grammar(
+    tools: Optional[List[Dict[str, Any]]],
+    hint: Dict[str, Any],
+    answer_schema: Dict[str, Any],
+    allow_think: bool = True,
+) -> Optional[str]:
+    """One grammar for a request with both tools and a response format.
+
+    OpenAI's contract: the model may call tools, and when it answers, the
+    answer follows the schema. So the reply is optional reasoning, then
+    either one or more calls in the format's own syntax (with this module's
+    name and key constraints) or a JSON value matching `answer_schema`.
+    Stacking the plain JSON grammar on the tool grammar instead left only
+    their intersection, JSON, which no call can satisfy. Prose outside the
+    reasoning is ruled out, as it is for a plain response format.
+
+    None when the format has no grammar here; the caller then keeps tool
+    calls free and leaves the answer unconstrained, as before.
+
+    `allow_think` False drops the reasoning block for a request that turned
+    thinking off: with prose masked, Gemma took the open `<|channel>` as its
+    way out and reasoned until max_tokens (2026-10-14).
+    """
+    fmt = str((hint or {}).get("format") or "").strip()
+    head = _FORMAT_HEADS.get(fmt)
+    base = build_grammar_string(tools, hint)
+    if head is None or base is None or not base.startswith(head):
+        return None
+    schema = dict(answer_schema)
+    # Whitespace stays free inside the answer; see response_format.py.
+    schema["x-guidance"] = {**schema.get("x-guidance", {}), "whitespace_flexible": True}
+    return (
+        "%llguidance {}\n"
+        + ("start: think? WS? (calls | answer) WS?\n" if allow_think else "start: WS? (calls | answer) WS?\n")
+        + (f"think: {_THINK_BLOCKS[fmt]}\n" if allow_think else "")
+        + "calls: tool_call (WS? tool_call)*\n"
+        + f"answer: %json {json.dumps(schema)}\n"
+        + "WS: /[ \\t\\r\\n]+/\n"
+        + "TEXT: /(.|\\n)*/\n"
+    ) + base[len(head) :]
+
+
 def build_tool_grammar_processor(
     tokenizer: Any,
     tools: Optional[List[Dict[str, Any]]],

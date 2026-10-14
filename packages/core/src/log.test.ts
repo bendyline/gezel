@@ -130,6 +130,38 @@ describe('logger', () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith({ phase: 'setup' });
   });
 
+  it('hands a stderr choice to worker threads, which start from their own copy', async () => {
+    setLogOutput('stderr');
+    expect(process.env.GEZEL_LOG_OUTPUT).toBe('stderr');
+    const { Worker } = await import('node:worker_threads');
+    const seen = await new Promise<unknown>((resolve, reject) => {
+      const worker = new Worker(
+        "require('node:worker_threads').parentPort.postMessage(process.env.GEZEL_LOG_OUTPUT)",
+        { eval: true },
+      );
+      worker.once('message', resolve);
+      worker.once('error', reject);
+    });
+    expect(seen).toBe('stderr');
+
+    // A fresh realm (what a worker is) reads it back on load.
+    const key = Symbol.for('bendyline.gezel.log-state');
+    const holder = globalThis as Record<symbol, unknown>;
+    const shared = holder[key];
+    try {
+      delete holder[key];
+      vi.resetModules();
+      const fresh = await import('./log.js');
+      expect(fresh.getLogOutput()).toBe('stderr');
+    } finally {
+      holder[key] = shared;
+      vi.resetModules();
+    }
+
+    setLogOutput('split');
+    expect(process.env.GEZEL_LOG_OUTPUT).toBeUndefined();
+  });
+
   it('per-namespace debug works at info level', () => {
     setLogLevel('info');
     setDebugNamespaces('chat,mcp-bridge');

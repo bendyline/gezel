@@ -5,14 +5,36 @@ import { createLogger } from '@bendyline/gezel';
 const log = createLogger('mlx');
 
 /**
- * Closing markers that end a reasoning block the chat template opened for the
- * model. Kept in sync with the paired forms `extractReasoning` strips at end of
- * turn — this is the streaming half of the same knowledge.
+ * Markers that open and close a reasoning block. Kept in sync with the paired
+ * forms `extractReasoning` strips at end of turn — this is the streaming half
+ * of the same knowledge. Gemma 4 opens a named channel (`<|channel>thought\n`,
+ * sometimes without the leading pipe) and closes it with `<channel|>`.
  */
-const CLOSE_MARKERS = ['</think>', '</reasoning>', '[/THINK]', '<|end|>'] as const;
+const OPEN_MARKERS = ['<think>', '<reasoning>', '[THINK]', '<|channel>', '<channel>'] as const;
+const CLOSE_MARKERS = ['</think>', '</reasoning>', '[/THINK]', '<|end|>', '<channel|>'] as const;
+const OPEN_PATTERN = /<think>|<reasoning>|\[THINK\]|<\|?channel>/i;
+const CHANNEL_NAME = /^[A-Za-z_][\w-]*/;
 
-/** The longest close marker, so `push` knows how much tail to hold back. */
-const MAX_MARKER_LENGTH = Math.max(...CLOSE_MARKERS.map((marker) => marker.length));
+/** The longest marker, so `push` knows how much tail to hold back. */
+const MAX_MARKER_LENGTH = Math.max(
+  ...[...OPEN_MARKERS, ...CLOSE_MARKERS].map((marker) => marker.length),
+);
+
+/** Response header in which the sidecar reports the rendered prompt's state. */
+export const REASONING_OPEN_HEADER = 'x-gezel-reasoning-open';
+
+/**
+ * Whether the engine says this turn's prompt left the model inside a reasoning
+ * block. The sidecar reads the rendered prompt, so this beats anything derived
+ * from the template text: Qwen 3.5's small models open `<think>` only when
+ * `enable_thinking` is explicitly true, and Gemma 4 opens its thought channel
+ * only after a tool response. Undefined when the header is absent.
+ */
+export function engineOpensReasoning(header: string | null | undefined): boolean | undefined {
+  if (header === '1') return true;
+  if (header === '0') return false;
+  return undefined;
+}
 
 /**
  * How a chat template's generation prompt leaves the model inside a reasoning
@@ -28,7 +50,9 @@ export type TemplateReasoningOpen = 'always' | 'unless-thinking-off';
 /**
  * Whether the model's chat template opens a reasoning block as the last thing
  * it emits before the model starts generating, and whether that depends on
- * `enable_thinking`.
+ * `enable_thinking`. A fallback for a sidecar that does not report
+ * {@link REASONING_OPEN_HEADER}: a template guess cannot see which branch the
+ * request takes.
  *
  * Qwen-family templates end their generation prompt with a bare `<think>`, so
  * the model's output begins *inside* reasoning and the only tag that ever
@@ -127,6 +151,11 @@ export interface ReasoningSplitChunk {
 export class StreamingReasoningSplit {
   private buffer = '';
   private inReasoning: boolean;
+  /** A channel opener names its channel (`thought`) before the reasoning starts. */
+  private channelNamePending = false;
+  /** The blank lines a model leaves after closing its reasoning are not reply. */
+  private afterClose = false;
+  private sawVisible = false;
   private readonly enabled: boolean;
 
   constructor(opts: { opensInReasoning: boolean; enabled?: boolean }) {
@@ -156,26 +185,53 @@ export class StreamingReasoningSplit {
 
     while (this.buffer.length > 0) {
       if (this.inReasoning) {
-        const close = this.firstCloseMarker();
+        if (this.channelNamePending) {
+          const name = CHANNEL_NAME.exec(this.buffer)?.[0] ?? '';
+          if (!final && name.length === this.buffer.length) break;
+          this.buffer = this.buffer.slice(name.length).replace(/^[ \t]*\r?\n/, '');
+          this.channelNamePending = false;
+          continue;
+        }
+        const close = this.firstMarker(CLOSE_MARKERS);
         if (!close) break;
         reasoning += this.buffer.slice(0, close.index);
         this.buffer = this.buffer.slice(close.index + close.marker.length);
         this.inReasoning = false;
+        this.afterClose = true;
         continue;
       }
-      const open = /<think>|<reasoning>|\[THINK\]/i.exec(this.buffer);
+      if (this.afterClose) {
+        if (!this.sawVisible && visible.trim() === '') {
+          visible = '';
+          this.buffer = this.buffer.replace(/^\s+/, '');
+          if (this.buffer.length === 0) break;
+        }
+        this.afterClose = false;
+      }
+      const open = OPEN_PATTERN.exec(this.buffer);
+      // A closer with no opener is a template-opened block the engine did not
+      // report; the text before it has already streamed, but the tag need not.
+      const stray = this.firstMarker(CLOSE_MARKERS);
+      if (stray && (!open || stray.index < open.index)) {
+        visible += this.buffer.slice(0, stray.index);
+        this.buffer = this.buffer.slice(stray.index + stray.marker.length);
+        this.afterClose = true;
+        continue;
+      }
       if (!open) break;
       visible += this.buffer.slice(0, open.index);
       this.buffer = this.buffer.slice(open.index + open[0].length);
       this.inReasoning = true;
+      this.channelNamePending = /channel/i.test(open[0]);
     }
 
     if (final) {
       if (this.inReasoning) reasoning += this.buffer;
       else visible += this.buffer;
       this.buffer = '';
-      return { visible, reasoning };
+      return this.out(visible, reasoning);
     }
+    if (this.channelNamePending) return this.out(visible, reasoning);
 
     // Hold back a tail that could still grow into a marker; release the rest.
     const safeLength = this.buffer.length - this.holdBackLength();
@@ -185,13 +241,19 @@ export class StreamingReasoningSplit {
       if (this.inReasoning) reasoning += released;
       else visible += released;
     }
+    return this.out(visible, reasoning);
+  }
+
+  private out(visible: string, reasoning: string): ReasoningSplitChunk {
+    if (visible.trim() !== '') this.sawVisible = true;
     return { visible, reasoning };
   }
 
-  private firstCloseMarker(): { index: number; marker: string } | null {
+  private firstMarker(markers: readonly string[]): { index: number; marker: string } | null {
+    const haystack = this.buffer.toLowerCase();
     let best: { index: number; marker: string } | null = null;
-    for (const marker of CLOSE_MARKERS) {
-      const index = this.buffer.toLowerCase().indexOf(marker.toLowerCase());
+    for (const marker of markers) {
+      const index = haystack.indexOf(marker.toLowerCase());
       if (index === -1) continue;
       if (!best || index < best.index) best = { index, marker };
     }
@@ -200,12 +262,12 @@ export class StreamingReasoningSplit {
 
   /** Length of the trailing fragment that could still be a partial marker. */
   private holdBackLength(): number {
+    const candidates = (this.inReasoning ? CLOSE_MARKERS : [...OPEN_MARKERS, ...CLOSE_MARKERS]).map(
+      (marker) => marker.toLowerCase(),
+    );
     const maxTail = Math.min(MAX_MARKER_LENGTH - 1, this.buffer.length);
     for (let length = maxTail; length > 0; length -= 1) {
       const tail = this.buffer.slice(this.buffer.length - length).toLowerCase();
-      const candidates = this.inReasoning
-        ? CLOSE_MARKERS.map((marker) => marker.toLowerCase())
-        : ['<think>', '<reasoning>', '[think]'];
       if (candidates.some((marker) => marker.startsWith(tail))) return length;
     }
     return 0;

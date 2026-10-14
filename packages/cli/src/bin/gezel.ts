@@ -77,6 +77,7 @@ import {
 } from '../native-command.js';
 import { resolveRunPrompt } from '../run-prompt.js';
 import { checkRunReadiness } from '../run-readiness.js';
+import { ReplyPrinter } from '../run-reply.js';
 import { registerSecretCommands } from '../secrets-command.js';
 import { registerProjectSettingsCommands, registerSecurityCommands } from '../settings-command.js';
 import { installSignalCleanup } from '../signal-cleanup.js';
@@ -674,6 +675,7 @@ program
       }
       const session = await client.createChatSession({ gezelId, projectId });
       await client.sendToChatSession(session.id, prompt);
+      const reply = new ReplyPrinter((text) => process.stdout.write(text));
       let printed = false;
       let errored = false;
       for await (const ev of streamChatEvents({
@@ -682,9 +684,9 @@ program
         fetch: client.getFetch(),
       })) {
         if (ev.type === 'delta') {
-          process.stdout.write(ev.content);
-          printed = true;
+          reply.push(ev.content);
         } else if (ev.type === 'complete') {
+          printed = reply.finish();
           // Fallback for providers that send the whole message at once.
           if (!printed && ev.message.content) {
             process.stdout.write(ev.message.content);
@@ -695,6 +697,7 @@ program
           errored = true;
         }
       }
+      printed = reply.finish() || printed;
       if (printed) process.stdout.write('\n');
       if (errored) process.exitCode = 1;
     } finally {

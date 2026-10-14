@@ -194,6 +194,82 @@ function auditInstalledPackage(root, packageName) {
   }
 }
 
+/** What a reply on stdout must never contain: the model's reasoning, its call markup, or logs. */
+const STDOUT_LEAKS = [
+  ['reasoning tags', /<\/?think>|<\/?reasoning>|\[\/?THINK\]|<\|?\/?channel\|?>/i],
+  ['tool-call markup', /<tool_call>|<function=|<\|tool_call|<parameter=/i],
+  ['log records', /^\d{4}-\d\d-\d\dT\S+\s+(?:DEBUG|INFO|WARN|ERROR)\s/m],
+];
+
+function realModelStdoutCheck(bin, home, target) {
+  const [provider, model] = target.includes(':') ? target.split(/:(.*)/s) : ['', target];
+  if (!provider || !model) {
+    fail(`GEZEL_CONSUMER_REAL_MODELS entry ${JSON.stringify(target)} is not provider:model`);
+    return;
+  }
+  const configPath = join(home, 'config.json');
+  const config = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8')) : {};
+  config.provider = provider;
+  config.defaultModel = { ...(config.defaultModel ?? {}), [provider]: model };
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  const project = mkdtempSync(join(tmpdir(), 'gezel-packed-cli-real-'));
+  const { GEZEL_MOCK_PROVIDER: _mock, ...inherited } = process.env;
+  try {
+    // Arithmetic draws reasoning from a thinking model without inviting a tool.
+    const result = run(
+      process.execPath,
+      [bin, '--home', home, '--standalone', 'run', 'What is 17 times 23? Answer in one sentence.'],
+      {
+        cwd: project,
+        env: {
+          ...inherited,
+          GEZEL_HOME: home,
+          GEZEL_DISABLE_MACHINE_ENGINE: '1',
+          GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
+          GEZEL_SECRETS_BACKEND: 'file',
+        },
+        timeout: 15 * 60_000,
+      },
+    );
+    const leak = STDOUT_LEAKS.find(([, pattern]) => pattern.test(result.stdout));
+    if (result.status !== 0 || result.stdout.trim() === '') {
+      fail(`${target}: gezel run failed\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    } else if (leak) {
+      fail(`${target}: gezel run printed ${leak[0]} on stdout\nstdout: ${result.stdout}`);
+    } else if (!lastReplyReasoned(home)) {
+      // Clean, but the model never thought, so nothing here was tested.
+      fail(
+        `${target}: the reply carried no reasoning; pick a thinking model\nstdout: ${result.stdout}`,
+      );
+    } else {
+      ok(`${target}: stdout is the reply alone (${JSON.stringify(result.stdout.trim())})`);
+    }
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+}
+
+/** Whether the newest saved assistant message in `home` kept reasoning beside its reply. */
+function lastReplyReasoned(home) {
+  const gezelsDir = join(home, 'gezels');
+  if (!existsSync(gezelsDir)) return false;
+  let newest;
+  for (const gezel of readdirSync(gezelsDir)) {
+    const sessions = join(gezelsDir, gezel, 'sessions');
+    if (!existsSync(sessions)) continue;
+    for (const file of readdirSync(sessions)) {
+      if (!file.endsWith('.json')) continue;
+      const path = join(sessions, file);
+      const mtime = lstatSync(path).mtimeMs;
+      if (!newest || mtime > newest.mtime) newest = { path, mtime };
+    }
+  }
+  if (!newest) return false;
+  const messages = JSON.parse(readFileSync(newest.path, 'utf8')).messages ?? [];
+  const reply = messages.filter((message) => message.role === 'assistant').at(-1);
+  return typeof reply?.reasoning === 'string' && reply.reasoning.trim().length > 0;
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
@@ -842,6 +918,26 @@ try {
         rmSync(dir, { recursive: true, force: true });
       }
     }
+  }
+
+  // A real thinking model, opt-in. Mocked runs cannot catch a model's own
+  // output reaching stdout: the reasoning of local models, and the tool-call
+  // markup they write as text, both shipped in 1.2.4 (2026-10-13 npm audit).
+  // GEZEL_CONSUMER_REAL_MODELS lists provider:model pairs; the home in
+  // GEZEL_CONSUMER_REAL_MODEL_HOME is dedicated to this check and already has
+  // the models and engines (see docs/npm-release.md).
+  const realModels = (process.env.GEZEL_CONSUMER_REAL_MODELS ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const realModelHome = process.env.GEZEL_CONSUMER_REAL_MODEL_HOME;
+  if (realModels.length === 0) {
+    step('gezel run on a real model (skipped: set GEZEL_CONSUMER_REAL_MODELS)');
+  } else if (!realModelHome || !existsSync(realModelHome)) {
+    fail('GEZEL_CONSUMER_REAL_MODELS needs GEZEL_CONSUMER_REAL_MODEL_HOME set to a prepared home');
+  } else {
+    step('gezel run on real models keeps reasoning and markup off stdout');
+    for (const target of realModels) realModelStdoutCheck(bin, realModelHome, target);
   }
 
   // ── 6. Default install: boot without the optional PTY peer ─────────────

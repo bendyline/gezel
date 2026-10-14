@@ -157,23 +157,19 @@ describe('service bundled assets', () => {
     // at module top, so a dropped sibling kills the whole MLX engine at
     // boot — but only for people who installed from npm, the same silent
     // failure mode as the handboek hook.
-    for (const f of [
-      'gezel_mlx_server.py',
-      'spec_decode.py',
-      'cache_seed.py',
-      'cache_persist.py',
-      'wave_policy.py',
-    ]) {
-      expect(
-        existsSync(
-          resolve(
-            packages.find((pkg) => pkg.name === '@bendyline/gezel-inference')!.dist,
-            'providers/mlx/python',
-            f,
-          ),
-        ),
-        f,
-      ).toBe(true);
+    // The list is read from the server itself, so a module added to its
+    // sibling imports is covered without anyone remembering to list it here.
+    const pythonDir = resolve(
+      packages.find((pkg) => pkg.name === '@bendyline/gezel-inference')!.dist,
+      'providers/mlx/python',
+    );
+    const server = readFileSync(resolve(pythonDir, 'gezel_mlx_server.py'), 'utf8');
+    const siblings = [...server.matchAll(/^import (\w+) {2}# noqa: E402$/gm)].map(
+      (m) => `${m[1]}.py`,
+    );
+    expect(siblings).toContain('spec_decode.py');
+    for (const f of ['gezel_mlx_server.py', ...siblings]) {
+      expect(existsSync(resolve(pythonDir, f)), f).toBe(true);
     }
   });
 });

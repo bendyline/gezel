@@ -76,6 +76,7 @@ import think_budget  # noqa: E402
 import cache_seed  # noqa: E402
 import tool_grammar  # noqa: E402
 import response_format  # noqa: E402
+import batch_processors  # noqa: E402
 import spec_decode  # noqa: E402
 import tool_call_stream  # noqa: E402
 import template_stability  # noqa: E402
@@ -184,6 +185,20 @@ def _tool_stream_payload(frag, request_id: str, model: str, chunk) -> Dict[str, 
             "generation_tps": getattr(chunk, "generation_tps", 0.0),
             "cached_tokens": getattr(chunk, "cached_tokens", 0),
         },
+    }
+
+
+def _stream_headers(prompt: str) -> Dict[str, str]:
+    """SSE headers, plus whether the rendered prompt opened reasoning.
+
+    The client seeds its live reasoning split from X-Gezel-Reasoning-Open:
+    only the rendered prompt knows, and a wrong guess streams the model's
+    thoughts as its reply.
+    """
+    return {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+        "X-Gezel-Reasoning-Open": "1" if think_budget.prompt_opens_reasoning(prompt) else "0",
     }
 
 
@@ -1563,12 +1578,6 @@ def _store_snapshot(sub, snapshot) -> None:
         sub.band_snapshot = snapshot
 
 
-
-def _pass_through_logits(tokens, logits):
-    """A no-op logits processor that keeps BatchGenerator's per-sequence
-    processor lists aligned (see the comment where waves are inserted)."""
-    return logits
-
 class _Sub:
     """One in-flight batched request: its decode queue, accumulated tokens,
     and the bits needed to build its sequence + persist its KV on finish."""
@@ -2365,16 +2374,14 @@ class BatchEngine:
                 caches.append(c)
                 alltoks.append(at)
                 samplers.append(self._sampler_for(sub.request))
-                # Never an empty list here. mlx_lm's GenerationBatch.filter()
-                # trims logits_processors only `if any(...)`, so once every
-                # live sequence had [] the finished ones' entries stayed, and
-                # the next sequence's processors were appended after them at
-                # the wrong index. Its tool grammar, think budget or response
-                # format then never ran past the first token (in a mixed wave,
-                # one sequence's grammar could land on another). Caught
-                # 2026-10-13: a JSON-schema request right after a plain one
-                # came back as free text. A pass-through keeps any() true.
-                lps.append(self._processors_for(sub.request, sub.grammar) or [_pass_through_logits])
+                # Never an empty list: mlx_lm misaligns the next wave's
+                # grammars after a wave of unconstrained sequences
+                # (batch_processors.py has the mechanism and the test).
+                lps.append(
+                    batch_processors.per_sequence_processors(
+                        self._processors_for(sub.request, sub.grammar)
+                    )
+                )
                 maxtoks.append(int(sub.request.max_tokens) if sub.request.max_tokens else 2048)
             try:
                 uids = self._gen.insert_segments(
@@ -3252,6 +3259,10 @@ class ChatRequest(BaseModel):
     # an llguidance JSON grammar — see response_format.py. Before it was
     # declared here, pydantic dropped it and the answer came back unconstrained.
     response_format: Optional[Dict[str, Any]] = None
+    # OpenAI `tool_choice`. Read only to shape a response format's grammar
+    # when tools are offered too ("none": the answer alone; "required" or a
+    # named function: a call, so the tool grammar alone applies).
+    tool_choice: Optional[Any] = None
     # Per-request circuit breaker for a session that observed the assisted
     # speculative path violate a required-argument grammar. The TS provider
     # latches this after the first impossible call and leaves the drafter
@@ -3990,13 +4001,11 @@ def _serial_prompt_token_variants(prompt_text: str) -> "List[List[int]]":
     return variants
 
 
-async def _vision_stream(request, http_request, images, response_grammar=None):
+async def _vision_stream(request, http_request, images, prompt, response_grammar=None):
     """One full-tower vision request. Never share text-prefix KV or speculate."""
     request_id = f"chatcmpl-{uuid.uuid4()}"
     generator = None
     try:
-        prompt = _build_prompt(request.messages, request.tools,
-                               request.chat_template_override, request.chat_template_kwargs)
         kwargs = {"prefill_step_size": ARGS.prefill_step_size, **_kv_quant_kwargs()}
         for key in ("max_tokens", "temperature", "top_p", "top_k",
                     "repetition_penalty", "repetition_context_size"):
@@ -4005,7 +4014,7 @@ async def _vision_stream(request, http_request, images, response_grammar=None):
                 kwargs[key] = value
         tokenizer = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
         processors = []
-        if request.tool_grammar:
+        if request.tool_grammar and not response_format.covers_tool_calls(response_grammar):
             grammar = tool_grammar.build_tool_grammar_processor(
                 tokenizer, request.tools, request.tool_grammar)
             if grammar is not None:
@@ -4082,8 +4091,8 @@ async def chat_completions(request: ChatRequest, http_request: Request):
         )
 
     # Compiled before any generation, so a schema this engine cannot enforce
-    # (or one sent alongside tools) fails as a 422 instead of coming back as
-    # unconstrained text.
+    # fails as a 422 instead of coming back as unconstrained text. Tools sent
+    # alongside it are not an error: the answer is JSON or tool calls.
     response_grammar = None
     if request.response_format:
         try:
@@ -4091,9 +4100,19 @@ async def chat_completions(request: ChatRequest, http_request: Request):
                 getattr(PROCESSOR, "tokenizer", None) or PROCESSOR,
                 request.response_format,
                 request.tools,
+                request.tool_grammar,
+                request.tool_choice,
+                allow_think=(request.chat_template_kwargs or {}).get("enable_thinking", True) is not False,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # Every prompt built below (text, vision, the cache boundary probe)
+        # reads request.messages, so the model is told the format once here.
+        request.messages = response_format.ground_messages(
+            request.messages,
+            response_format.grounding_note(request.response_format),
+            response_format.note_placement(request.tool_grammar),
+        )
 
     if any(message.images for message in request.messages):
         if not _VISION_ENABLED:
@@ -4102,9 +4121,11 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             images = vision_inputs.decode_images(request.messages)
         except Exception as exc:
             raise HTTPException(status_code=422, detail=f"Invalid image input: {exc}") from exc
-        return StreamingResponse(_vision_stream(request, http_request, images, response_grammar),
+        prompt = _build_prompt(request.messages, request.tools,
+                               request.chat_template_override, request.chat_template_kwargs)
+        return StreamingResponse(_vision_stream(request, http_request, images, prompt, response_grammar),
                                  media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+                                 headers=_stream_headers(prompt))
 
     prompt_text = _build_prompt(
         request.messages,
@@ -4118,7 +4139,9 @@ async def chat_completions(request: ChatRequest, http_request: Request):
     # None — the turn then runs unconstrained + TS salvage, so this never
     # breaks a turn.
     tool_grammar_processor = None
-    if request.tool_grammar:
+    # A response grammar that also covers calls replaces the tool grammar:
+    # stacked, the two would leave only JSON, and no call could get through.
+    if request.tool_grammar and not response_format.covers_tool_calls(response_grammar):
         _grammar_tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
         tool_grammar_processor = tool_grammar.build_tool_grammar_processor(
             _grammar_tok, request.tools, request.tool_grammar
@@ -4224,7 +4247,7 @@ async def chat_completions(request: ChatRequest, http_request: Request):
         return StreamingResponse(
             _batched_stream_iter(sub),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            headers=_stream_headers(prompt_text),
         )
 
     # Defense in depth: the tower selector requires --max-concurrency >= 1
@@ -4495,18 +4518,13 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             # active allocation and is not touched by clear_cache().
             _reclaim_mlx_buffer_cache("turn-end", force=True, log=True)
 
+    # NOTE: mlx_vlm.server also sets `Connection: keep-alive`, which our
+    # daemon would have to strip over HTTP/2; omitted to keep behavior
+    # predictable across transports.
     return StreamingResponse(
         stream_iter(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            # NOTE: mlx_vlm.server sets `Connection: keep-alive` here,
-            # which our gezel daemon would have to strip when running
-            # over HTTP/2. We're a separate process not on HTTP/2 so
-            # the header is fine to send, but explicitly omit to keep
-            # behavior predictable across transports.
-            "X-Accel-Buffering": "no",
-        },
+        headers=_stream_headers(prompt_text),
     )
 
 
