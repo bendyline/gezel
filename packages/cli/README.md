@@ -399,7 +399,7 @@ Run `gezel --help` for the full list. The most-used ones:
 | `gezel agent list\|create\|show` | Manage your gezels |
 | `gezel project list\|create\|install` | Manage projects and their packages (`gezel env` is the same command) |
 | `gezel task list\|create\|show` | Manage tasks |
-| `gezel model list\|pull\|export` | Manage on-device chat models. `export <id> [file]` downloads the catalog model if needed, then writes a portable, checksum-verified `.gezmodel` you can move to another machine |
+| `gezel model list\|pull\|use\|export` | Manage on-device chat models. `list --available` shows the catalog models that fit this machine, with sizes; `use <id>` makes chats use a downloaded model (a pull does this itself when no working default is set). `export <id> [file]` downloads the catalog model if needed, then writes a portable, checksum-verified `.gezmodel` you can move to another machine |
 | `gezel native install\|list\|status` | Manage native engine binaries |
 | `gezel create-image\|create-video\|create-audio` | Generate media |
 | `gezel skills import\|convert` | Import and convert skills |

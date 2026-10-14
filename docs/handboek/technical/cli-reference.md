@@ -89,7 +89,10 @@ The full story — the source-folder format, both script forms, and the loop an 
 
 ```
 gezel model list            local chat models for this computer's engine
+gezel model list --available
+                            catalog models that fit this computer, with sizes
 gezel model pull <id>       download a chat model from the catalog
+gezel model use <id>        make chats use a downloaded model
 gezel model context <id> [tokens]
                             show or set a model's context window (auto clears it)
 gezel model concurrency [slots]

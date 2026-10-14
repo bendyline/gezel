@@ -22,10 +22,14 @@ import {
   type BootstrapChatProvider,
   NATIVE_TOOLKIT,
   bootstrapChatModelLabel,
+  chatModelCandidates,
   fitVerdicts,
   formatDownloadSize,
+  orderInstalledChatModels,
   pickAccessoryModels,
   rankChatModels,
+  recoDevice,
+  runsHere,
 } from '../bootstrap.js';
 
 type DownloadEvent =
@@ -59,6 +63,8 @@ interface ModelPlan {
   }>;
   /** Hardware winner before availability is considered. */
   recommendedChatModel?: BootstrapChatModel;
+  /** The installed model offered first, absent when none can run here. */
+  leadInstalledId?: string;
   /** Downloadable choices, in hardware recommendation order. */
   chatModels: BootstrapChatModel[];
   accessories: BootstrapAccessoryModel[];
@@ -158,12 +164,19 @@ export function BootstrapGate(props: {
         client.getVideoModelFit().catch(() => null),
       ]);
       const installedIds = new Set(installedChat.models.map((model) => model.id));
+      const candidates = chatModelCandidates(context.chatCatalog, context.device, context.provider);
       const rankedChatModels = rankChatModels(
         context.chatCatalog,
         context.device,
         context.provider,
       );
       const recommendedChatModel = rankedChatModels[0];
+      const installedInOrder = orderInstalledChatModels<(typeof installedChat.models)[number]>(
+        installedChat.models,
+        rankedChatModels,
+        candidates,
+      );
+      const leadInstalled = installedInOrder.find((model) => runsHere(model.id, candidates));
       const chatModels = rankedChatModels.filter((model) => !installedIds.has(model.id));
       const catalogAttributions = new Map(
         context.chatCatalog.flatMap((item) =>
@@ -199,11 +212,12 @@ export function BootstrapGate(props: {
         kind: 'model-choice',
         plan: {
           context,
-          installedChatModels: installedChat.models.map((model) => {
+          installedChatModels: installedInOrder.map((model) => {
             const attribution = catalogAttributions.get(model.id);
             return { ...model, ...(attribution ? { attribution } : {}) };
           }),
           ...(recommendedChatModel ? { recommendedChatModel } : {}),
+          ...(leadInstalled ? { leadInstalledId: leadInstalled.id } : {}),
           chatModels,
           accessories,
         },
@@ -448,7 +462,7 @@ export function BootstrapGate(props: {
     const workshopDownloadBytes =
       accessoryBytes + (best && !bestInstalled ? best.approxSizeBytes : 0);
     const workshopHelperLabels = screen.plan.accessories.map(accessoryKindLabel).join(', ');
-    const options = [
+    const recommendedOptions = [
       ...(best
         ? [
             {
@@ -473,15 +487,25 @@ export function BootstrapGate(props: {
               : []),
           ]
         : []),
-      ...screen.plan.installedChatModels
-        .filter((model) => model.id !== best?.id)
-        .map((model) => ({
-          label: `Use ${model.name ?? model.id}${model.attribution ? ` (${model.attribution})` : ''}`,
-          hint: `already available on this machine${
-            model.approxSizeBytes ? ` · ${formatDownloadSize(model.approxSizeBytes)}` : ''
-          }`,
-          value: `installed:${model.id}`,
-        })),
+    ];
+    const installedOptions = screen.plan.installedChatModels
+      .filter((model) => model.id !== best?.id)
+      .map((model) => ({
+        label: `Use ${model.name ?? model.id}${model.attribution ? ` (${model.attribution})` : ''}`,
+        hint: `${model.id === screen.plan.leadInstalledId ? 'already on this machine, no download' : 'already available on this machine'}${
+          model.approxSizeBytes ? ` · ${formatDownloadSize(model.approxSizeBytes)}` : ''
+        }`,
+        value: `installed:${model.id}`,
+      }));
+    // A model already on disk that runs here is the default, ahead of the
+    // hardware recommendation: Enter on the first option used to start a
+    // 16 GB download beside it. The recommendation stays offered right after.
+    const leadIsInstalled =
+      screen.plan.leadInstalledId !== undefined && screen.plan.leadInstalledId !== best?.id;
+    const options = [
+      ...(leadIsInstalled
+        ? [...installedOptions, ...recommendedOptions]
+        : [...recommendedOptions, ...installedOptions]),
       ...screen.plan.chatModels
         .filter((model) => model.id !== best?.id)
         .slice(0, MAX_ALTERNATIVE_MODELS)
@@ -565,17 +589,6 @@ function BootstrapFrame(props: { title: string; children: ReactNode }): JSX.Elem
       <Text dimColor>Ctrl+C exit</Text>
     </Box>
   );
-}
-
-function recoDevice(memory: Awaited<ReturnType<GezelClient['getMemoryProfile']>>): RecoDevice {
-  return {
-    platform: memory.platform,
-    gpuVramBytes: memory.gpuVramBytes,
-    ...(memory.gpuMemoryKind ? { gpuMemoryKind: memory.gpuMemoryKind } : {}),
-    totalRamBytes: memory.totalRamBytes,
-    usableBytes: memory.usableBytes,
-    ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),
-  };
 }
 
 function BootstrapChoiceList(props: {

@@ -66,8 +66,14 @@ import {
 } from '../engagement-mode.js';
 import { floatOpt, intOpt, resolvePromptText, saveArtifact } from '../generate.js';
 import { resolveKnowledgeInstallSource } from '../knowledge-install.js';
+import {
+  availableChatModels,
+  formatAvailableChatModels,
+  pinPulledModel,
+  useChatModel,
+} from '../model-choice.js';
 import { exportModelToFile } from '../model-export.js';
-import { pullChatModel } from '../model-pull.js';
+import { pullChatModel, waitForMlxRuntime } from '../model-pull.js';
 import {
   formatNativeList,
   formatNativeStatus,
@@ -75,6 +81,7 @@ import {
   parseNativeEngine,
   parseNativeVariant,
 } from '../native-command.js';
+import { RunProgress } from '../run-progress.js';
 import { resolveRunPrompt } from '../run-prompt.js';
 import { checkRunReadiness } from '../run-readiness.js';
 import { ReplyPrinter } from '../run-reply.js';
@@ -676,6 +683,7 @@ program
       const session = await client.createChatSession({ gezelId, projectId });
       await client.sendToChatSession(session.id, prompt);
       const reply = new ReplyPrinter((text) => process.stdout.write(text));
+      const progress = new RunProgress((text) => process.stderr.write(text));
       let printed = false;
       let errored = false;
       for await (const ev of streamChatEvents({
@@ -683,9 +691,13 @@ program
         headers: client.authHeader(),
         fetch: client.getFetch(),
       })) {
-        if (ev.type === 'delta') {
+        if (ev.type === 'engine_phase') {
+          progress.phase(ev);
+        } else if (ev.type === 'delta') {
+          progress.settle();
           reply.push(ev.content);
         } else if (ev.type === 'complete') {
+          progress.settle();
           printed = reply.finish();
           // Fallback for providers that send the whole message at once.
           if (!printed && ev.message.content) {
@@ -693,10 +705,12 @@ program
             printed = true;
           }
         } else if (ev.type === 'error') {
+          progress.settle();
           console.error(`\n${ev.error}`);
           errored = true;
         }
       }
+      progress.settle();
       printed = reply.finish() || printed;
       if (printed) process.stdout.write('\n');
       if (errored) process.exitCode = 1;
@@ -2157,11 +2171,23 @@ model
 
 model
   .command('list')
-  .description('List local chat models for an engine')
+  .description('List downloaded chat models, or with --available the catalog models that fit')
   .option('-p, --provider <engine>', 'mlx | llama-cpp | ds4 (default: platform default)')
-  .action(async (opts: { provider?: string }) => {
+  .option('-a, --available', 'List catalog models for this machine, with download sizes')
+  .action(async (opts: { provider?: string; available?: boolean }) => {
     const client = await connectOwned(cliGlobals());
     const provider = resolveModelProvider(opts.provider);
+    if (opts.available) {
+      const available = await availableChatModels(client, provider);
+      console.log(
+        formatAvailableChatModels({
+          engine: provider,
+          platformDefault: resolveOnDeviceProvider(process.platform, process.arch),
+          ...available,
+        }),
+      );
+      return;
+    }
     const { models } =
       provider === 'mlx'
         ? await client.listMlxModels()
@@ -2169,7 +2195,9 @@ model
           ? await client.listDs4Models()
           : await client.listLlamaCppModels();
     if (models.length === 0) {
-      console.log(`(no local ${provider} models — download one with \`gezel model pull <id>\`)`);
+      console.log(
+        `(no local ${provider} models — \`gezel model list --available\` shows ones to download)`,
+      );
       return;
     }
     for (const m of models) {
@@ -2181,12 +2209,31 @@ model
 
 model
   .command('pull <id>')
-  .description('Download a local chat model from the catalog (e.g. gemma4-31b-q4)')
+  .description(
+    'Download a local chat model from the catalog (e.g. qwen3.5-2b-q4, about 1.5 GB; `gezel model list --available` shows what fits)',
+  )
   .option('-p, --provider <engine>', 'mlx | llama-cpp | ds4 (default: platform default)')
   .action(async (id: string, opts: { provider?: string }) => {
     const client = await connectOwned(cliGlobals());
     const provider = resolveModelProvider(opts.provider);
     await pullChatModel(client, provider, id, (text) => process.stderr.write(text));
+    if (provider === 'mlx') await waitForMlxRuntime(client, (text) => process.stderr.write(text));
+    if ((await pinPulledModel(client, provider, id)) === 'pinned') {
+      process.stderr.write(`${id} is now the default ${provider} model.\n`);
+    }
+  });
+
+model
+  .command('use <id>')
+  .description('Make chats use a downloaded model')
+  .option('-p, --provider <engine>', 'mlx | llama-cpp | ds4 (default: the engine that has it)')
+  .action(async (id: string, opts: { provider?: string }) => {
+    const client = await connectOwned(cliGlobals());
+    const engine = await useChatModel(client, id, {
+      ...(opts.provider ? { requested: resolveModelProvider(opts.provider) } : {}),
+      platformDefault: resolveOnDeviceProvider(process.platform, process.arch),
+    });
+    console.log(`Chats now use ${id} (${engine}).`);
   });
 
 model
