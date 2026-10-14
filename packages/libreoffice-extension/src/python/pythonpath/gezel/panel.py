@@ -233,6 +233,15 @@ class PanelSession:
         self.view.set_gezels(names, index)
         self.view.layout()
 
+    def _follow_home(self):
+        """Talk to whichever Gezel is running now: it may have started, or a
+        development build taken over, since the panel opened."""
+        home = gezel_home()
+        if home != self.home:
+            self.home = home
+            self.http = GezelHttp(home)
+            self.store = TokenStore.for_home(home)
+
     # ── actions ─────────────────────────────────────────────────────────
     def connect(self):
         if self.busy:
@@ -243,6 +252,7 @@ class PanelSession:
 
         def work():
             try:
+                self._follow_home()
                 token = ensure_token(
                     self.http,
                     self.store,

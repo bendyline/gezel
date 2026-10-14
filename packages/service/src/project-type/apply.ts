@@ -27,6 +27,7 @@ import {
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
+import { slugifyEntityName as slugify } from '@bendyline/gezel/runtime';
 import { makeCraftbookResolver } from '../craftbook/resolve.js';
 import type { Store } from '../fs/store.js';
 import { installProjectTypeScripts } from '../scripts/install.js';
@@ -91,6 +92,22 @@ async function crewPool(
   const install = deps.installGezels ?? (await deps.store.listGezels().catch(() => []));
   const onRoster = new Set(roster.map((gezel) => gezel.id));
   return [...roster, ...install.filter((gezel) => !onRoster.has(gezel.id))];
+}
+
+/**
+ * A random first name no gezel on the install uses, by id or by the id its
+ * name would slug to. A typed project stages its crew in an empty home, where
+ * the Store's `-2` suffixing cannot see the install, so a repeated name
+ * ("gezel bohuslav already exists") failed the whole create at publish.
+ */
+function pickUnusedGezelName(
+  inUse: ReadonlySet<string>,
+): ReturnType<typeof pickRandomNameWithGender> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const pick = pickRandomNameWithGender();
+    if (!inUse.has(slugify(pick.name))) return pick;
+  }
+  return pickRandomNameWithGender();
 }
 
 function sha256Hex(content: string | Buffer): string {
@@ -311,7 +328,11 @@ export async function applyProjectType(
   const gezelsCreated: AppliedProjectType['gezelsCreated'] = [];
   let voormanGezelId: string | undefined;
   const reuse = manifest.leanProfile || input.reuseRosterGezels !== false;
-  const pool = reuse ? await crewPool(deps, project.gezelIds ?? []) : [];
+  const install = deps.installGezels ?? (await store.listGezels().catch(() => []));
+  const pool = reuse
+    ? await crewPool({ ...deps, installGezels: install }, project.gezelIds ?? [])
+    : [];
+  const namesInUse = new Set(install.flatMap((gezel) => [gezel.id, slugify(gezel.name)]));
   const taken = new Set<string>();
   for (const ref of manifest.gezels) {
     const tpl = await catalog.get('gezel-template', ref.templateId).catch(() => null);
@@ -329,7 +350,7 @@ export async function applyProjectType(
         );
         continue;
       }
-      const { name, gender } = pickRandomNameWithGender();
+      const { name, gender } = pickUnusedGezelName(namesInUse);
       const extraFrontmatter = parseTemplateFrontmatter(tpl.manifest.frontmatter);
       const created = await store.createGezel({
         name,
@@ -342,6 +363,7 @@ export async function applyProjectType(
       });
       gezelId = created.id;
       gezelName = created.name;
+      namesInUse.add(created.id).add(slugify(created.name));
     }
     taken.add(gezelId);
     gezelsCreated.push({

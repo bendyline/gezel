@@ -1,6 +1,7 @@
 import { GezelSdkError, errorFromResponse } from './errors.js';
 import { readSseDataChunks } from './sse.js';
 import type {
+  AppSubject,
   AppToolDefinition,
   AppToolHandlerResult,
   AppToolsRegistration,
@@ -38,6 +39,7 @@ export async function registerAppTools(
     });
 
   let tools = new Map(input.tools.map((tool) => [tool.name, tool]));
+  let subject = input.subject;
   let closed = false;
   let relayId = '';
   let readyResolve: (() => void) | undefined;
@@ -67,6 +69,7 @@ export async function registerAppTools(
       projectId: input.projectId,
       ...(input.gezelIds ? { gezelIds: input.gezelIds } : {}),
       ...(input.surfaceId ? { surfaceId: input.surfaceId } : {}),
+      ...(subject ? { subject } : {}),
       tools: [...tools.values()].map(({ name, description, inputSchema, timeoutMs }) => ({
         name,
         description,
@@ -196,8 +199,9 @@ export async function registerAppTools(
       return relayId;
     },
     ready,
-    async update(next: AppToolDefinition[]) {
+    async update(next: AppToolDefinition[], opts?: { subject?: AppSubject | null }) {
       tools = new Map(next.map((tool) => [tool.name, tool]));
+      if (opts && 'subject' in opts) subject = opts.subject ?? undefined;
       if (relayId) await publishTools(relayId);
     },
     async close() {

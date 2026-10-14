@@ -502,6 +502,14 @@ export interface RegisterAppToolsInput {
    * only while its latest message from a person came through your chat.
    */
   surfaceId?: string;
+  /**
+   * The item your chat is about — the document open beside it. Needs
+   * `surfaceId`. Gezel then treats your chat's threads as conversations
+   * about that item: it names the item to the gezel, narrows the gezel's
+   * tools to yours plus a small core, and stamps the threads so your chat
+   * can list only those about this item.
+   */
+  subject?: AppSubject;
   tools: AppToolDefinition[];
   /** Human-readable provenance shown in Gezel's connected-app views. */
   label?: string;
@@ -509,12 +517,36 @@ export interface RegisterAppToolsInput {
   onError?(error: unknown): void;
 }
 
+/** What your chat is about. Facts only: Gezel writes everything the model reads. */
+export interface AppSubject {
+  kind: 'document' | 'spreadsheet' | 'presentation' | 'item';
+  /** Your app's name as a person says it: `Word`. */
+  app: string;
+  /** What the person calls the item: its file name, or `Untitled document`. */
+  title: string;
+  /** Where it is saved. Omit while it is unsaved. */
+  path?: string;
+  /** `item` (default): the item is the whole job. `context`: where the person is looking. */
+  focus?: 'item' | 'context';
+  /** Whether the person lets your tools change it. */
+  editable?: boolean;
+  /**
+   * One of your read-only tools. Gezel calls it with `{}` when a person
+   * sends a message and opens their turn with what it returns: a JSON object
+   * with `text` (the selection), `isEmpty`, `truncated` and `documentIsEmpty`.
+   */
+  stateTool?: string;
+}
+
 export interface AppToolsRegistration {
   readonly relayId: string;
   /** Resolves once the daemon has accepted the registration. */
   ready: Promise<void>;
-  /** Replace the registered tools. */
-  update(tools: AppToolDefinition[]): Promise<void>;
+  /**
+   * Replace the registered tools, and the subject when `opts.subject` is
+   * given (`null` removes it).
+   */
+  update(tools: AppToolDefinition[], opts?: { subject?: AppSubject | null }): Promise<void>;
   /** Withdraw the tools and stop listening. */
   close(): Promise<void>;
 }

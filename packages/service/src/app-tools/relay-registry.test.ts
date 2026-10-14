@@ -339,4 +339,81 @@ describe('AppToolRelayRegistry', () => {
     expect(registry.listRelays()).toHaveLength(2);
     expect(registry.ownerOf(other.relayId)).toBe('rival');
   });
+
+  describe('a subject', () => {
+    const SELECTION = {
+      name: 'office_read_selection',
+      description: 'Read the selection.',
+      inputSchema: { type: 'object', properties: {} },
+    };
+    const SUBJECT = {
+      kind: 'document' as const,
+      app: 'Word',
+      title: 'Untitled document',
+      stateTool: 'office_read_selection',
+    };
+
+    it('belongs to one chat, so it needs a surface', () => {
+      const registry = new AppToolRelayRegistry();
+      const { relayId } = registry.open({ appId: 'office' });
+      expect(() =>
+        registry.register(relayId, { projectId: 'default', subject: SUBJECT, tools: [SELECTION] }),
+      ).toThrow(AppToolRelayError);
+    });
+
+    it('names a state tool the app actually registered', () => {
+      const registry = new AppToolRelayRegistry();
+      const { relayId } = registry.open({ appId: 'office' });
+      expect(() =>
+        registry.register(relayId, {
+          projectId: 'default',
+          surfaceId: 'pane-12345',
+          subject: { ...SUBJECT, stateTool: 'doc_read_selection' },
+          tools: [SELECTION],
+        }),
+      ).toThrow(/stateTool/);
+    });
+
+    it('is found by its surface and shows in the relay listing', () => {
+      const registry = new AppToolRelayRegistry();
+      const { relayId } = registry.open({ appId: 'office' });
+      registry.register(relayId, {
+        projectId: 'default',
+        surfaceId: 'pane-12345',
+        subject: SUBJECT,
+        tools: [SELECTION],
+      });
+      registry.noteUserMessage('s-1', 'pane-12345');
+      registry.noteUserMessage('s-2', 'elsewhere1');
+      expect(registry.subjectBindingForSurface('pane-12345')?.subject?.title).toBe(
+        'Untitled document',
+      );
+      expect(registry.subjectBindingForSurface('elsewhere1')).toBeUndefined();
+      expect(registry.sessionsOnSurface('pane-12345')).toEqual(['s-1']);
+      expect(registry.listRelays()[0]?.bindings[0]?.subjectTitle).toBe('Untitled document');
+    });
+
+    it('moves the fingerprint when the document is saved or edits switch', () => {
+      const registry = new AppToolRelayRegistry();
+      const { relayId } = registry.open({ appId: 'office' });
+      const register = (subject: typeof SUBJECT & { path?: string; editable?: boolean }) =>
+        registry.register(relayId, {
+          projectId: 'default',
+          surfaceId: 'pane-12345',
+          subject,
+          tools: [SELECTION],
+        });
+      registry.noteUserMessage('s-1', 'pane-12345');
+      const fingerprint = () =>
+        appToolBindingsFingerprint(
+          registry.listForSession({ projectId: 'default', gezelId: 'g', sessionId: 's-1' }),
+        );
+      register(SUBJECT);
+      const unsaved = fingerprint();
+      register({ ...SUBJECT, title: 'Report.docx', path: 'C:\\Report.docx' });
+      const saved = fingerprint();
+      register({ ...SUBJECT, title: 'Report.docx', path: 'C:\\Report.docx', editable: false });
+      expect(new Set([unsaved, saved, fingerprint()]).size).toBe(3);
+    });
+  });
 });

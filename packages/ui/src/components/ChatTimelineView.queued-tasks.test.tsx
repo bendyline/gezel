@@ -124,6 +124,29 @@ describe('ChatTimelineView — queued task receipts', () => {
     expect(await screen.findByText('Task number 6')).toBeInTheDocument();
   });
 
+  it('places a receipt at its own moment, above a newer conversation', async () => {
+    // The regression: receipts rendered after every thread, so a card
+    // held since the morning sat between a live reply and the composer.
+    const newer = {
+      sessionId: 's2',
+      gezelId: 'g1',
+      projectId: 'p1',
+      sessionTitle: 'Why gezel',
+      sessionCreatedAt: '2026-08-21T05:40:00.000Z',
+      sessionLastActivityAt: '2026-08-21T05:40:00.000Z',
+      sessionProviderName: 'llama-cpp',
+      role: 'user',
+      content: 'Add some content on why gezel is awesome.',
+      at: '2026-08-21T05:40:00.000Z',
+    } as TimelineMessage;
+    renderTimeline({ messages: [seedMessage, newer], queuedTasks: [entry(6)] });
+    const card = await screen.findByText('Task number 6');
+    const before = screen.getByText('Start the review.');
+    const after = screen.getByText('Add some content on why gezel is awesome.');
+    expect(before.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('drops the receipt once that task is streaming its turn', async () => {
     renderTimeline({ messages: [seedMessage], queuedTasks: [entry(6)] });
     await screen.findByText('Task number 6');

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, readdir } from 'node:fs/promises';
+import { access, readFile, readdir } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 
 /**
@@ -60,21 +60,60 @@ async function onPath(name: string, env: NodeJS.ProcessEnv): Promise<string | un
 
 const versionCache = new Map<string, Promise<string | undefined>>();
 
-/** `soffice --version` → `LibreOffice 25.8.1.1 …` → `25.8.1.1`. Cached per binary. */
-export function libreOfficeVersion(sofficePath: string): Promise<string | undefined> {
+/** `VS_FIXEDFILEINFO.dwSignature` (0xFEEF04BD), as it sits in the file. */
+const FIXED_FILE_INFO_SIGNATURE = Buffer.from([0xbd, 0x04, 0xef, 0xfe]);
+const FIXED_FILE_INFO_STRUC_VERSION = 0x0001_0000;
+
+/**
+ * The product version a Windows executable declares in its version resource
+ * (`26.8.1.1`), read from the file's `VS_FIXEDFILEINFO` block without running
+ * it. Undefined when the file has no such block.
+ */
+export function windowsExecutableVersion(bytes: Buffer): string | undefined {
+  let at = bytes.indexOf(FIXED_FILE_INFO_SIGNATURE);
+  while (at >= 0 && at + 24 <= bytes.length) {
+    if (bytes.readUInt32LE(at + 4) === FIXED_FILE_INFO_STRUC_VERSION) {
+      const ms = bytes.readUInt32LE(at + 16);
+      const ls = bytes.readUInt32LE(at + 20);
+      return [ms >>> 16, ms & 0xffff, ls >>> 16, ls & 0xffff].join('.');
+    }
+    at = bytes.indexOf(FIXED_FILE_INFO_SIGNATURE, at + 1);
+  }
+  return undefined;
+}
+
+/**
+ * The installed LibreOffice's version, for display. Cached per binary.
+ *
+ * Windows reads it from `soffice.exe` instead of running it. There
+ * `soffice.exe` is a windowed launcher: `--version` prints nothing to a
+ * captured stdout, the timeout kills the launcher, and the `soffice.bin` it
+ * started stays behind with no window, holding the LibreOffice profile.
+ * Every daemon start left one, and the extension's install then refused with
+ * "Close LibreOffice first" while no LibreOffice window was open
+ * (2026-10-13). Elsewhere `soffice --version` prints `LibreOffice 25.8.1.1 …`
+ * and exits.
+ */
+export function libreOfficeVersion(
+  sofficePath: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<string | undefined> {
   let cached = versionCache.get(sofficePath);
   if (!cached) {
-    cached = new Promise((resolve) => {
-      execFile(
-        sofficePath,
-        ['--version'],
-        { windowsHide: true, timeout: 15_000 },
-        (err, stdout) => {
-          if (err) return resolve(undefined);
-          resolve(/LibreOffice\s+([\d.]+)/.exec(String(stdout))?.[1]);
-        },
-      );
-    });
+    cached =
+      platform === 'win32'
+        ? readFile(sofficePath).then(windowsExecutableVersion, () => undefined)
+        : new Promise((resolve) => {
+            execFile(
+              sofficePath,
+              ['--version'],
+              { windowsHide: true, timeout: 15_000 },
+              (err, stdout) => {
+                if (err) return resolve(undefined);
+                resolve(/LibreOffice\s+([\d.]+)/.exec(String(stdout))?.[1]);
+              },
+            );
+          });
     versionCache.set(sofficePath, cached);
   }
   return cached;

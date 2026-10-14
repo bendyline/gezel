@@ -6,14 +6,57 @@ import unittest
 
 import _path  # noqa: F401
 from gezel.client import GezelHttp, HttpError, parse_sse_lines
-from gezel.discovery import DaemonNotRunning, discover, gezel_home
+from gezel.discovery import DaemonNotRunning, _answers, discover, gezel_home
 from stub_server import StubDaemon
+
+
+def _publish(home, port, installed=False):
+    os.makedirs(os.path.join(home, "runtime"), exist_ok=True)
+    with open(os.path.join(home, "runtime", "port"), "w") as f:
+        f.write(f"{port}\n")
+    if installed:
+        os.makedirs(os.path.join(home, "integrations", "libreoffice"), exist_ok=True)
+        with open(os.path.join(home, "integrations", "libreoffice", "setup.json"), "w") as f:
+            f.write("{}")
 
 
 class DiscoveryTests(unittest.TestCase):
     def test_gezel_home_honors_env(self):
         self.assertEqual(gezel_home({"GEZEL_HOME": "/x/y"}), "/x/y")
-        self.assertTrue(gezel_home({}).endswith(".gezel"))
+
+    def test_installed_home_is_the_default_when_nothing_answers(self):
+        with tempfile.TemporaryDirectory() as user:
+            # A port file whose daemon is gone does not choose a home.
+            _publish(os.path.join(user, ".gezel-dev"), 6228)
+            home = gezel_home({}, answers=lambda _port: False, user_dir=user)
+            self.assertEqual(home, os.path.join(user, ".gezel"))
+
+    def test_finds_a_development_gezel(self):
+        # LibreOffice starts without GEZEL_HOME, so a development build of the
+        # desktop app (~/.gezel-dev) used to read as "Gezel is not running".
+        with tempfile.TemporaryDirectory() as user:
+            _publish(os.path.join(user, ".gezel-dev"), 6228)
+            home = gezel_home({}, answers=lambda port: port == 6228, user_dir=user)
+            self.assertEqual(home, os.path.join(user, ".gezel-dev"))
+
+    def test_prefers_the_gezel_that_installed_this_extension(self):
+        with tempfile.TemporaryDirectory() as user:
+            _publish(os.path.join(user, ".gezel"), 6228)
+            _publish(os.path.join(user, ".gezel-dev"), 6229, installed=True)
+            answers = lambda _port: True  # noqa: E731
+            self.assertEqual(
+                gezel_home({}, answers=answers, user_dir=user), os.path.join(user, ".gezel-dev")
+            )
+            os.remove(os.path.join(user, ".gezel-dev", "integrations", "libreoffice", "setup.json"))
+            self.assertEqual(gezel_home({}, answers=answers, user_dir=user), os.path.join(user, ".gezel"))
+
+    def test_answers_means_something_is_listening(self):
+        daemon = StubDaemon()
+        try:
+            self.assertTrue(_answers(daemon.port))
+        finally:
+            daemon.close()
+        self.assertFalse(_answers(daemon.port))
 
     def test_reads_port_and_cert(self):
         with tempfile.TemporaryDirectory() as home:

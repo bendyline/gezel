@@ -57,6 +57,7 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 15 | **Behavior `promptAppend` walk** (the old "local hints") | per resolved model profile — see next section | 0 to ~9.4K ch |
 | 16 | `## Tools available this turn` ([chat/tools-block.ts](../packages/service/src/chat/tools-block.ts)) | tiers tiny/small/medium only; skipped for providers without an MCP bridge (copilot, the CLI providers); per-gezel `tools.md` overrides; bridge-failure notice overrides all | tiny: full descriptions; small/medium: names-only |
 | 17 | File-edits-off notice / consultation-mode addendum / fresh-project addendum | lockdown / spawned consultation / ≤5 workspace files | ~1–2K ch each |
+| 17b | `## The document open beside this chat` — the item an app's chat is about (`renderAppSubjectBlock` in [core app-subject.ts](../packages/core/src/app-subject.ts)), naming only the app's tools. With `focus: 'item'` and the app connected it also stands down rows 2, 6's "Where work belongs", 6b, 7, 10, 13 and the fresh-project addendum, condenses the project about, and lists the app's tools first in row 16. An out-of-reach variant says the document cannot be reached | the session's surface registered a `subject` (the Office pane), or the thread carries a `subject` stamp | ~110 tok |
 | 18 | Active-task anchor (recency anchor, deliberately **last**) | task-scoped | 1 paragraph |
 
 ### The two bands (KV-prefix caching)
@@ -276,6 +277,15 @@ while they stream.
   carries `turnIntent: 'off'` (the person dismissed the suggested task for that text)
   skips the plan, the prelude, and the `invoke_craftbook` clamp for that one turn. The
   prelude path remains for the CLI, evals, and older clients, which send neither.
+- **The person's selection** (`readAppSubjectStateLine` in
+  [chat/app-subject-session.ts](../packages/service/src/chat/app-subject-session.ts)):
+  on a turn a person sends beside an app's item, the daemon calls the app's
+  state tool (3 s budget) and opens the message with one bracketed line —
+  `[Word, "Report.docx": the document is empty.]`, or the selection fenced and
+  labelled as document content. It sits nearest the person's words, every
+  other prelude above it. The selected text joins the turn's evidence the way
+  the person's own message does, so rewriting it is not refused as invention.
+  The same turn's indexed context leaves out project files (below).
 - **Indexed context** (`resolveTurnProjectRetrieval`): a scoped, diversified
   evidence block from the active project, current gezel memory, the person's
   own memory ("About you"), and shared library. Off/Lean/Balanced/Deep plus a

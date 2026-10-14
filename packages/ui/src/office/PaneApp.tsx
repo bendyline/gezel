@@ -1,8 +1,15 @@
-import { providerUsesManagedMcpBridge } from '@bendyline/gezel';
+import {
+  type SessionSubject,
+  appSubjectKey,
+  isBackgroundServiceRole,
+  providerUsesManagedMcpBridge,
+} from '@bendyline/gezel';
+import type { AppSubject } from '@bendyline/gezel-app-sdk/browser';
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Root } from 'react-dom/client';
 import { providerLabel } from '../components/provider-label.js';
 import { APP_SURFACE_PARAM } from '../embedded/app-surface.js';
+import { documentFocusParams } from '../embedded/document-focus.js';
 import * as Select from '../primitives/Select.js';
 import {
   type PaneProject,
@@ -20,7 +27,31 @@ import {
   isRequirementSetSupported,
 } from './host.js';
 import { type OfficeRelay, type RelayStatus, startOfficeRelay } from './relay.js';
+import { SELECTION_TOOL } from './tools/common.js';
 import { toolsForHost } from './tools/index.js';
+
+const SUBJECT_KIND: Record<OfficeHostApp, AppSubject['kind']> = {
+  word: 'document',
+  excel: 'spreadsheet',
+  powerpoint: 'presentation',
+};
+
+/**
+ * What this pane's chat is about, as the daemon is told: facts only. The
+ * selection tool doubles as the state tool, so every message the person
+ * sends opens with what they have selected.
+ */
+export function paneSubject(host: OfficeHostApp, path: string | null, edits: boolean): AppSubject {
+  return {
+    kind: SUBJECT_KIND[host],
+    app: OFFICE_HOST_LABELS[host],
+    title: documentTitle(path),
+    ...(path ? { path } : {}),
+    focus: 'item',
+    editable: edits,
+    stateTool: SELECTION_TOOL,
+  };
+}
 
 function relayLabel(status: RelayStatus, gezelName: string | undefined): string {
   switch (status) {
@@ -43,11 +74,25 @@ function relayLabel(status: RelayStatus, gezelName: string | undefined): string 
  * the gezel it talks to for as long as it is open, in the threads its own
  * chat drives: the frame stamps every message with `surfaceId`, the id the
  * tools are registered under.
+ *
+ * With `document`, the frame opens on one conversation about this document
+ * rather than the whole project (see `embedded/document-focus.ts`); the
+ * project stays one click away inside it.
  */
-export function chatFrameUrl(projectId: string, gezelId: string, surfaceId: string): string {
+export function chatFrameUrl(
+  projectId: string,
+  gezelId: string,
+  surfaceId: string,
+  document?: SessionSubject,
+): string {
   const params = new URLSearchParams({ embedded: 'chat', compact: '1', projectId });
   if (gezelId) params.set('gezelId', gezelId);
   params.set(APP_SURFACE_PARAM, surfaceId);
+  if (document) {
+    for (const [name, value] of Object.entries(documentFocusParams(document))) {
+      params.set(name, value);
+    }
+  }
   return `/?${params.toString()}`;
 }
 
@@ -92,6 +137,16 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
   );
   const toolsRef = useRef(tools);
   toolsRef.current = tools;
+  const subject = useMemo(() => paneSubject(host, path, edits), [host, path, edits]);
+  const subjectRef = useRef(subject);
+  subjectRef.current = subject;
+  // The stamp the chat gives threads it opens about this document: its path
+  // once saved, this pane before. The frame lists both keys, so a thread
+  // begun before a Save As stays in view.
+  const documentStamp = useMemo<SessionSubject | undefined>(() => {
+    const key = appSubjectKey({ path, surfaceId });
+    return key ? { key, kind: subject.kind, app: subject.app, title: subject.title } : undefined;
+  }, [path, surfaceId, subject.kind, subject.app, subject.title]);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +171,7 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
     let closed = false;
     let relay: OfficeRelay | null = null;
     const sent = toolsRef.current;
+    const sentSubject = subjectRef.current;
     void startOfficeRelay({
       baseUrl,
       token: ready.token,
@@ -124,6 +180,7 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
       surfaceId,
       label: `${OFFICE_HOST_LABELS[host]}: ${documentTitle(path)}`,
       tools: sent,
+      subject: sentSubject,
       onStatus: setRelayStatus,
       onUnauthorized: () => setUnauthorized(true),
     })
@@ -134,9 +191,12 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
         }
         relay = r;
         relayRef.current = r;
-        // "Allow edits" switched while the relay was still connecting: the
-        // update below found no relay then, so the old tools went out.
-        if (toolsRef.current !== sent) void r.update(toolsRef.current).catch(() => undefined);
+        // "Allow edits" switched (or the document was saved) while the relay
+        // was still connecting: the update below found no relay then, so the
+        // old tools and facts went out.
+        if (toolsRef.current !== sent || subjectRef.current !== sentSubject) {
+          void r.update(toolsRef.current, subjectRef.current).catch(() => undefined);
+        }
       })
       .catch(() => setRelayStatus('closed'));
     const onHide = () => void relay?.close();
@@ -150,8 +210,8 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
   }, [project.id, gezelId]);
 
   useEffect(() => {
-    void relayRef.current?.update(tools).catch(() => undefined);
-  }, [tools]);
+    void relayRef.current?.update(tools, subject).catch(() => undefined);
+  }, [tools, subject]);
 
   // Save As moves the document; its project may change with it.
   useEffect(() => {
@@ -185,6 +245,9 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
   };
 
   const chosen = roster.find((g) => g.id === gezelId);
+  // Background-service gezels (the Boekwachter, the Klerk) are not someone to
+  // write a document with; keep one only while it is already the choice.
+  const offered = roster.filter((g) => !isBackgroundServiceRole(g.role) || g.id === gezelId);
   const provider = chosen ? (chosen.provider ?? ready.defaultProvider) : undefined;
   // Copilot and the CLI providers run their own tool loop, which cannot
   // reach tools an app registers; the daemon withholds them, so say so here.
@@ -224,13 +287,13 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
           )}
         </div>
         <div className="office-pane-controls">
-          {roster.length > 0 && (
+          {offered.length > 0 && (
             <Select.Root value={gezelId} onValueChange={chooseGezel}>
               <Select.Trigger aria-label="Talk to">
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
-                {roster.map((g) => (
+                {offered.map((g) => (
                   <Select.Item key={g.id} value={g.id}>
                     {g.name}
                   </Select.Item>
@@ -264,7 +327,7 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
         key={`${project.id}:${gezelId}`}
         className="office-pane-chat"
         title="Gezel chat"
-        src={chatFrameUrl(project.id, gezelId, surfaceId)}
+        src={chatFrameUrl(project.id, gezelId, surfaceId, documentStamp)}
       />
     </div>
   );

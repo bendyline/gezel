@@ -5177,7 +5177,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(4);
   });
 
-  it('aborts reasoning-only direct file-work retries into the corrective path', async () => {
+  it.each(['llama', 'lfm2.5-24b-a2b-q4'])('bounds runaway reasoning for %s', async (model) => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;
       tools?: Array<{ function: { name: string } }>;
@@ -5263,7 +5263,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     }) as typeof fetch;
 
     const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
-    const session = await provider.createSession({ systemMessage: 'sys', model: 'llama' });
+    const session = await provider.createSession({ systemMessage: 'sys', model });
     const internal = session as unknown as {
       deps: {
         bridges: {
@@ -5312,7 +5312,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(3);
   });
 
-  it('does not count short reasoning bursts toward the constrained no-signal chunk limit', async () => {
+  it.each([
+    { model: 'llama', reasoningRepeats: 1 },
+    { model: 'lfm2.5-24b-a2b-q4', reasoningRepeats: 17 },
+  ])('allows bounded reasoning for $model', async ({ model, reasoningRepeats }) => {
     // Regression: gemma4-e4b (channel profile, thinking kept ON in the
     // grammar-fallback repair path) streams reasoning in many tiny chunks.
     // The no-signal chunk counter treated each as a bare framing chunk and
@@ -5361,10 +5364,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       return abortableSseResponse(
         init?.signal as AbortSignal | undefined,
         [
-          // 40 short reasoning chunks (160 chars total — well under the
-          // 1024 reasoning budget, but past the 32-chunk framing limit).
+          // LFM2.5 always reasons: 2,720 characters must reach the write,
+          // while the ordinary-model case stays below its tighter budget.
           ...Array.from({ length: 40 }, () => ({
-            choices: [{ index: 0, delta: { reasoning_content: 'hm. ' } }],
+            choices: [{ index: 0, delta: { reasoning_content: 'hm. '.repeat(reasoningRepeats) } }],
           })),
           {
             choices: [
@@ -5396,7 +5399,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     }) as typeof fetch;
 
     const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
-    const session = await provider.createSession({ systemMessage: 'sys', model: 'llama' });
+    const session = await provider.createSession({ systemMessage: 'sys', model });
     const internal = session as unknown as {
       deps: {
         bridges: {
@@ -9602,6 +9605,15 @@ describe('gate surgical edit turn detection (D4 gap: Theme B mode)', () => {
 });
 
 describe('constrained-turn reasoning allowance', () => {
+  it('keeps LFM2.5 A2B reasoning bounded without widening other LFM models', () => {
+    for (const model of ['lfm2.5-24b-a2b-q4', 'lfm2.5-24b-a2b-q8']) {
+      expect(constrainedToolReasoningCharLimitForModel(model)).toBe(3_072);
+      expect(constrainedToolNoSignalMsForModel(model)).toBe(90_000);
+    }
+    expect(constrainedToolReasoningCharLimitForModel('lfm2.5-1.2b-q4')).toBe(1_024);
+    expect(constrainedToolNoSignalMsForModel('lfm2.5-1.2b-q4')).toBe(45_000);
+  });
+
   it('gives Muse Glimmer the expanded allowance — its template has no no-think mode, so even reasoning_strength=low overruns the strict budget on whole-file deliverables', () => {
     expect(constrainedToolReasoningCharLimitForModel('muse-glimmer-30b-q4')).toBe(3072);
     expect(constrainedToolNoSignalMsForModel('muse-glimmer-30b-q4')).toBe(90_000);

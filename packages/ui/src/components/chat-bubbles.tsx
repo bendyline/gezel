@@ -68,6 +68,7 @@ import { ReportErrorLink } from './ReportErrorLink.js';
 import { ToolArgsSummary } from './ToolArgsSummary.js';
 import { ToolCraftbookCard } from './ToolCraftbookCard.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
+import { WorkChunksCount } from './WorkChunksCount.js';
 import { markdownToChatDoc, prepareChatMarkdown } from './chat-markdown.js';
 import type { OpenChatReference } from './chat-open-command.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatThemeForMode } from './chat-theme.js';
@@ -553,6 +554,16 @@ function openRetrievalSource(
  * styling, so a custom-named "Reviewer" or "Designer" still surfaces
  * without us having to invent a glyph for every variant.
  */
+/**
+ * The bubble header's hover text. It leads with the role because a narrow
+ * timeline hides the role suffix (`chat-timeline` container query in
+ * styles/chat.css), and hovering the name is then the way to read it.
+ */
+export function authorTitle(role: string | undefined, tooltip: string | undefined) {
+  const parts = [role?.trim(), tooltip].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
+
 export function RoleSuffix({ role }: { role?: string }) {
   if (!role) return null;
   const key = role.toLowerCase().trim();
@@ -1133,7 +1144,10 @@ export function MessageBubble({
   return (
     <div className={cls} data-msg-id={dataMsgId} data-session-id={dataSessionId}>
       {!headerless && (
-        <div className="msg-role" title={!isUser ? authorTooltip : undefined}>
+        <div
+          className="msg-role"
+          title={!isUser ? authorTitle(authorRole, authorTooltip) : undefined}
+        >
           {isUser ? (
             <>
               {isSystem ? 'System' : 'You'}
@@ -1969,12 +1983,9 @@ export function StreamingStatusLine({
         </>
       )}
       {!failed && !queued && wirePulseCount !== undefined && wirePulseCount > 0 && (
-        <span
-          className="msg-wire-pulse"
-          title={`${wirePulseCount} wire pulse${wirePulseCount === 1 ? '' : 's'} since the last visible token — Ollama is alive but the model is silent`}
-        >
+        <span className="msg-wire-pulse">
           {' '}
-          · {formatWirePulses(wirePulseCount)}
+          · <WorkChunksCount count={wirePulseCount} />
         </span>
       )}
     </span>
@@ -2270,11 +2281,8 @@ export function StreamingBubble({
       renderedSegments[renderedSegments.length - 1]?.kind === 'reasoning');
   const inlineWirePulse =
     !failed && !queued && !awaiting && wirePulseCount !== undefined && wirePulseCount > 0 ? (
-      <span
-        className="msg-live-inline-activity"
-        title={`${wirePulseCount} wire pulse${wirePulseCount === 1 ? '' : 's'} since the last visible token — the engine is alive and generating`}
-      >
-        {formatWirePulses(wirePulseCount)}
+      <span className="msg-live-inline-activity">
+        <WorkChunksCount count={wirePulseCount} />
       </span>
     ) : null;
   const stateCls = failed
@@ -2289,7 +2297,7 @@ export function StreamingBubble({
   const cls = `msg msg-assistant ${stateCls}${awaiting ? ' msg-awaiting' : ''}${extraClass ? ` ${extraClass}` : ''}`;
   return (
     <div className={cls} data-msg-id={dataMsgId} data-session-id={dataSessionId}>
-      <div className="msg-role" title={authorTooltip}>
+      <div className="msg-role" title={authorTitle(authorRole, authorTooltip)}>
         <GezelIcon
           svg={authorIcon}
           poppetje={authorPoppetje}
@@ -3688,16 +3696,6 @@ function formatElapsedLong(s: number): string {
   const r = s % 60;
   if (r === 0) return `${m} min in`;
   return `${m} min ${r} sec in`;
-}
-
-/**
- * Render a "wire pulse" count as a bare numeric tally. We used to draw
- * one dot per pulse (capped, then collapsed to "···· (207)"), but the
- * accumulating dots added visual noise without conveying more than the
- * number itself — so just show the count.
- */
-function formatWirePulses(count: number): string {
-  return `(${count})`;
 }
 
 /* `thinkingDetail` from the engine parsers comes pre-formatted as e.g.

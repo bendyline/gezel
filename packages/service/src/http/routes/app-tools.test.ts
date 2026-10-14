@@ -278,6 +278,57 @@ describe('/api/app-tools', () => {
     }
   }, 30_000);
 
+  it("stamps the pane's threads with its document and follows a Save As", async () => {
+    const relayId = await openRelay();
+    const stream = await openStream(relayId);
+    const surfaceId = 'route-doc-surface';
+    const subject = { kind: 'document', app: 'Word', title: 'Untitled document' };
+    try {
+      await stream.waitFor((event) => event.type === 'ready');
+      const register = (body: Record<string, unknown>) =>
+        api('PUT', `/api/app-tools/relays/${relayId}/tools`, {
+          token: appToken,
+          body: { projectId: 'default', tools: [TOOL], ...body },
+        });
+      // A subject describes one chat; without a surface it is refused.
+      expect((await register({ subject })).status).toBe(409);
+      expect((await register({ surfaceId, subject })).status).toBe(200);
+
+      const [gezel] = await svc.context.store.listGezels();
+      if (!gezel) throw new Error('no gezel to chat with');
+      const session = await svc.context.chat.createSession({ gezelId: gezel.id });
+      const sent = await api('POST', `/api/sessions/${session.id}/send`, {
+        token: appToken,
+        body: { message: 'Hello.' },
+        surface: surfaceId,
+      });
+      expect(sent.status).toBe(202);
+      const stamped = async () =>
+        (await svc.context.chat.getSessionRecord(session.id))?.subject ?? null;
+      expect(await stamped()).toEqual({ key: `surface:${surfaceId}`, ...subject });
+
+      // Saving the document moves its threads onto the path, unprompted.
+      const saved = { ...subject, title: 'Report.docx', path: 'C:\\Docs\\Report.docx' };
+      expect((await register({ surfaceId, subject: saved })).status).toBe(200);
+      expect(await stamped()).toMatchObject({
+        key: 'file:c:/docs/report.docx',
+        title: 'Report.docx',
+      });
+
+      const listed = await api(
+        'GET',
+        `/api/sessions?project=default&subject=${encodeURIComponent('file:c:/docs/report.docx')}`,
+        { token: appToken },
+      );
+      const { sessions } = (await listed.json()) as { sessions: Array<{ id: string }> };
+      expect(sessions.map((s) => s.id)).toEqual([session.id]);
+    } finally {
+      await svc.context.chat.drainBackground();
+      stream.close();
+      await api('DELETE', `/api/app-tools/relays/${relayId}`, { token: appToken });
+    }
+  }, 30_000);
+
   it('refuses a session-scoped token outright', async () => {
     const record = svc.context.tokenStore.issueSession({
       appId: 'session:app-tools-test',

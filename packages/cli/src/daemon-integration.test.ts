@@ -61,7 +61,10 @@ async function runCli(...args: string[]): Promise<{ stdout: string; stderr: stri
  * suite used to hit its deadline.
  */
 function childEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
+  // On Windows a fresh home downloads the MXC launcher at boot, and once it
+  // lands `--strict-sandbox` stops refusing — so the suite's outcome depended
+  // on how fast npm answered. Keep every platform but macOS without isolation.
+  const env: NodeJS.ProcessEnv = { ...process.env, GEZEL_MXC: 'off', ...extra };
   for (const key of Object.keys(env)) {
     if (key.startsWith('VITEST')) delete env[key];
   }

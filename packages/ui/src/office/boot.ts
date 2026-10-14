@@ -1,5 +1,9 @@
 import type { InferProjectForPathResponse, ProviderName } from '@bendyline/gezel';
-import { isFactualRole, providerUsesManagedMcpBridge } from '@bendyline/gezel';
+import {
+  isBackgroundServiceRole,
+  isFactualRole,
+  providerUsesManagedMcpBridge,
+} from '@bendyline/gezel';
 import {
   type HttpDeps,
   type KeyValueStorage,
@@ -146,7 +150,8 @@ export async function listGezels(deps: HttpDeps, token: string): Promise<RosterG
 /**
  * Remembered choice, else a writer (a gezel whose role states facts for a
  * living: the project's lead or crew first, then anyone), else the project
- * lead, its first member, the Meester, anyone. Every document session writes
+ * lead, its first member, the Meester, anyone — passing over background-service
+ * gezels while anyone else qualifies. Every document session writes
  * under the citation rule whoever is picked; a writer is also briefed for it.
  *
  * Gezels whose provider runs its own tool loop (Copilot, the CLI providers)
@@ -164,13 +169,18 @@ export function pickDefaultGezel(
   if (remembered && byId.has(remembered)) return remembered;
   const crew = [project.voormanGezelId, ...(project.gezelIds ?? [])];
   const isWriter = (id: string | undefined) => writesFactually(id ? byId.get(id) : undefined);
-  const order = [
+  const candidates = [
     ...crew.filter(isWriter),
     ...roster.filter((g) => writesFactually(g)).map((g) => g.id),
     ...crew,
     meesterId,
     ...roster.map((g) => g.id),
   ].filter((id): id is string => !!id && byId.has(id));
+  // A background-service gezel is never the default: the Boekwachter was the
+  // first "writer" in Default's crew (its name reads as one to the factual
+  // check), and its about.md tells it to stay invisible.
+  const conversational = candidates.filter((id) => !isBackgroundServiceRole(byId.get(id)?.role));
+  const order = conversational.length > 0 ? conversational : candidates;
   const reaches = (id: string) => {
     const provider = byId.get(id)?.provider ?? defaultProvider;
     return provider === undefined || providerUsesManagedMcpBridge(provider);

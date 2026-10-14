@@ -148,4 +148,35 @@ describe('ProjectTimeline — task scoping', () => {
     stream.push(envelope('unrelated-session', 'general project check-in'));
     await screen.findByText('general project check-in');
   });
+
+  it("scopes to a document's threads the same way — the Office pane's chat", async () => {
+    vi.mocked(api.listChatSessions).mockResolvedValue({
+      sessions: [{ id: 'task-session', gezelId: 'tomas', archived: false }],
+    } as never);
+    render(
+      <ProjectTimeline
+        projectId="molen-internal"
+        subjectKeys={['file:c:/docs/report.docx', 'surface:pane-12345']}
+        activeSessionId={undefined}
+      />,
+    );
+    await screen.findByText('scope the contract review');
+    expect(api.listProjectTimeline).toHaveBeenCalledWith(
+      'molen-internal',
+      expect.objectContaining({
+        subjectKeys: ['file:c:/docs/report.docx', 'surface:pane-12345'],
+      }),
+    );
+    await waitFor(() =>
+      expect(api.listChatSessions).toHaveBeenCalledWith({
+        projectId: 'molen-internal',
+        subjectKeys: ['file:c:/docs/report.docx', 'surface:pane-12345'],
+      }),
+    );
+
+    stream.push(envelope('unrelated-session', 'general project check-in'));
+    stream.push(envelope('task-session', 'the second paragraph is in'));
+    await screen.findByText('the second paragraph is in');
+    expect(screen.queryByText('general project check-in')).toBeNull();
+  });
 });

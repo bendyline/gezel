@@ -39,13 +39,19 @@ the Handboek's Connected Apps article.
 3. Project: `POST /api/projects/infer-for-path` with the document path from
    `Office.context.document.url` (none for unsaved or cloud documents).
 4. Gezel: remembered for this document (localStorage, keyed by path, never in
-   the document), else the project lead, a member, the Meester, anyone.
+   the document), else a writer in the crew, a writer anywhere, the project
+   lead, a member, the Meester, anyone — never a background-service gezel
+   (Boekwachter, Klerk, Keurmeester; `isBackgroundServiceRole`) while anyone
+   else qualifies. The picker hides them too, unless one is already chosen.
 5. The pane mints a surface id (one per pane), writes the token to
    `gezel:token`, and frames
-   `/?embedded=chat&compact=1&projectId=…&gezelId=…&appSurface=…`; the SPA
-   seeds the recipient from `gezelId`, and its API client sends every request
-   with the surface id in `x-gezel-app-surface`
-   (`packages/ui/src/embedded/app-surface.ts`).
+   `/?embedded=chat&compact=1&projectId=…&gezelId=…&appSurface=…&focus=document&subjectKey=…`;
+   the SPA seeds the recipient from `gezelId`, and its API client sends every
+   request with the surface id in `x-gezel-app-surface`
+   (`packages/ui/src/embedded/app-surface.ts`). The `focus=document`
+   parameters (`embedded/document-focus.ts`) open `DocumentChat` — one
+   conversation about this document — instead of the project view; see
+   [Document focus](#document-focus).
 6. The pane registers its tools through the app-tool relay (ADR 0013) for the
    project, **the chosen gezel only** (`gezelIds`), and **its own chat only**
    (`surfaceId`). A session is offered the tools while its latest message
@@ -63,6 +69,37 @@ the Handboek's Connected Apps article.
    to one of them (its own provider, else the install default from
    `/api/config`), the pane says so in one line under its header instead of
    claiming the gezel can read the document.
+
+## Document focus
+
+A chat beside a document is about that document, whatever the project and the
+gezel's role. The pane registers its tools with a `subject`
+(`AppSubjectSchema` in `core/schemas/app-tools.ts`): kind, app, title, path,
+`focus: 'item'`, `editable`, and `stateTool: 'office_read_selection'`. Facts
+only — every word the model reads is written by core's `app-subject.ts`. The
+Word pane incident that motivated it: an unsaved document in Default opened on
+the Boekwachter, whose session held 120 tools and no word about the document,
+asked "which file?" for "add some content on why Gezel is awesome", and spent
+171 s prefilling to ask it.
+
+For a session the surface is driving (`chat/app-subject-session.ts`):
+
+| Layer | What changes |
+|---|---|
+| System prompt | `## The document open beside this chat` section last in the prompt; "Where work belongs", the workspace inventory, assigned tasks, the routing guardrail and web-work guidance stand down; the project about is condensed; the tools block lists the document's tools first under `### This document (Word)` |
+| Tools | `APP_ITEM_FOCUS_BUILTIN_TOOLS` (ask, `search`, memory, `read_document`, `read_file`, the factual lookups) through the role-independent hard ceiling, plus the app's own tools; installed toolsets drop out of the prompt and the bridge; message-shaped clamps never run |
+| Retrieval | `workspace` and `artifacts` are left out of proactive context; the shared library, memories and knowledge catalogs (the Handboek among them) stay |
+| Each turn | the daemon calls the state tool (3 s budget) and opens the person's message with `[Word, "Report.docx": …]` — the selection fenced as document content, or "the document is empty" / "nothing is selected" |
+| Threads | stamped `ChatSession.subject` on create and on every send through the surface; a Save As re-stamps the surface's threads onto the path; `?subject=<key>` filters `/api/sessions` and the project timeline |
+
+`DocumentChat` is the frame's view: one header row (the document's title and
+**Show project**) over a timeline, thread picker and composer all scoped to
+the document's keys — its path and the pane's surface, so a thread begun
+before the first save stays listed. **Show project** swaps in the full project
+view with a **Back to …** key. A thread about the document written to from the
+desktop app keeps its stamp but loses the tools, and its prompt then says the
+document is out of reach. The LibreOffice panel has not adopted `subject` yet;
+it registers the same way and needs only the field.
 
 ## Tool catalogue (shared by both suites)
 
@@ -119,11 +156,12 @@ launch.
 - `tests/published/bundledAssets.test.ts` guards `dist/office` and
   `dist/libreoffice/gezel.oxt`.
 - End to end with Office: Settings → Connected Apps → set up Word; restart
-  Word; Home → Gezel; the pane connects without a code (a code here means the
-  key did not arrive: check the page URL for `?enroll=`); ask for a summary
-  of the selection and watch for a `doc_read_selection` call. On macOS the
-  first open is Home → Add-ins → Gezel instead: Word parses a sideloaded manifest
-  (`ContainsAppCommands: true` in its diagnostics log) but adds no ribbon
-  button until the add-in has been opened from that menu once. The setup
-  card says so in a dialog after a Mac setup.
+  Word; Home → Add-ins → Gezel (under Developer Add-ins on Windows); the pane
+  connects without a code (a code here means the key did not arrive: check
+  the page URL for `?enroll=`); ask for a summary of the selection and watch
+  for a `doc_read_selection` call. The first open has to come from that menu
+  on both platforms: Word parses a sideloaded manifest (`ContainsAppCommands:
+  true` in its diagnostics log on macOS) but adds no Home-tab button until the
+  add-in has been opened from Add-ins once. The setup card says so in a dialog
+  after a Windows or Mac setup.
 - LibreOffice: the manual recipe in `packages/libreoffice-extension/README.md`.

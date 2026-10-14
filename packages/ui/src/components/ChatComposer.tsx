@@ -7,6 +7,7 @@ import '@bendyline/squisq-editor-react/styles';
 import {
   type GezelSummary,
   type Project,
+  type SessionSubject,
   type Task,
   type TurnIntentPlan,
   displayName,
@@ -190,6 +191,14 @@ export interface ChatComposerProps {
   /** Craftbook template this composer's session edits (the editor's AI assist). */
   craftbookRef?: string;
   /**
+   * The app item this composer's threads are about (the Office pane's
+   * document). A thread created here is stamped with it, and the "reuse an
+   * existing thread" probe looks only among `subjectKeys` threads.
+   */
+  subject?: SessionSubject;
+  /** Every key this item's threads may carry: its path, and its pane's surface. */
+  subjectKeys?: readonly string[];
+  /**
    * Optional content rendered between the "To:" line and the editor —
    * SessionSwitcher slots in here so the session picker reads as part
    * of the composer instead of floating above it. A narrow composer moves
@@ -360,6 +369,8 @@ export function ChatComposer({
   recentReferences = [],
   onOpenReference,
   craftbookRef,
+  subject,
+  subjectKeys,
   onTurnStateChange,
   placeholder,
   taskRef,
@@ -738,12 +749,13 @@ export function ChatComposer({
       ...(taskRef ? { taskRef } : {}),
       ...(stepId ? { stepId } : {}),
       ...(craftbookRef ? { craftbookRef } : {}),
+      ...(subject ? { subject } : {}),
     });
     liveSessionIdRef.current = created.id;
     setLiveSessionId(created.id);
     onSessionCreated?.(created.id);
     return created.id;
-  }, [gezelId, projectId, taskRef, stepId, craftbookRef, onSessionCreated]);
+  }, [gezelId, projectId, taskRef, stepId, craftbookRef, subject, onSessionCreated]);
 
   const ensureSessionId = useCallback(async (): Promise<string> => {
     if (liveSessionIdRef.current) return liveSessionIdRef.current;
@@ -779,7 +791,12 @@ export function ChatComposer({
           }
         }
       } else {
-        const res = await api.listChatSessions({ gezelId, projectId });
+        // A document's composer reuses only a thread about that document.
+        const res = await api.listChatSessions({
+          gezelId,
+          projectId,
+          ...(subjectKeys?.length ? { subjectKeys } : {}),
+        });
         // Ordinary chat must never reuse a task/craftbook handoff session.
         // The SessionSwitcher applies the same boundary, but this fallback
         // also has to enforce it for the fast-type race before auto-pick.
@@ -795,7 +812,7 @@ export function ChatComposer({
       /* fall through to create */
     }
     return createFreshSession();
-  }, [gezelId, projectId, taskRef, createFreshSession, onSessionCreated]);
+  }, [gezelId, projectId, taskRef, subjectKeys, createFreshSession, onSessionCreated]);
 
   // Media belongs to the draft, in the `message_files/` companion beside its
   // `message.md` — the same shape every other squisq document here uses. A

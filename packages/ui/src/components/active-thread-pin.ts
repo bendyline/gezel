@@ -24,7 +24,7 @@ import { FRESH_THREAD_MAX_AGE_MS } from './chat-thread-freshness.js';
 import { isTerminalBottomLane } from './timeline-row-order.js';
 import type { ThreadGroup, ThreadMessageLike, TimelineThreadItem } from './timeline-threads.js';
 
-function newestActivityMs<M extends ThreadMessageLike, S>(group: ThreadGroup<M, S>): number {
+export function newestActivityMs<M extends ThreadMessageLike, S>(group: ThreadGroup<M, S>): number {
   let newest = Number.NEGATIVE_INFINITY;
   const rows = group.root ? [group.root, ...group.replies] : group.replies;
   for (const row of rows) {

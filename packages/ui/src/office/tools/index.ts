@@ -17,8 +17,19 @@ export interface ToolsForHostOptions {
     excel?: ExcelWorkbook;
     powerpoint?: PowerPointDeck;
     readSelection?: () => Promise<string>;
+    isDocumentEmpty?: () => Promise<boolean>;
     renderDiagram?: DiagramRenderer;
   };
+}
+
+/** Word's body has no text at all. One property read, no paragraph walk. */
+async function wordDocumentIsEmpty(): Promise<boolean> {
+  return await Word.run(async (ctx) => {
+    const body = ctx.document.body;
+    body.load('text');
+    await ctx.sync();
+    return body.text.trim().length === 0;
+  });
 }
 
 /**
@@ -28,10 +39,13 @@ export interface ToolsForHostOptions {
  * for the model than one that fails every call.
  */
 export function toolsForHost(opts: ToolsForHostOptions): AppToolDefinition[] {
+  const isDocumentEmpty =
+    opts.adapters?.isDocumentEmpty ?? (opts.host === 'word' ? wordDocumentIsEmpty : undefined);
   const all: PaneTool[] = [
     ...commonTools({
       describe: opts.describe,
       ...(opts.adapters?.readSelection ? { readSelection: opts.adapters.readSelection } : {}),
+      ...(isDocumentEmpty ? { isDocumentEmpty } : {}),
     }),
   ];
   if (opts.host === 'word') {

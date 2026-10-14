@@ -1,4 +1,5 @@
 import {
+  type AppSubject,
   type AppToolDefinition,
   type AppToolsRegistration,
   registerAppTools,
@@ -7,8 +8,8 @@ import {
 export type RelayStatus = 'connecting' | 'connected' | 'reconnecting' | 'closed';
 
 export interface OfficeRelay {
-  /** Replace the offered tools (edits switched on or off). */
-  update(tools: AppToolDefinition[]): Promise<void>;
+  /** Replace the offered tools and the document's facts (edits switched, saved under a new name). */
+  update(tools: AppToolDefinition[], subject: AppSubject): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -22,6 +23,8 @@ export interface StartRelayOptions {
   surfaceId: string;
   label: string;
   tools: AppToolDefinition[];
+  /** The document this pane's chat is about: see `AppSubject`. */
+  subject: AppSubject;
   onStatus: (status: RelayStatus) => void;
   /** The token stopped working (revoked in Gezel). */
   onUnauthorized: () => void;
@@ -50,6 +53,7 @@ export async function startOfficeRelay(opts: StartRelayOptions): Promise<OfficeR
         projectId: opts.projectId,
         gezelIds: [opts.gezelId],
         surfaceId: opts.surfaceId,
+        subject: opts.subject,
         tools: opts.tools,
         label: opts.label,
         onStatus: (status) => opts.onStatus(status),
@@ -64,7 +68,7 @@ export async function startOfficeRelay(opts: StartRelayOptions): Promise<OfficeR
     if ((err as { status?: number }).status === 401) opts.onUnauthorized();
   });
   return {
-    update: (tools) => registration.update(tools),
+    update: (tools, subject) => registration.update(tools, { subject }),
     close: () => registration.close(),
   };
 }

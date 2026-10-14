@@ -6,6 +6,7 @@ import {
   OpenAppToolRelayRequestSchema,
   RegisterAppToolsRequestSchema,
   createLogger,
+  sessionSubjectFor,
 } from '@bendyline/gezel';
 import { type Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
@@ -25,10 +26,41 @@ const log = createLogger('app-tools');
  * does not. A gezel's own session token is not a person writing from
  * anywhere, so it never moves that.
  */
-export function noteMessageSurface(ctx: ServiceContext, c: Context, sessionId: string): void {
+export async function noteMessageSurface(
+  ctx: ServiceContext,
+  c: Context,
+  sessionId: string,
+): Promise<void> {
   if (c.get('auth')?.scopes.includes('session')) return;
   const surface = AppToolSurfaceIdSchema.safeParse(c.req.header(APP_TOOL_SURFACE_HEADER));
-  ctx.appToolRelays.noteUserMessage(sessionId, surface.success ? surface.data : undefined);
+  const surfaceId = surface.success ? surface.data : undefined;
+  ctx.appToolRelays.noteUserMessage(sessionId, surfaceId);
+  if (surfaceId) await stampSurfaceSubject(ctx, surfaceId, [sessionId]);
+}
+
+/**
+ * Stamp threads with the item a surface's chat is about, so that chat lists
+ * them as this document's threads. Runs on each send through the surface
+ * (a thread the pane reached from the full project view counts too) and
+ * again when the registration's subject changes — a Save As moves an
+ * unsaved document's threads onto its path. Best-effort: a failed stamp
+ * costs the listing, never the message.
+ */
+async function stampSurfaceSubject(
+  ctx: ServiceContext,
+  surfaceId: string,
+  sessionIds: readonly string[],
+): Promise<void> {
+  const binding = ctx.appToolRelays.subjectBindingForSurface(surfaceId);
+  const stamp = binding?.subject ? sessionSubjectFor(binding.subject, surfaceId) : null;
+  if (!binding || !stamp) return;
+  for (const sessionId of sessionIds) {
+    await ctx.chat.setSessionSubject(sessionId, stamp, binding.projectId).catch((err: unknown) => {
+      log.warn(
+        `subject stamp failed for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  }
 }
 
 /**
@@ -172,6 +204,9 @@ export function appToolRoutes(ctx: ServiceContext): Hono {
     }
     try {
       const result = relays.register(relayId, body);
+      if (body.subject && body.surfaceId) {
+        await stampSurfaceSubject(ctx, body.surfaceId, relays.sessionsOnSurface(body.surfaceId));
+      }
       return c.json({ ok: true as const, ...result });
     } catch (err) {
       if (err instanceof AppToolRelayError) {

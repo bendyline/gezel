@@ -9,7 +9,7 @@ import {
   projectLocalDir,
   projectScriptFile,
 } from '@bendyline/gezel/paths';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import {
@@ -17,6 +17,18 @@ import {
   listTypedProjectStagingRoots,
   recoverTypedProjectCreations,
 } from './create.js';
+
+const namePicks = vi.hoisted(() => ({ queue: [] as string[] }));
+vi.mock('@bendyline/gezel', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@bendyline/gezel')>();
+  return {
+    ...actual,
+    pickRandomNameWithGender: () => {
+      const name = namePicks.queue.shift();
+      return name ? { name, gender: 'female' as const } : actual.pickRandomNameWithGender();
+    },
+  };
+});
 
 let home: string;
 let externalRoot: string;
@@ -54,6 +66,17 @@ const request = {
 } as const;
 
 describe('createTypedProject', () => {
+  it('names a new hire around the gezels the install already has', async () => {
+    const existing = await store.createGezel({ name: 'Bohuslav', role: 'Gardener' });
+    namePicks.queue.push('Bohuslav', 'Asel');
+
+    const { applied } = await createTypedProject({ store, catalog }, request);
+
+    expect(applied.gezelsCreated).toHaveLength(1);
+    expect(applied.gezelsCreated[0]).toMatchObject({ id: 'asel', name: 'Asel' });
+    expect((await store.getGezel(existing.id))?.role).toBe('Gardener');
+  });
+
   it('stages and commits a complete typed project across externalized roots', async () => {
     const response = await createTypedProject({ store, catalog }, request);
     const { project, applied } = response;

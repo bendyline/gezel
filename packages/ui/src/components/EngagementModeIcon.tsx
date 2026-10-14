@@ -36,8 +36,8 @@ const BENCH =
 
 // Flat face and rounded peen, drawn with the handle entering at the origin. A
 // symmetric mallet raised behind a bench reads as a gavel; a hooked claw tilted
-// over a neighbour reads as an axe.
-const HAMMER_HEAD =
+// over a neighbour reads as an axe. Shared with the chat's work-chunks count.
+export const HAMMER_HEAD =
   'M-2.4 -2.4Q-2.4 -2.6 -2.2 -2.6H0.4L2 -2.25Q2.5 -2.15 2.5 -1.65V-1.15Q2.5 -0.65 2 -0.55L0.4 -0.2H-2.2Q-2.4 -0.2 -2.4 -0.4Z';
 
 /**

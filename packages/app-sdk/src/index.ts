@@ -65,6 +65,7 @@ export {
   type CreateTrustingFetchOptions,
 } from './tls.js';
 export type {
+  AppSubject,
   AppToolCallContext,
   AppToolDefinition,
   AppToolHandlerResult,

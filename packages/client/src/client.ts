@@ -4070,10 +4070,13 @@ export class GezelClient {
   listChatSessions(filter?: {
     gezelId?: string;
     projectId?: string;
+    /** Only threads about these app items (`ChatSession.subject.key`). */
+    subjectKeys?: readonly string[];
   }): Promise<ListChatSessionsResponse> {
     const params = new URLSearchParams();
     if (filter?.gezelId) params.set('gezel', filter.gezelId);
     if (filter?.projectId) params.set('project', filter.projectId);
+    for (const key of filter?.subjectKeys ?? []) params.append('subject', key);
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/sessions${qs}`);
   }
@@ -4576,13 +4579,21 @@ export class GezelClient {
 
   listProjectTimeline(
     projectId: string,
-    opts?: { limit?: number; before?: string; gezelId?: string; taskRef?: string },
+    opts?: {
+      limit?: number;
+      before?: string;
+      gezelId?: string;
+      taskRef?: string;
+      /** Only threads about these app items (`ChatSession.subject.key`). */
+      subjectKeys?: readonly string[];
+    },
   ): Promise<ListTimelineResponse> {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set('limit', String(opts.limit));
     if (opts?.before) params.set('before', opts.before);
     if (opts?.gezelId) params.set('gezel', opts.gezelId);
     if (opts?.taskRef) params.set('task', opts.taskRef);
+    for (const key of opts?.subjectKeys ?? []) params.append('subject', key);
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/projects/${encodeURIComponent(projectId)}/timeline${qs}`);
   }

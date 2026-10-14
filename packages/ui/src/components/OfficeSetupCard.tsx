@@ -24,12 +24,21 @@ function errorText(err: unknown): string {
 }
 
 /**
- * Office on a Mac lists a newly registered add-in under Home → Add-ins and
- * adds its ribbon button only after the user opens it from there once, so a
- * Mac setup that stops at "choose Gezel on the Home tab" leaves them looking
- * at a ribbon with no Gezel on it.
+ * Office lists a sideloaded add-in under Home → Add-ins (in the "Developer
+ * Add-ins" section on Windows) and adds its ribbon button only after the user
+ * opens it from there once, so a setup that stops at "choose Gezel on the Home
+ * tab" leaves them looking at a ribbon with no Gezel on it. Both the macOS
+ * `wef` folder and the Windows `WEF\Developer` key register this way.
  */
-function MacFirstOpenDialog({ apps, onClose }: { apps: string[]; onClose: () => void }) {
+function FirstOpenDialog({
+  apps,
+  onMac,
+  onClose,
+}: {
+  apps: string[];
+  onMac: boolean;
+  onClose: () => void;
+}) {
   const one = apps.length === 1;
   const names = new Intl.ListFormat('en', { type: 'conjunction' }).format(apps);
   return (
@@ -41,18 +50,27 @@ function MacFirstOpenDialog({ apps, onClose }: { apps: string[]; onClose: () => 
             <h3>One more step in {one ? apps[0] : 'Office'}</h3>
           </Dialog.Title>
           <Dialog.Description className="muted small">
-            On a Mac, Office doesn&apos;t show Gezel&apos;s button until you open Gezel once from
-            the Add-ins menu.
+            Office doesn&apos;t show Gezel&apos;s button until you open Gezel once from the Add-ins
+            menu.
           </Dialog.Description>
           <ol className="office-first-open-steps">
             <li>
-              If {names} {one ? 'is' : 'are'} open, quit and reopen {one ? 'it' : 'them'}.
+              If {names} {one ? 'is' : 'are'} open, {onMac ? 'quit' : 'close'} and reopen{' '}
+              {one ? 'it' : 'them'}.
             </li>
             <li>
               On the <strong>Home</strong> tab, choose <strong>Add-ins</strong>.
             </li>
             <li>
-              Choose <strong>Gezel</strong>.
+              {onMac ? (
+                <>
+                  Choose <strong>Gezel</strong>.
+                </>
+              ) : (
+                <>
+                  Under <strong>Developer Add-ins</strong>, choose <strong>Gezel</strong>.
+                </>
+              )}
             </li>
           </ol>
           <p className="muted small">
@@ -90,6 +108,7 @@ export function OfficeSetupCard({
   const localDesktop = isLocalDesktopMode() && Boolean(bridge);
   const remoteMode = window.__GEZEL__?.mode === 'remote';
   const onMac = window.__GEZEL__?.platform === 'darwin';
+  const needsFirstOpen = onMac || window.__GEZEL__?.platform === 'win32';
   const [status, setStatus] = useState<OfficeSetupStatusResponse | null>(null);
   const [selected, setSelected] = useState<Set<OfficeApp>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -165,7 +184,7 @@ export function OfficeSetupCard({
       () => bridge!.enable([...selected]),
       'Could not set up Office',
       (next) => {
-        if (!onMac || next.state !== 'configured') return;
+        if (!needsFirstOpen || next.state !== 'configured') return;
         setFirstOpenApps(
           next.apps.filter((a) => a.selected && !before.has(a.app)).map((a) => a.label),
         );
@@ -277,7 +296,7 @@ export function OfficeSetupCard({
           {configured && (
             <p className="muted small">
               Restart Word, Excel, or PowerPoint if it was open, then{' '}
-              {onMac ? (
+              {needsFirstOpen ? (
                 <>
                   choose <strong>Add-ins</strong> on the Home tab and pick <strong>Gezel</strong>.
                   From then on, Gezel has its own button on the Home tab.
@@ -381,7 +400,7 @@ export function OfficeSetupCard({
         onCancel={() => setConfirmation(null)}
       />
 
-      <MacFirstOpenDialog apps={firstOpenApps} onClose={() => setFirstOpenApps([])} />
+      <FirstOpenDialog apps={firstOpenApps} onMac={onMac} onClose={() => setFirstOpenApps([])} />
 
       <ConfirmDialog
         open={confirmation === 'remove'}

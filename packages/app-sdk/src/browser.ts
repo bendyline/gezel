@@ -32,6 +32,7 @@ export type {
 } from '@bendyline/gezel-client/app-models';
 export { GezelSdkError } from './errors.js';
 export type {
+  AppSubject,
   AppToolCallContext,
   AppToolDefinition,
   AppToolHandlerResult,
