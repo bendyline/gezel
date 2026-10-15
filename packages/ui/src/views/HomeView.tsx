@@ -11,6 +11,7 @@ import { useFirstRunModel } from '../components/useFirstRunModel.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
 import { releaseUrl } from '../github-urls.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { peekApiRead } from '../shared-api-reads.js';
 import { useUpdateState } from '../update-state.js';
 import '../styles/home-view.css';
@@ -95,6 +96,8 @@ export function HomeView({
     () => peekApiRead('getSystemHomeInfo')?.usage.everUsed ?? false,
   );
   useEffect(() => {
+    // A portable host has no daemon home to report on and answers 501.
+    if (!runtimeCapabilities().daemonSettings) return;
     let cancelled = false;
     void api
       .getSystemHomeInfo()
