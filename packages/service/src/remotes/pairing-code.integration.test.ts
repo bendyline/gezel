@@ -122,6 +122,19 @@ describe('pairing with a connect code', () => {
     expect(models.status).toBe(200);
   });
 
+  it('answers a model listing for the remote provider, so it can be the default', async () => {
+    const api = loopbackApi(client);
+    const grouped = await api('GET', '/api/remotes/models');
+    const servers = grouped.json.servers as Array<{ models: Array<{ id: string }> }>;
+    const listed = await api('GET', '/api/models?provider=remote');
+    expect(listed.status).toBe(200);
+    expect((listed.json.models as Array<{ id: string }>).map((m) => m.id)).toEqual(
+      servers.flatMap((server) => server.models.map((m) => m.id)),
+    );
+    const probe = await api('GET', '/api/models/test?provider=remote');
+    expect(probe.json).toMatchObject({ ok: true, provider: 'remote' });
+  });
+
   it('keeps the pairing routes off browsers', async () => {
     const lanFetch = createTrustingFetch({ cert: server.cert!.certPem });
     const res = await lanFetch(`${remoteBase}/v1/apps/pair/start`, {

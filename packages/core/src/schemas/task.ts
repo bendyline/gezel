@@ -942,7 +942,12 @@ export const CompleteStepGateInfoSchema = z.object({
 });
 export type CompleteStepGateInfo = z.infer<typeof CompleteStepGateInfoSchema>;
 
-export const CompleteStepResponseSchema = z.object({
+// Preserve schema references in declarations instead of expanding the full
+// task shape again for every response that embeds it.
+export const CompleteStepResponseSchema: z.ZodObject<{
+  task: typeof TaskSchema;
+  gate: z.ZodOptional<typeof CompleteStepGateInfoSchema>;
+}> = z.object({
   task: TaskSchema,
   gate: CompleteStepGateInfoSchema.optional(),
 });
@@ -993,7 +998,9 @@ export const UpdateTaskStepRequestSchema = z.object({
 });
 export type UpdateTaskStepRequest = z.infer<typeof UpdateTaskStepRequestSchema>;
 
-export const UpdateTaskStepResponseSchema = z.object({
+export const UpdateTaskStepResponseSchema: z.ZodObject<{
+  task: typeof TaskSchema;
+}> = z.object({
   task: TaskSchema,
 });
 export type UpdateTaskStepResponse = z.infer<typeof UpdateTaskStepResponseSchema>;
@@ -1078,7 +1085,10 @@ export const TaskWaitStateSchema = z.object({
 });
 export type TaskWaitState = z.infer<typeof TaskWaitStateSchema>;
 
-export const ListTasksResponseSchema = z.object({
+export const ListTasksResponseSchema: z.ZodObject<{
+  tasks: z.ZodArray<typeof TaskSchema>;
+  waiting: z.ZodOptional<z.ZodArray<typeof TaskWaitStateSchema>>;
+}> = z.object({
   tasks: z.array(TaskSchema),
   /**
    * Queue state for whichever of `tasks` the runner is currently holding
@@ -1088,7 +1098,7 @@ export const ListTasksResponseSchema = z.object({
 });
 export type ListTasksResponse = z.infer<typeof ListTasksResponseSchema>;
 
-export const TaskResponseSchema = TaskSchema;
+export const TaskResponseSchema: typeof TaskSchema = TaskSchema;
 export type TaskResponse = z.infer<typeof TaskResponseSchema>;
 
 /* ─── Task notes ──────────────────────────────────────────────────────── */

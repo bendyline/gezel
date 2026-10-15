@@ -283,6 +283,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     },
   },
   getConfig: { provider: 'mock' },
+  listRemoteServerModels: { servers: [] },
   getCodexSetupStatus: {
     state: 'not-configured',
     models: [],

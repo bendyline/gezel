@@ -58,6 +58,11 @@ describe('providerLabel', () => {
     expect(providerLabel('ds4', 'linux', { compact: true })).toBe('ds4');
   });
 
+  it('names a paired server model as a remote server, never the raw id', () => {
+    expect(providerLabel('remote', 'win32')).toBe('Remote server');
+    expect(providerLabel('remote', 'win32', { compact: true })).toBe('Remote');
+  });
+
   it('returns the canonical name for cloud providers', () => {
     expect(providerLabel('copilot', 'win32')).toBe('Copilot');
     expect(providerLabel('openai', 'darwin')).toBe('OpenAI');

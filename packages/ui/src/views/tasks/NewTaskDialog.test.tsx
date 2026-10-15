@@ -291,10 +291,9 @@ describe('NewTaskDialog', () => {
       suggestedIds: [],
     } as never);
     renderDialog();
+    // Both books can render on All plans before the interests effect selects For you.
     await waitFor(() =>
-      expect(
-        screen.getByRole('radio', { name: /Make sense of a spreadsheet/ }),
-      ).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: /For you/ })).toHaveClass('active'),
     );
     const names = screen
       .getAllByRole('radio')

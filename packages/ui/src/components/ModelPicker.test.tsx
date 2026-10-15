@@ -7,7 +7,7 @@ import { primitivesMock } from '../test-utils/primitivesMock.js';
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
 
-const { ModelPicker, EffortTray } = await import('./ModelPicker.js');
+const { ModelPicker, EffortTray, invalidateRemoteServers } = await import('./ModelPicker.js');
 const { api } = await import('../api.js');
 const { announceModelInventoryChanged } = await import('../model-inventory.js');
 
@@ -59,6 +59,29 @@ describe('ModelPicker model inventory', () => {
     expect(await screen.findByText('Werkbank (offline) · Qwen 27B')).toBeInTheDocument();
     expect(screen.getByText('Studio · Gemma 4')).toBeInTheDocument();
     expect(api.listRemoteServerModels).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers a newly connected server at once, not after the list goes stale', async () => {
+    invalidateRemoteServers();
+    vi.mocked(api.listRemoteServerModels).mockResolvedValueOnce({ servers: [] } as never);
+    const before = render(<ModelPicker provider="remote" value={undefined} onChange={vi.fn()} />);
+    await waitFor(() => expect(api.listRemoteServerModels).toHaveBeenCalledTimes(1));
+    before.unmount();
+
+    vi.mocked(api.listRemoteServerModels).mockResolvedValueOnce({
+      servers: [
+        {
+          remoteId: 'c',
+          displayName: 'Zolder',
+          status: 'online',
+          models: [{ id: 'remote:c/llama-cpp:qwen', name: 'Qwen 27B' }],
+        },
+      ],
+    } as never);
+    invalidateRemoteServers();
+    render(<ModelPicker provider="remote" value={undefined} onChange={vi.fn()} />);
+    expect(await screen.findByText('Zolder · Qwen 27B')).toBeInTheDocument();
+    expect(api.listRemoteServerModels).toHaveBeenCalledTimes(2);
   });
 
   it('keeps reasoning choices keyboard-reachable when the saved effort is unavailable', async () => {

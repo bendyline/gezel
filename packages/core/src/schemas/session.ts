@@ -668,7 +668,12 @@ export type LaunchTaskFromSessionRequest = z.infer<typeof LaunchTaskFromSessionR
  * message (a retried POST) — the task and the receipt are the earlier ones
  * and nothing was appended to the thread.
  */
-export const LaunchTaskFromSessionResponseSchema = z.object({
+export const LaunchTaskFromSessionResponseSchema: z.ZodObject<{
+  task: typeof TaskSchema;
+  userMessage: typeof ChatMessageSchema;
+  receipt: typeof ChatMessageSchema;
+  reused: z.ZodBoolean;
+}> = z.object({
   task: TaskSchema,
   userMessage: ChatMessageSchema,
   receipt: ChatMessageSchema,

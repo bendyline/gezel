@@ -11174,6 +11174,16 @@ export class ChatManager extends LocalEngineRuntime {
 
   /** List the models available on the given provider (for the UI dropdown). */
   async listModelsForProvider(name: ProviderName, signal?: AbortSignal): Promise<ModelInfo[]> {
+    if (name === 'remote') {
+      // `remote` fronts every paired server and has no singleton to ask, so
+      // its listing is theirs combined — the same set `/api/remotes/models`
+      // groups by server. Probing it as a default must not read as broken.
+      const servers = (this.remotes?.list() ?? []).filter((remote) => !remote.managed);
+      const listed = await Promise.all(
+        servers.map((remote) => this.remoteModelsWithStatus(remote.remoteId)),
+      );
+      return listed.flatMap(({ models }) => models);
+    }
     const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
     if (machineRemoteId && (name === 'llama-cpp' || name === 'mlx' || name === 'ds4')) {
       const prefix = `${name}:`;

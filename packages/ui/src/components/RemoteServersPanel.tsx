@@ -13,6 +13,7 @@ import { Dialog } from '../primitives/index.js';
 import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { invalidateRemoteServers } from './ModelPicker.js';
 import { approvalErrorMessage } from './grant-verification.js';
 
 /**
@@ -668,6 +669,7 @@ export function RemoteServersPanel() {
       setBusy('code-connect');
       try {
         const { remote } = await api.pairRemoteWithCode({ baseUrl: codeTarget.baseUrl, code });
+        invalidateRemoteServers();
         setCodeTarget(null);
         setDirectAddress('');
         setNotice(`Connected to ${remote.displayName}. Its models are in your model picker.`);
@@ -694,6 +696,7 @@ export function RemoteServersPanel() {
         expectedIdentityFingerprint: inspection.fingerprint,
         ...(inspection.identityChanged ? { acceptIdentityChange: true } : {}),
       });
+      invalidateRemoteServers();
       setDirectAddress('');
       setNotice(`Connected to ${remote.displayName}. Its models are in your model picker.`);
       await refresh();
@@ -710,6 +713,7 @@ export function RemoteServersPanel() {
     setBusy('forget');
     try {
       await api.unpairRemote(forgetTarget.remoteId);
+      invalidateRemoteServers();
       setForgetTarget(null);
       setNotice(null);
       await refresh();
