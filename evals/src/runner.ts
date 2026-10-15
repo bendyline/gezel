@@ -1158,6 +1158,11 @@ export async function runTrial(
             llamaCppKvCacheType: process.env.GEZEL_EVAL_KV_CACHE_TYPE as 'f16' | 'q8_0' | 'q4_0',
           }
         : {}),
+      // Gemma's full-size SWA cache, pinned on or off instead of the
+      // auto-default, which the automatic KV ceiling now declines on 31b.
+      ...(process.env.GEZEL_EVAL_SWA_FULL === 'on' || process.env.GEZEL_EVAL_SWA_FULL === 'off'
+        ? { llamaCppSwaFull: process.env.GEZEL_EVAL_SWA_FULL === 'on' }
+        : {}),
       ...(imageModelId ? { imageProvider: 'sd-cpp' as const } : {}),
       ...(opts.generalistMode ? { generalistMode: opts.generalistMode } : {}),
       // A retrieval arm's policy outranks the `autoRecall: false` above:

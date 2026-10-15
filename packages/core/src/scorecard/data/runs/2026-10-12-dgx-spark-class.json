@@ -83,6 +83,90 @@
   ],
   "results": [
     {
+      "modelId": "gemma4-31b-q4",
+      "label": "gemma4-31b-q4",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "30.7B",
+      "runId": "2026-10-12-dgx-spark-class",
+      "suiteId": "complex-work",
+      "performance": {
+        "prefillTokensPerSec": 757,
+        "decodeTokensPerSec": 34,
+        "samples": 2
+      },
+      "runtime": {
+        "contextTokens": 82944,
+        "peakMemoryMb": 12025,
+        "kvCacheType": "f16"
+      },
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 68718
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1500057
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 747065
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1936337
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 986345
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 601988
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1074998
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 2,
+          "medianDurationMs": 1623332
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3645868
+        }
+      ]
+    },
+    {
       "modelId": "qwen3.8-27b-q4",
       "label": "qwen3.8-27b-q4",
       "engine": "llama-cpp",
@@ -468,7 +552,7 @@
       },
       "runtime": {
         "contextTokens": 262144,
-        "peakMemoryMb": 10932,
+        "peakMemoryMb": 11853,
         "kvCacheType": "f16"
       },
       "cells": [
@@ -510,9 +594,9 @@
         {
           "scenarioId": "craftbook-deep-security-review",
           "trials": 3,
-          "successes": 0,
-          "nonModelFailures": 3,
-          "medianDurationMs": 1975
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 538747
         },
         {
           "scenarioId": "large-pr-review",
@@ -631,7 +715,7 @@
           "trials": 3,
           "successes": 0,
           "nonModelFailures": 0,
-          "medianDurationMs": 5407380
+          "medianDurationMs": 6609501
         },
         {
           "scenarioId": "craftbook-ab-test-readout",
