@@ -70,7 +70,7 @@
     "check:packages": "node --test scripts/npm-consumer-audit.test.mjs && node scripts/check-package-consumers.mjs",
     "check:npm-release-candidate": "pnpm build && pnpm check:npm-release-candidate:unbuilt",
     "check:npm-release-candidate:unbuilt": "node scripts/rehearse-npm-release.mjs",
-    "check:release-toolchain": "node --test scripts/verify-published-npm-release.test.mjs scripts/assert-arm64-baseline.test.mjs scripts/check-npm-bootstrap.test.mjs && node scripts/check-release-toolchain.mjs",
+    "check:release-toolchain": "node --test scripts/verify-published-npm-release.test.mjs scripts/assert-arm64-baseline.test.mjs scripts/check-npm-bootstrap.test.mjs scripts/rehearse-npm-release.test.mjs && node scripts/check-release-toolchain.mjs",
     "check:workspace-deps": "node scripts/check-workspace-dependencies.mjs",
     "scorecard:barrel": "node scripts/gen-scorecard-barrel.mjs",
     "release": "multi-semantic-release",

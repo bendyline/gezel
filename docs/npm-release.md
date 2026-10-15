@@ -271,6 +271,12 @@ at start-up" is not enough: an interrupted earlier run leaves the file already
 stamped, and a faithful restore then writes the release version straight back
 while reporting success.
 
+Consumer failures are saved with their error output under
+`.cache/consumer-checks/` (override the JSON file path with
+`GEZEL_CONSUMER_REPORT_PATH`). If the rehearsal fails, it repeats those errors
+after the cleanup rebuild and prints the report path. A successful core
+rebuild at the end of a failed rehearsal is cleanup, not the failing check.
+
 ## npm consumers get a lean dependency graph
 
 `pnpm-workspace.yaml` pins transitive packages under `overrides`, and patches
