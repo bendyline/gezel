@@ -63,7 +63,7 @@ const WARNING_LABEL: Partial<Record<MediaModelFit['verdict'], string>> = {
 export function MediaFitNote({ fit }: { fit: MediaModelFit | undefined }) {
   if (!fit) return null;
   const warning = WARNING_LABEL[fit.verdict];
-  const figure = `needs ~${gb(fit.neededBytes)}${fit.pool === 'discrete' ? ' graphics memory' : ''}`;
+  const figure = `needs ~${gb(fit.neededBytes)} ${fit.pool === 'discrete' ? 'graphics memory' : 'memory'}`;
   return (
     <>
       <span>·</span>

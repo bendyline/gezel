@@ -1,4 +1,4 @@
-import { type GezelDetail, externalGezelModelId } from '@bendyline/gezel';
+import { type GezelDetail, externalGezelModelId, isLocalProvider } from '@bendyline/gezel';
 import type { ProviderName } from '../../providers/types.js';
 import type { InferenceContext as ServiceContext } from '../inference-context.js';
 import { resolveModelTarget } from './translate.js';
@@ -50,7 +50,9 @@ export type ChatTargetInput =
  * pins it; an inference-only host, which has no gezel to fall back to, then
  * answered that id with "Unknown model". Only a pin is trusted, so an unpinned
  * bare id still reaches the serving gezel like any other unknown string. When
- * several engines pin the same id, the configured provider decides.
+ * several engines pin the same id, the configured provider decides. A cloud
+ * provider's pin never matches: an app's hardcoded `gpt-4o` must reach the
+ * serving gezel, not leave the machine because it equals the OpenAI default.
  */
 export async function resolvePinnedModelTarget(
   ctx: ServiceContext,
@@ -60,7 +62,10 @@ export async function resolvePinnedModelTarget(
   if (!id) return null;
   const config = await ctx.store.readConfig().catch(() => null);
   const pins = Object.entries(config?.defaultModel ?? {}).filter(
-    ([provider, pinned]) => pinned === id && resolveModelTarget(`${provider}:${id}`) !== null,
+    ([provider, pinned]) =>
+      pinned === id &&
+      isLocalProvider(provider as ProviderName) &&
+      resolveModelTarget(`${provider}:${id}`) !== null,
   );
   const chosen =
     pins.find(([provider]) => provider === config?.provider) ??

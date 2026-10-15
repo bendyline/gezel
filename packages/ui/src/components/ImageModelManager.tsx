@@ -418,7 +418,7 @@ export function ImageModelManager({
                   <div className="catalog-ollama-specs muted small">
                     <code>{m.id}</code>
                     <span>·</span>
-                    <span>{formatSize(m.approxSizeBytes)}</span>
+                    <span>{formatSize(downloadBytes(m))}</span>
                     {m.quantization && (
                       <>
                         <span>·</span>

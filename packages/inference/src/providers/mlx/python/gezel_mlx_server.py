@@ -4026,7 +4026,7 @@ async def _vision_stream(request, http_request, images, prompt, response_grammar
             if processor is not None:
                 processors.append(processor)
         processor = response_format.build_response_format_processor(
-            tokenizer, response_grammar, thinking=prompt.rstrip().endswith("<think>"))
+            tokenizer, response_grammar, prompt)
         if processor is not None:
             processors.append(processor)
         if processors:
@@ -4158,10 +4158,13 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             # the prompt tail.
             opens_in_think=prompt_text.rstrip().endswith("<think>"),
         )
+    # Held back while the prompt leaves the model inside reasoning, whichever
+    # family's opener did it (Gemma 4 opens its thought channel after every
+    # tool response), so the grammar shapes the answer, not the thoughts.
     response_processor = response_format.build_response_format_processor(
         getattr(PROCESSOR, "tokenizer", None) or PROCESSOR,
         response_grammar,
-        thinking=prompt_text.rstrip().endswith("<think>"),
+        prompt_text,
     )
 
     # Look up or initialize cache state. Cascade:

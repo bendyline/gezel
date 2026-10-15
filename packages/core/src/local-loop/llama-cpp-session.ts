@@ -330,9 +330,14 @@ const EXPANDED_CONSTRAINED_TOOL_NO_SIGNAL_MS = 90_000;
 // the turn is cancelled before its tool call: every repair attempt on the
 // 2026-10-14 failing-tests-spec run died at ~3,073 chars. llama-server closes
 // the <think> block at this budget and the model goes on to the call (a
-// 128-token probe still wrote a valid file). 512 tokens is ~2,250 chars at
-// LFM2.5's ~4.4 chars/token, below the 3,072-char guard.
-const CONSTRAINED_TURN_ENGINE_REASONING_BUDGET_TOKENS = 512;
+// 128-token probe still wrote a valid file). The client guard sits above the
+// budget so it never fires first, and the budget sits above the old guard so a
+// turn that used to finish its reasoning still does: a 512-token budget
+// (~2,250 chars) cut game-writing turns shorter than before and cost
+// tankcombat its one-draft pass. 1,024 tokens is ~4,500 chars at LFM2.5's
+// ~4.4 chars/token.
+const CONSTRAINED_TURN_ENGINE_REASONING_BUDGET_TOKENS = 1_024;
+const ENGINE_BUDGETED_CONSTRAINED_TOOL_REASONING_CHAR_LIMIT = 6_144;
 
 function isDeepSeekR1Model(model: string | undefined): boolean {
   return model === 'deepseek-r1-8b-q4';
@@ -373,6 +378,7 @@ function needsExpandedConstrainedToolReasoning(model: string | undefined): boole
 }
 
 export function constrainedToolReasoningCharLimitForModel(model: string): number {
+  if (isLfm25A2bModel(model)) return ENGINE_BUDGETED_CONSTRAINED_TOOL_REASONING_CHAR_LIMIT;
   return needsExpandedConstrainedToolReasoning(model)
     ? EXPANDED_CONSTRAINED_TOOL_REASONING_CHAR_LIMIT
     : CONSTRAINED_TOOL_REASONING_CHAR_LIMIT;

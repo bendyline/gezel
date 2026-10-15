@@ -3,6 +3,7 @@ import { displayName, isCodingProject, pronounFormsForGender } from '@bendyline/
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
+import { peekApiRead } from '../shared-api-reads.js';
 import { ChatComposer } from './ChatComposer.js';
 import { ChatPillRow } from './ChatPillRow.js';
 import { ChatReferences } from './ChatReferences.js';
@@ -70,13 +71,15 @@ export function ProjectChat({
   project: ProjectDetail;
   compact?: boolean;
 }) {
-  const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  const [gezels, setGezels] = useState<GezelSummary[]>(
+    () => peekApiRead('listGezels')?.gezels ?? [],
+  );
   // Has the roster ever come back? Distinguishes "this project has nobody"
   // from "we haven't asked yet" — without it the empty state renders on the
   // first frame of every project switch. Monotonic on purpose: the refetch
   // below also fires on roster/voorman changes, and blanking the pane for
   // those would trade one flash for another.
-  const [gezelsLoaded, setGezelsLoaded] = useState(false);
+  const [gezelsLoaded, setGezelsLoaded] = useState(() => peekApiRead('listGezels') !== undefined);
   const [selectedId, setSelectedId] = useState<string>('');
 
   // Refetch the global gezel list whenever the project — or its

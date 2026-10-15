@@ -3,6 +3,7 @@ import { type ProviderName, createLogger, isLocalProvider } from '@bendyline/gez
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { ZodError } from 'zod';
+import { UnsupportedResponseFormatError } from '../../providers/mlx/runtime-diagnostics.js';
 import { OLLAMA_TURN_TIMEOUT_MS } from '../../providers/turn-timeout.js';
 import {
   type ExternalToolSpec,
@@ -685,11 +686,10 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
             await stream
               .writeSSE({
                 data: JSON.stringify({
-                  error: {
-                    message,
-                    type: 'server_error',
-                    code: 'provider_error',
-                  },
+                  error:
+                    err instanceof UnsupportedResponseFormatError
+                      ? { message, type: 'invalid_request_error', code: err.code }
+                      : { message, type: 'server_error', code: 'provider_error' },
                 }),
               })
               .catch((sseErr) => {
@@ -798,6 +798,19 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
               message: err.message,
               type: 'invalid_request_error',
               code: 'tools_not_supported_for_provider',
+            },
+          },
+          400,
+        );
+      }
+      if (err instanceof UnsupportedResponseFormatError) {
+        return c.json(
+          {
+            error: {
+              message: err.message,
+              type: 'invalid_request_error',
+              param: 'response_format',
+              code: err.code,
             },
           },
           400,

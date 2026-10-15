@@ -218,6 +218,7 @@ import {
   SHARED_PROJECT_MISSION_MD,
 } from './default-project-docs.js';
 import { DocumentsStore } from './documents-store.js';
+import { FileSnapshotCache } from './file-snapshot-cache.js';
 import { extForMimeType, mimeTypeForFilename, safeBasename } from './media-types.js';
 import { MemoryStore } from './memory-store.js';
 import {
@@ -419,8 +420,9 @@ export class Store {
    */
   private readonly sessionScanCache = new Map<
     string,
-    { mtimeMs: number; size: number; ino: number; summary: ChatSessionSummary }
+    { mtimeMs: number; ctimeMs: number; size: number; ino: number; summary: ChatSessionSummary }
   >();
+  private readonly timelineSessionCache = new FileSnapshotCache<ChatSession>();
 
   /**
    * Notified after every session persist/delete — the single choke point all
@@ -5642,10 +5644,10 @@ export class Store {
     path: string,
     label: string,
   ): Promise<{ summary: ChatSessionSummary; session: ChatSession | null } | null> {
-    let identity: { mtimeMs: number; size: number; ino: number };
+    let identity: { mtimeMs: number; ctimeMs: number; size: number; ino: number };
     try {
       const st = await stat(path);
-      identity = { mtimeMs: st.mtimeMs, size: st.size, ino: st.ino };
+      identity = { mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, size: st.size, ino: st.ino };
     } catch {
       this.sessionScanCache.delete(path);
       return null;
@@ -5654,12 +5656,15 @@ export class Store {
     if (
       hit &&
       hit.mtimeMs === identity.mtimeMs &&
+      hit.ctimeMs === identity.ctimeMs &&
       hit.size === identity.size &&
       hit.ino === identity.ino
     ) {
       return { summary: hit.summary, session: null };
     }
-    const session = await this.readSessionFile(path, label);
+    const session = await this.timelineSessionCache.read(path, () =>
+      this.readSessionFile(path, label),
+    );
     if (!session) {
       this.sessionScanCache.delete(path);
       return null;
@@ -5870,7 +5875,9 @@ export class Store {
         if (opts.taskRef && scanned.summary.taskRef !== opts.taskRef) continue;
         if (!aboutSubject(scanned.summary.subject)) continue;
         if (!includeArchived && scanned.summary.archived) continue;
-        const session = scanned.session ?? (await this.readSessionFile(path, label));
+        const session =
+          scanned.session ??
+          (await this.timelineSessionCache.read(path, () => this.readSessionFile(path, label)));
         if (!session) continue;
         if (opts.projectId && session.projectId !== opts.projectId) continue;
         // Task scoping is exact-match on the session's pinned `taskRef`,
@@ -6006,6 +6013,20 @@ export class Store {
       }
     }
 
+    // Select the page before doing per-message enrichment. The API's limit
+    // must bound reference matching and row construction as well as its JSON.
+    const eligible = sessions.flatMap((session) =>
+      session.messages.filter(
+        (message) =>
+          (message.role === 'user' || message.role === 'assistant') &&
+          !message.hidden &&
+          (!before || message.at < before),
+      ),
+    );
+    eligible.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+    const hasMore = eligible.length > limit;
+    const pageMessages = new Set(eligible.slice(-limit));
+
     // Gather one file inventory per in-scope project so we can backfill
     // `referencedFiles` on assistant messages that predate the server-side
     // parser. One recursive artifact walk plus one read of the indexer's
@@ -6021,6 +6042,7 @@ export class Store {
           s.projectId === pid &&
           s.messages.some(
             (m) =>
+              pageMessages.has(m) &&
               m.role === 'assistant' &&
               (!m.referencedFiles || hasQualifiedReferenceMismatch(m.content, m.referencedFiles)),
           ),
@@ -6041,7 +6063,7 @@ export class Store {
     // reused across every backfilled message.
     let taskRefs: string[] | null = null;
     const hasLegacyTaskRefAssistant = sessions.some((s) =>
-      s.messages.some((m) => m.role === 'assistant' && !m.referencedTasks),
+      s.messages.some((m) => pageMessages.has(m) && m.role === 'assistant' && !m.referencedTasks),
     );
     if (hasLegacyTaskRefAssistant) {
       try {
@@ -6068,6 +6090,7 @@ export class Store {
           ? s.messages.find((m) => m.role === 'user')?.at
           : undefined;
       for (const m of s.messages) {
+        if (!pageMessages.has(m)) continue;
         if (m.role !== 'user' && m.role !== 'assistant') continue;
         // Hidden facilitation seeds (e.g. a project-type page reaction with
         // `hideSeed`) stay in the session file for the model but never
@@ -6156,8 +6179,9 @@ export class Store {
 
     rows.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 
-    const hasMore = rows.length > limit;
-    const trimmed = hasMore ? rows.slice(rows.length - limit) : rows;
+    // Callers may annotate rows; never expose nested arrays from the cached
+    // transcript. Only the bounded page needs cloning.
+    const trimmed = structuredClone(rows);
     await this.linkUnindexedWorkspaceFiles(trimmed);
 
     // Unfiltered per-project queries also pull terminal entries from the

@@ -15,6 +15,7 @@ import {
   projectTasksDir,
 } from '@bendyline/gezel/paths';
 import { HttpStatusError } from '@bendyline/gezel/runtime';
+import { FileSnapshotCache } from './file-snapshot-cache.js';
 import { isSyncJunkName } from './sync-junk.js';
 
 export interface TaskFilesStoreOptions {
@@ -54,6 +55,8 @@ export class TaskFilesStore {
   private readonly home: string;
   private readonly external?: ExternalFolders;
   private readonly invalidTasks = new Map<string, string>();
+  private readonly records = new FileSnapshotCache<Task>(16 * 1024 * 1024);
+  private readonly descriptions = new FileSnapshotCache<string>(8 * 1024 * 1024);
 
   constructor(opts: TaskFilesStoreOptions) {
     this.home = opts.home;
@@ -198,8 +201,16 @@ export class TaskFilesStore {
   private async readTaskVersion(projectId: string, num: number): Promise<Task | null> {
     const file = projectTaskFile(this.home, projectId, num, this.external);
     try {
-      const raw = await readFile(file, 'utf8');
-      const parsed = checkStoredTask(JSON.parse(raw), projectId, num);
+      const cached = await this.records.read(file, async () =>
+        checkStoredTask(JSON.parse(await readFile(file, 'utf8')), projectId, num),
+      );
+      if (!cached) {
+        this.invalidTasks.delete(file);
+        return null;
+      }
+      // TaskManager edits aggregates before persisting them. Keep those
+      // drafts separate from the validated, immutable disk snapshot.
+      const parsed = structuredClone(cached);
       const about = await this.readTaskAbout(projectId, num);
       if (about.length > 0) parsed.description = about;
       this.invalidTasks.delete(file);
@@ -222,7 +233,8 @@ export class TaskFilesStore {
 
   async readTaskAbout(projectId: string, num: number): Promise<string> {
     try {
-      return await readFile(projectTaskAboutFile(this.home, projectId, num, this.external), 'utf8');
+      const file = projectTaskAboutFile(this.home, projectId, num, this.external);
+      return (await this.descriptions.read(file, () => readFile(file, 'utf8'))) ?? '';
     } catch {
       return '';
     }

@@ -153,10 +153,13 @@ export function ensureHandboekGezk({
     );
   }
   if (ok) return 'refreshed';
+  // The builder prints its own reason above; naming a cause here guessed wrong.
   const message =
-    '[handboek] could not refresh the bundled Handboek catalog (build:handboek-gezk failed — it needs the BGE embedding model, downloaded on first use)';
+    '[handboek] could not refresh the bundled Handboek catalog (build:handboek-gezk failed; its error is above)';
   if (env.CI) throw new Error(`${message}; refusing to ship a possibly stale archive`);
-  log(`${message}; keeping the committed archive`);
+  log(
+    `${message}; keeping the committed archive. Every service build re-renders the Handboek until this succeeds; set GEZEL_SKIP_HANDBOEK_GEZK=1 to skip the check meanwhile`,
+  );
   return 'stale';
 }
 

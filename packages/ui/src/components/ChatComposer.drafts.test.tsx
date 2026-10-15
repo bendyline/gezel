@@ -566,6 +566,67 @@ describe('drafts and threads', () => {
     expect(editorValue()).toBe('typed before the picker landed');
     expect(api.createPromptDraft).toHaveBeenCalledTimes(1);
   });
+
+  // Project chat holds the draft id and the thread itself, and its picker
+  // lands the thread after the composer mounts. A draft left on "new thread"
+  // on disk is lost to the next window, which looks for it by thread.
+  function ControlledComposer({ sessionId }: { sessionId: string | undefined }) {
+    const [draftId, setDraftId] = useState('');
+    return (
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId={sessionId}
+        draftScope="meester"
+        draftId={draftId || undefined}
+        onDraftIdChange={(next) => setDraftId(next ?? '')}
+      />
+    );
+  }
+
+  it('files the draft under the thread the picker lands after the draft exists', async () => {
+    const { rerender } = render(<ControlledComposer sessionId={undefined} />);
+    type('typed before the picker landed');
+    await waitFor(() => expect(api.createPromptDraft).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    });
+
+    rerender(<ControlledComposer sessionId="session-1" />);
+    await waitFor(() =>
+      expect(api.patchPromptDraft).toHaveBeenCalledWith('default', '2026-09-03-0001', {
+        sessionId: 'session-1',
+      }),
+    );
+    expect(editorValue()).toBe('typed before the picker landed');
+  });
+
+  it('files the draft under the thread the picker lands while the draft is being created', async () => {
+    let releaseCreate: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    vi.mocked(api.createPromptDraft).mockImplementation(async (_projectId, body) => {
+      await held;
+      return draftFixture({ content: body.content ?? '', sessionId: body.sessionId }) as never;
+    });
+    const { rerender } = render(<ControlledComposer sessionId={undefined} />);
+    type('typed before the picker landed');
+    await waitFor(() => expect(api.createPromptDraft).toHaveBeenCalledTimes(1));
+
+    rerender(<ControlledComposer sessionId="session-1" />);
+    await act(async () => {
+      releaseCreate?.();
+    });
+    await waitFor(() =>
+      expect(api.patchPromptDraft).toHaveBeenCalledWith('default', '2026-09-03-0001', {
+        sessionId: 'session-1',
+      }),
+    );
+    expect(editorValue()).toBe('typed before the picker landed');
+    expect(api.createPromptDraft).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('sending a draft', () => {

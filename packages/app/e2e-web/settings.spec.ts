@@ -57,6 +57,8 @@ test.describe('settings', () => {
         await page.getByTestId(`settings-nav-${s.id}`).click();
         const panel = page.getByTestId(`settings-section-${s.id}`);
         await expect(panel).toBeVisible();
+        // The section wrapper exists before its lazy provider panel mounts.
+        await expect(panel.getByRole('heading').first()).toBeVisible();
         await settle(page);
         await shot(page, s.name, {
           area: 'settings',

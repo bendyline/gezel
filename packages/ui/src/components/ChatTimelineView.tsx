@@ -2684,7 +2684,8 @@ export function ChatTimelineView({
             ),
         ),
       );
-      runway.style.blockSize = `${Math.max(0, reserve - consumed)}px`;
+      const blockSize = `${Math.max(0, reserve - consumed)}px`;
+      if (runway.style.blockSize !== blockSize) runway.style.blockSize = blockSize;
     };
 
     const lastReply = [
@@ -2996,10 +2997,7 @@ export function ChatTimelineView({
     // rendered bounds replace that fallback so threaded and top-level
     // replies each align to their own column.
     const viewportEl = el.parentElement;
-    if (viewportEl) {
-      const sbWidth = el.offsetWidth - el.clientWidth;
-      viewportEl.style.setProperty('--chat-timeline-sb-width', `${sbWidth}px`);
-    }
+    const sbWidth = el.offsetWidth - el.clientWidth;
     // Measure the rendered sticky header (when visible) so the
     // bubble's "still in view" check can account for the band the
     // sticky is about to cover. Falls back to the cached value when
@@ -3053,12 +3051,7 @@ export function ChatTimelineView({
     // detected bubble's exact border-box instead of guessing from a
     // global indent. This also avoids fractional-pixel drift at the
     // right edge when the 92% max-width resolves differently.
-    if (viewportEl && occludingAssistantRect) {
-      const viewportRect = viewportEl.getBoundingClientRect();
-      const left = occludingAssistantRect.left - viewportRect.left;
-      viewportEl.style.setProperty('--chat-sticky-left', `${left}px`);
-      viewportEl.style.setProperty('--chat-sticky-width', `${occludingAssistantRect.width}px`);
-    }
+    const viewportRect = occludingAssistantRect ? viewportEl?.getBoundingClientRect() : null;
 
     // Second pass: find the most-recent user message in the same
     // session whose bottom is above the OCCLUDING ASSISTANT's top.
@@ -3078,6 +3071,19 @@ export function ChatTimelineView({
       }
     }
 
+    // Finish geometry reads before changing inherited CSS variables. Writing
+    // between the two passes forces a second layout of the whole transcript.
+    if (viewportEl) {
+      const set = (name: string, value: string) => {
+        if (viewportEl.style.getPropertyValue(name) !== value)
+          viewportEl.style.setProperty(name, value);
+      };
+      set('--chat-timeline-sb-width', `${sbWidth}px`);
+      if (occludingAssistantRect && viewportRect) {
+        set('--chat-sticky-left', `${occludingAssistantRect.left - viewportRect.left}px`);
+        set('--chat-sticky-width', `${occludingAssistantRect.width}px`);
+      }
+    }
     const next =
       occludingAssistantId && lastUserIdInSession
         ? { userMessageId: lastUserIdInSession, assistantMessageId: occludingAssistantId }
@@ -3147,6 +3153,9 @@ export function ChatTimelineView({
     scheduleStickyRecompute();
     const el = scrollRef.current;
     if (!el) return;
+    const scrollHeight = el.scrollHeight;
+    const scrollTop = el.scrollTop;
+    const clientHeight = el.clientHeight;
     el.classList.add('chat-timeline-scrolling');
     if (scrollbarIdleTimerRef.current !== null) {
       window.clearTimeout(scrollbarIdleTimerRef.current);
@@ -3155,7 +3164,7 @@ export function ChatTimelineView({
       scrollRef.current?.classList.remove('chat-timeline-scrolling');
       scrollbarIdleTimerRef.current = null;
     }, SCROLLBAR_IDLE_MS);
-    const distFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
+    const distFromBottom = scrollHeight - (scrollTop + clientHeight);
     const nearBottom = distFromBottom <= SCROLL_NEAR_BOTTOM_PX;
     pinnedToBottomRef.current = nearBottom;
     // Only flip state when it actually changes — otherwise every
@@ -3168,15 +3177,15 @@ export function ChatTimelineView({
     // slice and prepend it. Preserve scroll position by snapshotting
     // scrollHeight before the insert.
     if (
-      el.scrollTop <= SCROLL_NEAR_TOP_PX &&
+      scrollTop <= SCROLL_NEAR_TOP_PX &&
       hasMore &&
       !loading &&
       !paginatingRef.current &&
       oldestAt
     ) {
       paginatingRef.current = true;
-      const prevHeight = el.scrollHeight;
-      const prevTop = el.scrollTop;
+      const prevHeight = scrollHeight;
+      const prevTop = scrollTop;
       void (async () => {
         try {
           const res = await loadTimeline({ limit: PAGE_SIZE, before: oldestAt });

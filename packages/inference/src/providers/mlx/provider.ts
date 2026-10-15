@@ -148,7 +148,7 @@ import {
   estimatePromptTokens,
   formatTps,
   isMidStreamConnectionDrop,
-  translateMlxHttpError,
+  mlxHttpError,
 } from './runtime-diagnostics.js';
 import {
   type MlxFatalError,
@@ -1943,7 +1943,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           this.deps.markUsed();
           const txt = await res.text().catch(() => '');
           log.error(`turn#${seq}.${turn} HTTP-ERR status=${res.status} ${res.statusText}`);
-          throw new Error(translateMlxHttpError(res.status, res.statusText, txt));
+          throw mlxHttpError(res.status, res.statusText, txt);
         }
         if (debugOn) {
           log.debug(

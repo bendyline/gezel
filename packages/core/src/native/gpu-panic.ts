@@ -58,6 +58,20 @@ export interface FindGpuPanicOptions {
 }
 
 /**
+ * An `.ips` is any diagnostic report; only bug type 210 is a kernel panic.
+ * An app crash (309) lists every loaded driver image, so a Metal process that
+ * aborts names `AGXG17XFamilyComputeContext` and matched {@link GPU_PANIC_RE}:
+ * on 2026-10-14 a llama-server that aborted in Metal teardown after SIGTERM
+ * paused local models for a day as a "GPU kernel panic" on a Mac that never
+ * restarted.
+ */
+function isKernelPanicReport(text: string): boolean {
+  const newline = text.indexOf('\n');
+  const header = newline === -1 ? text : text.slice(0, newline);
+  return /"bug_type"\s*:\s*"210"/.test(header);
+}
+
+/**
  * Return GPU-driver kernel panics recorded within the window, newest first.
  * Empty on non-macOS (no report dirs) or when nothing matches.
  */
@@ -90,6 +104,7 @@ export function findRecentGpuPanics(opts: FindGpuPanicOptions = {}): GpuPanicRec
       } catch {
         continue;
       }
+      if (name.endsWith('.ips') && !isKernelPanicReport(text)) continue;
       const m = GPU_PANIC_RE.exec(text);
       if (m) out.push({ file: path, when: new Date(mtimeMs), signature: m[0] });
     }

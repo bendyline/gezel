@@ -27,6 +27,35 @@ export async function readProcessRssBytes(pid: number): Promise<number | null> {
   });
 }
 
+/**
+ * The engine refused the request as the caller's to fix: a `response_format`
+ * schema its JSON grammar cannot enforce. Routes answer it with a 400
+ * `invalid_request_error`. Reported as a 500 `server_error`, it was retried
+ * by OpenAI SDKs although no retry could succeed.
+ */
+export class UnsupportedResponseFormatError extends Error {
+  readonly code = 'unsupported_response_format';
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnsupportedResponseFormatError';
+  }
+}
+
+/**
+ * The error a failed engine response becomes. The sidecar answers 422 with a
+ * `response_format` detail only for a schema it refused (response_format.py);
+ * its other 422s are about images, and stay engine errors.
+ */
+export function mlxHttpError(status: number, statusText: string, body: string): Error {
+  if (status === 422) {
+    const detail = tryParseJsonDetail(body, 1_000);
+    if (detail && /response[ _]format/i.test(detail)) {
+      return new UnsupportedResponseFormatError(detail);
+    }
+  }
+  return new Error(translateMlxHttpError(status, statusText, body));
+}
+
 /** Translate known mlx_vlm response shapes into user-actionable errors. */
 export function translateMlxHttpError(status: number, statusText: string, body: string): string {
   if (/Repository Not Found for url/i.test(body) || /401 Client Error/i.test(body)) {
@@ -167,11 +196,11 @@ export function computePreFirstByteBudgetMs(approxPromptTokens: number): number 
   return Math.min(PRE_FIRST_BYTE_CAP_MS, Math.round(scaled));
 }
 
-function tryParseJsonDetail(body: string): string | null {
+function tryParseJsonDetail(body: string, maxChars = 200): string | null {
   try {
     const obj = JSON.parse(body) as unknown;
     if (obj && typeof obj === 'object' && 'detail' in obj && typeof obj.detail === 'string') {
-      return obj.detail.slice(0, 200);
+      return obj.detail.slice(0, maxChars);
     }
   } catch {
     /* not JSON */

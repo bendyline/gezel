@@ -14,6 +14,10 @@ export const SERVICE_WORKER_ENTRIES = {
   embeddings: { built: 'memory/embed-worker.js' },
   'image-embeddings': { built: 'memory/image-embed-worker.js' },
   'static-index': { built: 'index-store/static-index-worker.js' },
+  'dashboard-composite': {
+    built: 'ambient/dashboard-composite-worker.js',
+    source: 'ambient/dashboard-composite-worker.ts',
+  },
   'document-convert': {
     built: 'index-store/convert-worker.js',
     source: 'index-store/convert-worker.ts',

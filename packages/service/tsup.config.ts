@@ -98,6 +98,8 @@ export default defineConfig({
     // CPU-heavy on large repositories. Keep it off the daemon event loop (and
     // therefore off Electron's main thread in embedded dev mode).
     'index-store/static-index-worker': 'src/index-store/static-index-worker.ts',
+    // Native dashboard rasterization AND PNG encoding block their caller.
+    'ambient/dashboard-composite-worker': 'src/ambient/dashboard-composite-worker.ts',
     // Kokoro speech synthesis. An ONNX run blocks its thread for a whole
     // sentence; in embedded mode the event loop it would block is Electron's
     // main process, which beachballed the app for as long as a chat reply

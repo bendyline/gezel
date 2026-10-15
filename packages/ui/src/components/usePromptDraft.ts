@@ -247,6 +247,12 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
         await api.deletePromptDraft(projectId, created.id).catch(() => {});
         throw new Error('draft discarded while it was being created');
       }
+      // The picker landed a thread while the POST was out. The slot effect's
+      // adoption needs a live draft id, which did not exist yet, so it falls
+      // to this continuation; a draft left on "new thread" on disk is lost to
+      // the next window, which looks for it by thread.
+      const arrivedThread =
+        created.sessionId === null && !freshThreadRef.current ? sessionIdRef.current : undefined;
       bornWithoutSessionRef.current = sessionIdRef.current === undefined;
       hasFilesRef.current = created.hasFiles;
       hasTaskLaunchRef.current = Boolean(created.taskLaunch);
@@ -263,6 +269,12 @@ export function usePromptDraft(options: UsePromptDraftOptions): PromptDraftContr
       if (live !== created.content) {
         writeDraftText(created.id, live);
         lane.update(live);
+      }
+      if (arrivedThread !== undefined) {
+        const updated = await api
+          .patchPromptDraft(projectId, created.id, { sessionId: arrivedThread })
+          .catch(() => null);
+        if (updated && draftIdRef.current === created.id) setMeta(updated);
       }
       // The surface left while the POST was out, so its unmount flush had no
       // lane to flush. Write the words now rather than a debounce later, and

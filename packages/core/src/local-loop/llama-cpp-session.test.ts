@@ -1749,7 +1749,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
   });
 
   it.each([
-    { model: 'lfm2.5-24b-a2b-q4', expected: 512 },
+    { model: 'lfm2.5-24b-a2b-q4', expected: 1024 },
     { model: 'lfm2.5-2.6b-q4', expected: 4096 },
   ])('caps the engine reasoning budget on constrained turns for $model', async ({
     model,
@@ -9668,7 +9668,7 @@ describe('gate surgical edit turn detection (D4 gap: Theme B mode)', () => {
 describe('constrained-turn reasoning allowance', () => {
   it('keeps LFM2.5 A2B reasoning bounded without widening other LFM models', () => {
     for (const model of ['lfm2.5-24b-a2b-q4', 'lfm2.5-24b-a2b-q8']) {
-      expect(constrainedToolReasoningCharLimitForModel(model)).toBe(3_072);
+      expect(constrainedToolReasoningCharLimitForModel(model)).toBe(6_144);
       expect(constrainedToolNoSignalMsForModel(model)).toBe(90_000);
     }
     expect(constrainedToolReasoningCharLimitForModel('lfm2.5-1.2b-q4')).toBe(1_024);

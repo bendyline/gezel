@@ -23,12 +23,28 @@ disables enforcement for the rest of the turn rather than killing it.
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 # An opener the chat template left as the last thing before generation: the
 # model then starts inside reasoning and only ever streams the closer. Gemma 4
 # names its channel on the opener's line (`<|channel>thought\n`).
 _OPEN_TAIL = re.compile(r"(?:<think>|<reasoning>|\[THINK\]|<\|channel>[A-Za-z_][\w-]*)\s*$", re.IGNORECASE)
+_REASONING_TAGS = (
+    ("<think>", "</think>"),
+    ("<reasoning>", "</reasoning>"),
+    ("[THINK]", "[/THINK]"),
+    ("<|channel>", "<channel|>"),
+)
+
+
+def open_reasoning_tags(prompt: str) -> Optional[Tuple[str, str]]:
+    """The opener the rendered prompt leaves generation inside, and the tag
+    that closes it; None when the prompt opens no reasoning block."""
+    match = _OPEN_TAIL.search(prompt or "")
+    if not match:
+        return None
+    tail = match.group(0).lower()
+    return next((tags for tags in _REASONING_TAGS if tail.startswith(tags[0].lower())), None)
 
 
 def prompt_opens_reasoning(prompt: str) -> bool:
@@ -40,7 +56,7 @@ def prompt_opens_reasoning(prompt: str) -> bool:
     channel only after a tool response. Guessing wrong streams the model's
     thoughts as its answer.
     """
-    return bool(_OPEN_TAIL.search(prompt or ""))
+    return open_reasoning_tags(prompt) is not None
 
 
 class ThinkBudgetProcessor:

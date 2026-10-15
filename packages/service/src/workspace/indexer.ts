@@ -1,5 +1,4 @@
-import { existsSync } from 'node:fs';
-import { open, readFile, readdir, stat } from 'node:fs/promises';
+import { access, open, readFile, readdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { CommandShape, DiscoveredCommand } from '@bendyline/gezel';
 import { discoverWorkspaceFiles } from './file-walk.js';
@@ -53,12 +52,17 @@ export async function detectWorkspacePackageManager(
       if (declared) return declared;
     }
 
-    const pnpmScore =
-      (existsSync(join(dir, 'pnpm-workspace.yaml')) ? 2 : 0) +
-      (existsSync(join(dir, 'pnpm-lock.yaml')) ? 1 : 0);
-    const npmScore =
-      (existsSync(join(dir, 'package-lock.json')) ? 1 : 0) +
-      (existsSync(join(dir, 'npm-shrinkwrap.json')) ? 1 : 0);
+    const [workspace, pnpmLock, npmLock, shrinkwrap] = await Promise.all(
+      ['pnpm-workspace.yaml', 'pnpm-lock.yaml', 'package-lock.json', 'npm-shrinkwrap.json'].map(
+        (name) =>
+          access(join(dir, name)).then(
+            () => true,
+            () => false,
+          ),
+      ),
+    );
+    const pnpmScore = (workspace ? 2 : 0) + (pnpmLock ? 1 : 0);
+    const npmScore = (npmLock ? 1 : 0) + (shrinkwrap ? 1 : 0);
     if (pnpmScore > 0 || npmScore > 0) {
       return pnpmScore > npmScore ? 'pnpm' : 'npm';
     }
@@ -332,7 +336,6 @@ function stripJsonc(input: string): string {
 
 /** Best-effort "does this look like a real workspace" check. */
 export async function workspaceLooksReal(workspaceDir: string): Promise<boolean> {
-  if (!existsSync(workspaceDir)) return false;
   try {
     const st = await stat(workspaceDir);
     return st.isDirectory();

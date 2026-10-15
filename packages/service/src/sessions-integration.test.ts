@@ -15,8 +15,9 @@ let httpFetch: typeof fetch;
 // secret store, optional MLX/llama-cpp probes). In isolation it's ~1s,
 // but several integration files boot one in parallel under
 // `pnpm test`, and contention pushes the 10s default over the cliff.
-// Match the 30s timeout that other startService-driven integration
-// tests (mcp-bridge.test.ts) use for the same reason.
+// The composition root is dynamically imported inside startService, so its
+// cold Vitest transforms also count against this hook (about 28s on their
+// own). Keep this a setup budget; browser tests measure built-app latency.
 beforeAll(async () => {
   process.env.GEZEL_MOCK_PROVIDER = '1';
   const home = await mkdtemp(join(tmpdir(), 'gezel-sess-integ-'));
@@ -33,11 +34,11 @@ beforeAll(async () => {
   });
   const created = (await res.json()) as { id: string };
   gezelId = created.id;
-}, 30_000);
+}, 60_000);
 
 afterAll(async () => {
-  await svc.stop();
-  await rm(svc.context.home, { recursive: true, force: true }).catch(() => {});
+  await svc?.stop();
+  if (svc) await rm(svc.context.home, { recursive: true, force: true }).catch(() => {});
   delete process.env.GEZEL_MOCK_PROVIDER;
 }, 30_000);
 

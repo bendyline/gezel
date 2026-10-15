@@ -5,7 +5,10 @@ import { describe, expect, it, vi } from 'vitest';
 const streams = vi.hoisted(() => ({
   all: vi.fn(),
   project: vi.fn(),
+  invalidate: vi.fn(),
 }));
+
+vi.mock('./shared-api-reads.js', () => ({ invalidateLiveApiReads: streams.invalidate }));
 
 vi.mock('@bendyline/gezel-client', () => ({
   streamAllChatEvents: streams.all,
@@ -35,6 +38,35 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe('shared chat events', () => {
+  it('invalidates lifecycle snapshots before delivery without invalidating on token deltas', async () => {
+    streams.invalidate.mockClear();
+    const gate = deferred();
+    const finish = deferred();
+    streams.all.mockImplementation(async function* () {
+      yield {
+        ...firstEnvelope,
+        event: { type: 'delta', content: 'hello' },
+      } satisfies ChatEventEnvelope;
+      await gate.promise;
+      yield { ...firstEnvelope, event: { type: 'done' } } satisfies ChatEventEnvelope;
+      await finish.promise;
+    });
+    const controller = new AbortController();
+    const subscriber = streamSharedAllChatEvents({
+      url: 'http://127.0.0.1/events/chat/all',
+      headers: { Authorization: 'Bearer lifecycle-test' },
+      signal: controller.signal,
+    });
+    expect((await subscriber.next()).value?.event.type).toBe('delta');
+    expect(streams.invalidate).not.toHaveBeenCalled();
+    gate.resolve();
+    expect((await subscriber.next()).value?.event.type).toBe('done');
+    expect(streams.invalidate).toHaveBeenCalledOnce();
+    controller.abort();
+    finish.resolve();
+    streams.all.mockReset();
+  });
+
   it('fans one upstream stream out to subscribers with independent cancellation', async () => {
     const first = deferred();
     const second = deferred();

@@ -3,7 +3,7 @@ import { createLogger, nowIso } from '@bendyline/gezel';
 import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { chunkMarkdown, shadowDocFilesPaths, writeConvertedMarkdownAt } from './docs.js';
 import { parseFrontmatter, withFrontmatter } from './frontmatter.js';
-import type { FileRecord, IndexProvenance } from './index-store-types.js';
+import type { ChunkInput, FileRecord, IndexProvenance } from './index-store-types.js';
 import { type IndexStore, MAX_ENRICH_ATTEMPTS } from './index-store.js';
 import { canNormalizeRaster } from './raster-normalize.js';
 
@@ -198,9 +198,7 @@ async function twinShadow(
 
 /**
  * Replace the file's chunks with the shadow body so descriptions/transcripts
- * become searchable, and mark the shadow done in the same write. The
- * filename-derived line the static pass indexed is folded back in as the
- * first chunk — name search must keep working.
+ * become searchable, and mark the shadow done in the same write.
  */
 function indexShadowBody(
   store: IndexStore,
@@ -209,6 +207,14 @@ function indexShadowBody(
   model: string | undefined,
 ): void {
   if (!file.hash) return;
+  store.putAiShadowChunks(file.path, file.hash, shadowBodyChunks(store, file, body), model);
+}
+
+/**
+ * A shadow body as chunks. The filename-derived line the static pass indexed
+ * is folded back in as the first chunk: name search must keep working.
+ */
+function shadowBodyChunks(store: IndexStore, file: FileRecord, body: string): ChunkInput[] {
   const nameWords = file.path
     .replace(/\.[^.]+$/, '')
     .split(/[^a-zA-Z0-9]+/)
@@ -218,13 +224,78 @@ function indexShadowBody(
   const dims = meta.width && meta.height ? ` ${meta.width}x${meta.height}` : '';
   const head = `${nameWords}${dims}`.trim();
   const kind = file.modality === 'image' ? 'image' : 'audio';
-  store.putAiShadowChunks(
-    file.path,
-    file.hash,
-    [
-      ...(head ? [{ kind, lineStart: 1, lineEnd: 1, text: head }] : []),
-      ...chunkMarkdown(body).map((c) => ({ ...c, kind })),
-    ],
-    model,
-  );
+  return [
+    ...(head ? [{ kind, lineStart: 1, lineEnd: 1, text: head }] : []),
+    ...chunkMarkdown(body).map((c) => ({ ...c, kind })),
+  ];
+}
+
+/** Candidates read and written per batch: one page of the scan, one transaction. */
+const WIPED_SHADOW_BATCH = 200;
+
+/**
+ * Put back AI descriptions and transcripts whose chunks a static pass
+ * replaced. Builds that shipped image metadata v3 without
+ * `putStaticChunksUnlessDescribed` re-read every photo and indexed its
+ * filename line over the description, while the shadow gate stayed 'ok': the
+ * AI tier never came back, and the photo was findable by name only, with no
+ * vectors. The sidecars under `artifacts/shadow/` survived, so this re-indexes
+ * them without a model call. Content with no sidecar on any of its paths goes
+ * back to the AI tier to be described again. Idempotent: a restored file no
+ * longer matches the scan.
+ */
+export async function repairWipedAiShadows(
+  store: IndexStore,
+  artifactsDir: string,
+): Promise<{ restored: number; reopened: number }> {
+  let restored = 0;
+  let reopened = 0;
+  let after = '';
+  for (;;) {
+    const files = store.filesWithWipedAiShadow(after, WIPED_SHADOW_BATCH);
+    if (files.length === 0) break;
+    after = files[files.length - 1]!.path;
+    const repairs: Array<{ filePath: string; contentHash: string; chunks?: ChunkInput[] }> = [];
+    for (const file of files) {
+      if (!file.hash) continue;
+      const body = await recoverShadowBody(store, artifactsDir, file);
+      repairs.push({
+        filePath: file.path,
+        contentHash: file.hash,
+        ...(body ? { chunks: shadowBodyChunks(store, file, body) } : {}),
+      });
+    }
+    const counts = store.repairWipedAiShadows(repairs);
+    restored += counts.restored;
+    reopened += counts.reopened;
+  }
+  return { restored, reopened };
+}
+
+/**
+ * The description on disk for this exact content: the file's own sidecar, or
+ * a copy's, which is then written as this path's own the way
+ * {@link aiShadowFile} adopts a twin. Null when neither exists.
+ */
+async function recoverShadowBody(
+  store: IndexStore,
+  artifactsDir: string,
+  file: FileRecord,
+): Promise<string | null> {
+  const paths = shadowDocFilesPaths(artifactsDir, file.path);
+  if (!paths) return null;
+  const own = await readFile(paths.mdPath, 'utf8').catch(() => null);
+  if (own !== null) {
+    const fm = parseFrontmatter(own);
+    if (fm.data.source_hash === file.hash && fm.body.trim()) return fm.body;
+  }
+  const twin = await twinShadow(store, artifactsDir, file);
+  if (!twin) return null;
+  // Best effort: the copy's sidecar still holds the description, so a rebuilt
+  // index re-adopts it through the twin even when this write fails.
+  await writeConvertedMarkdownAt(
+    paths,
+    withFrontmatter({ ...twin.data, source: file.path }, twin.body),
+  ).catch(() => {});
+  return twin.body;
 }

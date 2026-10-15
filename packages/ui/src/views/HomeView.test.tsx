@@ -367,6 +367,19 @@ describe('HomeView', () => {
     }
   });
 
+  it('opens an established workshop while a provider probe is still pending', async () => {
+    vi.mocked(api.getSystemHomeInfo).mockResolvedValue({ usage: { everUsed: true } } as never);
+    try {
+      vi.mocked(api.testProvider).mockReturnValue(new Promise(() => {}));
+      render(<HomeView />);
+      await screen.findByTestId('home-workshop');
+      expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Fetch my tools/ })).not.toBeInTheDocument();
+    } finally {
+      vi.mocked(api.getSystemHomeInfo).mockResolvedValue({ usage: { everUsed: false } } as never);
+    }
+  });
+
   describe('first run', () => {
     beforeEach(() => {
       timeline.empty = true;

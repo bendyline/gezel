@@ -19,6 +19,7 @@ import {
 import { api } from '../api.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
+import { setVisibleInterval } from '../visible-interval.js';
 
 interface ActivityState {
   snapshot: ActivityStatusResponse | null;
@@ -128,7 +129,7 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     mounted.current = true;
     void refresh();
-    const timer = window.setInterval(() => {
+    const timer = setVisibleInterval(() => {
       if (Date.now() - lastSuccess.current > 15_000) setStale(true);
       void refresh();
     }, 5_000);
@@ -181,7 +182,7 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     return () => {
       mounted.current = false;
       controller.abort();
-      clearInterval(timer);
+      timer();
       clearTimeout(eventTimer);
       window.removeEventListener('gezel:config-changed', changed);
       window.removeEventListener('gezel:projects-changed', roster);

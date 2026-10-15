@@ -27,21 +27,35 @@ const OPEN_CALL = new RegExp(
   'i',
 );
 
-const TAG_NAMES = [
-  'tool_call',
-  'function_calls',
-  'function',
-  'invoke',
-  '|tool_call',
-  '|tool_call|',
-];
+/** Any prefix of `literal`, the empty one included, as regex source. */
+function prefixOf(literal: string): string {
+  return [...literal].reduceRight(
+    (rest, ch) => `(?:${ch.replace(/[|\\^$.*+?()[\]{}]/g, '\\$&')}${rest})?`,
+    '',
+  );
+}
 
-/** A trailing `<`, `</fun`, `<tool_c` that may still become a call tag. */
+/**
+ * A trailing tag that may still complete an OPEN_CALL opener (or a closer):
+ * `<`, `</fun`, `<invoke name`, `<function=read_file2`. Printing one early
+ * cannot be taken back once the call closes and is cut out.
+ */
+const PARTIAL_TAG = new RegExp(
+  `^<(?:/?(?:${['tool_call', 'function_calls', 'invoke', '|tool_call|'].map(prefixOf).join('|')})` +
+    `|function=(?:${NAME}\\s*)?|invoke\\s+${prefixOf('name')})$`,
+  'i',
+);
+
+/**
+ * Longer than any real opener still arriving; past it the tail is text, so
+ * something like an endless `<function=aaaa` is not held back for good.
+ */
+const MAX_PARTIAL_TAG = 128;
+
 function withoutPartialTag(text: string): string {
-  const m = /<\/?([a-z_|=]*)$/i.exec(text);
-  if (!m) return text;
-  const name = m[1]!.toLowerCase().split('=')[0]!;
-  return TAG_NAMES.some((tag) => tag.startsWith(name)) ? text.slice(0, m.index) : text;
+  const at = text.lastIndexOf('<');
+  if (at < 0 || text.length - at > MAX_PARTIAL_TAG) return text;
+  return PARTIAL_TAG.test(text.slice(at)) ? text.slice(0, at) : text;
 }
 
 /** Where a call was removed, so the blank lines around it can close up. */
@@ -68,6 +82,21 @@ export function visibleReply(raw: string, streaming: boolean): string {
   return streaming ? out.replace(/\s+$/, '') : out;
 }
 
+/**
+ * Where to pick `visible` up again after the screen parted from it: the first
+ * character they disagree on, moved back to the start of a word that straddles
+ * it so no half word is left behind.
+ */
+function rejoinPoint(shown: string, visible: string): number {
+  let at = 0;
+  while (at < shown.length && at < visible.length && shown[at] === visible[at]) at++;
+  const isText = (ch: string | undefined) => ch !== undefined && /\S/.test(ch);
+  if (isText(visible[at - 1]) && (isText(visible[at]) || isText(shown[at]))) {
+    while (at > 0 && isText(visible[at - 1])) at--;
+  }
+  return at;
+}
+
 export class ReplyPrinter {
   private raw = '';
   private printed = '';
@@ -76,20 +105,41 @@ export class ReplyPrinter {
 
   push(chunk: string): void {
     this.raw += chunk;
-    this.emit(visibleReply(this.raw, true));
+    // A view that no longer extends the screen waits for finish(): while the
+    // reply is still arriving it is provisional, and a rejoin is printed once.
+    this.extend(visibleReply(this.raw, true));
   }
 
-  /** End of the reply. Returns whether anything was printed. */
-  finish(): boolean {
-    this.emit(visibleReply(this.raw, false));
+  /**
+   * End of the reply. `committed` is the saved message, printed when the
+   * stream carried no visible text (providers that send it whole). Returns
+   * whether anything was printed.
+   */
+  finish(committed?: string): boolean {
+    let visible = visibleReply(this.raw, false);
+    if (!visible && committed) visible = visibleReply(committed, false);
+    if (!this.extend(visible) && !this.printed.startsWith(visible)) this.rejoin(visible);
     return this.printed.length > 0;
   }
 
-  private emit(visible: string): void {
-    // Only ever extend what is on screen; a shorter or different view (a
-    // closer completing a pair) waits until the text grows past it again.
-    if (visible.length <= this.printed.length || !visible.startsWith(this.printed)) return;
-    this.write(visible.slice(this.printed.length));
+  /** Prints what `visible` adds to the screen; false when it does not extend it. */
+  private extend(visible: string): boolean {
+    if (!visible.startsWith(this.printed)) return false;
+    if (visible.length > this.printed.length) {
+      this.write(visible.slice(this.printed.length));
+      this.printed = visible;
+    }
+    return true;
+  }
+
+  /**
+   * The screen holds text the reply no longer has: a tag printed before it
+   * completed into a call. It cannot be taken back, so the rest of the reply
+   * goes on a line of its own rather than being dropped.
+   */
+  private rejoin(visible: string): void {
+    const rest = visible.slice(rejoinPoint(this.printed, visible)).replace(/^\s+/, '');
+    if (rest) this.write(`${this.printed.endsWith('\n') ? '' : '\n'}${rest}`);
     this.printed = visible;
   }
 }

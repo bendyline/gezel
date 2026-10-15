@@ -80,6 +80,101 @@ describe('ReplyPrinter', () => {
     printer.push('<tool_call>\n<function=x>\n</function>\n</tool_call>');
     expect(printer.finish()).toBe(false);
   });
+
+  // Release audit of 50a7f293: a tag with a space in it was printed before it
+  // completed, the stripped reply no longer extended stdout, and nothing more
+  // was written, not even at the end.
+  it('holds an invoke tag back across its attribute', () => {
+    expect(
+      print([
+        'Checking.',
+        ' <invoke',
+        ' name',
+        '="get_weather"><parameter name="city">Paris</parameter></invoke>',
+        ' It is sunny.',
+      ]),
+    ).toBe('Checking.\n\nIt is sunny.');
+  });
+
+  it('holds a call back while its tool name has digits, hyphens or dots', () => {
+    for (const name of ['read_file2', 'weather-v2', 'mcp.fs.read']) {
+      const reply = `Checking. <function=${name}>\n<parameter=path>\na.txt\n</parameter>\n</function> It is sunny.`;
+      for (const size of [1, 3, 7]) {
+        expect(print(pieces(reply, size))).toBe('Checking.\n\nIt is sunny.');
+      }
+      expect(print(pieces(`Checking. <invoke name="${name}">\n</invoke> It is sunny.`, 2))).toBe(
+        'Checking.\n\nIt is sunny.',
+      );
+    }
+  });
+
+  it('prints a comparison as soon as it cannot be a tag', () => {
+    let out = '';
+    const printer = new ReplyPrinter((text) => {
+      out += text;
+    });
+    printer.push('So a <');
+    expect(out).toBe('So a');
+    printer.push(' b, and <b');
+    expect(out).toBe('So a < b, and <b');
+    printer.push('> holds.');
+    expect(out).toBe('So a < b, and <b> holds.');
+    printer.finish();
+    expect(out).toBe('So a < b, and <b> holds.');
+  });
+
+  it('releases a tag that never completes', () => {
+    expect(print(['Write it as <function=name'])).toBe('Write it as <function=name');
+    // An endless run of name characters stops being held before the reply ends.
+    let out = '';
+    const printer = new ReplyPrinter((text) => {
+      out += text;
+    });
+    printer.push(`See <function=${'a'.repeat(200)}`);
+    expect(out).toBe(`See <function=${'a'.repeat(200)}`);
+  });
+
+  it('finishes the reply on its own line when stdout no longer matches it', () => {
+    // A tag too long to hold is printed, then completes into a call.
+    const name = 'a'.repeat(200);
+    const out = print([
+      'Checking.',
+      ` <function=${name}`,
+      '>x</function>',
+      ' It is sunny.',
+      ' Enjoy.',
+    ]);
+    expect(out).toBe(`Checking. <function=${name}\nIt is sunny. Enjoy.`);
+  });
+
+  it('restarts a word that runs into the stray tag on screen', () => {
+    const name = 'b'.repeat(200);
+    expect(print(['Done', `<function=${name}`, '>x</function>', 'Sunny.'])).toBe(
+      `Done<function=${name}\nDone\n\nSunny.`,
+    );
+  });
+
+  it('prints the saved message when the stream carried none of it', () => {
+    let out = '';
+    const printer = new ReplyPrinter((text) => {
+      out += text;
+    });
+    expect(printer.finish('The capital is Amsterdam.')).toBe(true);
+    expect(out).toBe('The capital is Amsterdam.');
+    // A second finish, as the stream closes, adds nothing.
+    expect(printer.finish()).toBe(true);
+    expect(out).toBe('The capital is Amsterdam.');
+  });
+
+  it('prefers the streamed reply to the saved message', () => {
+    let out = '';
+    const printer = new ReplyPrinter((text) => {
+      out += text;
+    });
+    printer.push('Amsterdam.');
+    printer.finish('Amsterdam');
+    expect(out).toBe('Amsterdam.');
+  });
 });
 
 describe('visibleReply', () => {

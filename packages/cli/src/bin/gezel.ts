@@ -698,12 +698,8 @@ program
           reply.push(ev.content);
         } else if (ev.type === 'complete') {
           progress.settle();
-          printed = reply.finish();
-          // Fallback for providers that send the whole message at once.
-          if (!printed && ev.message.content) {
-            process.stdout.write(ev.message.content);
-            printed = true;
-          }
+          // The saved message stands in for providers that send it whole.
+          printed = reply.finish(ev.message.content);
         } else if (ev.type === 'error') {
           progress.settle();
           console.error(`\n${ev.error}`);

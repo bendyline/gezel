@@ -65,12 +65,19 @@ if (process.argv.includes('--if-stale') && existsSync(outputPath)) {
     process.exit(0);
   }
 }
-await mkdir(join(root, 'packages/service/assets/handboek'), { recursive: true });
-const workDir = await mkdtemp(join(tmpdir(), 'handboek-gezk-'));
 const cacheDir =
   process.env.GEZEL_HF_CACHE_DIR ??
   join(process.env.GEZEL_HOME ?? join(homedir(), '.gezel'), 'engines/hf-cache');
-const embedder = await createProfileEmbedder(BGE_SMALL_EN_V15_1, { cacheDir });
+const embedder = await createProfileEmbedder(BGE_SMALL_EN_V15_1, { cacheDir }).catch(
+  (err: unknown) => {
+    // An actionable error's message is the whole story; its stack is noise.
+    if (!(err instanceof Error) || !(err as { isActionable?: boolean }).isActionable) throw err;
+    process.stderr.write(`[handboek] cannot embed the Handboek: ${err.message}\n`);
+    process.exit(1);
+  },
+);
+await mkdir(join(root, 'packages/service/assets/handboek'), { recursive: true });
+const workDir = await mkdtemp(join(tmpdir(), 'handboek-gezk-'));
 try {
   const report = await compileKnowledgeCatalog({
     catalog: {

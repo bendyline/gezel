@@ -12,6 +12,34 @@ function deferred<T>() {
 }
 
 describe('SerializedAutosaveController', () => {
+  it('ignores repeated editor emissions without postponing a pending save', async () => {
+    vi.useFakeTimers();
+    try {
+      const save = vi.fn<(value: string) => Promise<string>>().mockResolvedValue('ok');
+      const controller = new SerializedAutosaveController({
+        resourceKey: 'task:description',
+        initialValue: 'original',
+        save,
+        debounceMs: 100,
+      });
+      const listener = vi.fn();
+      controller.subscribe(listener);
+      for (let i = 0; i < 100; i++) controller.update('original');
+      expect(listener).toHaveBeenCalledTimes(1);
+      controller.update('edited');
+      await vi.advanceTimersByTimeAsync(90);
+      for (let i = 0; i < 100; i++) controller.update('edited');
+      expect(listener).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(save).toHaveBeenCalledExactlyOnceWith('edited');
+      const calls = listener.mock.calls.length;
+      controller.update('edited');
+      expect(listener).toHaveBeenCalledTimes(calls);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps an idle lane idle on a no-op update (editor mount emissions)', () => {
     const save = vi.fn<(value: string) => Promise<string>>();
     const controller = new SerializedAutosaveController({

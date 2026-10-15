@@ -75,6 +75,19 @@ describe('MLX structured-output wiring', () => {
     expect(SPEC_SRC).toMatch(/getattr\(request, "response_format", None\)/);
   });
 
+  it('holds the grammar back for whichever reasoning block the prompt opens', () => {
+    // Both paths hand over the rendered prompt; response_format.py finds the
+    // open block and its closer. Gated on a `<think>` tail alone, Gemma 4's
+    // thought channel (open after every tool response) was held to the
+    // answer and the reply streamed as reasoning (2026-10-14 audit).
+    expect(SERVER_SRC).toMatch(
+      /build_response_format_processor\(\s*tokenizer, response_grammar, prompt\)/,
+    );
+    expect(SERVER_SRC).toMatch(
+      /build_response_format_processor\(\s*getattr\(PROCESSOR, "tokenizer", None\) or PROCESSOR,\s*response_grammar,\s*prompt_text,\s*\)/,
+    );
+  });
+
   it('never hands BatchGenerator an empty processor list', () => {
     // mlx_lm's GenerationBatch.filter() trims logits_processors only
     // `if any(...)`: after an unconstrained request finished, the next one's

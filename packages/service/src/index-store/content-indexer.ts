@@ -6,6 +6,7 @@ import { PROJECT_SHADOW_DIR_NAME, projectLocalIndexDbFile } from '@bendyline/gez
 import { isLibraryInternalPath } from '../fs/sync-junk.js';
 import { indexFileSecurity } from '../security/extract.js';
 import { discoverWorkspaceFiles } from '../workspace/file-walk.js';
+import { repairWipedAiShadows } from './ai-shadow.js';
 import { classifyFile, isDenseBlob } from './classify.js';
 import {
   chunkMarkdown,
@@ -66,6 +67,11 @@ const EXTRACTOR_VERSION = 4;
  * 3: HEIC and camera RAW, lens and location (`lens`, `gps_lat`, `gps_lon`).
  */
 const IMAGE_META_VERSION = 3;
+/**
+ * Stamped once {@link repairWipedAiShadows} has covered this index, so the
+ * repair's scan runs once per index rather than on every pass.
+ */
+export const AI_SHADOW_REPAIR_META_KEY = 'ai_shadow_repaired_at';
 /** Past this, an image is hashed in a stream and only its head is read. */
 const STREAM_IMAGE_BYTES = 8 * 1024 * 1024;
 /** Enough for every header gezel parses: TIFF IFDs, HEIF `meta`, JPEG APP1. */
@@ -597,6 +603,8 @@ export async function indexWorkspaceContent(
     await sweepShadowOrphans(artifactsDir, seen);
   }
 
+  await repairWipedAiShadowsOnce(store, artifactsDir);
+
   // Stamp only after a complete walk: rows past a cap may hold old-version
   // extractions. Files this redo already covered are skipped meanwhile.
   if (codeRedoSince !== null && !capped) {
@@ -607,6 +615,28 @@ export async function indexWorkspaceContent(
   }
 
   return stats;
+}
+
+/**
+ * Put back the AI descriptions an earlier build's forced image re-read
+ * replaced with filename chunks (see {@link repairWipedAiShadows}). A failure
+ * leaves the stamp unset so the next pass tries again; it never fails this one.
+ */
+async function repairWipedAiShadowsOnce(store: IndexStore, artifactsDir: string): Promise<void> {
+  if (store.getMeta(AI_SHADOW_REPAIR_META_KEY)) return;
+  try {
+    const { restored, reopened } = await repairWipedAiShadows(store, artifactsDir);
+    if (restored > 0 || reopened > 0) {
+      log.info(
+        `[index] ${store.collectionId}: restored ${restored} AI descriptions a metadata re-read had replaced; ${reopened} with no description on disk will be described again`,
+      );
+    }
+    store.setMeta(AI_SHADOW_REPAIR_META_KEY, nowIso());
+  } catch (err) {
+    log.warn(
+      `[index] ${store.collectionId}: AI description repair failed, retrying next pass: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 /**

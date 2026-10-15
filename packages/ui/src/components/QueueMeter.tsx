@@ -1,3 +1,4 @@
+import { setVisibleInterval } from '../visible-interval.js';
 /**
  * QueueMeter
  *
@@ -556,8 +557,8 @@ export function useQueueLiveTurns(
         .catch(() => {});
     };
     refreshConfig();
-    const t = setInterval(refreshConfig, 10_000);
-    return () => clearInterval(t);
+    const t = setVisibleInterval(refreshConfig, 10_000);
+    return () => t();
   }, [enabled]);
 
   // Every session the provider queues already account for. The live-turn
@@ -628,8 +629,8 @@ export function QueueMeter() {
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 3000);
-    return () => clearInterval(interval);
+    const interval = setVisibleInterval(refresh, 3000);
+    return () => interval();
   }, [refresh]);
 
   const refreshGezels = useCallback(() => {

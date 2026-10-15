@@ -109,6 +109,10 @@ export class SerializedAutosaveController<Result> {
   }
 
   update(value: string): void {
+    // Editors may re-emit their current document after a parent render. Do
+    // not notify that parent again or postpone an already scheduled save.
+    // A failed lane still accepts the same value as an explicit retry.
+    if (value === this.desired && this.error === null) return;
     if (this.rebaseIfEquivalent(value)) return;
     this.desired = value;
     this.error = null;

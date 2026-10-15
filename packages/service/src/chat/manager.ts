@@ -690,7 +690,12 @@ function resolveTurnMessageOrigin(
 ): TurnMessageOrigin {
   if (opts?.messageOrigin) return opts.messageOrigin;
   if (opts?.from) return 'cross-gezel';
-  if (opts?.ambient || opts?.nudge || opts?.lane === 'background') return 'background-nudge';
+  if (opts?.ambient || opts?.lane === 'background') return 'background-nudge';
+  // `nudge` alone does not make a turn the runtime's. Only the composer's
+  // send route sets it, for a message the person typed while a turn ran, and
+  // the turn that message drives is theirs, as it is on the phone. The
+  // runtime's own nudges either re-prompt inside the turn they continue, or
+  // arrive with an origin, a sender, `ambient`, or the background lane.
   return 'direct-user';
 }
 
@@ -701,8 +706,8 @@ function resolveTurnMessageOrigin(
  * A person is waiting when they typed the turn or answered the question that
  * resumes it, and when the turn is the target of a synchronous consultation
  * (the asker is parked mid-turn on this reply). Everything else — task steps,
- * restart resumes, gezel-to-gezel messages, nudges — is work nobody reads
- * token by token, however important. Distinct from the queue lane on
+ * restart resumes, gezel-to-gezel messages, runtime nudges — is work nobody
+ * reads token by token, however important. Distinct from the queue lane on
  * purpose: task handoffs keep the interactive LANE so chores cannot starve
  * them, yet must still step aside at the engine for a person's message.
  */
@@ -2471,11 +2476,12 @@ export class ChatManager extends LocalEngineRuntime {
 
   /**
    * True while this session is running a turn the user started — a message
-   * they typed or an answer they gave. Nudges, handoffs, and other gezels'
-   * messages are not. Actions that exist to stop a model looping on its own
-   * (restarting a task that paused for help) require this, so a coordinator
-   * can do them for the user but never on its own initiative. A visitor of a
-   * shared mini-site types their own messages, but they are not the user.
+   * they typed (a mid-turn nudge included) or an answer they gave. The
+   * runtime's nudges, handoffs, and other gezels' messages are not. Actions
+   * that exist to stop a model looping on its own (restarting a task that
+   * paused for help) require this, so a coordinator can do them for the user
+   * but never on its own initiative. A visitor of a shared mini-site types
+   * their own messages, but they are not the user.
    */
   isUserDirectedTurn(sessionId: string): boolean {
     if (this.states.get(sessionId)?.record.visitorAccess) return false;
@@ -6808,6 +6814,9 @@ export class ChatManager extends LocalEngineRuntime {
        * persisted user message is marked `nudge: true` for the
        * transcript chip. On an idle session the flag is stripped —
        * the message never queued, so it renders as a normal send.
+       * The person typed it, so without a runtime marker its turn is
+       * `direct-user` (see `resolveTurnMessageOrigin`). Runtime sends
+       * never set it.
        */
       nudge?: boolean;
       /**
@@ -7600,7 +7609,9 @@ export class ChatManager extends LocalEngineRuntime {
       // here without manager.ts changes.
       const messageOrigin = resolveTurnMessageOrigin(opts);
       let turnIntentPlan: TurnIntentPlan | null = null;
-      if (messageOrigin === 'direct-user' && opts?.turnIntent !== 'off') {
+      // A person's nudge steers the work already running, and the composer
+      // never sends the route opt-out with one, so it gets no route of its own.
+      if (messageOrigin === 'direct-user' && opts?.nudge !== true && opts?.turnIntent !== 'off') {
         try {
           turnIntentPlan = await this.previewTurnIntent({
             message: userText,
@@ -7622,7 +7633,12 @@ export class ChatManager extends LocalEngineRuntime {
       // own name and the project's: a report signed "Rafiq" was refused for
       // naming a person no source mentions (2026-10-10 coverage run).
       const evidenceLedger = this.evidenceLedgers.get(sessionId);
-      if (evidenceLedger && messageOrigin !== 'background-nudge' && messageOrigin !== 'system') {
+      if (
+        evidenceLedger &&
+        opts?.nudge !== true &&
+        messageOrigin !== 'background-nudge' &&
+        messageOrigin !== 'system'
+      ) {
         const [self, project] = await Promise.all([
           this.store.getGezel(state.record.gezelId).catch(() => null),
           this.store.getProject(state.record.projectId).catch(() => null),
