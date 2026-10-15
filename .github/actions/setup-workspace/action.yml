@@ -24,6 +24,14 @@ inputs:
       override fails with a clear message instead of a confusing install.
     required: false
     default: 'true'
+  handboek-cache:
+    description: >-
+      Restore the built Handboek catalog and its embedding model for the
+      service build, and save them when the job succeeds. Off for jobs that
+      never build @bendyline/gezel-service, where the save would only warn
+      that there is nothing to save.
+    required: false
+    default: 'true'
 
 outputs:
   cache-hit:
@@ -119,3 +127,32 @@ runs:
       run: |
         echo "::error::pnpm install failed after 3 attempts"
         exit 1
+
+    # The Handboek catalog is a build product, not a committed file
+    # (scripts/handboek-gezk-lock.mjs). Built cold it renders and embeds ~1,400
+    # chunks: about a minute, plus the embedding model's download. The lock
+    # beside the archive decides freshness, so an older entry from the prefix
+    # fallback is safe: the service build re-renders it and re-embeds only when
+    # the articles really changed. The key is coarser than the lock's input
+    # hash on purpose; a spurious miss costs one render, never a wrong archive.
+    # The combined action saves in its post step, at the end of a successful job.
+    - name: Cache the Handboek catalog
+      if: inputs.handboek-cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          packages/service/assets/handboek/handboek.gezk
+          packages/service/assets/handboek/handboek.gezk.lock.json
+        key: handboek-gezk-${{ runner.os }}-${{ hashFiles('docs/handboek/**', 'packages/service/src/handboek/**', 'packages/catalog/src/**', 'packages/service/scripts/build-handboek-gezk.ts', 'scripts/handboek-gezk-lock.mjs', 'pnpm-lock.yaml') }}
+        restore-keys: handboek-gezk-${{ runner.os }}-
+
+    # The builder's embedding model (~130 MB, the builder's default cache
+    # under ~/.gezel), so a docs change re-embeds without every job pulling it
+    # from Hugging Face at once.
+    - name: Cache the Handboek embedding model
+      if: inputs.handboek-cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.gezel/engines/hf-cache
+        key: handboek-embedder-${{ runner.os }}-${{ hashFiles('packages/knowledge/src/profiles/registry.ts') }}
+        restore-keys: handboek-embedder-${{ runner.os }}-

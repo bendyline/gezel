@@ -213,20 +213,21 @@ export default defineConfig({
       recursive: true,
       filter: (source) => resolve(source) !== authoringGuide,
     });
-    // Refresh the committed catalog when its sources moved (docs, the
-    // Handboek engine, the catalog loader, or the Gilde pin). A fast input
-    // hash on every build; a rebuild only when the rendered articles changed.
-    // Runs here because the builder renders through this build's own
-    // dist/handboek.js. Under CI a stale archive that cannot be rebuilt fails
-    // the build — v1.26273.82 shipped the previous release's notes that way.
-    ensureHandboekGezk({ watch: process.argv.includes('--watch') });
-    const handboekGezk = resolve(__dirname, 'assets', 'handboek', 'handboek.gezk');
-    if (!existsSync(handboekGezk)) {
-      throw new Error(
-        `bundled Handboek knowledge catalog missing at ${handboekGezk} — run pnpm --filter @bendyline/gezel-service build:handboek-gezk`,
-      );
+    // Build the Handboek catalog: a build product, never committed. A fast
+    // input hash on every build; a re-render when its sources moved (docs,
+    // the Handboek engine, the catalog loader, or the Gilde pin), and a
+    // re-embed only when the rendered articles changed. Runs here because the
+    // builder renders through this build's own dist/handboek.js. Under CI a
+    // failed build fails this one — v1.26273.82 shipped the previous
+    // release's notes from a stale archive.
+    const handboek = ensureHandboekGezk({ watch: process.argv.includes('--watch') });
+    if (handboek === 'missing') {
+      // Local builds only. The daemon runs without a Handboek, and packaging
+      // (scripts/build-service-bundle.mjs) refuses a tree without one.
+      console.warn('[handboek] dist/ has no in-app Handboek catalog');
+    } else {
+      cpSync(resolve(__dirname, 'assets', 'handboek', 'handboek.gezk'), 'dist/handboek.gezk');
     }
-    cpSync(handboekGezk, 'dist/handboek.gezk');
     // The bundled diffusers video server (`gezel_video_server.py`),
     // spawned at runtime against the user's `video` venv.
     cpSync('src/providers/video/python', 'dist/providers/video/python', { recursive: true });

@@ -1,12 +1,14 @@
 /**
  * Assets the service tarball must carry, and the native-release pin.
  *
- * `packages/service/tsup.config.ts` stages two trees into `dist/` in an
+ * `packages/service/tsup.config.ts` stages these into `dist/` in an
  * `onSuccess` hook rather than through the TypeScript build:
  *
  *   dist/ui/               the web UI, so `gezel start --web` works from a
  *                          Node-only npm install with nothing else fetched
  *   dist/handboek-content/ the end-user handbook the daemon serves
+ *   dist/handboek.gezk     the in-app Handboek catalog, built just in time;
+ *                          a local build that could not embed it ships none
  *
  * A hook is a silent-failure surface: if it stops running, the build still
  * succeeds, the tarball still publishes, and the failure only shows up as a
@@ -101,6 +103,7 @@ describe('service bundled assets', () => {
 
   it('stages the handboek content', () => {
     expect(existsSync(resolve(service.dist, 'handboek-content'))).toBe(true);
+    expect(existsSync(resolve(service.dist, 'handboek.gezk'))).toBe(true);
   });
 
   it('stages BOTH harper proofing binaries beside the UI', () => {

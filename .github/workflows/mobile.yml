@@ -43,6 +43,7 @@ jobs:
         with:
           node-version: '24'
           pnpm-version: '11.15.1'
+          handboek-cache: 'false'
       - name: Build portable app and check contracts
         run: |
           pnpm mobile:build

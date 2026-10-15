@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -6,8 +7,11 @@ import { KnowledgeManager } from '@bendyline/gezel-inference/internal/knowledge/
 import { describe, expect, it } from 'vitest';
 
 const archive = resolve(import.meta.dirname, '..', '..', 'assets', 'handboek', 'handboek.gezk');
+// The service build makes the archive; it is not committed. A local checkout
+// that never built it skips, and CI, which always builds it, never does.
+const built = existsSync(archive) || Boolean(process.env.CI);
 
-describe('bundled Handboek knowledge catalog', () => {
+describe.skipIf(!built)('bundled Handboek knowledge catalog', () => {
   it('installs, browses, retrieves, and preserves a disabled choice', async () => {
     const home = await mkdtemp(join(tmpdir(), 'gezel-handboek-gezk-'));
     let manager = new KnowledgeManager({

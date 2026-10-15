@@ -9,11 +9,12 @@ import {
 } from '../../../../scripts/handboek-gezk-lock.mjs';
 
 /**
- * The service build's guard for the committed Handboek catalog. v1.26273.82
+ * The service build's just-in-time build of the Handboek catalog. v1.26273.82
  * shipped an archive built one commit before its release notes were renamed.
  */
 
 let root: string;
+const archive = 'packages/service/assets/handboek/handboek.gezk';
 
 async function put(path: string, text: string): Promise<void> {
   await mkdir(dirname(join(root, path)), { recursive: true });
@@ -27,7 +28,7 @@ beforeEach(async () => {
   await put('packages/catalog/src/source.ts', 'export {};\n');
   await put('packages/catalog/package.json', '{"name":"cat"}\n');
   await put('packages/service/scripts/build-handboek-gezk.ts', '// builder\n');
-  await put('packages/service/assets/handboek/handboek.gezk', 'archive');
+  await put(archive, 'archive');
 });
 
 afterEach(async () => {
@@ -61,7 +62,7 @@ describe('handboekInputsHash', () => {
     expect(linked).not.toBe(pinned);
   });
 
-  it('agrees across checkouts at different paths, so a committed lock holds on CI', async () => {
+  it('agrees across checkouts at different paths, so a cached lock survives a move', async () => {
     const gilde = 'node_modules/@bendyline/gilde/package.json';
     await put(gilde, '{"name":"@bendyline/gilde","version":"0.1.78"}\n');
     const first = handboekInputsHash(root, env);
@@ -116,7 +117,7 @@ describe('ensureHandboekGezk', () => {
     ).toThrow(/refusing to ship/);
   });
 
-  it('keeps a local build going on the committed archive when the rebuild fails', () => {
+  it('keeps a local build going on the previous archive when the rebuild fails', () => {
     const logged: string[] = [];
     const result = ensureHandboekGezk({
       repoRoot: root,
@@ -125,7 +126,46 @@ describe('ensureHandboekGezk', () => {
       runBuilder: () => false,
     });
     expect(result).toBe('stale');
-    expect(logged.at(-1)).toMatch(/keeping the committed archive/);
+    expect(logged.at(-1)).toMatch(/keeping the previous archive/);
+  });
+
+  it('builds the archive when none was ever built, even with a matching lock', async () => {
+    writeHandboekLock({ inputs: handboekInputsHash(root, env), content: 'c' }, root);
+    await rm(join(root, archive));
+    let calls = 0;
+    const result = ensureHandboekGezk({
+      repoRoot: root,
+      env,
+      log: quiet,
+      runBuilder: () => ++calls > 0,
+    });
+    expect(result).toBe('refreshed');
+    expect(calls).toBe(1);
+  });
+
+  it('reports a local build with no archive as missing rather than failing it', async () => {
+    await rm(join(root, archive));
+    const logged: string[] = [];
+    const result = ensureHandboekGezk({
+      repoRoot: root,
+      env,
+      log: (m) => logged.push(m),
+      runBuilder: () => false,
+    });
+    expect(result).toBe('missing');
+    expect(logged.at(-1)).toMatch(/no in-app Handboek/);
+  });
+
+  it('refuses to ship without a Handboek under CI', async () => {
+    await rm(join(root, archive));
+    expect(() =>
+      ensureHandboekGezk({
+        repoRoot: root,
+        env: { CI: 'true' },
+        log: quiet,
+        runBuilder: () => false,
+      }),
+    ).toThrow(/refusing to ship without the Handboek/);
   });
 
   it('only warns in watch mode, and honours the skip switch', () => {
@@ -142,6 +182,24 @@ describe('ensureHandboekGezk', () => {
         runBuilder,
       }),
     ).toBe('skipped');
+    expect(calls).toBe(0);
+  });
+
+  it('reports missing from watch mode and the skip switch when nothing was built', async () => {
+    await rm(join(root, archive));
+    let calls = 0;
+    const runBuilder = () => ++calls > 0;
+    expect(ensureHandboekGezk({ repoRoot: root, env, watch: true, log: quiet, runBuilder })).toBe(
+      'missing',
+    );
+    expect(
+      ensureHandboekGezk({
+        repoRoot: root,
+        env: { GEZEL_SKIP_HANDBOEK_GEZK: '1' },
+        log: quiet,
+        runBuilder,
+      }),
+    ).toBe('missing');
     expect(calls).toBe(0);
   });
 });

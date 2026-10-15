@@ -171,7 +171,7 @@ async function main() {
   const handboekCatalog = join(target, 'dist', 'handboek.gezk');
   if (!existsSync(handboekCatalog)) {
     throw new Error(
-      `[build-service-bundle] expected ${handboekCatalog}; the bundled Handboek knowledge catalog is missing`,
+      `[build-service-bundle] expected ${handboekCatalog}; the bundled Handboek knowledge catalog is missing. The service build makes it — look for its [handboek] lines, or run pnpm --filter @bendyline/gezel-service build:handboek-gezk`,
     );
   }
 
