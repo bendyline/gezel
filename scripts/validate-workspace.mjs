@@ -58,7 +58,9 @@ export async function runWorkspaceValidation(options = {}) {
   const repoRoot = options.repoRoot ?? defaultRepoRoot;
   const install = options.install ?? false;
   const coverage = options.coverage ?? false;
-  const inheritedEnv = options.env ?? process.env;
+  const inheritedEnv = { ...(options.env ?? process.env) };
+  // Tests and coverage inherit this too; explicit logging overrides still win.
+  inheritedEnv.GEZEL_LOG_LEVEL ||= 'warn';
   const runInstallFn = options.runInstallFn ?? runPreparedFrozenInstall;
   const runValidationFn = options.runValidationFn ?? runValidationChild;
   const runCoverageFn = options.runCoverageFn ?? runCoverageChild;
