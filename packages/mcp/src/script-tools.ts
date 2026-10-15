@@ -1,4 +1,4 @@
-import { scriptRunText } from '@bendyline/gezel';
+import { scriptRunText, scriptToolArgs } from '@bendyline/gezel';
 /**
  * Project-type script tools — dynamic per-session MCP registrations.
  *
@@ -157,7 +157,10 @@ export function registerScriptTools(
       try {
         const res = await deps.api.runProjectScript(deps.projectId, {
           name: spec.script,
-          input: { ...(args as Record<string, unknown>), ...(spec.bind ?? {}) },
+          input: {
+            ...scriptToolArgs(args as Record<string, unknown>, spec.inputs),
+            ...(spec.bind ?? {}),
+          },
         });
         return formatScriptRunResult(res);
       } catch (err) {

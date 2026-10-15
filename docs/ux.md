@@ -1258,8 +1258,15 @@ rail turns into a horizontal scroller — a stacked heading has no row to head.
 first wherever work is offered, and every item stays reachable:
 
 - New Task leads its rail with **For you** (the books serving the person's
-  areas, in the order the areas were picked) and opens on it, except inside a
-  project whose type recommends its own shelf. All plans stays one click away.
+  areas, in the order the areas were picked, books that carry a sample first)
+  and opens on it, except inside a project whose type recommends its own
+  shelf. All plans stays one click away.
+- A book's input picker adds a third key, **Try a sample**, when the book
+  carries a sample for that input, with one muted line saying it is made-up
+  example data. Never preselected, and never offered to a recurring run.
+- The welcome offers **Browse plans for …** under its first projects when
+  none of them serves an area the person picked; it opens New Task on For you.
+  It disappears once a first project serves every pick.
 - New Project orders its category rail and its sections by area, orders the
   types inside each section, and lands on the first category that serves the
   person. **All** is the first key of the rail.

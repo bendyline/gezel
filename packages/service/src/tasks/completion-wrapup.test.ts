@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type TaskOutputStore,
   WRAP_UP_MAX_FILES,
+  closingQuestion,
   collectTaskOutputs,
   composeTaskWrapUp,
   resolveTaskDeliverable,
@@ -128,6 +129,52 @@ describe('composeTaskWrapUp', () => {
 
   it('still closes the loop when the task wrote no files', () => {
     expect(composeTaskWrapUp(task(), [])).toContain('The task page (default/2) has every step');
+  });
+});
+
+describe("a board and the maker's question", () => {
+  const board = { kind: 'workspace' as const, path: 'trip.json', view: 'output-page' as const };
+  const question =
+    'Since we have a week to plan, would you like me to continue drafting the rest of the days?';
+
+  it('reads the question the maker ended on, and nothing when they asked none', () => {
+    expect(closingQuestion(`I've drafted the first day of your **Lisbon** trip. ${question}`)).toBe(
+      question,
+    );
+    expect(closingQuestion('Day two is on the board. Enjoy Lisbon!')).toBeUndefined();
+    // A rhetorical question early on is not the one to pass on.
+    expect(
+      closingQuestion('Why Sintra? It has palaces. Day three goes there. The rest is planned.'),
+    ).toBeUndefined();
+  });
+
+  // Day one of a seven-day trip was announced "All done … finished", and the
+  // Reisleider's "shall I go on?" never reached the person (2026-10-12).
+  it('calls a board ready to look at and passes the question on', () => {
+    const text = composeTaskWrapUp(task({ title: 'Lisbon Trip Planning' }), [board], null, board, {
+      name: 'Camila',
+      question,
+    });
+    expect(text).toContain(
+      "**Lisbon Trip Planning** is ready to look at on the project's Output page.",
+    );
+    expect(text).not.toMatch(/All done|is finished/);
+    expect(text).toContain(`Camila asks: “${question}”`);
+    expect(text).toContain('Answer Camila with **Make changes**');
+  });
+
+  it('keeps the data file out of the Updates card for a board', () => {
+    const card = taskFinishedQuestion({
+      task: task({ title: 'Lisbon Trip Planning' }),
+      thread: { id: 't', gezelId: 'meester', projectId: 'default' },
+      outputs: [board],
+      at: '2026-10-12T10:00:00.000Z',
+      deliverable: board,
+    });
+    expect(card.prompt).toBe(
+      "**Lisbon Trip Planning** is ready to look at on the project's Output page.",
+    );
+    expect(card.prompt).not.toContain('trip.json');
   });
 });
 

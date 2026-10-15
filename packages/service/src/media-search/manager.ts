@@ -156,13 +156,24 @@ export class MediaSearchManager {
     if (setting.enabled && opts.install !== false) await this.install();
   }
 
-  /** Deferred boot step: log what is resolved, then reconcile. */
-  async bootWarm(): Promise<void> {
+  /**
+   * Deferred boot step: log what is resolved, then reconcile. `install:
+   * false` opens or closes the gate without fetching; a new install's
+   * download waits for its first project (`first-run/optional-downloads.ts`).
+   */
+  async bootWarm(opts: { install?: boolean } = {}): Promise<void> {
     const setting = await this.setting();
     const parts = await installedMediaParts(this.cacheDir());
     log.info(
       `[media-search] resolved enabled=${setting.enabled} profile=${MEDIA_SEARCH_PROFILE.id} budget=${setting.imageTokenBudget} installed=${[...parts].join(',') || 'none'}`,
     );
+    await this.reconcile({
+      install: opts.install !== false && this.opts.backgroundDownloads !== false,
+    });
+  }
+
+  /** The boot download, once a held new install lets it start. */
+  async startBackgroundDownload(): Promise<void> {
     await this.reconcile({ install: this.opts.backgroundDownloads !== false });
   }
 

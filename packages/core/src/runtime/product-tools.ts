@@ -8,6 +8,7 @@ import {
   workspaceDrawerPrefix,
 } from '../path-rules.js';
 import { LEAN_PROFILE_BUILTIN_TOOLS, leanSession } from '../project-types/composition.js';
+import { scriptToolArgs } from '../project-types/script-tool-args.js';
 import { promptMandatedTools } from '../prompt/prompt-tool-contract.js';
 import {
   type AskQuestionRequest,
@@ -390,8 +391,9 @@ export async function executePortableTool(
   if (projectTool) {
     // The desktop's dispatch: the declared script, the model's arguments
     // checked against the tool's schema, the manifest's `bind` merged last.
+    const args = scriptToolArgs(raw, projectTool.inputs);
     if (projectTool.inputs) {
-      const violations = validateJsonSchema(raw, projectTool.inputs);
+      const violations = validateJsonSchema(args, projectTool.inputs);
       if (violations.length)
         throw new Error(
           `${name}: arguments do not match the tool's schema: ${formatJsonSchemaViolations(violations)}`,
@@ -399,7 +401,7 @@ export async function executePortableTool(
     }
     return actions.scripts!.run(
       projectTool.script,
-      { ...raw, ...(projectTool.bind ?? {}) },
+      { ...args, ...(projectTool.bind ?? {}) },
       session,
       'project',
     );

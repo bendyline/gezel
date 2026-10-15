@@ -271,6 +271,38 @@ describe('NewTaskDialog', () => {
     expect(screen.getByRole('radio', { name: 'Code Review' })).toBeInTheDocument();
   });
 
+  it('leads For you with a book that carries a sample to try', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      interests: { areas: ['data'], askedAt: '2026-10-12T10:00:00Z' },
+    } as never);
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('answer-sql', 'Answer a Question with SQL', { interests: ['data'] }),
+        bookItem('spreadsheet-findings', 'Make sense of a spreadsheet', {
+          interests: ['data'],
+          samples: [
+            { id: 'shop-sales', title: 'sales', param: 'source', files: ['samples/a/b.csv'] },
+          ],
+        }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    renderDialog();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('radio', { name: /Make sense of a spreadsheet/ }),
+      ).toBeInTheDocument(),
+    );
+    const names = screen
+      .getAllByRole('radio')
+      .map((radio) => radio.textContent ?? '')
+      .filter((text) => /SQL|spreadsheet/.test(text));
+    expect(names[0]).toMatch(/Make sense of a spreadsheet/);
+  });
+
   it('lands on For you when the dialog was mounted before the project list arrived', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'mock',

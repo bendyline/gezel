@@ -80,6 +80,25 @@ export const NATIVE_ENGINE_ARCHIVE_SHA256: Readonly<Record<string, string>> = Ob
   'gezel-native-0.1.49-win32-x64.zip':
     'e8996f82ea358903010e050d6b8b93beec683286af512b11cd8eeefdea50aa6d',
 });
+
+/** Download size in bytes of every engine archive published by native-v0.1.49. */
+export const NATIVE_ENGINE_ARCHIVE_BYTES: Readonly<Record<string, number>> = Object.freeze({
+  'gezel-native-0.1.49-darwin-arm64-metal.tar.gz': 6895181,
+  'gezel-native-0.1.49-darwin-arm64.tar.gz': 41543602,
+  'gezel-native-0.1.49-linux-arm64-cpu.tar.gz': 8681742,
+  'gezel-native-0.1.49-linux-arm64-cuda.tar.gz': 618839431,
+  'gezel-native-0.1.49-linux-arm64.tar.gz': 41977168,
+  'gezel-native-0.1.49-linux-x64-cpu.tar.gz': 13085558,
+  'gezel-native-0.1.49-linux-x64-cuda.tar.gz': 987396266,
+  'gezel-native-0.1.49-linux-x64-vulkan.tar.gz': 27140717,
+  'gezel-native-0.1.49-linux-x64.tar.gz': 58057802,
+  'gezel-native-0.1.49-win32-arm64-cpu.zip': 5459336,
+  'gezel-native-0.1.49-win32-arm64.zip': 42048477,
+  'gezel-native-0.1.49-win32-x64-cpu.zip': 8603082,
+  'gezel-native-0.1.49-win32-x64-cuda.zip': 641853362,
+  'gezel-native-0.1.49-win32-x64-vulkan.zip': 22326156,
+  'gezel-native-0.1.49-win32-x64.zip': 56551783,
+});
 // END PINNED NATIVE ARCHIVE HASHES
 
 /**
@@ -88,6 +107,22 @@ export const NATIVE_ENGINE_ARCHIVE_SHA256: Readonly<Record<string, string>> = Ob
  * packaging. Electron notarization is a separate distribution contract.
  */
 export const NATIVE_ENGINE_MACOS_NOTARIZED = true;
+
+/**
+ * The download size of the archive the resolver fetches for this platform
+ * and variant, when this build pins it. Undefined under a dev release
+ * override, whose archives this build has no sizes for.
+ */
+export function pinnedEngineArchiveBytes(
+  platformKey: string,
+  variant: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): number | undefined {
+  if (effectiveEngineRelease() !== NATIVE_ENGINE_RELEASE) return undefined;
+  const key = variant ? `${platformKey}-${variant}` : platformKey;
+  const ext = platform === 'win32' ? 'zip' : 'tar.gz';
+  return NATIVE_ENGINE_ARCHIVE_BYTES[`gezel-native-${NATIVE_ENGINE_RELEASE}-${key}.${ext}`];
+}
 
 /** True when a sha256 hex string is the all-zeros placeholder. */
 export function isPlaceholderDigest(digest: string): boolean {

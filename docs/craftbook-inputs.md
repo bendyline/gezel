@@ -104,7 +104,7 @@ there).
 
 | Surface | How an input is supplied |
 | --- | --- |
-| New Task dialog | A source picker per input, above the other params: **In this project** (a workspace folder or file, with a live "37 files · 2.1 MB" check) or **From your computer** (choose a folder or files, or drop them; uploaded with progress). Scheduled launches offer the project source only. |
+| New Task dialog | A source picker per input, above the other params: **In this project** (a workspace folder or file, with a live "37 files · 2.1 MB" check), **From your computer** (choose a folder or files, or drop them; uploaded with progress), or **Try a sample** when the book carries one for that input. Scheduled launches offer the project source only. |
 | `CreateTaskRequest.inputs` | `{ [param]: { from: 'workspace', path } \| { from: 'artifacts', path } \| { from: 'upload', stagingId } \| { from: 'sample', sampleId } }`. |
 | The welcome's craftbook first projects | `{ from: 'sample', sampleId }`: the book's own sample, attached to the composer with the sentence. |
 | Any string param path (MCP `invoke_craftbook`, CLI, terminal, evals) | The param's plain value: a workspace path, or `artifacts:<path>` for the artifacts drawer. No new plumbing needed. |

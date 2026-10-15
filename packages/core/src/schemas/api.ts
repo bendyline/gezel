@@ -2533,6 +2533,10 @@ export const GezelConfigSchema = z.object({
     .object({
       foldersStepDoneAt: z.string().optional(),
       overnightStepDoneAt: z.string().optional(),
+      /** When the first project the person asked for finished. */
+      firstProjectDoneAt: z.string().optional(),
+      /** When the downloads first run deferred (the image reader) started; once per install. */
+      optionalDownloadsAt: z.string().optional(),
     })
     .optional(),
   /**

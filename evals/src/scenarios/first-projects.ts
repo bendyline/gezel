@@ -10,7 +10,9 @@
  *
  *  - A typed candidate's sentence goes to the meester, whose kickoff routes it
  *    to the project type; it passes when that project's kickoff task completes
- *    (its gate already requires the page's data to have grown).
+ *    and the board holds what its card promises (`BOARD_CHECKS`). The task's
+ *    own gate only asks the data to have grown, which one day of a seven-day
+ *    trip satisfied while the person was told "All done" (2026-10-12).
  *  - A craftbook candidate launches through the composer's attached-task
  *    route with no meester turn, on the book's bundled sample when it has
  *    one; it passes when that task completes (its gates hold the deliverable).
@@ -27,6 +29,44 @@ import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts'
  * sentence these trials send.
  */
 const WAITING: readonly FirstProject[] = [
+  {
+    kind: 'type',
+    id: 'celebration',
+    area: 'home',
+    title: 'Plan a celebration',
+    hint: 'Guests, budget and the day itself, on one board.',
+    prompt: "Plan Dad's 70th birthday party in May, about 30 guests, with a rough budget.",
+    typeId: 'event-planner',
+  },
+  {
+    kind: 'type',
+    id: 'meals',
+    area: 'home',
+    title: 'Plan a week of meals',
+    hint: 'Dinners for the week and the shopping list, on a kitchen board.',
+    prompt:
+      'Start a project to plan a week of meals for two adults and a toddler, mostly vegetarian.',
+    typeId: 'meal-planner',
+  },
+  {
+    kind: 'type',
+    id: 'flashcards',
+    area: 'learning',
+    title: 'Study with flashcards',
+    hint: 'A deck of cards to review a few minutes a day.',
+    prompt: 'Start a project to make flashcards for learning the capitals of Europe.',
+    typeId: 'flashcards',
+  },
+  {
+    kind: 'type',
+    id: 'interview',
+    area: 'learning',
+    title: 'Get ready for an interview',
+    hint: 'Practice questions and a plan for the weeks before it.',
+    prompt:
+      'Start a project to get ready for my job interview at Northwind as a product designer next month.',
+    typeId: 'job-hunt',
+  },
   {
     kind: 'type',
     id: 'chess',
@@ -105,6 +145,66 @@ async function emptyBoard(
     : `${floor.files.join(' + ')} is ${size} bytes, needs ${floor.bytes}`;
 }
 
+type Board = Record<string, unknown>;
+const count = (value: unknown): number =>
+  Array.isArray(value)
+    ? value.length
+    : value && typeof value === 'object'
+      ? Object.keys(value).length
+      : 0;
+
+/**
+ * What each typed candidate's board must hold once its kickoff finishes,
+ * read from the files its Output page shows. A failure names the shortfall.
+ * A candidate with no entry only needs to meet the kickoff's data floor.
+ */
+const BOARD_CHECKS: Record<string, (files: Record<string, Board | null>) => string | null> = {
+  // "A day-by-day plan and a packing list", for about a week.
+  trip: (f) => {
+    const days = count(f['trip.json']?.days);
+    const packing = count(f['packing.json']?.records);
+    return days >= 5 && packing >= 1 ? null : `${days} days, ${packing} packing items`;
+  },
+  celebration: (f) => {
+    const guests = count(f['guests.json']?.records);
+    const budget = count(f['budget.json']?.entries);
+    return guests >= 1 && budget >= 1 ? null : `${guests} guests, ${budget} budget lines`;
+  },
+  meals: (f) => {
+    const days = count(f['menu.json']?.days);
+    return days >= 5 ? null : `${days} days of meals`;
+  },
+  language: (f) => (f['progress.json']?.scene ? null : 'no scene started'),
+  flashcards: (f) => {
+    const cards = count(f['deck.json']?.cards);
+    return cards >= 8 ? null : `${cards} cards`;
+  },
+  interview: (f) =>
+    count(f['pipeline.json']?.records) + count(f['activity.json']?.events) >= 1
+      ? null
+      : 'nothing on the pipeline',
+  'word-clues': (f) => (count(f['game.json']?.words) >= 1 ? null : 'no words dealt'),
+  invoice: (f) => (count(f['invoices.json']?.records) >= 1 ? null : 'no invoice'),
+};
+
+async function readBoard(
+  client: EvalContext['client'],
+  projectId: string,
+): Promise<Record<string, Board | null>> {
+  const files: Record<string, Board | null> = {};
+  const listing = await client.listProjectWorkspace(projectId).catch(() => ({ files: [] }));
+  for (const entry of listing.files) {
+    if (entry.isDirectory || !entry.path.endsWith('.json')) continue;
+    const read = await client.readProjectWorkspaceFile(projectId, entry.path).catch(() => null);
+    try {
+      files[entry.path] = read ? (JSON.parse(read.content) as Board) : null;
+    } catch {
+      files[entry.path] = null;
+    }
+  }
+  return files;
+}
+
 function typedScenario(first: Extract<FirstProject, { kind: 'type' }>): EvalScenario {
   return {
     id: `first-project-${first.id}`,
@@ -129,18 +229,28 @@ function typedScenario(first: Extract<FirstProject, { kind: 'type' }>): EvalScen
           `[scenario] ${kickoff.ref} ${kickoff.status} step=${kickoff.activeStepId ?? '-'}`,
         );
         const verdict = settled(kickoff);
-        if (verdict?.done && verdict.success) {
-          const empty = await emptyBoard(client, summary.id, kickoff);
-          if (empty) {
-            return {
+        if (!verdict) continue;
+        if (!verdict.done || !verdict.success) return verdict;
+        const empty = await emptyBoard(client, summary.id, kickoff);
+        if (empty) {
+          return {
+            done: true,
+            success: false,
+            reason: `${kickoff.ref} completed with nothing on its page: ${empty}`,
+            diagnostics: { ref: kickoff.ref },
+          };
+        }
+        const check = BOARD_CHECKS[first.id];
+        if (!check) return verdict;
+        const short = check(await readBoard(client, summary.id));
+        return short
+          ? {
               done: true,
               success: false,
-              reason: `${kickoff.ref} completed with nothing on its page: ${empty}`,
-              diagnostics: { ref: kickoff.ref },
-            };
-          }
-        }
-        if (verdict) return verdict;
+              reason: `${kickoff.ref} completed with a thin board: ${short}`,
+              diagnostics: { ref: kickoff.ref, board: short },
+            }
+          : verdict;
       }
       return { done: false };
     },
