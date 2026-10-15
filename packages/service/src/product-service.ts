@@ -16,6 +16,7 @@ import {
   createLogger,
   effectiveGeneralistModeSetting,
   formatSuspension,
+  isOwnerLaunchedCompletion,
   isSharedLibraryProject,
   isTaskWorkAllowed,
   lastNightShiftWindow,
@@ -82,6 +83,7 @@ import { createWorkerCatalogHost } from '@bendyline/gezel-inference/internal/kno
 import { warmEmbeddings } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import { deferBootWork } from './boot-work.js';
 import { FirstUseIndexingHold, defaultProviderCanAnswer } from './first-run/indexing-hold.js';
+import { OptionalDownloads } from './first-run/optional-downloads.js';
 import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
 import { ActivityTracker } from './fs/activity-tracker.js';
@@ -145,7 +147,10 @@ import { MemoryHealthMonitor } from './memory/health.js';
 import { MemoryManager } from './memory/manager.js';
 import { openModelWorkers, shutdownModelWorkers } from './model-workers.js';
 
-import { buildChatModelInstallRegistries } from './models/install-jobs.js';
+import {
+  buildChatModelInstallRegistries,
+  installCompanionRecognition,
+} from './models/install-jobs.js';
 
 import { migrateLegacySystemModels } from '@bendyline/gezel-inference/internal/models/storage-roots';
 import { DuckRunner } from './observations/duck.js';
@@ -1696,6 +1701,8 @@ export async function startProductService(
   // failing settle never starves the others: finding delegation closes
   // the linked finding (cancel reopens it); code reviews flip their
   // record to complete/canceled.
+  // Assigned once media search exists; a settle before then has nothing to release.
+  let optionalDownloads: OptionalDownloads | undefined;
   tasks.setTaskSettledHook(async ({ projectId, task, outcome }) => {
     // The terminal step activates nothing, so its XP (and the task's) is
     // noted here rather than in the step hook.
@@ -1711,6 +1718,7 @@ export async function startProductService(
     void chat
       .postTaskWrapUp(task, outcome)
       .catch((err) => log.warn(`[service] task wrap-up failed for ${task.ref}: ${String(err)}`));
+    if (isOwnerLaunchedCompletion(task, outcome)) void optionalDownloads?.firstProjectDone();
     await contentIndex
       .settleFindingsForTask(projectId, task.ref, outcome)
       .catch((err) => log.warn(`[service] finding settle failed for ${task.ref}: ${String(err)}`));
@@ -1840,6 +1848,24 @@ export async function startProductService(
     home,
     readConfig: () => store.readConfig(),
     backgroundDownloads: backgroundDownloadsAllowed(),
+  });
+  optionalDownloads = new OptionalDownloads({
+    readConfig: () => store.readConfig(),
+    writeConfig: (patch) => store.writeConfig(patch),
+    firstUseHeld: () => indexingHold.isActive(),
+    startShared: () => mediaSearch.startBackgroundDownload(),
+    startDeferred: async () => {
+      if (!backgroundDownloadsAllowed()) return;
+      const config = await store.readConfig();
+      const model = config.defaultModel?.['llama-cpp'];
+      if (!model || resolveDefaultProviderName(config) !== 'llama-cpp') return;
+      await installCompanionRecognition(model, {
+        home,
+        readConfig: () => store.readConfig().catch(() => null),
+        llamaCppModels,
+        recognition,
+      });
+    },
   });
   if (knowledge) {
     await knowledge.start();
@@ -2728,7 +2754,10 @@ export async function startProductService(
           if (warmed) log.debug('[memory] embedding pipeline warmed');
         });
         void relevance.bootWarm().catch(() => {});
-        void mediaSearch.bootWarm().catch(() => {});
+        void mediaSearch
+          .bootWarm({ install: false })
+          .then(() => optionalDownloads?.boot())
+          .catch(() => {});
       },
       () => stopping,
     ),
@@ -2745,6 +2774,7 @@ export async function startProductService(
     async stop() {
       stopping = true;
       for (const cancel of cancelBootWork) cancel();
+      optionalDownloads?.stop();
       // Model workers refuse new work from here and drain while the rest
       // shuts down; each is terminated once idle, never mid-run, because
       // process.exit tearing one down inside onnxruntime aborts the process.

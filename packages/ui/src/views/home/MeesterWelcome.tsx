@@ -3,6 +3,7 @@ import {
   type GezelSummary,
   type Poppetje as PoppetjeStruct,
   firstProjectsFor,
+  interestArea,
 } from '@bendyline/gezel';
 import { type ReactNode, useEffect, useState } from 'react';
 import { GezelIcon } from '../../components/GezelIcon.js';
@@ -95,6 +96,7 @@ export function MeesterWelcome({
   justReady = false,
   helpers = [],
   onShown,
+  onBrowseForYou,
 }: {
   meesterName: string;
   meesterIcon?: string | null;
@@ -108,6 +110,8 @@ export function MeesterWelcome({
   helpers?: readonly WelcomeHelper[];
   /** The introduction is on screen. */
   onShown?: () => void;
+  /** Open New Task on its For you shelf, for picks no first project serves. */
+  onBrowseForYou?: () => void;
 }) {
   useEffect(() => {
     onShown?.();
@@ -141,6 +145,11 @@ export function MeesterWelcome({
     canRunCraftbooks: capabilities.tasks && capabilities.chatTaskLaunch !== false,
     host: socialHost(),
   });
+  // The question promises a start for what was picked. Until a first project
+  // serves an area, New Task's For you shelf does: picking Data and Work used
+  // to leave the same trip, language and party cards (2026-10-12).
+  const served = new Set(firsts.map((first) => first.area));
+  const unserved = interests.areas.filter((area) => !served.has(area));
 
   return (
     <div
@@ -245,6 +254,19 @@ export function MeesterWelcome({
             </button>
           ))}
         </fieldset>
+        {unserved.length > 0 && onBrowseForYou && (
+          <p className="meester-welcome-alternatives">
+            <button
+              type="button"
+              className="gz-link-button meester-welcome-quiet-link"
+              onClick={onBrowseForYou}
+            >
+              {unserved.length === 1
+                ? `Browse plans for ${interestArea(unserved[0]!).label.toLowerCase()}`
+                : 'Browse plans for what you picked'}
+            </button>
+          </p>
+        )}
         <p className="meester-welcome-alternatives">Or tell me in your own words, below.</p>
 
         {showIntro && (
@@ -406,12 +428,12 @@ function WelcomeTools({ setup }: { setup: WelcomeSetup }) {
     );
   }
   if (state.kind === 'needs-download') {
-    const size = state.sizeBytes ? formatDownloadSize(state.sizeBytes) : null;
-    const label = [
-      'Fetch my tools',
-      ...(size ? [size] : []),
-      formatDownloadTime(state.sizeBytes),
-    ].join(' · ');
+    // The model and the engine it runs on, which downloads beside it.
+    const total = state.sizeBytes ? state.sizeBytes + (state.engineBytes ?? 0) : null;
+    const size = total ? formatDownloadSize(total) : null;
+    const label = ['Fetch my tools', ...(size ? [size] : []), formatDownloadTime(total)].join(
+      ' · ',
+    );
     return (
       <div className="meester-welcome-tools">
         <p className="meester-welcome-line">

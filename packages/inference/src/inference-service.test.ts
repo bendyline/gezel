@@ -190,7 +190,8 @@ describe('in-process inference host', () => {
     // Vitest's own handles keep this process alive whatever the host does, so
     // the check runs in a child Node with nothing else on its event loop. The
     // provider waits on an unreferenced timer, as an engine cold start does.
-    const entry = fileURLToPath(new URL('../dist/inference-service.js', import.meta.url));
+    // A file:// URL, not a path: Windows rejects `import "C:\\…"` as an unknown scheme.
+    const entry = new URL('../dist/inference-service.js', import.meta.url).href;
     const script = `
       import { mkdtemp, rm } from 'node:fs/promises';
       import { tmpdir } from 'node:os';

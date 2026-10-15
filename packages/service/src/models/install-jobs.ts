@@ -106,6 +106,25 @@ async function* runGgufInstallWithCompanion(
 }
 
 /**
+ * Pull the image reader a chat model that can't see images gets, outside any
+ * install stream: first run skips it during the model's download and starts
+ * it after the first project (see `first-run/optional-downloads.ts`).
+ */
+export async function installCompanionRecognition(
+  catalogId: string,
+  deps: {
+    home: string;
+    readConfig: () => Promise<GezelConfig | null>;
+    llamaCppModels: LlamaCppModelManager;
+    recognition: RecognitionManager;
+  },
+): Promise<void> {
+  for await (const _event of companionRecognitionEvents(catalogId, deps)) {
+    // Progress is for an install stream's subscribers; nobody watches this one.
+  }
+}
+
+/**
  * Pull an image reader alongside a chat model that can't see images, and
  * surface its progress as `companion` events on the same install stream.
  *

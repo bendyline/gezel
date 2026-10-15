@@ -304,6 +304,7 @@ import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
 import {
   WRAP_UP_MAX_FILES,
   composeTaskWrapUp,
+  loadMakerQuestion,
   loadTaskResult,
   placeTaskDeliverable,
   taskFinishedQuestion,
@@ -11763,6 +11764,17 @@ export class ChatManager extends LocalEngineRuntime {
       : null;
     const figures = await reviewTaskFigures(this.store, task, outputs).catch(() => null);
     const maker = deliverable ? deliverableMaker(task, deliverable) : undefined;
+    // The maker's open question reaches the owner here, or nowhere: it was
+    // asked in a task thread the owner has no reason to open.
+    const askerId = maker ?? (task.assignee?.kind === 'gezel' ? task.assignee.gezelId : undefined);
+    const question = askerId
+      ? await loadMakerQuestion(this.store, task, askerId).catch(() => undefined)
+      : undefined;
+    const askerName =
+      question && askerId
+        ? (await this.store.getGezel(askerId).catch(() => null))?.name
+        : undefined;
+    const ask = question && askerName ? { name: askerName, question } : null;
     // File references resolve against the thread's project. A kickoff from
     // the meester's Default thread builds in a project of its own, and its
     // file chips opened "trip.json was not found" there; the deliverable
@@ -11771,7 +11783,7 @@ export class ChatManager extends LocalEngineRuntime {
 
     const message: ChatMessage = {
       role: 'assistant',
-      content: composeTaskWrapUp(task, outputs, figures, deliverable),
+      content: composeTaskWrapUp(task, outputs, figures, deliverable, ask),
       at: nowIso(),
       synthetic: 'task-wrapup',
       referencedTasks: [task.ref],

@@ -10,7 +10,11 @@ import { resolvePlatformKey } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
 import { type SSEStreamingApi, streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
+import {
+  effectiveEngineRelease,
+  isEnginePinned,
+  pinnedEngineArchiveBytes,
+} from '../../engines/native-manifest.js';
 import { KNOWN_ENGINES, isKnownEngine } from '../../engines/registry.js';
 import { EngineBusyError } from '../../providers/native/capacity-broker.js';
 import type { EngineRuntimeContext as EngineContext } from '../engine-runtime-context.js';
@@ -56,17 +60,24 @@ export function enginesRoutes(ctx: EngineContext): Hono {
       | 'metal'
       | 'cpu'
       | undefined;
+    const platformKey = resolvePlatformKey();
     return c.json({
       release: effectiveEngineRelease(),
       pinned: isEnginePinned(),
-      platformKey: resolvePlatformKey(),
+      platformKey,
       ...(llamaBackend ? { llamaBackend } : {}),
       engines: KNOWN_ENGINES.map((name) => {
         const path = process.env[ENGINE_ENV_VAR[name]];
+        const installed = !!path && existsSync(path);
+        const downloadBytes =
+          !installed && name === 'llama-server' && platformKey && llamaBackend
+            ? pinnedEngineArchiveBytes(platformKey, llamaBackend)
+            : undefined;
         return {
           name,
-          installed: !!path && existsSync(path),
+          installed,
           ...(path ? { path } : {}),
+          ...(downloadBytes ? { downloadBytes } : {}),
         };
       }),
     });

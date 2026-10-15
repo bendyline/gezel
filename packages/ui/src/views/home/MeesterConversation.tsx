@@ -1,5 +1,5 @@
 import { type GezelSummary, type Poppetje as PoppetjeStruct, displayName } from '@bendyline/gezel';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { ChatComposer } from '../../components/ChatComposer.js';
 import { ChatReferences } from '../../components/ChatReferences.js';
@@ -11,6 +11,7 @@ import {
   readChatThreadSelection,
   writeChatThreadSelection,
 } from '../../components/chat-thread-memory.js';
+import { navigateToTab } from '../../components/nav-actions.js';
 import { useRoleBasedNameOnlyMode } from '../../components/useRoleBasedNameOnlyMode.js';
 import {
   MeesterSetupNote,
@@ -19,6 +20,9 @@ import {
   type WelcomeSetup,
 } from './MeesterWelcome.js';
 
+const NewTaskDialog = lazy(() =>
+  import('../tasks/NewTaskDialog.js').then((module) => ({ default: module.NewTaskDialog })),
+);
 /**
  * The meester conversation in the workshop's main column. Reuses the
  * existing global timeline + composer verbatim (migrated from HomeView's
@@ -73,6 +77,7 @@ export function MeesterConversation({
   // yet has nothing else to hang off.
   const [draftId, setDraftId] = useState<string>('');
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
+  const [browsingForYou, setBrowsingForYou] = useState(false);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [selectedGezelId, setSelectedGezelId] = useState(remembered?.gezelId || meesterGezelId);
   const [projectId, setProjectId] = useState(remembered?.projectId || 'default');
@@ -225,6 +230,7 @@ export function MeesterConversation({
                     justReady={justReady}
                     helpers={helpers}
                     onShown={onIntroductionShown}
+                    onBrowseForYou={() => setBrowsingForYou(true)}
                   />
                 ) : undefined
               }
@@ -306,6 +312,24 @@ export function MeesterConversation({
           </>
         )}
       </ChatReferences>
+      {/* `projects` is only read when the project picker shows, which the
+          lock suppresses — the same contract as the composer's Task key. */}
+      {browsingForYou && (
+        <Suspense fallback={null}>
+          <NewTaskDialog
+            open
+            defaultProjectId={projectId}
+            projects={[]}
+            gezels={gezels}
+            projectLocked
+            onClose={() => setBrowsingForYou(false)}
+            onCreated={(task) => {
+              setBrowsingForYou(false);
+              navigateToTab({ kind: 'task', ref: task.ref });
+            }}
+          />
+        </Suspense>
+      )}
     </section>
   );
 }
