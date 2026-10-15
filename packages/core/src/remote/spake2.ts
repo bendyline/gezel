@@ -1,6 +1,9 @@
 /**
  * SPAKE2 (RFC 9382), ciphersuite SPAKE2-P256-SHA256-HKDF-HMAC: the password-
- * authenticated key exchange behind connect codes for remote serving.
+ * authenticated key exchange behind connect codes for remote serving. One
+ * implementation for every host — the daemon in Node and the phone in its
+ * WebView — so both ends of a pairing compute the exact same transcript.
+ * Hashing, HKDF and HMAC come from WebCrypto, which both hosts provide.
  *
  * Why a PAKE: the code is 8 digits, so anything derived from it that crosses
  * the network (a hash, an HMAC) can be brute-forced offline in seconds by
@@ -10,7 +13,7 @@
  * transcript, so a successful run also proves each side is talking to the
  * identity it pinned — a man in the middle has to guess the code twice.
  *
- * The group arithmetic is plain BigInt over P-256 (Node's crypto exposes ECDH
+ * The group arithmetic is plain BigInt over P-256 (WebCrypto exposes ECDH
  * but no point addition, which SPAKE2 needs). BigInt is not constant-time,
  * which RFC 9382 §7 asks for. What that exposes here is narrow: x and y are
  * fresh per run and never reused, w belongs to one short-lived single-use
@@ -20,7 +23,14 @@
  * Verified against all four RFC 9382 Appendix B test vectors (spake2.test.ts).
  */
 
-import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
+import {
+  bytesToHex,
+  constantTimeEqual,
+  hexToBytes,
+  toArrayBuffer,
+  utf8,
+  webCrypto,
+} from './bytes.js';
 
 // ── P-256 ───────────────────────────────────────────────────────────────
 
@@ -109,18 +119,22 @@ function multiply(pt: Point, k: bigint): Point {
   return r0;
 }
 
-function toBytes(n: bigint, length = 32): Buffer {
-  return Buffer.from(n.toString(16).padStart(length * 2, '0'), 'hex');
+function toBytes(n: bigint, length = 32): Uint8Array {
+  return hexToBytes(n.toString(16).padStart(length * 2, '0'));
 }
 
-function fromBytes(b: Buffer): bigint {
-  return b.length === 0 ? 0n : BigInt(`0x${b.toString('hex')}`);
+function fromBytes(b: Uint8Array): bigint {
+  return b.length === 0 ? 0n : BigInt(`0x${bytesToHex(b)}`);
 }
 
 /** SEC1 uncompressed encoding, the form RFC 9382 puts on the wire for P-256. */
-function encodePoint(pt: Point): Buffer {
+function encodePoint(pt: Point): Uint8Array {
   if (!pt) throw new Error('spake2: cannot encode the point at infinity');
-  return Buffer.concat([Buffer.from([4]), toBytes(pt.x), toBytes(pt.y)]);
+  const out = new Uint8Array(65);
+  out[0] = 4;
+  out.set(toBytes(pt.x), 1);
+  out.set(toBytes(pt.y), 33);
+  return out;
 }
 
 /**
@@ -128,7 +142,7 @@ function encodePoint(pt: Point): Buffer {
  * endpoint MUST abort on a value that is not). P-256 has cofactor 1, so a
  * finite point on the curve is in the prime-order group.
  */
-function decodePoint(bytes: Buffer): { x: bigint; y: bigint } {
+function decodePoint(bytes: Uint8Array): { x: bigint; y: bigint } {
   if (bytes.length === 65 && bytes[0] === 4) {
     const pt = { x: fromBytes(bytes.subarray(1, 33)), y: fromBytes(bytes.subarray(33)) };
     if (pt.x >= P || pt.y >= P || !isOnCurve(pt)) throw new Spake2Error('point is not on P-256');
@@ -148,11 +162,45 @@ function decodePoint(bytes: Buffer): { x: bigint; y: bigint } {
 
 /** RFC 9382 §6, P-256: M and N, generated from the curve OID with no known discrete log. */
 const M = decodePoint(
-  Buffer.from('02886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f', 'hex'),
+  hexToBytes('02886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f'),
 );
 const N = decodePoint(
-  Buffer.from('03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49', 'hex'),
+  hexToBytes('03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49'),
 );
+
+// ── WebCrypto ───────────────────────────────────────────────────────────
+
+const subtle = webCrypto;
+
+async function sha(name: 'SHA-256' | 'SHA-512', data: Uint8Array): Promise<Uint8Array> {
+  return new Uint8Array(await subtle().digest(name, toArrayBuffer(data)));
+}
+
+async function hmacSha256(key: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
+  const k = await subtle().importKey(
+    'raw',
+    toArrayBuffer(key),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  return new Uint8Array(await subtle().sign('HMAC', k, toArrayBuffer(data)));
+}
+
+async function hkdfSha256(
+  ikm: Uint8Array,
+  info: Uint8Array,
+  lengthBytes: number,
+): Promise<Uint8Array> {
+  const k = await subtle().importKey('raw', toArrayBuffer(ikm), 'HKDF', false, ['deriveBits']);
+  return new Uint8Array(
+    await subtle().deriveBits(
+      { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: toArrayBuffer(info) },
+      k,
+      lengthBytes * 8,
+    ),
+  );
+}
 
 // ── Protocol ────────────────────────────────────────────────────────────
 
@@ -164,22 +212,24 @@ export interface Spake2State {
   role: Spake2Role;
   w: bigint;
   scalar: bigint;
-  share: Buffer;
+  share: Uint8Array;
 }
 
 export interface Spake2Keys {
   /** The shared secret (RFC 9382's Ke). */
-  ke: Buffer;
+  ke: Uint8Array;
   /** A's confirmation message, cA = MAC(KcA, TT). */
-  confirmA: Buffer;
+  confirmA: Uint8Array;
   /** B's confirmation message, cB = MAC(KcB, TT). */
-  confirmB: Buffer;
+  confirmB: Uint8Array;
 }
 
 /** A scalar uniform in [1, n), by rejection sampling (RFC 9382 §7). */
 function randomScalar(): bigint {
+  const bytes = new Uint8Array(32);
   for (;;) {
-    const k = fromBytes(randomBytes(32));
+    globalThis.crypto.getRandomValues(bytes);
+    const k = fromBytes(bytes);
     if (k > 0n && k < N_ORDER) return k;
   }
 }
@@ -190,8 +240,8 @@ function randomScalar(): bigint {
  * function, which the RFC recommends: the codes this serves are random,
  * single-use and live for minutes, and the only attack on them is online.
  */
-export function passwordScalar(password: string, context: string): bigint {
-  const digest = createHash('sha512').update(context).update('\0').update(password).digest();
+export async function passwordScalar(password: string, context: string): Promise<bigint> {
+  const digest = await sha('SHA-512', utf8(`${context}\0${password}`));
   return mod(fromBytes(digest), N_ORDER);
 }
 
@@ -206,11 +256,28 @@ export function spake2Start(
   return { role, w, scalar, share: encodePoint(add(multiply(G, scalar), blind)) };
 }
 
-function lengthPrefixed(bytes: Buffer): Buffer {
-  const len = Buffer.alloc(8);
-  len.writeBigUInt64LE(BigInt(bytes.length));
-  return Buffer.concat([len, bytes]);
+function lengthPrefixed(bytes: Uint8Array): Uint8Array {
+  const out = new Uint8Array(8 + bytes.length);
+  let len = bytes.length;
+  for (let i = 0; i < 8; i++) {
+    out[i] = len & 0xff;
+    len = Math.floor(len / 256);
+  }
+  out.set(bytes, 8);
+  return out;
 }
+
+function concat(parts: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let offset = 0;
+  for (const p of parts) {
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out;
+}
+
+const asBytes = (v: string | Uint8Array) => (typeof v === 'string' ? utf8(v) : v);
 
 /**
  * Round two: combine the peer's share into K, build the transcript, and derive
@@ -219,37 +286,41 @@ function lengthPrefixed(bytes: Buffer): Buffer {
  * Neither side may treat the exchange as done until it has checked the
  * other's confirmation with {@link confirmationsMatch}.
  */
-export function spake2Finish(
+export async function spake2Finish(
   state: Spake2State,
-  opts: { idA: string | Buffer; idB: string | Buffer; peerShare: Buffer; aad?: string | Buffer },
-): Spake2Keys {
+  opts: {
+    idA: string | Uint8Array;
+    idB: string | Uint8Array;
+    peerShare: Uint8Array;
+    aad?: string | Uint8Array;
+  },
+): Promise<Spake2Keys> {
   const peer = decodePoint(opts.peerShare);
   const unblind = negate(multiply(state.role === 'A' ? N : M, state.w));
   const k = multiply(add(peer, unblind), state.scalar);
   if (!k) throw new Spake2Error('shared point is the identity');
   const pA = state.role === 'A' ? state.share : opts.peerShare;
   const pB = state.role === 'A' ? opts.peerShare : state.share;
-  const transcript = Buffer.concat([
-    lengthPrefixed(Buffer.from(opts.idA)),
-    lengthPrefixed(Buffer.from(opts.idB)),
+  const transcript = concat([
+    lengthPrefixed(asBytes(opts.idA)),
+    lengthPrefixed(asBytes(opts.idB)),
     lengthPrefixed(pA),
     lengthPrefixed(pB),
     lengthPrefixed(encodePoint(k)),
     lengthPrefixed(toBytes(state.w)),
   ]);
-  const hash = createHash('sha256').update(transcript).digest();
-  const ke = hash.subarray(0, 16);
-  const ka = hash.subarray(16);
-  const info = Buffer.concat([Buffer.from('ConfirmationKeys'), Buffer.from(opts.aad ?? '')]);
-  const confirmationKeys = Buffer.from(hkdfSync('sha256', ka, Buffer.alloc(0), info, 32));
-  const mac = (key: Buffer) => createHmac('sha256', key).update(transcript).digest();
+  const hash = await sha('SHA-256', transcript);
+  const ke = hash.slice(0, 16);
+  const ka = hash.slice(16);
+  const info = concat([utf8('ConfirmationKeys'), asBytes(opts.aad ?? '')]);
+  const confirmationKeys = await hkdfSha256(ka, info, 32);
   return {
-    ke: Buffer.from(ke),
-    confirmA: mac(confirmationKeys.subarray(0, 16)),
-    confirmB: mac(confirmationKeys.subarray(16)),
+    ke,
+    confirmA: await hmacSha256(confirmationKeys.slice(0, 16), transcript),
+    confirmB: await hmacSha256(confirmationKeys.slice(16), transcript),
   };
 }
 
-export function confirmationsMatch(expected: Buffer, received: Buffer): boolean {
-  return expected.length === received.length && timingSafeEqual(expected, received);
+export function confirmationsMatch(expected: Uint8Array, received: Uint8Array): boolean {
+  return constantTimeEqual(expected, received);
 }

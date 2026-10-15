@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(GezelMobilePlugin.class);
         registerPlugin(GezelSpeechPlugin.class);
         registerPlugin(GezelVisionPlugin.class);
+        registerPlugin(GezelRemotePlugin.class);
         super.onCreate(savedInstanceState);
         try { PreviewBoundary.install(bridge, previewSnapshots); installBackNavigation(); }
         catch (Exception error) {

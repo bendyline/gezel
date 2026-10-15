@@ -132,6 +132,35 @@ describe('pairing with a connect code', () => {
     expect(res.status).toBe(403);
   });
 
+  it('notices quickly when the paired server goes away, and lists it as offline', async () => {
+    const api = loopbackApi(client);
+    const before = await api('GET', '/api/remotes?check=1');
+    expect((before.json.remotes as Array<{ status: string }>)[0]?.status).toBe('online');
+
+    await server.context.remoteServing.reconfigure({ enabled: false });
+    try {
+      // The tracker still trusts the fresh success above, so the listing
+      // tries the server; the refused connection is what marks it offline,
+      // without the certificate-refresh round trip it used to add.
+      const remoteId = client.context.remotes.list()[0]!.remoteId;
+      const started = Date.now();
+      const models = await api('GET', '/api/remotes/models');
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(models.json.servers).toEqual([
+        expect.objectContaining({ remoteId, status: 'offline' }),
+      ]);
+      const listed = await api('GET', '/api/remotes');
+      expect((listed.json.remotes as Array<{ status: string }>)[0]?.status).toBe('offline');
+    } finally {
+      const status = await server.context.remoteServing.reconfigure({
+        enabled: true,
+        bindAddress: '127.0.0.1',
+        port: 0,
+      });
+      remoteBase = `https://127.0.0.1:${status.port}`;
+    }
+  });
+
   it('will not show a code while sharing is off', async () => {
     await server.context.remoteServing.reconfigure({ enabled: false });
     try {

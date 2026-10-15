@@ -2137,7 +2137,11 @@ without reading it, and a typed code also stands in for an Approve click on the
 other screen. The code is shown only on request, in the large spaced
 `.device-code` recipe with its countdown, because it is read off one screen and
 typed into another. Port, interface, limits, and the identity code older
-versions still compare sit in **Advanced**.
+versions still compare sit in **Advanced**. A remembered server that can't be
+reached is a state, not an error: its row says "not reachable — gezellen answer
+without it until it's back", pickers keep its models listed as "(offline)", and
+a reply that ran on the fallback carries one line saying which server was away
+and what answered instead.
 
 **A label travels with its control.** In a wrapping row of labelled controls —
 the gezel header's Model, Context, Sandbox — wrap each label and its keys in one

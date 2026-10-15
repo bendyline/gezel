@@ -2,7 +2,7 @@
  * `/v1/apps/pair/*` — pairing a device with a connect code, on the LAN
  * listener. The code is shown on this device (Settings → Remote Servers →
  * Add a device); the client proves it typed it with SPAKE2 (see
- * remotes/spake2.ts) instead of anyone clicking Approve here.
+ * core's remote/spake2.ts) instead of anyone clicking Approve here.
  *
  *   POST /v1/apps/pair/start   (unauth)  pA in, pB + session id out. Spends
  *                                        one of the code's attempts.
@@ -85,11 +85,14 @@ export function v1AppsPairRoutes(ctx: EngineContext): Hono {
       return c.json({ error: 'invalid_device_identity' }, 400);
     }
     try {
-      const run = ctx.pairingCodes.begin({
+      const run = await ctx.pairingCodes.begin({
         share: Buffer.from(body.share, 'base64'),
         client: { appId: body.appId, appName: body.appName, fingerprint },
       });
-      return c.json({ sessionId: run.sessionId, share: run.share.toString('base64') });
+      return c.json({
+        sessionId: run.sessionId,
+        share: Buffer.from(run.share).toString('base64'),
+      });
     } catch (err) {
       if (err instanceof PairingClosedError) return c.json({ error: 'pairing_closed' }, 409);
       if (err instanceof PairingAttemptsExhaustedError) {
@@ -131,7 +134,7 @@ export function v1AppsPairRoutes(ctx: EngineContext): Hono {
       deviceId: appId,
     });
     return c.json({
-      confirm: result.confirmB.toString('base64'),
+      confirm: Buffer.from(result.confirmB).toString('base64'),
       token: record.token,
       name: displayHostname(),
     });

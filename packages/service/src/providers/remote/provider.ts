@@ -19,6 +19,7 @@ import type {
   SessionOpts,
 } from '@bendyline/gezel-inference/internal/providers/types';
 import { DEFAULT_TENANT_MAX_CONCURRENT } from '../../remotes/tenant-limits.js';
+import { fetchReachingRemote } from '../../remotes/unreachable.js';
 import { McpBridgePool } from '../mcp-bridge-pool.js';
 import {
   isEngineBusyResponse,
@@ -105,6 +106,11 @@ export interface RemoteGezelProviderOpts {
   models?: ModelInfo[];
   /** A-side admission cap on concurrent sockets to B. */
   concurrency?: number;
+  /**
+   * Told whether each request reached B: any HTTP answer counts, a failure
+   * to connect does not. Feeds remotes/reachability.ts.
+   */
+  onReachability?: (reachable: boolean) => void;
 }
 
 export class RemoteGezelProvider implements LLMProvider {
@@ -149,6 +155,14 @@ export class RemoteGezelProvider implements LLMProvider {
     return this.opts.models?.[0]?.id ?? this.opts.defaultModel;
   }
 
+  private reachTarget() {
+    return {
+      remoteId: this.opts.remoteId,
+      label: this.opts.label,
+      ...(this.opts.onReachability ? { onReachability: this.opts.onReachability } : {}),
+    };
+  }
+
   getContextWindow(): number | undefined {
     return this.lastAdmittedContextWindow;
   }
@@ -183,15 +197,20 @@ export class RemoteGezelProvider implements LLMProvider {
     let waitLogged = false;
     for (;;) {
       const latestConnection = this.opts.resolveConnection?.() ?? connection;
-      const res = await latestConnection.fetch(`${latestConnection.baseUrl}/v1/remote/admit`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${latestConnection.token}`,
+      const res = await fetchReachingRemote(
+        this.reachTarget(),
+        latestConnection.fetch,
+        `${latestConnection.baseUrl}/v1/remote/admit`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${latestConnection.token}`,
+          },
+          body: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, model: bLocal }),
+          ...(signal ? { signal } : {}),
         },
-        body: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, model: bLocal }),
-        ...(signal ? { signal } : {}),
-      });
+      );
       if (res.ok) {
         const admitted = RemoteAdmissionResponseSchema.parse(await res.json()).contextWindow;
         this.admittedContextWindows.set(admissionKey, {
@@ -267,10 +286,15 @@ export class RemoteGezelProvider implements LLMProvider {
     if (this.opts.models) return this.opts.models;
     try {
       const connection = this.opts.resolveConnection?.() ?? this.opts;
-      const res = await connection.fetch(`${connection.baseUrl}/v1/remote/models`, {
-        headers: { Authorization: `Bearer ${connection.token}` },
-        ...(signal ? { signal } : {}),
-      });
+      const res = await fetchReachingRemote(
+        this.reachTarget(),
+        connection.fetch,
+        `${connection.baseUrl}/v1/remote/models`,
+        {
+          headers: { Authorization: `Bearer ${connection.token}` },
+          ...(signal ? { signal } : {}),
+        },
+      );
       if (!res.ok) return [];
       const parsed = RemoteModelsResponseSchema.parse(await res.json());
       // Surface only chat models here (multimodal flows through the remote
@@ -304,6 +328,7 @@ export class RemoteGezelProvider implements LLMProvider {
     const bLocal = this.brokerModel(opts.model);
     this.log.info(`[remote-provider] session on ${this.opts.label} model=${bLocal}`);
     return new RemoteSession({
+      ...this.reachTarget(),
       baseUrl: this.opts.baseUrl,
       token: this.opts.token,
       fetch: this.opts.fetch,

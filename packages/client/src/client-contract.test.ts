@@ -409,6 +409,12 @@ const cases: ContractCase[] = [
     invoke: (c) => c.openMachineServingPairingCode(),
   },
   {
+    name: 'remote server models',
+    method: 'GET',
+    path: '/api/remotes/models',
+    invoke: (c) => c.listRemoteServerModels(),
+  },
+  {
     name: 'remote discover',
     method: 'GET',
     path: '/api/remotes/discover',

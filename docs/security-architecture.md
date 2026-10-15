@@ -150,6 +150,15 @@ The **enforcement layers** a model-driven action passes through, outermost first
   is never a trust decision: it fills in an address, and pairing verifies the identity
   itself. The DNS decoder reads untrusted packets, so every read is bounds-checked and a
   compression pointer may only jump backwards (fuzzed in `dns-sd.test.ts`).
+- **Following a paired server to a new address** (`remotes/reachability.ts` `relocateRemote`).
+  When a paired server can't be reached and discovery reports its fingerprint at another
+  address (a new DHCP lease), the client adopts that address only after the server there
+  proves the pinned identity: its `/v1/identity` key must hash to the pinned fingerprint and
+  sign the TLS certificate it presents, which becomes the new pin. A device that merely
+  announces someone else's fingerprint cannot produce that signature, so the most it can
+  cause is one wasted probe. Reachability itself is never a trust input: an unreachable
+  server only changes where work runs (this install's own provider answers, and says so
+  on the reply), never what a peer is allowed to do.
 - **TLS 1.3, self-signed, per-launch.** Default transport is HTTPS/2 with a self-signed
   loopback cert; the private key lives in memory only and never hits disk (only the public
   cert PEM + fingerprint are written, world-readable by design). Downgrade to plain HTTP

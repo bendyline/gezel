@@ -100,6 +100,23 @@ function formatRelative(ms?: number): string {
   return formatRelativeTime(ms);
 }
 
+/**
+ * One line on whether a remembered server can be used right now. Unreachable
+ * isn't an error to fix: work meant for it runs on this install's own
+ * provider until it's back, and the line says so.
+ */
+function remoteStatusText(remote: PairedRemoteInfo, seenOnNetwork: boolean): string {
+  if (remote.status === 'offline' && !seenOnNetwork) {
+    const since = remote.lastSeenAt ? ` (last reached ${formatRelative(remote.lastSeenAt)})` : '';
+    return `not reachable${since} — gezellen answer without it until it's back`;
+  }
+  if (seenOnNetwork) return 'on your network now';
+  if (remote.status === 'online') return 'reachable';
+  return remote.lastSeenAt
+    ? `last reached ${formatRelative(remote.lastSeenAt)}`
+    : `connected ${formatRelative(remote.pairedAt)}`;
+}
+
 /** `48210937` → `4821 0937`, keeping only digits, at most eight. */
 function formatConnectCode(value: string): string {
   const digits = value.replace(/\D/g, '').slice(0, 8);
@@ -391,7 +408,7 @@ export function RemoteServersPanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const [list, cfg] = await Promise.all([api.listRemotes(), api.getConfig()]);
+      const [list, cfg] = await Promise.all([api.listRemotes({ check: true }), api.getConfig()]);
       setRemotes(list.remotes);
       setServing(Boolean(cfg.remoteServing?.enabled));
       setServingPort(cfg.remoteServing?.port);
@@ -1151,12 +1168,7 @@ export function RemoteServersPanel() {
                     <span className="remote-address gz-selectable-text">
                       {new URL(r.baseUrl).hostname}
                     </span>{' '}
-                    —{' '}
-                    {onNetwork.has(r.pinnedIdentityFingerprint)
-                      ? 'on your network now'
-                      : r.lastSeenAt
-                        ? `last reached ${formatRelative(r.lastSeenAt)}`
-                        : `connected ${formatRelative(r.pairedAt)}`}
+                    — {remoteStatusText(r, onNetwork.has(r.pinnedIdentityFingerprint))}
                   </div>
                 </div>
                 <div className="connected-app-actions">

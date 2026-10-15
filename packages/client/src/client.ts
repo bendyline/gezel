@@ -524,6 +524,9 @@ import type {
   MachineServingState,
   PairedRemoteInfo,
   PairingCodeState,
+  RemoteServerModel,
+  RemoteServerModelsResponse,
+  RemoteServerStatus,
 } from './remote-serving.js';
 import { RetrievalClient } from './retrieval.js';
 import {
@@ -557,6 +560,9 @@ export type {
   MachineServingState,
   PairedRemoteInfo,
   PairingCodeState,
+  RemoteServerModel,
+  RemoteServerModelsResponse,
+  RemoteServerStatus,
 } from './remote-serving.js';
 
 export interface ScanModelBundleOptions {
@@ -4753,8 +4759,9 @@ export class GezelClient {
 
   // ---- Remote model execution (paired servers, this device as CLIENT) ----
 
-  listRemotes(): Promise<{ remotes: PairedRemoteInfo[] }> {
-    return this.request('GET', '/api/remotes');
+  /** `check` re-tests reachability first (throttled per server) instead of reporting the last result. */
+  listRemotes(opts?: { check?: boolean }): Promise<{ remotes: PairedRemoteInfo[] }> {
+    return this.request('GET', `/api/remotes${opts?.check ? '?check=1' : ''}`);
   }
 
   pairRemote(body: {
@@ -4815,6 +4822,11 @@ export class GezelClient {
     return this.request('GET', '/api/remotes/discover');
   }
 
+  /** Every paired server's models and whether it is reachable, in one call. */
+  listRemoteServerModels(): Promise<RemoteServerModelsResponse> {
+    return this.request('GET', '/api/remotes/models');
+  }
+
   /** The IPv4 addresses other devices can reach this one at, best first. */
   listLanAddresses(): Promise<{ addresses: LanAddressInfo[] }> {
     return this.request('GET', '/api/remotes/lan-addresses');
@@ -4868,14 +4880,9 @@ export class GezelClient {
 
   listRemoteModels(remoteId: string): Promise<{
     remoteId: string;
-    models: Array<{
-      id: string;
-      name: string;
-      contextWindow?: number;
-      supportsTools?: boolean;
-      supportsReasoning?: boolean;
-      parameterSize?: string;
-    }>;
+    /** Absent from daemons that predate reachability tracking. */
+    status?: RemoteServerStatus;
+    models: RemoteServerModel[];
   }> {
     return this.request('GET', `/api/remotes/${encodeURIComponent(remoteId)}/models`);
   }

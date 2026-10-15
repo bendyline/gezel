@@ -184,6 +184,29 @@ describe('RemoteServersPanel — connecting', () => {
     );
   });
 
+  it('says plainly when a remembered server is away, without treating it as an error', async () => {
+    api.discoverRemotes.mockResolvedValue({ available: true, servers: [] });
+    api.listRemotes.mockResolvedValue({
+      remotes: [
+        {
+          remoteId: SERVER_FP,
+          baseUrl: 'https://192.168.1.20:6229',
+          displayName: 'Werkbank',
+          pinnedIdentityFingerprint: SERVER_FP,
+          scopes: ['remote-inference'],
+          pairedAt: 1,
+          hasToken: true,
+          status: 'offline',
+        },
+      ],
+    });
+    render(<RemoteServersPanel />);
+    expect(
+      await screen.findByText(/not reachable — gezellen answer without it until it's back/),
+    ).toBeTruthy();
+    expect(api.listRemotes).toHaveBeenCalledWith({ check: true });
+  });
+
   it('remembers connected servers and marks the ones on the network now', async () => {
     api.discoverRemotes.mockResolvedValue({
       available: true,

@@ -202,8 +202,13 @@ import { RecognitionManager } from './providers/recognition/manager.js';
 import { resolveAutoMode } from './providers/recognition/prompts.js';
 import { VideoProviderManager } from './providers/video/manager.js';
 import { VideoModelPullRegistry } from './providers/video/pull-registry.js';
-import { createLanAdvertiser, lanDiscoveryEnabled } from './remotes/lan-discovery.js';
+import {
+  createLanAdvertiser,
+  createLanBrowser,
+  lanDiscoveryEnabled,
+} from './remotes/lan-discovery.js';
 import { createPairingCodes } from './remotes/pairing-code.js';
+import { createRemoteReachability } from './remotes/reachability.js';
 import { createRemotesRegistry } from './remotes/registry.js';
 import { createRemoteServingController } from './remotes/serving.js';
 import { createTenantLimiter } from './remotes/tenant-limits.js';
@@ -559,6 +564,10 @@ export async function startProductService(
   // embedded profile offers no remote connectivity, so it has no identity.
   const deviceIdentity = await loadOrCreateDeviceIdentity(home, secrets);
   const remotes = await createRemotesRegistry({ home });
+  // One browser for the Remote Servers panel and for following a paired
+  // server to a new address; it opens a socket only while one of them asks.
+  const lanBrowser = lanDiscoveryEnabled() ? createLanBrowser() : null;
+  const remoteReachability = createRemoteReachability({ registry: remotes, browser: lanBrowser });
   const systemStatus = new SystemStatusBus();
   const mlxRuntimeStatus = new MlxRuntimeStatusBus();
 
@@ -998,6 +1007,7 @@ export async function startProductService(
   // for `remote:<remoteId>/<model>` ids against the paired-servers registry.
   // The multimodal managers get the same wiring after they're constructed.
   chat.setRemotesRegistry(remotes);
+  chat.setRemoteReachability(remoteReachability);
   // Observable-progress auto-advance: ChatManager advances a craftbook step
   // (when its `advanceWhen` deliverable appears) by calling back into the
   // TaskManager's normal completion path. Injected, not a direct handle, to
@@ -2381,6 +2391,8 @@ export async function startProductService(
         ? signCertFingerprint(secrets, home, cert.sha256Hex)
         : Promise.resolve(null),
     remotes,
+    remoteReachability,
+    lanBrowser,
     ...(machineEngine ? { machineEngine } : {}),
     remoteServing,
     pairingCodes: createPairingCodes({

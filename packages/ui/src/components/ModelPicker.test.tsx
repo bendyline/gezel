@@ -38,6 +38,29 @@ describe('ModelPicker model inventory', () => {
     });
   });
 
+  it("lists an unreachable server's last-known models, marked offline", async () => {
+    vi.mocked(api.listRemoteServerModels).mockResolvedValue({
+      servers: [
+        {
+          remoteId: 'a',
+          displayName: 'Werkbank',
+          status: 'offline',
+          models: [{ id: 'remote:a/llama-cpp:qwen', name: 'Qwen 27B' }],
+        },
+        {
+          remoteId: 'b',
+          displayName: 'Studio',
+          status: 'online',
+          models: [{ id: 'remote:b/llama-cpp:gemma', name: 'Gemma 4' }],
+        },
+      ],
+    } as never);
+    render(<ModelPicker provider="remote" value={undefined} onChange={vi.fn()} />);
+    expect(await screen.findByText('Werkbank (offline) · Qwen 27B')).toBeInTheDocument();
+    expect(screen.getByText('Studio · Gemma 4')).toBeInTheDocument();
+    expect(api.listRemoteServerModels).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps reasoning choices keyboard-reachable when the saved effort is unavailable', async () => {
     vi.mocked(api.listProviderModels).mockResolvedValue({
       provider: 'openai',

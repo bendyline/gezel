@@ -1,9 +1,11 @@
 import type {
   PairedRemote,
+  RemoteKnownModel,
   RemotesRegistry,
 } from '@bendyline/gezel-inference/internal/remotes/types';
 export type {
   PairedRemote,
+  RemoteKnownModel,
   RemotesRegistry,
 } from '@bendyline/gezel-inference/internal/remotes/types';
 /**
@@ -138,6 +140,27 @@ async function loadPersisted(filePath: string): Promise<PairedRemote[]> {
   );
 }
 
+/** A cache, not a contract: drop any entry that isn't shaped right instead of the whole file. */
+function decodeKnownModels(raw: unknown[]): RemoteKnownModel[] {
+  const out: RemoteKnownModel[] = [];
+  for (const entry of raw.slice(0, 200)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const m = entry as Partial<RemoteKnownModel>;
+    if (typeof m.id !== 'string' || typeof m.name !== 'string') continue;
+    out.push({
+      id: m.id,
+      name: m.name,
+      ...(typeof m.contextWindow === 'number' ? { contextWindow: m.contextWindow } : {}),
+      ...(typeof m.supportsTools === 'boolean' ? { supportsTools: m.supportsTools } : {}),
+      ...(typeof m.supportsReasoning === 'boolean'
+        ? { supportsReasoning: m.supportsReasoning }
+        : {}),
+      ...(typeof m.parameterSize === 'string' ? { parameterSize: m.parameterSize } : {}),
+    });
+  }
+  return out;
+}
+
 function decodePersisted(raw: string): PairedRemote[] {
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== 'object') throw new Error('expected an object');
@@ -172,6 +195,7 @@ function decodePersisted(raw: string): PairedRemote[] {
       pairedAt: e.pairedAt,
       ...(typeof e.tlsCertPem === 'string' ? { tlsCertPem: e.tlsCertPem } : {}),
       ...(typeof e.lastSeenAt === 'number' ? { lastSeenAt: e.lastSeenAt } : {}),
+      ...(Array.isArray(e.knownModels) ? { knownModels: decodeKnownModels(e.knownModels) } : {}),
     });
   }
   return out;

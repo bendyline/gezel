@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { bytesToHex } from './bytes.js';
 import {
   Spake2Error,
   confirmationsMatch,
@@ -63,68 +64,74 @@ const big = (hex: string) => BigInt(`0x${hex}`);
 
 describe('SPAKE2 (RFC 9382, P256-SHA256-HKDF-HMAC)', () => {
   for (const v of RFC_VECTORS) {
-    it(`matches the RFC test vector for A='${v.A}', B='${v.B}'`, () => {
+    it(`matches the RFC test vector for A='${v.A}', B='${v.B}'`, async () => {
       const a = spake2Start('A', big(v.w), { scalar: big(v.x) });
       const b = spake2Start('B', big(v.w), { scalar: big(v.y) });
-      expect(a.share.toString('hex')).toBe(v.pA);
-      expect(b.share.toString('hex')).toBe(v.pB);
+      expect(bytesToHex(a.share)).toBe(v.pA);
+      expect(bytesToHex(b.share)).toBe(v.pB);
 
       const ids = { idA: v.A, idB: v.B };
-      const aKeys = spake2Finish(a, { ...ids, peerShare: b.share });
-      const bKeys = spake2Finish(b, { ...ids, peerShare: a.share });
+      const aKeys = await spake2Finish(a, { ...ids, peerShare: b.share });
+      const bKeys = await spake2Finish(b, { ...ids, peerShare: a.share });
       for (const keys of [aKeys, bKeys]) {
-        expect(keys.ke.toString('hex')).toBe(v.Ke);
-        expect(keys.confirmA.toString('hex')).toBe(v.AConf);
-        expect(keys.confirmB.toString('hex')).toBe(v.BConf);
+        expect(bytesToHex(keys.ke)).toBe(v.Ke);
+        expect(bytesToHex(keys.confirmA)).toBe(v.AConf);
+        expect(bytesToHex(keys.confirmB)).toBe(v.BConf);
       }
     });
   }
 
-  it('agrees on keys with fresh scalars and the same password', () => {
-    const w = passwordScalar('48210937', 'test');
+  it('agrees on keys with fresh scalars and the same password', async () => {
+    const w = await passwordScalar('48210937', 'test');
     const a = spake2Start('A', w);
     const b = spake2Start('B', w);
     const ids = { idA: 'client-fp', idB: 'server-fp', aad: 'aad' };
-    const aKeys = spake2Finish(a, { ...ids, peerShare: b.share });
-    const bKeys = spake2Finish(b, { ...ids, peerShare: a.share });
+    const aKeys = await spake2Finish(a, { ...ids, peerShare: b.share });
+    const bKeys = await spake2Finish(b, { ...ids, peerShare: a.share });
     expect(confirmationsMatch(aKeys.confirmA, bKeys.confirmA)).toBe(true);
     expect(confirmationsMatch(aKeys.confirmB, bKeys.confirmB)).toBe(true);
-    expect(aKeys.ke.equals(bKeys.ke)).toBe(true);
+    expect(bytesToHex(aKeys.ke)).toBe(bytesToHex(bKeys.ke));
   });
 
-  it('disagrees when the passwords differ', () => {
-    const a = spake2Start('A', passwordScalar('48210937', 'test'));
-    const b = spake2Start('B', passwordScalar('48210938', 'test'));
+  it('disagrees when the passwords differ', async () => {
+    const a = spake2Start('A', await passwordScalar('48210937', 'test'));
+    const b = spake2Start('B', await passwordScalar('48210938', 'test'));
     const ids = { idA: 'client-fp', idB: 'server-fp' };
-    const aKeys = spake2Finish(a, { ...ids, peerShare: b.share });
-    const bKeys = spake2Finish(b, { ...ids, peerShare: a.share });
+    const aKeys = await spake2Finish(a, { ...ids, peerShare: b.share });
+    const bKeys = await spake2Finish(b, { ...ids, peerShare: a.share });
     expect(confirmationsMatch(aKeys.confirmA, bKeys.confirmA)).toBe(false);
     expect(confirmationsMatch(aKeys.confirmB, bKeys.confirmB)).toBe(false);
   });
 
-  it('disagrees when the two sides pinned different identities, as a relay in the middle would', () => {
-    const w = passwordScalar('48210937', 'test');
+  it('disagrees when the two sides pinned different identities, as a relay in the middle would', async () => {
+    const w = await passwordScalar('48210937', 'test');
     const a = spake2Start('A', w);
     const b = spake2Start('B', w);
-    const aKeys = spake2Finish(a, { idA: 'client-fp', idB: 'impostor-fp', peerShare: b.share });
-    const bKeys = spake2Finish(b, { idA: 'client-fp', idB: 'server-fp', peerShare: a.share });
+    const aKeys = await spake2Finish(a, {
+      idA: 'client-fp',
+      idB: 'impostor-fp',
+      peerShare: b.share,
+    });
+    const bKeys = await spake2Finish(b, {
+      idA: 'client-fp',
+      idB: 'server-fp',
+      peerShare: a.share,
+    });
     expect(confirmationsMatch(aKeys.confirmA, bKeys.confirmA)).toBe(false);
   });
 
-  it('refuses a share that is not a point on P-256', () => {
-    const b = spake2Start('B', passwordScalar('1', 'test'));
-    const offCurve = Buffer.from(b.share);
+  it('refuses a share that is not a point on P-256', async () => {
+    const b = spake2Start('B', await passwordScalar('1', 'test'));
+    const offCurve = Uint8Array.from(b.share);
     offCurve[64] = (offCurve[64]! ^ 1) & 0xff;
-    expect(() => spake2Finish(b, { idA: '', idB: '', peerShare: offCurve })).toThrow(Spake2Error);
-    expect(() => spake2Finish(b, { idA: '', idB: '', peerShare: Buffer.alloc(65) })).toThrow(
-      Spake2Error,
-    );
-    expect(() => spake2Finish(b, { idA: '', idB: '', peerShare: Buffer.from([4, 1, 2]) })).toThrow(
-      Spake2Error,
-    );
+    for (const peerShare of [offCurve, new Uint8Array(65), Uint8Array.from([4, 1, 2])]) {
+      await expect(spake2Finish(b, { idA: '', idB: '', peerShare })).rejects.toBeInstanceOf(
+        Spake2Error,
+      );
+    }
   });
 
-  it('binds the password to its context', () => {
-    expect(passwordScalar('48210937', 'a')).not.toBe(passwordScalar('48210937', 'b'));
+  it('binds the password to its context', async () => {
+    expect(await passwordScalar('48210937', 'a')).not.toBe(await passwordScalar('48210937', 'b'));
   });
 });

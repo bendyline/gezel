@@ -52,6 +52,7 @@ final class MainViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(GezelMobilePlugin())
         bridge?.registerPluginInstance(GezelSpeechPlugin())
         bridge?.registerPluginInstance(GezelVisionPlugin())
+        bridge?.registerPluginInstance(GezelRemotePlugin())
     }
 }
 

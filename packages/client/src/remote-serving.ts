@@ -1,3 +1,9 @@
+/**
+ * Whether a paired server could be reached the last time this daemon tried:
+ * `unknown` until it has been contacted since the daemon started.
+ */
+export type RemoteServerStatus = 'online' | 'offline' | 'unknown';
+
 /** One server this device has paired with (token redacted). */
 export interface PairedRemoteInfo {
   remoteId: string;
@@ -6,8 +12,35 @@ export interface PairedRemoteInfo {
   pinnedIdentityFingerprint: string;
   scopes: string[];
   pairedAt: number;
+  /** Last time this daemon actually reached the server. */
   lastSeenAt?: number;
   hasToken: boolean;
+  status?: RemoteServerStatus;
+  /** When it last failed to reach the server. */
+  lastFailAt?: number;
+}
+
+/** A model a paired server offers, namespaced `remote:<remoteId>/<model>`. */
+export interface RemoteServerModel {
+  id: string;
+  name: string;
+  contextWindow?: number;
+  supportsTools?: boolean;
+  supportsReasoning?: boolean;
+  parameterSize?: string;
+}
+
+/**
+ * GET /api/remotes/models: every paired server's models, checked in
+ * parallel. An `offline` server lists the models it had when last reached.
+ */
+export interface RemoteServerModelsResponse {
+  servers: Array<{
+    remoteId: string;
+    displayName: string;
+    status: RemoteServerStatus;
+    models: RemoteServerModel[];
+  }>;
 }
 
 /** A gezel server another device is announcing on the local network. */
