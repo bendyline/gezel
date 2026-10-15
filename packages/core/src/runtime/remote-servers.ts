@@ -186,6 +186,10 @@ export class PortableRemoteServers {
     if (!this.host?.browse) return { available: false, servers: [] };
     const paired = (await this.store.readRemotes()).servers;
     const found = await this.host.browse(1_500).catch(() => []);
+    for (const s of found) {
+      const moved = paired.find((p) => p.pinnedIdentityFingerprint === s.fingerprint);
+      if (moved) await this.relocate(moved, `https://${hostForUrl(s.host)}:${s.port}`);
+    }
     return {
       available: true,
       servers: found.map((s) => {
@@ -202,6 +206,54 @@ export class PortableRemoteServers {
         };
       }),
     };
+  }
+
+  /**
+   * Follow a paired server to the address it now announces (a new DHCP
+   * lease), once the server there proves the pinned identity: its identity
+   * key hashes to the pinned fingerprint and signs the certificate it shows.
+   * Anyone can announce a fingerprint; only the server can sign for it.
+   */
+  private async relocate(
+    server: PortablePairedServer,
+    baseUrl: string,
+  ): Promise<PortablePairedServer | null> {
+    if (baseUrl === server.baseUrl || !this.host) return null;
+    try {
+      const identity = await readServerIdentity(
+        this.host.http,
+        baseUrl,
+        AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      );
+      if (
+        identity.fingerprint !== server.pinnedIdentityFingerprint ||
+        !(await verifyRemoteIdentity(identity))
+      )
+        return null;
+      // A signed identity can be replayed; holding its certificate's key
+      // cannot. Only a channel pinned to that certificate proves the server.
+      const pinned = this.host.http.pinned(identity.tlsCertPem!);
+      try {
+        const confirmed = await pinned(`${baseUrl}/v1/identity`, {
+          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        });
+        await confirmed.body?.cancel().catch(() => {});
+      } finally {
+        void pinned.close?.();
+      }
+      const moved = { ...server, baseUrl, tlsCertPem: identity.tlsCertPem! };
+      await this.update(server.remoteId, { baseUrl, tlsCertPem: moved.tlsCertPem });
+      return moved;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Look for a paired server that didn't answer at its address, and follow it. */
+  private async findElsewhere(server: PortablePairedServer): Promise<PortablePairedServer | null> {
+    const found = await this.host?.browse?.(1_000).catch(() => []);
+    const seen = found?.find((s) => s.fingerprint === server.pinnedIdentityFingerprint);
+    return seen ? this.relocate(server, `https://${hostForUrl(seen.host)}:${seen.port}`) : null;
   }
 
   /** Whether the server at an address can pair with a connect code. */
@@ -312,18 +364,30 @@ export class PortableRemoteServers {
     }
     const pending = this.inflight.get(remoteId);
     if (pending) return pending;
+    const probe = async (target: PortablePairedServer) => {
+      const response = await this.fetchFor(target)(`${target.baseUrl}/v1/identity`, {
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+      await response.body?.cancel().catch(() => {});
+    };
     const run = (async (): Promise<RemoteServerStatus> => {
       try {
-        const response = await this.fetchFor(server)(`${server.baseUrl}/v1/identity`, {
-          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-        });
-        await response.body?.cancel().catch(() => {});
-        this.reportReachable(remoteId);
-        return 'online';
+        await probe(server);
       } catch {
-        this.reportUnreachable(remoteId);
-        return 'offline';
+        const moved = await this.findElsewhere(server);
+        if (
+          !moved ||
+          !(await probe(moved).then(
+            () => true,
+            () => false,
+          ))
+        ) {
+          this.reportUnreachable(remoteId);
+          return 'offline';
+        }
       }
+      this.reportReachable(remoteId);
+      return 'online';
     })().finally(() => this.inflight.delete(remoteId));
     this.inflight.set(remoteId, run);
     return run;

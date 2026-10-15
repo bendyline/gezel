@@ -97,12 +97,19 @@ describe('createPairingCodes', () => {
   it('spends attempts for runs started together, so a burst cannot share one', async () => {
     const codes = createPairingCodes({ serverFingerprint: () => SERVER_FP, maxAttempts: 2 });
     const { code } = codes.open();
+    // Each run hashes its code first, so they reach the server in any order;
+    // whichever arrives third finds the attempts spent.
     const results = await Promise.allSettled([
       clientRun(codes, otherThan(code)),
       clientRun(codes, otherThan(code)),
       clientRun(codes, code),
     ]);
-    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled', 'rejected']);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(2);
+    const refused = results.filter((r) => r.status === 'rejected');
+    expect(refused).toHaveLength(1);
+    expect((refused[0] as PromiseRejectedResult).reason).toBeInstanceOf(
+      PairingAttemptsExhaustedError,
+    );
   });
 
   it('stops new runs at expiry but lets a run already started finish', async () => {

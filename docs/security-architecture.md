@@ -122,7 +122,8 @@ The **enforcement layers** a model-driven action passes through, outermost first
   daemon. `bindAddress` is validated to an IP literal at bind time, and per-tenant limits
   (concurrency + `requestsPerMinute`) are enforced for paired devices while the first-party
   bridge credential is exempt.
-- **Pairing a device by connect code** (`remotes/spake2.ts`, `remotes/pairing-code.ts`,
+- **Pairing a device by connect code** (core `remote/spake2.ts` and `remote/pairing.ts`,
+  shared by the daemon and the phone; the server half in `remotes/pairing-code.ts` and
   `http/routes/v1-apps-pair.ts`). Settings → Remote Servers → Add a device shows a random
   8-digit code; the connecting device types it, and the two daemons run SPAKE2 (RFC 9382,
   P256-SHA256-HKDF-HMAC, checked against the RFC's test vectors) over the TLS channel pinned
@@ -154,11 +155,33 @@ The **enforcement layers** a model-driven action passes through, outermost first
   When a paired server can't be reached and discovery reports its fingerprint at another
   address (a new DHCP lease), the client adopts that address only after the server there
   proves the pinned identity: its `/v1/identity` key must hash to the pinned fingerprint and
-  sign the TLS certificate it presents, which becomes the new pin. A device that merely
-  announces someone else's fingerprint cannot produce that signature, so the most it can
-  cause is one wasted probe. Reachability itself is never a trust input: an unreachable
+  sign a TLS certificate, and a request pinned to that certificate must then complete at
+  the new address, which proves the server there holds the certificate's key. The
+  certificate becomes the new pin. A device that announces someone else's fingerprint
+  cannot produce the signature, and one replaying the real server's signed identity cannot
+  complete the pinned handshake, so the most either can cause is one wasted probe. The
+  phone follows the same rule. Reachability itself is never a trust input: an unreachable
   server only changes where work runs (this install's own provider answers, and says so
   on the reply), never what a peer is allowed to do.
+- **Phones using a server's models** (core `runtime/remote-servers.ts`, mobile
+  `src/remote.ts`, the `GezelRemote` native plugins). A phone only connects; it never
+  serves. It pairs with the same connect-code client the daemon runs and keeps each
+  pairing, device token included, in `remotes.json`: Device tier, so app storage only,
+  never the person's synced Work folder or a gezel backup (Android also sets
+  `allowBackup="false"`). The page cannot reach a server itself (`connect-src 'self'`), so
+  requests go through the OS: the plugin accepts only `https://` IP-literal URLs (it is not
+  a general proxy), trusts exactly the leaf certificate the page pinned, and skips hostname
+  checks because that certificate names 127.0.0.1. Before anything is pinned, `/v1/identity`
+  is read without a pin, and the page accepts what it says only if the identity key signs
+  the certificate presented. On Android that first read takes the certificate from a
+  handshake the plugin refuses and then pins the request to it, so no trust manager ever
+  accepts a certificate it was not given. When the pinned certificate is refused (the
+  server restarted and made a new one), the phone re-reads the identity and adopts the new
+  certificate only if the pinned identity signed it. A turn on a server's model runs the
+  phone's own tool loop: the server sees the prompt and tool schemas and returns calls,
+  and every tool runs on the phone against the phone's files. Discovery uses Bonjour or
+  NSD for `_gezel._tcp`, and on iOS that is behind the system local-network prompt. The
+  Klerk and other background chores stay on the phone's own model.
 - **TLS 1.3, self-signed, per-launch.** Default transport is HTTPS/2 with a self-signed
   loopback cert; the private key lives in memory only and never hits disk (only the public
   cert PEM + fingerprint are written, world-readable by design). Downgrade to plain HTTP

@@ -26,6 +26,7 @@ import { createLogger } from '@bendyline/gezel';
 import { fingerprintOfPublicKeyPem } from '@bendyline/gezel-inference/internal/remotes/identity';
 import {
   closePairedRemoteFetches,
+  createPinnedFetch,
   getPairedRemoteFetch,
 } from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
 import type { LanBrowser } from './lan-discovery.js';
@@ -81,9 +82,11 @@ interface Entry {
 /**
  * Adopt a new address for a paired server: only when discovery reports its
  * fingerprint somewhere else AND the server there proves it holds the pinned
- * identity key (its `/v1/identity` signs its TLS certificate with that key).
- * A device merely announcing someone else's fingerprint can't produce that
- * signature, so the worst it can do is waste one probe.
+ * identity key (its `/v1/identity` signs its TLS certificate with that key)
+ * AND that certificate's key (a channel pinned to it completes a request). A
+ * device announcing someone else's fingerprint can't produce the signature,
+ * and one replaying the real server's signed identity can't complete the
+ * handshake, so the worst either can do is waste one probe.
  */
 export async function relocateRemote(
   remote: PairedRemote,
@@ -92,6 +95,8 @@ export async function relocateRemote(
     browser: LanBrowser | null;
     candidate?: string;
     inspect?: typeof inspectRemoteIdentity;
+    /** Reach `baseUrl` over a channel pinned to `tlsCertPem`; throws when it can't. */
+    confirm?: (baseUrl: string, tlsCertPem: string) => Promise<void>;
   },
 ): Promise<string | null> {
   let candidate = deps.candidate;
@@ -112,12 +117,30 @@ export async function relocateRemote(
   ) {
     return null;
   }
+  try {
+    await (deps.confirm ?? confirmPinnedIdentity)(baseUrl, identity.tlsCertPem);
+  } catch {
+    return null;
+  }
   await deps.registry.update(remote.remoteId, { baseUrl, tlsCertPem: identity.tlsCertPem });
   await closePairedRemoteFetches(deps.registry, remote.remoteId);
   log.info(
     `[remote-reachability] ${remote.displayName} moved from ${remote.baseUrl} to ${baseUrl}; following it`,
   );
   return baseUrl;
+}
+
+/** A signed identity can be replayed; only a server holding its certificate's key gets this far. */
+async function confirmPinnedIdentity(baseUrl: string, tlsCertPem: string): Promise<void> {
+  const fetchImpl = createPinnedFetch(tlsCertPem);
+  try {
+    const response = await fetchImpl(`${baseUrl}/v1/identity`, {
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    await response.body?.cancel().catch(() => {});
+  } finally {
+    await fetchImpl.close().catch(() => {});
+  }
 }
 
 /** One unauthenticated round trip over the pinned channel. */

@@ -253,7 +253,9 @@ export async function pairRemoteWithCode(
   // A device re-paired after a reinstall has a new identity at the same
   // address; the registry drops the stale entry for that address.
   await ctx.remotes.add(paired);
-  log.info(`[remote-pairing] paired with ${paired.baseUrl} by connect code (${paired.displayName})`);
+  log.info(
+    `[remote-pairing] paired with ${paired.baseUrl} by connect code (${paired.displayName})`,
+  );
   return paired;
 }
 

@@ -40,6 +40,8 @@ export async function fakeRemoteServer() {
   const server = {
     fingerprint,
     online: true,
+    /** The address it answers at; a request to any other reaches nothing. */
+    address: '192.168.1.20',
     certPem: '',
     identity: {} as Record<string, unknown>,
     deletes: [] as string[],
@@ -85,7 +87,7 @@ export async function fakeRemoteServer() {
     });
 
   async function handle(url: string, init?: RequestInit): Promise<Response> {
-    if (!server.online)
+    if (!server.online || new URL(url).hostname !== server.address)
       throw Object.assign(new TypeError('fetch failed'), { code: 'ECONNREFUSED' });
     const path = new URL(url).pathname;
     const body = init?.body ? JSON.parse(String(init.body)) : {};
@@ -138,7 +140,8 @@ export async function fakeRemoteServer() {
     bootstrap: () => ((input: string) => handle(String(input))) as unknown as RemoteFetch,
     pinned: (certPem: string) =>
       (async (input: string, init?: RequestInit) => {
-        if (server.online && certPem !== server.certPem) {
+        const reached = server.online && new URL(String(input)).hostname === server.address;
+        if (reached && certPem !== server.certPem) {
           throw Object.assign(new Error('certificate refused'), {
             code: REMOTE_CERTIFICATE_REFUSED,
           });

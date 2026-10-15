@@ -2143,6 +2143,16 @@ without it until it's back", pickers keep its models listed as "(offline)", and
 a reply that ran on the fallback carries one line saying which server was away
 and what answered instead.
 
+A phone is only ever the connecting side, so it gets the second half of the
+lobby alone: Settings → Artificial Intelligence → **Another device**, below the
+phone's own model. Nearby computers, the code field, and connect-by-address sit
+in the same order, and each connected computer lists its models as **Use …**
+keys, the one in use marked "in use". Choosing one does not replace the phone's
+own model. That model stays chosen above, labelled as the one that answers
+while the computer is away, and **Use this phone's model** switches back.
+Leaving the network is the normal case on a phone, so the reply's fallback line,
+not an error, is how a person learns about it.
+
 **A label travels with its control.** In a wrapping row of labelled controls —
 the gezel header's Model, Context, Sandbox — wrap each label and its keys in one
 non-wrapping group (`.provider-override-group`), so a line never ends on

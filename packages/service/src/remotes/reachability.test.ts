@@ -190,17 +190,50 @@ describe('relocateRemote', () => {
       tlsCertPem: 'NEW-CERT',
     })) as unknown as typeof inspectRemoteIdentity;
 
+    const confirm = vi.fn(async () => {});
     const moved = await relocateRemote(registry.get(fp)!, {
       registry,
       browser: null,
       candidate: 'https://192.168.1.77:6229',
       inspect,
+      confirm,
     });
     expect(moved).toBe('https://192.168.1.77:6229');
+    expect(confirm).toHaveBeenCalledWith('https://192.168.1.77:6229', 'NEW-CERT');
     expect(registry.get(fp)).toMatchObject({
       baseUrl: 'https://192.168.1.77:6229',
       tlsCertPem: 'NEW-CERT',
     });
+  });
+
+  it('stays put when another device replays the server’s signed identity', async () => {
+    const { generateKeyPairSync } = await import('node:crypto');
+    const { fingerprintOfPublicKeyPem } = await import(
+      '@bendyline/gezel-inference/internal/remotes/identity'
+    );
+    const pem = generateKeyPairSync('ed25519')
+      .publicKey.export({ type: 'spki', format: 'pem' })
+      .toString();
+    const fp = fingerprintOfPublicKeyPem(pem);
+    const registry = fakeRegistry([remote({ remoteId: fp, pinnedIdentityFingerprint: fp })]);
+    // The real identity, answered from an address whose TLS key isn't the server's.
+    const inspect = vi.fn(async () => ({
+      deviceId: 'srv',
+      publicKeyPem: pem,
+      fingerprint: fp,
+      tlsCertPem: 'REAL-CERT',
+    })) as unknown as typeof inspectRemoteIdentity;
+    const moved = await relocateRemote(registry.get(fp)!, {
+      registry,
+      browser: null,
+      candidate: 'https://192.168.1.66:6229',
+      inspect,
+      confirm: async () => {
+        throw new Error('certificate refused');
+      },
+    });
+    expect(moved).toBeNull();
+    expect(registry.get(fp)?.baseUrl).toBe('https://192.168.1.20:6229');
   });
 
   it('refuses a device announcing a fingerprint it cannot prove', async () => {

@@ -91,6 +91,70 @@ describe('PortableRemoteServers', () => {
     expect((await remotes.list())[0]?.status).toBe('offline');
   });
 
+  it('follows a server to a new address once it proves who it is', async () => {
+    let t = 1_000_000;
+    const { server, http } = await fakeServer();
+    const store = memoryStore();
+    const browse = async () => [
+      { name: 'Werkbank', host: server.address, port: 6229, fingerprint: server.fingerprint },
+    ];
+    const remotes = new PortableRemoteServers(
+      store,
+      { http, browse, deviceName: () => 'Phone' },
+      () => t,
+    );
+    const info = await remotes.pair({ baseUrl: BASE, code: '48210937' });
+    server.address = '192.168.1.31';
+    await server.rotate();
+    t += 61_000;
+    expect(await remotes.check(info.remoteId)).toBe('online');
+    expect(store.value.servers[0]).toMatchObject({
+      baseUrl: 'https://192.168.1.31:6229',
+      tlsCertPem: server.certPem,
+    });
+  });
+
+  it('stays put when another device replays a paired server’s identity', async () => {
+    let t = 1_000_000;
+    const real = await fakeServer();
+    const impostor = await fakeServer();
+    impostor.server.address = '192.168.1.66';
+    const store = memoryStore();
+    // Every address is reachable through one network; the impostor answers
+    // with the real server's signed identity, but holds its own certificate.
+    const route = (input: unknown) =>
+      new URL(String(input)).hostname === impostor.server.address ? impostor.http : real.http;
+    const http = {
+      bootstrap: () =>
+        ((input: string, init?: RequestInit) =>
+          route(input).bootstrap()(input, init)) as unknown as ReturnType<
+          typeof real.http.bootstrap
+        >,
+      pinned: (pem: string) =>
+        ((input: string, init?: RequestInit) =>
+          route(input).pinned(pem)(input, init)) as unknown as ReturnType<typeof real.http.pinned>,
+    };
+    const browse = async () => [
+      {
+        name: 'Werkbank',
+        host: impostor.server.address,
+        port: 6229,
+        fingerprint: real.server.fingerprint,
+      },
+    ];
+    const remotes = new PortableRemoteServers(
+      store,
+      { http, browse, deviceName: () => 'Phone' },
+      () => t,
+    );
+    const info = await remotes.pair({ baseUrl: BASE, code: '48210937' });
+    impostor.server.identity = real.server.identity;
+    real.server.online = false;
+    t += 61_000;
+    expect(await remotes.check(info.remoteId)).toBe('offline');
+    expect(store.value.servers[0]?.baseUrl).toBe(BASE);
+  });
+
   it('forgets a server and asks it to forget this device', async () => {
     const { server, store, remotes, info } = await paired();
     await remotes.forget(info.remoteId);

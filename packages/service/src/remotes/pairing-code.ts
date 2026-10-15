@@ -92,10 +92,7 @@ export interface PairingCodes {
    * SPAKE2 round two. Returns this side's confirmation when the client's
    * checks out, and closes the window: one code, one device.
    */
-  confirm(
-    sessionId: string,
-    confirmA: Uint8Array,
-  ): { confirmB: Uint8Array; client: PairingClient };
+  confirm(sessionId: string, confirmA: Uint8Array): { confirmB: Uint8Array; client: PairingClient };
 }
 
 interface Window {
