@@ -799,10 +799,10 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     ],
   },
   'deep-security-review': {
-    // Recipe mode: 0 of 280 scorecard runs ever drove this book, so every
-    // pass measured freehand output (2026-10-06 eval review). Switched before
-    // the 2026-10 scorecard refresh; rounds before it are not comparable here.
-    mode: 'workflow',
+    // Stays freehand until its test.json installs builtin.code-intel and
+    // builtin.security-intel: in recipe mode the launch refuses the task
+    // (409 CraftbookSetupRequiredError), so all three 2026-10-12 scorecard
+    // trials crashed before a model turn.
     // Bounded for the `developer` suite.
     timeoutMs: 45 * 60_000,
     progressTimeoutMs: 12 * 60_000,

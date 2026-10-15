@@ -1288,6 +1288,16 @@ Two consequences were acted on:
    windowed and *also* loses `cache_reuse`. A memory decision is therefore
    doubling as a cache-reuse decision, which is worth knowing when a
    smaller-RAM machine shows unexpectedly poor prefill reuse.
+3. **The auto-default is also declined past the automatic KV ceiling**
+   (`AUTO_KV_CACHE_MAX_BYTES`, 32 GiB, overridable with
+   `GEZEL_LLAMA_AUTO_KV_MAX_GB`), even where the full cache fits. gemma4-31b's
+   full cache is 55 GiB at 64K against 6 GiB windowed (880 vs 80 KiB/token
+   plus a ~1.2 GiB window block per slot), and on a 121 GB DGX Spark adaptive
+   growth had taken it to 69.6 GiB for a window its trials never used past
+   42K. The same ceiling stops adaptive growth for every model, and on a
+   shared memory pool growth also leaves half of what the base launch leaves
+   free (`ADAPTIVE_GROWTH_SHARED_FREE_SHARE`). A pinned `swaFull` keeps the
+   full cache, and an explicit context size skips growth altogether.
 
 Still open: whether the qwen preamble-above-tools problem (see the MLX
 section) is worth fixing on llama-cpp too. It is the same template property
