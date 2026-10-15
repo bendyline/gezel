@@ -11,6 +11,7 @@ import {
   needsSmallModelRecommendation,
   pickRecommendedModel,
   prefersMoE,
+  rateModelsForDevice,
 } from './recommendation.js';
 
 const GB = 1024 ** 3;
@@ -371,6 +372,87 @@ describe('pickRecommendedModel', () => {
     // The low-acceleration policy chooses the smallest curated candidate.
     expect(pick?.id).toBe('gemma4-e2b-q4');
     expect(pick?.reason).toMatch(/safest small model/);
+  });
+});
+
+describe('rateModelsForDevice', () => {
+  const smallCard: RecoDevice = {
+    platform: 'win32',
+    gpuVramBytes: 12 * GB,
+    totalRamBytes: 32 * GB,
+    usableBytes: 11.4 * GB,
+  };
+  const byId = (ratings: ReturnType<typeof rateModelsForDevice>, id: string) =>
+    ratings.find((r) => r.id === id);
+
+  it('leads with the first-run pick at 100 and keeps every other model below it', () => {
+    const ratings = rateModelsForDevice(CANDIDATES, smallCard);
+    expect(ratings[0]).toMatchObject({ id: 'qwen3.6-35b-a3b-q4', score: 100, recommended: true });
+    expect(ratings.filter((r) => r.recommended)).toHaveLength(1);
+    for (const rating of ratings.slice(1)) expect(rating.score).toBeLessThanOrEqual(99);
+    const scores = ratings.map((r) => r.score);
+    expect(scores).toEqual([...scores].sort((a, b) => b - a));
+  });
+
+  it('scores a model that cannot run here 0 and lists it last', () => {
+    const ratings = rateModelsForDevice(CANDIDATES, smallCard);
+    for (const id of ['qwen3.6-27b-q8', 'qwen3.6-35b-a3b-q8']) {
+      expect(byId(ratings, id)).toMatchObject({ score: 0, fit: { tier: 'too-big' } });
+    }
+    expect(ratings.slice(-2).map((r) => r.id)).toEqual(
+      expect.arrayContaining(['qwen3.6-27b-q8', 'qwen3.6-35b-a3b-q8']),
+    );
+  });
+
+  it('ranks every model that runs comfortably above one this machine would pace', () => {
+    const ratings = rateModelsForDevice(CANDIDATES, smallCard);
+    // A dense 27B larger than the card pages from RAM.
+    expect(byId(ratings, 'qwen3.6-27b-q4')).toMatchObject({ score: 40, fit: { tier: 'tight' } });
+    // Gemma's 15 against the best runnable 20, fully on the card.
+    expect(byId(ratings, 'gemma4-12b-q4')?.score).toBe(88);
+    // MoE-alignment breaks the tie among equal scores on a small card.
+    expect(ratings[1]?.id).toBe('gemma4-26b-q4');
+  });
+
+  it('gives an uncurated model that runs half marks, a stray score on a restricted one too', () => {
+    const ratings = rateModelsForDevice(CANDIDATES, smallCard);
+    expect(byId(ratings, 'mistral-7b-q4')?.score).toBe(50);
+    expect(byId(ratings, 'llama3.2-3b-q4')?.score).toBe(50);
+  });
+
+  it('CPU-only host: the smallest curated model leads and large ones are discounted', () => {
+    const ratings = rateModelsForDevice(CANDIDATES, {
+      platform: 'linux',
+      gpuVramBytes: null,
+      totalRamBytes: 16 * GB,
+      usableBytes: 8 * GB,
+    });
+    expect(ratings[0]).toMatchObject({ id: 'gemma4-e2b-q4', recommended: true });
+    for (const rating of ratings) {
+      const model = CANDIDATES.find((c) => c.id === rating.id)!;
+      if (model.residentBytes > 8 * GB) expect(rating.score).toBeLessThanOrEqual(40);
+    }
+  });
+
+  it('big discrete GPU: a MoE that fits ranks below the dense pick', () => {
+    const ratings = rateModelsForDevice(CANDIDATES, {
+      platform: 'win32',
+      gpuVramBytes: 34.2 * GB,
+      totalRamBytes: 64 * GB,
+      usableBytes: 32.5 * GB,
+    });
+    expect(ratings[0]).toMatchObject({ id: 'qwen3.6-27b-q4', recommended: true });
+    expect(byId(ratings, 'qwen3.6-35b-a3b-q4')?.score).toBe(90);
+  });
+
+  it('recommends nothing when no model is curated', () => {
+    const ratings = rateModelsForDevice(
+      [{ id: 'plain', licenseClass: 'open', tags: [], residentBytes: 4 * GB }],
+      smallCard,
+    );
+    expect(ratings).toEqual([
+      expect.objectContaining({ id: 'plain', score: 50, recommended: false }),
+    ]);
   });
 });
 

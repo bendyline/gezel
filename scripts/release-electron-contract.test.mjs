@@ -5,8 +5,26 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import {
+  RELEASE_VALIDATION_PHASES,
+  VALIDATION_PHASE_NAMES,
+  validationPhaseSteps,
+} from './validate-workspace.mjs';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
+
+/** Each top-level job of a workflow, keyed by job id, as its raw YAML text. */
+function workflowJobs(source) {
+  const body = source.slice(source.indexOf('\njobs:\n') + '\njobs:\n'.length);
+  const headers = [...body.matchAll(/^ {2}([\w-]+):\n/gm)];
+  return Object.fromEntries(
+    headers.map((header, index) => [
+      header[1],
+      body.slice(header.index, headers[index + 1]?.index ?? body.length),
+    ]),
+  );
+}
 
 test('Electron release configuration pins the audited packaging contracts', async () => {
   const [
@@ -436,22 +454,80 @@ test('npm release builds every workspace package the test-embedder prewarm impor
       'utf8',
     ),
   ]);
-  const build = publish.match(/name: Build the test embedder's dependencies\n\s+run: (.+)/)?.[1];
-  assert.ok(build, 'the release job must build the prewarm closure, not the whole workspace');
-  assert.ok(
-    publish.indexOf(build) < publish.indexOf('uses: ./.github/actions/setup-test-embedder'),
-    'the prewarm closure must be built before the embedder is verified',
-  );
   const imported = [...prewarm.matchAll(/(?:from |import\()'(@bendyline\/[^/']+)/g)].map(
     (match) => match[1],
   );
   assert.ok(imported.length > 0, 'the prewarm must load the embedder from a workspace package');
-  for (const pkg of imported) {
+  const prewarmJobs = Object.entries(workflowJobs(publish)).filter(([, job]) =>
+    job.includes('uses: ./.github/actions/setup-test-embedder'),
+  );
+  assert.ok(prewarmJobs.length > 0, 'the release must verify the shared embedding cache');
+  for (const [id, job] of prewarmJobs) {
+    const build = job.match(/name: Build the test embedder's dependencies\n\s+run: (.+)/)?.[1];
+    assert.ok(build, `release job ${id} must build the prewarm closure, not the whole workspace`);
     assert.ok(
-      build.includes(`--filter "${pkg}..."`),
-      `the prewarm resolves ${pkg} through its built dist/, so the release job must build it`,
+      job.indexOf(build) < job.indexOf('uses: ./.github/actions/setup-test-embedder'),
+      `release job ${id} must build the prewarm closure before the embedder is verified`,
     );
+    for (const pkg of imported) {
+      assert.ok(
+        build.includes(`--filter "${pkg}..."`),
+        `the prewarm resolves ${pkg} through its built dist/, so release job ${id} must build it`,
+      );
+    }
   }
+});
+
+test('npm release runs every phase of the canonical gate before it publishes', async () => {
+  const [rootPackageSource, publish] = await Promise.all([
+    readFile(join(root, 'package.json'), 'utf8'),
+    readFile(join(root, '.github', 'workflows', 'publish-npm.yml'), 'utf8'),
+  ]);
+  const scripts = JSON.parse(rootPackageSource).scripts;
+  const chain = scripts['validate:unlocked'];
+  const jobs = workflowJobs(publish);
+
+  const phaseJobs = new Map();
+  for (const phase of VALIDATION_PHASE_NAMES) {
+    const runners = Object.entries(jobs).filter(([, job]) =>
+      job.includes(`run: xvfb-run -a pnpm validate --phase=${phase}\n`),
+    );
+    assert.equal(runners.length, 1, `exactly one release job must run the ${phase} phase`);
+    phaseJobs.set(phase, runners[0][0]);
+  }
+  assert.doesNotMatch(
+    publish,
+    /run: xvfb-run -a pnpm validate\n/,
+    'the release runs the gate as phases; a whole-gate run is the serial job that outgrew its cap',
+  );
+
+  const needs = jobs.release
+    .match(/needs: \[([^\]]*)\]/)?.[1]
+    .split(',')
+    .map((id) => id.trim());
+  assert.ok(needs, 'the publish job must list the jobs it waits for');
+  assert.deepEqual(
+    [...new Set(phaseJobs.values())].sort(),
+    [...needs].sort(),
+    'the publish job must wait for every phase of the gate, and only for them',
+  );
+
+  // `test:stability` runs its pass twice; one pass per runner must add up to the same.
+  const stabilityJob = jobs[phaseJobs.get('stability')];
+  assert.deepEqual(RELEASE_VALIDATION_PHASES.stability.runs, ['pnpm test:stability:pass']);
+  assert.equal(
+    scripts['test:stability:unleased'],
+    'pnpm test:stability:pass:unleased && pnpm test:stability:pass:unleased',
+  );
+  assert.match(stabilityJob, /matrix:\n\s+pass: \[2, 3\]/);
+  assert.match(stabilityJob, /fail-fast: false/);
+
+  // Every step of the chain runs in exactly one phase.
+  const covered = [
+    ...validationPhaseSteps(chain, 'main'),
+    ...Object.values(RELEASE_VALIDATION_PHASES).flatMap(({ takes }) => takes),
+  ];
+  assert.deepEqual([...covered].sort(), chain.split(' && ').sort());
 });
 
 test('PR CI runs the full browser and Electron suites the release gates on', async () => {

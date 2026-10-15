@@ -1,12 +1,12 @@
 # @bendyline/gezel-app-sdk
 
-Public SDK for building third-party local apps against [gezel](https://github.com/bendyline/gezel). Gives you discovery, user consent, and an OpenAI-compatible chat / embeddings / models / ensure-model client in under 50 lines.
+Public SDK for building third-party local apps on [Gezel](https://github.com/bendyline/gezel). Gives you discovery, user consent, and an OpenAI-compatible chat / embeddings / models / ensure-model client in under 50 lines.
 
 ## Why
 
-If you ship a desktop app and want to use the user's locally-installed models without re-implementing model management, runtime detection, and TLS pinning — point this SDK at gezel and you're done. Apps that already target OpenAI's chat API can use gezel as a drop-in via the OpenAI-shaped envelopes.
+If you ship a desktop app and want to use the user's locally installed models without re-implementing model management, runtime detection, and TLS pinning, point this SDK at Gezel and you're done. Apps that already target OpenAI's chat API can use Gezel as a drop-in through the OpenAI-shaped envelopes.
 
-If your users may not have gezel at all, the [`/host`](#hosting-gezel-inside-your-app) entry runs one inside your own application, against a gezel home that belongs to your app. Same API either way.
+If your users may not have Gezel at all, the [`/host`](#hosting-gezel-inside-your-app) entry runs one inside your own application, against a Gezel home that belongs to your app. Same API either way.
 
 ## Install
 
@@ -14,7 +14,7 @@ If your users may not have gezel at all, the [`/host`](#hosting-gezel-inside-you
 npm install @bendyline/gezel-app-sdk
 ```
 
-Node 24+. The Node entry uses `undici` to trust gezel's loopback TLS cert.
+Node 24+. The Node entry uses `undici` to trust Gezel's loopback TLS certificate.
 
 ## Quickstart
 
@@ -30,13 +30,13 @@ const tokenStorage = {
 };
 
 const status = await detectGezel();
-if (!status.installed) throw new Error('gezel not installed');
-if (!status.running) throw new Error('start the gezel app first');
-if (!status.compatible) throw new Error('update the gezel app');
+if (!status.installed) throw new Error('Gezel is not installed');
+if (!status.running) throw new Error('start the Gezel app first');
+if (!status.compatible) throw new Error('update the Gezel app');
 
 const app = await connect({
-  appId: 'docblocks',
-  appName: 'DocBlocks',
+  appId: 'acme.notes',
+  appName: 'Acme Notes',
   scopes: ['openai'],
   tokenStorage,
 });
@@ -66,11 +66,17 @@ for await (const chunk of stream) {
 
 ## Consent flow
 
-The first time your app calls `connect()` for a given `appId`, gezel shows a desktop consent dialog to the user. You'll see one of:
+The first time your app calls `connect()` for a given `appId`, Gezel shows a desktop consent dialog to the user. You'll see one of:
 
 - **Approved** — your app stores the issued token via `tokenStorage.save`. Subsequent runs (via `tokenStorage.load`) skip the dialog entirely.
-- **Denied** — `connect()` throws a `GezelSdkError` with `code: 'user_denied'`. Surface a clear "User declined the gezel connection" to your user.
+- **Denied** — `connect()` throws a `GezelSdkError` with `code: 'user_denied'`. Tell your user plainly that they declined the Gezel connection.
 - **Timeout** — defaults to 120s. Override with `approvalTimeoutSec`. Throws `code: 'approval_timeout'`.
+
+Gezel keeps one grant per `appId`. Registering again while a request is still
+waiting for the user fails with `grant_already_pending`, and registering an app
+that is already connected fails with `already_connected` (both HTTP 409). Reuse
+the stored token instead. To start over, revoke the old grant with
+`app.revokeMyToken(appId)`, or have the user remove the app in Gezel's settings.
 
 Grants that can read or change Gezel product state require an additional
 requester-visible code. Supply `onVerificationCode` and show the value in your
@@ -119,17 +125,10 @@ const authorized = await authorizeLocal({
 const client = new GezelClient(authorized);
 ```
 
-The normal path connects directly to the per-user daemon described by
-`~/.gezel/runtime`; it never connects to or bootstraps through a
-`machine-engine` broker on port 6228. The returned object contains only the
-app's scoped token plus non-sensitive daemon diagnostics. It never exposes the
-daemon's first-party discovery credential.
-
-During a rolling upgrade, the SDK first probes the installed system service.
-If that service declares `legacy-full` (or predates role publication), the SDK
-uses it as the temporary product endpoint so VS Code and Electron cannot show
-different pre-migration projects. A `machine-engine` service is never treated
-as a product endpoint; the ladder continues to the per-user daemon.
+It connects directly to the user's own Gezel service, described by
+`~/.gezel/runtime`. The returned object contains only the app's scoped token
+plus non-sensitive daemon diagnostics. It never exposes the daemon's own
+credential.
 
 `authorize()` remains the transport-level primitive for callers that already
 resolved a base URL or do not need daemon diagnostics.
@@ -155,37 +154,26 @@ const authorized = await authorizeLocal({
 });
 ```
 
-SDK-owned launches are always detached per-user daemons with
-`GEZEL_SERVICE_ROLE=user` and `GEZEL_PORT=0`. They therefore publish their
-actual dynamic address through the user's runtime directory and cannot race
-the machine broker for port 6228. VS Code is the reference implementation of
-this optional launcher path.
+SDK-owned launches are always detached per-user daemons on a free port. They
+publish their actual address through the user's runtime directory, where the
+next discovery finds them.
 
-Gezel's own same-user desktop and CLI clients use `authorizeLocalOwner()`.
-That narrowly named first-party surface adopts or starts the same user daemon
-but returns its rotating runtime `ui` credential without opening a Connected
-Apps consent request, so a headless CLI never waits for a desktop approval UI.
-Third-party integrations must use `authorizeLocal()`; do not use the owner
-surface as an app-consent bypass.
-
-Gezel's own add-ins (Office, LibreOffice, VS Code) pass `gezelAddIn: true` to
-`authorizeLocal()`. On the user's own daemon the SDK then trades the owner
-credential it read during discovery for the add-in's own, narrower grant
-instead of asking for a connection code, and never returns the owner
-credential. A configured `baseUrl` or a legacy machine service still consents,
-and the daemon refuses the exchange for any app id that is not a Gezel add-in,
-so the option does nothing for third-party apps. See ADR 0018 in the Gezel
-repository.
+Gezel's own desktop app and CLI use `authorizeLocalOwner()`, which connects
+as the user who owns the daemon without a Connected Apps consent request.
+Third-party integrations must use `authorizeLocal()`; the owner surface is not
+an app-consent bypass. Likewise, `gezelAddIn: true` is reserved for Gezel's own
+add-ins (Office, LibreOffice, VS Code): the daemon refuses it for any other app
+id, so it does nothing for third-party apps.
 
 Use `product` for ordinary stateful product access and add `openai` only when
 the same app also calls the OpenAI-compatible inference routes. `product` does
 not grant first-party administration of other app connections.
 
-For CI / scripted environments, the gezel daemon honors `GEZEL_AUTOAPPROVE_APPS=appId1,appId2` and auto-approves listed apps at registration time.
+For CI / scripted environments, the Gezel daemon honors `GEZEL_AUTOAPPROVE_APPS=appId1,appId2` and auto-approves listed apps at registration time.
 
-## Hosting gezel inside your app
+## Hosting Gezel inside your app
 
-`connect()` needs a gezel the user already runs. When your app should work whether or not they have one, use the host entry: it connects to their gezel if it is there, and otherwise starts one in your own process.
+`connect()` needs a Gezel the user already runs. When your app should work whether or not they have one, use the host entry: it can connect to their Gezel when it is there (see [When hosting happens](#when-hosting-happens)), and otherwise starts one in your own process.
 
 ```ts
 import { connectOrHost } from '@bendyline/gezel-app-sdk/host';
@@ -193,7 +181,12 @@ import { connectOrHost } from '@bendyline/gezel-app-sdk/host';
 const gezel = await connectOrHost({
   appId: 'acme.travel',
   appName: 'Acme Travel',
-  // Hosting is opt-in. Without `host`, a missing gezel is still an error.
+  // Lets the SDK ask to join the user's own Gezel. Without it, a product
+  // grant cannot be approved, so the SDK hosts privately instead.
+  onVerificationCode(code) {
+    console.log(`Enter ${code} in Gezel to connect Acme Travel.`);
+  },
+  // Hosting is opt-in. Without `host`, a missing Gezel is still an error.
   host: { mode: 'in-process' },
 });
 
@@ -220,12 +213,12 @@ await gezel.close();
 
 ### What hosting does
 
-- **Its own home.** State goes under `~/.gezel/apps/<appId>/`, never the user's `~/.gezel` runtime. Your app's projects and gezels stay out of their workshop, and your daemon can never be restarted out from under you by the gezel desktop app.
+- **Its own home.** State goes under `~/.gezel/apps/<appId>/` (or the folder you pass as `host.home`), never the user's own `~/.gezel`. Your app's projects and gezels stay out of their workshop, and the Gezel desktop app can never restart your daemon out from under you.
 - **Their models, read-only.** Models the user already installed are found through a read-only overlay, so a 2 GB download does not happen twice. Nothing of yours is ever written there.
 - **No Chromium.** The system bootstrap (Playwright plus a ~280 MB browser) is off unless you pass `host: { systemBootstrap: true }`.
 - **One per process.** The daemon reads its settings from the environment, so a second hosted daemon in the same process is refused. A second *instance of your app* adopts the daemon the first one started.
-- **Its own port.** A hosted daemon always listens on an ephemeral port, never the canonical 6228 that the machine broker or the user's own Gezel expects to own.
-- **An inference-only profile.** `host: { inferenceOnly: true }` serves on-device model listing and installation, OpenAI-compatible chat and Responses, embeddings (`model: 'gezel:embeddings'` runs the on-device text embedder) and knowledge search — and nothing of the product: no projects, chats or app tools, so `ensureProject` and `openChat` need a full host. It starts no schedulers, channels, editor bridges, machine-service discovery, indexing or maintenance jobs, and sets up no remote connectivity: no secret store (nothing in the OS keychain), no device identity, and no pairing or LAN-serving endpoints. Both host modes serve the same surface. In-process, the SDK calls `@bendyline/gezel-inference` through its direct Fetch handler, so Electron needs neither a separate Node executable nor a loopback client connection.
+- **Its own port.** A hosted daemon always listens on a free port chosen at launch, never the canonical port 6228 the user's own Gezel uses.
+- **An inference-only profile.** `host: { inferenceOnly: true }` serves on-device model listing and installation, OpenAI-compatible chat and Responses, embeddings (`model: 'gezel:embeddings'` runs the on-device text embedder) and knowledge search — and nothing of the product: no projects, chats or app tools, so `ensureProject` and `openChat` need a full host. It starts no background jobs or indexing, and sets up no remote connectivity: no secret store (nothing in the OS keychain), no device identity, and no pairing or LAN-serving endpoints. Both host modes serve the same surface. In-process, the SDK calls `@bendyline/gezel-inference` directly, so Electron needs neither a separate Node executable nor a loopback network connection.
 
 An inference-only app ensures its model and chats with the id `ensureModel` returns as `chatModel`, which names the engine as well as the model:
 
@@ -251,20 +244,41 @@ await gezel.close();
 A bare id such as `qwen3.5-0.8b-q4` also works while it is the pinned default, which `ensureModel` sets on a daemon your app hosts.
 
 Install `@bendyline/gezel-inference` alongside this SDK for inference-only in-process hosting, or `@bendyline/gezel-service` for full or child-process hosting. Both are optional peer dependencies, so apps that only connect never download either.
-Keep the SDK and the hosting package on compatible releases. Inference-only hosting verifies
-that the host actually started the embedded profile and supplied its direct
-Fetch transport; an older one fails immediately with
+Keep the SDK and the hosting package on compatible releases. A hosting package
+too old to start the inference-only profile fails immediately with
 `service_inference_only_unsupported` instead of silently starting the full
-product or falling back to loopback networking.
+product.
 
 **Under Electron**, `process.execPath` is your app binary, not Node. Full-product hosting runs a tool server as a child process, so ship a Node binary and pass `host: { nodePath }`; without one, the SDK uses the Node a Gezel install keeps at `<Gezel home>/bin/node` when available. Inference-only in-process hosting starts no child-process features and needs no Node path.
 
 ### When hosting happens
 
-By default only a Gezel that is not running falls through to hosting. A person who declines the connection, or lets the approval expire, gets exactly that: no private daemon started behind their back. Two things change the ladder:
+`connectOrHost` uses an explicit `baseUrl` if you pass one (and never falls
+through from it), then the user's own running Gezel, then a daemon of your own
+when you passed `host`. Whether it asks the user's Gezel at all depends on
+whether that request could be approved:
 
-- **A saved grant is reused first.** An app with no `onVerificationCode` handler cannot complete a new handshake, but if `tokenStorage` or `existingToken` holds a grant from an earlier session, the SDK joins the running Gezel with it before hosting. It cannot prompt: without a code handler the SDK refuses to register a new grant, and that refusal is what falls through.
-- **`hostWhenRefused: true`** also hosts after a refusal, an expired or unanswered approval, or a connected-app surface switched off in Gezel. It is for apps that obtain their own consent — the AI is optional and the person switched it on inside the app. A daemon that is alive but unwell still fails loudly.
+- **Inference-only scopes** (`openai`, `remote-inference`) use click approval,
+  so the SDK asks the running Gezel and the user sees the consent dialog.
+- **Any other scope**, including the default `['product', 'openai']`, needs a
+  verification code shown by your app. With `onVerificationCode`, the SDK asks
+  the running Gezel. Without it, the SDK cannot ask: it reuses a grant saved in
+  `tokenStorage` or `existingToken` when there is one, and otherwise hosts a
+  private daemon **without contacting the user's Gezel, even when it is
+  running**. The same applies to inference-only scopes when you set
+  `requireVerificationCode: true`.
+- **`adoptUserDaemon: false`** always hosts, whatever else is running.
+
+Once the SDK has asked, only a Gezel that is not running, or one that does not
+speak this SDK's API (`daemon_incompatible`), falls through to hosting. A
+person who declines the connection, or lets the approval expire, gets exactly
+that: no private daemon started behind their back.
+
+**`hostWhenRefused: true`** also hosts after a refusal, an expired or
+unanswered approval, an app that is already connected, or a connected-app
+surface switched off in Gezel. It is for apps that obtain their own consent —
+the AI is optional and the person switched it on inside the app. A daemon that
+is alive but unwell still fails loudly.
 
 For an app whose own **Use AI** switch is the consent boundary, the silent
 startup policy is therefore:
@@ -332,14 +346,14 @@ Both calls are idempotent, so the normal shape is to run them on every launch. `
 
 ## Custom app tools
 
-Register tools your application runs itself. The model sees them beside gezel's own tools; when one is called, your handler runs in your process and its return value becomes the tool's output.
+Register tools your application runs itself. The model sees them beside Gezel's own tools; when one is called, your handler runs in your process and its return value becomes the tool's output.
 
 ```ts
 const registration = await project.registerTools({
   tools: [
     {
       name: 'add_travel_points',
-      description: 'Award travel points to the traveller.',
+      description: 'Award travel points to the traveler.',
       inputSchema: {
         type: 'object',
         properties: { points: { type: 'number' }, reason: { type: 'string' } },
@@ -360,10 +374,10 @@ Notes worth knowing:
 - **Arguments are validated** against your `inputSchema` before the call leaves the daemon, so a malformed call comes back to the model as a fixable error instead of reaching your handler.
 - **A handler that throws** is an ordinary tool failure: the model is told, and the turn continues.
 - **Timeouts** default to 60 s per call (`timeoutMs`, max 300 s).
-- Names are snake_case and may not shadow a built-in gezel tool.
+- Names are snake_case and may not shadow a built-in Gezel tool.
 - Needs the `product` scope (or a daemon your app hosts), and Node or Electron — `/api/*` is not reachable from a browser.
 
-Tools work the same against a hosted daemon and the user's own gezel; `registerTools` is also available on a plain `authorize()` result via the exported `registerAppTools`.
+Tools work the same against a hosted daemon and the user's own Gezel; `registerTools` is also available on a plain `authorize()` result via the exported `registerAppTools`.
 
 ## Headless / browser apps
 
@@ -396,14 +410,14 @@ Browser apps can't trust the loopback self-signed cert without OS-level interven
 | `app.models()` | List available models |
 | `app.ensureModel()` | Make sure a local model is downloaded |
 | `app.streamEnsureEvents()` | SSE: install progress + done/error |
-| `app.revokeMyToken()` | Self-revoke (user can also revoke from Settings) |
-| `app.close()` | Release the SDK-owned transport after consuming or cancelling response streams |
+| `app.revokeMyToken(appId)` | Self-revoke this app's token (the user can also revoke it in Settings) |
+| `app.close()` | Release the SDK-owned transport after consuming or canceling response streams |
 
 From `@bendyline/gezel-app-sdk/host`:
 
 | Method | Purpose |
 |---|---|
-| `connectOrHost()` | Connect to the user's gezel, or host one in this process; returns a `Gezel` |
+| `connectOrHost()` | Connect to the user's Gezel, or host one in this process; returns a `Gezel` |
 | `gezel.ensureModel()` | Engine binary + weights (present, bundled, or downloaded) + default pin |
 | `gezel.ensureProject()` | Bind a folder to a `GezelProject`, applying a `.gezapp` when one is given |
 | `gezel.openProject()` | A `GezelProject` for a project that already exists |
@@ -440,6 +454,8 @@ Errors thrown by the SDK are `GezelSdkError` instances carrying both an HTTP `st
 - `user_denied` — consent dialog rejected
 - `approval_timeout` — `approvalTimeoutSec` elapsed
 - `grant_expired` — the request expired or used all verification attempts
+- `grant_already_pending` (HTTP 409) — a connection request for this `appId` is still waiting for the user
+- `already_connected` (HTTP 409) — this `appId` already holds a grant; reuse its stored token, or revoke it before registering again
 - `verification_code_handler_required` — a stateful scope omitted `onVerificationCode`
 - `verification_not_supported` — the daemon did not honor an explicit code requirement
 - `model_not_found` — unknown `<provider>:<model>` prefix
@@ -452,7 +468,7 @@ Errors thrown by the SDK are `GezelSdkError` instances carrying both an HTTP `st
 From the host entry:
 
 - `node_binary_required` — hosting under Electron without `host.nodePath`
-- `service_not_installed` — `@bendyline/gezel-service` is not installed and no `serviceModule` was passed
+- `service_not_installed` — the hosting package (`@bendyline/gezel-service`, or `@bendyline/gezel-inference` with `inferenceOnly`) is not installed and no `serviceModule` was passed
 - `host_already_active` — this process already hosts a daemon
 - `folder_has_other_app` — the target folder belongs to a different app's project
 - `tool_name_reserved` / `tool_name_conflict` — an app tool name collides with a built-in or another app
@@ -463,7 +479,7 @@ The daemon serves the public contract at `GET /v1/openapi.json` (unauth). Point 
 
 ## Spec
 
-See the upstream gezel docs for the full route table and the OpenAPI document. The SDK is a thin wrapper over those routes; the routes are the source of truth.
+The SDK is a thin wrapper over the daemon's HTTP routes, and the routes are the source of truth. The full route table is in the [Gezel repository](https://github.com/bendyline/gezel).
 
 ## Application embedding wrapper
 
@@ -506,7 +522,7 @@ API works through the private in-process host's direct Fetch transport.
 
 Offer `improvement` to people as better results with its size, for example
 "Improve knowledge results with a 300 MB model download", and stop showing it
-once it is null. Never call it a reranker.
+once it is null.
 
 The caller includes returned passages in its own chat prompt as untrusted
 reference material. Plain `app.chat()` does not implicitly retrieve knowledge.

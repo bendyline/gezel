@@ -26,6 +26,8 @@ import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { VALIDATION_PHASE_NAMES } from './validate-workspace.mjs';
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 
@@ -183,8 +185,12 @@ try {
   if (!workflow.includes('pnpm install --lockfile-only --frozen-lockfile')) {
     failures.push('publish-npm.yml must verify frozen lockfile consistency after release');
   }
-  if (!workflow.includes('xvfb-run -a pnpm validate')) {
-    failures.push('publish-npm.yml must run the canonical validation gate before publishing');
+  for (const phase of VALIDATION_PHASE_NAMES) {
+    if (!workflow.includes(`xvfb-run -a pnpm validate --phase=${phase}\n`)) {
+      failures.push(
+        `publish-npm.yml must run the ${phase} phase of the canonical validation gate before publishing`,
+      );
+    }
   }
   if (!workflow.includes('node scripts/verify-published-npm-release.mjs')) {
     failures.push('publish-npm.yml must verify exact registry artifacts after publishing');

@@ -1,7 +1,7 @@
 {
   "name": "@bendyline/gezel-connectors-spectral",
   "version": "1.0.6",
-  "description": "Off-platform host for Apache-2.0 Prismatic components (the connector `spectral` driver). Keeps the pinned MIT @prismatic-io/spectral SDK + vendored components out of the service process; the service SPAWNS run-action.js in the sandbox, it never imports it.",
+  "description": "Runs Gezel's Prismatic (Spectral) connector actions in a separate, sandboxed process.",
   "license": "MIT",
   "engines": {
     "node": ">=24.0.0"

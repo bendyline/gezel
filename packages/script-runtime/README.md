@@ -31,18 +31,20 @@ cannot change it. On desktop, the service exports an adapter that places each
 QuickJS guest in a dedicated worker:
 
 ```ts
-import { ScriptRunner, QuickJSWorkerExecutor } from '@bendyline/gezel-service';
+import { QuickJSWorkerExecutor, ScriptRunner, Store } from '@bendyline/gezel-service';
+
+const store = new Store({ home: '/path/to/gezel-home' });
+await store.ensureLayout();
 
 const runner = new ScriptRunner({
   store,
-  chat,
   executor: new QuickJSWorkerExecutor(),
-  // Supply other normal ScriptRunner dependencies for the capabilities in use.
+  // Add chat, memory, tasks, … for the capabilities your scripts use.
 });
 ```
 
 Use the runner for product execution: it owns metadata/input validation,
-engagement restrictions, capability dispatch, output validation, run history, and
+the AI activity setting, capability dispatch, output validation, run history, and
 secret redaction. The executor itself supplies none of those permissions.
 Returning a successful VM result does not establish that a script has valid
 product output. Construction above is intended for embedders and conformance
@@ -50,11 +52,30 @@ testing; there is no UI preference, API parameter, or automatic fallback that
 selects it.
 
 For another host, import `QuickJSScriptExecutor` from
-`@bendyline/gezel-script-runtime/quickjs` inside a dedicated worker. Supply trusted
-bundled SDK source, a synchronous compiler, an awake-time clock, and callbacks to
-the host's capability dispatcher. The host must also enforce a deadline and
-terminate the worker independently. The portable executor uses standard host
-timers to pump promises; its guest receives no timer or platform APIs.
+`@bendyline/gezel-script-runtime/quickjs` inside a dedicated worker. Supply the
+trusted SDK source as `sdkModuleSource`, a synchronous `compile` function, a
+`now()` clock, and callbacks to the host's capability dispatcher. The SDK source
+is the self-contained `portable` build that `@bendyline/gezel-sdk` ships; the
+Gezel service reads the same file, `dist/portable.js`. Bundle it at build time
+for a browser, or read it in Node:
+
+```ts
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+
+const sdkModuleSource = await readFile(
+  fileURLToPath(import.meta.resolve('@bendyline/gezel-sdk/portable')),
+  'utf8',
+);
+```
+
+To let scripts import `@bendyline/gezel-sdk/checks` too, read that module the
+same way and pass it as `modules: { '@bendyline/gezel-sdk/checks': source }`.
+If the computer can sleep during a run, make `now()` leave out the time it spent
+asleep, so a run is not timed out for time it could never use. The host must
+also enforce a deadline and terminate the worker independently. The portable
+executor uses standard host timers to pump promises; its guest receives no timer
+or platform APIs.
 
 The executor uses the `quickjs-emscripten` WASM package, so a WebView host needs
 no native QuickJS bridge. A browser host can compile and validate the supported
@@ -95,12 +116,17 @@ a call's intent is written ahead of its effect when no snapshot is that recent.
 Invalid output and failed audit writes cannot report success, and neither can a
 gate that stamps no verdict. Any other script that declares `outputs` but never
 calls `gezel.output()` finishes `ok` with no output and a warning in its log.
-Each run may make 250,000 host calls (`limits.maxHostCalls`); standard-scope and
-provenance-trusted scripts are bounded only by their timeout
-(`limits.maxTrustedHostCalls`).
-Long-running deadlines use the shared awake-time budget. Explicit host
-cancellation takes precedence over sleep credit and waits for dispatched host
-effects and child audits to settle.
+The runner stops a run that makes more than 250,000 host calls
+(`DEFAULT_MAX_HOST_CALLS`, set with `limits.maxHostCalls`); it is a backstop
+against runaway loops, sized for scripts that touch tens of thousands of
+records. Standard-scope and provenance-trusted scripts have no call limit by
+default (`limits.maxTrustedHostCalls`) and are bounded by their timeout. The
+QuickJS executor has a separate, much smaller budget of its own: 1,000 host
+calls and notifications per execution (its `maxCalls` option, and
+`QUICKJS_MAX_CALLS` in the Web Worker host). Both apply, so a QuickJS run stops
+at whichever it reaches first. Deadlines leave out time the computer spent
+asleep. Canceling a run from the host takes effect even before its deadline,
+and waits for host effects already under way and child audits to settle.
 
 ## Script profile (experimental)
 
@@ -127,9 +153,9 @@ are unsupported: the QuickJS binding does not expose an unhandled-rejection
 tracker, so detached promise failures cannot reliably be reported. This is not
 full Node script compatibility.
 
-Defaults are 32 MiB guest heap, 512 KiB guest stack, 1,000 host calls/notifications,
-32 pending calls, one million UTF-16 code units per source/message, and four
-million aggregate units. The service worker also bounds JSON traffic and has its
+QuickJS executor defaults are 32 MiB guest heap, 512 KiB guest stack, 1,000 host
+calls and notifications, 32 pending calls, one million UTF-16 code units per
+source or message, and four million aggregate units. The service worker also bounds JSON traffic and has its
 own V8 heap limits. These are separate bounds, not a total application memory
 limit. An interrupted worker ignores late replies and the runner freezes its
 audit record before redaction and persistence.

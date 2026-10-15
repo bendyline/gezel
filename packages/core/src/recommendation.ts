@@ -32,7 +32,12 @@
  * candidates (with provider-appropriate `residentBytes`) and the live memory
  * profile; the UI badge reuses `isRecommendedModel` alone.
  */
-import { MOE_NON_EXPERT_FRACTION_ESTIMATE, computeModelFit, isMoEFromTags } from './model-fit.js';
+import {
+  MOE_NON_EXPERT_FRACTION_ESTIMATE,
+  type ModelFitResult,
+  computeModelFit,
+  isMoEFromTags,
+} from './model-fit.js';
 import { lowBitScoreFactor } from './model-quantization.js';
 
 const GB = 1024 ** 3;
@@ -463,6 +468,105 @@ export function pickRecommendedModel(
     recoScore: top.score,
     reason: `${top.m.id} (${scoreLabel(top)}, ${top.isMoE ? 'MoE' : 'dense'}) — best-effort, nothing fits comfortably`,
   };
+}
+
+export interface ModelRating {
+  id: string;
+  /** The same fit verdict the install browser badges this model with. */
+  fit: ModelFitResult;
+  /**
+   * 0–100: how well this model suits this machine. 100 is the recommended
+   * pick; every other model stays below it; 0 means it cannot run here.
+   */
+  score: number;
+  /** The one model {@link pickRecommendedModel} would install here. */
+  recommended: boolean;
+}
+
+/**
+ * What a runnable model that this machine will pace badly keeps of its score:
+ * a `tight` fit, or a large model on a host with no fast accelerator. Low
+ * enough that any model running comfortably outranks it.
+ */
+const LIKELY_SLOW_SCORE_FACTOR = 0.4;
+
+/** A MoE on a big discrete GPU runs, but the first-run pick skips it for dense. */
+const DENSE_PREFERRED_SCORE_FACTOR = 0.9;
+
+/**
+ * Rate every model for this machine, in the order a picker should offer them.
+ *
+ * The score has two halves. Fit decides whether and how well the model runs
+ * here (too big → 0; tight or CPU-paced → heavily discounted). The curated
+ * `recoScore`, discounted for very low-bit quants, decides how good it is once
+ * it runs: the best curated model that runs here keeps its whole score, an
+ * unscored model that runs keeps half. The recommended pick is
+ * {@link pickRecommendedModel}'s choice, never re-derived, so this list and
+ * first run can never disagree about which model comes first.
+ */
+export function rateModelsForDevice(
+  models: readonly RecoModelInput[],
+  device: RecoDevice,
+): ModelRating[] {
+  const smallModelHost = needsSmallModelRecommendation(device);
+  const excludeMoE = excludesMoE(device);
+  const preferMoE = prefersMoE(device);
+  const rated = models.map((m) => {
+    const isMoE = isMoEFromTags(m.tags);
+    const fit = computeModelFit({
+      residentBytes: m.residentBytes,
+      isMoE,
+      usableBytes: device.usableBytes,
+      totalRamBytes: device.totalRamBytes,
+      gpuVramBytes: device.gpuVramBytes,
+      ...(device.budgetBytes !== undefined ? { admissibleBytes: device.budgetBytes } : {}),
+      ...(m.nonExpertBytes !== undefined ? { nonExpertBytes: m.nonExpertBytes } : {}),
+    });
+    const quality = isRecommendedModel(m)
+      ? (m.recoScore as number) * lowBitScoreFactor(m.quantization)
+      : 0;
+    const fitFactor = !fit.runnable
+      ? 0
+      : fit.tier === 'tight' || (smallModelHost && m.residentBytes > SMALL_MODEL_VRAM_THRESHOLD)
+        ? LIKELY_SLOW_SCORE_FACTOR
+        : excludeMoE && isMoE
+          ? DENSE_PREFERRED_SCORE_FACTOR
+          : 1;
+    return { m, isMoE, fit, quality, fitFactor };
+  });
+
+  const bestQuality = Math.max(0, ...rated.filter((r) => r.fit.runnable).map((r) => r.quality));
+  const pick = pickRecommendedModel(models, device);
+  const pickId = rated.find((r) => r.m.id === pick?.id)?.fit.runnable ? pick?.id : undefined;
+
+  const ratings = rated.map((r) => {
+    const share = bestQuality > 0 ? r.quality / bestQuality : 0;
+    const score = Math.round(100 * r.fitFactor * (0.5 + 0.5 * share));
+    const recommended = r.m.id === pickId;
+    return {
+      r,
+      rating: {
+        id: r.m.id,
+        fit: r.fit,
+        score: recommended ? 100 : Math.min(99, score),
+        recommended,
+      },
+    };
+  });
+
+  // Ties follow the first-run picker: smallest first where only a small model
+  // is usable, otherwise MoE-alignment and then the largest that still fits.
+  const align = (r: (typeof rated)[number]) => (r.isMoE === preferMoE ? 1 : 0);
+  ratings.sort(
+    (a, b) =>
+      Number(b.rating.recommended) - Number(a.rating.recommended) ||
+      b.rating.score - a.rating.score ||
+      (smallModelHost
+        ? a.r.m.residentBytes - b.r.m.residentBytes
+        : align(b.r) - align(a.r) || b.r.m.residentBytes - a.r.m.residentBytes) ||
+      a.r.m.id.localeCompare(b.r.m.id),
+  );
+  return ratings.map(({ rating }) => rating);
 }
 
 /**

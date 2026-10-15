@@ -60,6 +60,9 @@ export function machineSharedMarkerFile(
 
 /** A shared root is trusted only after the installer publishes its marker. */
 export function activeMachineSharedHome(env: NodeJS.ProcessEnv = process.env): string | null {
+  // A home kept apart from the machine install (`gezel --home <dir>` sets
+  // this) must neither show nor write the machine's shared gezels/projects.
+  if (env.GEZEL_DISABLE_MACHINE_SHARED === '1') return null;
   const root = machineSharedHome(process.platform, env);
   const marker = machineSharedMarkerFile(process.platform, env);
   if (!root || !marker || !existsSync(marker)) return null;

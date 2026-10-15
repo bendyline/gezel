@@ -1,9 +1,21 @@
 {
   "name": "@bendyline/gezel-inference",
   "version": "1.0.0",
-  "description": "Shared on-device inference, model management and knowledge runtime for Gezel hosts.",
+  "description": "Gezel's on-device inference runtime: native engines, local model management, embeddings, knowledge search, and OpenAI-compatible routes.",
   "license": "MIT",
-  "keywords": ["gezel", "ai", "agents", "local-first", "daemon", "server", "llm"],
+  "keywords": [
+    "gezel",
+    "ai",
+    "local-first",
+    "llm",
+    "inference",
+    "on-device",
+    "local-ai",
+    "llama.cpp",
+    "mlx",
+    "embeddings",
+    "openai-compatible"
+  ],
   "homepage": "https://github.com/bendyline/gezel",
   "bugs": {
     "url": "https://github.com/bendyline/gezel/issues"

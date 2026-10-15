@@ -50,6 +50,14 @@ export interface EngineCacheAdapter {
   evict(sessionIds: readonly string[]): Promise<void>;
 
   /**
+   * This session will never be resumed (a one-shot `gezel run`): keep only
+   * what helps other sessions, such as a shared prompt-prefix snapshot, and
+   * never a resumable snapshot of its own. Optional — an engine that keeps
+   * nothing on disk can ignore it. Must not do I/O.
+   */
+  markEphemeral?(sessionId: string): void;
+
+  /**
    * Snapshot of what the engine currently has cached. Polled by the
    * controller every few seconds for telemetry; also informs the
    * watermark-based eviction (controller compares its tracked usage

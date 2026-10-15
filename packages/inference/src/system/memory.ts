@@ -724,6 +724,17 @@ function isKnownUnifiedNvidiaDevice(name: string): boolean {
   return /\bgb10\b/.test(normalized) || normalized.includes('dgx spark');
 }
 
+/**
+ * A hybrid-graphics laptop powers its discrete GPU down when idle, and the
+ * first `nvidia-smi` after that waits for it to wake: 2.25–2.36 s on an RTX
+ * 5070 Ti laptop (2026-10-15), against ~0.1 s warm. The old 2 s limit read
+ * that as "no NVIDIA GPU", so the machine was sized as CPU-only for the next
+ * minute and offered a 2.4 GB model with a 12 GB card idle beside it. Startup
+ * never awaits this probe, so the margin only costs a caller that asks for the
+ * profile while the driver is truly hung.
+ */
+const NVIDIA_MEMORY_PROBE_TIMEOUT_MS = 10_000;
+
 async function probeNvidiaMemory(): Promise<NvidiaMemoryProbe | null> {
   try {
     const { stdout } = await exec(
@@ -731,7 +742,7 @@ async function probeNvidiaMemory(): Promise<NvidiaMemoryProbe | null> {
       ['--query-gpu=name,memory.total', '--format=csv,noheader,nounits'],
       // Keep this short-lived console probe invisible without detaching it
       // from the daemon that owns and awaits it.
-      { timeout: 2000, ...windowsHeadlessSpawnOptions() },
+      { timeout: NVIDIA_MEMORY_PROBE_TIMEOUT_MS, ...windowsHeadlessSpawnOptions() },
     );
     return parseNvidiaMemoryProbe(stdout);
   } catch {

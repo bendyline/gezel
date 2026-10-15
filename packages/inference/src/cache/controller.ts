@@ -127,6 +127,7 @@ function emptyHitsBySource(): HitsBySource {
 }
 
 const RECENT_TURN_WINDOW = 50;
+const MAX_REMEMBERED_EPHEMERAL_SESSIONS = 1024;
 
 export interface SessionCacheControllerOptions {
   /** Replaceable clock for tests. Defaults to `Date.now`. */
@@ -149,6 +150,12 @@ export class SessionCacheController {
    * `setBudget` after construction.
    */
   private readonly pendingBudgets = new Map<string, number>();
+  /**
+   * One-shot sessions, remembered so an adapter registered after the session
+   * was created (engines start lazily, on the first turn) still learns them.
+   * Bounded: only a session's own turns need the mark.
+   */
+  private readonly ephemeralSessions = new Set<string>();
   private readonly now: () => number;
   private readonly logger: NonNullable<SessionCacheControllerOptions['logger']>;
   private reconcileTimer?: NodeJS.Timeout;
@@ -189,6 +196,21 @@ export class SessionCacheController {
       gezelOutcomes: new Map(),
       recentOutcomes: [],
     });
+    for (const sessionId of this.ephemeralSessions) adapter.markEphemeral?.(sessionId);
+  }
+
+  /**
+   * A session that will never be resumed keeps no resumable cache of its own
+   * on disk. Every one-shot `gezel run` left a ~300 MB llama slot snapshot
+   * that nothing ever read (2026-10-15 npm audit).
+   */
+  markEphemeral(sessionId: string): void {
+    this.ephemeralSessions.add(sessionId);
+    if (this.ephemeralSessions.size > MAX_REMEMBERED_EPHEMERAL_SESSIONS) {
+      const oldest = this.ephemeralSessions.values().next().value;
+      if (oldest !== undefined) this.ephemeralSessions.delete(oldest);
+    }
+    for (const state of this.providers.values()) state.adapter.markEphemeral?.(sessionId);
   }
 
   /**

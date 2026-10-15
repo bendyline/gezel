@@ -717,3 +717,61 @@ describe('LlamaCppCacheAdapter — slot persistence + prefix sharing', () => {
     expect(subsequent).toBe(0);
   });
 });
+
+describe('LlamaCppCacheAdapter — one-shot sessions', () => {
+  let tmp: string;
+  beforeEach(async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'gezel-llama-oneshot-'));
+  });
+  afterEach(async () => {
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  function adapter() {
+    const saved: string[] = [];
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:0',
+      slotSavePath: tmp,
+      fetchImpl: (async (url: string, init?: RequestInit) => {
+        if (String(url).includes('action=save')) {
+          const filename = JSON.parse(String(init?.body)).filename as string;
+          saved.push(filename);
+          await writeFile(join(tmp, filename), 'saved');
+        }
+        return new Response('{}');
+      }) as unknown as typeof fetch,
+    });
+    return { a, saved };
+  }
+
+  it('seeds the missing gezel prefix file and keeps no snapshot of its own', async () => {
+    const { a, saved } = adapter();
+    a.markEphemeral('run-1');
+    await a.prepareForSend('run-1', 'prefix');
+    await a.evict(['run-1']);
+
+    expect(saved).toEqual([`${llamaPrefixId('prefix')}.bin`]);
+    expect(await readdir(tmp)).not.toContain('sess-run-1.bin');
+  });
+
+  it('writes nothing once the gezel prefix file exists', async () => {
+    const { a, saved } = adapter();
+    await writeFile(join(tmp, `${llamaPrefixId('prefix')}.bin`), 'earlier');
+    a.markEphemeral('run-2');
+    await a.prepareForSend('run-2', 'prefix');
+
+    expect(await a.flushAll()).toBe(0);
+    expect(saved).toEqual([]);
+  });
+
+  it('still snapshots an ordinary session beside a one-shot one', async () => {
+    const { a, saved } = adapter();
+    a.markEphemeral('run-3');
+    await a.prepareForSend('run-3', 'prefix');
+    await a.prepareForSend('chat', 'prefix');
+    await a.flushAll();
+
+    expect(saved).toContain('sess-chat.bin');
+    expect(saved).not.toContain('sess-run-3.bin');
+  });
+});

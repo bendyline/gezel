@@ -168,6 +168,16 @@ The release workflow runs the same canonical gate as CI: `pnpm validate`.
 **Add mandatory checks to that script, not to the workflow** — a release must
 never be able to be laxer than a pull request.
 
+The workflow runs that gate in phases on parallel runners
+(`pnpm validate --phase=main`, `--phase=stability`, `--phase=e2e`), because
+the serial chain outgrew one job's time limit. The split lives in
+[`scripts/validate-workspace.mjs`](../scripts/validate-workspace.mjs), not in
+the workflow. `stability` and `e2e` each take named steps of
+`validate:unlocked` and run them after `pnpm build`, and `main` runs every
+other step, so a new step needs no workflow edit. A plain `pnpm validate` still
+runs the whole chain serially. Passing the same flag runs one release job's
+share locally.
+
 Two of its steps exist specifically for npm:
 
 ### `pnpm test:published`

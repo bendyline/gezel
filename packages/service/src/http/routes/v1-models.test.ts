@@ -10,6 +10,16 @@ vi.mock('@bendyline/gezel-inference/internal/providers/apple-foundation-models/s
     available: false,
   })),
 }));
+// Never probe this machine's GPU from a unit test; tests that rate models
+// pass a profile, and the rest exercise the listing without one.
+vi.mock('@bendyline/gezel-inference/internal/system/memory', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@bendyline/gezel-inference/internal/system/memory')>()),
+  detectMemoryProfileCached: vi.fn(async () => {
+    throw new Error('no memory probe in unit tests');
+  }),
+}));
+
+const GiB = 1024 ** 3;
 
 // Listings cache Apple's readiness; each test starts from a fresh check.
 beforeEach(() => resetAppleStatusCache());
@@ -141,6 +151,95 @@ describe('GET /v1/models catalog metadata', () => {
     const body = (await response.json()) as { data: Array<{ id: string }> };
     expect(body.data.map((entry) => entry.id)).toEqual(['llama-cpp:small-writer']);
     expect(providers).toEqual(['llama-cpp', 'ds4']);
+  });
+
+  describe('rating downloadable models for this machine', () => {
+    const smallCard = async () => ({
+      platform: 'win32',
+      totalRamBytes: 32 * GiB,
+      gpuVramBytes: 12 * GiB,
+      gpuMemoryKind: 'discrete' as const,
+      source: 'gpu-nvidia' as const,
+      usableBytes: 11.4 * GiB,
+      budgetBytes: 19 * GiB,
+    });
+
+    function catalogOf(
+      ...models: Array<{ id: string; gib: number; recoScore?: number; ds4Only?: boolean }>
+    ) {
+      const ctx = modelContext();
+      ctx.chat.listModelsForProvider = vi.fn(async () => []);
+      ctx.catalog.list = vi.fn(async () =>
+        models.map(({ id, gib, recoScore, ds4Only }) => ({
+          manifest: {
+            schemaVersion: 1,
+            kind: 'chat-model',
+            id,
+            name: id,
+            tags: [],
+            licenseClass: 'open',
+            ...(recoScore === undefined ? {} : { recoScore }),
+            approxSizeBytes: gib * GiB,
+            supportsTools: true,
+            ...(ds4Only
+              ? { ds4: { approxSizeBytes: gib * GiB } }
+              : { llamaCpp: { approxSizeBytes: gib * GiB } }),
+          },
+        })),
+      ) as unknown as typeof ctx.catalog.list;
+      return ctx;
+    }
+
+    async function list(ctx: ServiceContext, memoryProfile = smallCard) {
+      const response = await v1ModelsRoutes(ctx, { localOnly: true, memoryProfile }).request(
+        'http://localhost/',
+      );
+      return ((await response.json()) as { data: Array<Record<string, unknown>> }).data;
+    }
+
+    it('lists the recommended model first and one too big for this machine last, at 0', async () => {
+      const data = await list(
+        catalogOf(
+          { id: 'huge', gib: 60, recoScore: 30 },
+          { id: 'plain', gib: 4 },
+          { id: 'curated', gib: 6, recoScore: 20 },
+        ),
+      );
+      expect(data.map((entry) => entry.id)).toEqual([
+        'llama-cpp:curated',
+        'llama-cpp:plain',
+        'llama-cpp:huge',
+      ]);
+      expect(data[0]).toMatchObject({
+        fit: { tier: 'fits' },
+        recommendation: { score: 100, recommended: true },
+      });
+      expect(data[1]).toMatchObject({ recommendation: { score: 50, recommended: false } });
+      expect(data[2]).toMatchObject({
+        fit: { tier: 'too-big' },
+        recommendation: { score: 0, recommended: false },
+      });
+    });
+
+    it('falls back to curated order, unrated, when this machine cannot be read', async () => {
+      const data = await list(
+        catalogOf({ id: 'plain', gib: 4 }, { id: 'curated', gib: 6, recoScore: 20 }),
+        async () => {
+          throw new Error('probe failed');
+        },
+      );
+      expect(data.map((entry) => entry.id)).toEqual(['llama-cpp:curated', 'llama-cpp:plain']);
+      expect(data[0]).not.toHaveProperty('fit');
+      expect(data[0]).not.toHaveProperty('recommendation');
+    });
+
+    it('offers ds4-only models only where a ds4 build is on disk', async () => {
+      const ctx = catalogOf({ id: 'giant-moe', gib: 80, ds4Only: true });
+      vi.stubEnv('GEZEL_DS4_SERVER_BIN', '');
+      expect(await list(ctx)).toEqual([]);
+      vi.stubEnv('GEZEL_DS4_SERVER_BIN', '/opt/gezel/ds4-server');
+      expect((await list(ctx)).map((entry) => entry.id)).toEqual(['ds4:giant-moe']);
+    });
   });
 
   it('keeps the embedded profile local and does not enumerate gezels or cloud providers', async () => {

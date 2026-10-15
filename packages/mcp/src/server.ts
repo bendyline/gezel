@@ -43,6 +43,7 @@ import {
   findGezelInRoster,
   findProjectByReference,
   formatMediaClock,
+  gezelNamesInUse,
   gezelNotFoundMessage,
   gezelRosterHint,
   matchProjectTypeForBrief,
@@ -145,7 +146,7 @@ import {
   messageGezelText,
   nearbyPathMatches,
   parseKnowledgeUri,
-  pickRandomNameWithGender,
+  pickUnusedGezelName,
   prioritizePullsForCurrentBranch,
   readTaskNotesText,
   removeStepAndCleanEdges,
@@ -381,6 +382,18 @@ const fetchImpl: typeof fetch =
   (certPath ? createTrustingFetch({ cert: readFileSync(certPath, 'utf8') }) : createPatientFetch());
 
 const api = new GezelClient({ baseUrl, token, fetch: fetchImpl });
+
+/**
+ * A random first name no gezel on the install has yet. A failed roster read
+ * still yields a name: a repeated name is cosmetic, a failed recruit is not.
+ */
+async function pickFreshGezelName(): Promise<ReturnType<typeof pickUnusedGezelName>> {
+  const roster = await api
+    .listGezels()
+    .then((response) => response.gezels)
+    .catch(() => []);
+  return pickUnusedGezelName(gezelNamesInUse(roster));
+}
 const linkedFetchImpl: typeof fetch = (input, init) => {
   const headers = new Headers(init?.headers);
   headers.set('x-gezel-linked-from', projectId);
@@ -4413,7 +4426,7 @@ server.tool(
         'create_gezel accepts either templateId or a custom about, not both. Omit about to use the template.',
       );
     }
-    const { name, gender } = pickRandomNameWithGender();
+    const { name, gender } = await pickFreshGezelName();
     const created = templateId
       ? await api.createGezelFromTemplate(templateId, { name, gender })
       : await api.createGezel({
@@ -6078,7 +6091,7 @@ server.tool(
     templateId: z.string().describe('Template id from `list_gilde` (e.g. "voorman", "designer")'),
   },
   async ({ templateId }) => {
-    const { name, gender } = pickRandomNameWithGender();
+    const { name, gender } = await pickFreshGezelName();
     const created = await api.createGezelFromTemplate(templateId, { name, gender });
     return {
       content: [
@@ -7483,7 +7496,7 @@ async function runBinaryDocumentProject(
       mode: 'crew',
       lead: 'none',
     });
-    const { name: gezelName, gender: gezelGender } = pickRandomNameWithGender();
+    const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
     const voorman = await api.createGezelFromTemplate('voorman', {
       name: gezelName,
       gender: gezelGender,
@@ -7564,7 +7577,7 @@ async function runPromotedStartJobAsProject(input: {
       mode: 'crew',
       lead: 'none',
     });
-    const { name: gezelName, gender: gezelGender } = pickRandomNameWithGender();
+    const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
     const voorman = await api.createGezelFromTemplate('voorman', {
       name: gezelName,
       gender: gezelGender,
@@ -7976,7 +7989,7 @@ server.tool(
         mode: 'crew',
         lead: 'none',
       });
-      const { name: gezelName, gender: gezelGender } = pickRandomNameWithGender();
+      const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
       const voorman = await api.createGezelFromTemplate('voorman', {
         name: gezelName,
         gender: gezelGender,
@@ -8165,7 +8178,7 @@ async function runFlatProject(
       missionObjectives: normalizeMarkdown(brief.missionObjectives),
       mode: 'solo',
     });
-    const { name: gezelName, gender: gezelGender } = pickRandomNameWithGender();
+    const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
     const builder = await api.createGezelFromTemplate(effectiveSpecialistRole, {
       name: gezelName,
       gender: gezelGender,

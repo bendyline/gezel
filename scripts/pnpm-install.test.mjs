@@ -29,7 +29,11 @@ import {
   runNodeWithDependencyReadLease,
   runWithDependencyReadLease,
 } from './run-with-dependency-lease.mjs';
-import { parseWorkspaceValidationArgs, runWorkspaceValidation } from './validate-workspace.mjs';
+import {
+  RELEASE_VALIDATION_PHASES,
+  parseWorkspaceValidationArgs,
+  runWorkspaceValidation,
+} from './validate-workspace.mjs';
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'gezel-pnpm-install-test-'));
@@ -1106,6 +1110,101 @@ test('the local all path runs coverage only after validation succeeds', async (t
   });
   assert.equal(failedCode, 1);
   assert.equal(coverageRan, false);
+});
+
+function recordingSpawnPnpm(invocations, exitCodes = {}) {
+  return (args) => {
+    invocations.push(args[1]);
+    const child = new EventEmitter();
+    child.pid = 2_147_483_647;
+    child.killed = false;
+    child.kill = () => true;
+    queueMicrotask(() => child.emit('close', exitCodes[args[1]] ?? 0, null));
+    return child;
+  };
+}
+
+async function writeValidationChain(root, steps) {
+  await writeFile(
+    join(root, 'package.json'),
+    JSON.stringify({ scripts: { 'validate:unlocked': steps.join(' && ') } }),
+  );
+}
+
+test('release phases split validate:unlocked so every step runs exactly once', async (t) => {
+  const root = await fixture(t);
+  const { stability, e2e } = RELEASE_VALIDATION_PHASES;
+  const scriptOf = (step) => step.slice('pnpm '.length);
+  await writeValidationChain(root, [
+    'pnpm build',
+    'pnpm typecheck',
+    ...stability.takes,
+    'pnpm test:surface',
+    ...e2e.takes,
+    'pnpm build:bundle',
+  ]);
+
+  const ran = async (phase, exitCodes) => {
+    const invocations = [];
+    const code = await runWorkspaceValidation({
+      repoRoot: root,
+      phase,
+      spawnPnpmFn: recordingSpawnPnpm(invocations, exitCodes),
+    });
+    return { code, invocations };
+  };
+
+  assert.deepEqual(await ran('main'), {
+    code: 0,
+    invocations: ['build', 'typecheck', 'test:surface', 'build:bundle'],
+  });
+  assert.deepEqual(await ran('stability'), {
+    code: 0,
+    invocations: ['build', ...stability.runs.map(scriptOf)],
+  });
+  assert.deepEqual(await ran('e2e'), {
+    code: 0,
+    invocations: ['build', ...e2e.takes.map(scriptOf)],
+  });
+  assert.deepEqual(await ran('main', { typecheck: 3 }), {
+    code: 3,
+    invocations: ['build', 'typecheck'],
+  });
+});
+
+test('a release phase refuses a chain it cannot split before running any step', async (t) => {
+  const root = await fixture(t);
+  const invocations = [];
+  const spawnPnpmFn = recordingSpawnPnpm(invocations);
+  const { stability, e2e } = RELEASE_VALIDATION_PHASES;
+
+  await writeValidationChain(root, ['pnpm build', ...e2e.takes]);
+  await assert.rejects(
+    runWorkspaceValidation({ repoRoot: root, phase: 'e2e', spawnPnpmFn }),
+    /validate:unlocked no longer runs pnpm test:stability; update the stability phase/,
+  );
+
+  await writeValidationChain(root, [
+    'pnpm build',
+    'pnpm lint --max-diagnostics=0',
+    ...stability.takes,
+    ...e2e.takes,
+  ]);
+  await assert.rejects(
+    runWorkspaceValidation({ repoRoot: root, phase: 'main', spawnPnpmFn }),
+    /step "pnpm lint --max-diagnostics=0" is not a bare `pnpm <script>`/,
+  );
+  assert.deepEqual(invocations, []);
+
+  assert.deepEqual(parseWorkspaceValidationArgs(['--phase=e2e']), {
+    install: false,
+    coverage: false,
+    phase: 'e2e',
+  });
+  assert.throws(
+    () => parseWorkspaceValidationArgs(['--phase=nightly']),
+    /unknown --phase "nightly"; expected one of main, stability, e2e/,
+  );
 });
 
 test('link and release-update workflows lock config edits and prepare installs safely', async () => {

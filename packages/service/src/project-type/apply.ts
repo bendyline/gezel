@@ -17,7 +17,8 @@ import {
   type SeedPlanState,
   compareSemver,
   createLogger,
-  pickRandomNameWithGender,
+  gezelNamesInUse,
+  pickUnusedGezelName,
   projectTypeCrewMatch,
   projectTypeIcon,
   projectTypeTemplateFrontmatter,
@@ -92,22 +93,6 @@ async function crewPool(
   const install = deps.installGezels ?? (await deps.store.listGezels().catch(() => []));
   const onRoster = new Set(roster.map((gezel) => gezel.id));
   return [...roster, ...install.filter((gezel) => !onRoster.has(gezel.id))];
-}
-
-/**
- * A random first name no gezel on the install uses, by id or by the id its
- * name would slug to. A typed project stages its crew in an empty home, where
- * the Store's `-2` suffixing cannot see the install, so a repeated name
- * ("gezel bohuslav already exists") failed the whole create at publish.
- */
-function pickUnusedGezelName(
-  inUse: ReadonlySet<string>,
-): ReturnType<typeof pickRandomNameWithGender> {
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const pick = pickRandomNameWithGender();
-    if (!inUse.has(slugify(pick.name))) return pick;
-  }
-  return pickRandomNameWithGender();
 }
 
 function sha256Hex(content: string | Buffer): string {
@@ -332,7 +317,7 @@ export async function applyProjectType(
   const pool = reuse
     ? await crewPool({ ...deps, installGezels: install }, project.gezelIds ?? [])
     : [];
-  const namesInUse = new Set(install.flatMap((gezel) => [gezel.id, slugify(gezel.name)]));
+  const namesInUse = gezelNamesInUse(install);
   const taken = new Set<string>();
   for (const ref of manifest.gezels) {
     const tpl = await catalog.get('gezel-template', ref.templateId).catch(() => null);

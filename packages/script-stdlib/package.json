@@ -1,7 +1,7 @@
 {
   "name": "@bendyline/gezel-script-stdlib",
   "version": "1.1.5",
-  "description": "Standard gate-script library packed into the app. Plain defineScript sources resolved in place by the script runner (scope: 'standard'); read-only, trusted, versioned with the app.",
+  "description": "Gezel's standard script library: trusted, read-only scripts that check and support craftbook steps.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "scripts", "stdlib"],
   "homepage": "https://github.com/bendyline/gezel",

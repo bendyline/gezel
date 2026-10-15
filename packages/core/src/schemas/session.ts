@@ -579,6 +579,12 @@ export const CreateChatSessionRequestSchema = z.object({
    * labels. See `ChatSessionSchema.roleBasedNameOnlyMode`.
    */
   roleBasedNameOnlyMode: z.boolean().optional(),
+  /**
+   * One question and one answer (`gezel run`): the thread is saved like any
+   * other, but the engine keeps no resumable cache of it on disk, only the
+   * shared prompt prefix later sessions start from.
+   */
+  oneShot: z.boolean().optional(),
 });
 export type CreateChatSessionRequest = z.infer<typeof CreateChatSessionRequestSchema>;
 

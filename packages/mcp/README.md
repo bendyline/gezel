@@ -1,12 +1,17 @@
 # @bendyline/gezel-mcp
 
 The [Model Context Protocol](https://modelcontextprotocol.io) server that gives
-[gezel](https://github.com/bendyline/gezel) agents their hands.
+gezels, the AI companions in [Gezel](https://github.com/bendyline/gezel), their
+hands.
 
 Every tool a gezel can call lives here: memory search and save, workspace file
 operations, project artifacts, the shared document library, script and
 Playwright execution, task management, team and project management, image
 rendering, and history search.
+
+Gezel runs this server for every gezel's chat. You can also run it from any
+other MCP client, so that client works with your gezels' memories, projects,
+and tasks.
 
 ```bash
 npm install @bendyline/gezel-mcp
@@ -49,6 +54,10 @@ it, then reconnect the server from your MCP client.
 Run this way, the server acts with your own access, as the `gezel` command
 does; `GEZEL_PROJECT_ID` picks a default, not a boundary.
 
+`gezel agent list` (from `@bendyline/gezel-cli`) lists your gezels and their
+ids. The `agent` in that command and in `GEZEL_AGENT_ID` is a historical name:
+both refer to your gezels.
+
 When Gezel starts the server itself, for a gezel's chat, it passes the
 connection directly: `GEZEL_BASE_URL`, `GEZEL_TOKEN` (a token it mints for that
 one session, confined to its project unless the gezel coordinates across
@@ -70,8 +79,8 @@ Run the server and call `tools/list` for the authoritative, current inventory.
 | Subpath | Contents |
 |---|---|
 | `@bendyline/gezel-mcp` | Server construction helpers |
-| `@bendyline/gezel-mcp/lint-contracts` | Tool-contract linting used by the eval harness |
-| `@bendyline/gezel-mcp/dist/server.js` | The stdio entry point. Resolved by string from `packages/service/src/chat/manager.ts` — removing this export makes chat sessions silently run with no tools |
+| `@bendyline/gezel-mcp/lint-contracts` | The exact input and output schemas the built-in tools publish, for checking tool contracts |
+| `@bendyline/gezel-mcp/dist/server.js` | The stdio server itself, also installed as the `gezel-mcp` command. The Gezel service launches this file for every chat, so it stays a supported path |
 
 ## Stability
 

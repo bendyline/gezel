@@ -1,8 +1,10 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  MACHINE_SHARED_MARKER,
+  activeMachineSharedHome,
   gezelDir,
   gezelHome,
   gezelPaths,
@@ -154,5 +156,29 @@ describe('project script paths', () => {
     expect(projectScriptRunFile(ROOT, 'default', '2026-04-21', 'r1')).toBe(
       join(ROOT, 'projects', 'default', 'scripts', 'runs', '2026-04-21', 'r1.json'),
     );
+  });
+});
+
+describe('activeMachineSharedHome', () => {
+  it('mounts a marked shared root unless the home is kept apart from it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gezel-shared-'));
+    try {
+      await writeFile(join(root, MACHINE_SHARED_MARKER), '{}');
+      expect(activeMachineSharedHome({ GEZEL_MACHINE_SHARED_HOME: root })).toBe(root);
+      expect(
+        activeMachineSharedHome({
+          GEZEL_MACHINE_SHARED_HOME: root,
+          GEZEL_DISABLE_MACHINE_SHARED: '1',
+        }),
+      ).toBeNull();
+      expect(
+        activeMachineSharedHome({
+          GEZEL_MACHINE_SHARED_HOME: root,
+          GEZEL_DISABLE_MACHINE_SHARED: '0',
+        }),
+      ).toBe(root);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

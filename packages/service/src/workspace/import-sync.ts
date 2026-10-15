@@ -11,9 +11,10 @@ import {
   craftbookFromDoc,
   createLogger,
   formatCraftbookDocErrors,
+  gezelNamesInUse,
   nowIso,
   parseSkillDoc,
-  pickRandomNameWithGender,
+  pickUnusedGezelName,
   projectGezelId,
   skillToCraftbookDoc,
 } from '@bendyline/gezel';
@@ -373,7 +374,9 @@ async function recruitFromTemplate(
 ): Promise<{ id: string; name: string } | null> {
   const template = await resolveGildeTemplateForRole(catalog, templateId).catch(() => null);
   if (!template || template.templateId !== templateId) return null;
-  const { name, gender } = pickRandomNameWithGender();
+  const { name, gender } = pickUnusedGezelName(
+    gezelNamesInUse(await store.listGezels().catch(() => [])),
+  );
   const created = await store.createGezel({
     name,
     role: template.role,
@@ -725,7 +728,7 @@ async function ensurePersonaGezel(
     return;
   }
 
-  const { name, gender } = pickRandomNameWithGender();
+  const { name, gender } = pickUnusedGezelName(gezelNamesInUse(all));
   const created = await store.createGezel({
     name,
     role: persona.role,

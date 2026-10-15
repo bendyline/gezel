@@ -1,4 +1,4 @@
-import { pickRandomNameWithGender } from '../names.js';
+import { gezelNamesInUse, pickUnusedGezelName } from '../names.js';
 import { projectTypeIcon } from '../project-icons.js';
 import {
   type ProjectTypeHost,
@@ -184,6 +184,7 @@ export async function planPortableTypedProject(args: {
   const reuse = manifest.leanProfile || request.projectType.reuseRosterGezels !== false;
   const pool = reuse ? args.installGezels : [];
   const taken = new Set<string>();
+  const namesInUse = gezelNamesInUse(args.installGezels);
   const crew: PortableTypedProjectPlan['crew'] = [];
   const hires: TypedProjectGezel[] = [];
   for (const [slot, ref] of manifest.gezels.entries()) {
@@ -198,7 +199,8 @@ export async function planPortableTypedProject(args: {
       continue;
     }
     if (!template || template.manifest.kind !== 'gezel-template') continue;
-    const { name, gender } = pickRandomNameWithGender();
+    const { name, gender } = pickUnusedGezelName(namesInUse);
+    namesInUse.add(slugifyEntityName(name));
     const frontmatter = projectTypeTemplateFrontmatter(template.manifest.frontmatter);
     hires.push({
       slot,

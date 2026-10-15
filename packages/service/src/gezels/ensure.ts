@@ -1,8 +1,10 @@
 import {
   type GezelGender,
   type GildeTemplateResolution,
+  gezelNamesInUse,
   inferGenderForName,
-  pickRandomNameWithGender,
+  pickUnusedGezelName,
+  pickUnusedSuggestedName,
   resolveGezelTemplateForRole,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -77,6 +79,7 @@ export async function ensureGezel(args: {
   if (!query) throw new Error('ensureGezel: jobTitle is required');
 
   const existing = await store.listGezels();
+  const inUse = gezelNamesInUse(existing);
 
   // 0. Exact template, when the caller names one: the roster gezel made
   // from it, else a fresh gezel from precisely that template. Identity is
@@ -98,6 +101,7 @@ export async function ensureGezel(args: {
       const { name: chosenName, gender: chosenGender } = pickNameAndGender({
         preferredName: opts.preferredName,
         ...(exact.nameSuggestions ? { suggestions: exact.nameSuggestions } : {}),
+        inUse,
       });
       const created = await store.createGezel({
         name: chosenName,
@@ -156,6 +160,7 @@ export async function ensureGezel(args: {
     const { name: chosenName, gender: chosenGender } = pickNameAndGender({
       preferredName: opts.preferredName,
       ...(resolved.nameSuggestions ? { suggestions: resolved.nameSuggestions } : {}),
+      inUse,
     });
     const created = await store.createGezel({
       name: chosenName,
@@ -189,6 +194,7 @@ export async function ensureGezel(args: {
     bespokeMode === 'static' ? staticSpecialistAbout(query) : await generateGezelAbout(chat, query);
   const { name: chosenName, gender: chosenGender } = pickNameAndGender({
     preferredName: opts.preferredName,
+    inUse,
   });
   const created = await store.createGezel({
     name: chosenName,
@@ -251,25 +257,24 @@ export async function resolveGildeTemplateForRole(
  *   1. caller-supplied `preferredName` wins — gender is inferred from
  *      the name (pool lookup, NB flip applied once).
  *   2. template `nameSuggestions` list (image-generator's "Picasso",
- *      "Vermeer", …) — gender inferred the same way.
- *   3. random draw from the gendered pools via `pickRandomNameWithGender`
- *      — name and gender come paired so the NB flip isn't re-rolled by
- *      the Store's inference fallback.
+ *      "Vermeer", …) that no gezel uses yet — gender inferred the same way.
+ *   3. random draw from the gendered pools that no gezel uses yet — name
+ *      and gender come paired so the NB flip isn't re-rolled by the Store's
+ *      inference fallback.
  */
 function pickNameAndGender(opts: {
   preferredName?: string;
   suggestions?: readonly string[];
+  inUse: ReadonlySet<string>;
 }): { name: string; gender: GezelGender } {
   const preferred = opts.preferredName?.trim();
   if (preferred) {
     return { name: preferred, gender: inferGenderForName(preferred) };
   }
   if (opts.suggestions && opts.suggestions.length > 0) {
-    const idx = Math.floor(Math.random() * opts.suggestions.length);
-    const suggested = opts.suggestions[idx];
-    if (suggested) return { name: suggested, gender: inferGenderForName(suggested) };
+    return pickUnusedSuggestedName(opts.suggestions, opts.inUse);
   }
-  return pickRandomNameWithGender();
+  return pickUnusedGezelName(opts.inUse);
 }
 
 /**

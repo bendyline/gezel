@@ -49,7 +49,9 @@ import {
   withTransientConnection,
 } from '../connection.js';
 import {
+  blockedTaskReason,
   craftbookDoLaunch,
+  filterCraftbooks,
   parseCraftbookArguments,
   resolveCraftbookInvocation,
   waitForTask,
@@ -84,6 +86,8 @@ import {
   parseNativeEngine,
   parseNativeVariant,
 } from '../native-command.js';
+import { stderrProgress } from '../progress-output.js';
+import { resolveRunGezel } from '../run-gezel.js';
 import { RunProgress } from '../run-progress.js';
 import { resolveRunPrompt } from '../run-prompt.js';
 import { checkRunReadiness } from '../run-readiness.js';
@@ -245,7 +249,7 @@ program
   )
   .option(
     '--web',
-    'Serve the web UI over HTTP on loopback and print a one-time browser URL (reuses a daemon already serving it).',
+    'Serve the web UI over HTTP on loopback and print a browser URL whose sign-in token lasts until the service restarts (reuses a daemon already serving it).',
   )
   .option('--open', 'With --web, open the printed URL in your default browser.')
   .option(
@@ -311,7 +315,7 @@ program
             if (opts.web) retry.push('--web');
             throw new CliError(
               `gezeld is already running for this home ${opts.web ? 'without the web UI' : `on port ${running.port}`} (pid ${running.pid}).\n` +
-                `Restart it ${wanted} with \`${[...retry, '--restart'].join(' ')}\`, or stop it first with \`gezel stop --daemon\`.`,
+                `Restart it ${wanted} with \`${[...retry, '--restart'].join(' ')}\`, or stop it first with \`gezel stop\`.`,
             );
           }
           console.error(`Restarting gezeld (pid ${running.pid}) ${wanted}…`);
@@ -365,7 +369,7 @@ async function runtimeServes(
 
 /**
  * Read the daemon's per-launch web-UI token from its runtime file and
- * print the one-time browser URL (optionally opening it). The detached
+ * print the per-launch browser URL (optionally opening it). The detached
  * daemon's own stdout isn't visible to this process, so we reconstruct
  * the URL the daemon logged. `baseUrl` is the actual bound origin (honors
  * any ephemeral fallback).
@@ -416,7 +420,7 @@ async function startForeground(env: NodeJS.ProcessEnv): Promise<void> {
   // Keep a dedicated stdin ownership pipe while inheriting output. EOF gives
   // gezeld a graceful, cross-platform stop channel and the OS closes the same
   // pipe if this foreground owner crashes. In web mode the daemon still
-  // prints its one-time URL to this stdout.
+  // prints its per-launch URL to this stdout.
   const child = spawn(process.execPath, [entry], {
     detached: false,
     stdio: ['pipe', 'inherit', 'inherit'],
@@ -532,17 +536,35 @@ function reportApiCompat(verdict: ApiCompatVerdict): void {
   process.exitCode = 1;
 }
 
+// `stop` mirrors `start`: it shuts the service down. It used to be only the
+// app's emergency brake, which left the service a script had just started
+// running in the background (2026-10-15 npm audit); that is `--keep-running`.
 program
   .command('stop')
   .description(
-    'Hard stop all AI work and switch Gezel to Reactive mode; gezeld keeps running (use --daemon to shut it down)',
+    'Stop all AI work and shut down your Gezel service (--keep-running only stops the AI work)',
   )
-  .option('--daemon', 'Shut down the user-owned daemon process itself')
-  .action(async (opts: { daemon?: boolean }) => {
+  .option(
+    '--keep-running',
+    'Emergency brake: cancel AI work, unload engines and switch to Reactive, but leave the service running',
+  )
+  .addOption(new Option('--daemon', 'Shut down the service (the default)').hideHelp())
+  .action(async (opts: { keepRunning?: boolean; daemon?: boolean }) => {
     const globals = cliGlobals();
-    if (opts.daemon) {
-      await stopUserDaemon(globals);
-      return;
+    if (!opts.keepRunning) {
+      if (globals.connect) {
+        throw new CliError(
+          'gezel stop cannot shut down a remote service. Use `gezel stop --keep-running` to stop its AI work.',
+        );
+      }
+      const system = await findHealthySystemService(globals);
+      if (!system) {
+        await stopUserDaemon(globals);
+        return;
+      }
+      console.log(
+        `The machine-wide Gezel service on port ${system.port} is managed by the operating system and keeps running; stopping its AI work instead.`,
+      );
     }
 
     // Do not manufacture a local daemon merely to tell it to stop. Explicit
@@ -567,11 +589,9 @@ program
     console.log(
       `Hard stop complete: ${details.join(', ')}. Local engines unloaded; Gezel is Reactive.`,
     );
-    // This is the app's emergency brake, not a shutdown — the app still needs
-    // gezeld. Say so: scripts that read "stop" as "exit" leak the process.
     if (userRuntime) {
       console.log(
-        `gezeld is still running (pid ${userRuntime.pid}); run \`gezel stop --daemon\` to shut it down.`,
+        `gezeld is still running (pid ${userRuntime.pid}); run \`gezel stop\` to shut it down.`,
       );
     }
   });
@@ -612,7 +632,7 @@ async function stopDaemonPid(pid: number): Promise<boolean> {
 
 async function stopUserDaemon(globals: CliGlobals): Promise<void> {
   if (globals.connect) {
-    throw new CliError('gezel stop --daemon cannot stop an explicit remote service.');
+    throw new CliError('gezel stop cannot shut down an explicit remote service.');
   }
   const system = await findHealthySystemService(globals);
   if (system) {
@@ -691,14 +711,16 @@ program
       });
       const { client } = conn;
       const projectId = await resolveRunProject(client, cliGlobals());
-      const gezelId = opts.gezel ?? (await ensureCliProjectLead(client, projectId));
+      const gezelId = opts.gezel
+        ? await resolveRunGezel(client, opts.gezel)
+        : await ensureCliProjectLead(client, projectId);
       const readiness = await checkRunReadiness(client, gezelId);
       if (!readiness.ready) {
         console.error(readiness.message);
         process.exitCode = 1;
         return;
       }
-      const session = await client.createChatSession({ gezelId, projectId });
+      const session = await client.createChatSession({ gezelId, projectId, oneShot: true });
       await client.sendToChatSession(session.id, prompt);
       const reply = new ReplyPrinter((text) => process.stdout.write(text));
       const progress = new RunProgress((text) => process.stderr.write(text));
@@ -749,6 +771,7 @@ program
     `
 Bare values fill the craftbook's required parameters in order; key=value sets any
 parameter; every other word is your request, which becomes the task description.
+\`gezel craftbook list\` shows the craftbooks you can start here.
 
 Examples:
   gezel do summarize-long "Summarize notes.txt for the board"
@@ -825,7 +848,7 @@ Examples:
           params: parsed.params,
           ...(craftbook.paramSchema ? { paramSchema: craftbook.paramSchema } : {}),
           prompter: terminalPrompter(),
-          write: (text) => process.stderr.write(text),
+          write: stderrProgress(),
         });
       if (craftbook.cliWorkflow) {
         if (book.source !== 'project')
@@ -920,9 +943,69 @@ async function printTaskWait(
         `${task.ref}: ${task.status}${task.activeStepId ? ` (${task.activeStepId})` : ''}`,
       ),
   });
-  console.log(opts.json ? JSON.stringify(result) : `${result.task.ref}: ${result.outcome}`);
+  const reason = await blockedTaskReason(client, result);
+  console.log(
+    opts.json
+      ? JSON.stringify({ ...result, ...(reason ? { reason } : {}) })
+      : `${result.task.ref}: ${result.outcome}`,
+  );
+  if (!opts.json && result.outcome === 'blocked') {
+    if (reason) console.error(reason);
+    console.error(`See its notes with \`gezel task notes ${result.task.ref}\`.`);
+  }
   process.exitCode = result.exitCode;
 }
+
+const craftbook = program
+  .command('craftbook')
+  .description('Browse the craftbooks `gezel do` can start');
+
+craftbook
+  .command('list [words...]')
+  .description(
+    "List the craftbooks `gezel do` can start in this folder's project; words filter by command, title and tags",
+  )
+  .option('--json', 'emit the list as JSON')
+  .action(async (words: string[], opts: { json?: boolean }) => {
+    const client = await connectOwned(cliGlobals());
+    // Listing must not create a project: a folder that has none yet sees what
+    // `gezel do` would offer there, the Default project's craftbooks.
+    const preview = await previewRunProject(client, cliGlobals());
+    const projectId = preview.projectId ?? 'default';
+    const [config, result] = await Promise.all([
+      client.getConfig(),
+      client.listProjectCraftbooks(projectId),
+    ]);
+    const books = filterCraftbooks(
+      normalizeCraftbooks(result.items, config.showWorkInProgressFeatures === true),
+      words,
+    );
+    if (opts.json) {
+      console.log(
+        JSON.stringify(
+          books.map((book) => ({
+            command: book.command,
+            name: book.name,
+            category: book.category,
+            source: book.source,
+            ...(book.description ? { description: book.description } : {}),
+          })),
+        ),
+      );
+      return;
+    }
+    if (books.length === 0) {
+      console.log(
+        words.length > 0
+          ? `No craftbook matches "${words.join(' ')}".`
+          : 'No craftbooks are available here.',
+      );
+      return;
+    }
+    const width = Math.min(32, Math.max(...books.map((book) => book.command.length)) + 2);
+    for (const book of books) console.log(`${book.command.padEnd(width)}${book.name}`);
+    console.error(`\nStart one with \`gezel do <command> "<your request>"\`.`);
+  });
 
 const agent = program.command('agent').description('Manage your gezels (your AI companions)');
 
@@ -1996,7 +2079,7 @@ native
     const installed = await installNativeToolkit(client, {
       ...(variant ? { variant } : {}),
       ...(engine ? { engines: [engine] } : {}),
-      output: { writeProgress: (text) => process.stderr.write(text) },
+      output: { writeProgress: stderrProgress() },
     });
     console.log(
       `${engine ? `${engine} ready` : 'native toolkit ready'}\n${formatNativeStatus(installed)}`,
@@ -2063,23 +2146,24 @@ image
     const client = await connectOwned(cliGlobals());
     let lastPct = -1;
     let pullError: string | undefined;
+    const progress = stderrProgress();
     await client.pullImageModel(id, (ev) => {
       if (ev.type === 'progress') {
         const total = ev.totalBytes ?? 0;
         const pct = total > 0 ? Math.floor((ev.bytesWritten / total) * 100) : 0;
         if (pct !== lastPct) {
           lastPct = pct;
-          process.stderr.write(
+          progress(
             `\rpulling ${id}: ${String(pct).padStart(3)}%  ${(ev.bytesWritten / 1e9).toFixed(2)}/${(total / 1e9).toFixed(2)} GB`,
           );
         }
       } else if (ev.type === 'retrying') {
-        process.stderr.write(`\n  retry ${ev.attempt}/${ev.maxAttempts}: ${ev.reason}\n`);
+        progress(`\n  retry ${ev.attempt}/${ev.maxAttempts}: ${ev.reason}\n`);
       } else if (ev.type === 'error') {
         pullError = ev.error;
-        process.stderr.write('\n');
+        progress('\n');
       } else if (ev.type === 'done' && !pullError) {
-        process.stderr.write(`\rpulled ${id}${' '.repeat(48)}\n`);
+        progress(`\rpulled ${id}${' '.repeat(48)}\n`);
       }
     });
     if (pullError) throw new CliError(`pull failed: ${pullError}`);
@@ -2230,8 +2314,9 @@ model
   .action(async (id: string, opts: { provider?: string }) => {
     const client = await connectOwned(cliGlobals());
     const provider = resolveModelProvider(opts.provider);
-    await pullChatModel(client, provider, id, (text) => process.stderr.write(text));
-    if (provider === 'mlx') await waitForMlxRuntime(client, (text) => process.stderr.write(text));
+    const progress = stderrProgress();
+    await pullChatModel(client, provider, id, progress);
+    if (provider === 'mlx') await waitForMlxRuntime(client, progress);
     if ((await pinPulledModel(client, provider, id)) === 'pinned') {
       process.stderr.write(`${id} is now the default ${provider} model.\n`);
     }
@@ -2265,9 +2350,7 @@ model
       ...(opts.force ? { force: true } : {}),
       ...(opts.pull === false ? { skipPull: true } : {}),
       output: {
-        writeProgress: (text) => {
-          process.stderr.write(text);
-        },
+        writeProgress: stderrProgress(),
       },
     });
     console.log(`exported ${id} to ${result.path} (${(result.bytesWritten / 1e9).toFixed(2)} GB)`);

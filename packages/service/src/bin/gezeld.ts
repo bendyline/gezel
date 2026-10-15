@@ -123,7 +123,7 @@ async function main() {
     process.stderr,
     `gezeld listening on ${scheme}://127.0.0.1:${running.port} (home=${gezelHome()})\n`,
   );
-  // Web mode: surface the one-time browser URL on the daemon's own
+  // Web mode: surface the per-launch browser URL on the daemon's own
   // stdout so foreground (`gezel start --web --foreground`) users see it
   // directly. The detached CLI path reads the same token from
   // `runtime/web-ui-token` to print + optionally open a browser.

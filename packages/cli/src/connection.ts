@@ -15,7 +15,8 @@ import {
   evaluateApiCompat,
   getLogLevel,
   getLogOutput,
-  pickRandomNameWithGender,
+  gezelNamesInUse,
+  pickUnusedGezelName,
   projectLeadGezelId,
   setLogLevel,
   setLogOutput,
@@ -73,12 +74,32 @@ export class CliError extends Error {
 /** Apply `--home` to the env so gezelHome()/readRuntime()/startService see it. */
 export function applyHome(globals: CliGlobals): void {
   if (globals.home) process.env.GEZEL_HOME = resolve(globals.home);
+  // A home named with --home is its own world, apart from the desktop app's
+  // machine install. A scratch home mounted the machine's shared Default
+  // project and wrote its test task there, and its first `model list` hashed
+  // 58 GB of machine models (2026-10-15 npm audit). Your own ~/.gezel keeps
+  // both; GEZEL_DISABLE_MACHINE_SHARED=0 opts a separate home back in.
+  if (
+    globals.home &&
+    process.env.GEZEL_DISABLE_MACHINE_SHARED === undefined &&
+    !isAccountHome(resolve(globals.home))
+  ) {
+    process.env.GEZEL_DISABLE_MACHINE_SHARED = '1';
+  }
   // A standalone CLI may read immutable, service-published model bundles,
   // but still writes downloads/caches only beneath its own GEZEL_HOME.
-  if (!process.env.GEZEL_SHARED_ASSETS_DIR) {
+  if (!process.env.GEZEL_SHARED_ASSETS_DIR && process.env.GEZEL_DISABLE_MACHINE_SHARED !== '1') {
     const sharedAssets = systemSharedAssetsDir();
     if (sharedAssets) process.env.GEZEL_SHARED_ASSETS_DIR = sharedAssets;
   }
+}
+
+/** Whether `home` is this account's own Gezel home (`~/.gezel`, or `~/.gezel-dev` in development). */
+export function isAccountHome(home: string): boolean {
+  const normalize = (path: string) =>
+    process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path);
+  const wanted = normalize(home);
+  return ['.gezel', '.gezel-dev'].some((name) => normalize(join(homedir(), name)) === wanted);
 }
 
 /** Reject global flag combinations before any command performs work. */
@@ -457,7 +478,7 @@ export async function connectForRun(globals: CliGlobals): Promise<RunConnection>
  */
 export function spawnedDaemonNotice(pid: number | undefined): string {
   const which = pid === undefined ? '' : ` (pid ${pid})`;
-  return `Started the Gezel background service${which}; it keeps running after this command. Stop it with \`gezel stop --daemon\`.\n`;
+  return `Started the Gezel background service${which}; it keeps running after this command. Stop it with \`gezel stop\`.\n`;
 }
 
 /**
@@ -818,7 +839,7 @@ interface IncompatibleDaemon {
   code: ApiIncompatibilityCode;
   reason: string;
   version: string | undefined;
-  /** A machine-wide service the OS manages, which `gezel stop --daemon` cannot stop. */
+  /** A machine-wide service the OS manages, which `gezel stop` cannot stop. */
   systemService: boolean;
 }
 
@@ -848,7 +869,7 @@ export function incompatibleDaemonCliError(source: GezelSdkError | IncompatibleD
   return new CliError(
     verdict.systemService
       ? `${capitalize(service)} installed for this computer is older than this gezel CLI can use. Update the Gezel app, which replaces it, then try again.`
-      : `${capitalize(service)} running for this user is older than this gezel CLI can use. Open the Gezel app, which replaces an outdated service when it starts, or stop it with \`gezel stop --daemon\` and run this command again.`,
+      : `${capitalize(service)} running for this user is older than this gezel CLI can use. Open the Gezel app, which replaces an outdated service when it starts, or stop it with \`gezel stop\` and run this command again.`,
   );
 }
 
@@ -1051,7 +1072,7 @@ export async function ensureCliProjectLead(
         (gezel) => gezel.templateId === 'builder' || gezel.role?.trim().toLowerCase() === 'builder',
       );
       if (!builder) {
-        const { name, gender } = pickRandomNameWithGender();
+        const { name, gender } = pickUnusedGezelName(gezelNamesInUse(gezels));
         builder = await client.createGezelFromTemplate('builder', { name, gender });
       }
       const updated = await client.updateProject(projectId, { voormanGezelId: builder.id });
@@ -1067,7 +1088,7 @@ export async function ensureCliProjectLead(
     (gezel) => gezel.templateId === 'voorman' || gezel.role?.trim().toLowerCase() === 'voorman',
   );
   if (!voorman) {
-    const { name, gender } = pickRandomNameWithGender();
+    const { name, gender } = pickUnusedGezelName(gezelNamesInUse(gezels));
     voorman = await client.createGezelFromTemplate('voorman', { name, gender });
   }
   const updated = await client.updateProject(projectId, { voormanGezelId: voorman.id });

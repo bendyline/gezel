@@ -1,6 +1,6 @@
 # Notices and attributions
 
-Gezel itself is released under the [MIT License](./LICENSE). This file lists
+Gezel itself is released under the [MIT License](https://github.com/bendyline/gezel/blob/main/LICENSE). This file lists
 the third-party open source software bundled into, or distributed alongside,
 Gezel — along with each component's upstream license and homepage. Release
 builds collect the corresponding license and notice texts into the installed
@@ -14,8 +14,8 @@ license and notice texts for every package compiled into its browser UI and
 Office pane are in `dist/licenses/npm/`, where `manifest.json` maps each
 package to its texts (see **Code compiled into the browser bundles**). The
 font license texts are in `dist/licenses/fonts/`, harper.js's license is in
-`dist/ui/harper/`, and the Kokoro pronunciation dictionaries' license is
-`dist/kokoro-lexicon/LICENSE`.
+`dist/ui/harper/`, and the Kokoro pronunciation dictionaries' license ships
+in the `@bendyline/gezel-inference` package at `dist/kokoro-lexicon/LICENSE`.
 
 ---
 
