@@ -36,13 +36,18 @@ const BENCH =
 
 // Flat face and rounded peen, drawn with the handle entering at the origin. A
 // symmetric mallet raised behind a bench reads as a gavel; a hooked claw tilted
-// over a neighbour reads as an axe. Shared with the chat's work-chunks count.
+// over a neighbor reads as an axe. Shared with the chat's work-chunks count.
 export const HAMMER_HEAD =
   'M-2.4 -2.4Q-2.4 -2.6 -2.2 -2.6H0.4L2 -2.25Q2.5 -2.15 2.5 -1.65V-1.15Q2.5 -0.65 2 -0.55L0.4 -0.2H-2.2Q-2.4 -0.2 -2.4 -0.4Z';
 
+// Drawn along +x from the mouthpiece (the origin) to the bell. The flare and
+// the rim are what make it a bullhorn; a plain cone read as a flashlight.
+const BULLHORN =
+  'M-0.55 -0.42H0L4.9 -1.95V1.95L0 0.42H-0.55Q-0.8 0.42 -0.8 0.17V-0.17Q-0.8 -0.42 -0.55 -0.42Z';
+
 /**
  * The crew at the workbench: the bench empty with its hammer down, the lead
- * alone, the whole crew, then the lead raising the hammer unasked.
+ * alone, the whole crew, then the lead calling the shots through a bullhorn.
  */
 export function EngagementModeIcon({ mode }: { mode: AIEngagementMode }) {
   const crew = mode === 'off' ? [] : mode === 'reactive' ? [LEAD] : [LEFT, LEAD, RIGHT];
@@ -68,10 +73,15 @@ export function EngagementModeIcon({ mode }: { mode: AIEngagementMode }) {
       ))}
       {mode === 'proactive' && (
         <>
-          <path d="M13.6 11.4h2.2" fill="none" />
-          <rect x="14.9" y="10.3" width="2.4" height="2.2" rx=".9" stroke="none" />
-          <path d="M16.1 8.95V4.1" fill="none" />
-          <path d={HAMMER_HEAD} transform="translate(16.1 3.9)" stroke="none" />
+          <g transform="translate(16 6.4) rotate(-38)" stroke="none">
+            <path d={BULLHORN} />
+            <rect x="4.75" y="-2.25" width=".75" height="4.5" rx=".35" />
+          </g>
+          {/* The pistol grip stops square above the fist; the cut is what makes it a
+              hand holding a handle rather than an arm fused into the horn. */}
+          <path d="M16.55 6.4 16.15 7.8" fill="none" strokeWidth="1.25" strokeLinecap="butt" />
+          <rect x="15.25" y="8.2" width="1.75" height="1.4" rx=".6" stroke="none" />
+          <path d="M14 10.8 15.55 9.4" fill="none" />
         </>
       )}
       {mode === 'off' && (

@@ -5,6 +5,7 @@ import {
   pickWithRange,
   planDisplayName,
   planOutputSummary,
+  planShortDescription,
   starterCraftbookIds,
   visibleCatalogItems,
 } from '@bendyline/gezel';
@@ -146,7 +147,7 @@ export function MakeSomething({ projectId, projects }: { projectId: string; proj
 /**
  * The card takes the paper its artwork is drawn on, so the mark bleeds into
  * it. A starter says in a few words what comes back; a first-project plan
- * keeps its own description.
+ * keeps the opening clause of its own description, so every key is one size.
  */
 function MakeSomethingCard({
   book,
@@ -176,7 +177,7 @@ function MakeSomethingCard({
       <span className="home-make-name">{planDisplayName(book.manifest)}</span>
       <span className="home-make-description">
         {(starter ? planOutputSummary(book.manifest, { starter }) : null) ??
-          book.manifest.description}
+          planShortDescription(book.manifest.description)}
       </span>
     </button>
   );

@@ -24,8 +24,19 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_gezel._tcp</string>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Take a photo to add to your message in Gezel.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Find computers running Gezel on your network so you can use their models.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record your voice to write messages in Gezel.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

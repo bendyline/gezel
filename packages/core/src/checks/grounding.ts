@@ -48,6 +48,17 @@ export function normalizeInlineEmphasis(text: string): string {
   return text.replace(/\*\*|__|`/g, '');
 }
 
+/**
+ * Fold typographic hyphens (U+2010-U+2012, U+2212) and no-break, figure, thin
+ * and narrow spaces to ASCII. Nemotron 3.5 Lightning writes dates and
+ * compounds with U+2011 between the parts, so a faithful 2026-09-01 read as a
+ * missing value (2026-10-15). En and em dashes are punctuation and stay. Like
+ * the emphasis fold, this only ever widens what a required value can match.
+ */
+export function normalizeTypography(text: string): string {
+  return text.replace(/[\u2010-\u2012\u2212]/g, '-').replace(/[\u00a0\u2007\u2009\u202f]/g, ' ');
+}
+
 /** A single grounded fact: at least one `required` form must appear and no
  *  `forbidden` (decoy) form may. Values are regex sources, matched
  *  case-insensitively against the (optionally digit-normalized) text. */
@@ -89,8 +100,8 @@ export function valueGrounding(
   facts: readonly GroundingFact[],
   opts: { normalizeDigits?: boolean } = {},
 ): GroundingResult {
-  const haystack = normalizeInlineEmphasis(
-    opts.normalizeDigits === false ? text : normalizeDigitGroups(text),
+  const haystack = normalizeTypography(
+    normalizeInlineEmphasis(opts.normalizeDigits === false ? text : normalizeDigitGroups(text)),
   );
   const signals: string[] = [];
   const decoysDetected: string[] = [];
@@ -480,9 +491,8 @@ export function valuesSubsetOf(
   // comparing. Like the glob handling above this only ever WIDENS the allowed
   // set, so it cannot turn a genuinely invented value into a pass.
   const foldSpace = (t: string): string =>
-    t
+    normalizeTypography(t)
       .replace(/&nbsp;|&#160;|&#xa0;|&#xA0;/g, ' ')
-      .replace(/\u00a0/g, ' ')
       .replace(/\s+/g, ' ');
   const normalize = (t: string): string => {
     const folded = foldSpace(t);

@@ -23,6 +23,7 @@ import { RemoteServingConfigSchema } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { GrantExpiredError } from '../../grants/manager.js';
 import type { EngineContext } from '../engine-context.js';
+import { pairingCodeRoutes } from './pairing-code.js';
 
 export function remoteServingManageRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
@@ -58,6 +59,8 @@ export function remoteServingManageRoutes(ctx: EngineContext): Hono {
   };
 
   app.get('/', async (c) => c.json(await describe()));
+
+  app.route('/pairing-code', pairingCodeRoutes(ctx));
 
   app.put('/', async (c) => {
     const parsed = RemoteServingConfigSchema.safeParse(await c.req.json().catch(() => null));

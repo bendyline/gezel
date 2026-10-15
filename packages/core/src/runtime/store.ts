@@ -36,6 +36,7 @@ import * as projectTypes from './project-types.js';
 import * as projects from './projects.js';
 import * as questions from './questions.js';
 import * as reminders from './reminders.js';
+import * as remotes from './remotes-file.js';
 import { PortableRepository, type PortableStoreOptions } from './repository.js';
 import * as scriptRuns from './script-runs.js';
 import * as scriptSources from './script-sources.js';
@@ -160,6 +161,12 @@ export class PortableStore {
     patch: Partial<{ [K in keyof GezelConfig]: GezelConfig[K] | null }>,
   ): Promise<GezelConfig> {
     return this.run((repo) => projects.writeConfig(repo, patch));
+  }
+  readRemotes() {
+    return this.run(remotes.readRemotes);
+  }
+  writeRemotes(value: remotes.PortableRemotes) {
+    return this.run((repo) => remotes.writeRemotes(repo, value));
   }
   sharedProjectId() {
     return this.run(projects.sharedProjectId);

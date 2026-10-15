@@ -25,6 +25,7 @@ import {
   EffortTray,
   ModelPicker,
   useReasoningSupport,
+  useRemoteServers,
 } from '../components/ModelPicker.js';
 import { NotificationsSetting } from '../components/NotificationsSetting.js';
 import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloads.js';
@@ -716,17 +717,20 @@ function DaemonSettingsView() {
     [config],
   );
 
-  const setProvider = useCallback(async (provider: ProviderName) => {
-    setStatus('saving…');
-    try {
-      const res = await api.updateConfig({ provider });
-      setConfig(res);
-      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-      setStatus('saved — open chats restart on their next message.');
-    } catch (err) {
-      setStatus(`save failed: ${(err as Error).message}`);
-    }
-  }, []);
+  const setProvider = useCallback(
+    async (provider: ProviderName, defaultModel?: ConfigResponse['defaultModel']) => {
+      setStatus('saving…');
+      try {
+        const res = await api.updateConfig({ provider, ...(defaultModel ? { defaultModel } : {}) });
+        setConfig(res);
+        window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
+        setStatus('saved — open chats restart on their next message.');
+      } catch (err) {
+        setStatus(`save failed: ${(err as Error).message}`);
+      }
+    },
+    [],
+  );
 
   const saveDebugMode = useCallback(async (debugMode: boolean) => {
     setStatus('saving…');
@@ -1141,7 +1145,8 @@ function DaemonSettingsView() {
         | 'ollama'
         | 'llama-cpp'
         | 'mlx'
-        | 'ds4',
+        | 'ds4'
+        | 'remote',
       value: string | undefined,
     ) => {
       setStatus('saving…');
@@ -1464,6 +1469,40 @@ function DaemonSettingsView() {
     provider === 'apple-foundation-models' ||
     config?.appleFoundationModelsStatus?.installed === true;
 
+  // Models on paired servers (Settings → Remote Servers). Offered once a
+  // server shares at least one, and kept on offer while one is chosen. Read
+  // outside this tab only when a paired server is in use, for the nav subline.
+  const remoteServers = useRemoteServers(
+    section === 'defaults' || provider === 'remote' || nightShiftProvider === 'remote',
+  );
+  const remoteModels = useMemo(
+    () =>
+      (remoteServers ?? []).flatMap((server) => server.models.map((model) => ({ server, model }))),
+    [remoteServers],
+  );
+  const showRemoteProvider =
+    provider === 'remote' || nightShiftProvider === 'remote' || remoteModels.length > 0;
+  const remoteServerNames = [...new Set(remoteModels.map(({ server }) => server.displayName))];
+  const remoteProviderLabel =
+    remoteServerNames.length === 1 ? remoteServerNames[0]! : providerLabel('remote', uiPlatform);
+  const remoteProviderTitle =
+    'Use a model on another gezel device you connected to. Your files and chats stay here; only the model runs there.';
+  // A remote choice must name a model — the id is what selects the server —
+  // so switching to one keeps the saved model while it's still offered and
+  // otherwise starts on the first.
+  const startingRemoteModel = (saved: string | undefined): string | undefined =>
+    saved && remoteModels.some(({ model }) => model.id === saved)
+      ? saved
+      : remoteModels[0]?.model.id;
+  const selectRemoteProvider = () => {
+    const saved = config?.defaultModel?.remote;
+    const model = startingRemoteModel(saved);
+    void setProvider(
+      'remote',
+      model && model !== saved ? { ...(config?.defaultModel ?? {}), remote: model } : undefined,
+    );
+  };
+
   // Super Lockdown — and any custom posture with external chat switched off —
   // refuses to build a non-local provider at all: `ChatManager.ensureProvider`
   // throws before the SDK or CLI is touched. Offering those as live choices
@@ -1482,8 +1521,13 @@ function DaemonSettingsView() {
     'your current security level';
   const blockedProviderTitle = (name: ProviderName) =>
     `${providerLabel(name, uiPlatform)} sends chat off this device, which ${securityLevelLabel} does not allow. Change the level in Security & Compliance to use it.`;
-  /** Blocked *and* on offer — the pill stays, greyed, so the state is legible. */
-  const providerBlocked = (name: ProviderName) => externalChatBlocked && !isLocalProvider(name);
+  /**
+   * Blocked *and* on offer — the pill stays, greyed, so the state is legible.
+   * The daemon doesn't hold paired-server turns to the external-chat switch,
+   * so greying that pill would claim a block that isn't there.
+   */
+  const providerBlocked = (name: ProviderName) =>
+    externalChatBlocked && !isLocalProvider(name) && name !== 'remote';
 
   // Subline under the "Artificial Intelligence" nav header: which engine and
   // model a new chat gets by default. Answering that used to mean opening the
@@ -1528,10 +1572,17 @@ function DaemonSettingsView() {
   }, [provider, configuredDefaultModel]);
 
   const aiDefaultSubline = useMemo(() => {
+    if (provider === 'remote') {
+      // A bare `remote:<id>/<model>` id is not a name anyone would recognize.
+      const match = remoteModels.find(({ model }) => model.id === configuredDefaultModel);
+      return match
+        ? `Default: ${match.server.displayName} · ${shortModelName(match.model.name)}`
+        : `Default: ${providerLabel('remote', uiPlatform)}`;
+    }
     const engine = providerLabel(provider, uiPlatform);
     const model = shortModelName(defaultModelName);
     return `Default: ${engine}${model ? ` · ${model}` : ''}`;
-  }, [provider, uiPlatform, defaultModelName]);
+  }, [provider, uiPlatform, defaultModelName, remoteModels, configuredDefaultModel]);
 
   const nightShiftProviderChoices: Array<{
     id: ProviderName;
@@ -1560,6 +1611,9 @@ function DaemonSettingsView() {
             title: 'Use the DwarfStar (ds4) engine for Night Shift work.',
           },
         ]
+      : []),
+    ...(showRemoteProvider
+      ? [{ id: 'remote' as const, label: remoteProviderLabel, title: remoteProviderTitle }]
       : []),
     ...(showCopilotProvider ? [{ id: 'copilot' as const, label: 'GitHub Copilot' }] : []),
     { id: 'openai', label: 'OpenAI' },
@@ -2725,6 +2779,16 @@ function DaemonSettingsView() {
                       {providerLabel('apple-foundation-models', uiPlatform)}
                     </button>
                   )}
+                  {showRemoteProvider && (
+                    <button
+                      type="button"
+                      className={`provider-pill${provider === 'remote' ? ' provider-pill-active' : ''}`}
+                      onClick={selectRemoteProvider}
+                      title={remoteProviderTitle}
+                    >
+                      {remoteProviderLabel}
+                    </button>
+                  )}
                   {showCopilotProvider && (
                     <button
                       type="button"
@@ -2988,6 +3052,42 @@ function DaemonSettingsView() {
 
                 {provider === 'apple-foundation-models' && <AppleFoundationModelsStatus />}
 
+                {provider === 'remote' && (
+                  <>
+                    <div
+                      className="new-row"
+                      style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
+                    >
+                      <label className="muted" style={{ fontSize: '0.9rem' }}>
+                        Default model
+                      </label>
+                      <ModelPicker
+                        provider="remote"
+                        value={config?.defaultModel?.remote}
+                        // Clearing it would leave nothing that names a server.
+                        onChange={(v) => {
+                          if (v) void saveDefaultModel('remote', v);
+                        }}
+                        placeholder="Choose a model"
+                      />
+                    </div>
+                    <p className="muted small" style={{ marginTop: '0.75rem' }}>
+                      Only the model runs on the other device; your files and chats stay here. While
+                      it can't be reached, a model installed on this computer answers instead.
+                      Connect or forget devices in the{' '}
+                      <button
+                        type="button"
+                        className="gz-link-button"
+                        onClick={() => setSection('remoteServers')}
+                        style={{ padding: 0 }}
+                      >
+                        Remote Servers
+                      </button>{' '}
+                      tab.
+                    </p>
+                  </>
+                )}
+
                 {(provider === 'llama-cpp' || provider === 'mlx') && (
                   <div
                     className="new-row"
@@ -3121,7 +3221,10 @@ function DaemonSettingsView() {
                               void saveNightShiftModelOverride({
                                 enabled: true,
                                 provider: choice.id,
-                                model: config?.defaultModel?.[choice.id],
+                                model:
+                                  choice.id === 'remote'
+                                    ? startingRemoteModel(config?.defaultModel?.remote)
+                                    : config?.defaultModel?.[choice.id],
                               })
                             }
                             title={

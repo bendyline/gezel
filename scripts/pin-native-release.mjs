@@ -151,7 +151,10 @@ for (const [filename, hash] of archiveHashes) {
     );
   }
 }
-const archiveBlock = renderArchiveHashes(version, engineHashes);
+// The welcome counts the engine in its download size ("Fetch my tools ·
+// 7 GB"), so each archive's size rides beside its hash.
+const assetBytes = new Map(release.assets.map((asset) => [asset.name, asset.size]));
+const archiveBlock = renderArchiveHashes(version, engineHashes, assetBytes);
 const nativeFilesResponse = await fetch(nativeFilesAsset.url, {
   headers: headers('application/octet-stream'),
   redirect: 'follow',
@@ -253,7 +256,7 @@ function parseSha256sums(text) {
   return new Map([...entries].sort(([a], [b]) => a.localeCompare(b)));
 }
 
-function renderArchiveHashes(version, hashes) {
+function renderArchiveHashes(version, hashes, sizes) {
   const lines = [
     '// BEGIN PINNED NATIVE ARCHIVE HASHES',
     `/** Exact SHA256 values for every engine archive published by native-v${version}. */`,
@@ -261,6 +264,17 @@ function renderArchiveHashes(version, hashes) {
   ];
   for (const [filename, hash] of hashes) {
     lines.push(`  '${filename}':`, `    '${hash}',`);
+  }
+  lines.push(
+    '});',
+    '',
+    `/** Download size in bytes of every engine archive published by native-v${version}. */`,
+    'export const NATIVE_ENGINE_ARCHIVE_BYTES: Readonly<Record<string, number>> = Object.freeze({',
+  );
+  for (const filename of hashes.keys()) {
+    const bytes = sizes.get(filename);
+    if (typeof bytes !== 'number') throw new Error(`release has no size for ${filename}`);
+    lines.push(`  '${filename}': ${bytes},`);
   }
   lines.push('});', '// END PINNED NATIVE ARCHIVE HASHES');
   return lines.join('\n');

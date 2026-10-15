@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { type FirstProject, firstProjectsFor } from './first-projects.js';
+import { FIRST_PROJECTS, type FirstProject, firstProjectsFor } from './first-projects.js';
+import { PromptMeesterBuildPrelude } from './model-profile/behaviors/prompt-meester-build-prelude.js';
+import { PromptMeesterCraftbookPrelude } from './model-profile/behaviors/prompt-meester-craftbook-prelude.js';
+import type { TurnCtx } from './model-profile/types.js';
 
 const typed = (id: string, area: FirstProject['area']): FirstProject => ({
   kind: 'type',
@@ -79,5 +82,39 @@ describe('firstProjectsFor on a phone', () => {
         (p) => p.id,
       ),
     ).toEqual(['trip', 'chess']);
+  });
+});
+
+// A typed first project reaches its project type only through the meester's
+// start_project, and on a small model that call reliably happens only under
+// the build prelude. Unprompted, Gemma 4 E4B answered "a week of meals" and
+// "a word game" in chat, or recruited a gezel of its own (2026-10-14).
+describe('typed first projects and the meester', () => {
+  const turn = (userText: string): TurnCtx => ({
+    catalogId: 'gemma4-e4b-q4',
+    tier: 'small',
+    family: 'gemma',
+    modelId: 'gemma4-e4b-q4',
+    providerName: 'llama-cpp',
+    sessionId: 'welcome',
+    isMeester: true,
+    projectId: 'default',
+    messageOrigin: 'direct-user',
+    availableToolNames: ['start_project', 'invoke_craftbook', 'suggest_craftbook'],
+    userText,
+    drained: [],
+    assistantContent: '',
+    continuationCount: 0,
+  });
+
+  it('words every one so the meester is steered to start its project, and only that', () => {
+    for (const first of FIRST_PROJECTS) {
+      if (first.kind !== 'type') continue;
+      const ctx = turn(first.prompt);
+      expect(PromptMeesterBuildPrelude.userPromptPrelude!(ctx, undefined), first.id).toContain(
+        'start_project',
+      );
+      expect(PromptMeesterCraftbookPrelude.userPromptPrelude!(ctx, undefined), first.id).toBeNull();
+    }
   });
 });

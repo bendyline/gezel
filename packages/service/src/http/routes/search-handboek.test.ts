@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -18,34 +19,38 @@ let httpFetch: typeof fetch;
 let baseUrl: string;
 const priorMock = process.env.GEZEL_MOCK_PROVIDER;
 const priorArchive = process.env.GEZEL_HANDBOEK_GEZK;
+const archive = resolve(
+  import.meta.dirname,
+  '..',
+  '..',
+  '..',
+  'assets',
+  'handboek',
+  'handboek.gezk',
+);
+// The service build makes the archive; it is not committed. A local checkout
+// that never built it skips, and CI, which always builds it, never does.
+const built = existsSync(archive) || Boolean(process.env.CI);
 
-beforeAll(async () => {
-  process.env.GEZEL_MOCK_PROVIDER = '1';
-  process.env.GEZEL_HANDBOEK_GEZK = resolve(
-    import.meta.dirname,
-    '..',
-    '..',
-    '..',
-    'assets',
-    'handboek',
-    'handboek.gezk',
-  );
-  home = await mkdtemp(join(tmpdir(), 'gezel-search-handboek-'));
-  svc = await startService({ home });
-  baseUrl = `${svc.cert ? 'https' : 'http'}://127.0.0.1:${svc.port}`;
-  httpFetch = svc.cert ? createTrustingFetch({ cert: svc.cert.certPem }) : fetch;
-}, 120_000);
+describe.skipIf(!built)('project search', () => {
+  beforeAll(async () => {
+    process.env.GEZEL_MOCK_PROVIDER = '1';
+    process.env.GEZEL_HANDBOEK_GEZK = archive;
+    home = await mkdtemp(join(tmpdir(), 'gezel-search-handboek-'));
+    svc = await startService({ home });
+    baseUrl = `${svc.cert ? 'https' : 'http'}://127.0.0.1:${svc.port}`;
+    httpFetch = svc.cert ? createTrustingFetch({ cert: svc.cert.certPem }) : fetch;
+  }, 120_000);
 
-afterAll(async () => {
-  await svc?.stop();
-  await rm(home, { recursive: true, force: true }).catch(() => {});
-  if (priorMock === undefined) delete process.env.GEZEL_MOCK_PROVIDER;
-  else process.env.GEZEL_MOCK_PROVIDER = priorMock;
-  if (priorArchive === undefined) delete process.env.GEZEL_HANDBOEK_GEZK;
-  else process.env.GEZEL_HANDBOEK_GEZK = priorArchive;
-}, 30_000);
+  afterAll(async () => {
+    await svc?.stop();
+    await rm(home, { recursive: true, force: true }).catch(() => {});
+    if (priorMock === undefined) delete process.env.GEZEL_MOCK_PROVIDER;
+    else process.env.GEZEL_MOCK_PROVIDER = priorMock;
+    if (priorArchive === undefined) delete process.env.GEZEL_HANDBOEK_GEZK;
+    else process.env.GEZEL_HANDBOEK_GEZK = priorArchive;
+  }, 30_000);
 
-describe('project search', () => {
   it('answers from the Handboek in the Default project', async () => {
     const res = await httpFetch(`${baseUrl}/api/projects/default/tools/search`, {
       method: 'POST',

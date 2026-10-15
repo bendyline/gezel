@@ -1,6 +1,6 @@
 import type { GezmodelEngine, ModelInfo, ProviderName } from '@bendyline/gezel';
 import { composeFitnessBadge } from '@bendyline/gezel';
-import type { ModelFitnessEntry } from '@bendyline/gezel-client';
+import type { ModelFitnessEntry, RemoteServerModelsResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import {
@@ -24,6 +24,7 @@ function invalidateModels(provider: ProviderName): void {
 }
 
 async function loadModels(provider: ProviderName, refresh = false): Promise<ModelInfo[]> {
+  if (provider === 'remote') return loadRemoteModels();
   if (refresh) invalidateModels(provider);
   if (!refresh) {
     const hit = cached.get(provider);
@@ -32,20 +33,14 @@ async function loadModels(provider: ProviderName, refresh = false): Promise<Mode
     if (existing) return existing;
   }
   const generation = cacheGeneration.get(provider) ?? 0;
-  const source =
-    provider === 'remote'
-      ? loadRemoteModels()
-      : api
-          .listProviderModels(provider, refresh ? { refresh: true } : undefined)
-          .then((res) => res.models);
-  const p = source
+  const p = api
+    .listProviderModels(provider, refresh ? { refresh: true } : undefined)
+    .then((res) => res.models)
     .then((models) => {
       // An older request may finish after an install event and the forced
       // refresh it triggered. Never let that stale response repopulate the
       // page-lifetime cache.
-      if ((cacheGeneration.get(provider) ?? 0) === generation) {
-        cached.set(provider, models);
-      }
+      if ((cacheGeneration.get(provider) ?? 0) === generation) cached.set(provider, models);
       return models;
     })
     .finally(() => {
@@ -58,29 +53,91 @@ async function loadModels(provider: ProviderName, refresh = false): Promise<Mode
 /**
  * Aggregate chat models across every paired server, grouped by server name in
  * the label ("MacStudio · Qwen2.5 72B"). Each id is the namespaced
- * `remote:<remoteId>/<model>` the gezel stores. Offline servers are skipped.
+ * `remote:<remoteId>/<model>` the gezel stores. A server that can't be
+ * reached still lists the models it had, marked offline: picking one is
+ * fine, and its work runs on this device until the server is back.
  */
 async function loadRemoteModels(): Promise<ModelInfo[]> {
-  const { remotes } = await api.listRemotes();
-  const out: ModelInfo[] = [];
-  for (const r of remotes) {
-    try {
-      const { models } = await api.listRemoteModels(r.remoteId);
-      for (const m of models) {
-        out.push({
-          id: m.id,
-          name: `${r.displayName} · ${m.name}`,
-          ...(m.supportsTools !== undefined ? { supportsTools: m.supportsTools } : {}),
-          ...(m.supportsReasoning !== undefined ? { supportsReasoning: m.supportsReasoning } : {}),
-          ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
-          ...(m.parameterSize ? { parameterSize: m.parameterSize } : {}),
-        });
-      }
-    } catch {
-      /* server offline — skip its models */
-    }
+  const servers = await loadRemoteServers();
+  const models = servers.flatMap((server) =>
+    server.models.map((m) => ({
+      id: m.id,
+      name: `${remoteServerLabel(server)} · ${m.name}`,
+      ...(m.supportsTools !== undefined ? { supportsTools: m.supportsTools } : {}),
+      ...(m.supportsReasoning !== undefined ? { supportsReasoning: m.supportsReasoning } : {}),
+      ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
+      ...(m.parameterSize ? { parameterSize: m.parameterSize } : {}),
+    })),
+  );
+  // Seeds the next picker's first render; freshness is loadRemoteServers' job.
+  cached.set('remote', models);
+  return models;
+}
+
+export type RemoteServerModels = RemoteServerModelsResponse['servers'];
+
+/** "MacStudio", or "MacStudio (offline)" while it can't be reached. */
+export function remoteServerLabel(server: RemoteServerModels[number]): string {
+  return `${server.displayName}${server.status === 'offline' ? ' (offline)' : ''}`;
+}
+
+/** Paired servers come and go, so their list is re-read after this long. */
+const REMOTE_MODELS_TTL_MS = 30_000;
+let remoteServers: { at: number; servers: RemoteServerModels } | null = null;
+let remoteServersInflight: Promise<RemoteServerModels> | null = null;
+let remoteServersGeneration = 0;
+
+/**
+ * Every paired server with the chat models it offers, read at most once per
+ * {@link REMOTE_MODELS_TTL_MS} for every picker on the page. A daemon that
+ * predates `/api/remotes/models` reads as no servers.
+ */
+export function loadRemoteServers(): Promise<RemoteServerModels> {
+  if (remoteServers && Date.now() - remoteServers.at < REMOTE_MODELS_TTL_MS) {
+    return Promise.resolve(remoteServers.servers);
   }
-  return out;
+  if (remoteServersInflight) return remoteServersInflight;
+  const generation = remoteServersGeneration;
+  const p: Promise<RemoteServerModels> = api
+    .listRemoteServerModels()
+    .then(({ servers }) => servers)
+    .catch(() => [])
+    .then((servers) => {
+      // A pair or forget that landed mid-request makes this answer stale.
+      if (generation === remoteServersGeneration) remoteServers = { at: Date.now(), servers };
+      return servers;
+    })
+    .finally(() => {
+      if (remoteServersInflight === p) remoteServersInflight = null;
+    });
+  remoteServersInflight = p;
+  return p;
+}
+
+/** Pairing or forgetting a server changes what every picker should offer. */
+export function invalidateRemoteServers(): void {
+  remoteServersGeneration += 1;
+  remoteServers = null;
+  remoteServersInflight = null;
+  cached.delete('remote');
+}
+
+/** {@link loadRemoteServers} as state; `null` until the first answer. */
+export function useRemoteServers(enabled = true): RemoteServerModels | null {
+  const [servers, setServers] = useState<RemoteServerModels | null>(
+    enabled ? (remoteServers?.servers ?? null) : null,
+  );
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    void loadRemoteServers().then((loaded) => {
+      if (!cancelled) setServers(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled]);
+  return servers;
 }
 
 function isLocalProvider(p: ProviderName): p is 'mlx' | 'llama-cpp' {

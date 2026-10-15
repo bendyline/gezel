@@ -15,7 +15,16 @@ import {
   rewritePromptDraftFileRefs,
 } from '@bendyline/gezel';
 import { streamChatEvents } from '@bendyline/gezel-client';
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { isBackDismiss } from '../back-dismiss.js';
@@ -23,7 +32,6 @@ import { SubmitArrow } from '../primitives/index.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
-import { NewTaskDialog } from '../views/tasks/NewTaskDialog.js';
 import { AutosaveStatus } from './AutosaveStatus.js';
 import { ChatAttachmentButtons } from './ChatAttachmentButtons.js';
 import { ChatNarrateButton } from './ChatNarrateButton.js';
@@ -61,6 +69,9 @@ import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useWaitingForModel } from './useWaitingForModel.js';
 
 export type ComposerTurnState = 'idle' | 'streaming' | 'queued' | 'error';
+const NewTaskDialog = lazy(() =>
+  import('../views/tasks/NewTaskDialog.js').then((module) => ({ default: module.NewTaskDialog })),
+);
 
 interface LocalTurnStream {
   id: number;
@@ -2109,22 +2120,24 @@ export function ChatComposer({
       </div>
       {/* Portals, so its position in the tree is cosmetic. `projects` is only
           read when the project picker shows, which `projectLocked` suppresses. */}
-      {taskLaunchEnabled && taskLaunchProps && (
-        <NewTaskDialog
-          open={taskDialogOpen}
-          launchMode="compose"
-          initialLaunch={taskLaunch.attached}
-          composerText={draftRef.current}
-          onComposerTextChange={applyBriefEdit}
-          defaultProjectId={projectId}
-          projects={taskLaunchProps.projects}
-          gezels={taskLaunchProps.gezels}
-          projectLocked
-          onClose={closeTaskDialog}
-          onUseInChat={(launch) => {
-            void taskLaunch.attach(launch);
-          }}
-        />
+      {taskDialogOpen && taskLaunchEnabled && taskLaunchProps && (
+        <Suspense fallback={null}>
+          <NewTaskDialog
+            open={taskDialogOpen}
+            launchMode="compose"
+            initialLaunch={taskLaunch.attached}
+            composerText={draftRef.current}
+            onComposerTextChange={applyBriefEdit}
+            defaultProjectId={projectId}
+            projects={taskLaunchProps.projects}
+            gezels={taskLaunchProps.gezels}
+            projectLocked
+            onClose={closeTaskDialog}
+            onUseInChat={(launch) => {
+              void taskLaunch.attach(launch);
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );

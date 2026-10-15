@@ -9,7 +9,8 @@ import {
 import { Select } from '../primitives/index.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { detectDs4Availability } from '../views/ds4-availability.js';
-import { deviceLabel } from './provider-label.js';
+import { loadRemoteServers, remoteServerLabel } from './ModelPicker.js';
+import { deviceLabel, providerLabel } from './provider-label.js';
 
 /**
  * Combined provider + model picker. Replaces the old `Provider:` chip
@@ -99,6 +100,8 @@ function providerLabelFor(provider: ProviderName): string {
       return 'DwarfStar (ds4)';
     case 'apple-foundation-models':
       return 'Apple Intelligence';
+    case 'remote':
+      return providerLabel('remote');
     default:
       return provider;
   }
@@ -215,23 +218,39 @@ export function ProviderModelSelect({
         candidates.push('ds4');
       }
 
-      const settled = await Promise.all(
-        candidates.map(async (p): Promise<ProviderEntry | null> => {
-          try {
-            const refresh =
-              (p === 'llama-cpp' || p === 'mlx' || p === 'ds4') &&
-              ((refreshEngineRef.current === p && inventoryEpoch > 0) ||
-                modelInventoryRevision(p) > 0);
-            const res = await api.listProviderModels(p, refresh ? { refresh: true } : undefined);
-            if (res.models.length === 0) return null;
-            return { provider: p, label: providerLabelFor(p), models: res.models };
-          } catch {
-            return null;
-          }
-        }),
-      );
+      const [settled, remoteServers] = await Promise.all([
+        Promise.all(
+          candidates.map(async (p): Promise<ProviderEntry | null> => {
+            try {
+              const refresh =
+                (p === 'llama-cpp' || p === 'mlx' || p === 'ds4') &&
+                ((refreshEngineRef.current === p && inventoryEpoch > 0) ||
+                  modelInventoryRevision(p) > 0);
+              const res = await api.listProviderModels(p, refresh ? { refresh: true } : undefined);
+              if (res.models.length === 0) return null;
+              return { provider: p, label: providerLabelFor(p), models: res.models };
+            } catch {
+              return null;
+            }
+          }),
+        ),
+        // Paired servers have no `/api/models` listing — `remote` is a family
+        // of servers, each with its own row named after the server.
+        loadRemoteServers(),
+      ]);
       if (cancelled) return;
-      const filtered = settled.filter((e): e is ProviderEntry => e !== null);
+      const filtered = [
+        ...settled.filter((e): e is ProviderEntry => e !== null),
+        ...remoteServers
+          .filter((server) => server.models.length > 0)
+          .map(
+            (server): ProviderEntry => ({
+              provider: 'remote',
+              label: remoteServerLabel(server),
+              models: server.models,
+            }),
+          ),
+      ];
       // Stable order: on-device providers first (the local-first
       // story is "your computer is the default surface"), then
       // cloud. Within each band, the order matches the historical
@@ -242,6 +261,7 @@ export function ProviderModelSelect({
         'ds4',
         'apple-foundation-models',
         'ollama',
+        'remote',
         'copilot',
         'openai',
         'anthropic',

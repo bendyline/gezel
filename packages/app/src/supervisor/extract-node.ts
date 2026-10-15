@@ -2,8 +2,15 @@ import { existsSync } from 'node:fs';
 import { chmod, cp, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sha256File, verifyBundleManifest } from './bundle-manifest.js';
+import { runtimeInstallStampPath } from '@bendyline/gezel/paths';
+import { readBundleManifest, sha256File, verifyBundleManifest } from './bundle-manifest.js';
 import { redirectAsarToUnpacked } from './extract-bundle.js';
+import {
+  type InstallStamp,
+  clearInstallStamp,
+  installStampMatches,
+  writeInstallStamp,
+} from './install-stamp.js';
 
 export interface NodeInstallOptions {
   /** User home root — binary lands at `<home>/bin/node[.exe]`. */
@@ -73,10 +80,33 @@ export async function installNodeIfNeeded(opts: NodeInstallOptions): Promise<Nod
     /* fresh install */
   }
 
+  // A copy verified on an earlier launch is trusted while its stamp matches:
+  // same version and declared digest, and the file's metadata unmoved since
+  // it was hashed. That is stronger than the old version-only fast path,
+  // which let modified bytes survive behind a matching node.version marker.
+  // Only a shipped manifest can name the digest without hashing the bundle,
+  // so a bundle without one is verified in full on every launch.
+  const expectedDigest = (await readBundleManifest(bundleDir))?.get(binaryName);
+  const stamp: InstallStamp | null = expectedDigest
+    ? {
+        path: runtimeInstallStampPath(home, 'node'),
+        identity: `${shippedVersion} ${expectedDigest}`,
+        root: installDir,
+        files: [binaryName],
+      }
+    : null;
+  if (stamp && installedVersion === shippedVersion && (await installStampMatches(stamp))) {
+    return {
+      binaryPath: installedBinary,
+      version: shippedVersion,
+      action: 'up-to-date',
+      verified: true,
+    };
+  }
+
   // Re-hash the bundled binary against the bundle's sha256.txt (written
   // by fetch-node.mjs) before trusting either a new copy or the existing
-  // installed binary. The old version-only fast path let modified bytes
-  // survive indefinitely behind a matching node.version marker.
+  // installed binary.
   const integrity = await verifyBundleManifest(bundleDir, [binaryName]);
   if (!integrity.ok) {
     logger?.warn?.(
@@ -90,6 +120,7 @@ export async function installNodeIfNeeded(opts: NodeInstallOptions): Promise<Nod
     const installedFile = await lstat(installedBinary);
     const installedDigest = installedFile.isFile() ? await sha256File(installedBinary) : null;
     if (installedDigest === bundleDigest) {
+      if (stamp) await writeInstallStamp(stamp);
       return {
         binaryPath: installedBinary,
         version: installedVersion,
@@ -102,6 +133,7 @@ export async function installNodeIfNeeded(opts: NodeInstallOptions): Promise<Nod
     );
   }
 
+  await clearInstallStamp(runtimeInstallStampPath(home, 'node'));
   await mkdir(installDir, { recursive: true });
   logger?.info?.(
     installedVersion === shippedVersion
@@ -145,6 +177,7 @@ export async function installNodeIfNeeded(opts: NodeInstallOptions): Promise<Nod
       `[supervisor] post-install verify failed: ${installedBinary} differs from the authenticated bundle`,
     );
   }
+  if (stamp) await writeInstallStamp(stamp);
 
   return {
     binaryPath: installedBinary,

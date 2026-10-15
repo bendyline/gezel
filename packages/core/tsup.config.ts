@@ -35,6 +35,10 @@ export default defineConfig({
     // via @bendyline/gezel-sdk/checks), and the eval harness. Must stay
     // dependency-free.
     'src/checks/index.ts',
+    // `./remote` — remote serving's client side for every host: the
+    // `/v1/remote/*` wire contract, connect-code pairing (SPAKE2 on
+    // WebCrypto), and identities. The daemon and the phone both import it.
+    'src/remote/index.ts',
     // Parser-backed, presentation-only SVG sanitizer shared by service,
     // catalog ingestion, and the UI's final rendering boundary.
     'src/svg/index.ts',

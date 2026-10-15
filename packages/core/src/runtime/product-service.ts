@@ -39,8 +39,13 @@ import {
 import type { BuiltInstructions } from '../prompt/instructions.js';
 import { IN_APP_WEB_PREVIEW_GUIDANCE } from '../prompt/web-preview.js';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../question-format.js';
+import { parseRemoteModelId, remoteChatFetch } from '../remote/index.js';
 import { resolveRoleId } from '../roles/index.js';
-import { type AnswerQuestionRequest, AskQuestionRequestSchema } from '../schemas/api.js';
+import {
+  type AnswerQuestionRequest,
+  AskQuestionRequestSchema,
+  type GezelConfig,
+} from '../schemas/api.js';
 import {
   type CreateGezelRequest,
   MessageGezelRequestSchema,
@@ -106,6 +111,7 @@ import {
   validatePortableMessageHints,
 } from './message-delivery.js';
 import { handlePortableModelsRoute, modelBudget } from './model-budget.js';
+import { portableSessionModel, portableTurnRoute, serverModelParts } from './model-routing.js';
 import { buildPortableInstructions } from './portable-instructions.js';
 import { portableSampling, portableTuning } from './portable-sampling.js';
 import { portableToolSurface } from './product-tools.js';
@@ -124,6 +130,11 @@ import { type PortableProjectType, PortableProjectTypes } from './project-types.
 import { AbortedWhileQueuedError, type Lane, ProviderQueue, runInQueue } from './provider-queue.js';
 import { answeredQuestion } from './questions.js';
 import { type PortableQueueHost, handlePortableQueueRoute } from './queue-routes.js';
+import {
+  type PortablePairedServer,
+  type PortableRemoteHost,
+  PortableRemoteServers,
+} from './remote-servers.js';
 import type { PortableScripts } from './script-host.js';
 import { handlePortableScriptRoute } from './script-routes.js';
 import { createPortableScriptTaskActions } from './script-tasks.js';
@@ -162,6 +173,8 @@ export {
   PORTABLE_UNREAD_IMAGE_WARNING,
   PORTABLE_UNSEEN_IMAGE_WARNING,
 } from './turn-attachments.js';
+/** This device's own providers, or a paired server's model. */
+type TurnProviderId = MobileProviderId | 'remote';
 /** Crew handoffs share one count per chain; a person's message starts a new chain. */
 type HandoffChain = { count: number };
 type Turn = {
@@ -177,7 +190,7 @@ type Turn = {
   state: 'waiting' | 'running';
   lane: Lane;
   job?: string;
-  providerId: MobileProviderId;
+  providerId: TurnProviderId;
   taskOwned: boolean;
   /** Carries a question answer, whose seed must survive a turn that never ran. */
   answered: boolean;
@@ -218,10 +231,29 @@ type KnownSession = SessionScope & { providerName?: ProviderName };
 /** A phone holds a handful of prompts in memory at most. */
 const MAX_ACTIVE_TURNS = 16;
 const MAX_QUEUED_PER_SESSION = 20;
+/** The desktop's reply budget for a model on another device. */
+const REMOTE_REPLY_MAX_TOKENS = 8_192;
+/** Engines the status pill can name. */
+const ENGINE_PHASE_PROVIDERS = [
+  'llama-cpp',
+  'mlx',
+  'ds4',
+  'apple-foundation-models',
+  'android-mlkit',
+] as const satisfies readonly Extract<ChatEvent, { type: 'engine_phase' }>['provider'][];
+/** A server's engine phases the turn loop reports as its own. */
+const ENGINE_LOOP_PHASES = new Set(['loading_model', 'prefill', 'generating']);
+/** A reply's warnings, led by why it ran on this device when its conversation runs elsewhere. */
+function withNotice(notice: string | undefined, warnings: readonly string[]) {
+  const all = notice ? [notice, ...warnings] : [...warnings];
+  return all.length ? { warnings: all } : {};
+}
 
 export class PortableProductService {
   private readonly audio?: PortableSpeechRoutes;
   private readonly vision?: PortableVision;
+  /** Other devices' gezel servers this one paired with, for their models. */
+  readonly remotes: PortableRemoteServers;
   readonly capabilities: Readonly<RuntimeCapabilities>;
   /** One turn per conversation, waiting for the engine or running on it. */
   private readonly turns = new Map<string, Turn>();
@@ -380,9 +412,12 @@ export class PortableProductService {
       projectTypes?: () => Promise<readonly PortableProjectType[]>;
       /** On-device image recognizers; omitted hosts tell the model it cannot see photos. */
       vision?: PortableVision;
+      /** Native HTTPS to other devices; omitted hosts cannot use another device's models. */
+      remote?: PortableRemoteHost;
     } = {},
   ) {
     this.vision = host.vision;
+    this.remotes = new PortableRemoteServers(store, host.remote ?? null);
     if (host.speech)
       this.audio = new PortableSpeechRoutes(
         store,
@@ -882,6 +917,38 @@ export class PortableProductService {
     });
   }
 
+  /**
+   * Run new conversations on a paired server's model. Its own model stays
+   * this device's fallback for when the server can't be reached.
+   */
+  async setRemoteModel(modelId: string): Promise<void> {
+    const target = parseRemoteModelId(modelId);
+    if (!target || !(await this.remotes.server(target.remoteId)))
+      throw new ProductError('That device is no longer connected. Connect it again first.', 409);
+    await this.withModelChange(async () => {
+      const config = await this.store.readConfig();
+      await this.store.writeConfig({
+        provider: 'remote',
+        defaultModel: { ...config.defaultModel, remote: modelId },
+      });
+    });
+  }
+
+  async newSessionModel(
+    gezel: { provider?: ProviderName; parsed: { frontmatter: { model?: string } } } | null,
+    config: GezelConfig,
+  ): Promise<{ providerName: ProviderName; model: string; inventory?: MobileModelInventory }> {
+    return portableSessionModel(this.modelRoutingHost(), gezel, config);
+  }
+
+  private modelRoutingHost() {
+    return {
+      providers: () => this.providers(),
+      inference: this.inference,
+      remotes: this.remotes,
+    };
+  }
+
   private resolveKlerkModel(signal: AbortSignal): Promise<PortableTransformTarget> {
     return resolvePortableKlerkModel(
       {
@@ -1095,13 +1162,13 @@ export class PortableProductService {
           'Answer or skip the pending question before continuing this conversation.',
           409,
         );
-      const providerId = MobileProviderIdSchema.parse(session.providerName);
-      const provider = (await this.providers()).find((item) => item.id === providerId);
-      if (!provider || provider.availability !== 'available')
-        throw new ProductError(
-          provider?.reason ?? 'Choose an available on-device model in Settings.',
-          409,
-        );
+      const route = await portableTurnRoute(this.modelRoutingHost(), session, config);
+      check();
+      const providerId = route.providerId;
+      const capabilities =
+        route.kind === 'remote'
+          ? { tools: true, structuredChat: true }
+          : route.provider.capabilities;
       let sentDraft: PromptDraftMeta | undefined;
       if (typeof body.draftId === 'string') {
         sentDraft = (await this.store.getPromptDraft(session.projectId, body.draftId)) ?? undefined;
@@ -1112,8 +1179,15 @@ export class PortableProductService {
       }
       const context = await this.store.getProjectContext(session.projectId, session.gezelId);
       const inventory = providerId === 'llama-cpp' ? await this.inference.models?.() : undefined;
-      const modelId = session.model ?? inventory?.selectedModelId ?? providerId;
-      if (providerId !== 'llama-cpp' && modelId !== providerId)
+      // A turn that fell back from its server runs on this device's model and
+      // leaves the conversation's own model alone, so the next turn returns.
+      const modelId =
+        route.kind === 'remote'
+          ? route.modelId
+          : route.notice
+            ? (inventory?.selectedModelId ?? providerId)
+            : (session.model ?? inventory?.selectedModelId ?? providerId);
+      if (route.kind === 'local' && providerId !== 'llama-cpp' && modelId !== providerId)
         throw new ProductError(
           'The conversation model is not available from this on-device provider.',
           409,
@@ -1124,13 +1198,23 @@ export class PortableProductService {
           409,
         );
       const gezelMaxTokens = context.gezel.parsed.frontmatter.tuning?.sampling?.maxTokens;
-      const budget = modelBudget(config, provider, inventory, modelId, gezelMaxTokens);
+      const budget =
+        route.kind === 'remote'
+          ? {
+              contextSize: route.contextWindow,
+              maxTokens: Math.min(
+                gezelMaxTokens ?? REMOTE_REPLY_MAX_TOKENS,
+                Math.floor(route.contextWindow / 2),
+              ),
+            }
+          : modelBudget(config, route.provider, inventory, modelId, gezelMaxTokens);
       // A game or chat room answers in a line or a move. On a system model
       // every token held back for the reply is one the conversation cannot
       // use, so a lean project holds back less. llama.cpp keeps its budget:
       // a reasoning model thinks before it calls a tool.
       const limits =
         leanSession(context.project, session) &&
+        route.kind === 'local' &&
         providerId !== 'llama-cpp' &&
         gezelMaxTokens === undefined
           ? { ...budget, maxTokens: Math.min(budget.maxTokens, LEAN_PROFILE_REPLY_MAX_TOKENS) }
@@ -1149,6 +1233,7 @@ export class PortableProductService {
       // llama.cpp's own chat layer takes the request fields and launch
       // settings the desktop's llama-server does, from the same resolvers.
       const tuning = portableTuning(tuningInput);
+      const serverModel = route.kind === 'remote' ? serverModelParts(route.serverModel) : undefined;
       const structuredChat:
         | (StructuredChatSettings & {
             history: readonly ChatMessage[];
@@ -1159,9 +1244,17 @@ export class PortableProductService {
             craftbookStep?: ActiveCraftbookStep;
           })
         | undefined =
-        providerId === 'llama-cpp' && provider.capabilities.structuredChat && this.inference.chat
+        route.kind === 'remote' ||
+        (providerId === 'llama-cpp' && capabilities.structuredChat && this.inference.chat)
           ? {
-              config: llamaCppNativeChatConfig(resolveLlamaCppChatLaunch(catalogModel?.tuning)),
+              // A server renders the request with its own engine's settings.
+              ...(route.kind === 'local'
+                ? {
+                    config: llamaCppNativeChatConfig(
+                      resolveLlamaCppChatLaunch(catalogModel?.tuning),
+                    ),
+                  }
+                : {}),
               ...(tuning ? { tuning } : {}),
               // A standalone seed carries the whole state; earlier turns stay out.
               history: placement.standalone
@@ -1169,9 +1262,14 @@ export class PortableProductService {
                 : admitted
                   ? session.messages.slice(0, -1)
                   : [...session.messages],
-              ...(catalogModel ? { catalogId: catalogModel.source.catalogId } : {}),
+              ...(catalogModel
+                ? { catalogId: catalogModel.source.catalogId }
+                : serverModel
+                  ? { catalogId: serverModel.modelId }
+                  : {}),
               isMeester: config.meesterGezelId === session.gezelId,
-              // The behaviors the desktop resolves for this catalog model.
+              // The behaviors the desktop resolves for this catalog model; a
+              // server's model is classed by its own provider and size.
               profile: resolveProfile({
                 manifest: catalogModel
                   ? {
@@ -1181,15 +1279,16 @@ export class PortableProductService {
                     }
                   : undefined,
                 tier: classifyModelTier({
-                  providerName: 'llama-cpp',
-                  modelId,
-                  parameterSize: catalogModel?.parameterSize,
+                  providerName: serverModel?.providerName ?? 'llama-cpp',
+                  modelId: serverModel?.modelId ?? modelId,
+                  parameterSize:
+                    route.kind === 'remote' ? route.parameterSize : catalogModel?.parameterSize,
                 }),
-                providerName: 'llama-cpp',
+                providerName: serverModel?.providerName ?? 'llama-cpp',
               }),
             }
           : undefined;
-      session.model = modelId;
+      if (!(route.kind === 'local' && route.notice)) session.model = modelId;
       const activeTask = await checkTask();
       const activeStep = activeTask?.craftbook.steps.find((step) => step.id === session.stepId);
       // The desktop's per-step steering: the step the loop's correctives
@@ -1242,10 +1341,10 @@ export class PortableProductService {
         projectTools,
       );
       // Only phones and tablets host this runtime, and every prompt token is
-      // prefill time there.
+      // prefill time there — unless another device runs the model.
       const footprintName = resolvePromptFootprint({
         contextWindow: limits.contextSize,
-        constrainedDevice: true,
+        constrainedDevice: route.kind === 'local',
       });
       const footprint = PROMPT_FOOTPRINT_POLICY[footprintName];
       // llama.cpp gets the desktop's own prompt, so a model and craftbook tuned
@@ -1258,7 +1357,7 @@ export class PortableProductService {
           session,
           context,
           ...(activeTask ? { task: activeTask } : {}),
-          modelId: catalogModel?.source.catalogId ?? modelId,
+          modelId: catalogModel?.source.catalogId ?? serverModel?.modelId ?? modelId,
           tier: structuredChat.profile.tier,
           profile: structuredChat.profile,
           toolNames: inventoryTools.map((tool) => tool.name),
@@ -1470,10 +1569,10 @@ export class PortableProductService {
           modelId,
           ...limits,
           ...(sampling ? { sampling } : {}),
-          startListing: provider.capabilities.tools
+          startListing: capabilities.tools
             ? footprint.nativeToolListing
             : footprint.textToolListing,
-          nativeTools: provider.capabilities.tools
+          nativeTools: capabilities.tools
             ? {
                 teamScope: roleHasTeamScope(context.gezel.role, context.project.mode),
                 taskRef: session.taskRef,
@@ -1481,6 +1580,18 @@ export class PortableProductService {
               }
             : undefined,
           ...(structuredChat ? { structuredChat } : {}),
+          ...(route.kind === 'remote'
+            ? {
+                remote: {
+                  server: route.server,
+                  serverModel: route.serverModel,
+                  ...(serverModel && serverModel.providerName !== 'remote'
+                    ? { engine: serverModel.providerName }
+                    : {}),
+                },
+              }
+            : {}),
+          ...(route.kind === 'local' && route.notice ? { notice: route.notice } : {}),
         },
         inventoryTools,
         projectTools,
@@ -1724,6 +1835,7 @@ export class PortableProductService {
         this.resolveBundledCraftbook(id, source, version, projectId),
       draftChanged: (draft) => this.draftChanged(draft),
       emit: (session, event) => this.emit(session, event),
+      newSessionModel: (gezel, config) => this.newSessionModel(gezel, config),
     };
   }
   /** Claim a session synchronously, before any await lets another send in. */
@@ -1745,7 +1857,7 @@ export class PortableProductService {
   }
   private async runTurn(
     turn: Turn,
-    providerId: MobileProviderId,
+    providerId: TurnProviderId,
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
     limits: {
       modelId: string;
@@ -1763,6 +1875,10 @@ export class PortableProductService {
         prompt?: BuiltInstructions;
         craftbookStep?: ActiveCraftbookStep;
       };
+      /** The paired server that runs this turn's model, and its engine. */
+      remote?: { server: PortablePairedServer; serverModel: string; engine?: ProviderName };
+      /** Why this turn runs here although its conversation runs on a server. */
+      notice?: string;
     },
     inventory: readonly PortableToolSpec[],
     projectTools: readonly ProjectTypeTool[] = [],
@@ -1780,7 +1896,12 @@ export class PortableProductService {
       limits.contextSize,
       limits.maxTokens,
     ].join(':');
-    const { startListing, structuredChat: _shared, ...loopLimits } = limits;
+    const { startListing, structuredChat: _shared, remote, notice, ...loopLimits } = limits;
+    // The status pill names an engine; a server's model shows its server's.
+    const phaseProvider =
+      providerId !== 'remote'
+        ? providerId
+        : ENGINE_PHASE_PROVIDERS.find((engine) => engine === remote?.engine);
     // A turn may queue other work but must never wait on it: its own
     // conversation already holding the slot would wait forever.
     if (this.engine.describe().active.some((item) => item.sessionId === session.id))
@@ -1809,20 +1930,26 @@ export class PortableProductService {
           let firstToken = true;
           let lastPhase: string | undefined;
           let lastPhaseAt = 0;
-          const loopOptions: Parameters<typeof runPortableToolLoop>[0] = {
+          const loopOptions: Omit<Parameters<typeof runPortableToolLoop>[0], 'providerId'> = {
             phase: (phase, detail = {}) => {
               // Progress ticks arrive faster than a pill can show them; a phase
               // change always goes out, repeats at most four times a second.
               const now = Date.now();
+              if (!phaseProvider) return;
               if (phase === lastPhase && now - lastPhaseAt < 250) return;
               lastPhase = phase;
               lastPhaseAt = now;
               const ttftMs = phase === 'generating' && firstToken ? now - acquiredAt : undefined;
               if (phase === 'generating') firstToken = false;
-              const text = mobileEnginePhaseDetail({ phase, ...detail });
+              const engineText = mobileEnginePhaseDetail({ phase, ...detail });
+              const text = remote
+                ? engineText
+                  ? `${engineText} (on ${remote.server.displayName})`
+                  : `On ${remote.server.displayName}`
+                : engineText;
               this.emit(session, {
                 type: 'engine_phase',
-                provider: providerId,
+                provider: phaseProvider,
                 // Desktop engines never wait on heat; the pill's detail says why.
                 phase: phase === 'cooling' ? 'starting' : phase,
                 ...(text ? { detail: text } : {}),
@@ -1836,7 +1963,6 @@ export class PortableProductService {
             inference: this.inference,
             session,
             requestId: turn.requestId,
-            providerId,
             ...loopLimits,
             // The system message and the turn; the history between them is
             // the loop's to fit.
@@ -1966,10 +2092,61 @@ export class PortableProductService {
             },
           };
           const shared = limits.structuredChat;
-          if (!shared) return runPortableToolLoop(loopOptions);
+          if (!shared) {
+            if (providerId === 'remote') throw new Error('A server turn needs the shared loop');
+            return runPortableToolLoop({ ...loopOptions, providerId });
+          }
+          // A server's model runs the same loop here; only its requests travel.
+          let remoteFailure: string | undefined;
+          const endpoint = remote
+            ? {
+                providerId: 'remote' as const,
+                fetch: remoteChatFetch({
+                  fetch: this.remotes.fetchFor(remote.server),
+                  baseUrl: remote.server.baseUrl,
+                  token: remote.server.token,
+                  model: remote.serverModel,
+                  serverName: remote.server.displayName,
+                  queue: {
+                    lane: turn.lane === 'interactive' ? 'interactive' : 'background',
+                    sessionId: session.id,
+                    gezelId: session.gezelId,
+                    projectId: session.projectId,
+                  },
+                  onPhase: ({ phase, ...detail }) => {
+                    if (phase === 'queued' && phaseProvider)
+                      this.emit(session, {
+                        type: 'engine_phase',
+                        provider: phaseProvider,
+                        phase: 'starting',
+                        detail: `Waiting for ${remote.server.displayName} to finish other work`,
+                      });
+                    else if (ENGINE_LOOP_PHASES.has(phase))
+                      loopOptions.phase?.(phase as 'loading_model' | 'prefill' | 'generating', {
+                        ...(detail.progress !== undefined ? { progress: detail.progress } : {}),
+                        ...(detail.outputTokens !== undefined
+                          ? { outputTokens: detail.outputTokens }
+                          : {}),
+                        ...(detail.tokensPerSec !== undefined
+                          ? { tokensPerSec: detail.tokensPerSec }
+                          : {}),
+                      });
+                  },
+                  onReachability: (reachable) =>
+                    reachable
+                      ? this.remotes.reportReachable(remote.server.remoteId)
+                      : this.remotes.reportUnreachable(remote.server.remoteId),
+                  onFailure: (message) => {
+                    remoteFailure = message;
+                  },
+                }),
+                failure: () => remoteFailure,
+              }
+            : undefined;
           // llama.cpp's own chat layer on this device: the desktop's turn loop,
           // over the same request, stream and error semantics.
           return runSharedLoopTurn({
+            ...(endpoint ? { endpoint } : {}),
             store: this.store,
             inference: this.inference,
             host: this.engineHost,
@@ -2021,13 +2198,14 @@ export class PortableProductService {
           : {}),
         status: turn.cancelled || result.stopReason === 'cancelled' ? 'interrupted' : 'complete',
         stopReason: turn.cancelled ? 'cancelled' : result.stopReason,
-        ...(turn.cancelled
-          ? { warnings: ['This response was stopped before it finished.'] }
-          : result.stopReason === 'length'
-            ? { warnings: ["This response reached the model's output limit."] }
-            : loopWarnings?.length
-              ? { warnings: loopWarnings }
-              : {}),
+        ...withNotice(
+          notice,
+          turn.cancelled
+            ? ['This response was stopped before it finished.']
+            : result.stopReason === 'length'
+              ? ["This response reached the model's output limit."]
+              : (loopWarnings ?? []),
+        ),
       };
     } catch (error) {
       if (error instanceof AbortedWhileQueuedError) {
@@ -2044,7 +2222,7 @@ export class PortableProductService {
           providerId,
           status: turn.cancelled ? 'interrupted' : 'error',
           error: failure,
-          warnings: ['This response did not finish.'],
+          ...withNotice(notice, ['This response did not finish.']),
         };
     }
     releaseBudget?.();
@@ -2224,11 +2402,7 @@ export class PortableProductService {
     const gezel = await this.store.getGezel(assignee.gezelId);
     if (!gezel) throw new Error('Task assignee not found');
     const config = await this.store.readConfig();
-    const providerName = MobileProviderIdSchema.parse(
-      gezel.provider ?? config.provider ?? 'llama-cpp',
-    );
-    const inventory = providerName === 'llama-cpp' ? await this.inference.models?.() : undefined;
-    const model = gezel.parsed.frontmatter.model ?? inventory?.selectedModelId ?? providerName;
+    const { providerName, model } = await this.newSessionModel(gezel, config);
     const roleBasedNameOnlyMode = task.roleBasedNameOnlyMode ?? config.roleBasedNameOnlyMode;
     let session: ChatSession | undefined;
     let continued = false;

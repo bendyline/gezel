@@ -82,6 +82,29 @@ export function workspaceReadHint(result: WorkspaceReadFileSuccess): string {
   return `\n\n…[${parts.join('; ')}]`;
 }
 
+/**
+ * The end of a ranged read, capped 400 lines after its start. A model asking
+ * for lines 1-1000 of a 47-line file wants the whole file; refusing the range
+ * before the read told it nothing it could fix, and Ornith 1.5 35B sent the
+ * same call thirteen times until the turn was stopped (2026-10-14). A slice
+ * of a longer file still ends with the next range to read.
+ */
+export function cappedWorkspaceReadEnd(
+  startLine: number | undefined,
+  endLine: number | undefined,
+): number | undefined {
+  if (endLine === undefined) return undefined;
+  return Math.min(endLine, (startLine ?? 1) + WORKSPACE_READ_MAX_RANGE_LINES - 1);
+}
+
+/** Cap each request's range; see {@link cappedWorkspaceReadEnd}. */
+export function cappedWorkspaceReadRange<T extends { startLine?: number; endLine?: number }>(
+  request: T,
+): T {
+  const endLine = cappedWorkspaceReadEnd(request.startLine, request.endLine);
+  return endLine === request.endLine ? request : { ...request, endLine };
+}
+
 /** A range the desktop refuses before reading: reversed, or longer than 400 lines. */
 export function workspaceReadRangeError(args: { startLine?: number; endLine?: number }):
   | string

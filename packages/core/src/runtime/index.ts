@@ -5,6 +5,7 @@ export * from './entities.js';
 export * from './meester.js';
 export * from './store.js';
 export * from './product-service.js';
+export * from './remote-servers.js';
 export type { PortableStoreOptions } from './repository.js';
 export type { PortableFileArea, PortableListOptions } from './project-files.js';
 export type { CreatePortableSession } from './sessions.js';

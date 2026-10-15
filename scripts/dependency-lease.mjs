@@ -6,9 +6,21 @@ import { join, resolve } from 'node:path';
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const OWNER_GRACE_MS = 30 * 1000;
-const LEASE_PATH_ENV = 'GEZEL_DEPENDENCY_LEASE_PATH';
-const LEASE_TOKEN_ENV = 'GEZEL_DEPENDENCY_LEASE_TOKEN';
-const LEASE_MODE_ENV = 'GEZEL_DEPENDENCY_LEASE_MODE';
+const DEPENDENCY_LEASE = {
+  path: dependencyLeasePath,
+  label: 'dependency',
+  envPrefix: 'GEZEL_DEPENDENCY_LEASE',
+  readWait: '[dependency-lease] waiting for a dependency mutation to finish',
+  writeWait:
+    '[dependency-lease] waiting for builds/tests and another dependency mutation to finish',
+};
+const BUILD_OUTPUT_LEASE = {
+  path: buildOutputLeasePath,
+  label: 'build output',
+  envPrefix: 'GEZEL_BUILD_OUTPUT_LEASE',
+  readWait: '[build] waiting for another workspace build or validation to finish',
+  writeWait: '[build] waiting for another workspace build or validation to finish',
+};
 
 function delay(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
@@ -34,6 +46,12 @@ export async function dependencyLeasePath(repoRoot) {
   if (process.platform === 'win32') canonical = canonical.toLowerCase();
   const key = createHash('sha256').update(canonical).digest('hex').slice(0, 20);
   return join(tmpdir(), `gezel-dependency-lease-${key}`);
+}
+
+/** Shared even when two Windows shells have different sandbox TEMP directories. */
+export async function buildOutputLeasePath(repoRoot) {
+  const canonical = await realpath(repoRoot).catch(() => resolve(repoRoot));
+  return join(canonical, '.cache', 'build-output-lease');
 }
 
 async function ownerSnapshot(ownerDir) {
@@ -91,7 +109,7 @@ async function acquireGate(leaseRoot, token, options) {
     const snapshot = await ownerSnapshot(gateDir);
     if (snapshotIsStale(snapshot) && (await removeStaleOwner(gateDir, token))) continue;
     if (Date.now() - options.startedAt >= options.timeoutMs) {
-      throw new Error('Timed out waiting to inspect the checkout dependency lease');
+      throw new Error(`Timed out waiting to inspect the checkout ${options.label} lease`);
     }
     await delay(options.pollMs);
   }
@@ -114,15 +132,15 @@ async function liveReaderSnapshots(readersDir, quarantineToken) {
   return readers;
 }
 
-function inheritedLease(options, leaseRoot, requestedMode) {
+function inheritedLease(options, leaseRoot, requestedMode, lease) {
   const env = options.env ?? process.env;
-  if (resolve(env[LEASE_PATH_ENV] ?? '') !== resolve(leaseRoot)) return null;
-  const token = env[LEASE_TOKEN_ENV];
-  const mode = env[LEASE_MODE_ENV];
+  if (resolve(env[`${lease.envPrefix}_PATH`] ?? '') !== resolve(leaseRoot)) return null;
+  const token = env[`${lease.envPrefix}_TOKEN`];
+  const mode = env[`${lease.envPrefix}_MODE`];
   if (!token || (mode !== 'read' && mode !== 'mutation')) return null;
   if (requestedMode === 'mutation' && mode === 'read') {
     throw new Error(
-      'Cannot upgrade a live dependency read lease to a mutation lease. Finish the build/test command before repairing dependencies.',
+      `Cannot upgrade a live ${lease.label} read lease to a mutation lease. Finish the build/test command before repairing dependencies.`,
     );
   }
   return { env, mode, token };
@@ -138,16 +156,16 @@ async function inheritedLeaseIsLive(leaseRoot, inherited) {
   return snapshot?.owner?.token === inherited.token && ownerPids.some(processIsAlive);
 }
 
-async function withDependencyLease(repoRoot, mode, fn, options = {}) {
-  const leaseRoot = await dependencyLeasePath(repoRoot);
-  const inherited = inheritedLease(options, leaseRoot, mode);
+async function withDependencyLease(repoRoot, mode, fn, options = {}, lease = DEPENDENCY_LEASE) {
+  const leaseRoot = await lease.path(repoRoot);
+  const inherited = inheritedLease(options, leaseRoot, mode, lease);
   if (inherited && (await inheritedLeaseIsLive(leaseRoot, inherited))) {
     return fn({
       setChildPid: async () => {},
       leaseEnv: {
-        [LEASE_PATH_ENV]: leaseRoot,
-        [LEASE_TOKEN_ENV]: inherited.token,
-        [LEASE_MODE_ENV]: inherited.mode,
+        [`${lease.envPrefix}_PATH`]: leaseRoot,
+        [`${lease.envPrefix}_TOKEN`]: inherited.token,
+        [`${lease.envPrefix}_MODE`]: inherited.mode,
       },
     });
   }
@@ -161,7 +179,12 @@ async function withDependencyLease(repoRoot, mode, fn, options = {}) {
   let ownerDir;
 
   while (!ownerDir) {
-    const gateDir = await acquireGate(leaseRoot, token, { startedAt, timeoutMs, pollMs });
+    const gateDir = await acquireGate(leaseRoot, token, {
+      startedAt,
+      timeoutMs,
+      pollMs,
+      label: lease.label,
+    });
     try {
       const writerDir = join(leaseRoot, 'writer');
       const writer = await ownerSnapshot(writerDir);
@@ -178,14 +201,10 @@ async function withDependencyLease(repoRoot, mode, fn, options = {}) {
 
     if (ownerDir) break;
     if (Date.now() - startedAt >= timeoutMs) {
-      throw new Error(`Timed out waiting for a dependency ${mode} lease`);
+      throw new Error(`Timed out waiting for a ${lease.label} ${mode} lease`);
     }
     if (!announcedWait) {
-      console.log(
-        mode === 'mutation'
-          ? '[dependency-lease] waiting for builds/tests and another dependency mutation to finish'
-          : '[dependency-lease] waiting for a dependency mutation to finish',
-      );
+      console.log(mode === 'mutation' ? lease.writeWait : lease.readWait);
       announcedWait = true;
     }
     await delay(pollMs);
@@ -196,7 +215,7 @@ async function withDependencyLease(repoRoot, mode, fn, options = {}) {
     mode,
     pid: process.pid,
     childPid: null,
-    command: options.command ?? `dependency ${mode}`,
+    command: options.command ?? `${lease.label} ${mode}`,
     repoRoot: resolve(repoRoot),
     startedAt: new Date().toISOString(),
   };
@@ -205,9 +224,9 @@ async function withDependencyLease(repoRoot, mode, fn, options = {}) {
   await writeOwner();
 
   const leaseEnv = {
-    [LEASE_PATH_ENV]: leaseRoot,
-    [LEASE_TOKEN_ENV]: token,
-    [LEASE_MODE_ENV]: mode,
+    [`${lease.envPrefix}_PATH`]: leaseRoot,
+    [`${lease.envPrefix}_TOKEN`]: token,
+    [`${lease.envPrefix}_MODE`]: mode,
   };
   try {
     return await fn({
@@ -229,4 +248,13 @@ export function withDependencyReadLease(repoRoot, fn, options = {}) {
 
 export function withDependencyMutationLease(repoRoot, fn, options = {}) {
   return withDependencyLease(repoRoot, 'mutation', fn, options);
+}
+
+/**
+ * Builds may share dependency readers but must not clean each other's dist
+ * folders. This separate lease also keeps validation's build outputs stable
+ * until its checks finish; child builds inherit it instead of deadlocking.
+ */
+export function withBuildOutputLease(repoRoot, fn, options = {}) {
+  return withDependencyLease(repoRoot, 'mutation', fn, options, BUILD_OUTPUT_LEASE);
 }

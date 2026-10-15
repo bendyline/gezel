@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatSession } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from './store.js';
 
 let home: string;
@@ -723,6 +723,56 @@ describe('Store session CRUD', () => {
 });
 
 describe('Store session listings reuse unchanged summaries', () => {
+  it('enriches only the selected page and preserves cold/warm pagination results', async () => {
+    await store.writeSession(
+      sessionFixture({
+        messages: [
+          {
+            role: 'assistant',
+            content: 'An older reply mentioning old.txt',
+            at: '2026-04-14T10:00:00Z',
+          },
+          { role: 'user', content: 'Newest prompt', at: '2026-04-14T10:01:00Z' },
+        ],
+      }),
+    );
+    const inventory = vi.spyOn(store, 'listProjectArtifactsRecursive');
+    const latest = await store.listTimeline({ projectId: 'default', limit: 1 });
+    expect(latest.messages.map((m) => m.content)).toEqual(['Newest prompt']);
+    expect(latest.hasMore).toBe(true);
+    expect(inventory).not.toHaveBeenCalled();
+    expect(await store.listTimeline({ projectId: 'default', limit: 1 })).toEqual(latest);
+    const previous = await store.listTimeline({
+      projectId: 'default',
+      limit: 1,
+      before: latest.messages[0]!.at,
+    });
+    expect(previous.messages[0]?.role).toBe('assistant');
+    expect(previous.hasMore).toBe(false);
+    expect(inventory).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not expose cached transcript objects to timeline consumers', async () => {
+    await store.writeSession(
+      sessionFixture({
+        messages: [
+          {
+            role: 'assistant',
+            content: 'A reply',
+            at: '2026-04-14T10:00:00Z',
+            warnings: ['original'],
+            referencedFiles: [],
+            referencedTasks: [],
+          },
+        ],
+      }),
+    );
+    const first = await store.listTimeline({ projectId: 'default', limit: 1 });
+    first.messages[0]!.warnings!.push('caller annotation');
+    const second = await store.listTimeline({ projectId: 'default', limit: 1 });
+    expect(second.messages[0]?.warnings).toEqual(['original']);
+  });
+
   it('sees a rewrite through writeSession and an edit made outside gezel', async () => {
     await store.writeSession(sessionFixture({ id: 'cached', title: 'First' }));
     expect((await store.listSessions()).map((s) => s.title)).toEqual(['First']);

@@ -1,17 +1,17 @@
 /**
- * Rebuild the immutable Handboek knowledge catalog shipped by gezeld, and the
- * `handboek.gezk.lock.json` beside it.
+ * Build the immutable Handboek knowledge catalog shipped by gezeld, and the
+ * `handboek.gezk.lock.json` beside it. Both are build products, ignored by git.
  *
- *   --if-stale  what the service build runs when the lock's input hash no
- *               longer matches: re-render, and rebuild only if the rendered
- *               content changed (otherwise just refresh the lock). See
- *               scripts/handboek-gezk-lock.mjs.
+ *   --if-stale  what the service build runs when the archive is missing or
+ *               the lock's input hash no longer matches: re-render, and
+ *               rebuild only if the rendered content changed (otherwise just
+ *               refresh the lock). See scripts/handboek-gezk-lock.mjs.
  */
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import {
   BGE_SMALL_EN_V15_1,
@@ -28,6 +28,7 @@ import {
   siteDeviceInfo,
 } from '@bendyline/gezel-service/handboek';
 import {
+  handboekGezkPaths,
   handboekInputsHash,
   readHandboekLock,
   writeHandboekLock,
@@ -56,7 +57,7 @@ const content = createHash('sha256')
     `${handboekKnowledgeFingerprint(source)}\n${BGE_SMALL_EN_V15_1.id}\n${MARKDOWN_CHUNKS_2.id}\n`,
   )
   .digest('hex');
-const outputPath = join(root, 'packages/service/assets/handboek/handboek.gezk');
+const { archive: outputPath, lock: lockPath } = handboekGezkPaths(root);
 if (process.argv.includes('--if-stale') && existsSync(outputPath)) {
   const lock = readHandboekLock(root);
   if (lock?.content === content) {
@@ -65,12 +66,23 @@ if (process.argv.includes('--if-stale') && existsSync(outputPath)) {
     process.exit(0);
   }
 }
-await mkdir(join(root, 'packages/service/assets/handboek'), { recursive: true });
-const workDir = await mkdtemp(join(tmpdir(), 'handboek-gezk-'));
 const cacheDir =
   process.env.GEZEL_HF_CACHE_DIR ??
   join(process.env.GEZEL_HOME ?? join(homedir(), '.gezel'), 'engines/hf-cache');
-const embedder = await createProfileEmbedder(BGE_SMALL_EN_V15_1, { cacheDir });
+const embedder = await createProfileEmbedder(BGE_SMALL_EN_V15_1, { cacheDir }).catch(
+  (err: unknown) => {
+    // An actionable error's message is the whole story; its stack is noise.
+    if (!(err instanceof Error) || !(err as { isActionable?: boolean }).isActionable) throw err;
+    process.stderr.write(`[handboek] cannot embed the Handboek: ${err.message}\n`);
+    process.exit(1);
+  },
+);
+await mkdir(dirname(outputPath), { recursive: true });
+const workDir = await mkdtemp(join(tmpdir(), 'handboek-gezk-'));
+// The next build trusts the archive on the lock's word, so it is never
+// written in place: a run that dies partway leaves the previous pair intact,
+// and the lock is dropped before the swap so it never vouches for new bytes.
+const partialPath = join(dirname(outputPath), `handboek.${process.pid}.partial.gezk`);
 try {
   const report = await compileKnowledgeCatalog({
     catalog: {
@@ -88,7 +100,7 @@ try {
       yield* source.documents;
     })(),
     assets: source.assets,
-    outputPath,
+    outputPath: partialPath,
     workDir,
     embeddingProfile: embedder.profile,
     chunkingProfile: MARKDOWN_CHUNKS_2,
@@ -104,6 +116,8 @@ try {
       if (total > 0 && done % 100 === 0) process.stdout.write(`${phase}: ${done}/${total}\n`);
     },
   });
+  await rm(lockPath, { force: true });
+  await rename(partialPath, outputPath);
   writeHandboekLock({ inputs, content }, root);
   process.stdout.write(
     `Wrote ${outputPath}: ${report.documents} documents, ${report.chunks} chunks, ${report.archiveBytes} bytes\n`,
@@ -111,4 +125,5 @@ try {
 } finally {
   await embedder.dispose();
   await rm(workDir, { recursive: true, force: true });
+  await rm(partialPath, { force: true });
 }

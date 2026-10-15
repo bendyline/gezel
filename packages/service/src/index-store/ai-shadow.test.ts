@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { projectContentIndexDbFile } from '@bendyline/gezel/paths';
@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { classifyFile } from './classify.js';
 import { ContentIndex } from './content-index.js';
-import { runWorkspaceContentIndex } from './content-indexer.js';
+import { AI_SHADOW_REPAIR_META_KEY, runWorkspaceContentIndex } from './content-indexer.js';
 import type { EnrichDeps } from './enrich.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { IndexStore } from './index-store.js';
@@ -43,6 +43,14 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
 });
+
+/** A unit vector per text, so a chunk's own text finds it again. */
+function vectorFor(text: string): number[] {
+  const v = new Array<number>(TEXT_EMBED_DIM).fill(0);
+  for (let i = 0; i < text.length; i++) v[(text.charCodeAt(i) * 31 + i) % TEXT_EMBED_DIM]! += 1;
+  const norm = Math.hypot(...v) || 1;
+  return v.map((x) => x / norm);
+}
 
 async function seedMedia(): Promise<void> {
   await mkdir(join(dir, 'photos'), { recursive: true });
@@ -240,13 +248,6 @@ describe('a forced image metadata re-read', () => {
   const dbPath = () => projectContentIndexDbFile(home, 'c', dir);
   const openStore = async () =>
     (await IndexStore.open(dbPath(), { collectionId: 'c', kind: 'workspace', rootPath: dir }))!;
-  /** A unit vector per text, so a chunk's own text finds it again. */
-  const vectorFor = (text: string): number[] => {
-    const v = new Array<number>(TEXT_EMBED_DIM).fill(0);
-    for (let i = 0; i < text.length; i++) v[(text.charCodeAt(i) * 31 + i) % TEXT_EMBED_DIM]! += 1;
-    const norm = Math.hypot(...v) || 1;
-    return v.map((x) => x / norm);
-  };
   /** As if a newer build bumped the image tier's metadata version. */
   const rollBackImageMetaVersion = async () => {
     const store = await openStore();
@@ -350,5 +351,163 @@ describe('indexing an AI shadow', () => {
     } finally {
       store.close();
     }
+  });
+});
+
+describe('repairing descriptions a forced re-read replaced', () => {
+  const photo = 'photos/cat-sunset.png';
+  const copy = 'photos/cat-sunset-copy.png';
+  const description = 'A cat silhouetted against an orange sunset.';
+  const nameChunk = 'photos cat sunset png 800x600';
+  const dbPath = () => projectContentIndexDbFile(home, 'c', dir);
+  const openStore = async () =>
+    (await IndexStore.open(dbPath(), { collectionId: 'c', kind: 'workspace', rootPath: dir }))!;
+  const sidecarDir = (path: string) => join(artifacts, 'shadow', `${path}_files`);
+  const embed = async (texts: string[]) => texts.map(vectorFor);
+  const indexPass = () => runWorkspaceContentIndex(dir, 'c', artifacts, { dbPath: dbPath() });
+
+  /**
+   * What gezel-service 1.2.4's forced image re-read left behind: the static
+   * name chunk over the description, the shadow gate still 'ok', and an
+   * index from before the repair existed.
+   */
+  const wipe = async (path: string, text: string, opts: { repairStamp?: 'keep' } = {}) => {
+    const store = await openStore();
+    try {
+      const hash = store.getFile(path)!.hash!;
+      store.putChunks(path, hash, [{ kind: 'image', lineStart: 1, lineEnd: 1, text }]);
+      if (opts.repairStamp !== 'keep') store.deleteMeta(AI_SHADOW_REPAIR_META_KEY);
+    } finally {
+      store.close();
+    }
+  };
+
+  it('restores the description from its sidecar and re-embeds it without a model call, once', async () => {
+    await seedMedia();
+    const describeImage = vi.fn(async (_abs: string) => ({ body: description, model: 'vision-x' }));
+    const summarize = vi.fn(async () => 'A cat at dusk.');
+    await ci.aiShadows('c', { describeImage }, 10);
+    await ci.enrich('c', { summarize, embed }, 10);
+    let store = await openStore();
+    const before = store.chunksForFile(photo);
+    store.close();
+    expect(before.some((c) => c.text.includes('orange sunset'))).toBe(true);
+
+    await wipe(photo, nameChunk);
+    store = await openStore();
+    expect(store.searchDocs('orange', 5).map((h) => h.filePath)).not.toContain(photo);
+    store.close();
+
+    await indexPass();
+
+    store = await openStore();
+    try {
+      expect(store.getMeta(AI_SHADOW_REPAIR_META_KEY)).toBeTruthy();
+      expect(store.searchDocs('orange', 5).map((h) => h.filePath)).toContain(photo);
+      expect(store.filesNeedingAiShadow(10).map((f) => f.path)).not.toContain(photo);
+      expect(store.countNeedingEnrichment()).toBe(1);
+    } finally {
+      store.close();
+    }
+
+    await ci.enrich('c', { summarize, embed }, 10);
+    expect(summarize).toHaveBeenCalledTimes(1);
+    expect(describeImage).toHaveBeenCalledTimes(1);
+    store = await openStore();
+    try {
+      const after = store.chunksForFile(photo);
+      expect(after.map((c) => [c.kind, c.text])).toEqual(before.map((c) => [c.kind, c.text]));
+      if (store.vecAvailable) {
+        const restored = after.find((c) => c.text.includes('orange sunset'))!;
+        const [hit] = store.searchTextVectors(vectorFor(restored.text), 1);
+        expect(hit?.chunkId).toBe(restored.id);
+      }
+      expect(store.countNeedingEnrichment()).toBe(0);
+      expect(store.countNeedingEmbedOnly()).toBe(0);
+    } finally {
+      store.close();
+    }
+
+    // The stamp holds: a later pass leaves even a fresh wipe alone.
+    await wipe(photo, nameChunk, { repairStamp: 'keep' });
+    await indexPass();
+    store = await openStore();
+    try {
+      expect(store.chunksForFile(photo).map((c) => c.text)).toEqual([nameChunk]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('sends a photo whose description is gone from disk back to be described', async () => {
+    await seedMedia();
+    const describeImage = vi.fn(async (_abs: string) => ({ body: description, model: 'vision-x' }));
+    await ci.aiShadows('c', { describeImage }, 10);
+    await ci.enrich('c', { summarize: async () => '', embed }, 10);
+    await wipe(photo, nameChunk);
+    await rm(sidecarDir(photo), { recursive: true, force: true });
+
+    await indexPass();
+
+    let store = await openStore();
+    try {
+      expect(store.getMeta(AI_SHADOW_REPAIR_META_KEY)).toBeTruthy();
+      expect(store.chunksForFile(photo).map((c) => c.text)).toEqual([nameChunk]);
+      expect(store.filesNeedingAiShadow(10).map((f) => f.path)).toContain(photo);
+      expect(store.countNeedingEnrichment()).toBe(0);
+    } finally {
+      store.close();
+    }
+
+    expect(await ci.aiShadows('c', { describeImage }, 10)).toMatchObject({
+      produced: 1,
+      called: 1,
+    });
+    expect(describeImage).toHaveBeenCalledTimes(2);
+    expect(existsSync(join(sidecarDir(photo), 'cat-sunset.md'))).toBe(true);
+    await ci.enrich('c', { summarize: async () => '', embed }, 10);
+    store = await openStore();
+    try {
+      expect(store.searchDocs('orange', 5).map((h) => h.filePath)).toContain(photo);
+      expect(store.countNeedingEnrichment()).toBe(0);
+      if (store.vecAvailable) {
+        const restored = store.chunksForFile(photo).find((c) => c.text.includes('orange sunset'))!;
+        const [hit] = store.searchTextVectors(vectorFor(restored.text), 1);
+        expect(hit?.chunkId).toBe(restored.id);
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+  it("restores a copy from its twin's description and leaves described photos alone", async () => {
+    await mkdir(join(dir, 'photos'), { recursive: true });
+    await writeFile(join(dir, 'photos', 'cat-sunset.png'), PNG_800x600);
+    await copyFile(join(dir, 'photos', 'cat-sunset.png'), join(dir, copy));
+    await indexPass();
+    const describeImage = vi.fn(async (_abs: string) => ({ body: description, model: 'vision-x' }));
+    await ci.aiShadows('c', { describeImage }, 10);
+    await ci.enrich('c', { summarize: async () => '', embed }, 10);
+    let store = await openStore();
+    const untouched = store.chunksForFile(photo);
+    store.close();
+
+    await wipe(copy, 'photos cat sunset copy png 800x600');
+    await rm(sidecarDir(copy), { recursive: true, force: true });
+    await indexPass();
+
+    store = await openStore();
+    try {
+      expect(store.chunksForFile(photo)).toEqual(untouched);
+      expect(store.chunksForFile(copy).some((c) => c.text.includes('orange sunset'))).toBe(true);
+    } finally {
+      store.close();
+    }
+    const sidecar = parseFrontmatter(
+      await readFile(join(sidecarDir(copy), 'cat-sunset-copy.md'), 'utf8'),
+    );
+    expect(sidecar.data.source).toBe(copy);
+    expect(sidecar.body.trim()).toBe(description);
+    expect(describeImage).toHaveBeenCalledTimes(1);
   });
 });

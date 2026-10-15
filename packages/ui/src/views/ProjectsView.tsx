@@ -128,6 +128,7 @@ import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
 import { Select, Tabs } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
+import { peekApiRead } from '../shared-api-reads.js';
 import { useEffectiveTheme } from '../theme.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
 import { ProjectOutsideInEditor } from './projects/ProjectOutsideInEditor.js';
@@ -454,8 +455,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const autoCompact = useCompactLayout(containerRef);
   const effectiveCompact = compact || autoCompact;
   const editorTheme = useEffectiveTheme();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selected, setSelected] = useState<ProjectDetail | null>(null);
+  const [projects, setProjects] = useState<Project[]>(
+    () => peekApiRead('listProjects')?.projects ?? [],
+  );
+  const [selected, setSelected] = useState<ProjectDetail | null>(() =>
+    forceProjectId ? (peekApiRead('getProject', forceProjectId) ?? null) : null,
+  );
   const [browsingProjects, setBrowsingProjects] = useState(false);
   const showProjectList = effectiveCompact && !detailOnly && (browsingProjects || !selected);
   const [changingArchive, setChangingArchive] = useState(false);
@@ -558,7 +563,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     label: string;
     pageTools?: string[];
   } | null>(null);
-  const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  const [gezels, setGezels] = useState<GezelSummary[]>(
+    () => peekApiRead('listGezels')?.gezels ?? [],
+  );
   const [projectLocalGezelRoster, setProjectLocalGezelRoster] = useState<{
     projectId: string;
     gezels: GezelSummary[];

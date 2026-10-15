@@ -23,6 +23,14 @@ function code(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException)?.code;
 }
 
+/**
+ * Lookups may not be allowed into another account's directory, such as the
+ * Gezel service's private model folders. What a lookup cannot see is absent.
+ */
+function hidden(error: unknown): boolean {
+  return ['ENOENT', 'EACCES', 'EPERM'].includes(code(error) ?? '');
+}
+
 /** Never follow a link within a store, including a linked store root. */
 async function safeDirectory(directory: string, create: boolean): Promise<boolean> {
   const absolute = resolve(directory);
@@ -40,8 +48,8 @@ async function safeDirectory(directory: string, create: boolean): Promise<boolea
     if (!info.isDirectory() || info.isSymbolicLink())
       throw new Error(`Unsafe speech model directory: ${absolute}`);
   } catch (error) {
+    if (!create && hidden(error)) return false;
     if (code(error) !== 'ENOENT') throw error;
-    if (!create) return false;
     await mkdir(absolute).catch((failure: unknown) => {
       if (code(failure) !== 'EEXIST') throw failure;
     });
@@ -80,7 +88,7 @@ export class SpeechAssetStore {
   private async verified(candidate: string, file: SpeechModelFile): Promise<boolean> {
     if (!(await safeDirectory(dirname(candidate), false))) return false;
     const info = await lstat(candidate).catch((error: unknown) => {
-      if (code(error) === 'ENOENT') return null;
+      if (hidden(error)) return null;
       throw error;
     });
     if (!info?.isFile() || info.size !== file.size) return false;

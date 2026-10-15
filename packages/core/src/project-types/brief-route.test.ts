@@ -5,6 +5,7 @@ import {
   fillProjectTypeParams,
   matchProjectTypeForBrief,
   projectTypeNamedByBrief,
+  projectTypesMentionedByBrief,
 } from './brief-route.js';
 
 const lead = (templateId: string) => [{ templateId, voorman: true }];
@@ -173,6 +174,25 @@ describe('matchProjectTypeForBrief', () => {
     expect(
       matchProjectTypeForBrief('A trip to Rome for our wedding on 3 May 2027', TYPES),
     ).toBeNull();
+  });
+
+  it('lists every type a tied brief touches, so the person can settle it', () => {
+    expect(
+      projectTypesMentionedByBrief('A trip to Rome for our wedding on 3 May 2027', TYPES).sort(),
+    ).toEqual(['event-planner', 'trip-planner']);
+    expect(projectTypesMentionedByBrief('Build me a website for our wedding', TYPES)).toEqual([]);
+  });
+
+  it('reads a plural tag in its singular', () => {
+    expect(projectTypeNamedByBrief('Help me write a guest list', TYPES)).toBe('event-planner');
+    expect(projectTypeNamedByBrief('A flashcard deck for Dutch verbs', TYPES)).toBe('flashcards');
+  });
+
+  // Event Planner alone carries "planning", and a meester brief about
+  // "planning healthy meals" tied it with Meal Planner (2026-10-14).
+  it('never reads a word a goal is phrased in as a type of its own', () => {
+    expect(projectTypeNamedByBrief('Planning for next quarter', TYPES)).toBeNull();
+    expect(projectTypesMentionedByBrief('Planning a quiet week at home', TYPES)).toEqual([]);
   });
 
   it('reads a language by name', () => {

@@ -1,4 +1,9 @@
-import { createAwakeTimeout } from '@bendyline/gezel';
+import {
+  type ApiIncompatibilityCode,
+  createAwakeTimeout,
+  evaluateApiCompat,
+  readApiCompatEvidence,
+} from '@bendyline/gezel';
 
 /** Discovery is a short probe; model/tool requests retain their own budgets. */
 export const DEFAULT_HEALTH_TIMEOUT_MS = 5_000;
@@ -62,3 +67,44 @@ export async function requestDaemonHealth(
     deadline.signal.removeEventListener('abort', onAbort);
   }
 }
+
+export type DaemonCompatibility =
+  | { compatible: true; version: string | undefined }
+  | {
+      compatible: false;
+      version: string | undefined;
+      code: ApiIncompatibilityCode;
+      reason: string;
+    };
+
+/**
+ * Probe a daemon's `/api/health` and judge its API generation range against
+ * this client's (see `evaluateApiCompat`). Rejects, like
+ * {@link requestDaemonHealth}, when nothing answers or the status is not OK,
+ * so callers keep a single "not running" path.
+ */
+export async function probeDaemonCompatibility(
+  baseUrl: string,
+  options: { fetch: typeof fetch; timeoutMs?: number; client?: string },
+): Promise<DaemonCompatibility> {
+  const response = await requestDaemonHealth(baseUrl, {
+    fetch: options.fetch,
+    ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return judgeDaemonHealth(response.body, options.client ? { client: options.client } : {});
+}
+
+/** {@link probeDaemonCompatibility} for a health body the caller already fetched. */
+export function judgeDaemonHealth(
+  body: unknown,
+  options: { client?: string } = {},
+): DaemonCompatibility {
+  const evidence = readApiCompatEvidence(body);
+  const verdict = evaluateApiCompat(evidence, options.client ? { client: options.client } : {});
+  return verdict.compatible
+    ? { compatible: true, version: evidence.version }
+    : { ...verdict, version: evidence.version };
+}
+
+export type DaemonIncompatibilityCode = ApiIncompatibilityCode;

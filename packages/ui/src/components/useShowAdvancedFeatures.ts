@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { peekApiRead } from '../shared-api-reads.js';
 
 /**
  * Subscribes the "show advanced features" flag (config.showAdvancedFeatures)
@@ -11,7 +12,7 @@ import { api } from '../api.js';
  * route change or manual reload.
  */
 export function useShowAdvancedFeatures(): boolean {
-  const [on, setOn] = useState<boolean>(false);
+  const [on, setOn] = useState(() => peekApiRead('getConfig')?.showAdvancedFeatures ?? false);
 
   useEffect(() => {
     let cancelled = false;

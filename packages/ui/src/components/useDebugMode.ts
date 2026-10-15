@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { peekApiRead } from '../shared-api-reads.js';
 
 /**
  * Subscribes the debug-mode flag (`config.debugMode`) into a component.
@@ -10,7 +11,7 @@ import { api } from '../api.js';
  * takes effect without a reload.
  */
 export function useDebugMode(): boolean {
-  const [on, setOn] = useState<boolean>(false);
+  const [on, setOn] = useState(() => peekApiRead('getConfig')?.debugMode ?? false);
 
   useEffect(() => {
     let cancelled = false;

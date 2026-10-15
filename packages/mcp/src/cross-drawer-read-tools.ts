@@ -5,6 +5,8 @@ import {
   WORKSPACE_READ_MAX_RANGE_LINES,
   type WorkspaceReadFileRequest,
   type WorkspaceReadFileSuccess,
+  cappedWorkspaceReadEnd,
+  cappedWorkspaceReadRange,
   formatWorkspaceRead,
   renderExactToolCall,
   withLineNumbers,
@@ -149,6 +151,39 @@ function reroutedReadNotice(
  * repeat tracker exists to kill. `read_artifact` takes the same path for
  * documents in the artifacts drawer — uploaded craftbook inputs, mostly.
  */
+// Images, audio, video, fonts and archives have no text to read. A
+// `read_artifact` on a generated PNG decoded 532,946 characters of bytes;
+// truncated to 105,000 they still overflowed the 65,536-token context, and the
+// pet-shop page was never written (Nemotron 3.5 Lightning, 2026-10-15; LFM2.5
+// the same way on 2026-10-13). SVG is text and stays readable.
+const BINARY_MEDIA_EXTENSIONS = new Set(
+  (
+    'png jpg jpeg gif webp bmp ico avif tif tiff heic ' +
+    'mp3 wav ogg flac m4a mp4 mov webm woff woff2 ttf otf zip gz'
+  ).split(' '),
+);
+
+function binaryMediaExtension(path: string): string | null {
+  const ext = /\.([a-z0-9]+)$/i.exec(path.trim())?.[1]?.toLowerCase();
+  return ext && BINARY_MEDIA_EXTENSIONS.has(ext) ? ext : null;
+}
+
+function binaryMediaReadResult(
+  requestedTool: 'read_file' | 'read_artifact',
+  path: string,
+  ext: string,
+): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: `${requestedTool} "${path}": this is a binary ${ext.toUpperCase()} file, not text, so it was not read. Its bytes carry nothing you can use here; refer to the file by its path instead (for example in an <img> or <audio> element).`,
+      },
+    ],
+    structuredContent: { requestedTool, requestedPath: path, binary: true, extension: ext },
+  };
+}
+
 async function rerouteBinaryDocumentRead(
   dependencies: CrossDrawerReadDependencies,
   path: string,
@@ -158,9 +193,11 @@ async function rerouteBinaryDocumentRead(
   structuredContent?: Record<string, unknown>;
 } | null> {
   const { api, projectId, toolIsAuthorized, unwrapApiError } = dependencies;
-  if (!isBinaryDocumentPath(path)) return null;
   const artifact = surface === 'artifact';
   const requestedTool = artifact ? 'read_artifact' : 'read_file';
+  const media = binaryMediaExtension(path);
+  if (media) return binaryMediaReadResult(requestedTool, path, media);
+  if (!isBinaryDocumentPath(path)) return null;
   const exactCall = renderExactToolCall('read_doc_as_markdown', {
     path,
     ...(artifact ? { artifact: true } : {}),
@@ -234,7 +271,8 @@ export function registerWorkspaceReadTools(dependencies: CrossDrawerReadDependen
           `1-based last line to return (inclusive). Maximum ${WORKSPACE_READ_MAX_RANGE_LINES} lines per ranged read; omit to read the next bounded chunk.`,
         ),
     }).shape,
-    async ({ path, startLine, endLine, raw }) => {
+    async ({ path, startLine, endLine: requestedEndLine, raw }) => {
+      const endLine = cappedWorkspaceReadEnd(startLine, requestedEndLine);
       try {
         // Before any range maths: a binary document has no lines to slice.
         const rerouted = await rerouteBinaryDocumentRead(dependencies, path, 'workspace');
@@ -410,8 +448,9 @@ export function registerWorkspaceReadTools(dependencies: CrossDrawerReadDependen
         if ((files === undefined) === (paths === undefined)) {
           throw new Error('pass exactly one of `paths` or `files`');
         }
-        const requests: WorkspaceReadFileRequest[] =
+        const requested: WorkspaceReadFileRequest[] =
           files ?? paths?.map((path) => ({ path })) ?? [];
+        const requests = requested.map(cappedWorkspaceReadRange);
         for (const request of requests) {
           const rangeError = workspaceReadRangeError(request);
           if (rangeError) throw new Error(`${request.path}: ${rangeError}`);
@@ -597,7 +636,13 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
       tail: z.number().int().min(0).optional().describe('Legacy: read just the last N lines.'),
     }).shape,
     async ({ path, startLine, endLine, lines, head, tail }) => {
-      const sliceArgs = { startLine, endLine, lines, head, tail };
+      const sliceArgs = {
+        startLine,
+        endLine: cappedWorkspaceReadEnd(startLine, endLine),
+        lines,
+        head,
+        tail,
+      };
       const sliceError = artifactSliceArgsError(sliceArgs);
       if (sliceError) return errorResult(`read_artifact "${path}": ${sliceError}`);
       const opts = artifactSliceOpts(sliceArgs);
@@ -653,7 +698,7 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
                     ? {
                         path: workspaceCollision.path,
                         ...(startLine !== undefined ? { startLine } : {}),
-                        ...(endLine !== undefined ? { endLine } : {}),
+                        ...(sliceArgs.endLine !== undefined ? { endLine: sliceArgs.endLine } : {}),
                       }
                     : { path: workspaceCollision.path };
               if (request.startLine === undefined && request.endLine === undefined) {
@@ -807,7 +852,8 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
       if ((files === undefined) === (paths === undefined)) {
         return errorResult('read_artifacts failed: pass exactly one of `paths` or `files`');
       }
-      const requests: WorkspaceReadFileRequest[] = files ?? paths?.map((path) => ({ path })) ?? [];
+      const requested: WorkspaceReadFileRequest[] = files ?? paths?.map((path) => ({ path })) ?? [];
+      const requests = requested.map(cappedWorkspaceReadRange);
       for (const request of requests) {
         const rangeError = workspaceReadRangeError(request);
         if (rangeError) return errorResult(`read_artifacts failed: ${request.path}: ${rangeError}`);

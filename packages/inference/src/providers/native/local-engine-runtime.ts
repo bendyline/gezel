@@ -1492,6 +1492,7 @@ export class LocalEngineRuntime {
       (residentContextWindow !== undefined && !overrideActive) || envNumCtx !== undefined;
 
     const {
+      autoKvCacheMaxBytes,
       defaultLocalEngineSlots,
       estimatePerSlotKvBytes,
       kvQuantScale,
@@ -1864,8 +1865,14 @@ export class LocalEngineRuntime {
         // `requirement.minimumPerTurnCtxTokens`, so the windowed
         // re-plan sheds slots or denies but never shortens the window.
         const explicitSwaFull = config.llamaCppSwaFull ?? manifestEngineConfig?.swaFull;
+        const fullCacheOverCeiling =
+          exactKvAtReference !== undefined &&
+          (exactKvAtReference / referenceCtx) * grantedCtx * slots > autoKvCacheMaxBytes();
         const windowedCacheWillRun =
-          (!admission.minimumSatisfied || admission.clamped || admission.slots < slots) &&
+          (!admission.minimumSatisfied ||
+            admission.clamped ||
+            admission.slots < slots ||
+            fullCacheOverCeiling) &&
           (explicitSwaFull === false ||
             (explicitSwaFull === undefined &&
               isGemmaModel({ architecture: installed.architecture, modelId })));

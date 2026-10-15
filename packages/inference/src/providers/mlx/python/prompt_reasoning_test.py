@@ -128,6 +128,22 @@ class ReasoningOpenTests(unittest.TestCase):
             with self.subTest(prompt=prompt[-24:]):
                 self.assertIs(think_budget.prompt_opens_reasoning(prompt), expected)
 
+    # The response grammar waits for the closer of whichever block is open;
+    # waiting for `</think>` on Gemma held its thought channel to the answer.
+    def test_open_reasoning_names_its_closer(self):
+        cases = {
+            '<|im_start|>assistant\n<think>\n': ('<think>', '</think>'),
+            '<|turn>model\n<|channel>thought\n': ('<|channel>', '<channel|>'),
+            '[INST]hi[/INST][THINK]': ('[THINK]', '[/THINK]'),
+            'assistant\n<reasoning>\n': ('<reasoning>', '</reasoning>'),
+            '<|turn>model\n<|channel>thought\n<channel|>': None,
+            '<|im_start|>assistant\n<think>\n\n</think>\n\n': None,
+            '': None,
+        }
+        for prompt, expected in cases.items():
+            with self.subTest(prompt=prompt[-24:]):
+                self.assertEqual(think_budget.open_reasoning_tags(prompt), expected)
+
     def test_every_stream_reports_it(self):
         namespace = dict(Dict=Dict, think_budget=think_budget)
         exec(compile(ast.Module(body=[HEADERS], type_ignores=[]), '<headers>', 'exec'), namespace)

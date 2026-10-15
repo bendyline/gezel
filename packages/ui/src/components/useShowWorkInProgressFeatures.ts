@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { peekApiRead } from '../shared-api-reads.js';
 
 /**
  * Live view of the UI/CLI-only work-in-progress feature bucket. The default
@@ -7,7 +8,7 @@ import { api } from '../api.js';
  * discoverability only and deliberately does not change service capability.
  */
 export function useShowWorkInProgressFeatures(): boolean {
-  const [on, setOn] = useState(false);
+  const [on, setOn] = useState(() => peekApiRead('getConfig')?.showWorkInProgressFeatures ?? false);
 
   useEffect(() => {
     let cancelled = false;

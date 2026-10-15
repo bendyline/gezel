@@ -93,7 +93,7 @@ interface MediaManifest {
   recoScore?: number;
   licenseClass?: string;
   approxSizeBytes?: number;
-  auxiliaryFiles?: Array<{ sizeBytes?: number }>;
+  auxiliaryFiles?: Array<{ approxSizeBytes?: number }>;
 }
 
 interface AudioModel {
@@ -142,7 +142,7 @@ function pickAudio(list: AudioModel[]): AudioModel | null {
 /** Image download = the diffusion file + all auxiliary files (VAE, LLM encoder). */
 function imageTotalBytes(m: MediaManifest): number | null {
   const main = m.approxSizeBytes ?? 0;
-  const aux = (m.auxiliaryFiles ?? []).reduce((sum, f) => sum + (f.sizeBytes ?? 0), 0);
+  const aux = (m.auxiliaryFiles ?? []).reduce((sum, f) => sum + (f.approxSizeBytes ?? 0), 0);
   const total = main + aux;
   return total > 0 ? total : null;
 }

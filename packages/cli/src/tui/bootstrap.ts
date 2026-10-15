@@ -67,7 +67,7 @@ interface AccessoryCatalogModel {
   recoScore?: number;
   licenseClass?: string;
   tags?: string[];
-  auxiliaryFiles?: Array<{ sizeBytes?: number }>;
+  auxiliaryFiles?: Array<{ approxSizeBytes?: number }>;
 }
 
 /** Verdicts by catalog id from a `/models/fit` answer, or null without one. */
@@ -254,7 +254,7 @@ export function pickAccessoryModels(input: AccessoryInputs): BootstrapAccessoryM
       name: image.name,
       approxSizeBytes:
         image.approxSizeBytes +
-        (image.auxiliaryFiles ?? []).reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0),
+        (image.auxiliaryFiles ?? []).reduce((sum, file) => sum + (file.approxSizeBytes ?? 0), 0),
       requiredEngine: 'sd-server',
     });
   }

@@ -49,6 +49,7 @@ import {
   normalizeArtifactPath,
   projectNotFoundMessage,
   projectTypeNamedByBrief,
+  projectTypesMentionedByBrief,
   roleWithGloss,
 } from '@bendyline/gezel';
 /**
@@ -227,6 +228,7 @@ import {
   inferSourceDeliverablePath,
   kickoffTaskTitle,
   shouldPromoteStartJobToProject,
+  typedKickoffWatch,
 } from './kickoff-text.js';
 import {
   type LinkedWorkspaceTarget,
@@ -7641,10 +7643,11 @@ interface RoutableProjectType extends BriefRoutableType {
   description?: string;
   tools?: ReadonlyArray<{ name: string; description?: string }>;
   pages?: {
-    reads?: ReadonlyArray<{ source: string; path: string }>;
+    reads?: ReadonlyArray<{ source: string; path: string; subtree?: boolean }>;
     /** Tools only the page calls; a session never has them. */
     tools?: readonly string[];
   };
+  workspaceSeed?: readonly string[];
 }
 
 /**
@@ -7689,8 +7692,13 @@ async function routeBriefToProjectType(brief: {
     // the bakery's must not become a trip.
     const said = await personsLatestRequest();
     const fromSaid = said ? matchProjectTypeForBrief(said, types) : null;
+    // A brief that touches the person's type among others still means it: a
+    // meester's "planning healthy meals" also reads as Event Planner, and the
+    // tie sent "plan a week of meals" to a build crew (2026-10-14).
     const match =
-      fromSaid && fromSaid.typeId === projectTypeNamedByBrief(text, types)
+      fromSaid &&
+      (fromSaid.typeId === projectTypeNamedByBrief(text, types) ||
+        projectTypesMentionedByBrief(text, types).includes(fromSaid.typeId))
         ? fromSaid
         : matchProjectTypeForBrief(text, types);
     const type = match ? types.find((t) => t.id === match.typeId) : undefined;
@@ -7812,15 +7820,41 @@ async function runTypedKickoff(
     const crew = created.applied.gezelsCreated;
     const lead = crew.find((g) => g.voorman) ?? crew[0];
     if (!lead) return startedWithoutTask('the project type recruited no lead');
-    let advanceWhen: { file: string; minBytes: number; requireChange: false } | undefined;
-    if (match.dataFile) {
-      const seed = await api.readProjectWorkspaceFile(project.id, match.dataFile).catch(() => null);
-      advanceWhen = {
-        file: match.dataFile,
-        minBytes: (seed?.content.length ?? 0) + TYPED_KICKOFF_MIN_GROWTH_BYTES,
-        requireChange: false,
-      };
-    }
+    // The page's data must grow past its seed for the first draft to count,
+    // and a hand advance is held to the same floor: Job Hunt and Social Feed
+    // leads called advance_task_step over an untouched board and "finished"
+    // with nothing on it (Gemma 4 E4B, 2026-10-14).
+    const watch = typedKickoffWatch(type);
+    const watched = watch.length > 0 ? watch : match.dataFile ? [match.dataFile] : [];
+    const seeds = await Promise.all(
+      watched.map((file) =>
+        api
+          .readProjectWorkspaceFile(project.id, file)
+          .then((seed) => seed.content.length)
+          .catch(() => 0),
+      ),
+    );
+    const advanceWhen =
+      watched[0] !== undefined
+        ? {
+            file: watched[0],
+            minBytes: (seeds[0] ?? 0) + TYPED_KICKOFF_MIN_GROWTH_BYTES,
+            requireChange: false as const,
+          }
+        : undefined;
+    const gate =
+      watched.length > 0
+        ? {
+            at: 'completion' as const,
+            checks: [
+              {
+                kind: 'totalMinBytes' as const,
+                files: watched,
+                bytes: seeds.reduce((sum, n) => sum + n, 0) + TYPED_KICKOFF_MIN_GROWTH_BYTES,
+              },
+            ],
+          }
+        : undefined;
     const known = Object.entries(match.params)
       .filter(([key, value]) => !match.assumed.includes(key) && value.trim().length > 0)
       .map(([key, value]) => ({ title: type.params?.properties?.[key]?.title ?? key, value }));
@@ -7849,6 +7883,7 @@ async function runTypedKickoff(
           ...step,
           assignee: { kind: 'gezel', gezelId: lead.id },
           ...(advanceWhen ? { advanceWhen } : {}),
+          ...(gate ? { gate } : {}),
           // The page's data is written through the type's tools, in the shape
           // the page reads; the file tools would let the lead invent one.
           toolPolicy: { outputMedium: 'none', disallowBuiltinToolsets: ['workspace-fs-write'] },

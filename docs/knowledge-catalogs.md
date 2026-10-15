@@ -101,7 +101,9 @@ The Handboek is a normal `.gezk` catalog (`bendyline/handboek`) built from the
 curated and generated documentation by
 `packages/service/scripts/build-handboek-gezk.ts`. Its source remains under
 `docs/handboek/`, and `gezel handboek export` continues to render that source
-to website HTML. The service package ships the archive in `dist/handboek.gezk`.
+to website HTML. The service build makes the archive (it is not committed; see
+`scripts/handboek-gezk-lock.mjs`), and the service package ships it in
+`dist/handboek.gezk`.
 On first start or a changed archive digest, the user daemon runs the same
 verified private install path as a local catalog and registers it as `bundled`.
 It appears in Knowledge, can be disabled, and participates in ordinary

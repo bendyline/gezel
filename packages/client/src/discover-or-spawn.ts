@@ -41,7 +41,7 @@ export class DaemonNotRunningError extends Error {
   }
 }
 
-/** A forced spawn's daemon exited before it published its runtime files. */
+/** A spawned daemon exited before it published its runtime files. */
 export class SpawnedDaemonExitedError extends Error {
   constructor(
     public readonly code: number | null,
@@ -51,6 +51,28 @@ export class SpawnedDaemonExitedError extends Error {
       `gezeld exited (${signal ? `signal ${signal}` : `code ${code}`}) before it started; another daemon may already be running for this home. Check ~/.gezel/logs/.`,
     );
     this.name = 'SpawnedDaemonExitedError';
+  }
+}
+
+/**
+ * The daemon this call spawned exited before publishing its runtime. A live
+ * `holderPid` means it lost the single-instance race to another daemon — one
+ * this call did not start and has not version-checked, so adopting it is the
+ * caller's decision, never this function's.
+ */
+export class DaemonExitedDuringStartupError extends SpawnedDaemonExitedError {
+  constructor(
+    public readonly exitCode: number | null,
+    signal: NodeJS.Signals | null,
+    public readonly holderPid: number | null,
+  ) {
+    super(exitCode, signal);
+    const how = signal ? `signal ${signal}` : `exit code ${exitCode ?? 'unknown'}`;
+    this.message =
+      holderPid !== null
+        ? `gezeld exited during startup (${how}): another daemon (pid ${holderPid}) already owns this home`
+        : `gezeld exited during startup (${how}). Check ~/.gezel/logs/.`;
+    this.name = 'DaemonExitedDuringStartupError';
   }
 }
 
@@ -262,39 +284,59 @@ export async function discoverOrSpawn(
     ...windowsHeadlessSpawnOptions(),
   });
   if (detached) child.unref();
-  let exit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
-  child.once('exit', (code: number | null, signal: NodeJS.Signals | null) => {
-    exit = { code, signal };
-  });
 
-  while (Date.now() < deadline) {
-    await wait(Math.min(pollIntervalMs, remainingMs(deadline)));
-    const runtime = await readRuntimeFn(home);
-    // An unforced spawn may adopt whichever daemon won a concurrent start;
-    // a forced one wants its own process and nothing else.
-    const ours = !forceSpawn || runtime?.pid === child.pid;
-    if (runtime && ours && isProcessAliveFn(runtime.pid)) {
-      const client = clientFactory({
-        baseUrl: runtime.baseUrl,
-        token: runtime.token,
-        cert: runtime.cert,
-      });
-      try {
-        await boundedHealth(client, Math.min(healthTimeoutMs, remainingMs(deadline)));
-        return {
-          client,
+  // Only the runtime our own child publishes counts. A daemon that wins the
+  // single-instance lock first (an autostart unit relaunched by its service
+  // manager, a second `gezel start`) also publishes a healthy runtime, and
+  // accepting it handed the caller a daemon of unknown version that it
+  // believed it had just spawned.
+  const startup: { exit?: { code: number | null; signal: NodeJS.Signals | null }; error?: Error } =
+    {};
+  const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+    startup.exit = { code, signal };
+  };
+  const onError = (error: Error) => {
+    startup.error = error;
+  };
+  child.once('exit', onExit);
+  child.once('error', onError);
+  try {
+    while (Date.now() < deadline) {
+      await wait(Math.min(pollIntervalMs, remainingMs(deadline)));
+      if (startup.error) throw startup.error;
+      const runtime = await readRuntimeFn(home);
+      if (startup.exit) {
+        const holderPid =
+          runtime && runtime.pid !== child.pid && isProcessAliveFn(runtime.pid)
+            ? runtime.pid
+            : null;
+        throw new DaemonExitedDuringStartupError(startup.exit.code, startup.exit.signal, holderPid);
+      }
+      if (runtime && runtime.pid === child.pid && isProcessAliveFn(runtime.pid)) {
+        const client = clientFactory({
           baseUrl: runtime.baseUrl,
           token: runtime.token,
           cert: runtime.cert,
-          pid: runtime.pid,
-          outcome: 'spawned',
-          child: detached ? undefined : child,
-        };
-      } catch {
-        // Keep polling — the server may not have bound yet.
+        });
+        try {
+          await boundedHealth(client, Math.min(healthTimeoutMs, remainingMs(deadline)));
+          return {
+            client,
+            baseUrl: runtime.baseUrl,
+            token: runtime.token,
+            cert: runtime.cert,
+            pid: runtime.pid,
+            outcome: 'spawned',
+            child: detached ? undefined : child,
+          };
+        } catch {
+          // Keep polling — the server may not have bound yet.
+        }
       }
     }
-    if (forceSpawn && exit) throw new SpawnedDaemonExitedError(exit.code, exit.signal);
+  } finally {
+    child.off('exit', onExit);
+    child.off('error', onError);
   }
 
   await terminateFailedSpawn(child, logger);

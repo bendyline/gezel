@@ -92,6 +92,8 @@ export function providerLabel(
       return compact ? 'ds4' : 'DwarfStar';
     case 'llama-cpp':
       return deviceLabel(platform, { compact });
+    case 'remote':
+      return compact ? 'Remote' : 'Remote server';
     default:
       return provider;
   }

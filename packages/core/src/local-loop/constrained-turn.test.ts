@@ -4,6 +4,7 @@ import {
   type LocalChatCompletionTool,
   applyConstrainedTurnShape,
   disableTemplateThinking,
+  isImmediateFileWritePrompt,
   isImmediateFileWriteTurn,
   isScenarioFileRepairPrompt,
   readFileOnlyTools,
@@ -66,6 +67,34 @@ describe('isImmediateFileWriteTurn', () => {
     expect(isScenarioFileRepairPrompt(prompt, create)).toBe(false);
     expect(isImmediateFileWriteTurn(prompt, ROSTER, repair)).toBe(false);
     expect(isScenarioFileRepairPrompt(prompt, repair)).toBe(true);
+  });
+
+  it('stands down when the write directive waits on named reads', () => {
+    const context = { toolSurfaceIsWriteFileOnly: false };
+    const readThenWrite =
+      'Please write the postmortem. The evidence files are timeline.md and metrics.csv. Read both first. ' +
+      'After the second evidence read succeeds, your next tool call must be `write_file({ path: "postmortem.md", content: ... })`.';
+    expect(isImmediateFileWritePrompt(readThenWrite, context)).toBe(false);
+    expect(isImmediateFileWriteTurn(readThenWrite, ROSTER)).toBe(false);
+    expect(
+      isImmediateFileWritePrompt(
+        'After every source read completes, your next tool call must be `write_file`.',
+        context,
+      ),
+    ).toBe(false);
+  });
+
+  it('still fires when the reads are already behind the turn', () => {
+    const context = { toolSurfaceIsWriteFileOnly: false };
+    expect(isImmediateFileWritePrompt('Your next tool call must be `write_file`.', context)).toBe(
+      true,
+    );
+    expect(
+      isImmediateFileWritePrompt(
+        'You already read the sources first. Your next tool call must be `write_file`.',
+        context,
+      ),
+    ).toBe(true);
   });
 
   it('treats a bare deliverable line as urgent only once the surface is narrowed', () => {

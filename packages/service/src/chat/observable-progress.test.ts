@@ -116,7 +116,21 @@ describe('terminal task-note completion', () => {
     if (condition === 'multiple-outputs') step.toolPolicy!.additionalOutputMedia = ['artifact'];
     if (condition === 'paused') f.task.status = 'paused';
     if (condition === 'user-owned') step.assignee = { kind: 'user' };
-    await expect(f.run()).resolves.toEqual({});
+    // A turn that saved no note at all is reported for the save-it re-prompt.
+    const unsaved = ['failed-write', 'read-only', 'no-write'].includes(condition);
+    await expect(f.run()).resolves.toEqual(
+      unsaved ? { unmetTaskNote: { taskRef: 'example/1', stepId: 'finish' } } : {},
+    );
+    expect(f.advance).not.toHaveBeenCalled();
+  });
+
+  it('reports a non-terminal note step that ended with its result only in the reply', async () => {
+    const f = fixture();
+    f.task.craftbook.steps[0]!.terminal = false;
+    f.calls.length = 0;
+    await expect(f.run()).resolves.toEqual({
+      unmetTaskNote: { taskRef: 'example/1', stepId: 'finish' },
+    });
     expect(f.advance).not.toHaveBeenCalled();
   });
 
@@ -142,6 +156,71 @@ describe('terminal task-note completion', () => {
       attempt: 1,
       activeStepId: 'repair',
     });
+    await expect(f.run()).resolves.toEqual({ autoAdvanced: true });
+  });
+});
+
+// A typed project's kickoff finishes when its Output page's data file grows
+// past the seed. A lead that ends its turn short of that is reported, so the
+// manager can re-prompt it once instead of leaving the first project empty.
+describe('growth gate', () => {
+  function kickoff(content: string) {
+    const task = {
+      projectId: 'jobs',
+      num: 2,
+      ref: 'jobs/2',
+      status: 'active',
+      activeStepId: 'first-draft',
+      assignee: { kind: 'gezel', gezelId: 'coach' },
+      craftbook: {
+        steps: [
+          {
+            id: 'first-draft',
+            name: 'First draft',
+            advanceWhen: { file: 'pipeline.json', minBytes: 200, requireChange: false },
+            lastActivatedAt: '2026-10-14T23:00:00.000Z',
+          },
+        ],
+      },
+    } as Task;
+    const record = {
+      id: 'session',
+      gezelId: 'coach',
+      projectId: 'jobs',
+      taskRef: task.ref,
+      stepId: 'first-draft',
+      stepActivationId: '2026-10-14T23:00:00.000Z',
+    } as ChatSession;
+    const advance = vi.fn().mockResolvedValue({ status: 'advanced' });
+    const deps: DeliverableGateDeps = {
+      store: {
+        listProjectTasks: async () => [task],
+        readProjectWorkspaceFile: async () => content,
+      } as unknown as Store,
+      taskAdvancer: advance,
+      readEffectiveTask: async () => task,
+      liveRecord: () => record,
+    };
+    return {
+      advance,
+      run: () => maybeAutoAdvanceOnObservableProgress(deps, { record }, [], 'session'),
+    };
+  }
+
+  it('reports a file still short of its floor', async () => {
+    const f = kickoff('{"applications":[]}');
+    await expect(f.run()).resolves.toEqual({
+      unmetGrowthGate: {
+        taskRef: 'jobs/2',
+        file: 'pipeline.json',
+        reason: expect.stringContaining('below minBytes'),
+      },
+    });
+    expect(f.advance).not.toHaveBeenCalled();
+  });
+
+  it('advances once the file has grown', async () => {
+    const f = kickoff(`{"applications":[${'"x",'.repeat(60)}"x"]}`);
     await expect(f.run()).resolves.toEqual({ autoAdvanced: true });
   });
 });

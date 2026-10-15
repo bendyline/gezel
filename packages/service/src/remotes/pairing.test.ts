@@ -179,4 +179,32 @@ describe('remote pairing trust', () => {
     expect(update).not.toHaveBeenCalled();
     expect(remote.tlsCertPem).toBe('OLD-CERT');
   });
+
+  it('does not re-dial for a fresh certificate when the server never answered', async () => {
+    const remote: PairedRemote = {
+      remoteId: 'ab'.repeat(32),
+      baseUrl: 'https://192.0.2.10:6229',
+      displayName: 'Remote',
+      token: 'TOKEN',
+      pinnedIdentityKey: 'pem',
+      pinnedIdentityFingerprint: 'ab'.repeat(32),
+      tlsCertPem: 'OLD-CERT',
+      scopes: ['remote-inference'],
+      pairedAt: Date.now(),
+    };
+    const refused = new TypeError('fetch failed', {
+      cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+    });
+    const createBootstrap = vi.fn();
+    const pairedFetch = createPairedRemoteFetch(
+      remote,
+      { update: vi.fn() } as unknown as RemotesRegistry,
+      {
+        createPinned: () => vi.fn().mockRejectedValue(refused) as never,
+        createBootstrap: createBootstrap as never,
+      },
+    );
+    await expect(pairedFetch(`${remote.baseUrl}/v1/remote/models`)).rejects.toBe(refused);
+    expect(createBootstrap).not.toHaveBeenCalled();
+  });
 });

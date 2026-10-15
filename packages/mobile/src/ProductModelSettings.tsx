@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { ModelBudgetSettings } from './ModelBudgetSettings.js';
 import { ModelChooser } from './ModelChooser.js';
 import { PhotoReadingSettings } from './PhotoReadingSettings.js';
+import { RemoteModelSettings } from './RemoteModelSettings.js';
 import type { MobileHost, ModelInventory } from './native.js';
 
 /** Native model acquisition is a host control inside the ordinary Settings view. */
@@ -42,6 +43,8 @@ export function ProductModelSettings({
   const [providers, setProviders] = useState<MobileProvider[]>([]);
   const [inventory, setInventory] = useState<ModelInventory>({ models: [] });
   const [provider, setProvider] = useState<MobileProviderId>('llama-cpp');
+  /** A model on another device, when new conversations use one. */
+  const [remoteInUse, setRemoteInUse] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const onError = useCallback(
@@ -56,6 +59,7 @@ export function ProductModelSettings({
     ]);
     setProviders(nextProviders);
     setInventory(nextInventory);
+    setRemoteInUse(config.provider === 'remote' ? config.defaultModel?.remote : undefined);
     if (
       config.provider === 'llama-cpp' ||
       config.provider === 'apple-foundation-models' ||
@@ -76,6 +80,11 @@ export function ProductModelSettings({
   }, [load, onError]);
   const selected = providers.find(({ id }) => id === provider);
   const modelId = provider === 'llama-cpp' ? inventory.selectedModelId : provider;
+  const changing = busy || saving || status.busy || status.pendingSave || status.changingModel;
+  const useLocal = async () => {
+    await service.setProvider(provider);
+    await refresh();
+  };
   return (
     <section aria-label="On-device models">
       <p>
@@ -83,6 +92,22 @@ export function ProductModelSettings({
         while the app is open.
       </p>
       {error && <p role="alert">{error}</p>}
+      {remoteInUse && (
+        <div className="mobile-actions">
+          <p className="muted small">
+            New conversations use a model on another device. The model below answers while that
+            device can't be reached.
+          </p>
+          <button
+            type="button"
+            className="gz-key"
+            disabled={changing}
+            onClick={() => void useLocal().catch(onError)}
+          >
+            Use this phone's model
+          </button>
+        </div>
+      )}
       <ModelChooser
         host={guardedHost}
         service={service}
@@ -111,6 +136,16 @@ export function ProductModelSettings({
           fittedContext={inventory.models.find(({ id }) => id === modelId)?.contextTokens}
           disabled={busy || saving || status.busy || status.pendingSave || status.changingModel}
           refresh={refresh}
+          onError={onError}
+        />
+      )}
+      {host.native && !setup && (
+        <RemoteModelSettings
+          service={service}
+          disabled={changing}
+          {...(remoteInUse ? { inUse: remoteInUse } : {})}
+          onChanged={refresh}
+          useLocal={useLocal}
           onError={onError}
         />
       )}

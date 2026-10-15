@@ -4,7 +4,11 @@ import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
-import type { GezelConfig, SessionTelemetryListResponse } from '@bendyline/gezel';
+import {
+  ChatModelTuningSchema,
+  type GezelConfig,
+  type SessionTelemetryListResponse,
+} from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { startAutoAnswerer } from './auto-answer.ts';
 import { seedDocblocksRuntime } from './docblocks-runtime.ts';
@@ -384,7 +388,11 @@ export async function runTrial(
     defaultLlamaEvalLaunch,
     llamaCppReasoningEvalLaunchOverrides(opts, engine),
   );
-  const reasoningEffortConfig = llamaCppReasoningEffortEvalConfig(opts, engine);
+  const reasoningEffortConfig = mergeEvalModelTuningConfig(
+    opts.modelId,
+    llamaCppReasoningEffortEvalConfig(opts, engine),
+    evalModelTuningOverrideConfig(opts.modelId),
+  );
   const trialId = makeTrialId(scenario.id, engine, opts.modelId);
   const runsDir = resolveEvalRunsDir(opts.runsDir);
   const runDir = join(runsDir, trialId);
@@ -497,6 +505,9 @@ export async function runTrial(
   log(`[trial] runDir=${runDir}`);
   log(`[trial] trialHome=${trialHome}`);
   log(`[trial] cacheRoot=${cacheRoot}`);
+  if (process.env.GEZEL_EVAL_MODEL_TUNING?.trim()) {
+    log(`[trial] modelTuning override=${process.env.GEZEL_EVAL_MODEL_TUNING.trim()}`);
+  }
 
   // `engine` was resolved at the top of the function so the trial id
   // can encode the provider; pull category here for the gates below.
@@ -1157,6 +1168,11 @@ export async function runTrial(
         ? {
             llamaCppKvCacheType: process.env.GEZEL_EVAL_KV_CACHE_TYPE as 'f16' | 'q8_0' | 'q4_0',
           }
+        : {}),
+      // Gemma's full-size SWA cache, pinned on or off instead of the
+      // auto-default, which the automatic KV ceiling now declines on 31b.
+      ...(process.env.GEZEL_EVAL_SWA_FULL === 'on' || process.env.GEZEL_EVAL_SWA_FULL === 'off'
+        ? { llamaCppSwaFull: process.env.GEZEL_EVAL_SWA_FULL === 'on' }
         : {}),
       ...(imageModelId ? { imageProvider: 'sd-cpp' as const } : {}),
       ...(opts.generalistMode ? { generalistMode: opts.generalistMode } : {}),
@@ -2063,6 +2079,57 @@ export function llamaCppReasoningEffortEvalConfig(
     modelTuning: {
       [opts.modelId]: {
         reasoning: { templateKwargs: { reasoning_effort: effort } },
+      },
+    },
+  };
+}
+
+/**
+ * `GEZEL_EVAL_MODEL_TUNING`: a JSON tuning block applied as the model's
+ * install-wide override (`config.modelTuning[<modelId>]`), which outranks the
+ * catalog's profiles. A tuning campaign can then A/B sampling without editing
+ * the shared catalog index that concurrent runs read. A block the schema
+ * rejects fails the trial loudly rather than running the control by accident.
+ */
+export function evalModelTuningOverrideConfig(
+  modelId: string,
+  raw: string | undefined = process.env.GEZEL_EVAL_MODEL_TUNING,
+): Partial<GezelConfig> | undefined {
+  if (!raw?.trim()) return undefined;
+  const requested: unknown = JSON.parse(raw);
+  const tuning = ChatModelTuningSchema.parse(requested);
+  const dropped = droppedKeys(requested, tuning);
+  if (dropped.length > 0) {
+    throw new Error(
+      `GEZEL_EVAL_MODEL_TUNING has keys the tuning schema drops: ${dropped.join(', ')}`,
+    );
+  }
+  return { modelTuning: { [modelId]: tuning } };
+}
+
+function droppedKeys(requested: unknown, parsed: unknown, path = ''): string[] {
+  if (!requested || typeof requested !== 'object' || Array.isArray(requested)) return [];
+  const kept = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  return Object.entries(requested as Record<string, unknown>).flatMap(([key, value]) =>
+    key in kept ? droppedKeys(value, kept[key], `${path}${key}.`) : [`${path}${key}`],
+  );
+}
+
+function mergeEvalModelTuningConfig(
+  modelId: string,
+  base: Partial<GezelConfig> | undefined,
+  override: Partial<GezelConfig> | undefined,
+): Partial<GezelConfig> | undefined {
+  if (!base) return override;
+  if (!override) return base;
+  const a = base.modelTuning?.[modelId] ?? {};
+  const b = override.modelTuning?.[modelId] ?? {};
+  return {
+    modelTuning: {
+      [modelId]: {
+        ...a,
+        ...b,
+        ...(a.reasoning || b.reasoning ? { reasoning: { ...a.reasoning, ...b.reasoning } } : {}),
       },
     },
   };
@@ -4281,8 +4348,18 @@ export function buildPoisonedSessionRecoveryMessage(args: {
     !!sniff &&
     sniff.bytes > 0 &&
     !sniffReportsMissingTarget(filePath, sniff.failReason);
+  // A data file is regenerated from its sources, not patched record by record:
+  // data-wrangle's own repair says "do not hand-edit the JSON … rebuild from
+  // the sources", and this message used to say the opposite ("smallest
+  // targeted repair … do not replace the complete file"). Nemotron 3.5
+  // Lightning got both in one session and never rebuilt (2026-10-15).
+  const derivedDataFile =
+    !!filePath && /\.(?:json|jsonl|ndjson|csv|tsv|ya?ml|xml)$/i.test(filePath);
   const editLine =
     taskGraphLine ??
+    (filePath && derivedDataFile
+      ? `Your next tool call should rebuild \`${filePath}\` from its source files for the latest validator failure: rerun or fix the script that produces it, or write the complete corrected file with \`write_file\`. Do not hand-patch individual records.`
+      : null) ??
     (filePath
       ? explicitLineEditFailure || !existingCheckedFile
         ? `Your next tool call should repair \`${filePath}\`. ${explicitLineEditFailure ? 'The prior line-based edit was explicitly rejected, so change strategy: ' : ''}use \`write_file\` to write a complete corrected version at exactly \`${filePath}\`.`
@@ -4290,7 +4367,7 @@ export function buildPoisonedSessionRecoveryMessage(args: {
       : 'Your next tool call should write or repair the requested workspace deliverable. Prefer `write_file` for recovery after a failed line-based edit.');
   const closingLine = taskGraphLine
     ? 'Do not answer only in prose. Make the named task-tool calls, then stop with a short status note.'
-    : existingCheckedFile && !explicitLineEditFailure
+    : existingCheckedFile && !explicitLineEditFailure && !derivedDataFile
       ? 'Do not answer only in prose. Make one concrete targeted workspace edit, then stop with a short status note.'
       : 'Do not answer only in prose. Do not retry the same malformed `replace_lines` or `replace_in_file` call. Make one concrete workspace edit, then stop with a short status note.';
   return [

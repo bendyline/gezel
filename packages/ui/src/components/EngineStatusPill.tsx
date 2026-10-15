@@ -1,3 +1,4 @@
+import { setVisibleInterval } from '../visible-interval.js';
 /**
  * EngineStatusPill
  *
@@ -154,8 +155,8 @@ export function EngineStatusPill() {
 
   useEffect(() => {
     refreshConfig();
-    const timer = setInterval(refreshConfig, 10_000);
-    return () => clearInterval(timer);
+    const timer = setVisibleInterval(refreshConfig, 10_000);
+    return () => timer();
   }, [refreshConfig]);
 
   const refreshGezels = useCallback(() => {
@@ -170,8 +171,8 @@ export function EngineStatusPill() {
 
   useEffect(() => {
     refreshGezels();
-    const timer = setInterval(refreshGezels, 10_000);
-    return () => clearInterval(timer);
+    const timer = setVisibleInterval(refreshGezels, 10_000);
+    return () => timer();
   }, [refreshGezels]);
 
   const refreshActivity = useCallback(() => {
@@ -189,8 +190,8 @@ export function EngineStatusPill() {
 
   useEffect(() => {
     refreshActivity();
-    const timer = setInterval(refreshActivity, 3_000);
-    return () => clearInterval(timer);
+    const timer = setVisibleInterval(refreshActivity, 3_000);
+    return () => timer();
   }, [refreshActivity]);
 
   const updateDeviceSafetyMode = useCallback(
@@ -604,10 +605,10 @@ function EngineStatusPillForProvider({
       }
     };
     void refresh();
-    const t = setInterval(() => void refresh(), 10_000);
+    const t = setVisibleInterval(() => void refresh(), 10_000);
     return () => {
       cancelled = true;
-      clearInterval(t);
+      t();
     };
   }, [onDeviceProvider]);
 
@@ -681,8 +682,8 @@ function EngineStatusPillForProvider({
 
   useEffect(() => {
     refreshModelSpeeds();
-    const timer = setInterval(refreshModelSpeeds, 30_000);
-    return () => clearInterval(timer);
+    const timer = setVisibleInterval(refreshModelSpeeds, 30_000);
+    return () => timer();
   }, [refreshModelSpeeds]);
 
   // Pill-specific telemetry (per-turn stats + static RAM footprint).
@@ -796,7 +797,7 @@ function EngineStatusPillForProvider({
       inflight.count === 0
     )
       return;
-    const t = setInterval(() => {
+    const t = setVisibleInterval(() => {
       setTick((n) => n + 1);
       setRecentTurns((prev) => {
         const cutoff = Date.now() - STATS_WINDOW_MS;
@@ -804,7 +805,7 @@ function EngineStatusPillForProvider({
         return filtered.length === prev.length ? prev : filtered;
       });
     }, 1000);
-    return () => clearInterval(t);
+    return () => t();
   }, [liveTurns.size, recentTurns.length, mediaActivity.size, inflight.count]);
 
   const rollingAvgTokensPerSec = useMemo(

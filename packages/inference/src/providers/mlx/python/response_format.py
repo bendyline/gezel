@@ -13,9 +13,14 @@ path and wrote objects keyed `""` or `":"`. Measured 2026-10-14 on
 gemma4-e4b and qwen3.8-27b: 22/32 and 14/16 useful JSON-mode answers
 compact, 31/32 and 16/16 with flexible whitespace, no whitespace runaways.
 
-A thinking model reasons first: when the prompt opens inside `<think>`, the
-grammar holds off until `</think>` (mlx_vlm's ThinkingAwareLogitsProcessor),
-so it shapes the answer and not the private reasoning.
+A thinking model reasons first: when the prompt opens inside reasoning
+(Qwen's `<think>`, Gemma 4's `<|channel>thought` after every tool response),
+the grammar holds off until that block's closer (mlx_vlm's
+ThinkingAwareLogitsProcessor), so it shapes the answer and not the private
+reasoning. It once waited only for `<think>`: on Gemma the grammar then
+held the open thought channel to the answer, the model never wrote
+`<channel|>`, and a streaming client, told reasoning was open, got the whole
+answer as reasoning and an empty reply.
 
 A request may carry tools as well, as OpenAI allows: the model can call
 them, and when it answers, the answer follows the schema. Where the model's
@@ -35,15 +40,19 @@ required second one with whitespace until max_tokens. Whitespace runs are
 also capped (`_BoundedWhitespace`), because llguidance's flexible whitespace
 has no bound and that loop is the classic JSON-mode failure.
 
-A schema llguidance cannot compile raises ValueError for the server to return
-as a 422: that is the caller's mistake, and free text would hide it. Only a
-matcher fault mid-answer degrades to unconstrained text, as tool grammars do,
-rather than killing a turn already under way.
+A schema llguidance refuses as written is compiled again with `oneOf` held as
+`anyOf` and the keywords it does not implement left unenforced
+(`_RELAXED_OPTIONS`), as llama.cpp serves them. One that still cannot compile
+raises ValueError for the server to return as a 422, which /v1 answers as the
+caller's 400: free text would hide the mistake. Only a matcher fault
+mid-answer degrades to unconstrained text, as tool grammars do, rather than
+killing a turn already under way.
 """
 
 import json
-from typing import Any, Dict, List, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
+import think_budget
 import tool_grammar
 
 
@@ -99,7 +108,7 @@ def compile_response_grammar(
     schema = response_schema(response_format)
     if schema is None:
         return None
-    answer = _compile_answer(tokenizer, schema)
+    answer, options = _compile_answer(tokenizer, schema)
     if not tools or tool_choice == "none":
         # With "none" the answer is the whole reply, so the tool grammar
         # stands down too.
@@ -107,6 +116,8 @@ def compile_response_grammar(
     if _wants_a_call(tool_choice):
         print("[response-format] tool_choice asks for a call; the tool grammar alone applies", flush=True)
         return None
+    if options:
+        schema = {**schema, "x-guidance": {**schema.get("x-guidance", {}), **options}}
     combined = tool_grammar.build_answer_or_calls_grammar(
         tools, tool_grammar_hint or {}, schema, allow_think=allow_think
     )
@@ -128,11 +139,31 @@ def compile_response_grammar(
     return ResponseGrammar(combined, covers_tool_calls=True)
 
 
-def _compile_answer(tokenizer: Any, schema: Dict[str, Any]) -> str:
+# What lets a schema through that llguidance refuses as written. `oneOf` is
+# held as `anyOf`: pydantic writes every discriminated union as `oneOf`, and
+# llguidance accepts one only when it can prove the branches disjoint.
+# Keywords it does not implement (`uniqueItems` from a pydantic `set`, `not`,
+# `if`/`then`/`else`) go unenforced, as llama.cpp's converter leaves them.
+# Refusing them failed requests llama.cpp serves, and that this engine served
+# as free text before it enforced schemas at all.
+_RELAXED_OPTIONS = {"coerce_one_of": True, "lenient": True}
+
+
+def _unenforceable(detail: Any) -> ValueError:
+    return ValueError(f"The response format's schema cannot be enforced: {detail}")
+
+
+def _compile_answer(tokenizer: Any, schema: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """The answer grammar and the compiler options it needed beyond the defaults.
+
+    A schema that compiles as written gets exactly the grammar it always got;
+    only one llguidance refuses is compiled again with `_RELAXED_OPTIONS`.
+    """
     import llguidance as llg
     from llguidance import LLMatcher
 
     schema_text = json.dumps(schema)
+    llg_tok = tool_grammar._get_llg_tokenizer(tokenizer)
     try:
         if hasattr(llg, "JsonCompiler"):
             grammar = llg.JsonCompiler(whitespace_flexible=True).compile(
@@ -141,10 +172,35 @@ def _compile_answer(tokenizer: Any, schema: Dict[str, Any]) -> str:
         else:
             grammar = llg.grammar_from("json_schema", schema_text)
     except Exception as exc:  # noqa: BLE001 - any compiler rejection is the caller's schema
-        raise ValueError(f"The response format's schema cannot be enforced: {exc}") from exc
-    err = LLMatcher.validate_grammar(grammar, tool_grammar._get_llg_tokenizer(tokenizer))
+        return _compile_relaxed(schema_text, llg_tok, exc), dict(_RELAXED_OPTIONS)
+    err = LLMatcher.validate_grammar(grammar, llg_tok)
     if err:
-        raise ValueError(f"The response format's schema cannot be enforced: {err}")
+        raise _unenforceable(err)
+    return grammar, {}
+
+
+def _compile_relaxed(schema_text: str, llg_tok: Any, refusal: Exception) -> str:
+    from llguidance import LLMatcher
+
+    compile_schema = getattr(LLMatcher, "grammar_from_json_schema", None)
+    validate = getattr(LLMatcher, "validate_grammar_with_warnings", None)
+    if compile_schema is None or validate is None:
+        raise _unenforceable(refusal) from refusal
+    try:
+        grammar = compile_schema(
+            schema_text, overrides={"whitespace_flexible": True, **_RELAXED_OPTIONS}
+        )
+        is_error, messages = validate(grammar, llg_tok)
+    except Exception as exc:  # noqa: BLE001 - any compiler rejection is the caller's schema
+        raise _unenforceable(exc) from exc
+    if is_error:
+        # The relaxed pass's error, not the first refusal: it names what is
+        # left once every relaxation has been applied.
+        raise _unenforceable(messages[0] if messages else refusal)
+    print(
+        f"[response-format] schema relaxed to compile: {'; '.join(messages) or refusal}",
+        flush=True,
+    )
     return grammar
 
 
@@ -260,8 +316,33 @@ class _BoundedWhitespace:
         return logits
 
 
+def reasoning_gate(tokenizer: Any, prompt: str) -> Optional[Tuple[str, str]]:
+    """The reasoning tags the grammar waits out, or None to apply it at once.
+
+    Set when the rendered prompt leaves generation inside a reasoning block.
+    The grammar is released on the closer's token id, so a closer this
+    tokenizer splits into pieces cannot gate it: released on its last piece
+    (often `>`), it would trip on ordinary reasoning text.
+    """
+    tags = think_budget.open_reasoning_tags(prompt)
+    if tags is None:
+        return None
+    try:
+        ids = tokenizer.encode(tags[1], add_special_tokens=False)
+    except Exception:  # noqa: BLE001 - no encode, no gate
+        ids = []
+    if len(ids) != 1:
+        print(
+            f"[response-format] the prompt opens reasoning but {tags[1]} is not one token; "
+            "the grammar applies from the first token",
+            flush=True,
+        )
+        return None
+    return tags
+
+
 def build_response_format_processor(
-    tokenizer: Any, grammar: Optional[ResponseGrammar], thinking: bool
+    tokenizer: Any, grammar: Optional[ResponseGrammar], prompt: str
 ) -> Optional[Any]:
     """The logits processor for a compiled response grammar, or None."""
     if grammar is None:
@@ -272,11 +353,20 @@ def build_response_format_processor(
         LLGuidanceLogitsProcessor(grammar.text, tool_grammar._get_llg_tokenizer(tokenizer)),
         _whitespace_tokens(tokenizer),
     )
-    if thinking:
-        processor = ThinkingAwareLogitsProcessor(processor, tokenizer, enable_thinking=True)
+    tags = reasoning_gate(tokenizer, prompt)
+    thinking = "off"
+    if tags is not None:
+        processor = ThinkingAwareLogitsProcessor(
+            processor,
+            tokenizer,
+            thinking_start_token=tags[0],
+            thinking_end_token=tags[1],
+            enable_thinking=True,
+        )
+        thinking = f"deferred until={tags[1]}"
     print(
         f"[response-format] active answer={'json-or-calls' if grammar.covers_tool_calls else 'json'} "
-        f"thinking={'deferred' if thinking else 'off'}",
+        f"thinking={thinking}",
         flush=True,
     )
     return tool_grammar.SafeToolGrammarProcessor(

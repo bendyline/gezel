@@ -30,6 +30,11 @@ import {
   pinnedLoadFiles,
   prefetchExternalData,
 } from './pinned-files.js';
+import {
+  TRANSFORMERS_MODULE,
+  TransformersDependencyMissingError,
+  unresolvedSpecifier,
+} from './transformers-import.js';
 
 const MAX_BATCH = 8;
 const MAX_CHARS = 8_000;
@@ -275,16 +280,20 @@ function encoderRows(
 
 async function loadTransformers(): Promise<TransformersModule> {
   try {
-    const specifier = '@huggingface/transformers';
+    const specifier: string = TRANSFORMERS_MODULE;
     return (await import(specifier)) as unknown as TransformersModule;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (/Cannot find (module|package)/i.test(message)) {
+    const missing = unresolvedSpecifier(err);
+    if (missing === TRANSFORMERS_MODULE) {
       throw new EmbedderUnavailableError(
-        `the embedding runtime is not installed — knowledge builds and semantic search need the optional peer @huggingface/transformers@${TRANSFORMERS_PEER_RANGE}; install it alongside @bendyline/gezel-knowledge`,
+        `the embedding runtime is not installed — knowledge builds and semantic search need the optional peer ${TRANSFORMERS_MODULE}@${TRANSFORMERS_PEER_RANGE}; install it alongside @bendyline/gezel-knowledge`,
         { runtimeMissing: true },
       );
     }
+    // Not an EmbedderUnavailableError: callers read that as the supported
+    // "runtime absent" state and stay quiet, and a broken install is a fault.
+    if (missing)
+      throw new TransformersDependencyMissingError(missing, TRANSFORMERS_PEER_RANGE, err);
     throw err;
   }
 }

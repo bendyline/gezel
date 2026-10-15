@@ -66,6 +66,30 @@ describe('resolveDaemon', () => {
     );
   });
 
+  it('hosts its own daemon when the running Gezel speaks an API generation it cannot', async () => {
+    // The daemon the app ships is the closest match there is to itself.
+    authorizeLocalMock.mockRejectedValue(
+      new GezelSdkError('The Gezel service (1.26226.50) is older than this app can connect to', {
+        code: 'daemon_incompatible',
+      }),
+    );
+    const connection = await resolveDaemon({ ...APP, onVerificationCode: () => {}, host: {} });
+    expect(connection.mode).toBe('hosted');
+  });
+
+  it('says why when the running Gezel is incompatible and the app cannot host', async () => {
+    authorizeLocalMock.mockRejectedValue(
+      new GezelSdkError('The Gezel service (1.26226.50) is older than this app can connect to', {
+        code: 'daemon_incompatible',
+      }),
+    );
+    await expect(resolveDaemon({ ...APP, onVerificationCode: () => {} })).rejects.toMatchObject({
+      code: 'daemon_incompatible',
+      message: expect.stringContaining('1.26226.50'),
+    });
+    expect(hostInProcessMock).not.toHaveBeenCalled();
+  });
+
   it('refuses to host after the user declined the connection', async () => {
     // Starting a private daemon here would do the thing the user just said no
     // to, in a place they cannot see.

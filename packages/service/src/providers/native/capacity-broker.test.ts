@@ -7,6 +7,7 @@ import {
 import {
   CapacityBroker,
   autoDetectBudgetBytes,
+  autoKvCacheMaxBytes,
   clampCtxTokensForMemory,
   computeCapacityBudget,
   defaultLocalEngineSlots,
@@ -14,6 +15,7 @@ import {
   fastMemoryBudgetBytes,
   formatCapacityDenial,
   formatContextCapacityDenial,
+  liveRamOsReserveBytes,
   llamaCppSlotCeiling,
   localEngineKvBudgetBytes,
   localEngineSlotCeiling,
@@ -1440,6 +1442,123 @@ describe('adaptive context growth', () => {
         committedOtherBytes: 2 * GB,
       });
       expect(shared.perTurnCtxTokens).toBeLessThan(alone.perTurnCtxTokens);
+    });
+
+    describe('automatic KV ceiling', () => {
+      // 2026-10-14: gemma4-31b's --swa-full cache (~880 KiB/token) on a
+      // 121 GB DGX Spark grew from 64K to 82,944 tokens — a 69.6 GB cache,
+      // 94 GB with weights — for a window trials never used past 42K.
+      const SPARK = {
+        basePerTurnCtxTokens: 65_536,
+        targetPerTurnCtxTokens: 262_144,
+        slots: 1,
+        kvBytesPerToken: 880 * 1024,
+        weightsResidentBytes: 18 * GB,
+        fastBudgetBytes: 105.6 * GB,
+        committedOtherBytes: 0,
+        budgetKind: 'unified' as const,
+        vramBytes: 0,
+        freeSystemRamBytes: 115 * GB,
+      };
+
+      it('does not grow a cache that already sits above the ceiling', () => {
+        expect(planAdaptiveContextGrowth(SPARK)).toMatchObject({
+          grown: false,
+          perTurnCtxTokens: 65_536,
+          slots: 1,
+        });
+      });
+
+      it('grows to the ceiling, not to the fast pool', () => {
+        const result = planAdaptiveContextGrowth({ ...SPARK, kvBytesPerToken: 256 * 1024 });
+        expect(result).toMatchObject({ grown: true, perTurnCtxTokens: 131_072 });
+        expect(result.reason).toMatch(/stopped at the ~32\.0 GB automatic KV ceiling/);
+      });
+
+      it('leaves a cheap-KV model its whole native window', () => {
+        // qwen3.8-27b: ~64 KiB/token holds 262K in 16 GiB.
+        expect(planAdaptiveContextGrowth({ ...SPARK, kvBytesPerToken: 64 * 1024 })).toMatchObject({
+          grown: true,
+          perTurnCtxTokens: 262_144,
+        });
+      });
+
+      it('counts every slot and its fixed window block against the ceiling', () => {
+        const result = planAdaptiveContextGrowth({
+          ...SPARK,
+          slots: 2,
+          kvBytesPerToken: 80 * 1024,
+          kvFixedPerSlotBytes: 1.2 * GB,
+        });
+        expect(result.grown).toBe(true);
+        expect(result.slots * (1.2 * GB + result.perTurnCtxTokens * 80 * 1024)).toBeLessThanOrEqual(
+          32 * GB,
+        );
+      });
+
+      it('takes an explicit ceiling and GEZEL_LLAMA_AUTO_KV_MAX_GB', () => {
+        const wide = { ...SPARK, kvBytesPerToken: 256 * 1024 };
+        expect(
+          planAdaptiveContextGrowth({ ...wide, maxKvCacheBytes: 24 * GB }).perTurnCtxTokens,
+        ).toBe(98_304);
+        vi.stubEnv('GEZEL_LLAMA_AUTO_KV_MAX_GB', '20');
+        expect(autoKvCacheMaxBytes()).toBe(20 * GB);
+        expect(planAdaptiveContextGrowth(wide).perTurnCtxTokens).toBe(81_920);
+      });
+    });
+
+    describe('shared-pool headroom', () => {
+      // A 64 GB Mac with 30 GB free at launch: weights 8.6 GB, ~36 KB/token.
+      const MAC = {
+        basePerTurnCtxTokens: 65_536,
+        targetPerTurnCtxTokens: 262_144,
+        slots: 1,
+        kvBytesPerToken: 36 * 1024,
+        weightsResidentBytes: 8.6 * GB,
+        fastBudgetBytes: 44.8 * GB,
+        committedOtherBytes: 0,
+        budgetKind: 'unified' as const,
+        vramBytes: 0,
+        freeSystemRamBytes: 30 * GB,
+        maxKvCacheBytes: 1024 * GB,
+      };
+
+      it('spends at most half of what the base launch leaves free', () => {
+        const result = planAdaptiveContextGrowth(MAC);
+        const baseKv = 65_536 * MAC.kvBytesPerToken;
+        const left =
+          (MAC.freeSystemRamBytes - liveRamOsReserveBytes() - 0.5 * GB - MAC.weightsResidentBytes) *
+            0.8 -
+          baseKv;
+        expect(result.grown).toBe(true);
+        expect(result.perTurnCtxTokens).toBeLessThan(262_144);
+        expect(result.perTurnCtxTokens * MAC.kvBytesPerToken).toBeLessThanOrEqual(
+          baseKv + left / 2,
+        );
+        expect(result.reason).toMatch(/stopped to keep ~\d+\.\d GB free for other work/);
+      });
+
+      it('does not grow when the base launch leaves nothing spare', () => {
+        expect(planAdaptiveContextGrowth({ ...MAC, freeSystemRamBytes: 12 * GB })).toMatchObject({
+          grown: false,
+          perTurnCtxTokens: 65_536,
+        });
+      });
+
+      it('holds nothing back on a discrete card, whose growth stays confined to VRAM', () => {
+        const card = { ...DENSE_ON_CARD, maxKvCacheBytes: 1024 * GB };
+        expect(planAdaptiveContextGrowth({ ...card, freeSystemRamBytes: 10 * GB })).toEqual(
+          planAdaptiveContextGrowth({ ...card, freeSystemRamBytes: 999 * GB }),
+        );
+      });
+
+      it('holds nothing back for a policy-only preview', () => {
+        const { freeSystemRamBytes: _omit, ...preview } = MAC;
+        expect(planAdaptiveContextGrowth(preview)).toMatchObject({
+          grown: true,
+          perTurnCtxTokens: 262_144,
+        });
+      });
     });
 
     describe('measured free graphics memory', () => {

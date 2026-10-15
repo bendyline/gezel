@@ -14,7 +14,7 @@ import {
 import { startService } from '@bendyline/gezel-service';
 import { gezelHome } from '@bendyline/gezel/paths';
 import { type DaemonLogFile, installDaemonLogFile } from './daemon-log-file.js';
-import { applyAutostartRuntimeArguments } from './runtime-args.js';
+import { applyAutostartRuntimeArguments, isAutostartLaunch } from './runtime-args.js';
 
 let stopRunningService: (() => Promise<void>) | null = null;
 let fatalExitInFlight = false;
@@ -157,8 +157,12 @@ main().catch((err) => {
   // SingleInstanceError is an expected, actionable refusal (another daemon
   // already owns this home) — print just its message, not a stack.
   if (err instanceof Error && err.name === 'SingleInstanceError') {
-    writeProcessOutput(process.stderr, `${err.message}\n`);
-    void (daemonLog?.flush() ?? Promise.resolve()).finally(() => process.exit(1));
+    const standDown = isAutostartLaunch(process.argv.slice(2));
+    writeProcessOutput(
+      process.stderr,
+      `${err.message}${standDown ? ' Autostart is standing down until the next login or until the app hands over.' : ''}\n`,
+    );
+    void (daemonLog?.flush() ?? Promise.resolve()).finally(() => process.exit(standDown ? 0 : 1));
   } else {
     void exitAfterFatalError(err instanceof Error ? err : new Error(String(err)), 'startup');
   }

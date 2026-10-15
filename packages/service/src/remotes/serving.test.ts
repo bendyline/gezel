@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { generateLoopbackCert } from '../http/cert.js';
+import type { LanAdvertiser } from './lan-discovery.js';
 import { createRemoteServingController } from './serving.js';
 
 describe('RemoteServingController', () => {
@@ -83,6 +84,59 @@ describe('RemoteServingController', () => {
       ).rejects.toThrow(/IP literal/);
       // The healthy listener must survive the rejected reconfigure.
       expect(controller.status()).toEqual(started);
+    } finally {
+      await controller.stop();
+    }
+  });
+
+  it('announces the listener only while it runs, and not when told to stay unlisted', async () => {
+    const advertiser = {
+      advertise: vi.fn<LanAdvertiser['advertise']>(async () => {}),
+      stop: vi.fn<LanAdvertiser['stop']>(async () => {}),
+    };
+    const controller = createRemoteServingController({
+      cert: await generateLoopbackCert(),
+      deviceFingerprint: 'ab'.repeat(32),
+      fetch: () => () => Promise.resolve(new Response('ok')),
+      advertiser,
+    });
+    try {
+      const started = await controller.reconfigure({ enabled: true, port: 0 });
+      expect(advertiser.advertise).toHaveBeenLastCalledWith(
+        expect.objectContaining({ port: started.port, fingerprint: 'ab'.repeat(32) }),
+      );
+
+      advertiser.advertise.mockClear();
+      advertiser.stop.mockClear();
+      await controller.reconfigure({ enabled: true, port: started.port, advertise: false });
+      expect(advertiser.advertise).not.toHaveBeenCalled();
+      expect(advertiser.stop).toHaveBeenCalled();
+      expect(controller.status()).toEqual(started);
+
+      advertiser.stop.mockClear();
+      await controller.reconfigure({ enabled: false });
+      expect(advertiser.stop).toHaveBeenCalled();
+    } finally {
+      await controller.stop();
+    }
+  });
+
+  it('has nothing to announce when bound to loopback', async () => {
+    const advertiser = {
+      advertise: vi.fn<LanAdvertiser['advertise']>(async () => {}),
+      stop: vi.fn<LanAdvertiser['stop']>(async () => {}),
+    };
+    const controller = createRemoteServingController({
+      cert: await generateLoopbackCert(),
+      deviceFingerprint: 'ab'.repeat(32),
+      fetch: () => () => Promise.resolve(new Response('ok')),
+      advertiser,
+    });
+    try {
+      await controller.reconfigure({ enabled: true, bindAddress: '127.0.0.1', port: 0 });
+      expect(advertiser.advertise).toHaveBeenLastCalledWith(
+        expect.objectContaining({ addresses: [] }),
+      );
     } finally {
       await controller.stop();
     }

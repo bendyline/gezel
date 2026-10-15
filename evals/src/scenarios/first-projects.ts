@@ -10,7 +10,9 @@
  *
  *  - A typed candidate's sentence goes to the meester, whose kickoff routes it
  *    to the project type; it passes when that project's kickoff task completes
- *    (its gate already requires the page's data to have grown).
+ *    and the board holds what its card promises (`BOARD_CHECKS`). The task's
+ *    own gate only asks the data to have grown, which one day of a seven-day
+ *    trip satisfied while the person was told "All done" (2026-10-12).
  *  - A craftbook candidate launches through the composer's attached-task
  *    route with no meester turn, on the book's bundled sample when it has
  *    one; it passes when that task completes (its gates hold the deliverable).
@@ -18,26 +20,22 @@
  * `first-projects` is its own suite: every trial is a full first project.
  */
 
-import type { FirstProject, Task } from '@bendyline/gezel';
+import { FIRST_PROJECTS, type FirstProject, type Task } from '@bendyline/gezel';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
 
-export const FIRST_PROJECT_CANDIDATES: readonly FirstProject[] = [
-  {
-    kind: 'type',
-    id: 'trip',
-    area: 'home',
-    title: 'Plan a trip',
-    hint: 'A day-by-day plan and a packing list, on a trip board.',
-    prompt: 'Plan a trip to Lisbon next spring for the four of us, about a week.',
-    typeId: 'trip-planner',
-  },
+/**
+ * Candidates the welcome does not offer yet. Everything it does offer is
+ * read from `FIRST_PROJECTS` itself, so a sentence reworded there is the
+ * sentence these trials send.
+ */
+const WAITING: readonly FirstProject[] = [
   {
     kind: 'type',
     id: 'celebration',
     area: 'home',
     title: 'Plan a celebration',
     hint: 'Guests, budget and the day itself, on one board.',
-    prompt: "Plan Dad's 70th birthday party in May, about 30 guests.",
+    prompt: "Plan Dad's 70th birthday party in May, about 30 guests, with a rough budget.",
     typeId: 'event-planner',
   },
   {
@@ -46,17 +44,9 @@ export const FIRST_PROJECT_CANDIDATES: readonly FirstProject[] = [
     area: 'home',
     title: 'Plan a week of meals',
     hint: 'Dinners for the week and the shopping list, on a kitchen board.',
-    prompt: 'Plan a week of meals for two adults and a toddler, mostly vegetarian.',
+    prompt:
+      'Start a project to plan a week of meals for two adults and a toddler, mostly vegetarian.',
     typeId: 'meal-planner',
-  },
-  {
-    kind: 'type',
-    id: 'language',
-    area: 'learning',
-    title: 'Practice a language',
-    hint: 'Short role-play scenes with a patient tutor.',
-    prompt: 'Start a project to practice Spanish with a language tutor. I know the basics.',
-    typeId: 'language-trainer',
   },
   {
     kind: 'type',
@@ -64,7 +54,7 @@ export const FIRST_PROJECT_CANDIDATES: readonly FirstProject[] = [
     area: 'learning',
     title: 'Study with flashcards',
     hint: 'A deck of cards to review a few minutes a day.',
-    prompt: 'Make me flashcards to learn the capitals of Europe.',
+    prompt: 'Start a project to make flashcards for learning the capitals of Europe.',
     typeId: 'flashcards',
   },
   {
@@ -73,7 +63,8 @@ export const FIRST_PROJECT_CANDIDATES: readonly FirstProject[] = [
     area: 'learning',
     title: 'Get ready for an interview',
     hint: 'Practice questions and a plan for the weeks before it.',
-    prompt: 'Help me get ready for a job interview as a product designer next month.',
+    prompt:
+      'Start a project to get ready for my job interview at Northwind as a product designer next month.',
     typeId: 'job-hunt',
   },
   {
@@ -85,116 +76,19 @@ export const FIRST_PROJECT_CANDIDATES: readonly FirstProject[] = [
     prompt: "Let's play a game of chess. I'm a beginner.",
     typeId: 'chess',
   },
-  {
-    kind: 'type',
-    id: 'word-clues',
-    area: 'play',
-    title: 'Play a word game',
-    hint: 'Clues to solve, one word at a time.',
-    prompt: "Let's play a word game: give me clues and I'll guess the words.",
-    typeId: 'word-clues',
-  },
-  {
-    kind: 'type',
-    id: 'invoice',
-    area: 'business',
-    title: 'Send an invoice',
-    hint: 'Your clients and what they owe, on an office board.',
-    prompt:
-      "Set up my freelance office. I'm a freelance illustrator and I need to send invoices to two clients.",
-    typeId: 'freelance-office',
-  },
-  {
-    kind: 'type',
-    id: 'posts',
-    area: 'content',
-    title: 'Plan a week of posts',
-    hint: 'Drafts in your voice, ready to publish.',
-    prompt: 'Plan a week of LinkedIn posts for my pottery studio.',
-    typeId: 'social-feed',
-  },
-  {
-    kind: 'craftbook',
-    id: 'notes-to-actions',
-    area: 'work',
-    title: 'Turn meeting notes into actions',
-    hint: 'Who does what by when, from a meeting’s notes.',
-    prompt: 'Turn these meeting notes into a list of who does what by when.',
-    craftbookId: 'meeting-notes-to-actions',
-    sample: { param: 'source', sampleId: 'team-sync' },
-  },
-  {
-    kind: 'craftbook',
-    id: 'status-report',
-    area: 'work',
-    title: 'Write a status report',
-    hint: 'A short update your team can read in a minute.',
-    prompt:
-      'Write a status report for my team: we shipped the new onboarding flow, the billing migration slipped a week, and hiring is on track.',
-    craftbookId: 'status-report',
-  },
-  {
-    kind: 'craftbook',
-    id: 'spreadsheet',
-    area: 'data',
-    title: 'Make sense of a spreadsheet',
-    hint: 'What is in it, what stands out, and what to look at next.',
-    prompt: 'Tell me what stands out in this spreadsheet.',
-    craftbookId: 'spreadsheet-findings',
-    sample: { param: 'source', sampleId: 'shop-sales' },
-  },
-  {
-    kind: 'craftbook',
-    id: 'tidy',
-    area: 'data',
-    title: 'Tidy up a spreadsheet',
-    hint: 'A clean copy, and a list of what was changed.',
-    prompt: 'Tidy up this spreadsheet.',
-    craftbookId: 'tidy-spreadsheet',
-    sample: { param: 'source', sampleId: 'club-members' },
-  },
-  {
-    kind: 'craftbook',
-    id: 'proposal',
-    area: 'business',
-    title: 'Draft a proposal',
-    hint: 'Scope, timeline and price, ready to send.',
-    prompt: "Draft a proposal for redesigning a local bakery's website, about four weeks of work.",
-    craftbookId: 'proposal-sow',
-  },
-  {
-    kind: 'craftbook',
-    id: 'newsletter',
-    area: 'content',
-    title: 'Write a newsletter issue',
-    hint: 'This month’s news, written to be read.',
-    prompt:
-      "Write this month's newsletter for my pottery studio: a new glaze, a spring class, and a studio sale.",
-    craftbookId: 'newsletter-issue',
-  },
-  {
-    kind: 'craftbook',
-    id: 'explain-code',
-    area: 'software',
-    title: 'Explain a code folder',
-    hint: 'What it does, how it is laid out, and where to start reading.',
-    prompt: 'Explain how this code folder works.',
-    craftbookId: 'explain-code-folder',
-    sample: { param: 'source', sampleId: 'todo-cli' },
-  },
-  {
-    kind: 'craftbook',
-    id: 'review-code',
-    area: 'software',
-    title: 'Review a code folder',
-    hint: 'Findings with the file and line, and what is good.',
-    prompt: "Review this code and tell me what's wrong.",
-    craftbookId: 'review-code-folder',
-    sample: { param: 'source', sampleId: 'todo-cli-bugs' },
-  },
 ];
 
+export const FIRST_PROJECT_CANDIDATES: readonly FirstProject[] = [...FIRST_PROJECTS, ...WAITING];
+
 const TRIAL_BUDGET_MS = 40 * 60_000;
+
+/**
+ * A newcomer gets no harness kicks, so neither does a trial of their first
+ * project. A generic "write_file the deliverable" kick sent a Job Hunt lead,
+ * whose step writes through its project's tools and may not write files,
+ * into a loop re-reading pipeline.json (2026-10-14).
+ */
+const FIRST_PROJECT_REPAIR = 'runtime';
 
 function settled(task: Task): SuccessCheckResult | null {
   if (task.status === 'complete') {
@@ -216,12 +110,108 @@ function settled(task: Task): SuccessCheckResult | null {
   return null;
 }
 
+/**
+ * Why a completed kickoff left its Output page at the seed, or null when the
+ * page's data grew past the kickoff's own floor. Job Hunt and Social Feed
+ * leads advanced by hand over an untouched board, and those trials passed
+ * (Gemma 4 E4B, 2026-10-14).
+ */
+async function emptyBoard(
+  client: EvalContext['client'],
+  projectId: string,
+  kickoff: Task,
+): Promise<string | null> {
+  const step = kickoff.craftbook.steps[0];
+  const gate = step?.gate && 'checks' in step.gate ? step.gate : undefined;
+  const total = gate?.checks?.find((check) => check.kind === 'totalMinBytes');
+  const floor =
+    total && total.kind === 'totalMinBytes'
+      ? { files: total.files, bytes: total.bytes }
+      : step?.advanceWhen
+        ? { files: [step.advanceWhen.file], bytes: step.advanceWhen.minBytes ?? 1 }
+        : null;
+  if (!floor) return null;
+  const sizes = await Promise.all(
+    floor.files.map((file) =>
+      client
+        .readProjectWorkspaceFile(projectId, file)
+        .then((read) => read.content.length)
+        .catch(() => 0),
+    ),
+  );
+  const size = sizes.reduce((sum, n) => sum + n, 0);
+  return size >= floor.bytes
+    ? null
+    : `${floor.files.join(' + ')} is ${size} bytes, needs ${floor.bytes}`;
+}
+
+type Board = Record<string, unknown>;
+const count = (value: unknown): number =>
+  Array.isArray(value)
+    ? value.length
+    : value && typeof value === 'object'
+      ? Object.keys(value).length
+      : 0;
+
+/**
+ * What each typed candidate's board must hold once its kickoff finishes,
+ * read from the files its Output page shows. A failure names the shortfall.
+ * A candidate with no entry only needs to meet the kickoff's data floor.
+ */
+const BOARD_CHECKS: Record<string, (files: Record<string, Board | null>) => string | null> = {
+  // "A day-by-day plan and a packing list", for about a week.
+  trip: (f) => {
+    const days = count(f['trip.json']?.days);
+    const packing = count(f['packing.json']?.records);
+    return days >= 5 && packing >= 1 ? null : `${days} days, ${packing} packing items`;
+  },
+  celebration: (f) => {
+    const guests = count(f['guests.json']?.records);
+    const budget = count(f['budget.json']?.entries);
+    return guests >= 1 && budget >= 1 ? null : `${guests} guests, ${budget} budget lines`;
+  },
+  meals: (f) => {
+    const days = count(f['menu.json']?.days);
+    return days >= 5 ? null : `${days} days of meals`;
+  },
+  language: (f) => (f['progress.json']?.scene ? null : 'no scene started'),
+  flashcards: (f) => {
+    const cards = count(f['deck.json']?.cards);
+    return cards >= 8 ? null : `${cards} cards`;
+  },
+  interview: (f) =>
+    count(f['pipeline.json']?.records) + count(f['activity.json']?.events) >= 1
+      ? null
+      : 'nothing on the pipeline',
+  'word-clues': (f) => (count(f['game.json']?.words) >= 1 ? null : 'no words dealt'),
+  invoice: (f) => (count(f['invoices.json']?.records) >= 1 ? null : 'no invoice'),
+};
+
+async function readBoard(
+  client: EvalContext['client'],
+  projectId: string,
+): Promise<Record<string, Board | null>> {
+  const files: Record<string, Board | null> = {};
+  const listing = await client.listProjectWorkspace(projectId).catch(() => ({ files: [] }));
+  for (const entry of listing.files) {
+    if (entry.isDirectory || !entry.path.endsWith('.json')) continue;
+    const read = await client.readProjectWorkspaceFile(projectId, entry.path).catch(() => null);
+    try {
+      files[entry.path] = read ? (JSON.parse(read.content) as Board) : null;
+    } catch {
+      files[entry.path] = null;
+    }
+  }
+  return files;
+}
+
 function typedScenario(first: Extract<FirstProject, { kind: 'type' }>): EvalScenario {
   return {
     id: `first-project-${first.id}`,
     description: `First project "${first.title}": the meester routes it to ${first.typeId} and its lead fills the board.`,
     prompt: first.prompt,
     timeoutMs: TRIAL_BUDGET_MS,
+    repairPolicy: FIRST_PROJECT_REPAIR,
     successCheck: async ({ client, logChanged }: EvalContext): Promise<SuccessCheckResult> => {
       const projects = await client.listProjects().catch(() => ({ projects: [] }));
       for (const summary of projects.projects ?? []) {
@@ -229,14 +219,38 @@ function typedScenario(first: Extract<FirstProject, { kind: 'type' }>): EvalScen
         const project = await client.getProject(summary.id).catch(() => null);
         if (project?.projectType?.id !== first.typeId) continue;
         const tasks = await client.listProjectTasks(summary.id).catch(() => ({ tasks: [] }));
-        const kickoff = (tasks.tasks ?? []).find((t) => t.num === 1);
+        // A type's schedules are created before its kickoff: social-feed opens
+        // on two cron tasks that wait for their tick, and judging task 1 failed
+        // every posts trial in under a minute on a schedule (2026-10-14).
+        const kickoff = (tasks.tasks ?? []).filter((t) => !t.cron).sort((a, b) => a.num - b.num)[0];
         if (!kickoff) continue;
         logChanged(
           'kickoff',
           `[scenario] ${kickoff.ref} ${kickoff.status} step=${kickoff.activeStepId ?? '-'}`,
         );
         const verdict = settled(kickoff);
-        if (verdict) return verdict;
+        if (!verdict) continue;
+        if (!verdict.done || !verdict.success) return verdict;
+        const empty = await emptyBoard(client, summary.id, kickoff);
+        if (empty) {
+          return {
+            done: true,
+            success: false,
+            reason: `${kickoff.ref} completed with nothing on its page: ${empty}`,
+            diagnostics: { ref: kickoff.ref },
+          };
+        }
+        const check = BOARD_CHECKS[first.id];
+        if (!check) return verdict;
+        const short = check(await readBoard(client, summary.id));
+        return short
+          ? {
+              done: true,
+              success: false,
+              reason: `${kickoff.ref} completed with a thin board: ${short}`,
+              diagnostics: { ref: kickoff.ref, board: short },
+            }
+          : verdict;
       }
       return { done: false };
     },
@@ -251,6 +265,7 @@ function craftbookScenario(first: Extract<FirstProject, { kind: 'craftbook' }>):
     prompt: first.prompt,
     skipInitialPrompt: true,
     timeoutMs: TRIAL_BUDGET_MS,
+    repairPolicy: FIRST_PROJECT_REPAIR,
     setup: async (ctx: EvalContext): Promise<void> => {
       launched = null;
       const session = await ctx.client.createChatSession({

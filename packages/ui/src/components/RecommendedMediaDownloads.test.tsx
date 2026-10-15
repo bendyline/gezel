@@ -17,7 +17,7 @@ const imageItem = {
     recoScore: 20,
     licenseClass: 'open',
     approxSizeBytes: 2.46 * GB,
-    auxiliaryFiles: [{ sizeBytes: 0.25 * GB }, { sizeBytes: 2.5 * GB }],
+    auxiliaryFiles: [{ approxSizeBytes: 0.25 * GB }, { approxSizeBytes: 2.5 * GB }],
   },
 };
 const videoItem = {

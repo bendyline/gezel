@@ -13,7 +13,7 @@ import { UnresolvedToolFailureLedger } from '../local-loop/unresolved-tool-failu
 import type { PortableInference } from '../mobile/inference.js';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
 import { spliceIntoText } from '../recognition/digest.js';
-import type { ChatMessage, ChatMessageToolCall } from '../schemas/gezel.js';
+import type { ChatMessage, ChatMessageToolCall, ProviderName } from '../schemas/gezel.js';
 import type { MobileEnginePhaseEvent } from '../schemas/mobile-provider.js';
 import type { ChatSession } from '../schemas/session.js';
 import { GEZEL_TOOL_DESCRIPTIONS } from '../tools/gezel-tool-descriptions.js';
@@ -66,6 +66,16 @@ export interface SharedLoopTurnOptions {
   requiredTool?: string;
   tools: readonly PortableToolSpec[];
   actions: PortableToolActions;
+  /**
+   * Runs the model somewhere other than this device's engine — a paired
+   * server, through `remoteChatFetch` — under this provider id.
+   */
+  endpoint?: {
+    providerId: ProviderName;
+    fetch: typeof fetch;
+    /** What the failed request said, in words a person should read. */
+    failure(): string | undefined;
+  };
   signal: AbortSignal;
   cancelled(): boolean;
   checkpoint(message: ChatMessage): Promise<void>;
@@ -103,6 +113,7 @@ export async function runSharedLoopTurn(
   options: SharedLoopTurnOptions,
 ): Promise<SharedLoopTurnResult> {
   const { session } = options;
+  const providerId = options.endpoint?.providerId ?? 'llama-cpp';
   let message: ChatMessage | undefined;
   const check = async () => {
     if (options.cancelled()) throw new Error('Response stopped');
@@ -130,7 +141,7 @@ export async function runSharedLoopTurn(
         {
           store: options.store,
           session,
-          providerId: 'llama-cpp',
+          providerId,
           actions: options.actions,
           desktopResultText: true,
           contextWindow: options.contextSize,
@@ -143,7 +154,7 @@ export async function runSharedLoopTurn(
               content: '',
               at: new Date().toISOString(),
               status: 'streaming',
-              providerId: 'llama-cpp',
+              providerId,
               toolCalls: [],
             };
             return message;
@@ -180,18 +191,21 @@ export async function runSharedLoopTurn(
   const llama = new LlamaCppSession({
     resolveBaseUrl: async () => NATIVE_ENGINE_BASE_URL,
     markUsed: () => {},
-    fetchImpl: nativeChatFetch({
-      inference: options.inference,
-      modelId: options.modelId,
-      contextSize: options.contextSize,
-      ...(options.structuredChat.config ? { chatConfig: options.structuredChat.config } : {}),
-      requestId: () => options.requestId,
-      ...(phase
-        ? {
-            onPhase: ({ requestId: _requestId, phase: engine, ...detail }) => phase(engine, detail),
-          }
-        : {}),
-    }),
+    fetchImpl:
+      options.endpoint?.fetch ??
+      nativeChatFetch({
+        inference: options.inference,
+        modelId: options.modelId,
+        contextSize: options.contextSize,
+        ...(options.structuredChat.config ? { chatConfig: options.structuredChat.config } : {}),
+        requestId: () => options.requestId,
+        ...(phase
+          ? {
+              onPhase: ({ requestId: _requestId, phase: engine, ...detail }) =>
+                phase(engine, detail),
+            }
+          : {}),
+      }),
     model: options.modelId,
     numCtx: options.contextSize,
     disableThinkingRequestShape: 'chat-template',
@@ -267,6 +281,8 @@ export async function runSharedLoopTurn(
   } catch (error) {
     if (options.cancelled() || (error instanceof Error && error.message === turnCancelledMessage()))
       return finish('', 'cancelled');
+    const failure = options.endpoint?.failure();
+    if (failure) throw new Error(failure, { cause: error });
     // The loop names llama-server's address when a request cannot start; on a
     // phone that is the in-app engine refusing (too warm, low on memory), whose
     // own sentence is the one to show.

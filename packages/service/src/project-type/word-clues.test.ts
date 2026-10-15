@@ -170,4 +170,54 @@ describe('word clues', () => {
       await chat.shutdown();
     }
   }, 60_000);
+
+  // "Play a word game" from the welcome hands the clue-giver an undealt
+  // table, and dealing is the page's button: its first clue was refused as
+  // "The game is over" and the first project never started (2026-10-14).
+  it('deals the first board when the clue-giver looks at an empty table', async (ctx) => {
+    const detail = await catalog.get('project-type', 'word-clues');
+    if (!detail || detail.manifest.kind !== 'project-type') return ctx.skip();
+    if (detail.manifest.version === '1.0.0') return ctx.skip();
+
+    const project = await store.createProject({ name: 'Word Clues' });
+    await applyProjectType(
+      { store, catalog, home },
+      { projectId: project.id, typeId: 'word-clues' },
+    );
+    const chat = new ChatManager({
+      store,
+      events: new ChatEventBus(),
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['copilot', new MockProvider({ name: 'copilot' })]],
+      catalog,
+      secrets: new FileSecretStore(home),
+    });
+    const runner = new ScriptRunner({ store, chat, catalog });
+    const run = (inputs: Record<string, unknown>) =>
+      runner.run({
+        projectId: project.id,
+        scriptName: 'clue-store',
+        inputs,
+        trigger: { kind: 'manual', userInitiated: true },
+      });
+    try {
+      const first = await run({ action: 'board' });
+      expect(first.error).toBeUndefined();
+      expect(first.output).toMatchObject({ status: 'clue_needed' });
+      const state = (first.output as { modelState: { yourWords: string[] } }).modelState;
+      expect(state.yourWords).toHaveLength(6);
+      // A second look reads the same board rather than dealing another.
+      const again = await run({ action: 'board' });
+      expect(
+        (again.output as { modelState: { yourWords: string[] } }).modelState.yourWords,
+      ).toEqual(state.yourWords);
+      expect((await run({ action: 'give_clue', clue: 'zzqx', count: 1 })).error).toBeUndefined();
+    } finally {
+      await chat.drainBackground();
+      await chat.shutdown();
+    }
+  }, 60_000);
 });

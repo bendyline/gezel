@@ -720,7 +720,7 @@ export function TaskDetail({
                 ariaLabel="Task description"
                 key={`description-${task.ref}-${descriptionKey}`}
                 initialMarkdown={task.description ?? ''}
-                onChange={(source) => descriptionAutosave.update(source)}
+                onChange={descriptionAutosave.update}
                 colorScheme={editorTheme}
                 showPlayTab={false}
                 height="auto"

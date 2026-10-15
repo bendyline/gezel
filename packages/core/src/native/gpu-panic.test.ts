@@ -30,6 +30,21 @@ describe('findRecentGpuPanics', () => {
     expect(found[0]?.signature).toMatch(/IOGPUMemory|completeMemory/);
   });
 
+  it('detects a GPU-driver panic written as an .ips kernel report', () => {
+    write('Kernel-2026-10-14.ips', GPU_PANIC_BODY, 60 * 60 * 1000);
+    expect(findRecentGpuPanics({ dirs: [dir] })).toHaveLength(1);
+  });
+
+  it('ignores an app crash report that merely loaded the GPU driver', () => {
+    write(
+      'gezel-llama-server-2026-10-14-151431.ips',
+      '{"app_name":"gezel-llama-server","bug_type":"309"}\n' +
+        '{"exception":{"type":"EXC_CRASH","signal":"SIGABRT"},"usedImages":[{"name":"AGXG17XFamilyComputeContext"}]}',
+      60 * 60 * 1000,
+    );
+    expect(findRecentGpuPanics({ dirs: [dir] })).toEqual([]);
+  });
+
   it('ignores a non-GPU panic', () => {
     write('panic-wdog.panic', UNRELATED_PANIC, 60 * 60 * 1000);
     expect(findRecentGpuPanics({ dirs: [dir] })).toEqual([]);

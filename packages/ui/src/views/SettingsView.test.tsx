@@ -82,6 +82,7 @@ const { peekPendingSettingsSection, requestSettingsSection } = await import('../
 const { api } = await import('../api.js');
 const { resetUpdateStateForTests } = await import('../update-state.js');
 const { refreshCopilotAvailability } = await import('../components/useCopilotAvailability.js');
+const { invalidateRemoteServers } = await import('../components/ModelPicker.js');
 
 /** Copilot present in the manifest, absent from this device. */
 const UNAVAILABLE = {
@@ -98,6 +99,9 @@ describe('SettingsView', () => {
     // read it don't each fetch. That cache outlives a test, so drop it or the
     // first case's answer decides every later one.
     refreshCopilotAvailability();
+    // Paired servers are memoized the same way.
+    invalidateRemoteServers();
+    vi.mocked(api.listRemoteServerModels).mockResolvedValue({ servers: [] } as never);
     window.__GEZEL__ = {
       ...window.__GEZEL__,
       token: window.__GEZEL__?.token ?? 'test-token',
@@ -878,6 +882,37 @@ describe('SettingsView', () => {
     render(<SettingsView />);
     pills = await defaultProviderSwitch();
     expect(await pills.findByRole('button', { name: 'Apple Intelligence' })).toBeInTheDocument();
+  });
+
+  // Connecting to a server promised its models in the picker, and the
+  // Artificial Intelligence tab had no way to choose one.
+  it('offers a paired server as the default provider and starts it on a model', async () => {
+    vi.mocked(api.listRemoteServerModels).mockResolvedValue({
+      servers: [
+        {
+          remoteId: 'a',
+          displayName: 'Werkbank',
+          status: 'online',
+          models: [{ id: 'remote:a/llama-cpp:qwen', name: 'Qwen 27B' }],
+        },
+      ],
+    } as never);
+    render(<SettingsView />);
+    const pills = await defaultProviderSwitch();
+    fireEvent.click(await pills.findByRole('button', { name: 'Werkbank' }));
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        provider: 'remote',
+        defaultModel: { remote: 'remote:a/llama-cpp:qwen' },
+      }),
+    );
+  });
+
+  it('keeps the paired-server pill away until a server shares a model', async () => {
+    render(<SettingsView />);
+    const pills = await defaultProviderSwitch();
+    expect(await pills.findByRole('button', { name: 'OpenAI Codex CLI' })).toBeInTheDocument();
+    expect(pills.queryByRole('button', { name: 'Remote server' })).toBeNull();
   });
 
   it('offers both API-key providers alongside their CLI variants', async () => {

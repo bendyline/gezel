@@ -42,6 +42,7 @@ import {
   GezelGrowthStateSchema,
   type GezelSummary,
   type GezelTrait,
+  type HistoryEvent,
   type ImportProvenance,
   ImportProvenanceSchema,
   type InstalledPackage,
@@ -149,6 +150,7 @@ import {
   projectDir,
   projectDocsDir,
   projectFindingLifecycleFile,
+  projectHistoryFile,
   projectInternalGithubDir,
   projectLocalConfigFile,
   projectLocalGezelDir,
@@ -218,6 +220,7 @@ import {
   SHARED_PROJECT_MISSION_MD,
 } from './default-project-docs.js';
 import { DocumentsStore } from './documents-store.js';
+import { FileSnapshotCache } from './file-snapshot-cache.js';
 import { extForMimeType, mimeTypeForFilename, safeBasename } from './media-types.js';
 import { MemoryStore } from './memory-store.js';
 import {
@@ -226,6 +229,11 @@ import {
   type ProjectArtifactSliceResult,
   ProjectArtifactsStore,
 } from './project-artifacts-store.js';
+import {
+  inspectProjectJson,
+  parseProjectHistory,
+  rebuildProjectFromHistory,
+} from './project-meta-recovery.js';
 import { TaskFilesStore } from './task-files-store.js';
 import {
   type WalkDirResult,
@@ -419,8 +427,9 @@ export class Store {
    */
   private readonly sessionScanCache = new Map<
     string,
-    { mtimeMs: number; size: number; ino: number; summary: ChatSessionSummary }
+    { mtimeMs: number; ctimeMs: number; size: number; ino: number; summary: ChatSessionSummary }
   >();
+  private readonly timelineSessionCache = new FileSnapshotCache<ChatSession>();
 
   /**
    * Notified after every session persist/delete — the single choke point all
@@ -4311,9 +4320,10 @@ export class Store {
   }
 
   private async tryGetProjectMeta(id: string): Promise<Project | null> {
+    const path = projectMetaFile(this.home, id);
     let raw: string;
     try {
-      raw = await readFile(projectMetaFile(this.home, id), 'utf8');
+      raw = await readFile(path, 'utf8');
     } catch (err) {
       // ENOENT is the normal "no such project" path — this is a `try` getter
       // and callers rely on null for not-found, so stay quiet. Any OTHER fs
@@ -4334,21 +4344,175 @@ export class Store {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
-    } catch (err) {
-      log.warn(
-        `[store] project.json for ${id} is not valid JSON:`,
-        err instanceof Error ? err.message : err,
+    } catch {
+      return this.recoverProjectMeta(id, path);
+    }
+    return this.acceptProjectMeta(id, path, parsed);
+  }
+
+  private async acceptProjectMeta(
+    id: string,
+    path: string,
+    parsed: unknown,
+  ): Promise<Project | null> {
+    const result = ProjectSchema.safeParse(parsed);
+    if (!result.success) {
+      this.reportUnreadableProjectMeta(
+        path,
+        await projectMetaFileState(path),
+        `[store] project.json for ${id} failed schema validation: ${result.error.message}`,
       );
       return null;
     }
-    const result = ProjectSchema.safeParse(parsed);
-    if (!result.success) {
-      log.warn(`[store] project.json for ${id} failed schema validation:`, result.error.message);
-      return null;
-    }
+    this.unreadableProjectMeta.delete(path);
     return projectStorageScope(this.home, id) === 'machine-shared'
       ? { ...result.data, storageScope: 'machine-shared' }
       : result.data;
+  }
+
+  /**
+   * File state of each project.json already reported as unreadable. Listings
+   * and pollers read every project every few seconds, so a bad file is
+   * reported once, and again only after it changes.
+   */
+  private readonly unreadableProjectMeta = new Map<string, string>();
+
+  /** One repair per file, however many readers hit it at once. */
+  private readonly projectMetaRecoveries = new Map<string, Promise<Project | null>>();
+
+  private reportUnreadableProjectMeta(path: string, state: string, message: string): void {
+    if (this.unreadableProjectMeta.get(path) === state) return;
+    this.unreadableProjectMeta.set(path, state);
+    log.warn(message);
+  }
+
+  private recoverProjectMeta(id: string, path: string): Promise<Project | null> {
+    const pending = this.projectMetaRecoveries.get(path);
+    if (pending) return pending;
+    const run = this.recoverProjectMetaNow(id, path).finally(() =>
+      this.projectMetaRecoveries.delete(path),
+    );
+    this.projectMetaRecoveries.set(path, run);
+    return run;
+  }
+
+  /**
+   * Repair a project.json that does not parse (see project-meta-recovery.ts):
+   * what an interrupted write left is salvaged or rebuilt from the project's
+   * history, and a malformed hand edit is reported and left for the person.
+   *
+   * The file is re-read rather than taken from the caller, so a reader holding
+   * bytes from before an earlier repair cannot rebuild over a record written
+   * since. It is rewritten in place, never renamed away: `projectStorageScope`
+   * finds a machine-shared project by its project.json, and without one the
+   * write would land in the user home.
+   */
+  private async recoverProjectMetaNow(id: string, path: string): Promise<Project | null> {
+    let raw: string;
+    try {
+      raw = await readFile(path, 'utf8');
+    } catch {
+      return null;
+    }
+    const damage = inspectProjectJson(raw);
+    if (damage.kind === 'valid') return this.acceptProjectMeta(id, path, damage.value);
+    const info = await stat(path).catch(() => null);
+    const state = projectMetaStateOf(info);
+    if (this.unreadableProjectMeta.get(path) === state) return null;
+    if (damage.kind === 'malformed') {
+      this.reportUnreadableProjectMeta(
+        path,
+        state,
+        `[store] project.json for ${id} is not valid JSON; leaving it as is until it is fixed`,
+      );
+      return null;
+    }
+    if (damage.kind === 'salvaged') {
+      const result = ProjectSchema.safeParse(damage.value);
+      if (!result.success) {
+        this.reportUnreadableProjectMeta(
+          path,
+          state,
+          `[store] project.json for ${id} failed schema validation: ${result.error.message}`,
+        );
+        return null;
+      }
+      return this.persistRecoveredProjectMeta(
+        id,
+        path,
+        state,
+        result.data,
+        `[store] project.json for ${id} had stray NULs or a byte-order mark; rewrote it clean`,
+      );
+    }
+    const config = await this.readConfig().catch(() => null);
+    if (id === resolveSharedProjectId(config ?? undefined)) {
+      // History never records the library's identity marker, and boot's
+      // ensureSharedProject already recreates a missing library in place.
+      this.reportUnreadableProjectMeta(
+        path,
+        state,
+        `[store] project.json for the shared library (${id}) was emptied by an interrupted write; it is recreated at the next start`,
+      );
+      return null;
+    }
+    const events = await this.readProjectHistoryForRecovery(id, path);
+    const rebuilt = rebuildProjectFromHistory(
+      id,
+      events,
+      (info?.mtime ?? new Date()).toISOString(),
+    );
+    if (raw.replaceAll('\u0000', '').trim()) {
+      await copyFile(path, `${path}.corrupt-${Date.now()}`).catch(() => {});
+    }
+    return this.persistRecoveredProjectMeta(
+      id,
+      path,
+      state,
+      rebuilt,
+      `[store] project.json for ${id} was emptied by an interrupted write; rebuilt "${rebuilt.name}" from ${events.length} history events (write access and credential grants are back to their defaults)`,
+    );
+  }
+
+  private async persistRecoveredProjectMeta(
+    id: string,
+    path: string,
+    state: string,
+    project: Project,
+    message: string,
+  ): Promise<Project | null> {
+    try {
+      await this.writeProjectMeta(project);
+    } catch (err) {
+      this.reportUnreadableProjectMeta(
+        path,
+        state,
+        `[store] project.json for ${id} is damaged and could not be repaired: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
+    log.warn(message);
+    return this.acceptProjectMeta(id, path, project);
+  }
+
+  /**
+   * The project's history events, read directly: HistoryManager reads only the
+   * account-private file, while a project migrated to the machine-shared root
+   * keeps its pre-split history beside project.json.
+   */
+  private async readProjectHistoryForRecovery(id: string, path: string): Promise<HistoryEvent[]> {
+    const files = new Set([
+      projectHistoryFile(this.home, id),
+      join(dirname(path), 'history.jsonl'),
+    ]);
+    const byId = new Map<string, HistoryEvent>();
+    for (const file of files) {
+      const raw = await readFile(file, 'utf8').catch(() => '');
+      for (const event of parseProjectHistory(raw)) byId.set(event.id, event);
+    }
+    return [...byId.values()];
   }
 
   // ---------- project artifacts ----------
@@ -5642,10 +5806,10 @@ export class Store {
     path: string,
     label: string,
   ): Promise<{ summary: ChatSessionSummary; session: ChatSession | null } | null> {
-    let identity: { mtimeMs: number; size: number; ino: number };
+    let identity: { mtimeMs: number; ctimeMs: number; size: number; ino: number };
     try {
       const st = await stat(path);
-      identity = { mtimeMs: st.mtimeMs, size: st.size, ino: st.ino };
+      identity = { mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs, size: st.size, ino: st.ino };
     } catch {
       this.sessionScanCache.delete(path);
       return null;
@@ -5654,12 +5818,15 @@ export class Store {
     if (
       hit &&
       hit.mtimeMs === identity.mtimeMs &&
+      hit.ctimeMs === identity.ctimeMs &&
       hit.size === identity.size &&
       hit.ino === identity.ino
     ) {
       return { summary: hit.summary, session: null };
     }
-    const session = await this.readSessionFile(path, label);
+    const session = await this.timelineSessionCache.read(path, () =>
+      this.readSessionFile(path, label),
+    );
     if (!session) {
       this.sessionScanCache.delete(path);
       return null;
@@ -5870,7 +6037,9 @@ export class Store {
         if (opts.taskRef && scanned.summary.taskRef !== opts.taskRef) continue;
         if (!aboutSubject(scanned.summary.subject)) continue;
         if (!includeArchived && scanned.summary.archived) continue;
-        const session = scanned.session ?? (await this.readSessionFile(path, label));
+        const session =
+          scanned.session ??
+          (await this.timelineSessionCache.read(path, () => this.readSessionFile(path, label)));
         if (!session) continue;
         if (opts.projectId && session.projectId !== opts.projectId) continue;
         // Task scoping is exact-match on the session's pinned `taskRef`,
@@ -6006,6 +6175,20 @@ export class Store {
       }
     }
 
+    // Select the page before doing per-message enrichment. The API's limit
+    // must bound reference matching and row construction as well as its JSON.
+    const eligible = sessions.flatMap((session) =>
+      session.messages.filter(
+        (message) =>
+          (message.role === 'user' || message.role === 'assistant') &&
+          !message.hidden &&
+          (!before || message.at < before),
+      ),
+    );
+    eligible.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+    const hasMore = eligible.length > limit;
+    const pageMessages = new Set(eligible.slice(-limit));
+
     // Gather one file inventory per in-scope project so we can backfill
     // `referencedFiles` on assistant messages that predate the server-side
     // parser. One recursive artifact walk plus one read of the indexer's
@@ -6021,6 +6204,7 @@ export class Store {
           s.projectId === pid &&
           s.messages.some(
             (m) =>
+              pageMessages.has(m) &&
               m.role === 'assistant' &&
               (!m.referencedFiles || hasQualifiedReferenceMismatch(m.content, m.referencedFiles)),
           ),
@@ -6041,7 +6225,7 @@ export class Store {
     // reused across every backfilled message.
     let taskRefs: string[] | null = null;
     const hasLegacyTaskRefAssistant = sessions.some((s) =>
-      s.messages.some((m) => m.role === 'assistant' && !m.referencedTasks),
+      s.messages.some((m) => pageMessages.has(m) && m.role === 'assistant' && !m.referencedTasks),
     );
     if (hasLegacyTaskRefAssistant) {
       try {
@@ -6068,6 +6252,7 @@ export class Store {
           ? s.messages.find((m) => m.role === 'user')?.at
           : undefined;
       for (const m of s.messages) {
+        if (!pageMessages.has(m)) continue;
         if (m.role !== 'user' && m.role !== 'assistant') continue;
         // Hidden facilitation seeds (e.g. a project-type page reaction with
         // `hideSeed`) stay in the session file for the model but never
@@ -6156,8 +6341,9 @@ export class Store {
 
     rows.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 
-    const hasMore = rows.length > limit;
-    const trimmed = hasMore ? rows.slice(rows.length - limit) : rows;
+    // Callers may annotate rows; never expose nested arrays from the cached
+    // transcript. Only the bounded page needs cloning.
+    const trimmed = structuredClone(rows);
     await this.linkUnindexedWorkspaceFiles(trimmed);
 
     // Unfiltered per-project queries also pull terminal entries from the
@@ -7162,6 +7348,14 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function projectMetaStateOf(info: { size: number; mtimeMs: number } | null): string {
+  return info ? `${info.size}:${info.mtimeMs}` : 'missing';
+}
+
+async function projectMetaFileState(path: string): Promise<string> {
+  return projectMetaStateOf(await stat(path).catch(() => null));
 }
 
 function defaultAboutMarkdown(role?: string): string {

@@ -2,7 +2,7 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { withDependencyReadLease } from './dependency-lease.mjs';
+import { withBuildOutputLease, withDependencyReadLease } from './dependency-lease.mjs';
 import { spawnPnpm } from './pnpm-cli.mjs';
 import { runPreparedFrozenInstall, withPnpmInstallLock } from './pnpm-install.mjs';
 
@@ -66,28 +66,35 @@ export async function runWorkspaceValidation(options = {}) {
   const withLease = install ? withPnpmInstallLock : withDependencyReadLease;
   return withLease(
     repoRoot,
-    async ({ setChildPid, leaseEnv }) => {
-      const env = { ...inheritedEnv, ...leaseEnv };
-      if (install) {
-        const installCode = await runInstallFn({
-          repoRoot,
-          args: [],
-          allowPurge: false,
-          env,
-          setChildPid,
-        });
-        if (installCode !== 0) return installCode;
-      }
-      const childOptions = {
+    ({ setChildPid: setDependencyChildPid, leaseEnv: dependencyEnv }) =>
+      withBuildOutputLease(
         repoRoot,
-        env,
-        setChildPid,
-        ...(options.spawnPnpmFn ? { spawnPnpmFn: options.spawnPnpmFn } : {}),
-      };
-      const validationCode = await runValidationFn(childOptions);
-      if (validationCode !== 0 || !coverage) return validationCode;
-      return runCoverageFn(childOptions);
-    },
+        async ({ setChildPid: setBuildChildPid, leaseEnv: buildEnv }) => {
+          const env = { ...inheritedEnv, ...dependencyEnv, ...buildEnv };
+          const setChildPid = (pid) =>
+            Promise.all([setDependencyChildPid(pid), setBuildChildPid(pid)]);
+          if (install) {
+            const installCode = await runInstallFn({
+              repoRoot,
+              args: [],
+              allowPurge: false,
+              env,
+              setChildPid,
+            });
+            if (installCode !== 0) return installCode;
+          }
+          const childOptions = {
+            repoRoot,
+            env,
+            setChildPid,
+            ...(options.spawnPnpmFn ? { spawnPnpmFn: options.spawnPnpmFn } : {}),
+          };
+          const validationCode = await runValidationFn(childOptions);
+          if (validationCode !== 0 || !coverage) return validationCode;
+          return runCoverageFn(childOptions);
+        },
+        { command: 'pnpm validate', env: inheritedEnv },
+      ),
     {
       command: coverage ? 'pnpm all' : install ? 'pnpm deps:validate' : 'pnpm validate',
       env: inheritedEnv,

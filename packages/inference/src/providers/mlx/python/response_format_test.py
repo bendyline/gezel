@@ -282,6 +282,278 @@ def test_grammar_accepts_the_shape_and_rejects_violations():
     )
 
 
+# Pydantic 2.13's schema for `pet: Cat | Dog = Field(discriminator="kind")`
+# with each `kind` defaulted. The discriminator is optional, so llguidance
+# cannot prove the branches disjoint and refuses the `oneOf` as written.
+PET = {
+    "$defs": {
+        "Cat": {
+            "properties": {
+                "kind": {"const": "cat", "default": "cat", "title": "Kind", "type": "string"},
+                "meows": {"title": "Meows", "type": "integer"},
+            },
+            "required": ["meows"],
+            "title": "Cat",
+            "type": "object",
+        },
+        "Dog": {
+            "properties": {
+                "kind": {"const": "dog", "default": "dog", "title": "Kind", "type": "string"},
+                "barks": {"title": "Barks", "type": "number"},
+            },
+            "required": ["barks"],
+            "title": "Dog",
+            "type": "object",
+        },
+    },
+    "properties": {
+        "pet": {
+            "discriminator": {"mapping": {"cat": "#/$defs/Cat", "dog": "#/$defs/Dog"}, "propertyName": "kind"},
+            "oneOf": [{"$ref": "#/$defs/Cat"}, {"$ref": "#/$defs/Dog"}],
+            "title": "Pet",
+        }
+    },
+    "required": ["pet"],
+    "title": "Owner",
+    "type": "object",
+}
+# Keywords llguidance does not implement: a pydantic `set[str]`, `not`, and
+# `if`/`then`/`else`. Each schema keeps a constraint it does enforce.
+UNIMPLEMENTED = {
+    "uniqueItems": {
+        "type": "object",
+        "properties": {"tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": True}},
+        "required": ["tags"],
+    },
+    "not": {
+        "type": "object",
+        "properties": {"code": {"not": {"type": "string"}}},
+        "required": ["code"],
+    },
+    "if/then": {
+        "type": "object",
+        "properties": {"country": {"type": "string"}, "zip": {"type": "string"}},
+        "required": ["country"],
+        "if": {"properties": {"country": {"const": "US"}}},
+        "then": {"required": ["zip"]},
+        "else": {"properties": {"zip": {"pattern": "^[A-Z]"}}},
+    },
+}
+
+
+def _schema_format(schema):
+    return {"type": "json_schema", "json_schema": {"schema": schema}}
+
+
+def _accepts(tokenizer, grammar_text, text):
+    from llguidance import LLMatcher
+    import tool_grammar
+
+    matcher = LLMatcher(tool_grammar._get_llg_tokenizer(tokenizer), grammar_text)
+    ids = tokenizer.encode(text, add_special_tokens=False)
+    return matcher.try_consume_tokens(ids) == len(ids) and matcher.is_accepting()
+
+
+def test_schemas_llguidance_refuses_as_written_still_compile():
+    try:
+        import llguidance as llg
+    except ModuleNotFoundError:
+        print("  (skipped: llguidance not installed)")
+        return
+    tokenizer = _tokenizer()
+    if tokenizer is None:
+        print("  (skipped: no installed MLX model tokenizer)")
+        return
+    for name, schema in [("oneOf", PET), *UNIMPLEMENTED.items()]:
+        try:
+            llg.JsonCompiler(whitespace_flexible=True).compile(json.dumps(schema))
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{name}: llguidance now compiles it as written; pick a schema it refuses")
+        grammar = rf.compile_response_grammar(tokenizer, _schema_format(schema))
+        assert grammar is not None and not grammar.covers_tool_calls, name
+    pet = rf.compile_response_grammar(tokenizer, _schema_format(PET)).text
+    assert _accepts(tokenizer, pet, '{"pet": {"kind": "cat", "meows": 3}}')
+    assert _accepts(tokenizer, pet, '{"pet": {"barks": 1.5}}')
+    assert not _accepts(tokenizer, pet, '{"pet": {"kind": "cow", "moos": 1}}')
+    assert not _accepts(tokenizer, pet, "A cat.")
+    # What llguidance implements is still enforced; only the rest is not.
+    tags = rf.compile_response_grammar(tokenizer, _schema_format(UNIMPLEMENTED["uniqueItems"])).text
+    assert _accepts(tokenizer, tags, '{"tags": ["a", "a"]}')
+    assert not _accepts(tokenizer, tags, '{"tags": "a"}')
+    country = rf.compile_response_grammar(tokenizer, _schema_format(UNIMPLEMENTED["if/then"])).text
+    assert _accepts(tokenizer, country, '{"country": "US", "zip": "12345"}')
+    assert not _accepts(tokenizer, country, '{"zip": "12345"}')
+    # With tools the relaxed answer and the calls still form one grammar.
+    for family, fmt in (("qwen", "hermes"), ("gemma", "gemma")):
+        family_tok = _tokenizer(family)
+        if family_tok is None:
+            print(f"  (skipped tools: no installed {family} tokenizer)")
+            continue
+        combined = rf.compile_response_grammar(family_tok, _schema_format(PET), WEATHER, {"format": fmt})
+        assert combined is not None and combined.covers_tool_calls, family
+        assert _accepts(family_tok, combined.text, '{"pet": {"kind": "dog", "barks": 2}}'), family
+
+
+def test_a_schema_that_still_cannot_compile_names_what_it_lacks():
+    try:
+        import llguidance  # noqa: F401
+    except ModuleNotFoundError:
+        print("  (skipped: llguidance not installed)")
+        return
+    tokenizer = _tokenizer()
+    if tokenizer is None:
+        print("  (skipped: no installed MLX model tokenizer)")
+        return
+    for schema, needle in (
+        ({"type": "object", "properties": {"n": {"type": "bogus"}}}, "bogus"),
+        ({"type": "string", "pattern": "(("}, "unclosed group"),
+        ({"$ref": "https://example.com/pet.json"}, "https://example.com/pet.json"),
+        # Refused as written for its `uniqueItems`; what is left after the
+        # relaxation is what the caller has to fix.
+        ({"type": "array", "items": {"type": "bogus"}, "uniqueItems": True}, "bogus"),
+    ):
+        try:
+            rf.compile_response_grammar(tokenizer, _schema_format(schema))
+        except ValueError as exc:
+            message = str(exc)
+            assert message.startswith("The response format's schema cannot be enforced: "), message
+            assert needle in message, message
+            # Compiler options an API caller cannot set.
+            assert "coerce_one_of" not in message and "lenient" not in message, message
+            continue
+        raise AssertionError(f"expected a ValueError for {schema}")
+
+
+def test_valid_schemas_compile_exactly_as_before():
+    try:
+        import llguidance as llg
+    except ModuleNotFoundError:
+        print("  (skipped: llguidance not installed)")
+        return
+    tokenizer = _tokenizer()
+    if tokenizer is None:
+        print("  (skipped: no installed MLX model tokenizer)")
+        return
+    for schema in (REVIEW, ANSWER, {"type": "object"}):
+        grammar = rf.compile_response_grammar(tokenizer, _schema_format(schema))
+        assert grammar.text == llg.JsonCompiler(whitespace_flexible=True).compile(json.dumps(schema))
+    import tool_grammar
+
+    combined = rf.compile_response_grammar(tokenizer, ANSWER_FORMAT, WEATHER, {"format": "hermes"})
+    assert combined.text == tool_grammar.build_answer_or_calls_grammar(WEATHER, {"format": "hermes"}, ANSWER)
+    assert "coerce_one_of" not in combined.text and "lenient" not in combined.text
+
+
+class _SplitTokenizer:
+    """Encodes `single` as one token and anything else as three."""
+
+    def __init__(self, *single):
+        self.single = set(single)
+
+    def encode(self, text, add_special_tokens=False):
+        return [7] if text in self.single else [1, 2, 3]
+
+
+def test_the_grammar_waits_out_only_reasoning_the_prompt_opened():
+    gemma = _SplitTokenizer("<channel|>")
+    assert rf.reasoning_gate(gemma, "<|turn>model\n<|channel>thought\n") == ("<|channel>", "<channel|>")
+    assert rf.reasoning_gate(gemma, "<|turn>model\n") is None
+    assert rf.reasoning_gate(gemma, "<|turn>model\n<|channel>thought\n<channel|>") is None
+    qwen = _SplitTokenizer("</think>")
+    assert rf.reasoning_gate(qwen, "<|im_start|>assistant\n<think>\n") == ("<think>", "</think>")
+    assert rf.reasoning_gate(qwen, "<|im_start|>assistant\n<think>\n\n</think>\n\n") is None
+    # A closer the tokenizer splits cannot release the grammar on one id, so
+    # it applies from the first token, as it did before the gate existed.
+    assert rf.reasoning_gate(qwen, "<|turn>model\n<|channel>thought\n") is None
+
+
+def _render(tokenizer, after_tool):
+    messages = [{"role": "user", "content": "Weather in Paris?"}]
+    if after_tool:
+        messages += [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "get_weather", "arguments": {"city": "Paris"}}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "name": "get_weather", "content": "Sunny"},
+        ]
+    return tokenizer.apply_chat_template(
+        messages, tools=WEATHER, tokenize=False, add_generation_prompt=True, enable_thinking=True
+    )
+
+
+def _reasoning_held_cases(family, fmt, closer, call_opener):
+    try:
+        import mlx.core as mx
+        import llguidance  # noqa: F401
+        import mlx_vlm.structured  # noqa: F401
+        import think_budget
+        import tool_grammar
+    except ModuleNotFoundError:
+        print("  (skipped: mlx, mlx_vlm or llguidance not installed)")
+        return
+    tokenizer = _tokenizer(family)
+    if tokenizer is None:
+        print(f"  (skipped: no installed {family} tokenizer)")
+        return
+    grammar = rf.compile_response_grammar(tokenizer, ANSWER_FORMAT, WEATHER, {"format": fmt})
+    vocab = tool_grammar._get_llg_tokenizer(tokenizer).vocab_size
+
+    def one(text):
+        ids = tokenizer.encode(text, add_special_tokens=False)
+        assert len(ids) == 1, (text, ids)
+        return ids[0]
+
+    prose, brace, close, call = one("It"), one("{"), one(closer), one(call_opener)
+
+    # The model's own template ends the prompt inside reasoning on the turn
+    # after a tool result: every final answer of an agent loop.
+    prompt = _render(tokenizer, after_tool=True)
+    assert think_budget.prompt_opens_reasoning(prompt), prompt[-40:]
+    proc = rf.build_response_format_processor(tokenizer, grammar, prompt)
+    ids = tokenizer.encode(prompt, add_special_tokens=False)
+
+    def step(token=None):
+        if token is not None:
+            ids.append(token)
+        return proc(mx.array(ids), mx.zeros((1, vocab)))
+
+    out = step()
+    for token in tokenizer.encode("The forecast says sunny, so", add_special_tokens=False):
+        assert out[0, prose].item() == 0.0, "the grammar masked the reasoning"
+        out = step(token)
+    assert out[0, close].item() == 0.0
+    out = step(close)
+    # Released by the closer: the answer is the schema's or a call.
+    assert out[0, prose].item() == float("-inf"), "the grammar never engaged"
+    assert out[0, brace].item() == 0.0 and out[0, call].item() == 0.0
+    for token in tokenizer.encode('{"answer": "Sunny"}', add_special_tokens=False):
+        assert out[0, token].item() == 0.0, tokenizer.decode([token])
+        out = step(token)
+    assert not proc.disabled
+
+    # A prompt that opens no reasoning gets the grammar from the first token,
+    # as before.
+    first = _render(tokenizer, after_tool=False)
+    if not think_budget.prompt_opens_reasoning(first):
+        fresh = rf.build_response_format_processor(tokenizer, grammar, first)
+        out = fresh(mx.array(tokenizer.encode(first, add_special_tokens=False)), mx.zeros((1, vocab)))
+        assert out[0, prose].item() == float("-inf") and out[0, brace].item() == 0.0
+
+
+def test_gemma_answers_after_its_thought_channel_closes():
+    _reasoning_held_cases("gemma", "gemma", "<channel|>", "<|tool_call>")
+
+
+def test_qwen_answers_after_its_think_block_closes():
+    _reasoning_held_cases("qwen", "hermes", "</think>", "<tool_call>")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

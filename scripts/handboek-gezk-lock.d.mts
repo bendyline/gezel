@@ -26,4 +26,4 @@ export function ensureHandboekGezk(opts?: {
   watch?: boolean;
   log?: (message: string) => void;
   runBuilder?: (paths: HandboekGezkPaths, env: NodeJS.ProcessEnv) => boolean;
-}): 'skipped' | 'fresh' | 'stale' | 'refreshed';
+}): 'skipped' | 'fresh' | 'stale' | 'refreshed' | 'missing';

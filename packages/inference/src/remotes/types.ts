@@ -1,3 +1,12 @@
+export interface RemoteKnownModel {
+  id: string;
+  name: string;
+  contextWindow?: number;
+  supportsTools?: boolean;
+  supportsReasoning?: boolean;
+  parameterSize?: string;
+}
+
 export interface PairedRemote {
   /** Stable id A assigns to this server = its full identity fingerprint. */
   remoteId: string;
@@ -29,6 +38,12 @@ export interface PairedRemote {
   pairedAt: number;
   /** Last time A successfully reached this server (in-memory unless flushed). */
   lastSeenAt?: number;
+  /**
+   * The server's chat models the last time A listed them, already namespaced
+   * for A. Kept so a picker can show them, marked unavailable, while the
+   * server is asleep or A is off its network.
+   */
+  knownModels?: RemoteKnownModel[];
   /**
    * Runtime-managed connections are never persisted and cannot be removed by
    * the ordinary pairing UI. Today the only managed peer is this computer's

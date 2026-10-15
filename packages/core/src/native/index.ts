@@ -47,6 +47,8 @@ export {
   windowsDetachedSpawnOptions,
   windowsHeadlessSpawnOptions,
 } from './console-detach.js';
+export type { FileFingerprint } from './file-fingerprint.js';
+export { fileFingerprint, sameFileFingerprint } from './file-fingerprint.js';
 export { LLAMA_ENGINE_VERSION } from './llama-engine-version.js';
 export { resolvePlatformKey } from './platform-key.js';
 export {

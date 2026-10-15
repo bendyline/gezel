@@ -129,6 +129,43 @@ describe('installNodeIfNeeded', () => {
     await expect(readFile(next.binaryPath!, 'utf8')).resolves.toBe('fake-node-binary');
   });
 
+  it('trusts a stamped install without re-reading the bundle', async () => {
+    await writeVerifiedBundle('24.18.0');
+    const first = await installNodeIfNeeded({ home, bundleDir });
+    // Bytes that no longer match the bundle's own manifest: a launch that
+    // hashed the bundle would refuse it. The stamped copy is still the one
+    // that was verified, so it stays in use.
+    const binary = process.platform === 'win32' ? 'node.exe' : 'node';
+    await writeFile(join(bundleDir, binary), 'not-what-the-manifest-says');
+
+    const next = await installNodeIfNeeded({ home, bundleDir });
+    expect(next).toMatchObject({ action: 'up-to-date', verified: true });
+    expect(next.binaryPath).toBe(first.binaryPath);
+  });
+
+  it('stamps an install that was verified before stamps existed', async () => {
+    await writeVerifiedBundle('24.18.0');
+    await installNodeIfNeeded({ home, bundleDir });
+    const stampPath = join(home, 'bin', 'node.stamp.json');
+    await rm(stampPath);
+
+    const next = await installNodeIfNeeded({ home, bundleDir });
+    expect(next.action).toBe('up-to-date');
+    expect(existsSync(stampPath)).toBe(true);
+  });
+
+  it('re-verifies an installed binary edited without changing its size', async () => {
+    await writeVerifiedBundle('24.18.0');
+    const first = await installNodeIfNeeded({ home, bundleDir });
+    // Past one clock tick, so the edit's file times differ from the install's.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await writeFile(first.binaryPath!, 'FAKE-node-binary');
+
+    const next = await installNodeIfNeeded({ home, bundleDir });
+    expect(next.action).toBe('refreshed');
+    await expect(readFile(next.binaryPath!, 'utf8')).resolves.toBe('fake-node-binary');
+  });
+
   it('replaces a corrupt destination symlink without overwriting its target', async () => {
     if (process.platform === 'win32') return;
     await writeVerifiedBundle('24.18.0');

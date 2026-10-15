@@ -788,16 +788,47 @@ describe('consolidated MCP tools', () => {
     });
   });
 
-  it('rejects reversed/oversized ranges and raw ranged reads before transport', async () => {
+  it('reads an oversized range as its first 400 lines instead of refusing it', async () => {
+    let sent: unknown;
+    handler = (url, method, body) => {
+      expect(url.pathname).toBe('/api/projects/project-a/tools/read-files');
+      expect(method).toBe('POST');
+      sent = body;
+      return {
+        results: [
+          {
+            status: 'ok',
+            path: 'a.ts',
+            content: 'export const a = 1;\n',
+            startLine: 1,
+            endLine: 1,
+            totalLines: 1,
+            totalBytes: 20,
+            eof: true,
+            completeFile: true,
+            hasMore: false,
+            truncated: false,
+          },
+        ],
+        truncated: false,
+        totalBytesReturned: 20,
+        totalScannedBytes: 20,
+      };
+    };
+    const result = await client.callTool({
+      name: 'read_file',
+      arguments: { path: 'a.ts', startLine: 1, endLine: 1000 },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(sent).toEqual({ files: [{ path: 'a.ts', startLine: 1, endLine: 400 }] });
+  });
+
+  it('rejects reversed ranges and raw ranged reads before transport', async () => {
     const call = (arguments_: Record<string, unknown>) =>
       client.callTool({ name: 'read_file', arguments: arguments_ });
     const reversed = await call({ path: 'a.ts', startLine: 20, endLine: 10 });
     expect(reversed.isError).toBe(true);
     expect(JSON.stringify(reversed.content)).toContain('must be greater than or equal');
-
-    const oversized = await call({ path: 'a.ts', startLine: 1, endLine: 401 });
-    expect(oversized.isError).toBe(true);
-    expect(JSON.stringify(oversized.content)).toContain('at most 400 lines');
 
     const rawRange = await call({ path: 'a.ts', startLine: 1, endLine: 2, raw: true });
     expect(rawRange.isError).toBe(true);

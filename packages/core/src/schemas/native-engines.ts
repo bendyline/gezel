@@ -45,6 +45,11 @@ export const NativeEngineInstallStatusSchema = z.object({
   name: NativeEngineNameSchema,
   installed: z.boolean(),
   path: z.string().optional(),
+  /**
+   * The pinned archive's download size, for an engine not yet installed
+   * whose archive this build pins. First run counts it in "Fetch my tools".
+   */
+  downloadBytes: z.number().int().nonnegative().optional(),
 });
 export type NativeEngineInstallStatus = z.infer<typeof NativeEngineInstallStatusSchema>;
 

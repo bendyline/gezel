@@ -25,6 +25,7 @@ import {
 import {
   CapacityDeniedError,
   NOT_ENOUGH_MEMORY_MESSAGE,
+  autoKvCacheMaxBytes,
   availableSystemRamBytes,
   formatContextCapacityDenial,
   minViableLocalContextTokens,
@@ -964,8 +965,15 @@ export async function buildLlamaCppProvider(opts: {
             architecture: modelCatalogInfo?.architecture,
             modelId: defaultModelId ?? undefined,
           });
+        // A full-size cache past the automatic KV ceiling is declined even
+        // where it fits: gemma4-31b's is 55 GB at 64K, 11x its windowed
+        // cache, for a cross-request reuse gain nobody had measured.
+        const kvCeilingBytes = autoKvCacheMaxBytes();
+        const fullCacheOverCeiling =
+          fullKvBytesAtRequested !== undefined && fullKvBytesAtRequested > kvCeilingBytes;
         const fullKvOverBudget =
           fullCacheFitsFastMemory === false ||
+          fullCacheOverCeiling ||
           !admission.minimumSatisfied ||
           admission.slots < slots ||
           admission.clamped;
@@ -1035,15 +1043,36 @@ export async function buildLlamaCppProvider(opts: {
                     Math.max(0, fastBudgetBytes - committedOtherBytes) / 1024 ** 3
                   ).toFixed(1)} GiB`
                 : undefined;
-            log.warn(
-              [
-                `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: the full SWA working set at the requested `,
-                `${effectiveNumCtx * slots}-token total context does not fit fast memory — keeping the full `,
-                'context and declining the --swa-full auto-default instead; the windowed KV cache ',
-                'is what actually fits (cross-request prefix reuse unavailable). ',
-                `Fit detail: ${fastFitDetail ?? admission.reason ?? 'over budget at the requested slot count'}`,
-              ].join(''),
-            );
+            const overCeilingOnly =
+              fullCacheOverCeiling &&
+              fullCacheFitsFastMemory !== false &&
+              admission.minimumSatisfied &&
+              admission.slots >= slots &&
+              !admission.clamped;
+            if (overCeilingOnly && fullKvBytesAtRequested !== undefined) {
+              // A policy choice on a machine that could hold the cache, not
+              // a shortage: info, not warn.
+              log.info(
+                [
+                  `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: the full SWA cache at the requested `,
+                  `${effectiveNumCtx * slots}-token total context would take `,
+                  `${(fullKvBytesAtRequested / 1024 ** 3).toFixed(1)} GiB, past the `,
+                  `${(kvCeilingBytes / 1024 ** 3).toFixed(1)} GiB automatic KV ceiling — keeping the full `,
+                  'context and declining the --swa-full auto-default instead; the windowed KV cache ',
+                  'holds it (cross-request prefix reuse unavailable).',
+                ].join(''),
+              );
+            } else {
+              log.warn(
+                [
+                  `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: the full SWA working set at the requested `,
+                  `${effectiveNumCtx * slots}-token total context does not fit fast memory — keeping the full `,
+                  'context and declining the --swa-full auto-default instead; the windowed KV cache ',
+                  'is what actually fits (cross-request prefix reuse unavailable). ',
+                  `Fit detail: ${fastFitDetail ?? admission.reason ?? 'over budget at the requested slot count'}`,
+                ].join(''),
+              );
+            }
           }
           if (windowed) {
             ladderPlan = planCtxTokensForMemory({

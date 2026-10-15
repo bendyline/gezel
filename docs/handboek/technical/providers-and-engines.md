@@ -2,7 +2,7 @@
 id: providers-and-engines
 title: Providers and engines
 order: 3
-summary: Working with cloud models through the Claude and Codex CLIs, local engines, and how credentials are handled.
+summary: Working with cloud models through the Claude and Codex CLIs or the Claude and OpenAI APIs, local engines, and how credentials are handled.
 subcategory:
   id: how-gezel-works
   title: How Gezel works
@@ -15,6 +15,12 @@ A **provider** is where a gezel's intelligence comes from. Gezel supports both k
 
 ## Cloud providers
 
+Gezel reaches cloud models three ways: through a coding CLI you already use, directly through the Claude and OpenAI APIs, or through GitHub Copilot.
+
+Cloud models are the strongest option and need no hardware to speak of. The trade is that conversation content goes to that provider to be processed, under their terms.
+
+### Claude and Codex CLIs
+
 The first-class way to reach cloud models is through a coding CLI you already have installed and signed in:
 
 - **Claude CLI** — if Anthropic's `claude` command (Claude Code) is on your machine, gezel finds it automatically and drives it directly. Your existing login carries over — a Claude subscription works as-is, with no API key to manage. Gezel wires its own tools (memories, tasks, team management, documents, history) into each conversation, so your gezels keep their full craft while Claude does the thinking.
@@ -22,18 +28,24 @@ The first-class way to reach cloud models is through a coding CLI you already ha
 
 This interop is the recommended path because the account you already pay for keeps working, the CLIs bring their own strong agentic loop, and there's no separate credential to create or store. Settings shows whether each CLI was detected, and you can point gezel at a specific binary if it lives somewhere unusual.
 
-Two more cloud options:
-
-- **GitHub Copilot** — sign in with your GitHub account from Settings; your Copilot plan's quota applies and gezel shows the real usage buckets.
-- **OpenAI** and **Anthropic** API keys — paste a key; usage is billed by the provider per token.
-
-Cloud models are the strongest option and need no hardware to speak of. The trade is that conversation content goes to that provider to be processed, under their terms.
-
 ### Codex turn recovery
 
 Gezel ends a Codex turn after ten minutes without a valid stream event when no tool is running. This catches silent model turns before the longer overall turn limit. Active tool calls keep their own limits and the overall turn limit; diagnostic heartbeats and stderr do not reset the inactivity timer. Both budgets count awake time, so a short machine sleep does not consume them.
 
 For task handoffs, a failed turn enters the existing bounded recovery: at most three sends, using the task's original procedure and completion gates. If recovery fails, the task pauses with a note containing the provider error. Retrying a paused task keeps its task identity and available session evidence.
+
+### Claude API and OpenAI API
+
+Gezel also talks to both APIs directly, with no CLI involved:
+
+- **Claude API** — create a key at [platform.claude.com](https://platform.claude.com/settings/keys) and paste it in **Settings → Anthropic Claude**.
+- **OpenAI API**, which serves the models behind ChatGPT — create a key at [platform.openai.com](https://platform.openai.com/api-keys) and paste it in **Settings → OpenAI**. An organization ID is optional.
+
+Gezel runs its own tools in these conversations too, so a gezel on an API key keeps the same craft as one on a CLI. Usage is billed per token by Anthropic or OpenAI, separately from any Claude or ChatGPT subscription. Choose this route on a machine without the CLIs, or when you would rather pay per use than through a subscription.
+
+### GitHub Copilot
+
+Sign in with your GitHub account from Settings; your Copilot plan's quota applies and gezel shows the real usage buckets.
 
 ## Local engines
 

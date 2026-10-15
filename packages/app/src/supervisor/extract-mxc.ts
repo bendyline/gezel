@@ -12,8 +12,15 @@ import {
   mxcArch,
   mxcInstallDir,
 } from '@bendyline/gezel/native';
-import { sha256File, verifyBundleManifest } from './bundle-manifest.js';
+import { runtimeInstallStampPath } from '@bendyline/gezel/paths';
+import { readBundleManifest, sha256File, verifyBundleManifest } from './bundle-manifest.js';
 import { redirectAsarToUnpacked } from './extract-bundle.js';
+import {
+  type InstallStamp,
+  clearInstallStamp,
+  installStampMatches,
+  writeInstallStamp,
+} from './install-stamp.js';
 import { resolveRuntimeInPlace } from './run-in-place.js';
 
 export interface MxcInstallOptions {
@@ -82,6 +89,39 @@ export async function installMxcIfNeeded(opts: MxcInstallOptions): Promise<MxcIn
   }
 
   const shippedVersion = (await readFile(versionFilePath, 'utf8')).trim();
+
+  // A copy verified on an earlier launch is trusted while its stamp matches;
+  // see install-stamp.ts. The compiled-in pin still applies: a stamp can only
+  // vouch for the digest the manifest declares, and that digest must be a
+  // pinned launcher for this build's version.
+  const expectedDigest = (await readBundleManifest(bundleDir))?.get(MXC_EXECUTOR_NAME) ?? null;
+  const expectedPin = expectedDigest ? pinnedArchFor(expectedDigest) : null;
+  const expectedArch = expectedPin ?? mxcArch();
+  const stampable =
+    expectedDigest !== null &&
+    expectedArch !== null &&
+    (expectedPin !== null || shippedVersion !== MXC_VERSION);
+  const stamp: InstallStamp | null = stampable
+    ? {
+        path: runtimeInstallStampPath(home, 'mxc'),
+        identity: `${shippedVersion} ${expectedDigest}`,
+        root: mxcInstallDir(home, shippedVersion),
+        files: [MXC_EXECUTOR_NAME],
+      }
+    : null;
+  if (stamp && expectedDigest && expectedArch && (await installStampMatches(stamp))) {
+    const sentinel = join(stamp.root, MXC_VERIFIED_SENTINEL);
+    if ((await readSentinelDigest(sentinel)) !== expectedDigest) {
+      await writeSentinel(sentinel, shippedVersion, expectedArch, expectedDigest);
+    }
+    return {
+      executorPath: join(stamp.root, MXC_EXECUTOR_NAME),
+      version: shippedVersion,
+      action: 'up-to-date',
+      verified: true,
+    };
+  }
+
   const integrity = await verifyBundleManifest(bundleDir, [MXC_EXECUTOR_NAME]);
   if (!integrity.ok) {
     logger?.warn?.(
@@ -119,6 +159,7 @@ export async function installMxcIfNeeded(opts: MxcInstallOptions): Promise<MxcIn
       if ((await readSentinelDigest(sentinelPath)) !== bundleDigest) {
         await writeSentinel(sentinelPath, shippedVersion, arch, bundleDigest);
       }
+      if (stamp) await writeInstallStamp(stamp);
       return {
         executorPath: installedExecutor,
         version: shippedVersion,
@@ -138,9 +179,10 @@ export async function installMxcIfNeeded(opts: MxcInstallOptions): Promise<MxcIn
       : `[supervisor] installing bundled mxc launcher v${shippedVersion}`,
   );
 
-  // A sentinel that outlives the bytes it vouched for would let the lookup
-  // trust whatever lands next, so it goes before the launcher is touched.
+  // A sentinel or stamp that outlives the bytes it vouched for would let the
+  // lookup trust whatever lands next, so both go before the launcher is touched.
   await rm(sentinelPath, { force: true });
+  await clearInstallStamp(runtimeInstallStampPath(home, 'mxc'));
   const stagingExecutor = `${installedExecutor}.staging-${process.pid}-${Date.now()}`;
   await rm(stagingExecutor, { force: true });
   await cp(bundleExecutor, stagingExecutor, { force: true });
@@ -164,6 +206,7 @@ export async function installMxcIfNeeded(opts: MxcInstallOptions): Promise<MxcIn
     );
   }
   await writeSentinel(sentinelPath, shippedVersion, arch, bundleDigest);
+  if (stamp) await writeInstallStamp(stamp);
 
   return {
     executorPath: installedExecutor,

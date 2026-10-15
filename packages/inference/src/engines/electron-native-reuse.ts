@@ -1,8 +1,13 @@
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { lstat, readdir, readlink } from 'node:fs/promises';
-import { basename, join, posix, relative, resolve, sep } from 'node:path';
-import { resolvePlatformKey } from '@bendyline/gezel/native';
+import { existsSync } from 'node:fs';
+import { lstat, mkdir, open, readFile, readdir, readlink, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, posix, relative, resolve, sep } from 'node:path';
+import {
+  type FileFingerprint,
+  fileFingerprint,
+  resolvePlatformKey,
+  sameFileFingerprint,
+} from '@bendyline/gezel/native';
 import pinnedManifestJson from './native-file-manifest.json' with { type: 'json' };
 import { effectiveEngineRelease } from './native-manifest.js';
 import { BENDYLINE_APPLE_TEAM_ID, BENDYLINE_PUBLISHER, verifyCodeSignature } from './signature.js';
@@ -50,6 +55,15 @@ export interface ElectronNativeReuseOptions {
    * this false so their parent app is also signature/notarization checked.
    */
   allowStandaloneMacPayload?: boolean;
+  /**
+   * Remember each pinned file that hashed to its pin, with its fingerprint
+   * (see file-fingerprint.ts in core), so a later call re-hashes only files
+   * whose metadata moved: `nativePayloadVerificationPath(home)`. Everything
+   * else still runs on every call, including the listing that rejects a
+   * loadable file the release does not pin. Keep it somewhere no easier to
+   * write than the payload itself: whoever can edit it can vouch for any bytes.
+   */
+  cacheFile?: string;
 }
 
 /**
@@ -103,41 +117,107 @@ export async function verifyNativeBinaries(
     };
   }
 
+  const cache = opts.cacheFile ? await readHashCache(opts.cacheFile) : null;
+  const pinnedCount = platformEntries.reduce((n, [, pin]) => n + Object.keys(pin.files).length, 0);
   const failures: string[] = [];
-  for (const candidate of opts.candidates) {
-    const startedAt = Date.now();
-    try {
-      await verifyCandidate({
-        root: candidate,
-        platform,
-        entries: platformEntries,
-        verifySignature: opts.verifySignature ?? verifyCodeSignature,
-        allowStandaloneMacPayload: opts.allowStandaloneMacPayload === true,
-      });
-      return {
-        reused: true,
-        nativeBinDir: resolve(candidate),
-        // The elapsed time is load-bearing diagnostics, not decoration: this
-        // is pre-bind boot work whose cost scales with the payload, and on a
-        // CUDA host it is the largest single read the daemon ever does at
-        // startup. Without it in the log there is nothing to attribute a slow
-        // launch to.
-        reason: `verified ${
-          opts.allowStandaloneMacPayload ? 'standalone' : 'Electron'
-        } native release ${release} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
-      };
-    } catch (error) {
-      failures.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
+  try {
+    for (const candidate of opts.candidates) {
+      const startedAt = Date.now();
+      const hashedBefore = cache?.hashed ?? 0;
+      try {
+        await verifyCandidate({
+          root: candidate,
+          platform,
+          entries: platformEntries,
+          verifySignature: opts.verifySignature ?? verifyCodeSignature,
+          allowStandaloneMacPayload: opts.allowStandaloneMacPayload === true,
+          cache,
+        });
+        return {
+          reused: true,
+          nativeBinDir: resolve(candidate),
+          // The elapsed time is load-bearing diagnostics, not decoration: this
+          // is pre-bind boot work whose cost scales with the payload, and on a
+          // CUDA host it is the largest single read the daemon ever does at
+          // startup. Without it in the log there is nothing to attribute a slow
+          // launch to.
+          reason: `verified ${
+            opts.allowStandaloneMacPayload ? 'standalone' : 'Electron'
+          } native release ${release} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s${
+            cache ? ` (${cache.hashed - hashedBefore} of ${pinnedCount} files hashed)` : ''
+          }`,
+        };
+      } catch (error) {
+        failures.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
-  }
 
-  return {
-    reused: false,
-    reason:
-      failures.length > 0
-        ? failures.join('; ')
-        : 'no Electron native payload candidate was installed',
-  };
+    return {
+      reused: false,
+      reason:
+        failures.length > 0
+          ? failures.join('; ')
+          : 'no Electron native payload candidate was installed',
+    };
+  } finally {
+    if (cache) await saveHashCache(cache);
+  }
+}
+
+interface VerifiedFileRecord {
+  sha256: string;
+  fingerprint: FileFingerprint;
+}
+
+interface HashCache {
+  path: string;
+  /** What earlier calls verified, by absolute path. */
+  known: Map<string, VerifiedFileRecord>;
+  /** Every pinned file this call looked at. */
+  examined: Set<string>;
+  /** What this call confirmed, from `known` or by hashing. */
+  confirmed: Map<string, VerifiedFileRecord>;
+  hashed: number;
+}
+
+async function readHashCache(path: string): Promise<HashCache> {
+  const known = new Map<string, VerifiedFileRecord>();
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
+    if (isRecord(parsed) && parsed.schema === 1 && isRecord(parsed.files)) {
+      for (const [file, record] of Object.entries(parsed.files)) {
+        // The fingerprint's shape is checked where it is compared.
+        if (isRecord(record) && typeof record.sha256 === 'string') {
+          known.set(file, record as unknown as VerifiedFileRecord);
+        }
+      }
+    }
+  } catch {
+    // Missing or unreadable: this call hashes everything and writes it anew.
+  }
+  return { path, known, examined: new Set(), confirmed: new Map(), hashed: 0 };
+}
+
+async function saveHashCache(cache: HashCache): Promise<void> {
+  const dropped = [...cache.examined].some(
+    (file) => cache.known.has(file) && !cache.confirmed.has(file),
+  );
+  if (cache.hashed === 0 && !dropped) return;
+  // Records this call never looked at belong to another candidate, which a
+  // dev launch verifies in a separate call against the same file. Dropping
+  // them would make the two calls erase each other and hash everything on
+  // every launch. They are kept while their files exist.
+  const files: Record<string, VerifiedFileRecord> = {};
+  for (const [file, record] of cache.known) {
+    if (!cache.examined.has(file) && existsSync(file)) files[file] = record;
+  }
+  for (const [file, record] of cache.confirmed) files[file] = record;
+  try {
+    await mkdir(dirname(cache.path), { recursive: true });
+    await writeFile(cache.path, `${JSON.stringify({ schema: 1, files }, null, 2)}\n`, 'utf8');
+  } catch {
+    // Only a speedup: the next call hashes what it cannot find here.
+  }
 }
 
 async function verifyCandidate(opts: {
@@ -146,6 +226,7 @@ async function verifyCandidate(opts: {
   entries: Array<[string, NativePlatformPin]>;
   verifySignature: typeof verifyCodeSignature;
   allowStandaloneMacPayload: boolean;
+  cache: HashCache | null;
 }): Promise<void> {
   const root = resolve(opts.root);
   const rootInfo = await lstat(root);
@@ -182,11 +263,13 @@ async function verifyCandidate(opts: {
     // Semantics are unchanged: any rejection still fails the candidate, and
     // the first one to fail wins the message.
     // The pin is the whole per-file check; see verifyNativeBinaries.
+    const hashBuffers: Buffer[] = [];
     await mapWithConcurrency(Object.entries(platformPin.files), 4, async ([relativePath, pin]) => {
       if (!isSafeRelativePath(relativePath)) {
         throw new Error(`unsafe pinned native path: ${relativePath}`);
       }
       const absolute = join(platformDir, ...relativePath.split('/'));
+      opts.cache?.examined.add(absolute);
       const info = await lstat(absolute);
       if (!info.isFile() || info.isSymbolicLink()) {
         throw new Error(`pinned file is missing or not regular: ${platformKey}/${relativePath}`);
@@ -196,9 +279,26 @@ async function verifyCandidate(opts: {
       if (info.size !== pin.sizeBytes) {
         throw new Error(`size mismatch: ${platformKey}/${relativePath}`);
       }
-      const actualSha = await sha256File(absolute);
-      if (actualSha !== pin.sha256.toLowerCase()) {
+      const want = pin.sha256.toLowerCase();
+      // Fingerprinted before hashing, so a file that changes mid-hash is
+      // recorded as it was and hashed again next time.
+      const fingerprint = opts.cache ? await fileFingerprint(absolute) : null;
+      const known = fingerprint ? opts.cache?.known.get(absolute) : undefined;
+      if (
+        fingerprint &&
+        known?.sha256 === want &&
+        sameFileFingerprint(known.fingerprint, fingerprint)
+      ) {
+        opts.cache?.confirmed.set(absolute, known);
+        return;
+      }
+      const actualSha = await sha256File(absolute, hashBuffers);
+      if (actualSha !== want) {
         throw new Error(`sha256 mismatch: ${platformKey}/${relativePath}`);
+      }
+      if (opts.cache) {
+        opts.cache.hashed += 1;
+        if (fingerprint) opts.cache.confirmed.set(absolute, { sha256: want, fingerprint });
       }
     });
 
@@ -279,8 +379,11 @@ async function listNativeEntries(
 
 /**
  * Run `worker` over `items` with at most `limit` in flight, rejecting with the
- * first failure. Workers already in flight are allowed to settle; nothing here
- * mutates state, so an abandoned hash is inert.
+ * first failure. Workers already in flight are allowed to settle, and only
+ * record files that really did match, so an abandoned hash is inert. No new
+ * item starts after a failure: without that, the other workers went on hashing
+ * the rest of a rejected payload (a stale 1.6 GB dev checkout) in the
+ * background while the next candidate was being verified.
  */
 async function mapWithConcurrency<T>(
   items: readonly T[],
@@ -288,12 +391,19 @@ async function mapWithConcurrency<T>(
   worker: (item: T) => Promise<void>,
 ): Promise<void> {
   let next = 0;
+  let failed = false;
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     for (;;) {
+      if (failed) return;
       const index = next++;
       const item = items[index];
       if (index >= items.length || item === undefined) return;
-      await worker(item);
+      try {
+        await worker(item);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
     }
   });
   await Promise.all(runners);
@@ -390,16 +500,33 @@ function enclosingMacApp(path: string): string | null {
 // daemon event loop (a 64 KB stream yields ~100k times and queues behind other
 // work). Engines is a lower layer than models, so this mirrors models'
 // MODEL_HASH_READ_BUFFER_BYTES rather than importing it.
+//
+// The buffer is reused, never one per chunk. A 16 MB `highWaterMark` stream
+// allocates a fresh 16 MB buffer for every read, and in Electron's main process
+// (where the dev supervisor runs this, and the embedded service after it) each
+// allocation cost ~44 ms and left V8 in a ~20 s garbage-collection storm once
+// the 1.7 GB Windows CUDA payload was done: the duckdb and MXC provisioning
+// after it took 4.5 s and 13 s on the splash, against ~50 ms each in isolation.
+// Reusing the buffer hashed the same payload in 1.1 s with no storm.
 const HASH_READ_BUFFER_BYTES = 16 * 1024 * 1024;
 
-function sha256File(path: string): Promise<string> {
-  return new Promise((resolveHash, reject) => {
-    const hash = createHash('sha256');
-    const stream = createReadStream(path, { highWaterMark: HASH_READ_BUFFER_BYTES });
-    stream.on('data', (chunk) => hash.update(chunk));
-    stream.on('error', reject);
-    stream.on('end', () => resolveHash(hash.digest('hex')));
-  });
+async function sha256File(path: string, buffers: Buffer[]): Promise<string> {
+  const buffer = buffers.pop() ?? Buffer.allocUnsafe(HASH_READ_BUFFER_BYTES);
+  try {
+    const handle = await open(path, 'r');
+    try {
+      const hash = createHash('sha256');
+      for (;;) {
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+        if (bytesRead === 0) return hash.digest('hex');
+        hash.update(buffer.subarray(0, bytesRead));
+      }
+    } finally {
+      await handle.close();
+    }
+  } finally {
+    buffers.push(buffer);
+  }
 }
 
 /** Legacy adoption API. New embedding hosts should use the side-effect-free verifier. */

@@ -80,6 +80,21 @@ describe('installDuckdbIfNeeded', () => {
     expect(second.action).toBe('up-to-date');
   });
 
+  it('trusts a stamped install without re-reading the bundle, and keeps its sentinel', async () => {
+    await stageBundle('duckdb-bytes');
+    await installDuckdbIfNeeded({ home, bundleDir });
+    await writeFile(join(bundleDir, binaryName), 'not what the manifest says');
+    await rm(join(duckdbInstallDir(home, '1.5.5'), '.verified.json'));
+
+    const second = await installDuckdbIfNeeded({ home, bundleDir });
+    expect(second).toMatchObject({ action: 'up-to-date', verified: true });
+    expect(await readFile(second.binaryPath as string, 'utf8')).toBe('duckdb-bytes');
+    const sentinel = JSON.parse(
+      await readFile(join(duckdbInstallDir(home, '1.5.5'), '.verified.json'), 'utf8'),
+    );
+    expect(sentinel.binarySha).toBe(sha('duckdb-bytes'));
+  });
+
   it('refreshes an installed binary whose bytes drifted from the bundle', async () => {
     await stageBundle('duckdb-bytes');
     const first = await installDuckdbIfNeeded({ home, bundleDir });

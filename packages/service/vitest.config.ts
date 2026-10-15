@@ -169,6 +169,10 @@ export default defineConfig({
       // whose background indexing waits half an hour. The first-use tests
       // unset it themselves.
       GEZEL_DISABLE_FIRST_USE_GRACE: '1',
+      // A test service that turns LAN serving on must not announce itself
+      // over mDNS on the developer's network. lan-discovery.test.ts drives
+      // the advertiser and browser directly over loopback.
+      GEZEL_LAN_DISCOVERY: 'off',
     },
     projects: [
       {

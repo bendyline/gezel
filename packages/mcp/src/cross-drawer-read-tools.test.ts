@@ -205,6 +205,43 @@ describe('cross-drawer read tools', () => {
     expect(tools.names()).toEqual(['read_file', 'read_files', 'read_artifact', 'read_artifacts']);
   });
 
+  describe('binary media', () => {
+    it('answers a PNG artifact read with a notice instead of decoded bytes', async () => {
+      const tools = captureTools();
+      const dependencies = createDependencies(tools.server);
+      registerArtifactReadTools(dependencies);
+
+      const result = await tools.handler('read_artifact')({
+        path: 'generated/image-2026-10-15.png',
+      });
+
+      expect(resultText(result)).toContain('binary PNG file, not text');
+      expect(result.isError).not.toBe(true);
+      expect(dependencies.api.readProjectArtifactSlice).not.toHaveBeenCalled();
+    });
+
+    it('answers a workspace image read the same way, whatever the case of the extension', async () => {
+      const tools = captureTools();
+      const dependencies = createDependencies(tools.server);
+      registerWorkspaceReadTools(dependencies);
+
+      const text = resultText(await tools.handler('read_file')({ path: 'assets/logo.PNG' }));
+
+      expect(text).toContain('binary PNG file, not text');
+      expect(dependencies.readWorkspaceFile).not.toHaveBeenCalled();
+    });
+
+    it('still reads an SVG, which is text', async () => {
+      const tools = captureTools();
+      const dependencies = createDependencies(tools.server);
+      registerWorkspaceReadTools(dependencies);
+
+      await tools.handler('read_file')({ path: 'assets/logo.svg' });
+
+      expect(dependencies.readWorkspaceFile).toHaveBeenCalled();
+    });
+  });
+
   describe('binary office documents', () => {
     // Wild-caught on the first binary-source PowerPoint trial: read_file on a
     // .docx returned `1→PK\x03\x04…[Content_Types].xml…`, two gezels each

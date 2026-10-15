@@ -32,6 +32,7 @@ const tokenStorage = {
 const status = await detectGezel();
 if (!status.installed) throw new Error('gezel not installed');
 if (!status.running) throw new Error('start the gezel app first');
+if (!status.compatible) throw new Error('update the gezel app');
 
 const app = await connect({
   appId: 'docblocks',
@@ -435,6 +436,7 @@ expose `close()` and `destroy()` for callers managing their own transport lifeti
 Errors thrown by the SDK are `GezelSdkError` instances carrying both an HTTP `status` (when known) and a `code` from the server's response envelope. Common codes:
 
 - `daemon_not_running` — no runtime files / health probe failed
+- `daemon_incompatible` — a daemon is running but does not serve this SDK's API generation (the `apiCompat` range on `/api/health`): it predates the handshake, or one side needs updating. Versions are never compared; a daemon the SDK started itself is never checked. `connectOrHost` with `host` runs its own daemon instead
 - `user_denied` — consent dialog rejected
 - `approval_timeout` — `approvalTimeoutSec` elapsed
 - `grant_expired` — the request expired or used all verification attempts

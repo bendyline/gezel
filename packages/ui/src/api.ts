@@ -12,6 +12,11 @@ import type { ReactNode } from 'react';
 import { readAppSurface, withAppSurface } from './embedded/app-surface.js';
 import type { HostHtmlPreview, HostHtmlPreviewRequest } from './html-preview-host.js';
 import { instrumentFetch, setPerfReportSink } from './nav-timing.js';
+import {
+  installSharedApiReads,
+  invalidateApiReads,
+  withReadInvalidation,
+} from './shared-api-reads.js';
 
 /**
  * Where an app update has got to. Mirrors the union the Electron main process
@@ -464,8 +469,21 @@ const appSurface = readAppSurface(window.location.search);
 export const api = new GezelClient({
   baseUrl: resolveBaseUrl(),
   token: resolveToken(),
-  fetch: instrumentFetch(appSurface ? withAppSurface(baseFetch, appSurface) : baseFetch),
+  fetch: withReadInvalidation(
+    instrumentFetch(appSurface ? withAppSurface(baseFetch, appSurface) : baseFetch),
+  ),
 });
+installSharedApiReads(api);
+for (const event of [
+  'gezel:config-updated',
+  'gezel:project-created',
+  'gezel:project-updated',
+  'gezel:project-deleted',
+  'gezel:gezel-updated',
+  'gezel:gezel-deleted',
+]) {
+  window.addEventListener(event, invalidateApiReads);
+}
 
 if (window.__GEZEL__?.capabilities?.perfReports !== false) {
   setPerfReportSink((report) => {

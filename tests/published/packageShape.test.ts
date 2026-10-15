@@ -47,15 +47,15 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   '@bendyline/gezk': 100_000, //                     ~30 KB
   // Deliberately tighter than the 1.5x rule below: this package is already
   // oversized, and the cause is known — its `.d.ts` output writes inferred
-  // types out in full. dist/runtime/index.d.ts was 4.2 MB until the portable
-  // store and task runner declared their return types (`Promise<Task>` rather
-  // than a 130 KB expansion per method); what remains is the shared schema
-  // chunk (~3.2 MB), where every schema that embeds TaskSchema repeats its
-  // whole type. Fix that, not the budget, when this trips again. Keep this
-  // close to the measurement so the next growth reopens it. (It tripped at
-  // 3.36 MB when `./local-loop` became an entry: unsplit, every entry bundled
+  // types out in full. Explicit return types shrank the portable runtime's
+  // declarations, and task response schemas now retain references to
+  // TaskSchema rather than repeating its whole type. The shared schema chunk
+  // still expands other nested schemas; reuse those references when this
+  // trips again. Keep this close to the measurement so the next growth
+  // reopens it. (It tripped at 3.36 MB when `./local-loop` became an entry:
+  // unsplit, every entry bundled
   // its own copy of the shared code. tsup now splits it into chunks.)
-  '@bendyline/gezel': 2_000_000, //                    1.75 MB
+  '@bendyline/gezel': 2_000_000, //                    1.97 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
   '@bendyline/gezel-script-runtime': 50_000,

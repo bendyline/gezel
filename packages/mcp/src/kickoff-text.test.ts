@@ -11,6 +11,7 @@ import {
   kickoffTaskTitle,
   macroLooksLikeBuildMission,
   shouldPromoteStartJobToProject,
+  typedKickoffWatch,
 } from './kickoff-text.js';
 
 const BUILD_BRIEF = {
@@ -204,6 +205,20 @@ describe('buildTypedKickoffStep', () => {
     expect(step.description).not.toContain('index.html');
   });
 
+  // Day one of a seven-day trip, then "shall I go on?", was reported as done.
+  it('asks for the whole first version before any question', () => {
+    const step = buildTypedKickoffStep({
+      typeName: 'Trip Planner',
+      brief: { name: 'Lisbon', about: 'A week in Lisbon.' },
+      dataFile: 'trip.json',
+      unsaid: [],
+    });
+    expect(step.description).toContain('make the whole first version there');
+    expect(step.description).toContain('each day of a trip');
+    expect(step.description).toContain('finish it before you ask anything');
+    expect(step.description).not.toContain('has something in it');
+  });
+
   // The meester's own brief for a Lisbon trip added hotels, dining and a
   // budget the default posture could not research (2026-10-11).
   it('states the goal in the person’s words, and leaves extras for the lead to offer', () => {
@@ -241,5 +256,43 @@ describe('buildTypedKickoffStep', () => {
       'Already recorded from their words: "Where to?" Lisbon, "Departure date" next spring, "Who\'s going?" 4.',
     );
     expect(step.description).toContain('Start on the plan itself');
+  });
+});
+
+describe('typedKickoffWatch', () => {
+  it('watches every data file the Output page reads', () => {
+    // A Job Hunt lead that logged "interview at Northwind next month" grew
+    // activity.json, which the page shows, while only pipeline.json counted.
+    expect(
+      typedKickoffWatch({
+        pages: {
+          reads: [
+            { source: 'workspace', path: 'pipeline.json' },
+            { source: 'workspace', path: 'activity.json' },
+          ],
+        },
+      }),
+    ).toEqual(['pipeline.json', 'activity.json']);
+  });
+
+  it('watches the seeded index of a folder the page reads', () => {
+    expect(
+      typedKickoffWatch({
+        pages: {
+          reads: [
+            { source: 'workspace', path: 'posts', subtree: true },
+            { source: 'workspace', path: 'voice-guide.md' },
+            { source: 'artifacts', path: 'data', subtree: true },
+          ],
+        },
+        workspaceSeed: ['voice-guide.md', 'posts/index.json'],
+      }),
+    ).toEqual(['posts/index.json']);
+  });
+
+  it('watches nothing for a page with no workspace data', () => {
+    expect(
+      typedKickoffWatch({ pages: { reads: [{ source: 'artifacts', path: 'notes' }] } }),
+    ).toEqual([]);
   });
 });

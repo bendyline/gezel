@@ -15,7 +15,8 @@ import { scopeNeedsVerificationCode } from './scopes.js';
  *   2. the user's own running Gezel, through the ordinary consent handshake;
  *   3. a daemon hosted in this process, when the app opted into `host`.
  *
- * By default only "nothing is running" falls from 2 to 3. A denied consent, an
+ * By default only "nothing is running" — or a running Gezel whose API
+ * generation this app does not speak — falls from 2 to 3. A denied consent, an
  * expired approval, or a daemon that is alive but unwell all stay loud: an app
  * that quietly started its own daemon after the user declined would be doing
  * the thing they declined. An app that obtains its own consent — its AI is
@@ -38,14 +39,17 @@ export async function resolveDaemon(input: ConnectOrHostInput): Promise<DaemonCo
       return fromAuthorization(await authorizeLocal({ ...connectInput, scopes }));
     } catch (err) {
       const code = err instanceof GezelSdkError ? err.code : undefined;
-      const absent = code === 'daemon_not_running';
+      // An incompatible daemon is, for this app, the same as no daemon: the
+      // private one it would host ships with it, so it is the closest match
+      // there is. Without `host` it stays loud below, with the reason.
+      const absent = code === 'daemon_not_running' || code === 'daemon_incompatible';
       // A reuse-only attempt that found no reusable grant: without a code
       // handler there is nothing more to ask the Gezel the user runs.
       const reuseExhausted =
         adoption === 'reuse-only' && code === 'verification_code_handler_required';
       const refused = hostWhenRefused === true && code !== undefined && REFUSAL_CODES.has(code);
       if (!absent && !(host && (reuseExhausted || refused))) throw err;
-      if (!absent) {
+      if (!absent || code === 'daemon_incompatible') {
         host?.logger?.info?.(
           `[gezel] the running Gezel did not connect this app (${code}); hosting a private daemon instead`,
         );
@@ -55,6 +59,9 @@ export async function resolveDaemon(input: ConnectOrHostInput): Promise<DaemonCo
   }
 
   if (!host) {
+    if (notRunning instanceof GezelSdkError && notRunning.code === 'daemon_incompatible') {
+      throw notRunning;
+    }
     throw new GezelSdkError(
       'gezel daemon not found — start the Gezel desktop app, or pass `host` to run one inside this application',
       { code: 'daemon_not_running', ...(notRunning ? { cause: notRunning } : {}) },

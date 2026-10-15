@@ -1,10 +1,12 @@
 import { writeFile } from 'node:fs/promises';
+import { Worker } from 'node:worker_threads';
 import type {
   AmbientDashboardDisplayTarget,
   AmbientDashboardResolution,
   AmbientDashboardStyle,
   AmbientDashboardTheme,
 } from '@bendyline/gezel';
+import { findServiceWorkerEntry } from '@bendyline/gezel-inference/internal/utils/service-worker-entry';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { resolveTheme } from '@bendyline/squisq/schemas';
@@ -82,6 +84,7 @@ export const renderAmbientDashboard: AmbientDashboardRenderer = async (opts) => 
       result.bytes,
       displayTarget,
       theme.colors.background,
+      opts.signal,
     );
     await writeFile(opts.outputPath, bytes);
   }
@@ -106,6 +109,7 @@ export async function placeDashboardInSafeArea(
   dashboardPng: Uint8Array,
   target: AmbientDashboardDisplayTarget,
   backgroundColor = '#ffffff',
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const { x, y, width, height } = target.safeArea;
   const encoded = Buffer.from(dashboardPng).toString('base64');
@@ -113,8 +117,24 @@ export async function placeDashboardInSafeArea(
 <rect width="100%" height="100%" fill="${escapeXmlAttribute(backgroundColor)}"/>
 <image x="${x}" y="${y}" width="${width}" height="${height}" preserveAspectRatio="none" href="data:image/png;base64,${encoded}"/>
 </svg>`;
-  const { Resvg } = await import('@resvg/resvg-js');
-  return new Resvg(svg).render().asPng();
+  signal?.throwIfAborted();
+  const entry = findServiceWorkerEntry(import.meta.url, 'dashboard-composite');
+  if (!entry) throw new Error('Dashboard compositor worker is missing; rebuild the service');
+  const worker = new Worker(entry, { workerData: svg, execArgv: [] });
+  let abort: (() => void) | undefined;
+  try {
+    return await new Promise<Uint8Array>((resolve, reject) => {
+      abort = () => reject(signal?.reason ?? new Error('Dashboard rendering cancelled'));
+      worker.once('message', resolve);
+      worker.once('error', reject);
+      worker.once('exit', (code) => reject(new Error(`Dashboard compositor exited (${code})`)));
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+    });
+  } finally {
+    if (abort) signal?.removeEventListener('abort', abort);
+    await worker.terminate();
+  }
 }
 
 function escapeXmlAttribute(value: string): string {

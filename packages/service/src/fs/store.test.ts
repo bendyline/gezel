@@ -1,8 +1,9 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { type Project, TaskSchema, isSharedLibraryProject, seedCharacter } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { HistoryManager } from '../history/manager.js';
 import { ConfigCorruptionError, Store, pickRoleBasedName } from './store.js';
 
 let home: string;
@@ -636,6 +637,72 @@ describe('projects', () => {
 
     const reactivated = await store.updateProject(created.id, { status: 'active' });
     expect(reactivated.status).toBe('active');
+  });
+});
+
+describe('project.json recovery', () => {
+  function stderrLinesMatching(write: { mock: { calls: unknown[][] } }, text: string): number {
+    return write.mock.calls.filter((call) => String(call[0]).includes(text)).length;
+  }
+
+  it('rebuilds a project.json an interrupted write zeroed, once, from its history', async () => {
+    const historied = new Store({ home, history: new HistoryManager(home) });
+    const created = await historied.createProject({
+      name: 'Vampire Hunter Game',
+      description: 'Stakes',
+    });
+    await historied.updateProject(created.id, { name: 'Vampire Hunter' });
+    const file = join(home, 'projects', created.id, 'project.json');
+    const size = (await stat(file)).size;
+    await writeFile(file, Buffer.alloc(size));
+
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      const reads = await Promise.all([
+        historied.listProjects(),
+        historied.getProject(created.id),
+        historied.getProject(created.id),
+      ]);
+      expect(reads[0].map((project) => project.name)).toEqual(['Vampire Hunter']);
+      expect(reads[1]).toMatchObject({ name: 'Vampire Hunter', description: 'Stakes' });
+      expect(stderrLinesMatching(write, 'rebuilt "Vampire Hunter"')).toBe(1);
+    } finally {
+      write.mockRestore();
+    }
+    expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({
+      id: created.id,
+      name: 'Vampire Hunter',
+    });
+    const { readdir } = await import('node:fs/promises');
+    expect((await readdir(dirname(file))).filter((name) => name.includes('.corrupt-'))).toEqual([]);
+  });
+
+  it('reports a malformed hand edit once per change and never rewrites it', async () => {
+    await store.createProject({ name: 'Edited' });
+    const file = join(home, 'projects', 'edited', 'project.json');
+    await writeFile(file, '{ "id": "edited", "name": ');
+
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      for (let i = 0; i < 4; i++) expect(await store.getProject('edited')).toBeNull();
+      expect(stderrLinesMatching(write, 'project.json for edited is not valid JSON')).toBe(1);
+
+      await writeFile(file, '{ "id": "edited", "name": "Edi');
+      expect(await store.getProject('edited')).toBeNull();
+      expect(stderrLinesMatching(write, 'project.json for edited is not valid JSON')).toBe(2);
+    } finally {
+      write.mockRestore();
+    }
+    expect(await readFile(file, 'utf8')).toBe('{ "id": "edited", "name": "Edi');
+  });
+
+  it('strips a byte-order mark and rewrites the record clean', async () => {
+    await store.createProject({ name: 'Marked' });
+    const file = join(home, 'projects', 'marked', 'project.json');
+    await writeFile(file, `﻿${await readFile(file, 'utf8')}`);
+
+    expect(await store.getProject('marked')).toMatchObject({ name: 'Marked' });
+    expect((await readFile(file, 'utf8')).startsWith('{')).toBe(true);
   });
 });
 

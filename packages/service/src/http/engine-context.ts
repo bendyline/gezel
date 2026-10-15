@@ -22,6 +22,7 @@ import type { ImageModelPullRegistry } from '../providers/image/pull-registry.js
 import type { RecognitionManager } from '../providers/recognition/manager.js';
 import type { VideoProviderManager } from '../providers/video/manager.js';
 import type { VideoModelPullRegistry } from '../providers/video/pull-registry.js';
+import type { PairingCodes } from '../remotes/pairing-code.js';
 import type { RemoteServingController } from '../remotes/serving.js';
 import type { TenantLimiter } from '../remotes/tenant-limits.js';
 import type { SpawnCapability } from '../system/spawn-capability.js';
@@ -79,6 +80,8 @@ export interface EngineContext {
     stop(): Promise<void>;
   };
   remoteServing: RemoteServingController;
+  /** Connect codes for the LAN listener above (Settings → Remote Servers → Add a device). */
+  pairingCodes: PairingCodes;
   remoteTenantLimits: TenantLimiter;
   tlsCertSha256?: string;
   tlsCertPem?: string;

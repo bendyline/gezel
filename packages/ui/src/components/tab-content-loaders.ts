@@ -1,7 +1,8 @@
 import type { RecentTab } from '@bendyline/gezel';
+import { api } from '../api.js';
 
-// Keep this module limited to dynamic-import edges. App and Sidebar may import
-// it eagerly without pulling any destination implementation into the shell.
+// App and Sidebar may import these dynamic edges and read warmers eagerly
+// without pulling any destination implementation into the shell.
 
 /**
  * Styles for surfaces the shell never draws (../surfaces.css). Every
@@ -88,4 +89,17 @@ function moduleForTab(tab: RecentTab): Promise<unknown> {
  */
 export function preloadTabContent(tab: RecentTab): void {
   void moduleForTab(tab).catch(() => {});
+  preloadTabData(tab);
+}
+
+/** Shared reads coalesce pointer/focus/navigation and destination effects. */
+export function preloadTabData(tab: RecentTab | null): void {
+  const reads: Promise<unknown>[] = [api.getConfig(), api.listGezels()];
+  if (tab?.kind === 'project') {
+    reads.push(api.getProject(tab.id), api.listChatSessions({ projectId: tab.id }));
+  }
+  if (!tab || tab.kind === 'project' || (tab.kind === 'area' && tab.area === 'projects')) {
+    reads.push(api.listProjects());
+  }
+  void Promise.allSettled(reads);
 }

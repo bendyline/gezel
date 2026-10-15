@@ -4,6 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { ZodError } from 'zod';
 import type { ResolvedTuning } from '../../model-profile/tuning.js';
+import { UnsupportedResponseFormatError } from '../../providers/mlx/runtime-diagnostics.js';
 import {
   ExternalToolsUnsupportedError,
   ModelNotInstalledError,
@@ -366,6 +367,9 @@ export function v1ResponsesRoutes(ctx: InferenceContext, opts: V1ResponsesRouteO
         }
         if (err instanceof ExternalToolsUnsupportedError) {
           return invalidRequest(c, err.message, 'tools_not_supported_for_provider');
+        }
+        if (err instanceof UnsupportedResponseFormatError) {
+          return invalidRequest(c, err.message, err.code);
         }
         const message = err instanceof Error ? err.message : String(err);
         if (

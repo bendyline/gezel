@@ -287,9 +287,12 @@ export function buildTypedKickoffStep(input: {
           .map((k) => `"${k.title}" ${k.value}`)
           .join(', ')}. Start on the plan itself, not on recording those again.`
       : '';
+  // "Finishes when it has something in it" read as permission to stop: a
+  // Reisleider planned day one of a week in Lisbon, asked whether to go on,
+  // and the person was told the plan was done (2026-10-12).
   const where = input.dataFile
-    ? ` The project's Output page shows \`${input.dataFile}\`, so make the first version there with this project's own tools; this step finishes when it has something in it.`
-    : " Make the first version with this project's own tools.";
+    ? ` The project's Output page shows \`${input.dataFile}\`, so make the whole first version there with this project's own tools: every part of what they asked for (each day of a trip, each guest, each card), and every section the page has room for.`
+    : " Make the whole first version with this project's own tools: every part of what they asked for.";
   // The page reads its data in the shape these tools write. A lead that wrote
   // trip.json by hand in a shape of its own left the trip board at "0 days".
   const tools =
@@ -302,8 +305,35 @@ export function buildTypedKickoffStep(input: {
       : '';
   return {
     name: 'First draft',
-    description: `You lead this ${input.typeName} project for the person. Their goal: ${goal}${where}${tools}${known}${unsaid} Make what they asked for; if something more would help, offer it in your reply instead of adding it. Do the real work this turn rather than describing it. Then reply in two or three sentences: what you made, and the one thing you need from them next.`,
+    description: `You lead this ${input.typeName} project for the person. Their goal: ${goal}${where}${tools}${known}${unsaid} Make what they asked for; if something more would help, offer it in your reply instead of adding it. Do the real work this turn rather than describing it, and finish it before you ask anything. Then reply in two or three sentences: what you made, and at most one question.`,
   };
+}
+
+/**
+ * The files a typed project's kickoff watches, read from its Output page: the
+ * JSON data files the page reads, and the seeded JSON inside a folder it reads
+ * whole (Social Feed's `posts/` keeps its store's `posts/index.json`). Only
+ * the type's own tools write them; given file tools, a Social Feed lead
+ * replaced that index with a plan of its own shape (2026-10-14).
+ */
+export function typedKickoffWatch(type: {
+  pages?: {
+    reads?: ReadonlyArray<{ source: string; path: string; subtree?: boolean }>;
+  };
+  workspaceSeed?: readonly string[];
+}): string[] {
+  const files = new Set<string>();
+  for (const read of type.pages?.reads ?? []) {
+    if (read.source !== 'workspace') continue;
+    if (read.subtree) {
+      for (const seeded of type.workspaceSeed ?? []) {
+        if (seeded.startsWith(`${read.path}/`) && seeded.endsWith('.json')) files.add(seeded);
+      }
+    } else if (read.path.endsWith('.json')) {
+      files.add(read.path);
+    }
+  }
+  return [...files];
 }
 
 /** "Build X" for a build, the goal's own name for everything else. */

@@ -8,8 +8,11 @@ import { chmod, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promise
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
+  type ApiCompatVerdict,
+  type ApiIncompatibilityCode,
   type HealthResponse,
   type ServiceRole,
+  evaluateApiCompat,
   getLogLevel,
   getLogOutput,
   pickRandomNameWithGender,
@@ -40,7 +43,7 @@ import {
   stopOwnedDaemon,
   systemSharedAssetsDir,
 } from '@bendyline/gezel-client/node';
-import { gezelPaths } from '@bendyline/gezel/paths';
+import { gezelHome, gezelPaths, nativePayloadVerificationPath } from '@bendyline/gezel/paths';
 import { installSignalCleanup } from './signal-cleanup.js';
 
 /** Global flags shared across commands (defined on the root program). */
@@ -165,6 +168,8 @@ export async function connectOwned(
       preferCanonicalPort: await shouldPreferCanonicalPort(),
       ...(process.env.GEZEL_HOME ? { home: process.env.GEZEL_HOME } : {}),
     },
+  }).catch((error: unknown) => {
+    throw isIncompatibleDaemonError(error) ? incompatibleDaemonCliError(error) : error;
   });
   if (authorized.daemon.mode === 'spawned' && options.announceSpawn !== false) {
     process.stderr.write(spawnedDaemonNotice(authorized.daemon.pid));
@@ -217,7 +222,19 @@ export async function connectForTui(globals: CliGlobals): Promise<TuiConnection>
   result.child?.stdout?.resume();
   result.child?.stderr?.resume();
 
-  if (result.outcome !== 'spawned') return { client: result.client };
+  if (result.outcome !== 'spawned') {
+    const health = await result.client.health();
+    const verdict = evaluateApiCompat(health, { client: CLI_CLIENT_LABEL });
+    if (!verdict.compatible) {
+      throw incompatibleDaemonCliError({
+        code: verdict.code,
+        reason: verdict.reason,
+        version: health.version,
+        systemService: false,
+      });
+    }
+    return { client: result.client };
+  }
 
   let stopPromise: Promise<void> | undefined;
   return {
@@ -502,6 +519,9 @@ export interface HealthySystemService {
   fetch: typeof fetch;
   port: number;
   home: string;
+  version: string;
+  /** Whether this CLI speaks the service's API generation; see `evaluateApiCompat`. */
+  compat: ApiCompatVerdict;
 }
 
 interface SystemServiceDiscoveryDeps {
@@ -568,6 +588,8 @@ export async function findHealthySystemService(
       fetch: fetchImpl,
       port: endpoint.port,
       home: endpoint.home,
+      version: health.version,
+      compat: evaluateApiCompat(health, { client: CLI_CLIENT_LABEL }),
     };
   } catch {
     return null;
@@ -649,6 +671,17 @@ async function connectPreferredService(
 
   const system = await findHealthySystemService(globals);
   if (!system) return null;
+  // Never fall through to the per-user daemon: this service holds the
+  // machine's product data, and the per-user home would show different —
+  // possibly no — projects without saying so.
+  if (!system.compat.compatible) {
+    throw incompatibleDaemonCliError({
+      code: system.compat.code,
+      reason: system.compat.reason,
+      version: system.version,
+      systemService: true,
+    });
+  }
   return connectWithCliGrant({
     baseUrl: system.baseUrl,
     fetch: system.fetch,
@@ -671,7 +704,10 @@ async function prepareStandaloneAssets(): Promise<void> {
   const candidates = electronNativeBinCandidates();
   if (candidates.length === 0) return;
   const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
-  await reuseVerifiedElectronNativeBinaries({ candidates });
+  await reuseVerifiedElectronNativeBinaries({
+    candidates,
+    cacheFile: nativePayloadVerificationPath(gezelHome()),
+  });
 }
 
 interface CliGrantInput {
@@ -768,10 +804,56 @@ export function cliGrantError(error: unknown, target: string): CliError {
         'No local Gezel daemon is running. Start the Gezel app or run `gezel start`, then try again.',
       );
     }
+    if (isIncompatibleDaemonError(error)) return incompatibleDaemonCliError(error);
   }
   return new CliError(
     `Could not authorize Gezel CLI against ${target}: ${error instanceof Error ? error.message : String(error)}`,
   );
+}
+
+/** How API-compatibility reasons name this client. */
+export const CLI_CLIENT_LABEL = 'this gezel CLI';
+
+interface IncompatibleDaemon {
+  code: ApiIncompatibilityCode;
+  reason: string;
+  version: string | undefined;
+  /** A machine-wide service the OS manages, which `gezel stop --daemon` cannot stop. */
+  systemService: boolean;
+}
+
+function isIncompatibleDaemonError(error: unknown): error is GezelSdkError {
+  return error instanceof GezelSdkError && error.code === 'daemon_incompatible';
+}
+
+/**
+ * Say which side is out of date and what to run. Accepts the SDK's
+ * `daemon_incompatible` error, whose `cause` carries the verdict, or a
+ * verdict the CLI reached itself.
+ */
+export function incompatibleDaemonCliError(source: GezelSdkError | IncompatibleDaemon): CliError {
+  const verdict: IncompatibleDaemon =
+    source instanceof GezelSdkError
+      ? { ...(source.cause as Omit<IncompatibleDaemon, 'systemService'>), systemService: false }
+      : source;
+  const service = `the Gezel service${verdict.version ? ` (${verdict.version})` : ''}`;
+  if (verdict.code === 'client-too-old') {
+    return new CliError(
+      `This gezel CLI is older than ${service} supports. Update it with \`npm install -g @bendyline/gezel-cli\`, then try again.`,
+    );
+  }
+  if (verdict.code === 'machine-engine-role') {
+    return new CliError(`Cannot use ${service}: ${verdict.reason}.`);
+  }
+  return new CliError(
+    verdict.systemService
+      ? `${capitalize(service)} installed for this computer is older than this gezel CLI can use. Update the Gezel app, which replaces it, then try again.`
+      : `${capitalize(service)} running for this user is older than this gezel CLI can use. Open the Gezel app, which replaces an outdated service when it starts, or stop it with \`gezel stop --daemon\` and run this command again.`,
+  );
+}
+
+function capitalize(text: string): string {
+  return `${text[0]?.toUpperCase() ?? ''}${text.slice(1)}`;
 }
 
 /**

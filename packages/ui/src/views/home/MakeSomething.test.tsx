@@ -74,7 +74,7 @@ it('honors an empty server starter set instead of reintroducing fallback ids', a
   expect(screen.queryByRole('button', { name: /Research report/ })).not.toBeInTheDocument();
 });
 
-it('labels a starter by what comes back and keeps other plans’ own descriptions', async () => {
+it('labels a starter by what comes back and keeps other plans’ own opening clause', async () => {
   const withGates = (id: string, tags: string[], description: string, ...files: string[]) => {
     const book = item(id);
     Object.assign(book.manifest, {
@@ -90,7 +90,7 @@ it('labels a starter by what comes back and keeps other plans’ own description
       withGates(
         'tidy-spreadsheet',
         ['first-project'],
-        'Clean up a messy sheet',
+        'Clean up a messy sheet: trims stray spaces and removes duplicate rows. It never guesses.',
         'plan.md',
         'index.html',
       ),
@@ -106,6 +106,7 @@ it('labels a starter by what comes back and keeps other plans’ own description
   expect(starter).toHaveTextContent('A written report');
   const firstProject = screen.getByRole('button', { name: /tidy-spreadsheet/ });
   expect(firstProject).toHaveTextContent('Clean up a messy sheet');
+  expect(firstProject).not.toHaveTextContent('stray spaces');
   expect(firstProject).not.toHaveTextContent('A website');
 });
 

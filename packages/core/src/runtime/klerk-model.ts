@@ -7,6 +7,7 @@ import {
 } from '../schemas/mobile-provider.js';
 import type { PortableCatalogModel } from './content.js';
 import { HttpStatusError as ProductError } from './http/errors.js';
+import { pickLocalProvider } from './local-provider.js';
 import { modelBudget } from './model-budget.js';
 import { portableSampling } from './portable-sampling.js';
 import type { PortableStore } from './store.js';
@@ -45,12 +46,21 @@ export async function resolvePortableKlerkModel(
     if (!gezel) throw new ProductError('The Klerk could not be prepared');
     await host.store.writeConfig({ klerkGezelId: gezel.id });
   }
-  const providerId = MobileProviderIdSchema.parse(gezel.provider ?? config.provider ?? 'llama-cpp');
+  // The Klerk's chores stay on this device, even while conversations use
+  // another device's model.
+  const requested = gezel.provider ?? config.provider ?? 'llama-cpp';
+  const local = requested === 'remote' ? await pickLocalProvider(host) : null;
+  if (requested === 'remote' && !local)
+    throw new ProductError('Set up a model on this device in Settings for the Klerk.', 409);
+  const providerId = local?.providerId ?? MobileProviderIdSchema.parse(requested);
   const provider = (await host.providers()).find((item) => item.id === providerId);
   if (provider?.availability !== 'available')
     throw new ProductError(provider?.reason ?? 'Choose an available model in Settings.', 409);
   const inventory = providerId === 'llama-cpp' ? await host.inference.models?.() : undefined;
-  const modelId = gezel.parsed.frontmatter.model ?? inventory?.selectedModelId ?? providerId;
+  const modelId =
+    (local ? undefined : gezel.parsed.frontmatter.model) ??
+    inventory?.selectedModelId ??
+    providerId;
   if (providerId !== 'llama-cpp' && modelId !== providerId)
     throw new ProductError('The Klerk model is not available from this on-device provider.', 409);
   if (inventory && !inventory.models.some((model) => model.id === modelId))

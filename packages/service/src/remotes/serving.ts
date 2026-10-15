@@ -1,9 +1,11 @@
 import { createSecureServer as createSecureHttp2Server } from 'node:http2';
-import { isIP } from 'node:net';
+import { isIP, isIPv4 } from 'node:net';
 import type { GezelConfig } from '@bendyline/gezel';
 import { createLogger } from '@bendyline/gezel';
 import { type ServerType, serve } from '@hono/node-server';
 import type { LoopbackCert } from '../http/cert.js';
+import { listLanAddresses } from './lan-addresses.js';
+import { type LanAdvertiser, displayHostname } from './lan-discovery.js';
 
 const log = createLogger('remote-serving');
 type ServeFetch = Parameters<typeof serve>[0]['fetch'];
@@ -20,19 +22,53 @@ export interface RemoteServingController {
   stop(): Promise<void>;
 }
 
+/**
+ * The addresses a listener on `host` can be reached at. A wildcard bind
+ * answers on every LAN address; one IPv4 interface answers only there; a
+ * loopback or IPv6-only bind has nothing a LAN peer could dial by IPv4.
+ */
+function advertisableAddresses(host: string): string[] {
+  if (host === '0.0.0.0' || host === '::') return listLanAddresses().map((a) => a.address);
+  if (isIPv4(host) && !host.startsWith('127.')) return [host];
+  return [];
+}
+
 export function createRemoteServingController(opts: {
   cert: LoopbackCert | null;
   /** Null when this service has no device identity (embedded inference). */
   deviceFingerprint: string | null;
   fetch: () => ServeFetch;
+  /** Announces the listener for LAN discovery while it runs. Null → never announced. */
+  advertiser?: LanAdvertiser | null;
 }): RemoteServingController {
   let server: ServerType | null = null;
   let current: RemoteServingStatus = { listening: false };
+  const advertiser = opts.advertiser ?? null;
+
+  const syncAdvertiser = async (config: GezelConfig['remoteServing']): Promise<void> => {
+    if (!advertiser) return;
+    const fingerprint = opts.deviceFingerprint;
+    if (!current.listening || !current.host || !current.port || !fingerprint) {
+      await advertiser.stop();
+      return;
+    }
+    if (config?.advertise === false) {
+      await advertiser.stop();
+      return;
+    }
+    await advertiser.advertise({
+      port: current.port,
+      fingerprint,
+      name: displayHostname(),
+      addresses: advertisableAddresses(current.host),
+    });
+  };
 
   const stop = async (): Promise<void> => {
     const active = server;
     server = null;
     current = { listening: false };
+    await advertiser?.stop();
     if (!active) return;
     await closeServer(active);
   };
@@ -66,6 +102,7 @@ export function createRemoteServingController(opts: {
       const host = bind || '0.0.0.0';
       const port = config.port ?? 6229;
       if (server && current.listening && current.host === host && current.port === port) {
+        await syncAdvertiser(config);
         return { ...current };
       }
 
@@ -83,11 +120,13 @@ export function createRemoteServingController(opts: {
         if (server !== ownedServer) return;
         server = null;
         current = { listening: false };
+        void advertiser?.stop();
       });
       log.warn(
         `[remote-serving] LAN listener on ${host}:${next.port} ` +
           `(identity ${deviceFingerprint.slice(0, 16)}…). Paired devices can run inference here.`,
       );
+      await syncAdvertiser(config);
       return { ...current };
     },
     stop,

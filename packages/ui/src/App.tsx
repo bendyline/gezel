@@ -8,7 +8,16 @@ import type {
   SecurityPolicy,
 } from '@bendyline/gezel';
 import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Suspense,
+  lazy,
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { api } from './api.js';
 import { ActivityControl } from './components/ActivityControl.js';
 import { AddFolderSheet, openAddFolder } from './components/AddFolderSheet.js';
@@ -41,7 +50,11 @@ import {
   requestOutputPaneRestore,
 } from './components/output-pane-maximize.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
-import { loadHomeViewModule, preloadTabContent } from './components/tab-content-loaders.js';
+import {
+  loadHomeViewModule,
+  preloadTabContent,
+  preloadTabData,
+} from './components/tab-content-loaders.js';
 import { useHostNotifications } from './components/useHostNotifications.js';
 import { useIsFirstRun } from './components/useIsFirstRun.js';
 import { readAppSurface } from './embedded/app-surface.js';
@@ -55,6 +68,7 @@ import { requestSettingsSection } from './settings-nav.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
 import { syncThemeFromConfig } from './theme.js';
+import { setVisibleInterval } from './visible-interval.js';
 
 const HomeView = lazy(() => loadHomeViewModule().then(({ HomeView }) => ({ default: HomeView })));
 const EmbeddedChat = lazy(() =>
@@ -293,7 +307,8 @@ function FullApp() {
     // user back to Home and clear their stored selection.
     setupOpened.current = true;
     beginNavigation(next ? tabKey(next) : 'home');
-    setSelection(next);
+    preloadTabData(next);
+    startTransition(() => setSelection(next));
     setNavigationOpen(false);
     try {
       if (next) window.localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify(next));
@@ -532,8 +547,8 @@ function FullApp() {
 
   useEffect(() => {
     refreshUsage();
-    const interval = setInterval(refreshUsage, 10_000);
-    return () => clearInterval(interval);
+    const interval = setVisibleInterval(refreshUsage, 10_000);
+    return () => interval();
   }, [refreshUsage]);
 
   // Seed the mid-turn set from every in-flight turn (each tagged with its
@@ -568,11 +583,11 @@ function FullApp() {
   useEffect(() => {
     reconcileActiveProjects();
     refreshPoisoned();
-    const t = window.setInterval(() => {
+    const t = setVisibleInterval(() => {
       reconcileActiveProjects();
       refreshPoisoned();
     }, 20_000);
-    return () => window.clearInterval(t);
+    return () => t();
   }, [reconcileActiveProjects, refreshPoisoned]);
   // A chat banner cleared a session's error — re-check the sidebar indicator.
   useEffect(() => {
@@ -1067,10 +1082,10 @@ function TaskSpeedMenu({
         });
     };
     load();
-    const id = window.setInterval(load, 5_000);
+    const id = setVisibleInterval(load, 5_000);
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      id();
     };
   }, [open]);
 
@@ -1598,10 +1613,10 @@ function QuotaMeters({
     };
 
     refresh();
-    const interval = window.setInterval(refresh, QUOTA_ACTIVITY_POLL_MS);
+    const interval = setVisibleInterval(refresh, QUOTA_ACTIVITY_POLL_MS);
     return () => {
       mounted = false;
-      window.clearInterval(interval);
+      interval();
     };
   }, []);
 

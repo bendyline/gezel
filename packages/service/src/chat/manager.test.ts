@@ -4199,18 +4199,24 @@ describe('ChatManager — per-session message queue', () => {
     expect(rec?.messages[0]?.nudge).toBeUndefined();
   });
 
-  it('an idle nudge keeps its background origin after losing the marker', async () => {
-    const session = await manager.createSession({ gezelId: 'ada' });
-    const stall = mock.scriptStreamThenStall('reply');
-    const pending = manager.send(session.id, 'not really a nudge', { nudge: true });
-    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
-      timeout: 5000,
-      interval: 10,
-    });
-    expect(manager.isUserDirectedTurn(session.id)).toBe(false);
-    stall.release();
-    await pending;
-  });
+  it.each([
+    ['the person’s nudge stays theirs', { nudge: true }, true],
+    ['a runtime nudge stays the runtime’s', { nudge: true, ambient: true }, false],
+  ])(
+    'an idle nudge keeps its origin after losing the marker: %s',
+    async (_label, opts, expected) => {
+      const session = await manager.createSession({ gezelId: 'ada' });
+      const stall = mock.scriptStreamThenStall('reply');
+      const pending = manager.send(session.id, 'not really a nudge', opts);
+      await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+        timeout: 5000,
+        interval: 10,
+      });
+      expect(manager.isUserDirectedTurn(session.id)).toBe(expected);
+      stall.release();
+      await pending;
+    },
+  );
 
   it('a merged queued turn stays visible when any part of it was visible', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });

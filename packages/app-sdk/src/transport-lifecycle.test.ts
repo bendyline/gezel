@@ -33,6 +33,8 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 const json = (body: unknown) => new Response(JSON.stringify(body));
+const health = (over: Record<string, unknown> = {}) =>
+  json({ version: 'test', apiCompat: { floor: 1, current: 1 }, ...over });
 
 describe('SDK transport ownership', () => {
   it('closes temporary detection transport after success or failure', async () => {
@@ -96,14 +98,16 @@ describe('SDK transport ownership', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
   it('transfers a discovered connection to the app and closes it once', async () => {
-    owned.fetch.mockResolvedValueOnce(json({ status: 'approved', token: 'scoped' }));
+    owned.fetch
+      .mockResolvedValueOnce(health())
+      .mockResolvedValueOnce(json({ status: 'approved', token: 'scoped' }));
     const app = await connect({ appId: 'test', appName: 'Test', scopes: ['openai'] });
     expect(owned.close).not.toHaveBeenCalled();
     await Promise.all([app.close(), app.close()]);
     expect(owned.close).toHaveBeenCalledTimes(1);
   });
   it('closes after authorization failure', async () => {
-    owned.fetch.mockRejectedValueOnce(new Error('offline'));
+    owned.fetch.mockResolvedValueOnce(health()).mockRejectedValueOnce(new Error('offline'));
     await expect(connect({ appId: 'test', appName: 'Test', scopes: ['openai'] })).rejects.toThrow(
       'offline',
     );
@@ -111,7 +115,7 @@ describe('SDK transport ownership', () => {
   });
   it('transfers native discovery ownership and cleans up failed probes', async () => {
     owned.fetch
-      .mockResolvedValueOnce(json({ version: 'test' }))
+      .mockResolvedValueOnce(health())
       .mockResolvedValueOnce(json({ status: 'approved', token: 'scoped' }));
     const authorization = await authorizeLocal({
       appId: 'test',
@@ -132,7 +136,11 @@ describe('SDK transport ownership', () => {
   it('never takes ownership of an injected transport, including runtime discovery', async () => {
     const close = vi.fn(async () => {});
     const borrowed = Object.assign(
-      vi.fn(async () => json({ status: 'approved', token: 'scoped' })),
+      vi.fn(async (url: string | URL | Request) =>
+        String(url).endsWith('/api/health')
+          ? health()
+          : json({ status: 'approved', token: 'scoped' }),
+      ),
       { close },
     );
     const app = await connect({
@@ -145,5 +153,33 @@ describe('SDK transport ownership', () => {
     expect(close).not.toHaveBeenCalled();
     expect(owned.fetch).not.toHaveBeenCalled();
     expect(owned.close).not.toHaveBeenCalled();
+  });
+  // A discovered daemon that predates the API handshake (the August
+  // 1.26226.50 autostart daemon of 2026-10-06) is unusable, not absent.
+  it('refuses a discovered daemon that predates the handshake and releases its transport', async () => {
+    owned.fetch.mockResolvedValueOnce(json({ version: '1.26226.50' }));
+    await expect(
+      connect({ appId: 'test', appName: 'Test', scopes: ['openai'] }),
+    ).rejects.toMatchObject({
+      code: 'daemon_incompatible',
+      message: expect.stringContaining('1.26226.50'),
+    });
+    owned.fetch.mockResolvedValueOnce(json({ version: '1.26226.50' }));
+    await expect(
+      authorizeLocal({ appId: 'test', appName: 'Test', scopes: ['openai'], daemon: { home } }),
+    ).rejects.toMatchObject({ code: 'daemon_incompatible' });
+    expect(owned.fetch).toHaveBeenCalledTimes(2);
+    expect(owned.close.mock.calls.length + owned.destroy.mock.calls.length).toBe(2);
+  });
+
+  it('reports a running but incompatible daemon from detectGezel', async () => {
+    owned.fetch.mockResolvedValueOnce(json({ version: '1.26226.50' }));
+    await expect(detectGezel()).resolves.toMatchObject({
+      running: true,
+      version: '1.26226.50',
+      compatible: false,
+    });
+    owned.fetch.mockResolvedValueOnce(health({ version: '1.26279.87' }));
+    await expect(detectGezel()).resolves.toMatchObject({ running: true, compatible: true });
   });
 });

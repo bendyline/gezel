@@ -11,6 +11,8 @@ import { useFirstRunModel } from '../components/useFirstRunModel.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
 import { releaseUrl } from '../github-urls.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
+import { peekApiRead } from '../shared-api-reads.js';
 import { useUpdateState } from '../update-state.js';
 import '../styles/home-view.css';
 import { HomeWorkshop } from './home/HomeWorkshop.js';
@@ -61,8 +63,12 @@ export function HomeView({
       | 'settings',
   ) => void;
 }) {
-  const [config, setConfig] = useState<ConfigResponse | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [config, setConfig] = useState<ConfigResponse | null>(
+    () => peekApiRead('getConfig') ?? null,
+  );
+  const [projects, setProjects] = useState<Project[]>(
+    () => peekApiRead('listProjects')?.projects ?? [],
+  );
   const [meesterName, setMeesterName] = useState<string | undefined>(undefined);
   const [meesterRoleBasedName, setMeesterRoleBasedName] = useState<string | undefined>(undefined);
   const [meesterIcon, setMeesterIcon] = useState<string | null>(null);
@@ -86,6 +92,23 @@ export function HomeView({
   // churned on boot.
   const [configured, setConfigured] = useState<boolean | null>(null);
   const needsFirstSetup = useFirstRun();
+  const [established, setEstablished] = useState(
+    () => peekApiRead('getSystemHomeInfo')?.usage.everUsed ?? false,
+  );
+  useEffect(() => {
+    // A portable host has no daemon home to report on and answers 501.
+    if (!runtimeCapabilities().daemonSettings) return;
+    let cancelled = false;
+    void api
+      .getSystemHomeInfo()
+      .then((home) => {
+        if (!cancelled) setEstablished(home.usage.everUsed);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -349,12 +372,10 @@ export function HomeView({
     else if (configured === true && sawFirstRunRef.current) setJustReady(true);
   }, [configured, firstRun]);
 
-  // Hold the loading splash until the verdict has actually settled — never
-  // guess first-run-vs-workshop while config is still loading or the probe is
-  // mid-flight, or a configured install would flash a download offer. The
-  // placeholder fades in only after a delay (see .home-loading-placeholder)
-  // so a fast boot shows an empty surface rather than a spinner blink.
-  if (!config || configured === null) {
+  // An established workspace can open while provider availability is checked.
+  // First-run setup still waits for that verdict to avoid flashing a download
+  // offer on a configured install. Delay the placeholder to avoid spinner blinks.
+  if (!config || (configured === null && !established)) {
     return (
       <div className="home-view home-view-loading" aria-busy="true">
         <div className="home-loading-placeholder" aria-live="polite">

@@ -1509,6 +1509,24 @@ export function binRuntimeRoot(root: string): string {
 }
 
 /**
+ * The supervisor's record that one bundled runtime (`node`, `pnpm`, `duckdb`,
+ * `mxc`) was hashed and matched after it was installed, so later launches
+ * can trust it from file metadata instead of re-hashing it.
+ */
+export function runtimeInstallStampPath(root: string, runtime: string): string {
+  return join(binRuntimeRoot(root), `${runtime}.stamp.json`);
+}
+
+/**
+ * Per-file record of an installed native engine payload that hashed to its
+ * source pins, so a later boot re-hashes only files whose metadata moved.
+ * Regenerable; safe to delete.
+ */
+export function nativePayloadVerificationPath(root: string): string {
+  return join(enginesRoot(root), 'native-payload', 'verified.json');
+}
+
+/**
  * Read the on-disk `config.json` without instantiating a Store. Used at
  * boot to discover `externalFolders` before the Store is constructed
  * (the Store needs `external` to resolve every other path correctly,

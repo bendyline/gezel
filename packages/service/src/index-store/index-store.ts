@@ -113,6 +113,10 @@ interface FileRow {
   loc: number | null;
 }
 
+/** At most one chunk on the file `f`: the static pass's name line, or nothing. */
+const WIPED_AI_SHADOW_CHUNKS = `(SELECT COUNT(*) FROM chunks c
+  WHERE c.collection_id = f.collection_id AND c.file_path = f.path) <= 1`;
+
 function symbolId(filePath: string, name: string): string {
   return `${filePath}#${name}`;
 }
@@ -1236,6 +1240,80 @@ export class IndexStore {
       this.replaceChunks(filePath, contentHash, chunks);
       this.markAiShadowOk(contentHash, filePath, model);
     });
+  }
+
+  /**
+   * Described media whose chunks lost the description: the shadow gate says
+   * 'ok' for the content, yet the file holds at most one chunk, the static
+   * pass's filename line. An indexed description is always a name line plus
+   * at least one body chunk. Keyset-paged by path, so a caller covers the
+   * collection once, and a file it could not change is never returned twice.
+   */
+  filesWithWipedAiShadow(afterPath: string, limit: number): FileRecord[] {
+    return this.db
+      .prepare(
+        `SELECT f.* FROM files f
+         JOIN shadow_state s ON s.content_hash = f.hash AND s.state = 'ok'
+         WHERE f.collection_id = ? AND f.path > ? AND f.trivial = 0
+           AND f.modality IN ('image','audio')
+           AND ${WIPED_AI_SHADOW_CHUNKS}
+         ORDER BY f.path LIMIT ?`,
+      )
+      .all<FileRow>(this.collectionId, afterPath, limit)
+      .map(rowToFile);
+  }
+
+  /**
+   * Repair files {@link filesWithWipedAiShadow} found, each only while it
+   * still reads that way: the AI tier writes on its own connection. A row with
+   * `chunks` gets its description back and keeps its 'ok' shadow row, whose
+   * stamp is the night tally's record of when the model ran. A row without
+   * (no description on disk) loses that row, so the AI tier adopts a sidecar
+   * that turns up or describes the file again. Either way the embedding gates
+   * reopen; the enrichment pass reuses the stored summary.
+   */
+  repairWipedAiShadows(
+    rows: ReadonlyArray<{ filePath: string; contentHash: string; chunks?: ChunkInput[] }>,
+  ): { restored: number; reopened: number } {
+    const counts = { restored: 0, reopened: 0 };
+    if (rows.length === 0) return counts;
+    return this.db.transaction(() => {
+      for (const row of rows) {
+        if (!this.aiShadowStillWiped(row.filePath, row.contentHash)) continue;
+        if (row.chunks) this.replaceChunks(row.filePath, row.contentHash, row.chunks);
+        else
+          this.db
+            .prepare("DELETE FROM shadow_state WHERE content_hash = ? AND state = 'ok'")
+            .run(row.contentHash);
+        this.reopenEmbeddingGates(row.contentHash);
+        counts[row.chunks ? 'restored' : 'reopened']++;
+      }
+      return counts;
+    });
+  }
+
+  private aiShadowStillWiped(filePath: string, contentHash: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 AS ok FROM files f
+         JOIN shadow_state s ON s.content_hash = f.hash AND s.state = 'ok'
+         WHERE f.collection_id = ? AND f.path = ? AND f.hash = ?
+           AND ${WIPED_AI_SHADOW_CHUNKS}`,
+      )
+      .get(this.collectionId, filePath, contentHash);
+    return Boolean(row);
+  }
+
+  /**
+   * A consumed gate never revisits its hash, so new chunks under it would
+   * stay unembedded. A failed summary row is kept: its attempts are the
+   * summarizer's budget, and the embed-only tier already admits it.
+   */
+  private reopenEmbeddingGates(contentHash: string): void {
+    this.db
+      .prepare('DELETE FROM enrichments WHERE content_hash = ? AND embedded_at IS NOT NULL')
+      .run(contentHash);
+    this.db.prepare('DELETE FROM embed_state WHERE content_hash = ?').run(contentHash);
   }
 
   private replaceChunks(

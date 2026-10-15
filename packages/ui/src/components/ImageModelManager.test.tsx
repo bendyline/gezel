@@ -159,4 +159,45 @@ describe('ImageModelManager downloads', () => {
     expect(await screen.findByRole('button', { name: 'Too large' })).toBeDisabled();
     expect(screen.getByText('needs ~9 GB graphics memory')).toBeInTheDocument();
   });
+
+  it('sizes the card by the whole download and says the need is memory', async () => {
+    // Ming-shaped: the text encoder is three times the diffusion weights.
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [
+        {
+          ...IMAGE_MODEL,
+          manifest: {
+            ...IMAGE_MODEL.manifest,
+            approxSizeBytes: 11.5 * GiB,
+            auxiliaryFiles: [
+              { role: 'llm', approxSizeBytes: 34.2 * GiB },
+              { role: 'vae', approxSizeBytes: 0.3 * GiB },
+            ],
+          },
+        },
+      ],
+    } as never);
+    vi.mocked(api.getImageModelFit).mockResolvedValue({
+      pool: 'unified',
+      budgetBytes: 96 * GiB,
+      totalRamBytes: 128 * GiB,
+      models: [
+        {
+          id: 'sdxl-turbo',
+          verdict: 'fits',
+          pool: 'unified',
+          weightBytes: 46 * GiB,
+          bytes: 52 * GiB,
+          exact: true,
+          neededBytes: 52 * GiB,
+          availableBytes: 96 * GiB,
+          reason: '',
+        },
+      ],
+    } as never);
+    render(<ImageModelManager />);
+
+    expect(await screen.findByText('46.0 GB')).toBeInTheDocument();
+    expect(screen.getByText('needs ~52 GB memory')).toBeInTheDocument();
+  });
 });

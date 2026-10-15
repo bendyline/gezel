@@ -5,8 +5,10 @@
  */
 import { basename, isAbsolute as isAbsolutePath, join as joinPath } from 'node:path';
 import {
+  type ApiCompatVerdict,
   GEZEL_VERSION,
   type StorageJob,
+  evaluateApiCompat,
   getLogLevel,
   getLogOutput,
   setLogLevel,
@@ -27,6 +29,7 @@ import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Command, Option } from 'commander';
 import { formatCliFailure, isNotFound } from '../cli-errors.js';
 import {
+  CLI_CLIENT_LABEL,
   CliError,
   type CliGlobals,
   applyHome,
@@ -465,6 +468,7 @@ program
       console.log(
         `gezeld system service port=${system.port} health=ok version=${health.version} startedAt=${health.startedAt}`,
       );
+      reportApiCompat(system.compat);
       return;
     }
     const broker = await describeMachineEngineBroker();
@@ -508,11 +512,25 @@ program
       console.log(
         `health ok: version=${health.version} startedAt=${health.startedAt}${engineNote}`,
       );
+      reportApiCompat(evaluateApiCompat(health, { client: CLI_CLIENT_LABEL }));
     } catch (err) {
       console.error(`health failed: ${(err as Error).message}`);
       process.exitCode = 1;
     }
   });
+
+/**
+ * A daemon can be healthy and still unusable by this CLI. Scripts gate on
+ * `gezel status` before running other commands, so that is a failure too.
+ */
+function reportApiCompat(verdict: ApiCompatVerdict): void {
+  if (verdict.compatible) {
+    console.log('api: compatible with this gezel CLI');
+    return;
+  }
+  console.log(`api: incompatible — ${verdict.reason}`);
+  process.exitCode = 1;
+}
 
 program
   .command('stop')
@@ -698,12 +716,8 @@ program
           reply.push(ev.content);
         } else if (ev.type === 'complete') {
           progress.settle();
-          printed = reply.finish();
-          // Fallback for providers that send the whole message at once.
-          if (!printed && ev.message.content) {
-            process.stdout.write(ev.message.content);
-            printed = true;
-          }
+          // The saved message stands in for providers that send it whole.
+          printed = reply.finish(ev.message.content);
         } else if (ev.type === 'error') {
           progress.settle();
           console.error(`\n${ev.error}`);

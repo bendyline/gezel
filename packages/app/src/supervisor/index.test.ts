@@ -21,6 +21,7 @@ import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { nativePayloadVerificationPath } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Hoisted mock context so vi.mock factories can read state set per-test.
@@ -91,6 +92,7 @@ const ctx = vi.hoisted(() => ({
     installedVersion: string | null;
   },
   logLines: [] as string[],
+  managedAutostart: null as null | import('../autostart/index.js').ManagedAutostart,
 }));
 
 vi.mock('./extract-pnpm.js', () => ({
@@ -187,6 +189,15 @@ vi.mock('@bendyline/gezel/native', () => ({
     return null;
   },
 }));
+// Never the real module: on a developer Mac or Linux box it reads and drives
+// the user's actual LaunchAgent / systemd unit through launchctl/systemctl.
+vi.mock('../autostart/index.js', () => ({
+  managedAutostart: vi.fn(() => ctx.managedAutostart),
+}));
+vi.mock('../autostart/runtime.js', () => ({
+  resolveAutostartNodePath: vi.fn(async (o: { home: string }) => `${o.home}/bin/node`),
+  resolveAutostartPnpmPath: vi.fn(async () => undefined),
+}));
 vi.mock('./mode.js', () => ({ resolveMode: vi.fn(), resolvePerUserMode: vi.fn() }));
 vi.mock('./system-service.js', () => ({
   readSystemServiceRuntime: vi.fn(() => Promise.resolve(ctx.systemRuntime)),
@@ -263,7 +274,8 @@ vi.mock('@bendyline/gezel-service', () => ({
 // Imports must come after vi.mock so they pick up the mocked versions.
 const { SupervisedService, connectOrStart, gracefullyStop, healthWithTimeout, stopProcessByPid } =
   await import('./index.js');
-const { resolveMode } = await import('./mode.js');
+const { resolveMode, resolvePerUserMode } = await import('./mode.js');
+const { resolveAutostartNodePath } = await import('../autostart/runtime.js');
 const { resolveNativeBinaryPath, verifyLlamaBinaryAgainstCheckoutPin } = await import(
   './native-bin.js'
 );
@@ -327,6 +339,7 @@ beforeEach(async () => {
   };
   ctx.compatibilityIssue = null;
   ctx.logLines = [];
+  ctx.managedAutostart = null;
   // "We can't read our own bundle version" is the default, which makes every
   // version check a no-op. Reset explicitly: `vi.clearAllMocks()` clears call
   // records but leaves implementations in place, so a test that stubs a
@@ -1012,6 +1025,186 @@ describe('Branch 4 — local-spawn-packaged', () => {
   });
 });
 
+// ── Autostart handover ──────────────────────────────────────────────
+
+/**
+ * A registered autostart unit whose daemon publishes `ctx.runtime`. Starting
+ * it moves the runtime to a fresh pid serving `startsVersion`.
+ */
+function fakeAutostart(opts: {
+  home?: string;
+  current: boolean;
+  startsVersion: string;
+  running: { pid: number; version: string } | null;
+}) {
+  const versions = new Map<number, string>();
+  const publish = (pid: number, version: string) => {
+    versions.set(pid, version);
+    ctx.runtime = {
+      pid,
+      port: pid,
+      baseUrl: `https://127.0.0.1:${pid}`,
+      token: `tok-${pid}`,
+      cert: null,
+    };
+  };
+  if (opts.running) publish(opts.running.pid, opts.running.version);
+  let nextPid = 7000;
+  const start = () => publish(nextPid++, opts.startsVersion);
+  ctx.health = (_signal, connection) => {
+    const pid = Number(new URL(connection?.baseUrl ?? 'https://x:1').port);
+    const version = versions.get(pid);
+    return version
+      ? Promise.resolve({ ok: true, version })
+      : Promise.reject(new Error('connection refused'));
+  };
+  const autostart = {
+    registeredHome: vi.fn(async () => opts.home ?? testHome),
+    isCurrent: vi.fn(async () => opts.current),
+    install: vi.fn(async () => start()),
+    restart: vi.fn(async () => start()),
+    stop: vi.fn(async () => {
+      ctx.runtime = null;
+    }),
+  };
+  ctx.managedAutostart = autostart;
+  return autostart;
+}
+
+describe('Autostart handover (packaged, per-user)', () => {
+  // The incident: the app SIGTERMed a version-mismatched autostart daemon,
+  // launchd's KeepAlive relaunched it, and it won the home back from the
+  // app's own spawn on most launches.
+  it('repairs a stale unit and adopts its daemon instead of killing it by pid', async () => {
+    vi.mocked(readBundleMeta).mockResolvedValue(bundleMeta('1.26279.87'));
+    const autostart = fakeAutostart({
+      current: false,
+      startsVersion: '1.26279.87',
+      running: { pid: 4242, version: '1.26226.50' },
+    });
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'local-adopt',
+      baseUrl: 'https://127.0.0.1:4242',
+      token: 'tok-4242',
+      cert: null,
+      pid: 4242,
+    });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+
+    expect(svc.mode).toBe('local-adopt');
+    expect(svc.baseUrl).toBe('https://127.0.0.1:7000');
+    expect(autostart.install).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gezelHome: testHome,
+        nodePath: `${testHome}/bin/node`,
+        gezeldPath: expect.stringMatching(/dist[\\/]bin[\\/]gezeld\.js$/),
+      }),
+    );
+    expect(stopDaemonProcessByPid).not.toHaveBeenCalled();
+    expect(discoverOrSpawn).not.toHaveBeenCalled();
+    await svc.shutdown();
+    // Adopted, not owned: quitting leaves the autostart daemon running.
+    expect(autostart.restart).not.toHaveBeenCalled();
+  });
+
+  it('stops a unit it cannot repair, serves itself, and leaves it stopped on quit', async () => {
+    const autostart = fakeAutostart({
+      current: false,
+      startsVersion: '1.0.0',
+      running: null,
+    });
+    vi.mocked(resolveAutostartNodePath).mockRejectedValueOnce(
+      new Error('verified bundled Node runtime is unavailable'),
+    );
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'local-spawn-packaged' });
+    vi.mocked(resolvePerUserMode).mockResolvedValue({ kind: 'local-spawn-packaged' });
+    vi.mocked(discoverOrSpawn).mockResolvedValue({
+      child: makeFakeChild(),
+      baseUrl: 'https://127.0.0.1:7777',
+      token: 'spawn-tok',
+      cert: null,
+      pid: 12345,
+    } as unknown as Awaited<ReturnType<typeof discoverOrSpawn>>);
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+
+    expect(svc.mode).toBe('local-spawn-packaged');
+    expect(autostart.install).not.toHaveBeenCalled();
+    expect(autostart.stop).toHaveBeenCalledTimes(1);
+    await svc.shutdown();
+    expect(autostart.restart).not.toHaveBeenCalled();
+  });
+
+  it('hands the home to autostart on quit when it was enabled mid-session', async () => {
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'local-spawn-packaged' });
+    vi.mocked(discoverOrSpawn).mockResolvedValue({
+      child: makeFakeChild(),
+      baseUrl: 'https://127.0.0.1:7777',
+      token: 'spawn-tok',
+      cert: null,
+      pid: 12345,
+    } as unknown as Awaited<ReturnType<typeof discoverOrSpawn>>);
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+    expect(svc.mode).toBe('local-spawn-packaged');
+
+    const autostart = fakeAutostart({ current: true, startsVersion: '1.0.0', running: null });
+    await svc.shutdown();
+    expect(autostart.restart).toHaveBeenCalledTimes(1);
+  });
+
+  it('never hands over to a unit registered for another home', async () => {
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'local-spawn-packaged' });
+    vi.mocked(discoverOrSpawn).mockResolvedValue({
+      child: makeFakeChild(),
+      baseUrl: 'https://127.0.0.1:7777',
+      token: 'spawn-tok',
+      cert: null,
+      pid: 12345,
+    } as unknown as Awaited<ReturnType<typeof discoverOrSpawn>>);
+    const autostart = fakeAutostart({
+      home: '/Users/someone/.gezel',
+      current: false,
+      startsVersion: '1.0.0',
+      running: null,
+    });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+    expect(svc.mode).toBe('local-spawn-packaged');
+    await svc.shutdown();
+    expect(autostart.install).not.toHaveBeenCalled();
+    expect(autostart.stop).not.toHaveBeenCalled();
+    expect(autostart.restart).not.toHaveBeenCalled();
+  });
+});
+
+describe('Spawn race recovery', () => {
+  it('version-checks the daemon that won the home instead of falling back to embedded', async () => {
+    vi.mocked(readBundleMeta).mockResolvedValue(bundleMeta('1.0.0'));
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'local-spawn-packaged' });
+    const lost = Object.assign(new Error('gezeld exited during startup (exit code 1)'), {
+      name: 'DaemonExitedDuringStartupError',
+      holderPid: 777,
+    });
+    vi.mocked(discoverOrSpawn).mockRejectedValueOnce(lost);
+    vi.mocked(resolvePerUserMode).mockResolvedValue({
+      kind: 'local-adopt',
+      baseUrl: 'https://127.0.0.1:7770',
+      token: 'winner',
+      cert: null,
+      pid: 777,
+    });
+    ctx.health = () => Promise.resolve({ ok: true, version: '1.0.0' });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+
+    expect(svc.mode).toBe('local-adopt');
+    expect(svc.baseUrl).toBe('https://127.0.0.1:7770');
+    expect(svc.fallbackReason).toBeNull();
+    await svc.shutdown();
+  });
+});
+
 // ── Branch 5: local-spawn-dev ───────────────────────────────────────
 
 describe('Branch 5 — local-spawn-dev', () => {
@@ -1110,6 +1303,7 @@ describe('Branch 3 — embedded', () => {
     expect(reuseVerifiedElectronNativeBinaries).toHaveBeenCalledWith({
       candidates: [ctx.nativeRoot],
       allowStandaloneMacPayload: true,
+      cacheFile: nativePayloadVerificationPath(testHome),
     });
     await svc.shutdown();
   });
@@ -1150,6 +1344,7 @@ describe('Branch 3 — embedded', () => {
     const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
     expect(reuseVerifiedElectronNativeBinaries).toHaveBeenCalledWith({
       candidates: [installedRoot],
+      cacheFile: nativePayloadVerificationPath(testHome),
     });
     await svc.shutdown();
   });
@@ -1176,12 +1371,15 @@ describe('Branch 3 — embedded', () => {
     const svc = await connectOrStart(baseOpts({ forceEmbedded: true }));
 
     expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(installedRoot);
+    // One cache for both calls, so each keeps the other's records.
     expect(reuseVerifiedElectronNativeBinaries).toHaveBeenNthCalledWith(1, {
       candidates: [ctx.nativeRoot],
       allowStandaloneMacPayload: true,
+      cacheFile: nativePayloadVerificationPath(testHome),
     });
     expect(reuseVerifiedElectronNativeBinaries).toHaveBeenNthCalledWith(2, {
       candidates: [installedRoot],
+      cacheFile: nativePayloadVerificationPath(testHome),
     });
     await svc.shutdown();
   });

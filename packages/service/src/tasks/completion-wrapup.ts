@@ -261,8 +261,15 @@ export function taskFinishedQuestion(opts: {
 }): Question {
   const { task, thread, deliverable } = opts;
   const outputs = outputsWithDeliverableFirst(opts.outputs, deliverable);
-  const shown = outputs.slice(0, 3);
-  const lines = [`**${task.title}** is finished.`];
+  // A board's data file is not a thing to hand over: `trip.json` under
+  // "is finished" read as a filename for a trip.
+  const board = Boolean(deliverable && 'view' in deliverable && deliverable.view === 'output-page');
+  const shown = board ? [] : outputs.slice(0, 3);
+  const lines = [
+    board
+      ? `**${task.title}** is ready to look at on the project's Output page.`
+      : `**${task.title}** is finished.`,
+  ];
   if (shown.length > 0) {
     lines.push(
       '',
@@ -298,29 +305,80 @@ export function taskFinishedQuestion(opts: {
   };
 }
 
+/** Longest question a wrap-up quotes; a longer one is the maker's to explain. */
+const MAKER_QUESTION_MAX_CHARS = 280;
+
+/**
+ * The question the maker ended on, from the last two sentences of their
+ * final reply, or undefined when they asked nothing.
+ */
+export function closingQuestion(text: string): string | undefined {
+  const plain = text
+    .replace(/[*_`#>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const sentences = (plain.match(/[^.!?]+[.!?]+/g) ?? []).map((part) => part.trim());
+  for (const sentence of sentences.slice(-2).reverse()) {
+    if (sentence.endsWith('?')) {
+      return sentence.length <= MAKER_QUESTION_MAX_CHARS ? sentence : undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * What the maker asked at the end of their work, read from the task's own
+ * threads. A Reisleider that planned one day of a week asked whether to go
+ * on; the owner, told the plan was done, never saw the question.
+ */
+export async function loadMakerQuestion(
+  store: Pick<Store, 'listSessions' | 'getSession'>,
+  task: Task,
+  makerGezelId: string,
+): Promise<string | undefined> {
+  const summaries = await store.listSessions({ projectId: task.projectId }).catch(() => []);
+  let latest: { at: string; content: string } | undefined;
+  for (const summary of summaries) {
+    if (summary.taskRef !== task.ref || summary.gezelId !== makerGezelId) continue;
+    const session = await store.getSession(summary.gezelId, summary.id).catch(() => null);
+    for (const message of session?.messages ?? []) {
+      if (message.role !== 'assistant' || message.synthetic || !message.content?.trim()) continue;
+      if (!latest || message.at > latest.at) latest = { at: message.at, content: message.content };
+    }
+  }
+  return latest ? closingQuestion(latest.content) : undefined;
+}
+
 /**
  * The message itself: warm, short, and only true things. With a deliverable
  * it leads with that one file and lists the rest as what was made on the
  * way; the chat closes the bubble with the deliverable's card, so the path
- * here is for the model's next turn as much as for the reader.
+ * here is for the model's next turn as much as for the reader. A board is
+ * "ready to look at", never "finished": its kickoff ends at a first draft.
+ * The maker's open question is passed on in their words.
  */
 export function composeTaskWrapUp(
   task: Task,
   outputs: readonly ReferencedFile[],
   figures?: FigureReview | null,
   deliverable?: (ReferencedFile & { view?: 'output-page' }) | null,
+  ask?: { name: string; question: string } | null,
 ): string {
-  const lines = [`All done — **${task.title}** is finished.`];
   // A project type's page reads the file; the page is what to look at.
   const board = deliverable?.view === 'output-page';
+  const lines = [
+    board
+      ? `**${task.title}** is ready to look at on the project's Output page.`
+      : `All done — **${task.title}** is finished.`,
+  ];
   const rest = deliverable ? outputs.filter((file) => !sameFile(file, deliverable)) : outputs;
   if (deliverable) {
-    lines.push(
-      '',
-      board
-        ? "It's on the project's Output page."
-        : `Here's your ${deliverableFormatNoun(deliverable.path)}: ${fileLabel(deliverable)}`,
-    );
+    if (!board) {
+      lines.push(
+        '',
+        `Here's your ${deliverableFormatNoun(deliverable.path)}: ${fileLabel(deliverable)}`,
+      );
+    }
     const shown = rest.slice(0, WRAP_UP_MAX_FILES - 1);
     if (shown.length > 0) {
       lines.push('', 'Along the way it also made:', '', ...shown.map((f) => `- ${fileLabel(f)}`));
@@ -339,6 +397,17 @@ export function composeTaskWrapUp(
   }
   const checks = renderFigureReview(figures, 'Before you send anything, check:');
   if (checks.length > 0) lines.push('', ...checks);
+  if (ask) {
+    lines.push(
+      '',
+      `${ask.name} asks: “${ask.question}”`,
+      '',
+      deliverable
+        ? `Answer ${ask.name} with **Make changes**, or open it to see it first.`
+        : `Answer ${ask.name} in the project's chat, or tell me what you would like.`,
+    );
+    return lines.join('\n');
+  }
   lines.push(
     '',
     board

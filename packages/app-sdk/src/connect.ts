@@ -1,4 +1,5 @@
 import { GezelApp } from './client.js';
+import { assertCompatibleDaemon } from './compat.js';
 import { readRuntimeForConnect } from './detect.js';
 import { GezelSdkError, errorFromResponse } from './errors.js';
 import { scopeNeedsVerificationCode } from './scopes.js';
@@ -228,6 +229,13 @@ async function resolveBaseUrlAndFetch(
       "gezel daemon not found — no runtime files under the gezel home's runtime/ directory (default ~/.gezel, GEZEL_HOME overrides). Start the gezel app or run `gezeld` first.",
       { code: 'daemon_not_running' },
     );
+  }
+  try {
+    await assertCompatibleDaemon(discovered.baseUrl, discovered.fetch);
+  } catch (error) {
+    if (discovered.destroy) await discovered.destroy();
+    else await discovered.close?.();
+    throw error;
   }
   return {
     baseUrl: discovered.baseUrl,

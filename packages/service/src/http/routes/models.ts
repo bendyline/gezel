@@ -21,6 +21,7 @@ const VALID_PROVIDERS: readonly ProviderName[] = [
   'mlx',
   'ds4',
   'apple-foundation-models',
+  'remote',
 ];
 
 /**

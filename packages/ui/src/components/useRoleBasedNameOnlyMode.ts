@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { peekApiRead } from '../shared-api-reads.js';
 
 /**
  * Subscribes the "boring mode" flag (config.roleBasedNameOnlyMode) into
@@ -10,7 +11,7 @@ import { api } from '../api.js';
  * a route change or manual reload.
  */
 export function useRoleBasedNameOnlyMode(): boolean {
-  const [on, setOn] = useState<boolean>(false);
+  const [on, setOn] = useState(() => peekApiRead('getConfig')?.roleBasedNameOnlyMode ?? false);
 
   useEffect(() => {
     let cancelled = false;

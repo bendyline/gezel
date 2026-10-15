@@ -66,13 +66,38 @@ export function briefAsksForBuild(text: string): boolean {
   );
 }
 
+/**
+ * Words a goal is phrased in rather than what it is about, never a type's
+ * signature even when only one type carries them. Event Planner's "planning"
+ * tied a meester's "planning healthy, mostly vegetarian meals" with Meal
+ * Planner, so the brief routed nowhere and a build crew got the week of meals
+ * (2026-10-14). "go", "words" and "home" read "let's go to Lisbon", "500
+ * words on…" and "at home" as a board game, a word game and a house manual.
+ */
+const GENERIC_TAGS = new Set([
+  'planning',
+  'go',
+  'words',
+  'home',
+  'business',
+  'design',
+  'study',
+  'training',
+  'documents',
+  'development',
+  'community',
+  'drive',
+  'offer',
+  'drafting',
+]);
+
 /** A tag counts toward a type only when no other candidate shares it. */
 function distinctiveTags(types: readonly BriefRoutableType[]): Map<string, string> {
   const owners = new Map<string, Set<string>>();
   for (const type of types) {
     for (const raw of type.tags ?? []) {
       const tag = raw.trim().toLowerCase();
-      if (!tag || QUERY_STOP_WORDS.has(tag)) continue;
+      if (!tag || QUERY_STOP_WORDS.has(tag) || GENERIC_TAGS.has(tag)) continue;
       const set = owners.get(tag) ?? new Set<string>();
       set.add(type.id);
       owners.set(tag, set);
@@ -93,6 +118,9 @@ function briefTokens(text: string): string[] {
 
 function tokenNamesTag(token: string, tag: string): boolean {
   if (token === tag || token === `${tag}s` || token === `${tag}es`) return true;
+  // A plural tag names its singular too: a meester brief that said only
+  // "meal plan" never reached Meal Planner's "meals" (2026-10-14).
+  if (tag.length >= 4 && tag.endsWith('s') && token === tag.slice(0, -1)) return true;
   // "traveling" names "travel"; short tags need the whole word.
   return tag.length >= 5 && token.startsWith(tag);
 }
@@ -134,11 +162,21 @@ export function projectTypeNamedByBrief(
   return namedProjectType(brief, types)?.type.id ?? null;
 }
 
-function namedProjectType(
+/**
+ * Every routable type the brief's distinctive tags touch, ties included. A
+ * kickoff uses it to let the person's own sentence settle a brief the meester
+ * worded more loosely: "planning healthy meals" touches two types, and the
+ * person's "plan a week of meals" names which one they meant.
+ */
+export function projectTypesMentionedByBrief(
   brief: string,
   types: readonly BriefRoutableType[],
-): { type: BriefRoutableType; hits: string[] } | null {
-  if (!brief.trim() || briefAsksForBuild(brief)) return null;
+): string[] {
+  if (!brief.trim() || briefAsksForBuild(brief)) return [];
+  return [...typeHits(brief, types).keys()];
+}
+
+function typeHits(brief: string, types: readonly BriefRoutableType[]): Map<string, string[]> {
   // Distinctive across the whole catalog: "writing" is shared with a chat
   // type even though only one of the two has a lead to route to.
   const unique = distinctiveTags(types);
@@ -150,6 +188,16 @@ function namedProjectType(
     if (!tokens.some((token) => tokenNamesTag(token, tag))) continue;
     hitsByType.set(typeId, [...(hitsByType.get(typeId) ?? []), tag]);
   }
+  return hitsByType;
+}
+
+function namedProjectType(
+  brief: string,
+  types: readonly BriefRoutableType[],
+): { type: BriefRoutableType; hits: string[] } | null {
+  if (!brief.trim() || briefAsksForBuild(brief)) return null;
+  const candidates = types.filter(isRoutable);
+  const hitsByType = typeHits(brief, types);
   let best: { id: string; hits: string[] } | null = null;
   let tied = false;
   for (const [id, hits] of hitsByType) {

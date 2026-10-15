@@ -948,6 +948,41 @@ function envGrowthCeilingTokens(): number | null {
 }
 
 /**
+ * The most KV cache an automatic choice plans for one llama.cpp engine:
+ * adaptive growth stops here, and the Gemma `--swa-full` auto-default is
+ * declined when its full-size cache would pass it. Explicit settings (a
+ * numeric context, a pinned `swaFull`) are the operator's call and bypass it;
+ * it never shortens the ladder-settled base window either.
+ *
+ * Past this a bigger cache buys nothing: llama.cpp's prefill and decode cost
+ * follows the tokens actually present, not the reservation, so the rest only
+ * defers compaction. Across the 2026-10-12 scorecard (DGX Spark, n=3 per
+ * scenario) gemma4-31b never passed 41.7K tokens of an 82,944-token window
+ * it held as a 69.6 GB `--swa-full` cache, and qwen3.8-27b peaked at 94.8K,
+ * about 6 GB of its KV. That memory is worth more as a second resident
+ * model, and the same week two daemons each grew into one unified pool and
+ * hung the machine.
+ */
+export const AUTO_KV_CACHE_MAX_BYTES = 32 * GIB;
+
+/** {@link AUTO_KV_CACHE_MAX_BYTES}, unless `GEZEL_LLAMA_AUTO_KV_MAX_GB` overrides it. */
+export function autoKvCacheMaxBytes(): number {
+  const raw = process.env.GEZEL_LLAMA_AUTO_KV_MAX_GB;
+  const gb = raw ? Number.parseFloat(raw) : Number.NaN;
+  return Number.isFinite(gb) && gb > 0 ? gb * GIB : AUTO_KV_CACHE_MAX_BYTES;
+}
+
+/**
+ * The share of a shared pool's live free memory, left after the un-grown
+ * launch, that adaptive growth may spend. The rest stays free for whatever
+ * starts next: the desktop's own apps, a second model, another daemon. The
+ * base grant already holds the practical window; growth is the extra, and an
+ * extra that takes everything down to the OS reserve leaves the next tenant
+ * to page the machine.
+ */
+export const ADAPTIVE_GROWTH_SHARED_FREE_SHARE = 0.5;
+
+/**
  * The context floor THIS host is held to. A 16 GB Mac or an 8 GB card cannot
  * back a 64K window next to the weights, and the admission ladder's only
  * remaining move there is to deny the launch — so those hosts run at
@@ -1351,6 +1386,8 @@ export interface AdaptiveCtxGrowthInput {
    * growth's to spend.
    */
   allowSlotTrade?: boolean;
+  /** Test seam; defaults to {@link autoKvCacheMaxBytes}. */
+  maxKvCacheBytes?: number;
 }
 
 export interface AdaptiveCtxGrowthResult {
@@ -1393,6 +1430,11 @@ export interface AdaptiveCtxGrowthResult {
  * the inputs match the base clamp. Inherits `VRAM_USABLE_FRACTION` and
  * {@link LOCAL_ENGINE_COMPUTE_HEADROOM} through the shared clamp.
  *
+ * Ceiling: total KV never grows past {@link autoKvCacheMaxBytes}, and on a
+ * shared pool with a live reading, never past the base KV plus
+ * {@link ADAPTIVE_GROWTH_SHARED_FREE_SHARE} of what the base launch leaves
+ * free. Both only stop growth; neither shrinks the base grant.
+ *
  * MoE models never grow on a discrete card: `planMoeOffload` places routed
  * experts around the KV reserve, and a grown reserve would silently evict
  * experts from VRAM — trading decode speed for context behind the user's
@@ -1419,6 +1461,33 @@ export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): Adapti
       : undefined;
   const cardBytes =
     measuredFreeVram !== undefined ? Math.min(input.vramBytes, measuredFreeVram) : input.vramBytes;
+  const kvTotalAt = (slots: number, ctx: number) =>
+    slots * (kvFixedPerSlot + ctx * input.kvBytesPerToken);
+  const baseKv = kvTotalAt(startSlots, base);
+  const capKv = Math.max(0, input.maxKvCacheBytes ?? autoKvCacheMaxBytes());
+  // Priced like the shared clamp (same OS reserve, same compute headroom) so
+  // "what the base launch leaves free" means the same thing to both.
+  const leftAfterBase =
+    !discrete && input.freeSystemRamBytes !== undefined
+      ? Math.max(
+          0,
+          (input.freeSystemRamBytes -
+            liveRamOsReserveBytes() -
+            CTX_PLANNING_MARGIN_BYTES -
+            input.weightsResidentBytes) *
+            (1 - LOCAL_ENGINE_COMPUTE_HEADROOM) -
+            baseKv,
+        )
+      : undefined;
+  const shareKv =
+    leftAfterBase !== undefined
+      ? baseKv + leftAfterBase * ADAPTIVE_GROWTH_SHARED_FREE_SHARE
+      : Number.POSITIVE_INFINITY;
+  const kvCeiling = Math.min(capKv, shareKv);
+  const ctxUnderCeiling = (slots: number): number => {
+    const perSlot = kvCeiling / slots - kvFixedPerSlot;
+    return perSlot > 0 ? Math.floor(perSlot / input.kvBytesPerToken / 1024) * 1024 : 0;
+  };
   const safeAt = (slots: number): number => {
     const safe = clampCtxTokensForMemory({
       requestedPerTurnCtxTokens: target,
@@ -1440,7 +1509,7 @@ export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): Adapti
       vramBytes: discrete ? cardBytes : 0,
       minPerTurnCtxTokens: 1,
     });
-    return Math.min(target, safe.perTurnCtxTokens);
+    return Math.min(target, safe.perTurnCtxTokens, ctxUnderCeiling(slots));
   };
   // Walk the slot count down only while the target stays out of reach:
   // the first (largest) count that reaches it wins, else the floor count
@@ -1448,7 +1517,9 @@ export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): Adapti
   const floorSlots = input.allowSlotTrade
     ? Math.min(startSlots, ADAPTIVE_GROWTH_MIN_SLOTS)
     : startSlots;
-  const noTradeCtx = safeAt(startSlots);
+  // Floored at the base grant: when the base already sits above the KV
+  // ceiling, the ceiling must not make a lane trade look like a big gain.
+  const noTradeCtx = Math.max(base, safeAt(startSlots));
   let chosenSlots = startSlots;
   let chosenCtx = noTradeCtx;
   for (let slots = startSlots - 1; slots >= floorSlots && chosenCtx < target; slots -= 1) {
@@ -1473,6 +1544,12 @@ export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): Adapti
     measuredFreeVram !== undefined && measuredFreeVram < Math.min(fastLeft, input.vramBytes)
       ? ` (capped at the ~${gb(measuredFreeVram)} of graphics memory other applications leave free)`
       : '';
+  const ceilingNote =
+    grownTo < target && ctxUnderCeiling(chosenSlots) <= grownTo
+      ? kvCeiling === capKv
+        ? `; stopped at the ~${gb(capKv)} automatic KV ceiling`
+        : `; stopped to keep ~${gb((leftAfterBase ?? 0) * (1 - ADAPTIVE_GROWTH_SHARED_FREE_SHARE))} free for other work`
+      : '';
   return {
     perTurnCtxTokens: grownTo,
     slots: chosenSlots,
@@ -1480,8 +1557,8 @@ export function planAdaptiveContextGrowth(input: AdaptiveCtxGrowthInput): Adapti
     reason:
       `growing context ${base} → ${grownTo} tokens/turn at ${chosenSlots} slot${chosenSlots === 1 ? '' : 's'}${slotNote} ` +
       `(target ${target}): weights ~${gb(input.weightsResidentBytes)} + grown KV ` +
-      `~${gb(chosenSlots * (kvFixedPerSlot + grownTo * input.kvBytesPerToken))} fits fast memory ` +
-      `~${gb(fastLeft)}${measuredNote}`,
+      `~${gb(kvTotalAt(chosenSlots, grownTo))} fits fast memory ` +
+      `~${gb(fastLeft)}${measuredNote}${ceilingNote}`,
   };
 }
 

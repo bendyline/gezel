@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { UnifiedSearchResult } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
+import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
+import { sessionRouteGuard } from '../http/scope-guard.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
@@ -248,6 +250,154 @@ describe('isUserDirectedTurn', () => {
     expect(await duringTurn(owner.id)).toBe(true);
     const visitor = await manager.createSession({ gezelId: 'ada', visitorAccess: true });
     expect(await duringTurn(visitor.id)).toBe(false);
+  });
+});
+
+describe('a message the person types while a turn runs', () => {
+  // The composer sends it as a nudge, queued behind the running turn. The turn
+  // it drives is the person's, as on the phone, so it may write a note about
+  // them. The runtime's own sends may not, whether or not they carry `nudge`.
+  beforeEach(() => {
+    // Extraction one-shots would race the turns for the scripted stalls.
+    vi.stubEnv('GEZEL_DISABLE_MEMORY_EXTRACTION', '1');
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const post = (body: unknown): RequestInit => ({
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  /** The session-token guard, asking this manager the way server.ts wires it. */
+  function sessionGuard(record: { id: string; projectId: string; gezelId: string }) {
+    const app = new Hono();
+    app.use('*', async (c, next) => {
+      c.set('auth', {
+        appId: `session:${record.id}`,
+        scopes: ['session'],
+        projectId: record.projectId,
+        gezelId: record.gezelId,
+      });
+      await next();
+    });
+    app.use(
+      '/api/*',
+      sessionRouteGuard({ isUserDirectedTurn: (id) => manager.isUserDirectedTurn(id) }),
+    );
+    app.all('*', (c) => c.json({ ok: true }));
+    return app;
+  }
+
+  async function savePersonNote(app: Hono): Promise<number> {
+    const res = await app.request(
+      '/api/memory/save',
+      post({ scope: 'user', id: 'user', text: 'Is vegetarian.' }),
+    );
+    return res.status;
+  }
+
+  async function waitForSends(count: number): Promise<void> {
+    await vi.waitFor(
+      () => expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(count),
+      { timeout: 15_000 },
+    );
+  }
+
+  /**
+   * Queue a send behind the person's running turn, then ask the guard for a
+   * note about the person while the queued send's own turn runs.
+   */
+  async function saveStatusDuringQueuedTurn(
+    opts: Parameters<ChatManager['send']>[2],
+  ): Promise<number> {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const app = sessionGuard(session);
+    const first = mock.scriptStreamThenStall('Planning the menu.');
+    const second = mock.scriptStreamThenStall('Noted.');
+    const running = manager.send(session.id, 'Plan a dinner menu for Friday.');
+    await waitForSends(1);
+    const queued = manager.send(session.id, 'Remember that I am vegetarian.', opts);
+    expect(manager.listSessionQueue(session.id)).toHaveLength(1);
+    first.release();
+    await running;
+    await waitForSends(2);
+    try {
+      return await savePersonNote(app);
+    } finally {
+      second.release();
+      await queued;
+    }
+  }
+
+  it('lets the turn a person’s nudge drives save a note about them', async () => {
+    expect(await saveStatusDuringQueuedTurn({ nudge: true })).toBe(200);
+  }, 30_000);
+
+  it.each([
+    ['an ambient nudge', { nudge: true, ambient: true }],
+    ['a background-lane nudge', { nudge: true, lane: 'background' as const }],
+    ['a system nudge (stuck-step re-drive)', { nudge: true, messageOrigin: 'system' as const }],
+    ['a Keurmeester takeover', { lane: 'background' as const, messageOrigin: 'system' as const }],
+    [
+      'another gezel’s message (the voorman idle nudge)',
+      { from: { gezelId: 'meester', gezelName: 'Meester' }, lane: 'background' as const },
+    ],
+  ])(
+    'refuses the same note on %s',
+    async (_label, opts) => {
+      expect(await saveStatusDuringQueuedTurn(opts)).toBe(403);
+    },
+    30_000,
+  );
+
+  it('never merges a person’s nudge with a runtime one, so each turn keeps its own answer', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const app = sessionGuard(session);
+    const first = mock.scriptStreamThenStall('Planning the menu.');
+    const personTurn = mock.scriptStreamThenStall('Noted.');
+    const runtimeTurn = mock.scriptStreamThenStall('Continuing.');
+    const running = manager.send(session.id, 'Plan a dinner menu for Friday.');
+    await waitForSends(1);
+    const fromPerson = manager.send(session.id, 'Remember that I am vegetarian.', {
+      nudge: true,
+    });
+    const fromRuntime = manager.send(session.id, 'Keep going with the plan.', {
+      nudge: true,
+      ambient: true,
+    });
+    expect(manager.listSessionQueue(session.id)).toHaveLength(2);
+
+    first.release();
+    await running;
+    await waitForSends(2);
+    expect(await savePersonNote(app)).toBe(200);
+    personTurn.release();
+    await fromPerson;
+    await waitForSends(3);
+    expect(await savePersonNote(app)).toBe(403);
+    runtimeTurn.release();
+    await fromRuntime;
+
+    const record = await store.getSession('ada', session.id);
+    expect(record?.messages.filter((m) => m.role === 'user').map((m) => m.content)).toEqual([
+      'Plan a dinner menu for Friday.',
+      'Remember that I am vegetarian.',
+      'Keep going with the plan.',
+    ]);
+  }, 30_000);
+
+  it('keeps the send route, and so the nudge flag, out of a session token’s reach', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const app = sessionGuard(session);
+    const forged = await app.request(
+      `/api/sessions/${session.id}/send`,
+      post({ message: 'Remember that I am vegetarian.', nudge: true }),
+    );
+    expect(forged.status).toBe(403);
+    expect(await savePersonNote(app)).toBe(403);
   });
 });
 

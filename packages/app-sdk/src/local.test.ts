@@ -22,6 +22,16 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+/** What a current daemon answers on `/api/health`; adopted daemons are checked against it. */
+function compatibleHealth(over: Record<string, unknown> = {}): Response {
+  return jsonResponse({
+    ok: true,
+    version: '1.26279.87',
+    apiCompat: { floor: 1, current: 1 },
+    ...over,
+  });
+}
+
 describe('local native app connection', () => {
   const originalSystemScope = process.env.GEZEL_SYSTEM_SCOPE;
   const originalRole = process.env.GEZEL_SERVICE_ROLE;
@@ -126,6 +136,7 @@ describe('local native app connection', () => {
     });
     const fetchImpl = vi
       .fn()
+      .mockResolvedValueOnce(compatibleHealth())
       .mockResolvedValueOnce(
         jsonResponse({ grantRequestId: 'grant-1', status: 'approved', token: 'app-token' }, 201),
       ) as unknown as typeof fetch;
@@ -168,7 +179,7 @@ describe('local native app connection', () => {
     });
     const fetchImpl = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ ok: true, serviceRole: 'legacy-full' }))
+      .mockResolvedValueOnce(compatibleHealth({ serviceRole: 'legacy-full' }))
       .mockResolvedValueOnce(
         jsonResponse({ grantRequestId: 'grant-1', status: 'approved', token: 'app-token' }, 201),
       ) as unknown as typeof fetch;
@@ -266,6 +277,7 @@ describe('local native app connection', () => {
     const fetchImpl = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = new URL(String(input));
       const auth = new Headers(init?.headers).get('authorization');
+      if (url.pathname === '/api/health') return compatibleHealth();
       calls.push(`${init?.method ?? 'GET'} ${url.pathname} ${auth}`);
       if (url.pathname === '/v1/apps/local-connect') {
         expect(JSON.parse(String(init?.body))).toEqual({ appId: 'vscode' });
@@ -309,6 +321,7 @@ describe('local native app connection', () => {
     });
     const fetchImpl = vi
       .fn()
+      .mockResolvedValueOnce(compatibleHealth())
       .mockResolvedValueOnce(jsonResponse({ error: 'not_found' }, 404))
       .mockResolvedValueOnce(
         jsonResponse({ grantRequestId: 'grant-1', status: 'approved', token: 'app-token' }, 201),
@@ -325,7 +338,75 @@ describe('local native app connection', () => {
     });
 
     expect(authorized.token).toBe('app-token');
-    expect(String(vi.mocked(fetchImpl).mock.calls[1]?.[0])).toContain('/v1/apps/register');
+    expect(String(vi.mocked(fetchImpl).mock.calls[2]?.[0])).toContain('/v1/apps/register');
+  });
+
+  // The 2026-10-06 incident from the CLI's side: an August autostart daemon
+  // held the user's home. It is running, so it must not read as absent — and
+  // it predates the API handshake, so it must not be adopted either.
+  it('refuses to adopt a running daemon that predates the API handshake', async () => {
+    discoverOrSpawn.mockResolvedValueOnce({
+      outcome: 'adopted',
+      baseUrl: 'https://127.0.0.1:54321',
+      token: 'owner-token',
+      cert: null,
+      pid: 4242,
+      client: {},
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, version: '1.26226.50' }),
+      ) as unknown as typeof fetch;
+
+    await expect(
+      authorizeLocalOwner({ fetch: fetchImpl, daemon: { daemonEntry: '/bundled/gezeld.js' } }),
+    ).rejects.toMatchObject({
+      code: 'daemon_incompatible',
+      message: expect.stringMatching(/1\.26226\.50.*update or restart the Gezel desktop app/),
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('never probes a daemon it spawned itself', async () => {
+    discoverOrSpawn.mockResolvedValueOnce({
+      outcome: 'spawned',
+      baseUrl: 'https://127.0.0.1:54321',
+      token: 'owner-token',
+      cert: null,
+      pid: 4242,
+      client: {},
+    });
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    await authorizeLocalOwner({
+      fetch: fetchImpl,
+      daemon: { daemonEntry: '/bundled/gezeld.js', spawnIfMissing: true },
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('stays loud about an outdated legacy-full service instead of falling to the per-user daemon', async () => {
+    readSystemServiceEndpoint.mockResolvedValueOnce({
+      baseUrl: 'http://127.0.0.1:6228',
+      port: 6228,
+      cert: null,
+      home: '/machine/gezel',
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, version: '1.26200.4' }),
+      ) as unknown as typeof fetch;
+
+    await expect(
+      authorizeLocal({
+        appId: 'vscode',
+        appName: 'Visual Studio Code',
+        scopes: ['product'],
+        fetch: fetchImpl,
+      }),
+    ).rejects.toMatchObject({ code: 'daemon_incompatible' });
+    expect(discoverOrSpawn).not.toHaveBeenCalled();
   });
 });
 

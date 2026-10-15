@@ -2,8 +2,15 @@ import { existsSync } from 'node:fs';
 import { cp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runtimeInstallStampPath } from '@bendyline/gezel/paths';
 import { verifyBundleManifest } from './bundle-manifest.js';
 import { redirectAsarToUnpacked } from './extract-bundle.js';
+import {
+  type InstallStamp,
+  clearInstallStamp,
+  installStampMatches,
+  writeInstallStamp,
+} from './install-stamp.js';
 
 export interface PnpmInstallOptions {
   /** User home root — runtime lands at `<home>/bin/pnpm-runtime/`. */
@@ -97,9 +104,33 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
     'dist/gezel-reflink-compat.cjs',
   ];
 
-  // Validate the source before the up-to-date shortcut. A version and copied
-  // manifest marker alone cannot authenticate installed files that changed
-  // after the first launch.
+  // A version and copied manifest marker alone cannot authenticate installed
+  // files that changed after the first launch; a stamp can, because it also
+  // holds each file's metadata from when it was hashed. See install-stamp.ts.
+  const stamp: InstallStamp | null =
+    shippedManifest !== null
+      ? {
+          path: runtimeInstallStampPath(home, 'pnpm'),
+          identity: `${shippedVersion}\n${shippedManifest}`,
+          root: installedRuntimeDir,
+          files: requiredFiles,
+        }
+      : null;
+  if (
+    stamp &&
+    installedVersion === shippedVersion &&
+    installedManifest === shippedManifest &&
+    (await installStampMatches(stamp))
+  ) {
+    return {
+      entryPath: installedEntry,
+      version: installedVersion,
+      action: 'up-to-date',
+      verified: true,
+    };
+  }
+
+  // Without a matching stamp, validate the source before the up-to-date check.
   const integrity = await verifyBundleManifest(bundleDir, requiredFiles);
   if (!integrity.ok) {
     logger?.warn?.(
@@ -126,6 +157,7 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
     existsSync(join(installedRuntimeDir, 'dist', 'gezel-reflink-compat.cjs')) &&
     (shippedManifest === null || installedIntegrity?.ok === true)
   ) {
+    if (stamp) await writeInstallStamp(stamp);
     return {
       entryPath: installedEntry,
       version: installedVersion,
@@ -134,6 +166,7 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
     };
   }
 
+  await clearInstallStamp(runtimeInstallStampPath(home, 'pnpm'));
   await mkdir(installDir, { recursive: true });
   logger?.info?.(
     installedVersion === shippedVersion
@@ -168,6 +201,7 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
       `[supervisor] post-copy verify failed: ${copiedIntegrity.reason ?? 'pnpm manifest state changed during installation'}`,
     );
   }
+  if (stamp) await writeInstallStamp(stamp);
 
   return {
     entryPath: installedEntry,

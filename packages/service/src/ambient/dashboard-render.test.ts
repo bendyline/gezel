@@ -4,6 +4,28 @@ import { readImageMeta } from '../index-store/image-meta.js';
 import { placeDashboardInSafeArea } from './dashboard-render.js';
 
 describe('placeDashboardInSafeArea', () => {
+  it('honors cancellation before and during native rendering', async () => {
+    const dashboard = new Resvg(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="red"/></svg>',
+    )
+      .render()
+      .asPng();
+    const target = {
+      width: 3840,
+      height: 2160,
+      safeArea: { x: 0, y: 0, width: 3840, height: 2160 },
+    };
+    const cancelled = new AbortController();
+    cancelled.abort(new Error('cancelled before rendering'));
+    await expect(
+      placeDashboardInSafeArea(dashboard, target, '#ffffff', cancelled.signal),
+    ).rejects.toThrow('cancelled before rendering');
+    const active = new AbortController();
+    const rendering = placeDashboardInSafeArea(dashboard, target, '#ffffff', active.signal);
+    active.abort(new Error('cancelled active rendering'));
+    await expect(rendering).rejects.toThrow('cancelled active rendering');
+  });
+
   it('pads a safe-area render back to the full display canvas', async () => {
     const dashboard = new Resvg(
       '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="64"><rect width="80" height="64" fill="red"/></svg>',

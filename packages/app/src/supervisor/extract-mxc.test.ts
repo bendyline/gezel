@@ -115,6 +115,28 @@ describe('installMxcIfNeeded', () => {
     expect((await readSentinel()).sha256).toBe(sha('x64-launcher'));
   });
 
+  it('trusts a stamped install without re-reading the bundle', async () => {
+    await stageBundle('x64-launcher');
+    await installMxcIfNeeded({ home, bundleDir });
+    await writeFile(join(bundleDir, 'wxc-exec.exe'), 'not what the manifest says');
+
+    const second = await installMxcIfNeeded({ home, bundleDir });
+    expect(second).toMatchObject({ action: 'up-to-date', verified: true });
+    expect(await readFile(second.executorPath as string, 'utf8')).toBe('x64-launcher');
+  });
+
+  it('never lets a stamp vouch for a digest the compiled-in pin rejects', async () => {
+    await stageBundle('x64-launcher');
+    await installMxcIfNeeded({ home, bundleDir });
+    // A manifest naming unpinned bytes for the pinned version is refused
+    // outright, whatever is already installed.
+    await writeFile(join(bundleDir, 'sha256.txt'), `${sha('some-other-exe')}  wxc-exec.exe\n`);
+    await writeFile(join(bundleDir, 'wxc-exec.exe'), 'some-other-exe');
+
+    const second = await installMxcIfNeeded({ home, bundleDir });
+    expect(second).toMatchObject({ action: 'no-bundle', executorPath: null, verified: false });
+  });
+
   it('refreshes an installed launcher whose bytes drifted from the bundle', async () => {
     await stageBundle('x64-launcher');
     const first = await installMxcIfNeeded({ home, bundleDir });
