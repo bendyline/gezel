@@ -274,14 +274,18 @@ The icon family is the crew at the workbench: one bench that never moves,
 with up to three poppetje figures standing behind it in fixed places, the
 lead in the middle a little taller. Off leaves the bench empty with the
 hammer lying on it; Chat only brings the lead to the bench; Tasks + chat
-brings the whole crew; Proactive has the lead raise the hammer unasked. The
-figures stand for a crew, not a literal count of active gezellen. Three shapes
-are deliberate. The H-frame legs make it a workbench; a plain table reads as
-a desk or a meeting table. The hammer has a flat face and a rounded peen and
-is held upright in the lead's fist: a symmetric mallet raised behind a bench
-reads as a gavel, and a hooked claw tilted over a neighbour reads as an axe.
-And initiative is a raised tool, never a raised hand, which reads as waiting
-to be called on. Labels and descriptions always explain the mode; color alone
+brings the whole crew; Proactive puts a bullhorn in the lead's hand, calling
+the shots. The figures stand for a crew, not a literal count of active
+gezellen. Three shapes are deliberate. The H-frame legs make it a workbench;
+a plain table reads as a desk or a meeting table. The resting hammer has a
+flat face and a rounded peen: a symmetric mallet reads as a gavel, and a
+hooked claw as an axe. And initiative is the bullhorn, flared and rimmed so it
+never reads as a flashlight, held clear of both neighbors by a pistol grip,
+with a thin cut between the grip and the fist so the hand holds a handle
+instead of fusing into the horn. It is never a
+raised hand, which reads as waiting to be called on, and never a raised tool,
+which over the crew reads as a threat. Labels and descriptions always explain
+the mode; color alone
 never does. Reuse `EngagementModeIcon` and the shared mode copy in the
 titlebar, menu, and Settings so this vocabulary remains consistent.
 

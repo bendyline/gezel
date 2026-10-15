@@ -306,6 +306,33 @@ export function buildTypedKickoffStep(input: {
   };
 }
 
+/**
+ * The files a typed project's kickoff watches, read from its Output page: the
+ * JSON data files the page reads, and the seeded JSON inside a folder it reads
+ * whole (Social Feed's `posts/` keeps its store's `posts/index.json`). Only
+ * the type's own tools write them; given file tools, a Social Feed lead
+ * replaced that index with a plan of its own shape (2026-10-14).
+ */
+export function typedKickoffWatch(type: {
+  pages?: {
+    reads?: ReadonlyArray<{ source: string; path: string; subtree?: boolean }>;
+  };
+  workspaceSeed?: readonly string[];
+}): string[] {
+  const files = new Set<string>();
+  for (const read of type.pages?.reads ?? []) {
+    if (read.source !== 'workspace') continue;
+    if (read.subtree) {
+      for (const seeded of type.workspaceSeed ?? []) {
+        if (seeded.startsWith(`${read.path}/`) && seeded.endsWith('.json')) files.add(seeded);
+      }
+    } else if (read.path.endsWith('.json')) {
+      files.add(read.path);
+    }
+  }
+  return [...files];
+}
+
 /** "Build X" for a build, the goal's own name for everything else. */
 export function kickoffTaskTitle(input: {
   name: string;

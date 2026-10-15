@@ -123,6 +123,10 @@ export async function maybeAutoAdvanceOnObservableProgress(
   /** The active step completed and ownership moved; this session must yield. */
   autoAdvanced?: true;
   unmetEditGate?: { taskRef: string; file: string };
+  /** A step that finishes when `file` grows is still short of its floor. */
+  unmetGrowthGate?: { taskRef: string; file: string; reason: string };
+  /** This session's task-note step ended its turn without saving a note. */
+  unmetTaskNote?: { taskRef: string; stepId: string };
   gateRejected?: {
     taskRef: string;
     stepId: string;
@@ -158,6 +162,8 @@ export async function maybeAutoAdvanceOnObservableProgress(
   // write to the deliverable this turn. Surfaced to the caller so the
   // false-"done" re-prompt can fire (the active half of the gate).
   let unmetEditGate: { taskRef: string; file: string } | undefined;
+  let unmetGrowthGate: { taskRef: string; file: string; reason: string } | undefined;
+  let unmetTaskNote: { taskRef: string; stepId: string } | undefined;
   for (const task of tasks) {
     // A task-scoped handoff may share its gezel with the host and dozens of
     // fanout siblings. Its tool trace is evidence only for that task. The
@@ -198,7 +204,23 @@ export async function maybeAutoAdvanceOnObservableProgress(
       !step.toolPolicy.additionalOutputMedia?.length &&
       state.record.taskRef === task.ref &&
       state.record.stepId === step.id;
-    if (!adv && !readEvidenceOnly && !terminalTaskNote) continue;
+    if (!adv && !readEvidenceOnly && !terminalTaskNote) {
+      // A reviewer on Gemma 4 E4B wrote "Verification: ship it." in its reply
+      // and ended the turn with no note, so the verdict never reached the
+      // task and the run sat until it stalled (2026-10-14).
+      if (
+        !unmetTaskNote &&
+        state.record.taskRef === task.ref &&
+        state.record.stepId === step.id &&
+        outputMediumForStep(step) === 'task-note' &&
+        stepOwnerGezelId(task, step) === gezelId &&
+        !servesEarlierActivation(state.record, task.ref, step) &&
+        !drained.some((call) => call.success && call.name === 'write_task_note')
+      ) {
+        unmetTaskNote = { taskRef: task.ref, stepId: step.id };
+      }
+      continue;
+    }
     // Only this gezel's step (step assignee → suggested → task assignee);
     // an owner step advances only when the owner says so.
     const owner = stepOwnerGezelId(task, step);
@@ -229,7 +251,10 @@ export async function maybeAutoAdvanceOnObservableProgress(
         // artifact. Match this turn's receipt against the persisted note so
         // another task's note, an old note, or a prose DONE cannot close it.
         const writes = drained.filter((call) => call.success && call.name === 'write_task_note');
-        if (writes.length === 0) continue;
+        if (writes.length === 0) {
+          unmetTaskNote ??= { taskRef: task.ref, stepId: step.id };
+          continue;
+        }
         const notes = await deps.store.listTaskNotes(projectId, task.num, step.id);
         const written = notes.some(
           (note) =>
@@ -327,6 +352,8 @@ export async function maybeAutoAdvanceOnObservableProgress(
         !deliverableWrittenThisTurn(drained, adv.file, adv.artifact === true)
       ) {
         unmetEditGate = { taskRef: task.ref, file: adv.file };
+      } else if (!adv.requireChange && !unmetGrowthGate) {
+        unmetGrowthGate = { taskRef: task.ref, file: adv.file, reason: gate.reason };
       }
       continue;
     }
@@ -387,7 +414,11 @@ export async function maybeAutoAdvanceOnObservableProgress(
     }
     return outcome?.status === 'advanced' ? { autoAdvanced: true } : {};
   }
-  return unmetEditGate ? { unmetEditGate } : {};
+  return {
+    ...(unmetEditGate ? { unmetEditGate } : {}),
+    ...(unmetGrowthGate ? { unmetGrowthGate } : {}),
+    ...(unmetTaskNote ? { unmetTaskNote } : {}),
+  };
 }
 
 /**

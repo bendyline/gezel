@@ -11,6 +11,7 @@ import {
   kickoffTaskTitle,
   macroLooksLikeBuildMission,
   shouldPromoteStartJobToProject,
+  typedKickoffWatch,
 } from './kickoff-text.js';
 
 const BUILD_BRIEF = {
@@ -241,5 +242,43 @@ describe('buildTypedKickoffStep', () => {
       'Already recorded from their words: "Where to?" Lisbon, "Departure date" next spring, "Who\'s going?" 4.',
     );
     expect(step.description).toContain('Start on the plan itself');
+  });
+});
+
+describe('typedKickoffWatch', () => {
+  it('watches every data file the Output page reads', () => {
+    // A Job Hunt lead that logged "interview at Northwind next month" grew
+    // activity.json, which the page shows, while only pipeline.json counted.
+    expect(
+      typedKickoffWatch({
+        pages: {
+          reads: [
+            { source: 'workspace', path: 'pipeline.json' },
+            { source: 'workspace', path: 'activity.json' },
+          ],
+        },
+      }),
+    ).toEqual(['pipeline.json', 'activity.json']);
+  });
+
+  it('watches the seeded index of a folder the page reads', () => {
+    expect(
+      typedKickoffWatch({
+        pages: {
+          reads: [
+            { source: 'workspace', path: 'posts', subtree: true },
+            { source: 'workspace', path: 'voice-guide.md' },
+            { source: 'artifacts', path: 'data', subtree: true },
+          ],
+        },
+        workspaceSeed: ['voice-guide.md', 'posts/index.json'],
+      }),
+    ).toEqual(['posts/index.json']);
+  });
+
+  it('watches nothing for a page with no workspace data', () => {
+    expect(
+      typedKickoffWatch({ pages: { reads: [{ source: 'artifacts', path: 'notes' }] } }),
+    ).toEqual([]);
   });
 });

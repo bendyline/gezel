@@ -89,14 +89,17 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     phone: true,
   },
   // Promoted 2026-10-14 ahead of their `first-project-*` evals. Kept after
-  // the evaluated entries so those stay first in their own areas.
+  // the evaluated entries so those stay first in their own areas. Each has
+  // since passed on Gemma 4 E4B, the word game and posts on Gilde's
+  // word-clues 1.0.1 and social-feed 1.0.2; the Gemma 4 12B runs are owed.
   {
     kind: 'type',
     id: 'meals',
     area: 'home',
     title: 'Plan a week of meals',
     hint: 'Dinners for the week and the shopping list, on a kitchen board.',
-    prompt: 'Plan a week of meals for two adults and a toddler, mostly vegetarian.',
+    prompt:
+      'Start a project to plan a week of meals for two adults and a toddler, mostly vegetarian.',
     typeId: 'meal-planner',
   },
   {
@@ -105,7 +108,7 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     area: 'learning',
     title: 'Study with flashcards',
     hint: 'A deck of cards to review a few minutes a day.',
-    prompt: 'Make me flashcards to learn the capitals of Europe.',
+    prompt: 'Start a project to make flashcards for learning the capitals of Europe.',
     typeId: 'flashcards',
   },
   {
@@ -114,7 +117,8 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     area: 'learning',
     title: 'Get ready for an interview',
     hint: 'Practice questions and a plan for the weeks before it.',
-    prompt: 'Help me get ready for a job interview as a product designer next month.',
+    prompt:
+      'Start a project to get ready for my job interview at Northwind as a product designer next month.',
     typeId: 'job-hunt',
   },
   {
@@ -123,7 +127,7 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     area: 'play',
     title: 'Play a word game',
     hint: 'Clues to solve, one word at a time.',
-    prompt: "Let's play a word game: give me clues and I'll guess the words.",
+    prompt: "Start a project to play a word game: give me clues and I'll guess the words.",
     typeId: 'word-clues',
   },
   {
@@ -133,7 +137,7 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     title: 'Send an invoice',
     hint: 'Your clients and what they owe, on an office board.',
     prompt:
-      "Set up my freelance office. I'm a freelance illustrator and I need to send invoices to two clients.",
+      "Start a project to run my freelance office. I'm an illustrator, and two clients owe me: Harbor Books $1,200 for a book cover and Riverside Cafe $450 for a menu, both due at the end of the month.",
     typeId: 'freelance-office',
   },
   {
@@ -142,7 +146,7 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     area: 'content',
     title: 'Plan a week of posts',
     hint: 'Drafts in your voice, ready to publish.',
-    prompt: 'Plan a week of LinkedIn posts for my pottery studio.',
+    prompt: 'Start a project to plan a week of LinkedIn posts for my pottery studio.',
     typeId: 'social-feed',
   },
   {

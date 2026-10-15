@@ -897,6 +897,8 @@ interface LiveSessionState {
    * continuation slot.
    */
   lastGateNudgeFingerprint?: string;
+  /** The last end-of-turn deliverable this session was nudged on (a step's file or note); once each. */
+  lastGrowthNudgeKey?: string;
   /**
    * Same lifecycle as `immediateFileWriteConstrained`, but for
    * scenario-level sniff failures after a file exists. These turns need
@@ -9024,6 +9026,53 @@ export class ChatManager extends LocalEngineRuntime {
             );
             continue;
           }
+          // The same false "done" on a step that finishes when its file grows.
+          // A Job Hunt lead on Gemma 4 E4B checked the empty pipeline, wrote a
+          // campaign plan in prose ending "I need your resume", and ended its
+          // turn; nothing re-prompted it, so the first project sat empty
+          // (2026-10-14). Prose cannot tell that apart from a finish, since the
+          // kickoff asks for "the one thing you need from them next", so any
+          // turn that ends short of the file is nudged, once per step file,
+          // unless it asked a real question or handed the work on.
+          const growth = advanceOutcome.unmetGrowthGate;
+          if (
+            growth &&
+            state.lastGrowthNudgeKey !== `${growth.taskRef}:${growth.file}` &&
+            !drained.some(
+              (d) =>
+                (d.name === 'ask_user_question' && d.success) ||
+                isSuccessfulAsyncHandoffToolCall(d),
+            )
+          ) {
+            continuations++;
+            state.lastGrowthNudgeKey = `${growth.taskRef}:${growth.file}`;
+            log.info(
+              `session ${sessionId}: ${growth.taskRef} growth gate unmet (${growth.reason}) at end of turn — nudging to add the work`,
+            );
+            promptForTurn = correctivePromptForLiveRoster(
+              buildDeliverableGrowthNudge(growth.file, growth.reason),
+              'deliverable-growth',
+            );
+            continue;
+          }
+          const unsavedNote = advanceOutcome.unmetTaskNote;
+          if (
+            unsavedNote &&
+            state.lastGrowthNudgeKey !== `${unsavedNote.taskRef}:note:${unsavedNote.stepId}` &&
+            !drained.some(
+              (d) =>
+                (d.name === 'ask_user_question' && d.success) ||
+                isSuccessfulAsyncHandoffToolCall(d),
+            )
+          ) {
+            continuations++;
+            state.lastGrowthNudgeKey = `${unsavedNote.taskRef}:note:${unsavedNote.stepId}`;
+            log.info(
+              `session ${sessionId}: ${unsavedNote.taskRef} step "${unsavedNote.stepId}" ended without a task note — nudging to save it`,
+            );
+            promptForTurn = correctivePromptForLiveRoster(buildTaskNoteNudge(), 'task-note-result');
+            continue;
+          }
           const unresolvedToolFailures = unresolvedFailedToolCalls(drained);
           let stallReason:
             | 'text'
@@ -16805,6 +16854,28 @@ const TASK_BUDGET_NUDGE =
  */
 export function buildDeliverableEditNudge(file: string): string {
   return `Continue. The deliverable for this step is an edit to \`${file}\`, but no successful write to that file landed this turn — so the work is not actually done. If the fix is real, make it now: call \`replace_in_file\` (smallest change) or \`write_file\` (full corrected file) on \`${file}\`. Do not report progress or summarize again until that edit has landed. If the change belongs in a different file, say which file and why instead.`;
+}
+
+/**
+ * Re-prompt for the false-"done" case on a step that finishes when its file
+ * grows: a typed project's kickoff watches its Output page's data. Names no
+ * tool, so it holds for a step whose writes go through its project's tools.
+ */
+/**
+ * Re-prompt for a task-note step whose turn ended with the result only in
+ * the reply. One instruction per line, so the live-roster filter drops just
+ * the line naming a tool the step does not have.
+ */
+export function buildTaskNoteNudge(): string {
+  return [
+    "Continue. This step's result belongs in a task note, and none was saved this turn: what you concluded in your reply does not reach the next step.",
+    'Save it now with `write_task_note`.',
+    'Then call `advance_task_step`.',
+  ].join('\n');
+}
+
+export function buildDeliverableGrowthNudge(file: string, reason: string): string {
+  return `Continue. This step finishes when \`${file}\` has the work in it, and it does not yet (${reason}): a reply alone does not count, and nothing the person can see has changed. Add the first real piece now with the tools this step names, then stop. If you cannot without an answer from the person, ask them.`;
 }
 
 /**
