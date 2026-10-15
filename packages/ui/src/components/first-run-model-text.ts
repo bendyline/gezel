@@ -26,15 +26,19 @@ export function formatDownloadSize(bytes: number): string {
   return `${Math.round(bytes / 1024 ** 2)} MB`;
 }
 
+/** What a first-run download averages: Hugging Face to a home connection. */
+const FIRST_RUN_GB_PER_MINUTE = 0.6;
+
 /**
- * Rough download time on fast internet, ceiled to the next 5 minutes. Rate
- * is ~1 GB/min (about 135 Mbps effective); rounding up because a too-low
- * estimate disappoints more than a too-high one.
+ * Rough download time, ceiled to the next 5 minutes. The rate is ~0.6 GB a
+ * minute (about 80 Mbps effective), measured on a first run: the old 1 GB a
+ * minute promised "about 10 minutes" for what took 24 (2026-10-12). Rounding
+ * up because a too-low estimate disappoints more than a too-high one.
  */
 export function formatDownloadTime(sizeBytes: number | null): string {
   if (!sizeBytes) return 'a few minutes';
   const gb = sizeBytes / 1024 ** 3;
-  const minutes = Math.max(5, Math.ceil(gb / 5) * 5);
+  const minutes = Math.max(5, Math.ceil(gb / FIRST_RUN_GB_PER_MINUTE / 5) * 5);
   return `about ${minutes} minutes`;
 }
 

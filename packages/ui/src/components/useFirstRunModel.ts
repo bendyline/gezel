@@ -42,6 +42,8 @@ export type FirstRunModelState =
       provider: OnDeviceProvider;
       modelId: string;
       sizeBytes: number | null;
+      /** The engine that comes down beside the model, when it is still needed. */
+      engineBytes?: number;
       /** Chat models already on disk that could be used right away. */
       alternatives: Array<{ id: string; name: string }>;
     }
@@ -285,12 +287,18 @@ export function useFirstRunModel({
           return;
         }
         // Nothing installed and nothing in flight: a fresh first run or an
-        // abandoned download. Either way we wait for the person's tap.
+        // abandoned download. Either way we wait for the person's tap. The
+        // engine comes down with the model, so the key counts it too.
+        const engine = await llamaEngineNeed({
+          provider,
+          ...(backendOverride ? { llamaCppBackendOverride: backendOverride } : {}),
+        }).catch(() => null);
         setState({
           kind: 'needs-download',
           provider,
           modelId: targetModel,
           sizeBytes,
+          ...(engine?.downloadBytes ? { engineBytes: engine.downloadBytes } : {}),
           alternatives: modelsRes.models
             .filter((m) => m.id !== targetModel)
             .slice(0, 3)
@@ -302,7 +310,14 @@ export function useFirstRunModel({
     } finally {
       checkInFlightRef.current = false;
     }
-  }, [provider, defaultModel, firstRunInstallError, settleOnDisk, onConfigChanged]);
+  }, [
+    provider,
+    defaultModel,
+    firstRunInstallError,
+    backendOverride,
+    settleOnDisk,
+    onConfigChanged,
+  ]);
 
   useEffect(() => {
     // Poll only while checking. 'needs-download' and 'failed' are set by the
@@ -372,7 +387,9 @@ export function useFirstRunModel({
     async (target: OnDeviceProvider, modelId: string, skipSha = false) => {
       let installError: string | null = null;
       let installMismatch: ChecksumMismatch | null = null;
-      const opts = skipSha ? { skipSha: true } : undefined;
+      // The image reader waits until after the first project; pulled here it
+      // shared the connection with the model the person tapped for.
+      const opts = { skipCompanion: true, ...(skipSha ? { skipSha: true } : {}) };
       const onEvent = (ev: { type: string; error?: string; mismatch?: ChecksumMismatch }) => {
         if (ev.type !== 'error') return;
         installError = ev.error ?? 'The download failed.';

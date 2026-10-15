@@ -28,6 +28,31 @@ type UndiciInit = Parameters<typeof undiciFetch>[1];
 
 export type ClosableFetch = typeof fetch & { close(): Promise<void> };
 
+/** Connect timeout for a paired peer (see {@link createPinnedFetch}). */
+export const PINNED_CONNECT_TIMEOUT_MS = 5_000;
+
+/** Failures before any TLS handshake: no certificate was presented, so none can be stale. */
+const NO_HANDSHAKE_CODES = new Set([
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EHOSTDOWN',
+  'ENETDOWN',
+  'ETIMEDOUT',
+  'EADDRNOTAVAIL',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
+
+function failedBeforeHandshake(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; depth < 6 && current && typeof current === 'object'; depth++) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && NO_HANDSHAKE_CODES.has(code)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 async function closeFetch(fetchImpl: typeof fetch | null | undefined): Promise<void> {
   const close = (fetchImpl as Partial<ClosableFetch> | null | undefined)?.close;
   if (typeof close === 'function') await close.call(fetchImpl);
@@ -47,6 +72,10 @@ export function createPinnedFetch(certPem: string): ClosableFetch {
       // IP; the cert identity itself is the pin, reinforced by the identity
       // signature verified at connect time.
       checkServerIdentity: () => undefined,
+      // A peer on the local network answers a connect within milliseconds.
+      // Waiting undici's default 10 s for one that left the network only
+      // delays the fallback; streamed replies keep their unlimited timeouts.
+      timeout: PINNED_CONNECT_TIMEOUT_MS,
     },
     allowH2: true,
     headersTimeout: 0,
@@ -125,7 +154,9 @@ export function createPairedRemoteFetch(
     try {
       return await active!(url, init);
     } catch (originalError) {
-      if (init?.signal?.aborted) throw originalError;
+      // A refresh re-dials the same address; when that address answered
+      // nothing at all it doubles the wait and fails the same way.
+      if (init?.signal?.aborted || failedBeforeHandshake(originalError)) throw originalError;
       refresh ??= refreshPairedCertificate(remote, registry, makeBootstrap).then((cert) => {
         const previous = active;
         active = makePinned(cert);

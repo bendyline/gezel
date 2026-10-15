@@ -964,6 +964,109 @@ button.filemap-review-issue:hover {
   cursor: pointer;
 }
 
+/* Remote Servers — each half ("Use another device's models", "Share this
+   device's models") breaks into small titled groups; the h4s keep them tight
+   to the h3 they belong to instead of the UA's 1.33em gaps. */
+.remote-servers h4 {
+  margin: 1rem 0 0.35rem;
+}
+.remote-servers h3 + h4 {
+  margin-top: 0.5rem;
+}
+
+/* The address another device types in. Selectable, and set a step larger
+   than the muted line around it because it is the thing being read off. */
+.remote-share-address {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  margin: 0.6rem 0 0.2rem;
+}
+.remote-share-address-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.remote-share-url {
+  font-size: var(--text-md);
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+.remote-address {
+  font-variant-numeric: tabular-nums;
+}
+/* Live status lines (<output>, which is inline by default) read as paragraphs. */
+.remote-status {
+  display: block;
+  margin: 0.5rem 0;
+}
+
+.remote-serving-priority {
+  margin-top: 1rem;
+}
+
+/* "Add a device", and the connect code it shows. The code is read off this
+   screen and typed into another, so it takes the identity code's larger,
+   spaced recipe (.device-code) and sits in its own bordered box while live. */
+.remote-add-device {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+.remote-pairing-code {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  max-width: 46rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.remote-pairing-code-value {
+  font-size: var(--text-xl);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The connecting device types that code here: one field, sized and spaced
+   like the code it copies. */
+.remote-connect-code-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.remote-connect-code-input {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--text-xl);
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+  max-width: 12rem;
+}
+
+/* Port, interface, limits, allowed models, the discovery switch, and the
+   identity code older versions compare: things most people never touch, so
+   they sit behind one closed disclosure. Connect-by-IP is the same shape:
+   the list above it is the usual way in. */
+.remote-serving-advanced,
+.remote-connect-direct {
+  margin-top: 1rem;
+}
+.remote-serving-advanced > summary,
+.remote-connect-direct > summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.remote-connect-direct > p {
+  margin: 0.5rem 0 0.4rem;
+}
 /* Remote Servers — server-settings field grid. Inputs inherit the global
    input recipe; this only lays out label-above-input pairs compactly. */
 .remote-serving-fields {
@@ -995,7 +1098,8 @@ button.filemap-review-issue:hover {
   margin-top: 0.5rem;
 }
 
-/* Pair a server by URL: the address takes the room, the name the rest. */
+/* Connect by IP address: an address is short, so the field stays narrow
+   rather than spanning the pane. */
 .remote-pair-form {
   display: flex;
   flex-wrap: wrap;
@@ -1004,11 +1108,8 @@ button.filemap-review-issue:hover {
   max-width: 46rem;
 }
 .remote-pair-form input {
-  flex: 1 1 10rem;
+  flex: 0 1 16rem;
   min-width: 0;
-}
-.remote-pair-form input:first-child {
-  flex: 2 1 16rem;
 }
 
 /* Identity code — the out-of-band pairing check two people read to each

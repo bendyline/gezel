@@ -442,21 +442,23 @@ export function NewTaskDialog({
   // The person's interest areas order the gallery: their shelf comes first
   // and the dialog lands on it. Nothing leaves All plans because of it.
   const interests = useInterests();
-  const forYouBooks = useMemo(
-    () =>
-      interests.areas.length === 0
-        ? []
-        : orderByInterests(
-            books.filter(
-              (b) =>
-                !b.item.unavailableReason &&
-                servesInterests(interestAreasForCraftbook(b.manifest), interests.areas),
-            ),
-            (b) => interestAreasForCraftbook(b.manifest),
-            interests.areas,
-          ),
-    [books, interests.areas],
-  );
+  const forYouBooks = useMemo(() => {
+    if (interests.areas.length === 0) return [];
+    const ordered = orderByInterests(
+      books.filter(
+        (b) =>
+          !b.item.unavailableReason &&
+          servesInterests(interestAreasForCraftbook(b.manifest), interests.areas),
+      ),
+      (b) => interestAreasForCraftbook(b.manifest),
+      interests.areas,
+    );
+    // A book with a sample starts with nothing of the person's own, so it
+    // leads: alphabetical put "Answer a Question with SQL" ahead of the
+    // spreadsheet books written for a newcomer (2026-10-12).
+    const sampled = (b: BookItem) => (b.manifest.samples?.length ?? 0) > 0;
+    return [...ordered.filter(sampled), ...ordered.filter((b) => !sampled(b))];
+  }, [books, interests.areas]);
   // Land on the project's recommended shelf when it has one (once per
   // open/project — user shelf picks stick after that).
   useEffect(() => {
@@ -1129,6 +1131,7 @@ export function NewTaskDialog({
         craftbookId={selectedBook.manifest.id}
         input={input}
         allowUpload={creationMode !== 'scheduled'}
+        samples={(selectedBook.manifest.samples ?? []).filter((s) => s.param === input.key)}
         value={inputValueFor(input.key)}
         onChange={(next) => {
           setInputValues((prev) => ({ ...prev, [input.key]: next }));

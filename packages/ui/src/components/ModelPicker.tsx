@@ -24,7 +24,10 @@ function invalidateModels(provider: ProviderName): void {
 }
 
 async function loadModels(provider: ProviderName, refresh = false): Promise<ModelInfo[]> {
-  if (refresh) invalidateModels(provider);
+  const age = Date.now() - (cachedAt.get(provider) ?? 0);
+  if (refresh || (provider === 'remote' && cached.has(provider) && age > REMOTE_MODELS_TTL_MS)) {
+    invalidateModels(provider);
+  }
   if (!refresh) {
     const hit = cached.get(provider);
     if (hit) return hit;
@@ -45,6 +48,7 @@ async function loadModels(provider: ProviderName, refresh = false): Promise<Mode
       // page-lifetime cache.
       if ((cacheGeneration.get(provider) ?? 0) === generation) {
         cached.set(provider, models);
+        cachedAt.set(provider, Date.now());
       }
       return models;
     })
@@ -58,30 +62,27 @@ async function loadModels(provider: ProviderName, refresh = false): Promise<Mode
 /**
  * Aggregate chat models across every paired server, grouped by server name in
  * the label ("MacStudio · Qwen2.5 72B"). Each id is the namespaced
- * `remote:<remoteId>/<model>` the gezel stores. Offline servers are skipped.
+ * `remote:<remoteId>/<model>` the gezel stores. A server that can't be
+ * reached still lists the models it had, marked offline: picking one is
+ * fine, and its work runs on this device until the server is back.
  */
 async function loadRemoteModels(): Promise<ModelInfo[]> {
-  const { remotes } = await api.listRemotes();
-  const out: ModelInfo[] = [];
-  for (const r of remotes) {
-    try {
-      const { models } = await api.listRemoteModels(r.remoteId);
-      for (const m of models) {
-        out.push({
-          id: m.id,
-          name: `${r.displayName} · ${m.name}`,
-          ...(m.supportsTools !== undefined ? { supportsTools: m.supportsTools } : {}),
-          ...(m.supportsReasoning !== undefined ? { supportsReasoning: m.supportsReasoning } : {}),
-          ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
-          ...(m.parameterSize ? { parameterSize: m.parameterSize } : {}),
-        });
-      }
-    } catch {
-      /* server offline — skip its models */
-    }
-  }
-  return out;
+  const { servers } = await api.listRemoteServerModels();
+  return servers.flatMap((server) =>
+    server.models.map((m) => ({
+      id: m.id,
+      name: `${server.displayName}${server.status === 'offline' ? ' (offline)' : ''} · ${m.name}`,
+      ...(m.supportsTools !== undefined ? { supportsTools: m.supportsTools } : {}),
+      ...(m.supportsReasoning !== undefined ? { supportsReasoning: m.supportsReasoning } : {}),
+      ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
+      ...(m.parameterSize ? { parameterSize: m.parameterSize } : {}),
+    })),
+  );
 }
+
+/** Paired servers come and go, so their list is re-read after this long. */
+const REMOTE_MODELS_TTL_MS = 30_000;
+const cachedAt = new Map<ProviderName, number>();
 
 function isLocalProvider(p: ProviderName): p is 'mlx' | 'llama-cpp' {
   return p === 'mlx' || p === 'llama-cpp';

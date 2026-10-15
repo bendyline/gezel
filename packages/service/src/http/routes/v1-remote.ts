@@ -35,6 +35,7 @@ import { streamSSE } from 'hono/streaming';
 import {
   IMAGE_HISTORY_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
+  REMOTE_STREAM_HEARTBEAT_MS,
   RemoteAdmissionRequestSchema,
   RemoteCacheEvictRequestSchema,
   RemoteCacheWarmRequestSchema,
@@ -679,6 +680,14 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
           }),
         ) ?? (() => {}),
       );
+
+      // A long prefill can be silent for minutes; this tells A the line is
+      // still up (see REMOTE_STREAM_HEARTBEAT_MS).
+      const heartbeat = setInterval(() => {
+        void stream.write(': keepalive\n\n').catch(() => {});
+      }, REMOTE_STREAM_HEARTBEAT_MS);
+      heartbeat.unref?.();
+      unsubs.push(() => clearInterval(heartbeat));
 
       try {
         const lastPriorMessage = body.priorMessages.at(-1);

@@ -6,6 +6,7 @@ import {
   planDurationEstimates,
   planLaunchFormSchema,
   planOutputSummary,
+  planShortDescription,
   starterCraftbookIds,
 } from './starter-craftbooks.js';
 
@@ -117,6 +118,33 @@ describe('output summaries', () => {
     expect(planOutputSummary(gated('scope.md', 'renders/rough-cut.mp4'))).toBe('A video');
     expect(planOutputSummary(gated('clip.mp4', 'clip.gif'))).toBe('A video and animated GIF');
     expect(planOutputSummary(gated('loop.gif'))).toBe('An animated GIF');
+  });
+});
+
+describe('short descriptions', () => {
+  it('keeps the opening clause of a paragraph-long description', () => {
+    expect(
+      planShortDescription(
+        'A plain-language tour of a folder of code: what it does, how to run it. Good for a project you inherited.',
+      ),
+    ).toBe('A plain-language tour of a folder of code');
+    expect(
+      planShortDescription(
+        'Hand it a spreadsheet and get back what is in it, what stands out, one table worth keeping, and what to look at next. Works on a CSV.',
+      ),
+    ).toBe('Hand it a spreadsheet and get back what is in it');
+  });
+  it('leaves a short description alone, apart from its closing period', () => {
+    expect(planShortDescription('Clean up a messy sheet.')).toBe('Clean up a messy sheet');
+    expect(planShortDescription('Writes v2.0 release notes')).toBe('Writes v2.0 release notes');
+    expect(planShortDescription(undefined)).toBe('');
+  });
+  it('never cuts to a label before a colon or to a stub before a comma', () => {
+    expect(planShortDescription('Note: drafts a reply to every open thread.')).toBe(
+      'Note: drafts a reply to every open thread',
+    );
+    const long = 'First, it reads every file in the folder and then writes one summary per file';
+    expect(planShortDescription(long)).toBe(long);
   });
 });
 

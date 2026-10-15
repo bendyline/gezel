@@ -48,19 +48,30 @@ function headerIndex(headers: string[], name: string): number {
   return headers.findIndex((h) => h.trim().toLowerCase() === name);
 }
 
+// Emphasis and code marks are formatting, not part of an identifier. A row
+// written `**T2**` used to stay `**T2**`, so a later row's dependency `T2`
+// "was not a row ID in this plan" and the rejection named a T2 the model could
+// see in its own table (Nemotron 3.5 Lightning, plan-and-estimate, 2026-08-11).
+function plainCell(cell: string): string {
+  let text = cell.trim();
+  for (;;) {
+    const unwrapped = text.match(/^(\*\*|__|\*|_|`)(.+)\1$/)?.[2]?.trim();
+    if (!unwrapped) return text;
+    text = unwrapped;
+  }
+}
+
 function parseDeps(cell: string): string[] {
   const trimmed = cell.trim();
+  const plain = plainCell(trimmed);
   // A single dash is the conventional table marker for “no dependency”.
   // Accept the Unicode dash characters produced by word processors and
   // models as well as ASCII hyphen-minus; none of them can be a row ID by
   // themselves.
-  if (!trimmed || /^[-\u2010-\u2015\u2212]$/.test(trimmed) || /^(none|n\/a)$/i.test(trimmed)) {
+  if (!plain || /^[-\u2010-\u2015\u2212]$/.test(plain) || /^(none|n\/a)$/i.test(plain)) {
     return [];
   }
-  return trimmed
-    .split(/[,;]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return trimmed.split(/[,;]/).map(plainCell).filter(Boolean);
 }
 
 export function planStructure(text: string, spec: PlanStructureSpec = {}): PlanStructureResult {
@@ -101,9 +112,9 @@ export function planStructure(text: string, spec: PlanStructureSpec = {}): PlanS
   };
 
   const rows: PlanRow[] = table.rows.map((cells) => ({
-    id: (cells[col.id] ?? '').trim(),
+    id: plainCell(cells[col.id] ?? ''),
     task: (cells[col.task] ?? '').trim(),
-    owner: (cells[col.owner] ?? '').trim(),
+    owner: plainCell(cells[col.owner] ?? ''),
     dependsOn: parseDeps(cells[col.deps] ?? ''),
     doneWhen: (cells[col.done] ?? '').trim(),
     ...(col.estimate >= 0 && (cells[col.estimate] ?? '').trim()

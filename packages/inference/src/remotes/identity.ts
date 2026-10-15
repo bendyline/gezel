@@ -91,6 +91,12 @@ export const IdentityResponseSchema = z.object({
   gezelVersion: z.string().optional(),
   protocolVersion: z.number().optional(),
   serviceRole: z.enum(['user', 'machine-engine', 'legacy-full']).optional(),
+  /**
+   * How a client may pair: `code` (a connect code shown on this device,
+   * SPAKE2 over `/v1/apps/pair/*`) and/or `approval` (`/v1/apps/register`,
+   * approved here). Absent → a server from before connect codes: approval only.
+   */
+  pairingMethods: z.array(z.string()).max(8).optional(),
 });
 export type IdentityResponse = z.infer<typeof IdentityResponseSchema>;
 

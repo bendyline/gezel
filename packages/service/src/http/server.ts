@@ -116,6 +116,7 @@ import { taskInputRoutes } from './routes/task-inputs.js';
 
 import { v1ChatRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-chat';
 import { v1EmbeddingsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-embeddings';
+import { pairingCodeRoutes } from './routes/pairing-code.js';
 import { remotesRoutes } from './routes/remotes.js';
 import { renderRoutes } from './routes/render.js';
 import { reportActionRoutes } from './routes/report-actions.js';
@@ -581,6 +582,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/models', modelsRoutes(ctx));
   // Remote model execution: A's paired-server admin surface (list/pair/unpair).
   app.route('/api/remotes', remotesRoutes(ctx));
+  // This daemon's connect code, while it owns the LAN listener.
+  app.route('/api/remote-serving/pairing-code', pairingCodeRoutes(ctx));
   // Machine-broker LAN-serving administration, proxied to
   // /v1/remote/manage/serving with the bridge credential; 503 without a broker.
   app.route('/api/machine-serving', machineServingRoutes(ctx));

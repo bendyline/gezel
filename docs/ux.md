@@ -804,6 +804,12 @@ output. **See all** opens the full plan gallery, whose **Start here** shelf
 uses the same starter set. Use the existing tray and radius tokens; these
 are square-ish keys, never pills.
 
+Every key is one size. A first-project plan's catalog description runs to a
+paragraph, so its key shows only the opening clause (`planShortDescription`:
+the first sentence, up to a colon, then up to the last comma that fits),
+clamped to two lines, and every tray row is as tall as the tallest. The
+whole description belongs to the launch sheet, not the key.
+
 Each Make something key is a **paper card**: it takes the paper its artwork is
 drawn on, in both themes, so the 64px mark bleeds into the card instead of
 sitting on it as a pasted square. `sampleArtworkPaper`
@@ -833,7 +839,8 @@ task queued for a shift that never runs is a silent failure.
 
 Output summaries come from declared output files, including publishing steps
 before a final Finish step. They stand in for the description only on the six
-starters; every other plan card shows its own description, and its
+starters; every other plan card shows its own description (on a Home key,
+its opening clause), and its
 **You'll get** line appears only for a deliverable the type names (a deck,
 document, PDF, video or GIF). A scratch `.md` or `.html` file says nothing
 about what the person receives. **Usually about N minutes here** appears only
@@ -1258,8 +1265,15 @@ rail turns into a horizontal scroller — a stacked heading has no row to head.
 first wherever work is offered, and every item stays reachable:
 
 - New Task leads its rail with **For you** (the books serving the person's
-  areas, in the order the areas were picked) and opens on it, except inside a
-  project whose type recommends its own shelf. All plans stays one click away.
+  areas, in the order the areas were picked, books that carry a sample first)
+  and opens on it, except inside a project whose type recommends its own
+  shelf. All plans stays one click away.
+- A book's input picker adds a third key, **Try a sample**, when the book
+  carries a sample for that input, with one muted line saying it is made-up
+  example data. Never preselected, and never offered to a recurring run.
+- The welcome offers **Browse plans for …** under its first projects when
+  none of them serves an area the person picked; it opens New Task on For you.
+  It disappears once a first project serves every pick.
 - New Project orders its category rail and its sections by area, orders the
   types inside each section, and lands on the first category that serves the
   person. **All** is the first key of the rail.
@@ -2110,6 +2124,34 @@ right, wrapping under it when narrow. A bare `<ul>` in a settings panel renders
 browser bullets and strands its buttons on their own line — Remote Servers
 shipped that way. Facts about the install (About → Version) use
 `.settings-facts`: muted label, value beside it.
+
+**Connecting two devices works like a game's LAN lobby.** Settings → Remote
+Servers puts sharing first (one switch, the address this device is reachable at,
+**Add a device**) and connecting second: gezel devices found on the network as
+rows with a **Connect** key, connect-by-IP in a closed disclosure for the device
+that isn't listed, and the servers this device remembers, each marked "on your
+network now" when discovery sees it. Connecting asks for the 8-digit code the
+other device shows, in one numeric field formatted `4821 0937` as it is typed.
+A code a person types beats one they compare: people confirm a comparison
+without reading it, and a typed code also stands in for an Approve click on the
+other screen. The code is shown only on request, in the large spaced
+`.device-code` recipe with its countdown, because it is read off one screen and
+typed into another. Port, interface, limits, and the identity code older
+versions still compare sit in **Advanced**. A remembered server that can't be
+reached is a state, not an error: its row says "not reachable — gezellen answer
+without it until it's back", pickers keep its models listed as "(offline)", and
+a reply that ran on the fallback carries one line saying which server was away
+and what answered instead.
+
+A phone is only ever the connecting side, so it gets the second half of the
+lobby alone: Settings → Artificial Intelligence → **Another device**, below the
+phone's own model. Nearby computers, the code field, and connect-by-address sit
+in the same order, and each connected computer lists its models as **Use …**
+keys, the one in use marked "in use". Choosing one does not replace the phone's
+own model. That model stays chosen above, labelled as the one that answers
+while the computer is away, and **Use this phone's model** switches back.
+Leaving the network is the normal case on a phone, so the reply's fallback line,
+not an error, is how a person learns about it.
 
 **A label travels with its control.** In a wrapping row of labelled controls —
 the gezel header's Model, Context, Sandbox — wrap each label and its keys in one

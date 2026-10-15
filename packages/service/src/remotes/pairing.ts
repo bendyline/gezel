@@ -17,7 +17,6 @@
  */
 
 import { isIP } from 'node:net';
-import { hostname } from 'node:os';
 import { createLogger } from '@bendyline/gezel';
 import {
   IdentityResponseSchema,
@@ -29,7 +28,9 @@ import {
   createInsecureBootstrapFetch,
   createPinnedFetch,
 } from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
+import { pairWithConnectCode } from '@bendyline/gezel/remote';
 import type { ServiceContext } from '../http/context.js';
+import { displayHostname } from './lan-discovery.js';
 import type { PairedRemote } from './registry.js';
 
 const log = createLogger('remote-pairing');
@@ -37,6 +38,11 @@ const log = createLogger('remote-pairing');
 export interface PairRemoteInput {
   /** B's base URL, e.g. `https://192.168.1.50:6229`. */
   baseUrl: string;
+  /**
+   * What A calls B. Never sent to B: B's approval prompt names A by A's own
+   * hostname, so a label typed (or discovered) for the server can't make a
+   * pairing request look like it came from the server itself.
+   */
   displayName?: string;
   approvalTimeoutSec?: number;
   /** Fingerprint the user verified out-of-band during the inspect step. */
@@ -173,7 +179,7 @@ export async function pairRemote(
       baseUrl,
       fetch: pinned,
       appId: ownIdentity.deviceId,
-      appName: input.displayName ?? hostname(),
+      appName: displayHostname(),
       deviceIdentityPubKey: ownIdentity.publicKeyPem,
       timeoutMs: (input.approvalTimeoutSec ?? 120) * 1000,
     });
@@ -185,7 +191,7 @@ export async function pairRemote(
   const paired: PairedRemote = {
     remoteId,
     baseUrl,
-    displayName: input.displayName ?? identity.deviceId,
+    displayName: input.displayName?.trim() || new URL(baseUrl).hostname,
     token,
     pinnedIdentityKey: identity.publicKeyPem,
     pinnedIdentityFingerprint: identity.fingerprint,
@@ -195,6 +201,61 @@ export async function pairRemote(
   };
   await ctx.remotes.add(paired);
   log.info(`[remote-pairing] paired with ${baseUrl} as ${remoteId} (${paired.displayName})`);
+  return paired;
+}
+
+/** Code-pairing refusals, shared with every client (core `remote/pairing.ts`). */
+export {
+  PairingCodeAttemptsError,
+  PairingCodeClosedError,
+  PairingCodeRejectedError,
+  PairingCodeUnsupportedError,
+} from '@bendyline/gezel/remote';
+
+export interface PairWithCodeInput {
+  baseUrl: string;
+  /** The 8 digits shown on B, spaces and dashes allowed. */
+  code: string;
+  /** What A calls B; defaults to the name B reports once the code checks out. */
+  displayName?: string;
+}
+
+/**
+ * Pairing with a connect code, run by core's client (the same code a phone
+ * runs) over undici: a bootstrap channel for `/v1/identity`, then a channel
+ * pinned to the certificate it presented. Unlike {@link pairRemote}, this needs
+ * no identity-code comparison and re-pins a changed identity without asking —
+ * the code the person typed is the out-of-band check.
+ */
+export async function pairRemoteWithCode(
+  ctx: ServiceContext,
+  input: PairWithCodeInput,
+): Promise<PairedRemote> {
+  const ownIdentity = ctx.deviceIdentity;
+  if (!ownIdentity) {
+    throw new Error('pairing: this service has no device identity to pair with');
+  }
+  const server = await pairWithConnectCode(
+    { bootstrap: createInsecureBootstrapFetch, pinned: createPinnedFetch },
+    {
+      baseUrl: input.baseUrl,
+      code: input.code,
+      client: {
+        deviceId: ownIdentity.deviceId,
+        fingerprint: ownIdentity.fingerprint,
+        publicKeyPem: ownIdentity.publicKeyPem,
+        appName: displayHostname(),
+      },
+      ...(input.displayName ? { displayName: input.displayName } : {}),
+    },
+  );
+  const paired: PairedRemote = { ...server };
+  // A device re-paired after a reinstall has a new identity at the same
+  // address; the registry drops the stale entry for that address.
+  await ctx.remotes.add(paired);
+  log.info(
+    `[remote-pairing] paired with ${paired.baseUrl} by connect code (${paired.displayName})`,
+  );
   return paired;
 }
 

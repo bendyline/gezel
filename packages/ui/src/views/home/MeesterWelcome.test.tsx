@@ -1,3 +1,4 @@
+import { DESKTOP_RUNTIME_CAPABILITIES } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -135,6 +136,37 @@ describe('MeesterWelcome', () => {
       expect(screen.getByRole('checkbox', { name: 'Data and spreadsheets' })).toBeChecked();
     });
 
+    // Picking Data left the trip, language and party cards. Data's first
+    // projects are craftbooks, so a host that cannot launch one from chat
+    // still serves nothing for it and points at New Task's For you shelf.
+    it('offers plans for a pick no first project serves', async () => {
+      window.__GEZEL__ = {
+        capabilities: { ...DESKTOP_RUNTIME_CAPABILITIES, chatTaskLaunch: false },
+      } as never;
+      try {
+        vi.mocked(api.getConfig).mockResolvedValue(
+          config({ interests: { areas: ['data'], askedAt: 'x' } } as Partial<ConfigResponse>),
+        );
+        const onBrowseForYou = vi.fn();
+        render(<MeesterWelcome {...figure} onBrowseForYou={onBrowseForYou} />);
+        fireEvent.click(
+          await screen.findByRole('button', { name: 'Browse plans for data and spreadsheets' }),
+        );
+        expect(onBrowseForYou).toHaveBeenCalled();
+      } finally {
+        delete window.__GEZEL__;
+      }
+    });
+
+    it('offers no browse link when the cards already serve the pick', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue(
+        config({ interests: { areas: ['home'], askedAt: 'x' } } as Partial<ConfigResponse>),
+      );
+      render(<MeesterWelcome {...figure} onBrowseForYou={vi.fn()} />);
+      await screen.findByRole('button', { name: /Plan a trip/ });
+      expect(screen.queryByRole('button', { name: /Browse plans/ })).toBeNull();
+    });
+
     it('never asks an established install', async () => {
       vi.mocked(api.getConfig).mockResolvedValue(config());
       render(<MeesterWelcome {...figure} />);
@@ -233,7 +265,7 @@ describe('MeesterWelcome', () => {
       render(<FirstRun cfg={config()} />);
 
       const key = await screen.findByRole('button', {
-        name: 'Fetch my tools · 16.0 GB · about 20 minutes',
+        name: 'Fetch my tools · 16.0 GB · about 30 minutes',
       });
       expect(screen.getByText(/I need my tools/)).toBeInTheDocument();
       expect(screen.getByText(/Change what I'm allowed to do/)).toBeInTheDocument();
@@ -334,6 +366,23 @@ describe('MeesterWelcome', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
       await waitFor(() => expect(api.ensureNativeEngine).toHaveBeenCalledTimes(2));
+    });
+
+    // "6.3 GB" counted the model alone; the engine came down beside it.
+    it('counts the engine in the key when it still has to come down', async () => {
+      vi.mocked(api.getNativeEngineStatus).mockResolvedValue({
+        release: 'native-v1',
+        pinned: true,
+        platformKey: 'win32-x64',
+        llamaBackend: 'cuda',
+        engines: [{ name: 'llama-server', installed: false, downloadBytes: 2 * 1024 ** 3 }],
+      } as never);
+      render(<FirstRun cfg={config()} />);
+      expect(
+        await screen.findByRole('button', {
+          name: 'Fetch my tools · 18.0 GB · about 30 minutes',
+        }),
+      ).toBeInTheDocument();
     });
 
     it('fetches the engine beside the model when the person taps', async () => {

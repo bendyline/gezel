@@ -290,7 +290,10 @@ import { createToolAudioPersister } from '../providers/tool-audio-persister.js';
 import { createToolImagePersister } from '../providers/tool-image-persister.js';
 import { TurnAbortError } from '../providers/turn-abort-error.js';
 import { artifactPathsOf, extractReferencedFiles } from '../references/file-references.js';
+import type { RemoteReachability, RemoteStatus } from '../remotes/reachability.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
+import { RemoteUnreachableError } from '../remotes/unreachable.js';
+import { awaitWindowsScriptSandboxBoot } from '../sandbox/windows-mxc-boot.js';
 import { windowsMxcState } from '../sandbox/windows-mxc.js';
 import { listStdlibScripts } from '../scripts/stdlib-source.js';
 import {
@@ -303,6 +306,7 @@ import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
 import {
   WRAP_UP_MAX_FILES,
   composeTaskWrapUp,
+  loadMakerQuestion,
   loadTaskResult,
   placeTaskDeliverable,
   taskFinishedQuestion,
@@ -476,6 +480,12 @@ import {
 } from './prompt-tool-contract.js';
 import { providerUsesManagedMcpBridge } from './provider-capabilities.js';
 import { spliceIntoText } from './recognition-splice.js';
+import {
+  isRemoteOnlyModel,
+  remoteFallbackNotice,
+  remoteIdForRoute,
+  remoteReturnNotice,
+} from './remote-fallback.js';
 import { type TurnImageLimits, resolveTurnImages } from './resolve-turn-images.js';
 import {
   claimsCompletion,
@@ -785,8 +795,14 @@ export function effectiveSessionModel(args: {
       : undefined;
   const capabilityRoutedModel =
     args.record.modelSource === 'capability-routing' ? args.record.model : undefined;
+  // A gezel pinned to a paired server's model runs on this install's own
+  // provider while that server is away; the remote id means nothing there.
+  const frontmatterModel =
+    args.record.providerName !== 'remote' && isRemoteOnlyModel(args.frontmatterModel)
+      ? undefined
+      : args.frontmatterModel;
   return (
-    args.frontmatterModel ??
+    frontmatterModel ??
     nightShiftModel ??
     capabilityRoutedModel ??
     args.config.defaultModel?.[args.record.providerName] ??
@@ -954,6 +970,8 @@ interface LiveSessionState {
   profile?: ResolvedModelProfile;
   /** One-shot user-visible warnings emitted when the tool cap hides tools. */
   toolCapWarnings?: string[];
+  /** One-shot notes that this turn's paired server is away, or back (remote-fallback.ts). */
+  routeNotices?: string[];
 }
 
 type BuiltSessionOpts = SessionOpts & {
@@ -1925,6 +1943,13 @@ export class ChatManager extends LocalEngineRuntime {
     this.remotes = remotes;
   }
   private remotes?: RemotesRegistry;
+  /** Whether each paired server is reachable; unreachable ones fall back (see remote-fallback.ts). */
+  setRemoteReachability(reachability: RemoteReachability): void {
+    this.remoteReachability = reachability;
+  }
+  private remoteReachability?: RemoteReachability;
+  /** Sessions currently answering on a fallback, keyed by session id, valued by the absent server. */
+  private readonly remoteFallbackSessions = new Map<string, string>();
   /**
    * Runtime-managed machine broker. Kept as a resolver because its bearer
    * token and TLS cert rotate independently of this user daemon.
@@ -2084,9 +2109,17 @@ export class ChatManager extends LocalEngineRuntime {
           fetch: getPairedRemoteFetch(latest, this.remotes!),
         };
       },
+      // This computer's own machine engine never wanders off the network.
+      ...(remote.managed
+        ? {}
+        : {
+            onReachability: (reachable: boolean) => {
+              if (reachable) this.remoteReachability?.reportReachable(remote.remoteId);
+              else this.remoteReachability?.reportUnreachable(remote.remoteId);
+            },
+          }),
     });
     this.remoteProviders.set(providerKey, { connectionKey, provider });
-    this.remotes?.touch(parsed.remoteId);
     return provider;
   }
 
@@ -2237,6 +2270,40 @@ export class ChatManager extends LocalEngineRuntime {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * A paired server's chat models for a picker, with whether it can be
+   * reached. An unreachable server answers at once with the models it had
+   * when last listed, so the picker can show them as unavailable instead of
+   * waiting on it or hiding them.
+   */
+  async remoteModelsWithStatus(
+    remoteId: string,
+  ): Promise<{ status: RemoteStatus; models: ModelInfo[] }> {
+    const remote = this.remotes?.get(remoteId);
+    if (!remote) return { status: 'offline', models: [] };
+    const known = (remote.knownModels ?? []) as ModelInfo[];
+    if (this.remoteReachability && (await this.remoteReachability.check(remoteId)) === 'offline') {
+      return { status: 'offline', models: known };
+    }
+    const models = await this.listRemoteModels(remoteId, AbortSignal.timeout(8_000));
+    const status = this.remoteReachability?.status(remoteId) ?? 'unknown';
+    if (status === 'offline') return { status, models: known };
+    const listed = models.map(
+      ({ id, name, contextWindow, supportsTools, supportsReasoning, parameterSize }) => ({
+        id,
+        name,
+        ...(contextWindow ? { contextWindow } : {}),
+        ...(supportsTools !== undefined ? { supportsTools } : {}),
+        ...(supportsReasoning !== undefined ? { supportsReasoning } : {}),
+        ...(parameterSize ? { parameterSize } : {}),
+      }),
+    );
+    if (listed.length > 0 && JSON.stringify(listed) !== JSON.stringify(remote.knownModels ?? [])) {
+      await this.remotes?.update(remoteId, { knownModels: listed }).catch(() => undefined);
+    }
+    return { status: 'online', models };
   }
 
   /**
@@ -7170,7 +7237,15 @@ export class ChatManager extends LocalEngineRuntime {
     if (inflightTurn.cancelled) turnAbort.abort();
     const engineBind = this.turnEngineBind(sessionId, preflightScope, opts, turnAbort.signal);
     try {
-      state = await this.ensureState(sessionId, userText, true, engineBind);
+      try {
+        state = await this.ensureState(sessionId, userText, true, engineBind);
+      } catch (err) {
+        // The paired server vanished between its reachability check and the
+        // session's first request. It is marked unreachable now, so building
+        // the session again lands on the fallback instead of failing the turn.
+        if (!(err instanceof RemoteUnreachableError) || inflightTurn.cancelled) throw err;
+        state = await this.ensureState(sessionId, userText, true, engineBind);
+      }
     } catch (err) {
       if (preflightScope && !inflightTurn.cancelled) {
         await this.recordPreTurnFailure(sessionId, userText, opts, err, preflightScope);
@@ -7217,6 +7292,14 @@ export class ChatManager extends LocalEngineRuntime {
         buf?.push(message);
       }
       state.toolCapWarnings = undefined;
+    }
+    if (state.routeNotices && state.routeNotices.length > 0) {
+      const buf = this.currentTurnWarnings.get(sessionId);
+      for (const message of state.routeNotices) {
+        this.events.publish(scope, { type: 'warning', message });
+        buf?.push(message);
+      }
+      state.routeNotices = undefined;
     }
     const userMessage = buildUserTurnMessage(userText, opts);
     state.record.messages.push(userMessage);
@@ -11357,8 +11440,10 @@ export class ChatManager extends LocalEngineRuntime {
     let pinnedByGezel = false;
     if (gezelId && !opts.model) {
       const gezel = await wait(this.store.getGezel(gezelId).catch(() => null));
-      if (gezel?.parsed.frontmatter.model) {
-        model = gezel.parsed.frontmatter.model;
+      const pinned = gezel?.parsed.frontmatter.model;
+      // A paired server's model can't run on the provider standing in for it.
+      if (pinned && !(providerName !== 'remote' && isRemoteOnlyModel(pinned))) {
+        model = pinned;
         pinnedByGezel = true;
       }
       if (gezel?.parsed.frontmatter.reasoningEffort) {
@@ -11762,6 +11847,17 @@ export class ChatManager extends LocalEngineRuntime {
       : null;
     const figures = await reviewTaskFigures(this.store, task, outputs).catch(() => null);
     const maker = deliverable ? deliverableMaker(task, deliverable) : undefined;
+    // The maker's open question reaches the owner here, or nowhere: it was
+    // asked in a task thread the owner has no reason to open.
+    const askerId = maker ?? (task.assignee?.kind === 'gezel' ? task.assignee.gezelId : undefined);
+    const question = askerId
+      ? await loadMakerQuestion(this.store, task, askerId).catch(() => undefined)
+      : undefined;
+    const askerName =
+      question && askerId
+        ? (await this.store.getGezel(askerId).catch(() => null))?.name
+        : undefined;
+    const ask = question && askerName ? { name: askerName, question } : null;
     // File references resolve against the thread's project. A kickoff from
     // the meester's Default thread builds in a project of its own, and its
     // file chips opened "trip.json was not found" there; the deliverable
@@ -11770,7 +11866,7 @@ export class ChatManager extends LocalEngineRuntime {
 
     const message: ChatMessage = {
       role: 'assistant',
-      content: composeTaskWrapUp(task, outputs, figures, deliverable),
+      content: composeTaskWrapUp(task, outputs, figures, deliverable, ask),
       at: nowIso(),
       synthetic: 'task-wrapup',
       referencedTasks: [task.ref],
@@ -12283,11 +12379,23 @@ export class ChatManager extends LocalEngineRuntime {
     gezelId?: string,
     opts?: { nightShift?: boolean },
   ): Promise<ProviderName> {
+    return (await this.resolveProviderRoute(gezelId, opts)).name;
+  }
+
+  /**
+   * The provider a gezel's work goes to. When the chosen route is a paired
+   * server, `remoteId` names it; when that server is known to be unreachable,
+   * `name` is what answers instead and `fallbackFrom` says why.
+   */
+  private async resolveProviderRoute(
+    gezelId?: string,
+    opts?: { nightShift?: boolean },
+  ): Promise<{ name: ProviderName; remoteId?: string; fallbackFrom?: string }> {
     // Eval-only cohort lock: model-authored gezels may explicitly request a
     // cloud provider during recovery. A local-model trial must keep every
     // spawned session on the provider under test or its result is invalid.
     const evalLock = resolveEvalProviderLock();
-    if (evalLock) return evalLock;
+    if (evalLock) return { name: evalLock };
 
     // Both `frontmatter.provider` and `config.provider` are already typed
     // as `ProviderName | undefined` via `ProviderNameSchema`. Trust the
@@ -12296,24 +12404,96 @@ export class ChatManager extends LocalEngineRuntime {
     // new provider was added to the enum without updating every switch.
     // The exhaustiveness test in `manager-provider-name.test.ts` locks
     // this behavior in.
+    let chosen: ProviderName | undefined;
+    let frontmatterModel: string | undefined;
     if (gezelId) {
       try {
         const gezel = await this.store.getGezel(gezelId);
-        const override = gezel?.parsed.frontmatter.provider;
-        if (override) return override;
+        chosen = gezel?.parsed.frontmatter.provider ?? undefined;
+        frontmatterModel = gezel?.parsed.frontmatter.model;
       } catch {
         /* fall through */
       }
     }
     const config = await this.store.readConfig();
-    if (
-      opts?.nightShift === true &&
-      config.nightShift?.modelOverride?.enabled === true &&
-      config.nightShift.modelOverride.provider
-    ) {
-      return config.nightShift.modelOverride.provider;
+    const nightOverride =
+      opts?.nightShift === true && config.nightShift?.modelOverride?.enabled === true
+        ? config.nightShift.modelOverride
+        : undefined;
+    if (!chosen && nightOverride?.provider) chosen = nightOverride.provider;
+    chosen ??= resolveDefaultProviderName(config);
+    if (chosen !== 'remote') return { name: chosen };
+
+    const remoteId = remoteIdForRoute({
+      frontmatterModel,
+      ...(nightOverride ? { nightOverride } : {}),
+      config,
+    });
+    if (!remoteId || this.remoteReachability?.status(remoteId) !== 'offline') {
+      return { name: 'remote', ...(remoteId ? { remoteId } : {}) };
     }
-    return resolveDefaultProviderName(config);
+    const fallback = await this.remoteFallbackProvider(config);
+    return fallback
+      ? { name: fallback, remoteId, fallbackFrom: remoteId }
+      : { name: 'remote', remoteId };
+  }
+
+  /**
+   * What answers while a paired server is away: the install's own provider
+   * when that isn't the remote one, else this platform's on-device engine —
+   * and only when it has a model to run, because a fallback that can't answer
+   * just trades one error for a vaguer one.
+   */
+  private async remoteFallbackProvider(config: GezelConfig): Promise<ProviderName | null> {
+    const candidate =
+      config.provider && config.provider !== 'remote'
+        ? config.provider
+        : resolveDefaultProviderName({});
+    if (candidate === 'remote') return null;
+    if (!isNativeLocalProvider(candidate) || this.machineEngineRemoteId?.()) return candidate;
+    const store = this.localModelStore(candidate);
+    if (!store) return candidate;
+    try {
+      return (await store.listInstalled()).length > 0 ? candidate : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Before a turn on a remote-routed gezel, make sure its server's status is
+   * current: probes it when it hasn't been heard from lately.
+   */
+  private async probeRemoteRoute(gezelId: string): Promise<void> {
+    if (!this.remoteReachability) return;
+    const route = await this.resolveProviderRoute(gezelId);
+    if (route.remoteId) await this.remoteReachability.check(route.remoteId);
+  }
+
+  /** Whether a live session should move because its paired server went away or came back. */
+  private async remoteRouteChanged(record: ChatSession, beforeTurn: boolean): Promise<boolean> {
+    if (!this.remoteReachability) return false;
+    if (beforeTurn) await this.probeRemoteRoute(record.gezelId);
+    const route = await this.resolveProviderRoute(record.gezelId);
+    return route.remoteId !== undefined && route.name !== record.providerName;
+  }
+
+  /** The sentence for a session that starts or stops falling back, if it does now. */
+  private remoteRouteNotice(
+    sessionId: string,
+    route: { name: ProviderName; remoteId?: string; fallbackFrom?: string },
+  ): string | null {
+    const nameOf = (remoteId: string) =>
+      this.remotes?.get(remoteId)?.displayName ?? 'The paired server';
+    if (route.fallbackFrom) {
+      if (this.remoteFallbackSessions.get(sessionId) === route.fallbackFrom) return null;
+      this.remoteFallbackSessions.set(sessionId, route.fallbackFrom);
+      return remoteFallbackNotice(nameOf(route.fallbackFrom), route.name);
+    }
+    const was = this.remoteFallbackSessions.get(sessionId);
+    if (!was) return null;
+    this.remoteFallbackSessions.delete(sessionId);
+    return route.name === 'remote' ? remoteReturnNotice(nameOf(was)) : null;
   }
 
   /**
@@ -13350,6 +13530,17 @@ export class ChatManager extends LocalEngineRuntime {
         ? exactCraftbookConstraintActive(existing.record, gezel, pendingUserText)
         : false;
       const gateRepairConstrained = await gateRepairConstraintActive(this.store, existing.record);
+      // Its paired server went away (or came back): rebuild so the turn goes
+      // where it can be answered. Probed first when a turn is about to run.
+      const remoteRerouted = await this.remoteRouteChanged(
+        existing.record,
+        pendingUserText !== undefined,
+      );
+      if (remoteRerouted) {
+        log.info(
+          `session ${existing.record.id.slice(0, 8)}: paired server reachability changed; rebuilding on ${await this.resolveProviderName(existing.record.gezelId)}`,
+        );
+      }
       const codexPermissionMode = gezel
         ? await this.resolveCodexPermissionMode(existing.record, gezel)
         : undefined;
@@ -13358,7 +13549,8 @@ export class ChatManager extends LocalEngineRuntime {
         : undefined;
       if (
         gezel &&
-        (gezel.about !== existing.aboutSnapshot ||
+        (remoteRerouted ||
+          gezel.about !== existing.aboutSnapshot ||
           (gezel.toolsMd ?? null) !== existing.toolsMdSnapshot ||
           growthSignature(gezel, await this.socialMode()) !== existing.growthSnapshot ||
           this.catalog.contentRoot() !== existing.catalogContentSnapshot ||
@@ -13449,8 +13641,12 @@ export class ChatManager extends LocalEngineRuntime {
     // `record.messages` is preserved; only the remote LLM session is
     // discarded. Without this, a session first opened under Copilot
     // keeps routing to Copilot forever and fails loudly once the user
-    // swaps to Ollama / OpenAI.
-    const currentProviderName = await this.resolveProviderName(record.gezelId);
+    // swaps to Ollama / OpenAI. The same path moves a session onto its
+    // fallback while its paired server is away, and back again after.
+    if (pendingUserText !== undefined) await this.probeRemoteRoute(record.gezelId);
+    const route = await this.resolveProviderRoute(record.gezelId);
+    const currentProviderName = route.name;
+    const routeNotice = this.remoteRouteNotice(record.id, route);
     if (currentProviderName !== record.providerName) {
       log.info(
         `migrating session ${record.id.slice(0, 8)} from ${record.providerName} → ${currentProviderName}`,
@@ -13676,6 +13872,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(sessionOpts.toolCapWarnings && sessionOpts.toolCapWarnings.length > 0
         ? { toolCapWarnings: sessionOpts.toolCapWarnings }
         : {}),
+      ...(routeNotice ? { routeNotices: [routeNotice] } : {}),
     };
     this.states.set(sessionId, state);
     if (isScheduledRunSession(state.record)) this.events.markScheduledRun(sessionId);
@@ -14128,6 +14325,9 @@ export class ChatManager extends LocalEngineRuntime {
       omitLastUserFromPriorMessages?: boolean;
     },
   ): Promise<BuiltSessionOpts> {
+    // The prompt surface and the gezel-mcp env below both read the Windows
+    // container state synchronously; settle the boot probe first.
+    if (process.platform === 'win32') await awaitWindowsScriptSandboxBoot();
     const project = await this.store.getProject(record.projectId);
     // A visitor on a shared mini-site sees only what the site's pages show; a
     // listing of the owner's files would hand a stranger every file name.
@@ -14859,6 +15059,9 @@ export class ChatManager extends LocalEngineRuntime {
     evidenceLedger?.setLookupTools(
       availableBuiltinTools.map((tool) => tool.name),
       factualLookupPreference,
+    );
+    evidenceLedger?.setWorkspaceFiles(
+      workspaceFiles.filter((entry) => !entry.isDirectory).map((entry) => entry.path),
     );
     const workspaceGestalt = workspaceGestaltActive
       ? await this.buildWorkspaceGestalt(

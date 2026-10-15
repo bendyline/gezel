@@ -1,6 +1,6 @@
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { postMissingDeliverableFeedback, postSniffFeedback } from '../sniff-feedback.ts';
-import { countDistinctMatches, requireOrderedSections } from '../success-check.ts';
+import { countDistinctMatches, foldTypography, requireOrderedSections } from '../success-check.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
 import {
   type PersistedFixtureContents,
@@ -924,9 +924,10 @@ async function readWorkspaceText(
 
 /** Pure evaluator shared by the live poller and deterministic grader tests. */
 export function evaluateIncidentPostmortem(
-  postmortem: string,
+  rawPostmortem: string,
   persistedEvidence: PersistedFixtureContents = expectedIncidentEvidenceContents(),
 ): IncidentPostmortemVerdict {
+  const postmortem = foldTypography(rawPostmortem);
   const signals: string[] = [];
   const failures: string[] = [];
   const evidenceIntegrity = checkSeedFixtureIntegrity(INCIDENT_EVIDENCE_FILES, persistedEvidence);

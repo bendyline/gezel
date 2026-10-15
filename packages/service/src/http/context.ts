@@ -38,6 +38,8 @@ import type { PreviewLogBuffer } from '../preview-log/buffer.js';
 import type { PromptDraftManager } from '../prompt-drafts/manager.js';
 import type { InputStagingManager } from '../tasks/inputs/staging.js';
 
+import type { LanBrowser } from '../remotes/lan-discovery.js';
+import type { RemoteReachability } from '../remotes/reachability.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
 
 import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
@@ -165,6 +167,10 @@ export interface ServiceContext extends EngineContext {
    * the user pairs. See [remotes/registry.ts](../remotes/registry.ts).
    */
   remotes: RemotesRegistry;
+  /** Whether each paired server is reachable now. See [remotes/reachability.ts](../remotes/reachability.ts). */
+  remoteReachability?: RemoteReachability;
+  /** Finds gezel servers on the local network (mDNS); null when discovery is off. */
+  lanBrowser?: LanBrowser | null;
   /**
    * Live owner of the opt-in, unauthenticated Ollama-compatible
    * loopback listener (port 11434). See http/ollama-emulation.ts.

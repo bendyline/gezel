@@ -17,7 +17,7 @@ import { api } from '../api.js';
  */
 export async function llamaEngineNeed(
   config: Pick<ConfigResponse, 'provider' | 'llamaCppBackendOverride'> | null,
-): Promise<{ variant?: string } | null> {
+): Promise<{ variant?: string; downloadBytes?: number } | null> {
   if (config?.provider !== 'llama-cpp') return null;
   const status = await api.getNativeEngineStatus().catch(() => null);
   if (!status?.pinned) return null;
@@ -25,5 +25,10 @@ export async function llamaEngineNeed(
   if (!llama || llama.installed) return null;
   const override = config.llamaCppBackendOverride;
   const variant = override && override !== 'auto' ? override : status.llamaBackend;
-  return variant ? { variant } : {};
+  // The pinned size is for the detected backend; an override fetches another.
+  const downloadBytes = variant === status.llamaBackend ? llama.downloadBytes : undefined;
+  return {
+    ...(variant ? { variant } : {}),
+    ...(downloadBytes ? { downloadBytes } : {}),
+  };
 }

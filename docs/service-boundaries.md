@@ -111,8 +111,9 @@ the user's project. Model catalog, pull, delete, engine-status, cache stats, and
 clearing proxy to the broker.
 
 The broker also owns **LAN serving to paired devices** on machine installs: the routable
-`remoteServing` listener (default 6229), the pairing grant queue, and the paired-device token
-roster all live in the broker's home, so serving keeps working with nobody logged in. Its
+`remoteServing` listener (default 6229), its connect code and mDNS advertisement, the pairing
+grant queue, and the paired-device token roster all live in the broker's process and home, so
+serving keeps working with nobody logged in. Its
 `remoteServing` config is written only through the loopback `/v1/remote/manage/serving` surface
 (gated by the `machine-models` scope), which the user daemon proxies for the UI at
 `/api/machine-serving`; a bridged user daemon defers its own LAN listener so port 6229 has one

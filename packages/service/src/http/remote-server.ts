@@ -5,6 +5,7 @@ import { ZodError } from 'zod';
 import { bearerAuth, requireScope } from './auth.js';
 import type { EngineContext } from './engine-context.js';
 import { hostGuard } from './host-guard.js';
+import { v1AppsPairRoutes } from './routes/v1-apps-pair.js';
 import { v1AppsRoutes } from './routes/v1-apps.js';
 import { v1IdentityRoutes } from './routes/v1-identity.js';
 import { v1RemoteRoutes } from './routes/v1-remote.js';
@@ -17,6 +18,9 @@ import { v1RemoteRoutes } from './routes/v1-remote.js';
 export function isRemoteServingRoute(method: string, path: string): boolean {
   if (method === 'GET' && path === '/v1/identity') return true;
   if (method === 'POST' && path === '/v1/apps/register') return true;
+  if (method === 'POST' && (path === '/v1/apps/pair/start' || path === '/v1/apps/pair/finish')) {
+    return true;
+  }
   if (method === 'GET' && /^\/v1\/apps\/grant\/[^/]+(?:\/events)?$/.test(path)) return true;
   if (method === 'DELETE' && /^\/v1\/apps\/[^/]+\/token$/.test(path)) return true;
   return path === '/v1/remote' || path.startsWith('/v1/remote/');
@@ -68,6 +72,7 @@ export function buildRemoteApp(ctx: EngineContext): Hono {
     return c.json({ error: 'internal_error', requestId }, 500);
   });
 
+  app.route('/v1/apps/pair', v1AppsPairRoutes(ctx));
   app.route('/v1/apps', v1AppsRoutes(ctx));
   app.route('/v1/identity', v1IdentityRoutes(ctx));
   app.use('/v1/remote/*', bearerAuth(ctx.tokenStore));

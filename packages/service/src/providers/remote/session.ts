@@ -11,7 +11,7 @@
  * appends the result to `priorMessages`, and POSTs again. B stays stateless.
  */
 
-import { autoCompactedNotice, createLogger } from '@bendyline/gezel';
+import { autoCompactedNotice, awakeNow, createLogger } from '@bendyline/gezel';
 import {
   TOOL_IMAGES_MESSAGE,
   retireInspectedToolImages,
@@ -48,6 +48,12 @@ import type {
 } from '@bendyline/gezel-inference/internal/providers/types';
 import { buildTurnUsage } from '@bendyline/gezel-inference/internal/providers/usage-builder';
 import {
+  type RemoteReachTarget,
+  RemoteUnreachableError,
+  fetchReachingRemote,
+  isRemoteUnreachableError,
+} from '../../remotes/unreachable.js';
+import {
   isLlamaCppGrammarParseError,
   simplifyJsonSchemaForLlamaCpp,
 } from '../llama-cpp/tool-grammar.js';
@@ -63,6 +69,7 @@ import {
   IMAGE_HISTORY_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
   type PriorMessageWire,
+  REMOTE_STREAM_HEARTBEAT_MS,
   type RemoteCacheWarmRequest,
   RemoteInferFrameSchema,
   type RemoteInferRequest,
@@ -99,6 +106,10 @@ export interface RemoteSessionDeps {
   baseUrl: string;
   token: string;
   fetch: typeof fetch;
+  /** The paired server, for reachability reports and the sentence a person reads. */
+  remoteId?: string;
+  label?: string;
+  onReachability?: (reachable: boolean) => void;
   /**
    * Refreshable connection for runtime-managed brokers. Existing chat
    * sessions survive broker restarts (rotated port, cert, and token) by
@@ -655,16 +666,21 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     for (;;) {
       const connection = this.deps.resolveConnection?.() ?? this.deps;
       start = Date.now();
-      res = await connection.fetch(`${connection.baseUrl}/v1/remote/infer`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${connection.token}`,
-          Accept: 'text/event-stream',
+      res = await fetchReachingRemote(
+        this.reachTarget(),
+        connection.fetch,
+        `${connection.baseUrl}/v1/remote/infer`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${connection.token}`,
+            Accept: 'text/event-stream',
+          },
+          body: JSON.stringify(body),
+          ...(opts?.queue?.signal ? { signal: opts.queue.signal } : {}),
         },
-        body: JSON.stringify(body),
-        ...(opts?.queue?.signal ? { signal: opts.queue.signal } : {}),
-      });
+      );
       if (res.ok && res.body) break;
 
       const detail = await res.text().catch(() => '');
@@ -716,120 +732,143 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     let toolCalls: ExternalToolCall[] = [];
     let errFrame: { code: string; message: string; requestId?: string } | null = null;
 
-    await readSseFrames(res.body as ReadableStream<Uint8Array>, (raw) => {
-      const parsed = RemoteInferFrameSchema.safeParse(raw);
-      if (!parsed.success) {
-        log.warn(`[remote] dropping unrecognized frame: ${JSON.stringify(raw).slice(0, 120)}`);
-        return;
-      }
-      const frame = parsed.data;
-      switch (frame.type) {
-        case 'delta':
-          text += frame.text;
-          this.emitDelta(frame.text);
-          break;
-        case 'reasoning_delta':
-          this.emitReasoningDelta(frame.text);
-          break;
-        case 'tool_args_delta':
-          this.emitToolArgsDelta(frame.name, frame.text, {
-            ...(frame.index !== undefined ? { index: frame.index } : {}),
-            ...(frame.id ? { id: frame.id } : {}),
-          });
-          break;
-        case 'wire_pulse':
-          this.emitWirePulse();
-          break;
-        case 'tool_call':
-          toolCalls = frame.calls.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments }));
-          break;
-        case 'usage':
-          if (frame.contextUtilization?.limit && frame.contextUtilization.limit > 0) {
-            // Capacity can change between admission and inference. Keep A's
-            // next pressure check calibrated to B's latest empirical limit.
-            this.numCtx = frame.contextUtilization.limit;
+    const signal = opts?.queue?.signal;
+    const lost = (cause?: unknown) => {
+      this.deps.onReachability?.(false);
+      const target = this.reachTarget();
+      return new RemoteUnreachableError(target.remoteId, target.label, 'stalled', { cause });
+    };
+    let outcome: 'complete' | 'stalled';
+    try {
+      outcome = await readSseFrames(
+        res.body as ReadableStream<Uint8Array>,
+        (raw) => {
+          const parsed = RemoteInferFrameSchema.safeParse(raw);
+          if (!parsed.success) {
+            log.warn(`[remote] dropping unrecognized frame: ${JSON.stringify(raw).slice(0, 120)}`);
+            return;
           }
-          this.emitUsage(
-            buildTurnUsage({
-              model: frame.model,
-              inputTokens: frame.inputTokens,
-              outputTokens: frame.outputTokens,
-              durationMs: frame.durationMs ?? Date.now() - start,
-              ...(frame.cachedInputTokens !== undefined
-                ? { cachedInputTokens: frame.cachedInputTokens }
-                : {}),
-              ...(frame.contextUtilization !== undefined
-                ? { contextUtilization: frame.contextUtilization }
-                : {}),
-            }),
-          );
-          break;
-        case 'reasoning':
-          reasoning += frame.text;
-          this.lastReasoning = (this.lastReasoning ?? '') + frame.text;
-          break;
-        case 'warning':
-          this.emitWarning(frame.message);
-          break;
-        case 'queued':
-          opts?.queue?.onQueueWait?.({ aheadOf: frame.aheadOf ?? 0 });
-          break;
-        case 'phase': {
-          // New brokers identify the native provider explicitly. Retain the
-          // model-prefix fallback so a newly upgraded user daemon can still
-          // consume phase frames from the first rolling-compatible broker.
-          const provider = frame.provider ?? nativeProviderFromModel(this.deps.model);
-          if (provider) {
-            if (typeof frame.ttftMs === 'number') {
-              // This is deliberately written by A as well as B: Settings →
-              // Open logs opens the per-user daemon log, while the machine
-              // broker's stdout is admin-protected on packaged installs.
-              log.info(
-                `[remote] TTFT ${frame.ttftMs}ms (engine=${provider} model=${this.deps.model})`,
+          const frame = parsed.data;
+          switch (frame.type) {
+            case 'delta':
+              text += frame.text;
+              this.emitDelta(frame.text);
+              break;
+            case 'reasoning_delta':
+              this.emitReasoningDelta(frame.text);
+              break;
+            case 'tool_args_delta':
+              this.emitToolArgsDelta(frame.name, frame.text, {
+                ...(frame.index !== undefined ? { index: frame.index } : {}),
+                ...(frame.id ? { id: frame.id } : {}),
+              });
+              break;
+            case 'wire_pulse':
+              this.emitWirePulse();
+              break;
+            case 'tool_call':
+              toolCalls = frame.calls.map((c) => ({
+                id: c.id,
+                name: c.name,
+                arguments: c.arguments,
+              }));
+              break;
+            case 'usage':
+              if (frame.contextUtilization?.limit && frame.contextUtilization.limit > 0) {
+                // Capacity can change between admission and inference. Keep A's
+                // next pressure check calibrated to B's latest empirical limit.
+                this.numCtx = frame.contextUtilization.limit;
+              }
+              this.emitUsage(
+                buildTurnUsage({
+                  model: frame.model,
+                  inputTokens: frame.inputTokens,
+                  outputTokens: frame.outputTokens,
+                  durationMs: frame.durationMs ?? Date.now() - start,
+                  ...(frame.cachedInputTokens !== undefined
+                    ? { cachedInputTokens: frame.cachedInputTokens }
+                    : {}),
+                  ...(frame.contextUtilization !== undefined
+                    ? { contextUtilization: frame.contextUtilization }
+                    : {}),
+                }),
               );
+              break;
+            case 'reasoning':
+              reasoning += frame.text;
+              this.lastReasoning = (this.lastReasoning ?? '') + frame.text;
+              break;
+            case 'warning':
+              this.emitWarning(frame.message);
+              break;
+            case 'queued':
+              opts?.queue?.onQueueWait?.({ aheadOf: frame.aheadOf ?? 0 });
+              break;
+            case 'phase': {
+              // New brokers identify the native provider explicitly. Retain the
+              // model-prefix fallback so a newly upgraded user daemon can still
+              // consume phase frames from the first rolling-compatible broker.
+              const provider = frame.provider ?? nativeProviderFromModel(this.deps.model);
+              if (provider) {
+                if (typeof frame.ttftMs === 'number') {
+                  // This is deliberately written by A as well as B: Settings →
+                  // Open logs opens the per-user daemon log, while the machine
+                  // broker's stdout is admin-protected on packaged installs.
+                  log.info(
+                    `[remote] TTFT ${frame.ttftMs}ms (engine=${provider} model=${this.deps.model})`,
+                  );
+                }
+                this.emitEnginePhase({
+                  provider,
+                  phase: frame.phase,
+                  ...(frame.detail ? { detail: frame.detail } : {}),
+                  ...(typeof frame.progress === 'number' ? { progress: frame.progress } : {}),
+                  ...(typeof frame.ttftMs === 'number' ? { ttftMs: frame.ttftMs } : {}),
+                  ...(typeof frame.outputTokens === 'number'
+                    ? { outputTokens: frame.outputTokens }
+                    : {}),
+                  ...(typeof frame.tokensPerSec === 'number'
+                    ? { tokensPerSec: frame.tokensPerSec }
+                    : {}),
+                });
+              }
+              break;
             }
-            this.emitEnginePhase({
-              provider,
-              phase: frame.phase,
-              ...(frame.detail ? { detail: frame.detail } : {}),
-              ...(typeof frame.progress === 'number' ? { progress: frame.progress } : {}),
-              ...(typeof frame.ttftMs === 'number' ? { ttftMs: frame.ttftMs } : {}),
-              ...(typeof frame.outputTokens === 'number'
-                ? { outputTokens: frame.outputTokens }
-                : {}),
-              ...(typeof frame.tokensPerSec === 'number'
-                ? { tokensPerSec: frame.tokensPerSec }
-                : {}),
-            });
+            case 'turn_stats':
+              this.emitTurnStats({
+                provider: frame.provider,
+                promptTokens: frame.promptTokens,
+                completionTokens: frame.completionTokens,
+                durationMs: frame.durationMs,
+                ...(typeof frame.tokensPerSec === 'number'
+                  ? { tokensPerSec: frame.tokensPerSec }
+                  : {}),
+              });
+              break;
+            case 'engine_stats':
+              this.emitEngineStats({
+                provider: frame.provider,
+                ramAllocBytes: frame.ramAllocBytes,
+              });
+              break;
+            case 'error':
+              errFrame = {
+                code: frame.code,
+                message: frame.message,
+                ...(frame.requestId ? { requestId: frame.requestId } : {}),
+              };
+              break;
+            default:
+              break; // done
           }
-          break;
-        }
-        case 'turn_stats':
-          this.emitTurnStats({
-            provider: frame.provider,
-            promptTokens: frame.promptTokens,
-            completionTokens: frame.completionTokens,
-            durationMs: frame.durationMs,
-            ...(typeof frame.tokensPerSec === 'number' ? { tokensPerSec: frame.tokensPerSec } : {}),
-          });
-          break;
-        case 'engine_stats':
-          this.emitEngineStats({
-            provider: frame.provider,
-            ramAllocBytes: frame.ramAllocBytes,
-          });
-          break;
-        case 'error':
-          errFrame = {
-            code: frame.code,
-            message: frame.message,
-            ...(frame.requestId ? { requestId: frame.requestId } : {}),
-          };
-          break;
-        default:
-          break; // done
-      }
-    });
+        },
+        { idleMs: REMOTE_STREAM_IDLE_MS },
+      );
+    } catch (err) {
+      if (signal?.aborted || !isRemoteUnreachableError(err)) throw err;
+      throw lost(err);
+    }
+    if (outcome === 'stalled' && !signal?.aborted) throw lost();
 
     if (errFrame) {
       const remoteError = errFrame as { code: string; message: string; requestId?: string };
@@ -843,6 +882,14 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
       throw error;
     }
     return { text, toolCalls, reasoning, queueWaitMs };
+  }
+
+  private reachTarget(): RemoteReachTarget {
+    return {
+      remoteId: this.deps.remoteId ?? '',
+      label: this.deps.label ?? 'The paired server',
+      ...(this.deps.onReachability ? { onReachability: this.deps.onReachability } : {}),
+    };
   }
 
   private advertisedTools(
@@ -869,29 +916,58 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
 }
 
 /**
+ * A reply that hears nothing for this long, from a server that has proved it
+ * sends keep-alives, has lost its server: three missed heartbeats.
+ */
+export const REMOTE_STREAM_IDLE_MS = REMOTE_STREAM_HEARTBEAT_MS * 3;
+const STREAM_WATCHDOG_POLL_MS = 5_000;
+
+/**
  * Minimal SSE reader: decode the stream, split on the blank-line frame
  * boundary, JSON-parse each `data:` payload, and hand the raw object to the
  * callback (the caller schema-validates). Tolerates `:`-comment keep-alive
  * lines and multi-line `data:` fields.
+ *
+ * With `idleMs`, a server that vanishes mid-reply (it slept, or this device
+ * left its network) ends the read as `'stalled'` instead of waiting on a
+ * socket the OS may hold open for many minutes. The watchdog arms only once a
+ * keep-alive comment has arrived — a server from before heartbeats can be
+ * silent through a long prefill and must not be cut off — and counts awake
+ * time, polling rather than arming one timer, so a nap on this side is not
+ * mistaken for the server going quiet.
  */
-async function readSseFrames(
+export async function readSseFrames(
   body: ReadableStream<Uint8Array>,
   onFrame: (raw: unknown) => void,
-): Promise<void> {
+  watch?: { idleMs: number; pollMs?: number },
+): Promise<'complete' | 'stalled'> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let heartbeats = false;
+  let stalled = false;
+  let lastHeard = awakeNow();
+  const watchdog = watch
+    ? setInterval(() => {
+        if (!heartbeats || awakeNow() - lastHeard <= watch.idleMs) return;
+        stalled = true;
+        void reader.cancel(new Error('remote stream went silent')).catch(() => {});
+      }, watch.pollMs ?? STREAM_WATCHDOG_POLL_MS)
+    : null;
+  watchdog?.unref?.();
   try {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
+      lastHeard = awakeNow();
       buffer += decoder.decode(value, { stream: true });
       let boundary = buffer.indexOf('\n\n');
       while (boundary !== -1) {
         const rawEvent = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
-        const data = rawEvent
-          .split('\n')
+        const lines = rawEvent.split('\n');
+        if (lines.some((line) => line.startsWith(':'))) heartbeats = true;
+        const data = lines
           .filter((line) => line.startsWith('data:'))
           .map((line) => line.slice(5).trim())
           .join('');
@@ -906,6 +982,8 @@ async function readSseFrames(
       }
     }
   } finally {
+    if (watchdog) clearInterval(watchdog);
     reader.releaseLock();
   }
+  return stalled ? 'stalled' : 'complete';
 }

@@ -81,6 +81,10 @@
       "types": "./dist/checks/index.d.ts",
       "import": "./dist/checks/index.js"
     },
+    "./remote": {
+      "types": "./dist/remote/index.d.ts",
+      "import": "./dist/remote/index.js"
+    },
     "./eval": {
       "types": "./dist/eval/index.d.ts",
       "import": "./dist/eval/index.js"

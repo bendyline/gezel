@@ -41,7 +41,11 @@ export function requireOrderedSections(
   let cursor = 0;
   for (const header of headers) {
     const escaped = header.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`^#+\\s+${escaped}\\s*$`, 'im');
+    // A parenthetical qualifier or a trailing colon is still that section:
+    // `## Timeline (UTC)` failed "missing or out-of-order at Timeline" on
+    // every repair while all eight sections stood in order (Nemotron 3.5
+    // Lightning, incident postmortem, 2026-10-15).
+    const re = new RegExp(`^#+\\s+${escaped}(?:\\s*\\([^)\\n]*\\))?\\s*:?\\s*$`, 'im');
     const slice = text.slice(cursor);
     const m = slice.match(re);
     if (!m || m.index === undefined) {

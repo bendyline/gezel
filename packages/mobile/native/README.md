@@ -26,6 +26,18 @@ the background cancels active work and prevents new generations until the app
 returns. No platform file path or arbitrary module loader is exposed to scripts.
 The privileged webview blocks navigation away from its packaged localhost origin.
 
+The `GezelRemote` plugin is the phone's only path to another device: HTTPS to a
+paired gezel server and discovery of `_gezel._tcp` (Bonjour on iOS, NSD on
+Android). It accepts only `https://` IP-literal URLs and trusts exactly the leaf
+certificate the page pins, with no hostname check, because a server's certificate
+names 127.0.0.1. A request with no pin reads only a server's identity. On Android
+that read pins to a certificate taken from a handshake the plugin refuses, so no
+trust manager accepts all certificates. A request that gets no TLS handshake
+within its connect timeout (5 s) fails as unreachable, while a server that is
+there may take as long as it needs. Bodies stream as `remoteChunk` events and end
+with `remoteEnd`. iOS declares `NSBonjourServices` and the local-network prompt in
+`Info.plist`.
+
 iOS supports arm64 devices and Apple Silicon simulators, minimum iOS 16.4.
 Build with Xcode 27 or later. Its weak-linked Foundation Models adapter requires
 iOS 26 and explicitly selects `SystemLanguageModel.default`. The provider chooser

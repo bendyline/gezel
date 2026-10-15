@@ -2,7 +2,7 @@ import { isEngagementAllowed } from '../engagement.js';
 import type { TerminalToolPolicy } from '../local-loop/provider-contract.js';
 import { terminalToolClosingText } from '../local-loop/terminal-tool-policy.js';
 import { createLogger } from '../log.js';
-import type { ChatMessage, ChatMessageToolCall } from '../schemas/gezel.js';
+import type { ChatMessage, ChatMessageToolCall, ProviderName } from '../schemas/gezel.js';
 import type { MobileEnginePhaseEvent } from '../schemas/mobile-provider.js';
 import type { MobileProviderId } from '../schemas/mobile-provider.js';
 import type { ChatSession } from '../schemas/session.js';
@@ -216,7 +216,7 @@ export interface StructuredChatSettings {
 export interface PortableToolRecordContext {
   store: PortableStore;
   session: ChatSession;
-  providerId: MobileProviderId;
+  providerId: ProviderName;
   actions: PortableToolActions;
   check(): Promise<void>;
   checkpoint(message: ChatMessage): Promise<void>;

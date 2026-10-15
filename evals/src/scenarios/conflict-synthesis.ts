@@ -1,6 +1,6 @@
 import { requireOrderedSections } from '@bendyline/gezel/checks';
 import { postMissingDeliverableFeedback, postSniffFeedback } from '../sniff-feedback.ts';
-import type { SniffResult } from '../success-check.ts';
+import { type SniffResult, foldTypography } from '../success-check.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
 import { provisionScenarioGezel, readProjectToolTrace } from './helpers.ts';
 import {
@@ -228,7 +228,7 @@ function lastValueRecordingIndex(toolTrace: readonly SynthesisToolCall[], value:
     if (
       call &&
       provenanceToolMutatesPath(call, SYNTHESIS_PATH) &&
-      (value.test(toolCallArgumentText(call)) ||
+      (value.test(foldTypography(toolCallArgumentText(call))) ||
         provenanceShellOverwritesPath(call, SYNTHESIS_PATH))
     ) {
       return index;
@@ -551,9 +551,10 @@ function sourceSupportFailures(markdown: string): string[] {
 }
 
 export function checkSynthesis(
-  markdown: string,
+  rawMarkdown: string,
   toolTrace: readonly SynthesisToolCall[],
 ): SniffResult {
+  const markdown = foldTypography(rawMarkdown);
   const signals: string[] = [];
   const failures: string[] = [];
   const fail = (reason: string) => {
@@ -627,7 +628,7 @@ export function checkSynthesis(
   if (citations >= 6) signals.push('citations');
   else
     fail(
-      `only ${citations} substantively cited claim(s) — cite a real seeded source file for at least six separate claims`,
+      `only ${citations} substantively cited claim(s) — name the seeded source file as a backticked filename inside the sentence (for example \`finance.csv\`) for at least six separate claims; numbered references such as [3] and a Sources list do not count`,
     );
 
   const requiredCount = 1 + PLANTED_CONFLICTS.length * 3 + 1 + 1 + 1;

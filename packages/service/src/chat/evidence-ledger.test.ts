@@ -200,6 +200,30 @@ describe('EvidenceLedger', () => {
     });
   });
 
+  it('names a mentioned source by its workspace path when the request gave only its name', () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn(
+      'The memos are in evidence/: memo-product.md, finance.csv, notes.md. Write synthesis.md.',
+    );
+    ledger.setLookupTools(['read_file', 'write_file']);
+    ledger.setWorkspaceFiles([
+      'evidence/memo-product.md',
+      'finance.csv',
+      'evidence/finance.csv',
+      'evidence/notes.md',
+      'archive/notes.md',
+    ]);
+    const refused = ledger.checkProseFileWrite('write_file', {
+      path: 'synthesis.md',
+      content: 'The launch budget is 310,000 EUR.',
+    });
+    expect(refused).toEqual({
+      kind: 'reject',
+      error:
+        'Not saved: no source evidence has been collected. Do not call `write_file` again yet. Your next tool call must be `read_file` (`evidence/memo-product.md`, `finance.csv`, `notes.md`). Use what it returns before writing.',
+    });
+  });
+
   it('does not fail open while lookup tools exist but no evidence was collected', () => {
     const ledger = new EvidenceLedger();
     ledger.beginTurn('Write a sourced report.');

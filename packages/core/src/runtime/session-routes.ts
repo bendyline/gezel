@@ -6,9 +6,10 @@ import { composeCraftbookLaunch, stringifyCraftbookParamValues } from '../craftb
 import { isEngagementAllowed } from '../engagement.js';
 import type { PortableInference } from '../mobile/inference.js';
 import { rewritePromptDraftFileRefs } from '../prompt-drafts.js';
+import type { GezelConfig } from '../schemas/api.js';
 import type { Craftbook } from '../schemas/craftbook.js';
-import type { ChatEvent, ChatMessage } from '../schemas/gezel.js';
-import { MobileProviderIdSchema } from '../schemas/mobile-provider.js';
+import type { ChatEvent, ChatMessage, ProviderName } from '../schemas/gezel.js';
+import type { MobileModelInventory } from '../schemas/mobile-provider.js';
 import type { PromptDraftMeta } from '../schemas/prompt-draft.js';
 import {
   type ChatSession,
@@ -56,6 +57,11 @@ export interface PortableSessionRouteHost {
   ): Promise<Craftbook | undefined>;
   draftChanged(draft: PromptDraftMeta): void;
   emit(session: SessionScope, event: ChatEvent): void;
+  /** The provider and model a new conversation with this gezel starts on. */
+  newSessionModel(
+    gezel: { provider?: ProviderName; parsed: { frontmatter: { model?: string } } } | null,
+    config: GezelConfig,
+  ): Promise<{ providerName: ProviderName; model: string; inventory?: MobileModelInventory }>;
 }
 
 /** The message a turn is answering; a finished turn has appended its reply after it. */
@@ -236,11 +242,7 @@ export async function handlePortableSessionRoute(
       const input = CreateChatSessionRequestSchema.parse(body);
       const gezel = await host.store.getGezel(input.gezelId);
       const config = await host.store.readConfig();
-      const providerName = MobileProviderIdSchema.parse(
-        gezel?.provider ?? config.provider ?? 'llama-cpp',
-      );
-      const inventory = providerName === 'llama-cpp' ? await host.inference.models?.() : undefined;
-      const model = gezel?.parsed.frontmatter.model ?? inventory?.selectedModelId ?? providerName;
+      const { providerName, model, inventory } = await host.newSessionModel(gezel, config);
       if (inventory && !inventory.models.some((item) => item.id === model))
         throw new ProductError(
           gezel?.parsed.frontmatter.model

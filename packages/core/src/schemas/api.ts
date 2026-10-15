@@ -840,6 +840,12 @@ export const RemoteServingConfigSchema = z.object({
   /** Port for the LAN listener. Default 6229 (loopback stays on 6228). */
   port: z.number().int().positive().optional(),
   /**
+   * Announce the listener over multicast DNS (`_gezel._tcp`) so devices on
+   * the same network find it without typing an address. Default on while
+   * serving; `false` keeps it unlisted (peers then need its address).
+   */
+  advertise: z.boolean().optional(),
+  /**
    * How remote turns compete with this device's own local work in the
    * provider queue. `equal` (default) → interactive lane like local;
    * `below-local` → background lane so local always drains first;
@@ -2533,6 +2539,10 @@ export const GezelConfigSchema = z.object({
     .object({
       foldersStepDoneAt: z.string().optional(),
       overnightStepDoneAt: z.string().optional(),
+      /** When the first project the person asked for finished. */
+      firstProjectDoneAt: z.string().optional(),
+      /** When the downloads first run deferred (the image reader) started; once per install. */
+      optionalDownloadsAt: z.string().optional(),
     })
     .optional(),
   /**

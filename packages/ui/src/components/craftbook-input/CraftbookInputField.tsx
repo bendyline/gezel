@@ -41,7 +41,7 @@ const SKIP_REASON_COPY: Record<TaskInputSkipReason, string> = {
   unreadable: 'could not be read',
 };
 
-type SourceMode = 'project' | 'computer';
+type SourceMode = 'project' | 'computer' | 'sample';
 
 interface WorkspaceEntry {
   path: string;
@@ -54,7 +54,9 @@ interface WorkspaceEntry {
  * "In this project" points at a workspace folder or file, read where it is;
  * "From your computer" uploads what the user picks into a staging area the
  * task adopts at launch. The upload runs in the browser, so it works the
- * same in the desktop app and in a plain browser tab.
+ * same in the desktop app and in a plain browser tab. "Try a sample" runs
+ * the book on the example it ships, so a newcomer can see what it does
+ * with nothing of their own.
  */
 export function CraftbookInputField({
   projectId,
@@ -64,6 +66,7 @@ export function CraftbookInputField({
   allowUpload,
   value,
   onChange,
+  samples = [],
 }: {
   projectId: string;
   craftbookId: string;
@@ -73,10 +76,17 @@ export function CraftbookInputField({
   allowUpload: boolean;
   value: CraftbookInputValue;
   onChange: (next: CraftbookInputValue) => void;
+  /** The book's samples for this input; a recurring run never offers one. */
+  samples?: ReadonlyArray<{ id: string; title: string }>;
 }) {
   const [mode, setMode] = useState<SourceMode>(
-    value.source?.from === 'upload' ? 'computer' : 'project',
+    value.source?.from === 'upload'
+      ? 'computer'
+      : value.source?.from === 'sample'
+        ? 'sample'
+        : 'project',
   );
+  const sample = allowUpload ? samples[0] : undefined;
   const [browsing, setBrowsing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -102,12 +112,17 @@ export function CraftbookInputField({
     discardUpload(valueRef.current.source);
     setMode(next);
     setBrowsing(false);
-    onChange(EMPTY_INPUT_VALUE);
+    if (next === 'sample' && sample)
+      void chooseSource({ from: 'sample', sampleId: sample.id }, sample.title);
+    else onChange(EMPTY_INPUT_VALUE);
   };
 
-  const chooseWorkspacePath = async (path: string, label: string) => {
+  const chooseWorkspacePath = (path: string, label: string) => {
     setBrowsing(false);
-    const source: TaskInputSource = { from: 'workspace', path };
+    return chooseSource({ from: 'workspace', path }, label);
+  };
+
+  const chooseSource = async (source: TaskInputSource, label: string) => {
     onChange({ source, label, busy: true });
     try {
       const preview = await api.taskInputs.previewTaskInput(projectId, {
@@ -202,9 +217,28 @@ export function CraftbookInputField({
         >
           From your computer
         </button>
+        {sample && (
+          <button
+            type="button"
+            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons is the shared keys-in-trays pattern.
+            role="radio"
+            aria-checked={mode === 'sample'}
+            className={`gz-key${mode === 'sample' ? ' gz-key-active' : ''}`}
+            onClick={() => chooseMode('sample')}
+          >
+            Try a sample
+          </button>
+        )}
       </div>
 
-      {mode === 'project' ? (
+      {mode === 'sample' && sample ? (
+        <div className="gz-cbi-body">
+          <div className="gz-cbi-row">
+            <span className="gz-cbi-summary">{summary ?? sample.title}</span>
+          </div>
+          <p className="muted small">Made-up example data, so you can see what it does first.</p>
+        </div>
+      ) : mode === 'project' ? (
         <div className="gz-cbi-body">
           <div className="gz-cbi-row">
             <button type="button" onClick={() => setBrowsing((v) => !v)} aria-expanded={browsing}>

@@ -1,4 +1,5 @@
 import {
+  fileRepairTargetPath,
   isDirectCreateSourceWritePrompt,
   isFileRepairPrompt,
   isImmediateFileWritePrompt,
@@ -943,6 +944,20 @@ function scenarioCheckedFile(text: string): string | undefined {
   return /\[scenario check\][^`\n]*`([^`\n]+)`/i.exec(text)?.[1];
 }
 
+// Both repair clamps need this, and the target is not always on a
+// `[scenario check]` line. An eval-recovery repair ("make the smallest
+// targeted repair in `out/customers.json`") fired both clamps, the
+// existing-source-edit one rebuilt its set without the runners, and Nemotron
+// 3.5 Lightning called `run_installed_script` on its helper until the turn was
+// stopped (2026-10-15).
+function withDataFileRepairRunners(toolSet: Set<string>, text: string): Set<string> {
+  const target = scenarioCheckedFile(text) ?? fileRepairTargetPath(text) ?? '';
+  if (DATA_FILE_EXTENSION.test(target)) {
+    for (const name of DATA_FILE_REPAIR_RUNNERS) toolSet.add(name);
+  }
+  return toolSet;
+}
+
 export function constrainAllowlistForScenarioFileRepair(
   allowlist: Set<string> | null,
   opts: {
@@ -958,10 +973,10 @@ export function constrainAllowlistForScenarioFileRepair(
     canonicalRoleKey(opts.role) === 'reviewer' && /\breview\.md\b/i.test(text)
       ? REVIEW_FILE_REPAIR_TOOLS
       : SCENARIO_FILE_REPAIR_TOOLS;
-  const toolSet = fileRepairToolsWithExplicitDirectives(baseToolSet, text);
-  if (DATA_FILE_EXTENSION.test(scenarioCheckedFile(text) ?? '')) {
-    for (const name of DATA_FILE_REPAIR_RUNNERS) toolSet.add(name);
-  }
+  const toolSet = withDataFileRepairRunners(
+    fileRepairToolsWithExplicitDirectives(baseToolSet, text),
+    text,
+  );
   const next = new Set<string>();
   for (const name of toolSet) {
     if (allowlist.has(name)) next.add(name);
@@ -1002,9 +1017,9 @@ export function constrainAllowlistForExistingSourceEdit(
   if (!shouldConstrainToExistingSourceEdit(opts)) return allowlist;
   const source = allowlist ?? allBuiltinTools();
   const next = new Set<string>();
-  const toolSet = fileRepairToolsWithExplicitDirectives(
-    SCENARIO_FILE_REPAIR_TOOLS,
-    opts.latestUserMessage,
+  const toolSet = withDataFileRepairRunners(
+    fileRepairToolsWithExplicitDirectives(SCENARIO_FILE_REPAIR_TOOLS, opts.latestUserMessage),
+    (opts.latestUserMessage ?? '').trim(),
   );
   for (const name of toolSet) {
     if (source.has(name)) next.add(name);

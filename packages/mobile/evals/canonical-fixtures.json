@@ -2,7 +2,7 @@
   {
     "id": "incident-postmortem",
     "sourceFile": "incident-postmortem",
-    "sourceSha256": "b063de5fab16b042a0e84dba41016498b5bc78e8918055ff7d38643793509cf6",
+    "sourceSha256": "5976548f9ece46b61fe12ca7b509ded4997951a6415d352a8c99c378a9138445",
     "timeoutMs": 2400000,
     "kind": "specialist",
     "project": {
@@ -44,7 +44,7 @@
   {
     "id": "conflict-synthesis",
     "sourceFile": "conflict-synthesis",
-    "sourceSha256": "23acf6fecc5300ffa6ea7687b43dcda6dafba334b4e8f219f017640a758a0548",
+    "sourceSha256": "eeae8b1ef702e738886d5319336a66e586fa7c03c7e23a9bdec11eaac72c9afc",
     "timeoutMs": 1800000,
     "kind": "specialist",
     "project": {
@@ -324,7 +324,7 @@
   {
     "id": "plan-and-estimate",
     "sourceFile": "plan-and-estimate",
-    "sourceSha256": "aadc13e116418f7bb0ac0bb45c025d0ca6bb8156320f0cff261cf9c50b4cc865",
+    "sourceSha256": "31e44c155ecc782651b03fdc76bef90a2d605f9918fa4610391f45647b2a9a24",
     "timeoutMs": 1500000,
     "kind": "specialist",
     "project": {

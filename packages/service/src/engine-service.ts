@@ -48,6 +48,8 @@ import { RecognitionManager } from './providers/recognition/manager.js';
 import { VideoProviderManager } from './providers/video/manager.js';
 import { VideoModelPullRegistry } from './providers/video/pull-registry.js';
 import { loadEngineIdentity } from './remotes/engine-identity.js';
+import { createLanAdvertiser, lanDiscoveryEnabled } from './remotes/lan-discovery.js';
+import { createPairingCodes } from './remotes/pairing-code.js';
 import { createRemoteServingController } from './remotes/serving.js';
 import { createTenantLimiter } from './remotes/tenant-limits.js';
 import { writeRuntime } from './runtime-discovery.js';
@@ -255,6 +257,7 @@ export async function startEngineService(
         if (!remoteApp) throw new Error('Engine HTTP app is not ready');
         return remoteApp.fetch;
       },
+      advertiser: lanDiscoveryEnabled() ? createLanAdvertiser() : null,
     });
     cleanup.push(() => remoteServing.stop());
     const context: EngineContext = {
@@ -282,6 +285,7 @@ export async function startEngineService(
       deviceIdentity: identity.identity,
       signIdentityCertificate: identity.signCertificate,
       remoteServing,
+      pairingCodes: createPairingCodes({ serverFingerprint: () => identity.identity.fingerprint }),
       remoteTenantLimits: createTenantLimiter(bootConfig.remoteServing?.limits),
       ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
       startedAt: nowIso(),

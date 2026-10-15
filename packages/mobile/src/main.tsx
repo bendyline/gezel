@@ -1,12 +1,13 @@
 import content from 'virtual:gezel-portable-content';
 import { PortableProductService, PortableStore } from '@bendyline/gezel/runtime';
-import { SystemBarType, SystemBars, SystemBarsStyle } from '@capacitor/core';
+import { Capacitor, SystemBarType, SystemBars, SystemBarsStyle } from '@capacitor/core';
 import { version } from '../../core/package.json';
 import { ProductModelSettings } from './ProductModelSettings.js';
 import { createBrowserHost } from './browser-host.js';
 import { createOfflineHtmlPreview } from './html-preview.js';
 import { createNativeHost, isNativeHost } from './native.js';
 import { createNativeNotifications } from './notifications.js';
+import { createNativeRemoteHost, nativeRemote } from './remote.js';
 import { createPreviewModuleCompiler } from './script-compiler.js';
 import { createMobileScripts } from './scripts.js';
 // The native host is always compact, so its stylesheet belongs in the first
@@ -28,6 +29,11 @@ async function boot() {
     speech: host.speech,
     vision: host.vision,
     projectTypes: async () => (await import('virtual:gezel-portable-project-types')).default,
+    // Another device's models, over native HTTPS; a build without the
+    // plugin simply has none to offer.
+    ...(host.native && Capacitor.isPluginAvailable('GezelRemote')
+      ? { remote: createNativeRemoteHost(nativeRemote) }
+      : {}),
   });
   service.setScripts(createMobileScripts(store));
   service.setContent(content);

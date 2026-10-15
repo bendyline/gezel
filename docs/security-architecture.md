@@ -122,6 +122,66 @@ The **enforcement layers** a model-driven action passes through, outermost first
   daemon. `bindAddress` is validated to an IP literal at bind time, and per-tenant limits
   (concurrency + `requestsPerMinute`) are enforced for paired devices while the first-party
   bridge credential is exempt.
+- **Pairing a device by connect code** (core `remote/spake2.ts` and `remote/pairing.ts`,
+  shared by the daemon and the phone; the server half in `remotes/pairing-code.ts` and
+  `http/routes/v1-apps-pair.ts`). Settings → Remote Servers → Add a device shows a random
+  8-digit code; the connecting device types it, and the two daemons run SPAKE2 (RFC 9382,
+  P256-SHA256-HKDF-HMAC, checked against the RFC's test vectors) over the TLS channel pinned
+  to the cert the server's identity signed. Both identity fingerprints are in the transcript,
+  so a confirmed run proves each side reached the identity it pinned, and the server issues
+  the `remote-inference` device token only after the client's confirmation checks out. A
+  short code is safe only because of the PAKE: anything derived from it that crossed the
+  network (a hash, an HMAC) would fall to an offline search of 10^8 values, whereas SPAKE2
+  gives an active attacker one guess per run. The server allows five runs per code, starts
+  counting at round one (that is where a guess becomes testable), shows a code only on
+  request, expires it after five minutes, and closes it after one device pairs. The code
+  never reaches disk and the management route (`/api/remote-serving/pairing-code`, or the
+  broker's `/v1/remote/manage/serving/pairing-code`) is loopback and first-party only. The
+  group arithmetic is BigInt, not constant-time (RFC 9382 §7 asks for that): scalars are
+  fresh per run and the password is a short-lived single-use code, which keeps the timing
+  exposure to that run. Clients from before connect codes still pair through
+  `/v1/apps/register` plus an Approve click and a 64-bit identity-code comparison;
+  `/v1/identity`'s `pairingMethods` tells a client which it may use.
+- **LAN discovery** (`remotes/lan-discovery.ts`, `remotes/dns-sd.ts`). While the listener runs,
+  the daemon that owns it answers multicast DNS for `_gezel._tcp` with its port, LAN
+  addresses, display name, and identity fingerprint — material `/v1/identity` already gives
+  anyone who can reach the port. `remoteServing.advertise: false` keeps it unlisted. The
+  browser half runs only while Settings → Remote Servers polls, sends one-shot legacy-unicast
+  queries from an ephemeral port, and closes a minute after the last poll. An advertisement
+  is never a trust decision: it fills in an address, and pairing verifies the identity
+  itself. The DNS decoder reads untrusted packets, so every read is bounds-checked and a
+  compression pointer may only jump backwards (fuzzed in `dns-sd.test.ts`).
+- **Following a paired server to a new address** (`remotes/reachability.ts` `relocateRemote`).
+  When a paired server can't be reached and discovery reports its fingerprint at another
+  address (a new DHCP lease), the client adopts that address only after the server there
+  proves the pinned identity: its `/v1/identity` key must hash to the pinned fingerprint and
+  sign a TLS certificate, and a request pinned to that certificate must then complete at
+  the new address, which proves the server there holds the certificate's key. The
+  certificate becomes the new pin. A device that announces someone else's fingerprint
+  cannot produce the signature, and one replaying the real server's signed identity cannot
+  complete the pinned handshake, so the most either can cause is one wasted probe. The
+  phone follows the same rule. Reachability itself is never a trust input: an unreachable
+  server only changes where work runs (this install's own provider answers, and says so
+  on the reply), never what a peer is allowed to do.
+- **Phones using a server's models** (core `runtime/remote-servers.ts`, mobile
+  `src/remote.ts`, the `GezelRemote` native plugins). A phone only connects; it never
+  serves. It pairs with the same connect-code client the daemon runs and keeps each
+  pairing, device token included, in `remotes.json`: Device tier, so app storage only,
+  never the person's synced Work folder or a gezel backup (Android also sets
+  `allowBackup="false"`). The page cannot reach a server itself (`connect-src 'self'`), so
+  requests go through the OS: the plugin accepts only `https://` IP-literal URLs (it is not
+  a general proxy), trusts exactly the leaf certificate the page pinned, and skips hostname
+  checks because that certificate names 127.0.0.1. Before anything is pinned, `/v1/identity`
+  is read without a pin, and the page accepts what it says only if the identity key signs
+  the certificate presented. On Android that first read takes the certificate from a
+  handshake the plugin refuses and then pins the request to it, so no trust manager ever
+  accepts a certificate it was not given. When the pinned certificate is refused (the
+  server restarted and made a new one), the phone re-reads the identity and adopts the new
+  certificate only if the pinned identity signed it. A turn on a server's model runs the
+  phone's own tool loop: the server sees the prompt and tool schemas and returns calls,
+  and every tool runs on the phone against the phone's files. Discovery uses Bonjour or
+  NSD for `_gezel._tcp`, and on iOS that is behind the system local-network prompt. The
+  Klerk and other background chores stay on the phone's own model.
 - **TLS 1.3, self-signed, per-launch.** Default transport is HTTPS/2 with a self-signed
   loopback cert; the private key lives in memory only and never hits disk (only the public
   cert PEM + fingerprint are written, world-readable by design). Downgrade to plain HTTP
@@ -649,7 +709,7 @@ privileged service identity or putting the daemon root token on disk.
 | Per-credential host binding for `http.authed` | DEFERRED | Today: https + `redirect:'manual'`; a granted script can still POST a credential to any public host it names. Needs a grant-schema decision (e.g. GitHub Enterprise custom hosts). |
 | `secrets.key` co-located with `secrets.enc` | DEFERRED | Same-dir, same `0600`; encryption ≈ file perms. Fix = bind the key to an OS keychain / machine-id KDF / passphrase. Treat `secrets.enc` as plaintext-equivalent for backup/sync purposes. |
 | Machine-shared client membership | PRODUCT CHOICE | Every local account that can read the shared runtime credential is a trusted first-party Gezel client and can access shared daemon data. A future installer choice should make shared-machine versus per-user/private hosting explicit. |
-| Broker LAN-serving administration via `machine-models` | PRODUCT CHOICE | The broker's `/v1/remote/manage/serving` surface (enable LAN serving, approve/deny device pairings, revoke devices) is authorized by the same shared runtime credential — until installer membership exists, any local account can administer LAN serving for the machine. The scope stays never-grantable via `/v1/apps/register`, so LAN peers can never obtain it. |
+| Broker LAN-serving administration via `machine-models` | PRODUCT CHOICE | The broker's `/v1/remote/manage/serving` surface (enable LAN serving, show a connect code, approve/deny device pairings, revoke devices) is authorized by the same shared runtime credential — until installer membership exists, any local account can administer LAN serving for the machine. The scope stays never-grantable via `/v1/apps/register`, so LAN peers can never obtain it. |
 | Remote product UI/API access | INTERIM — tunnel recipe | The product `/api` + web UI stay loopback-only by three independent layers (bind, host guard, cert/auth). The supported interim is a loopback-preserving tunnel (SSH `-L` / Tailscale toward loopback) with the schema-declared `service:{url,token}` supervisor mode; first-class remote access is designed in `docs/remote-access.md` and gated on the accounts ADR (0004). |
 | External user working directories from a machine daemon | NEEDS BROKER/GRANT | Dedicated service identities cannot safely inherit arbitrary user-profile access. Add an explicit ACL grant or user-context broker when linking such a folder; do not restore a privileged daemon identity. |
 | `denyNet` execution without an OS boundary | FAIL CLOSED | Windows runs it in the MXC container when the probe passes; Linux runs scripts without RPC under systemd. Elsewhere (Windows with the container off or unavailable, Linux RPC scripts) model/gate scripts return exit 126. Restore execution only with a real OS sandbox, not a JavaScript-only shim. |

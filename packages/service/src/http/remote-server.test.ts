@@ -5,6 +5,8 @@ describe('isRemoteServingRoute', () => {
   it.each([
     ['GET', '/v1/identity'],
     ['POST', '/v1/apps/register'],
+    ['POST', '/v1/apps/pair/start'],
+    ['POST', '/v1/apps/pair/finish'],
     ['GET', '/v1/apps/grant/grant-1'],
     ['GET', '/v1/apps/grant/grant-1/events'],
     ['DELETE', '/v1/apps/device-1/token'],
@@ -23,6 +25,8 @@ describe('isRemoteServingRoute', () => {
     ['GET', '/v1/apps'],
     ['POST', '/v1/apps/grant/grant-1/approve'],
     ['POST', '/v1/apps/grant/grant-1/deny'],
+    ['GET', '/v1/apps/pair/start'],
+    ['POST', '/api/remote-serving/pairing-code'],
     ['POST', '/v1/chat/completions'],
     ['GET', '/v1/models'],
   ])('keeps local and administrative routes off the LAN listener: %s %s', (method, path) => {
