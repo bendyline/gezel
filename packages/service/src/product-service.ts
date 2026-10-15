@@ -1712,7 +1712,7 @@ export async function startProductService(
   // the linked finding (cancel reopens it); code reviews flip their
   // record to complete/canceled.
   // Assigned once media search exists; a settle before then has nothing to release.
-  let optionalDownloads: OptionalDownloads | undefined;
+  let optionalDownloads: OptionalDownloads | undefined = undefined;
   tasks.setTaskSettledHook(async ({ projectId, task, outcome }) => {
     // The terminal step activates nothing, so its XP (and the task's) is
     // noted here rather than in the step hook.
