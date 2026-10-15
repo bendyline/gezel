@@ -33,6 +33,7 @@ function fixture() {
     retrySave: vi.fn(async () => {
       update({ pendingSave: false });
     }),
+    remotes: { available: false },
     store: { readConfig: vi.fn(async () => ({ provider: 'llama-cpp' })), writeConfig: vi.fn() },
   };
   const host = {
