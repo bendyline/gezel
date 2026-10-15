@@ -207,8 +207,23 @@ describe('machine-engine headless LAN serving', () => {
       headers: { authorization: `Bearer ${service.clientToken}` },
     });
     expect(res.status).toBe(404);
+    const code = await httpFetch(`${lanBaseUrl}/v1/remote/manage/serving/pairing-code`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${service.clientToken}` },
+    });
+    expect(code.status).toBe(404);
     const health = await httpFetch(`${lanBaseUrl}/api/health`);
     expect(health.status).toBe(404);
+  });
+
+  it('shows and withdraws the connect code for the listener it owns', async () => {
+    const opened = await manageFetch('/pairing-code', { method: 'POST' });
+    expect(opened.status).toBe(200);
+    const body = (await opened.json()) as { code: string; attemptsLeft: number };
+    expect(body.code).toMatch(/^\d{8}$/);
+    expect(body.attemptsLeft).toBe(5);
+    const closed = await manageFetch('/pairing-code', { method: 'DELETE' });
+    await expect(closed.json()).resolves.toMatchObject({ code: null });
   });
 
   it('rolls back an invalid serving update without disturbing the listener', async () => {

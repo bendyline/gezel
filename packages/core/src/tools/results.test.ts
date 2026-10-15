@@ -9,6 +9,8 @@ import {
   REANCHOR_MAX_CHARS,
   artifactCompletionHint,
   askUserQuestionText,
+  cappedWorkspaceReadEnd,
+  cappedWorkspaceReadRange,
   countLineChanges,
   createTaskText,
   crewMemberNamedIn,
@@ -150,6 +152,25 @@ describe('formatWorkspaceRead', () => {
     expect(formatWorkspaceRead(empty, false)).toContain('(no lines returned)');
     const capped = ok(sliceWorkspaceText('big.txt', lines(WORKSPACE_READ_MAX_RANGE_LINES + 1), {}));
     expect(formatWorkspaceRead(capped, false)).toContain('truncated=line-limit');
+  });
+});
+
+describe('cappedWorkspaceReadRange', () => {
+  it('caps an oversized range 400 lines after its start and leaves the rest alone', () => {
+    expect(cappedWorkspaceReadRange({ path: 'a.ts', startLine: 1, endLine: 1000 })).toEqual({
+      path: 'a.ts',
+      startLine: 1,
+      endLine: WORKSPACE_READ_MAX_RANGE_LINES,
+    });
+    expect(cappedWorkspaceReadEnd(101, 5000)).toBe(100 + WORKSPACE_READ_MAX_RANGE_LINES);
+    expect(cappedWorkspaceReadEnd(undefined, 1000)).toBe(WORKSPACE_READ_MAX_RANGE_LINES);
+    const inRange = { path: 'a.ts', startLine: 3, endLine: 9 };
+    expect(cappedWorkspaceReadRange(inRange)).toBe(inRange);
+    expect(cappedWorkspaceReadEnd(5, undefined)).toBeUndefined();
+    // A reversed range stays reversed, so the range check still refuses it.
+    expect(
+      workspaceReadRangeError(cappedWorkspaceReadRange({ startLine: 5, endLine: 4 })),
+    ).toContain('must be greater than or equal');
   });
 });
 

@@ -249,6 +249,7 @@ export class EvidenceLedger {
   private readonly unverifiedPlaces = new Set<string>();
   private lookupTools: string[] = [];
   private readerTools: string[] = [];
+  private workspacePaths: string[] = [];
   private lookupPreference: FactualLookupPreference = 'default';
 
   constructor(opts: { floor?: number } = {}) {
@@ -493,13 +494,33 @@ export class EvidenceLedger {
       .filter((p): p is string => typeof p === 'string' && p !== '');
     const isTarget = (f: string) =>
       target !== undefined && f.split('/').pop() === target.split('/').pop();
-    const named = mentionedSourceFiles(this.given).filter((f) => !isTarget(f));
+    const named = mentionedSourceFiles(this.given)
+      .map((f) => this.workspacePathFor(f))
+      .filter((f) => !isTarget(f));
     if (read.length === 0 && named.length === 0) return null;
     const files = [...new Set([...read, ...named])].filter((f) => !isTarget(f)).slice(0, 4);
     return {
       reader,
       files: files.length > 0 ? ` (${files.map((f) => `\`${f}\``).join(', ')})` : '',
     };
+  }
+
+  /**
+   * The session's workspace files, so a refusal names a source where it is.
+   * "The evidence files are in evidence/ — timeline.md, metrics.csv, …" left
+   * the refusal asking for `read_file` on `timeline.md`; LFM2.5 read all five
+   * bare names, got five "not found", and the turn was stopped (incident
+   * postmortem, 2026-10-14).
+   */
+  setWorkspaceFiles(paths: Iterable<string>): void {
+    this.workspacePaths = [...paths];
+  }
+
+  /** The one workspace path a bare file name refers to, else the name as given. */
+  private workspacePathFor(file: string): string {
+    if (this.workspacePaths.includes(file)) return file;
+    const matches = this.workspacePaths.filter((p) => p.split('/').pop() === file);
+    return matches.length === 1 ? matches[0]! : file;
   }
 
   /** The lookup tools this session has, in the order to try them. */

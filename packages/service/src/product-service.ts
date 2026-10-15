@@ -197,6 +197,8 @@ import { RecognitionManager } from './providers/recognition/manager.js';
 import { resolveAutoMode } from './providers/recognition/prompts.js';
 import { VideoProviderManager } from './providers/video/manager.js';
 import { VideoModelPullRegistry } from './providers/video/pull-registry.js';
+import { createLanAdvertiser, lanDiscoveryEnabled } from './remotes/lan-discovery.js';
+import { createPairingCodes } from './remotes/pairing-code.js';
 import { createRemotesRegistry } from './remotes/registry.js';
 import { createRemoteServingController } from './remotes/serving.js';
 import { createTenantLimiter } from './remotes/tenant-limits.js';
@@ -2185,6 +2187,7 @@ export async function startProductService(
       }
       return remoteFetchRef.value;
     },
+    advertiser: lanDiscoveryEnabled() ? createLanAdvertiser() : null,
   });
   const remoteTenantLimits = createTenantLimiter(config.remoteServing?.limits);
 
@@ -2354,6 +2357,9 @@ export async function startProductService(
     remotes,
     ...(machineEngine ? { machineEngine } : {}),
     remoteServing,
+    pairingCodes: createPairingCodes({
+      serverFingerprint: () => deviceIdentity?.fingerprint ?? null,
+    }),
     remoteTenantLimits,
     ollamaEmulation,
     codexSetup,

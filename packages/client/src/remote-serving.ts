@@ -10,11 +10,49 @@ export interface PairedRemoteInfo {
   hasToken: boolean;
 }
 
+/** A gezel server another device is announcing on the local network. */
+export interface DiscoveredRemoteServer {
+  name: string;
+  fingerprint: string;
+  address: string;
+  port: number;
+  /** The origin to pair with, e.g. `https://192.168.1.50:6229`. */
+  baseUrl: string;
+  lastSeenAt: number;
+  /** Set when this device has already paired with that server. */
+  pairedRemoteId?: string;
+}
+
+/** GET /api/remotes/discover. `available: false` → discovery is off on this host. */
+export interface DiscoverRemotesResponse {
+  available: boolean;
+  servers: DiscoveredRemoteServer[];
+}
+
+/**
+ * The connect code this device shows while someone is adding a device.
+ * `code: null` → none showing. `lastPaired` names the device the most recent
+ * code connected, so the UI can say so once the code disappears.
+ */
+export interface PairingCodeState {
+  code: string | null;
+  expiresAt?: number;
+  attemptsLeft?: number;
+  lastPaired?: { appName: string; at: number };
+}
+
+/** One IPv4 address other devices can reach this one at, best first. */
+export interface LanAddressInfo {
+  address: string;
+  interfaceName: string;
+}
+
 /** remoteServing config as managed on the machine broker. */
 export interface MachineServingConfig {
   enabled?: boolean;
   bindAddress?: string;
   port?: number;
+  advertise?: boolean;
   priority?: 'equal' | 'below-local' | 'above-local';
   reserveLocalGb?: number;
   allowModels?: string[];

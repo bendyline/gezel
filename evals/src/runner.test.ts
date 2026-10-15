@@ -951,6 +951,25 @@ describe('poisoned-session recovery', () => {
     expect(message).not.toContain('`write_file`');
   });
 
+  it('asks for a rebuild, not a record patch, when the checked file is derived data', () => {
+    const message = buildPoisonedSessionRecoveryMessage({
+      lastTurnError: '`run_installed_script` failed 5 times in a row',
+      filePath: 'out/customers.json',
+      sniff: {
+        key: 'out/customers.json',
+        score: 4,
+        bytes: 5105,
+        failReason: 'email "zoe.quill@example.com" appears more than once — dedup is missing',
+      },
+    });
+
+    expect(message).toContain('rebuild `out/customers.json` from its source files');
+    expect(message).toContain('Do not hand-patch individual records');
+    expect(message).not.toContain('smallest targeted repair');
+    expect(message).not.toContain('Do not replace the complete file');
+    expect(message).not.toContain('targeted workspace edit');
+  });
+
   it('uses a complete write when the named target is missing despite healthy scenario bytes', () => {
     // `bytes` is the SCENARIO's total, not this file's. schema-migration had
     // bytes=3088 from deliverables it HAD written while `tests/migrate.test.ts`

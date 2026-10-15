@@ -122,6 +122,34 @@ The **enforcement layers** a model-driven action passes through, outermost first
   daemon. `bindAddress` is validated to an IP literal at bind time, and per-tenant limits
   (concurrency + `requestsPerMinute`) are enforced for paired devices while the first-party
   bridge credential is exempt.
+- **Pairing a device by connect code** (`remotes/spake2.ts`, `remotes/pairing-code.ts`,
+  `http/routes/v1-apps-pair.ts`). Settings → Remote Servers → Add a device shows a random
+  8-digit code; the connecting device types it, and the two daemons run SPAKE2 (RFC 9382,
+  P256-SHA256-HKDF-HMAC, checked against the RFC's test vectors) over the TLS channel pinned
+  to the cert the server's identity signed. Both identity fingerprints are in the transcript,
+  so a confirmed run proves each side reached the identity it pinned, and the server issues
+  the `remote-inference` device token only after the client's confirmation checks out. A
+  short code is safe only because of the PAKE: anything derived from it that crossed the
+  network (a hash, an HMAC) would fall to an offline search of 10^8 values, whereas SPAKE2
+  gives an active attacker one guess per run. The server allows five runs per code, starts
+  counting at round one (that is where a guess becomes testable), shows a code only on
+  request, expires it after five minutes, and closes it after one device pairs. The code
+  never reaches disk and the management route (`/api/remote-serving/pairing-code`, or the
+  broker's `/v1/remote/manage/serving/pairing-code`) is loopback and first-party only. The
+  group arithmetic is BigInt, not constant-time (RFC 9382 §7 asks for that): scalars are
+  fresh per run and the password is a short-lived single-use code, which keeps the timing
+  exposure to that run. Clients from before connect codes still pair through
+  `/v1/apps/register` plus an Approve click and a 64-bit identity-code comparison;
+  `/v1/identity`'s `pairingMethods` tells a client which it may use.
+- **LAN discovery** (`remotes/lan-discovery.ts`, `remotes/dns-sd.ts`). While the listener runs,
+  the daemon that owns it answers multicast DNS for `_gezel._tcp` with its port, LAN
+  addresses, display name, and identity fingerprint — material `/v1/identity` already gives
+  anyone who can reach the port. `remoteServing.advertise: false` keeps it unlisted. The
+  browser half runs only while Settings → Remote Servers polls, sends one-shot legacy-unicast
+  queries from an ephemeral port, and closes a minute after the last poll. An advertisement
+  is never a trust decision: it fills in an address, and pairing verifies the identity
+  itself. The DNS decoder reads untrusted packets, so every read is bounds-checked and a
+  compression pointer may only jump backwards (fuzzed in `dns-sd.test.ts`).
 - **TLS 1.3, self-signed, per-launch.** Default transport is HTTPS/2 with a self-signed
   loopback cert; the private key lives in memory only and never hits disk (only the public
   cert PEM + fingerprint are written, world-readable by design). Downgrade to plain HTTP
@@ -649,7 +677,7 @@ privileged service identity or putting the daemon root token on disk.
 | Per-credential host binding for `http.authed` | DEFERRED | Today: https + `redirect:'manual'`; a granted script can still POST a credential to any public host it names. Needs a grant-schema decision (e.g. GitHub Enterprise custom hosts). |
 | `secrets.key` co-located with `secrets.enc` | DEFERRED | Same-dir, same `0600`; encryption ≈ file perms. Fix = bind the key to an OS keychain / machine-id KDF / passphrase. Treat `secrets.enc` as plaintext-equivalent for backup/sync purposes. |
 | Machine-shared client membership | PRODUCT CHOICE | Every local account that can read the shared runtime credential is a trusted first-party Gezel client and can access shared daemon data. A future installer choice should make shared-machine versus per-user/private hosting explicit. |
-| Broker LAN-serving administration via `machine-models` | PRODUCT CHOICE | The broker's `/v1/remote/manage/serving` surface (enable LAN serving, approve/deny device pairings, revoke devices) is authorized by the same shared runtime credential — until installer membership exists, any local account can administer LAN serving for the machine. The scope stays never-grantable via `/v1/apps/register`, so LAN peers can never obtain it. |
+| Broker LAN-serving administration via `machine-models` | PRODUCT CHOICE | The broker's `/v1/remote/manage/serving` surface (enable LAN serving, show a connect code, approve/deny device pairings, revoke devices) is authorized by the same shared runtime credential — until installer membership exists, any local account can administer LAN serving for the machine. The scope stays never-grantable via `/v1/apps/register`, so LAN peers can never obtain it. |
 | Remote product UI/API access | INTERIM — tunnel recipe | The product `/api` + web UI stay loopback-only by three independent layers (bind, host guard, cert/auth). The supported interim is a loopback-preserving tunnel (SSH `-L` / Tailscale toward loopback) with the schema-declared `service:{url,token}` supervisor mode; first-class remote access is designed in `docs/remote-access.md` and gated on the accounts ADR (0004). |
 | External user working directories from a machine daemon | NEEDS BROKER/GRANT | Dedicated service identities cannot safely inherit arbitrary user-profile access. Add an explicit ACL grant or user-context broker when linking such a folder; do not restore a privileged daemon identity. |
 | `denyNet` execution without an OS boundary | FAIL CLOSED | Windows runs it in the MXC container when the probe passes; Linux runs scripts without RPC under systemd. Elsewhere (Windows with the container off or unavailable, Linux RPC scripts) model/gate scripts return exit 126. Restore execution only with a real OS sandbox, not a JavaScript-only shim. |

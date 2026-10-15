@@ -53,7 +53,7 @@ export const INTEREST_AREAS: readonly InterestArea[] = [
   },
   {
     id: 'work',
-    label: 'Work and planning',
+    label: 'Organization planning',
     hint: 'Notes to actions, status reports, research, decks',
     shipped: true,
   },

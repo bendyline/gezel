@@ -17,7 +17,6 @@
  */
 
 import { isIP } from 'node:net';
-import { hostname } from 'node:os';
 import { createLogger } from '@bendyline/gezel';
 import {
   IdentityResponseSchema,
@@ -30,13 +29,21 @@ import {
   createPinnedFetch,
 } from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
 import type { ServiceContext } from '../http/context.js';
+import { displayHostname } from './lan-discovery.js';
+import { PAIRING_PROTOCOL, normalizePairingCode, pairingPasswordScalar } from './pairing-code.js';
 import type { PairedRemote } from './registry.js';
+import { Spake2Error, confirmationsMatch, spake2Finish, spake2Start } from './spake2.js';
 
 const log = createLogger('remote-pairing');
 
 export interface PairRemoteInput {
   /** B's base URL, e.g. `https://192.168.1.50:6229`. */
   baseUrl: string;
+  /**
+   * What A calls B. Never sent to B: B's approval prompt names A by A's own
+   * hostname, so a label typed (or discovered) for the server can't make a
+   * pairing request look like it came from the server itself.
+   */
   displayName?: string;
   approvalTimeoutSec?: number;
   /** Fingerprint the user verified out-of-band during the inspect step. */
@@ -173,7 +180,7 @@ export async function pairRemote(
       baseUrl,
       fetch: pinned,
       appId: ownIdentity.deviceId,
-      appName: input.displayName ?? hostname(),
+      appName: displayHostname(),
       deviceIdentityPubKey: ownIdentity.publicKeyPem,
       timeoutMs: (input.approvalTimeoutSec ?? 120) * 1000,
     });
@@ -185,7 +192,7 @@ export async function pairRemote(
   const paired: PairedRemote = {
     remoteId,
     baseUrl,
-    displayName: input.displayName ?? identity.deviceId,
+    displayName: input.displayName?.trim() || new URL(baseUrl).hostname,
     token,
     pinnedIdentityKey: identity.publicKeyPem,
     pinnedIdentityFingerprint: identity.fingerprint,
@@ -195,6 +202,152 @@ export async function pairRemote(
   };
   await ctx.remotes.add(paired);
   log.info(`[remote-pairing] paired with ${baseUrl} as ${remoteId} (${paired.displayName})`);
+  return paired;
+}
+
+/** The server is not showing a connect code (or it expired, or another device used it). */
+export class PairingCodeClosedError extends Error {
+  constructor() {
+    super(
+      "That device isn't showing a connect code. On it, open Settings → Remote Servers and choose Add a device.",
+    );
+    this.name = 'PairingCodeClosedError';
+  }
+}
+
+/** Wrong code, or a device in the middle that could not prove it knew the code. */
+export class PairingCodeRejectedError extends Error {
+  constructor() {
+    super("That code doesn't match. Check the code on the other device and try again.");
+    this.name = 'PairingCodeRejectedError';
+  }
+}
+
+export class PairingCodeAttemptsError extends Error {
+  constructor() {
+    super('Too many wrong codes. On the other device, choose Add a device again for a new code.');
+    this.name = 'PairingCodeAttemptsError';
+  }
+}
+
+/** The server predates connect codes; pair with the approval flow instead. */
+export class PairingCodeUnsupportedError extends Error {
+  constructor() {
+    super("That device's gezel is too old for connect codes.");
+    this.name = 'PairingCodeUnsupportedError';
+  }
+}
+
+export interface PairWithCodeInput {
+  baseUrl: string;
+  /** The 8 digits shown on B, spaces and dashes allowed. */
+  code: string;
+  /** What A calls B; defaults to the name B reports once the code checks out. */
+  displayName?: string;
+}
+
+async function postJson(
+  fetchImpl: typeof fetch,
+  url: string,
+  body: unknown,
+): Promise<{ status: number; json: Record<string, unknown> }> {
+  const response = await fetchImpl(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  return { status: response.status, json };
+}
+
+/**
+ * Pairing with a connect code: A runs SPAKE2 (see spake2.ts) with B over a
+ * channel pinned to the TLS cert B's identity signed. Both fingerprints are
+ * in the transcript, so a run that confirms proves B is the device showing
+ * the code the person typed — which is why, unlike {@link pairRemote}, this
+ * needs no identity-code comparison and re-pins a changed identity without
+ * asking: the code is the out-of-band check. B issues the token only after
+ * A's confirmation checks out, and A keeps it only after B's does.
+ */
+export async function pairRemoteWithCode(
+  ctx: ServiceContext,
+  input: PairWithCodeInput,
+): Promise<PairedRemote> {
+  const baseUrl = normalizeRemoteBaseUrl(input.baseUrl);
+  const ownIdentity = ctx.deviceIdentity;
+  if (!ownIdentity) {
+    throw new Error('pairing: this service has no device identity to pair with');
+  }
+  const code = normalizePairingCode(input.code);
+  if (!code) throw new PairingCodeRejectedError();
+
+  const identity = await inspectRemoteIdentity(baseUrl);
+  if (!identity.pairingMethods?.includes('code')) throw new PairingCodeUnsupportedError();
+
+  const pinned = createPinnedFetch(identity.tlsCertPem!);
+  let token: string;
+  let reportedName: string | undefined;
+  try {
+    const state = spake2Start('A', pairingPasswordScalar(code));
+    const start = await postJson(pinned, `${baseUrl}/v1/apps/pair/start`, {
+      appId: ownIdentity.deviceId,
+      appName: displayHostname(),
+      deviceIdentityPubKey: ownIdentity.publicKeyPem,
+      share: state.share.toString('base64'),
+    });
+    if (start.status === 409) throw new PairingCodeClosedError();
+    if (start.status === 429) throw new PairingCodeAttemptsError();
+    if (start.status === 404) throw new PairingCodeUnsupportedError();
+    if (start.status !== 200 || typeof start.json.sessionId !== 'string') {
+      throw new Error(`pairing: start returned HTTP ${start.status}`);
+    }
+    let keys: ReturnType<typeof spake2Finish>;
+    try {
+      keys = spake2Finish(state, {
+        idA: ownIdentity.fingerprint,
+        idB: identity.fingerprint,
+        peerShare: Buffer.from(String(start.json.share ?? ''), 'base64'),
+        aad: PAIRING_PROTOCOL,
+      });
+    } catch (err) {
+      if (err instanceof Spake2Error) throw new PairingCodeRejectedError();
+      throw err;
+    }
+    const finish = await postJson(pinned, `${baseUrl}/v1/apps/pair/finish`, {
+      sessionId: start.json.sessionId,
+      confirm: keys.confirmA.toString('base64'),
+    });
+    if (finish.status === 403) throw new PairingCodeRejectedError();
+    if (finish.status !== 200 || typeof finish.json.token !== 'string') {
+      throw new Error(`pairing: finish returned HTTP ${finish.status}`);
+    }
+    if (
+      !confirmationsMatch(keys.confirmB, Buffer.from(String(finish.json.confirm ?? ''), 'base64'))
+    ) {
+      throw new PairingCodeRejectedError();
+    }
+    token = finish.json.token;
+    if (typeof finish.json.name === 'string') reportedName = finish.json.name.trim().slice(0, 120);
+  } finally {
+    await pinned.close();
+  }
+
+  const paired: PairedRemote = {
+    remoteId: remoteIdForFingerprint(identity.fingerprint),
+    baseUrl,
+    displayName: input.displayName?.trim() || reportedName || new URL(baseUrl).hostname,
+    token,
+    pinnedIdentityKey: identity.publicKeyPem,
+    pinnedIdentityFingerprint: identity.fingerprint,
+    tlsCertPem: identity.tlsCertPem,
+    scopes: ['remote-inference'],
+    pairedAt: Date.now(),
+  };
+  // A device re-paired after a reinstall has a new identity at the same
+  // address; the registry drops the stale entry for that address.
+  await ctx.remotes.add(paired);
+  log.info(`[remote-pairing] paired with ${baseUrl} by connect code (${paired.displayName})`);
   return paired;
 }
 

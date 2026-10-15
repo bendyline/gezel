@@ -299,6 +299,17 @@ describe('conflict-synthesis grader', () => {
     expect(check.signals).toContain('source-reads-grounded');
   });
 
+  it('reads non-breaking-hyphen dates and narrow no-break spaces as plain text', () => {
+    const typographic = REFERENCE_SYNTHESIS.replace(
+      /(\d{4})-(\d{2})-(\d{2})/g,
+      '$1\u2011$2\u2011$3',
+    ).replace(/ EUR/g, '\u202fEUR');
+    expect(typographic).not.toBe(REFERENCE_SYNTHESIS);
+    const check = evaluateSynthesis(typographic);
+    expect(check.failReason).toBeUndefined();
+    expect(check.score).toBe(13);
+  });
+
   it('slices the conflicts section correctly', () => {
     const slices = sliceConflictsSection(REFERENCE_SYNTHESIS)!;
     expect(slices.inSlice).toContain('Engineering wins');

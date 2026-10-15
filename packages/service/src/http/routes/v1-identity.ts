@@ -32,6 +32,7 @@ export function v1IdentityRoutes(ctx: EngineContext): Hono {
       gezelVersion: GEZEL_VERSION,
       protocolVersion: PROTOCOL_VERSION,
       serviceRole: ctx.serviceRole,
+      pairingMethods: ['code', 'approval'],
     });
   });
 

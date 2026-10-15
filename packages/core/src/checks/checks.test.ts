@@ -458,6 +458,13 @@ describe('text checks', () => {
     if (!out.ok) expect(out.missing).toBe('Summary');
   });
 
+  it('requireOrderedSections accepts a qualifier or colon but not other words', () => {
+    const doc = '## Summary:\nstuff\n## Timeline (UTC)\n- 14:02 deploy\n## Root cause\n';
+    expect(requireOrderedSections(doc, ['Summary', 'Timeline', 'Root cause']).ok).toBe(true);
+    const renamed = requireOrderedSections('## Timeline of events\n', ['Timeline']);
+    expect(renamed.ok).toBe(false);
+  });
+
   it('jsonValid', () => {
     expect(jsonValid('{"a": 1}').ok).toBe(true);
     expect(jsonValid('{nope').ok).toBe(false);

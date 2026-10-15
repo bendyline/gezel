@@ -64,6 +64,7 @@ import {
 } from '../tools/inputs.js';
 import { findProjectByReference, projectNotFoundMessage } from '../tools/project-ref.js';
 import {
+  cappedWorkspaceReadRange,
   countLineChanges,
   crewMemberNamedIn,
   nearbyPathMatches,
@@ -748,10 +749,10 @@ export async function executePortableTool(
       throw new Error(
         '`raw: true` cannot be combined with a line range; omit `raw` for a numbered range',
       );
-    const range = {
+    const range = cappedWorkspaceReadRange({
       ...(typeof args.startLine === 'number' ? { startLine: args.startLine } : {}),
       ...(typeof args.endLine === 'number' ? { endLine: args.endLine } : {}),
-    };
+    });
     const invalid = workspaceReadRangeError(range);
     if (invalid) throw new Error(`read_file "${path}": ${invalid}`);
     const result = sliceWorkspaceText(path, content, range);

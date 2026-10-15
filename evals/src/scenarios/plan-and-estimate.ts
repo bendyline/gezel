@@ -5,7 +5,7 @@ import {
   wordBand,
 } from '@bendyline/gezel/checks';
 import { postSniffFeedback } from '../sniff-feedback.ts';
-import type { SniffResult } from '../success-check.ts';
+import { type SniffResult, foldTypography } from '../success-check.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
 import { provisionScenarioGezel } from './helpers.ts';
 
@@ -233,7 +233,12 @@ export function planHandoffStatusForMessages(
 // Pure grader.
 
 const REQUIRED_SECTIONS = ['Objective', 'Assumptions', 'Work plan', 'Risks'];
-const FLOOR_PLAN_RE = /floor[\s-]*plan/i;
+// Hyphens include U+2010-U+2015 and U+2212: Nemotron writes the sign-off row
+// as "floor-plan sign-off" with U+2011, and an ASCII-only class missed it.
+const FLOOR_PLAN_RE = /floor[\s\-\u2010-\u2015\u2212]*plan/i;
+const SIGNOFF_RE = /sign[\s\-\u2010-\u2015\u2212]*off|signed|approv(?:e|ed|al)/i;
+const MOVER_BOOKING_RE =
+  /(?:book|confirm|contract)[^|]{0,40}movers?|movers?[^|]{0,40}(?:book|confirm|contract)/i;
 
 const WORKSTREAM_SIGNALS: Array<{ signal: string; re: RegExp; label: string }> = [
   { signal: 'ws-floor-plan', re: FLOOR_PLAN_RE, label: 'the floor plan workstream' },
@@ -265,9 +270,11 @@ function moverBookingDependsOnFloorSignoff(rows: readonly PlanRow[]): {
   ok: boolean;
   detail?: string;
 } {
+  // A row that books the movers "based on the signed-off floor plan" names
+  // the sign-off as its input; it is not the sign-off it has to wait for.
   const floorSignoffs = rows.filter((row) => {
     const text = rowText(row);
-    return FLOOR_PLAN_RE.test(text) && /sign[\s-]*off|signed|approv(?:e|ed|al)/i.test(text);
+    return FLOOR_PLAN_RE.test(text) && SIGNOFF_RE.test(text) && !MOVER_BOOKING_RE.test(text);
   });
   if (floorSignoffs.length === 0) {
     return {
@@ -275,12 +282,7 @@ function moverBookingDependsOnFloorSignoff(rows: readonly PlanRow[]): {
       detail: 'no Work plan row represents formal floor-plan sign-off',
     };
   }
-  const moverBookings = rows.filter((row) => {
-    const text = rowText(row);
-    return /(?:book|confirm|contract)[^|]{0,40}movers?|movers?[^|]{0,40}(?:book|confirm|contract)/i.test(
-      text,
-    );
-  });
+  const moverBookings = rows.filter((row) => MOVER_BOOKING_RE.test(rowText(row)));
   if (moverBookings.length === 0) {
     return { ok: false, detail: 'no Work plan row books the movers' };
   }
@@ -294,7 +296,8 @@ function moverBookingDependsOnFloorSignoff(rows: readonly PlanRow[]): {
     : { ok: true };
 }
 
-export function checkRelocationPlan(markdown: string): SniffResult {
+export function checkRelocationPlan(rawMarkdown: string): SniffResult {
+  const markdown = foldTypography(rawMarkdown);
   const signals: string[] = [];
   let failReason: string | undefined;
   const fail = (reason: string) => {

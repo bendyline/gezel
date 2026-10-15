@@ -15,6 +15,8 @@
 .home-make-tray {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  /* Every row as tall as the tallest, so a key keeps its size on the next row. */
+  grid-auto-rows: 1fr;
   gap: 0.5rem;
   padding: 0.5rem;
   border-radius: var(--radius-lg);
@@ -74,6 +76,11 @@
 .home-make-description {
   font-size: var(--text-xs);
   color: var(--gezel-ink-warm-muted);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 @media (max-width: 600px) {
   .home-make-tray {

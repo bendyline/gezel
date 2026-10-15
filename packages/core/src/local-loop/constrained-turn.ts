@@ -105,6 +105,25 @@ export function isDirectCreateSourceWritePrompt(prompt: string): boolean {
   );
 }
 
+// A write directive that waits on reads is not an instruction to write now.
+// "Read all five first … After the fifth evidence read succeeds, your next tool
+// call must be `write_file(...)`" matched the next-tool-call pattern below and
+// clamped the turn to write_file alone before any read, so the grounding guard
+// refused the write and named a `read_file` the surface no longer offered
+// (LFM2.5-24B-A2B, incident postmortem, 2026-10-14). The condition governs its
+// whole sentence; "already read … first" is a report, not a request.
+function requiresReadsBeforeWrite(prompt: string): boolean {
+  return (
+    /\b(?:do not|don't)\s+write\s+until\b|\bread\b[\s\S]{0,100}\bbefore\s+(?:writing|drafting|creating|editing)\b/i.test(
+      prompt,
+    ) ||
+    /(?<!\balready\s)\bread\b[^.;\n]{0,60}\bfirst\b/i.test(prompt) ||
+    /\bafter\b[^.;\n]{0,80}\breads?\b[^.;\n]{0,40}\b(?:succeeds?|succeeded|completes?|completed|finish(?:es|ed)?)\b/i.test(
+      prompt,
+    )
+  );
+}
+
 export function isImmediateFileWritePrompt(
   prompt: string,
   context: { toolSurfaceIsWriteFileOnly: boolean },
@@ -116,12 +135,7 @@ export function isImmediateFileWritePrompt(
   // turn its failure text (for example, "write the note first") into a
   // write_file-only request.
   if (prompt.includes('GATE_TARGETED_EDIT:')) return false;
-  if (
-    /\b(?:do not|don't)\s+write\s+until\b|\bread\b[\s\S]{0,100}\bbefore\s+(?:writing|drafting|creating|editing)\b/i.test(
-      prompt,
-    )
-  )
-    return false;
+  if (requiresReadsBeforeWrite(prompt)) return false;
   // A backticked identifier is a name, not an instruction: the desktop step
   // seed's "(step `write`). … start with the first tool call" read as "write
   // now" and forced a write_file-only turn onto an artifact step, where the

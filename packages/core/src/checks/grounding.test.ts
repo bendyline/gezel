@@ -179,6 +179,22 @@ describe('valueGrounding — inline emphasis', () => {
     expect(valueGrounding('Original wait: __14__ minutes.', facts).ok).toBe(true);
   });
 
+  it('reads non-breaking hyphens and narrow no-break spaces as plain text', () => {
+    const nbHyphen = String.fromCharCode(0x2011);
+    const narrowSpace = String.fromCharCode(0x202f);
+    const facts = [
+      { id: 'launch', required: ['2026-09-01'] },
+      { id: 'budget', required: ['210,000 EUR'] },
+    ];
+    const text = `Launch on 2026${nbHyphen}09${nbHyphen}01 with 210,000${narrowSpace}EUR.`;
+    expect(valueGrounding(text, facts, { normalizeDigits: false }).ok).toBe(true);
+    const decoy = valueGrounding(`Launch on 2026${nbHyphen}08${nbHyphen}15.`, [
+      { id: 'launch', required: ['2026-09-01'], forbidden: ['2026-08-15'] },
+    ]);
+    expect(decoy.ok).toBe(false);
+    expect(decoy.decoysDetected).toContain('2026-08-15');
+  });
+
   it('still catches a forbidden value that was merely bolded', () => {
     // Emphasis must not become a way to smuggle a decoy past the check.
     const result = valueGrounding('Kelby reported **33.9** minutes.', [

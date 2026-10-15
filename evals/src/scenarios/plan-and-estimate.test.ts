@@ -99,6 +99,22 @@ describe('plan-and-estimate grader', () => {
     expect(check.signals).toContain('plan-structure');
   });
 
+  it('finds a U+2011-hyphenated sign-off row and never treats the booking row as its own sign-off', () => {
+    const nb = '\u2011';
+    const markdown = REFERENCE_PLAN.replace(
+      '| T3 | Sign off the final floor plan | Beatrix | T2 | Signed floor plan PDF in the project drive |',
+      `| T3 | Obtain formal floor${nb}plan sign${nb}off | Beatrix | T2 | Signed${nb}off floor${nb}plan document in the project drive |`,
+    ).replace(
+      '| T5 | Book the movers | Cas | T4 |',
+      '| T5 | Book the movers based on the signed-off floor plan | Cas | T4 |',
+    );
+
+    const check = checkRelocationPlan(markdown);
+
+    expect(check.failReason).toBeUndefined();
+    expect(check.signals).toContain('plan-structure');
+  });
+
   it('accepts floor-plan with a hyphen in the sign-off row', () => {
     const markdown = REFERENCE_PLAN.replaceAll('floor plan', 'floor-plan').replaceAll(
       'Floor plan',

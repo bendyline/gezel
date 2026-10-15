@@ -12,6 +12,19 @@ import {
 // existing imports.
 export { countDistinctMatches, requireOrderedSections } from '@bendyline/gezel/checks';
 
+/**
+ * Fold typographic hyphens (U+2010-U+2012, U+2212) and no-break, figure,
+ * thin and narrow spaces to ASCII before a prose checker's regexes read the
+ * text. Nemotron 3.5 Lightning writes dates and compounds with U+2011
+ * between the parts (a 2026-09-01 launch, a floor-plan sign-off); its correct
+ * synthesis read as lacking the authoritative launch date and its correct plan
+ * as lacking a sign-off row (2026-10-15). En and em dashes are punctuation,
+ * not hyphens, and stay. Only ever widens a match.
+ */
+export function foldTypography(text: string): string {
+  return text.replace(/[\u2010-\u2012\u2212]/g, '-').replace(/[\u00a0\u2007\u2009\u202f]/g, ' ');
+}
+
 // Deliberately STRICTER than the shared checks module's IMG_EXT (which
 // accepts .svg): the petshop brief requires a GENERATED raster logo, and
 // a hand-written inline SVG must not satisfy it. Scenario judgment stays

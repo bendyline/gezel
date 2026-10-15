@@ -111,6 +111,33 @@ describe('planStructure', () => {
     expect(r.detail).toMatch(/references T2, which is not a row ID|row T3/);
   });
 
+  it('reads emphasized or code-marked ids, owners, and dependencies as plain text', () => {
+    const r = planStructure(
+      table([
+        '| **T1** | Survey the site | **Beatrix** | - | Survey notes reviewed by Cas |',
+        '| `T2` | Draft the layout | Cas | *T1* | Layout approved in writing |',
+        '| __T3__ | Order materials | Femke | **T1**, **T2** | All POs confirmed by suppliers |',
+      ]),
+      { minRows: 3, ownerRoster: ROSTER },
+    );
+    expect(r.detail).toBe('');
+    expect(r.ok).toBe(true);
+    expect(r.rows.map((row) => row.id)).toEqual(['T1', 'T2', 'T3']);
+    expect(r.rows[0]?.owner).toBe('Beatrix');
+    expect(r.rows[2]?.dependsOn).toEqual(['T1', 'T2']);
+  });
+
+  it('still rejects an emphasized dependency that names no row', () => {
+    const r = planStructure(
+      table([
+        '| T1 | Survey the site | Beatrix | - | Survey notes reviewed by Cas |',
+        '| T2 | Draft the layout | Cas | **T7** | Layout approved in writing |',
+      ]),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('T7');
+  });
+
   it('a self-dependency is rejected', () => {
     const r = planStructure(
       table(['| T1 | Survey the site | Beatrix | T1 | Survey notes reviewed |']),

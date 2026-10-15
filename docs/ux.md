@@ -804,6 +804,12 @@ output. **See all** opens the full plan gallery, whose **Start here** shelf
 uses the same starter set. Use the existing tray and radius tokens; these
 are square-ish keys, never pills.
 
+Every key is one size. A first-project plan's catalog description runs to a
+paragraph, so its key shows only the opening clause (`planShortDescription`:
+the first sentence, up to a colon, then up to the last comma that fits),
+clamped to two lines, and every tray row is as tall as the tallest. The
+whole description belongs to the launch sheet, not the key.
+
 Each Make something key is a **paper card**: it takes the paper its artwork is
 drawn on, in both themes, so the 64px mark bleeds into the card instead of
 sitting on it as a pasted square. `sampleArtworkPaper`
@@ -833,7 +839,8 @@ task queued for a shift that never runs is a silent failure.
 
 Output summaries come from declared output files, including publishing steps
 before a final Finish step. They stand in for the description only on the six
-starters; every other plan card shows its own description, and its
+starters; every other plan card shows its own description (on a Home key,
+its opening clause), and its
 **You'll get** line appears only for a deliverable the type names (a deck,
 document, PDF, video or GIF). A scratch `.md` or `.html` file says nothing
 about what the person receives. **Usually about N minutes here** appears only
@@ -2110,6 +2117,20 @@ right, wrapping under it when narrow. A bare `<ul>` in a settings panel renders
 browser bullets and strands its buttons on their own line — Remote Servers
 shipped that way. Facts about the install (About → Version) use
 `.settings-facts`: muted label, value beside it.
+
+**Connecting two devices works like a game's LAN lobby.** Settings → Remote
+Servers puts sharing first (one switch, the address this device is reachable at,
+**Add a device**) and connecting second: gezel devices found on the network as
+rows with a **Connect** key, connect-by-IP in a closed disclosure for the device
+that isn't listed, and the servers this device remembers, each marked "on your
+network now" when discovery sees it. Connecting asks for the 8-digit code the
+other device shows, in one numeric field formatted `4821 0937` as it is typed.
+A code a person types beats one they compare: people confirm a comparison
+without reading it, and a typed code also stands in for an Approve click on the
+other screen. The code is shown only on request, in the large spaced
+`.device-code` recipe with its countdown, because it is read off one screen and
+typed into another. Port, interface, limits, and the identity code older
+versions still compare sit in **Advanced**.
 
 **A label travels with its control.** In a wrapping row of labelled controls —
 the gezel header's Model, Context, Sandbox — wrap each label and its keys in one

@@ -291,6 +291,7 @@ import { createToolImagePersister } from '../providers/tool-image-persister.js';
 import { TurnAbortError } from '../providers/turn-abort-error.js';
 import { artifactPathsOf, extractReferencedFiles } from '../references/file-references.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
+import { awaitWindowsScriptSandboxBoot } from '../sandbox/windows-mxc-boot.js';
 import { windowsMxcState } from '../sandbox/windows-mxc.js';
 import { listStdlibScripts } from '../scripts/stdlib-source.js';
 import {
@@ -14128,6 +14129,9 @@ export class ChatManager extends LocalEngineRuntime {
       omitLastUserFromPriorMessages?: boolean;
     },
   ): Promise<BuiltSessionOpts> {
+    // The prompt surface and the gezel-mcp env below both read the Windows
+    // container state synchronously; settle the boot probe first.
+    if (process.platform === 'win32') await awaitWindowsScriptSandboxBoot();
     const project = await this.store.getProject(record.projectId);
     // A visitor on a shared mini-site sees only what the site's pages show; a
     // listing of the owner's files would hand a stranger every file name.
@@ -14859,6 +14863,9 @@ export class ChatManager extends LocalEngineRuntime {
     evidenceLedger?.setLookupTools(
       availableBuiltinTools.map((tool) => tool.name),
       factualLookupPreference,
+    );
+    evidenceLedger?.setWorkspaceFiles(
+      workspaceFiles.filter((entry) => !entry.isDirectory).map((entry) => entry.path),
     );
     const workspaceGestalt = workspaceGestaltActive
       ? await this.buildWorkspaceGestalt(

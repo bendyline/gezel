@@ -516,11 +516,14 @@ import type { MlxInstallEvent, MlxInstalledModel, MlxRuntimeInfo } from './mlx-m
 import { OfficeIntegrationsClient } from './office-integrations.js';
 import { exportPortableBackup, scanPortableRestore } from './portable-backup.js';
 import type {
+  DiscoverRemotesResponse,
+  LanAddressInfo,
   MachineServingConfig,
   MachineServingDevice,
   MachineServingGrant,
   MachineServingState,
   PairedRemoteInfo,
+  PairingCodeState,
 } from './remote-serving.js';
 import { RetrievalClient } from './retrieval.js';
 import {
@@ -545,11 +548,15 @@ export type {
 export type { LlamaCppInstalledModel } from './llama-cpp-model.js';
 export type { MlxInstallEvent, MlxInstalledModel, MlxRuntimeInfo } from './mlx-model.js';
 export type {
+  DiscoveredRemoteServer,
+  DiscoverRemotesResponse,
+  LanAddressInfo,
   MachineServingConfig,
   MachineServingDevice,
   MachineServingGrant,
   MachineServingState,
   PairedRemoteInfo,
+  PairingCodeState,
 } from './remote-serving.js';
 
 export interface ScanModelBundleOptions {
@@ -4765,12 +4772,52 @@ export class GezelClient {
     fingerprint: string;
     existingFingerprint?: string;
     identityChanged: boolean;
+    /** `code` → pair with {@link pairRemoteWithCode}; only `approval` → {@link pairRemote}. */
+    pairingMethods: string[];
   }> {
     return this.request('POST', '/api/remotes/inspect', body);
   }
 
+  /**
+   * Pair with the connect code the server shows (Settings → Remote Servers →
+   * Add a device). Refusals carry a sentence in `details.message`:
+   * `pairing_code_rejected`, `pairing_closed`, `pairing_attempts_exhausted`,
+   * `pairing_code_unsupported`.
+   */
+  pairRemoteWithCode(body: {
+    baseUrl: string;
+    code: string;
+    displayName?: string;
+  }): Promise<{ remote: PairedRemoteInfo }> {
+    return this.request('POST', '/api/remotes/pair-with-code', body);
+  }
+
+  // ---- This daemon's connect code (it owns the LAN listener) ----
+
+  getPairingCode(): Promise<PairingCodeState> {
+    return this.request('GET', '/api/remote-serving/pairing-code');
+  }
+
+  openPairingCode(): Promise<PairingCodeState> {
+    return this.request('POST', '/api/remote-serving/pairing-code');
+  }
+
+  closePairingCode(): Promise<PairingCodeState> {
+    return this.request('DELETE', '/api/remote-serving/pairing-code');
+  }
+
   unpairRemote(remoteId: string): Promise<{ ok: boolean }> {
     return this.request('DELETE', `/api/remotes/${encodeURIComponent(remoteId)}`);
+  }
+
+  /** Gezel servers announcing themselves on the local network (mDNS). */
+  discoverRemotes(): Promise<DiscoverRemotesResponse> {
+    return this.request('GET', '/api/remotes/discover');
+  }
+
+  /** The IPv4 addresses other devices can reach this one at, best first. */
+  listLanAddresses(): Promise<{ addresses: LanAddressInfo[] }> {
+    return this.request('GET', '/api/remotes/lan-addresses');
   }
 
   // ---- Machine-broker LAN serving (this device as SERVER, broker-owned) ----
@@ -4805,6 +4852,18 @@ export class GezelClient {
 
   revokeMachineServingDevice(appId: string): Promise<{ ok: true }> {
     return this.request('DELETE', `/api/machine-serving/devices/${encodeURIComponent(appId)}`);
+  }
+
+  getMachineServingPairingCode(): Promise<PairingCodeState> {
+    return this.request('GET', '/api/machine-serving/pairing-code');
+  }
+
+  openMachineServingPairingCode(): Promise<PairingCodeState> {
+    return this.request('POST', '/api/machine-serving/pairing-code');
+  }
+
+  closeMachineServingPairingCode(): Promise<PairingCodeState> {
+    return this.request('DELETE', '/api/machine-serving/pairing-code');
   }
 
   listRemoteModels(remoteId: string): Promise<{

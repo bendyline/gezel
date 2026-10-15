@@ -1449,6 +1449,32 @@ describe('computeToolAllowlist', () => {
     expect(page!.has('run_nodejs_script')).toBe(false);
   });
 
+  it('keeps the script runner when a recovery repair of a data file has no scenario-check line', () => {
+    const recovery = [
+      '[eval recovery]',
+      'Your previous turn aborted, so the scheduler stopped automatic follow-up for this project.',
+      'Why the turn was stopped: [llama.cpp] aborting — `run_installed_script` failed 5 times in a row this turn.',
+      'Latest scenario check: score 4, bytes 5105, failure: email "zoe.quill@example.com" appears more than once — dedup is missing.',
+      "Your next tool call should make the smallest targeted repair in `out/customers.json` using `replace_in_file` or `replace_lines` for the latest concrete validator failure. Preserve the file's existing public exports, signatures, state shape, and already-passing behavior. If you need exact source text, read `out/customers.json` once, then patch only the failing logic. Do not replace the complete file.",
+      'Do not answer only in prose. Make one concrete targeted workspace edit, then stop with a short status note.',
+    ].join('\n');
+    const opts = { role: 'Developer', latestUserMessage: recovery };
+    expect(shouldConstrainToExistingSourceEdit(opts)).toBe(true);
+    const allow = computeToolAllowlist({
+      role: 'Developer',
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'nemotron3.5-lightning-30b-q4',
+      webSearchProvider: 'brave',
+    });
+    const chained = constrainAllowlistForExistingSourceEdit(
+      constrainAllowlistForScenarioFileRepair(allow, opts),
+      opts,
+    );
+    expect(chained!.has('run_nodejs_script')).toBe(true);
+    expect(chained!.has('replace_in_file')).toBe(true);
+  });
+
   it('does not collapse source-parse repair nudges to immediate write_file only', () => {
     const repair =
       "[Message from Priya]: [scenario check] I looked at `index.html` and the success criteria aren't met yet.\n" +

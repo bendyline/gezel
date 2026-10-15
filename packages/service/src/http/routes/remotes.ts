@@ -1,8 +1,9 @@
 /**
  * `/api/remotes` — Device A's admin surface for the servers it has paired with
  * for remote model execution (first-party UI only; mounted under the `/api/*`
- * bearer-auth umbrella). Pair, list, and unpair. Tokens are never returned to
- * the client — only `hasToken`.
+ * bearer-auth umbrella). Pair, list, and unpair; find servers announcing
+ * themselves on the network; list the addresses this device is reachable at.
+ * Tokens are never returned to the client — only `hasToken`.
  */
 
 import { HttpsOriginSchema } from '@bendyline/gezel';
@@ -12,11 +13,22 @@ import {
 } from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { listLanAddresses } from '../../remotes/lan-addresses.js';
+import {
+  type LanBrowser,
+  createLanBrowser,
+  lanDiscoveryEnabled,
+} from '../../remotes/lan-discovery.js';
 import {
   IdentityChangedError,
+  PairingCodeAttemptsError,
+  PairingCodeClosedError,
+  PairingCodeRejectedError,
+  PairingCodeUnsupportedError,
   inspectRemoteIdentity,
   normalizeRemoteBaseUrl,
   pairRemote,
+  pairRemoteWithCode,
   remoteBaseUrlMatches,
 } from '../../remotes/pairing.js';
 import type { PairedRemote } from '../../remotes/registry.js';
@@ -30,15 +42,47 @@ const PairRequestSchema = z.object({
   approvalTimeoutSec: z.number().int().positive().max(600).optional(),
 });
 
+const PairWithCodeRequestSchema = z.object({
+  baseUrl: HttpsOriginSchema,
+  code: z.string().max(32),
+  displayName: z.string().max(120).optional(),
+});
+
 function redact(r: PairedRemote): Omit<PairedRemote, 'token'> & { hasToken: boolean } {
   const { token, ...rest } = r;
   return { ...rest, hasToken: Boolean(token) };
 }
 
-export function remotesRoutes(ctx: ServiceContext): Hono {
+export function remotesRoutes(
+  ctx: ServiceContext,
+  opts: { lanBrowser?: LanBrowser | null } = {},
+): Hono {
   const app = new Hono();
+  // Opens a socket only while the Remote Servers panel polls, and closes it
+  // a minute after the last poll.
+  const lanBrowser =
+    opts.lanBrowser !== undefined
+      ? opts.lanBrowser
+      : lanDiscoveryEnabled()
+        ? createLanBrowser()
+        : null;
 
   app.get('/', (c) => c.json({ remotes: ctx.remotes.list().map(redact) }));
+
+  app.get('/discover', async (c) => {
+    if (!lanBrowser) return c.json({ available: false, servers: [] });
+    const own = ctx.deviceIdentity?.fingerprint;
+    const paired = ctx.remotes.list();
+    const servers = (await lanBrowser.browse())
+      .filter((server) => server.fingerprint !== own)
+      .map((server) => {
+        const match = paired.find((r) => r.pinnedIdentityFingerprint === server.fingerprint);
+        return match ? { ...server, pairedRemoteId: match.remoteId } : server;
+      });
+    return c.json({ available: true, servers });
+  });
+
+  app.get('/lan-addresses', (c) => c.json({ addresses: listLanAddresses() }));
 
   app.post('/inspect', async (c) => {
     const body = z.object({ baseUrl: HttpsOriginSchema }).parse(await c.req.json());
@@ -54,7 +98,30 @@ export function remotesRoutes(ctx: ServiceContext): Hono {
       identityChanged: Boolean(
         existing && existing.pinnedIdentityFingerprint !== identity.fingerprint,
       ),
+      pairingMethods: identity.pairingMethods ?? ['approval'],
     });
+  });
+
+  app.post('/pair-with-code', async (c) => {
+    const body = PairWithCodeRequestSchema.parse(await c.req.json());
+    try {
+      const paired = await pairRemoteWithCode(ctx, body);
+      await closePairedRemoteFetches(ctx.remotes, paired.remoteId);
+      return c.json({ remote: redact(paired) }, 201);
+    } catch (err) {
+      const refusal =
+        err instanceof PairingCodeClosedError
+          ? ({ error: 'pairing_closed', status: 409 } as const)
+          : err instanceof PairingCodeAttemptsError
+            ? ({ error: 'pairing_attempts_exhausted', status: 429 } as const)
+            : err instanceof PairingCodeRejectedError
+              ? ({ error: 'pairing_code_rejected', status: 403 } as const)
+              : err instanceof PairingCodeUnsupportedError
+                ? ({ error: 'pairing_code_unsupported', status: 409 } as const)
+                : null;
+      if (!refusal) throw err;
+      return c.json({ error: refusal.error, message: (err as Error).message }, refusal.status);
+    }
   });
 
   // Chat models a paired server offers, namespaced for A. Drives the picker.

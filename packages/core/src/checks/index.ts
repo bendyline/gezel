@@ -52,6 +52,7 @@ export {
   type ValuesSubsetResult,
   type ValuesSubsetSpec,
   normalizeInlineEmphasis,
+  normalizeTypography,
 } from './grounding.js';
 export {
   securityReport,

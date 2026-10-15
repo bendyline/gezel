@@ -154,6 +154,27 @@ export function planOutputSummary(
 }
 
 /**
+ * A plan's description cut to a card's few words, for keys that sit beside
+ * starters reading "A website". Catalog descriptions are written for the
+ * gallery and run to a paragraph, which made those keys four times as tall.
+ * Keep the plan's own wording: the first sentence, up to a colon or
+ * semicolon, then up to the last comma that fits. A clause with no such
+ * break is left whole for the card to clamp.
+ */
+export function planShortDescription(description: string | undefined, maxChars = 64): string {
+  const text = (description ?? '').trim();
+  const sentence = text.match(/^.+?[.!?](?=\s|$)/s)?.[0] ?? text;
+  let clause = sentence.replace(/[.!?]$/, '');
+  const head = clause.split(/[:;]/, 1)[0]!.trim();
+  if (head.length >= 16) clause = head;
+  if (clause.length > maxChars) {
+    const comma = clause.lastIndexOf(',', maxChars);
+    if (comma > maxChars / 2) clause = clause.slice(0, comma);
+  }
+  return clause;
+}
+
+/**
  * Local elapsed-time samples, grouped by original book identity. Overnight
  * waits, recurring hosts and fanout children are different jobs, not samples
  * of an immediate launch. A later note/edit must not move the finish time.
