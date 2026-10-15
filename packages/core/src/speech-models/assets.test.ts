@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -101,6 +101,58 @@ it('rejects linked directories and never writes through them', async () => {
     store.materialize(model, file, join(root, 'app.bin'), { download: true }),
   ).rejects.toThrow('Unsafe');
 });
+
+const isWindows = process.platform === 'win32';
+const runsAsRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+
+it.skipIf(isWindows || runsAsRoot)(
+  'treats a model inside a folder it may not enter as absent instead of failing the lookup',
+  async () => {
+    // The machine service keeps each engine's models in a folder only it can enter.
+    const engine = join(root, 'machine', 'models', 'whisper-cpp');
+    const servicePrivate = join(engine, 'test', file.name);
+    await mkdir(join(engine, 'test'), { recursive: true });
+    await writeFile(servicePrivate, bytes);
+    const legacy = join(root, 'legacy.bin');
+    await writeFile(legacy, bytes);
+    await chmod(engine, 0o000);
+    try {
+      const store = new SpeechAssetStore({
+        root: join(root, 'cache'),
+        candidates: () => [servicePrivate, legacy],
+        fetchImpl: async () => new Response(bytes),
+      });
+      expect(await store.find(model, file)).toBe(legacy);
+      await rm(legacy);
+      expect(await store.find(model, file)).toBeNull();
+      const destination = join(root, 'app', file.name);
+      expect(await store.materialize(model, file, destination, { download: true })).toBe(true);
+      expect(await readFile(destination)).toEqual(bytes);
+    } finally {
+      await chmod(engine, 0o755);
+    }
+  },
+);
+
+it.skipIf(isWindows || runsAsRoot)(
+  'still fails loudly when it may not enter the folder it must write to',
+  async () => {
+    const locked = join(root, 'locked');
+    await mkdir(join(locked, 'app'), { recursive: true });
+    await chmod(locked, 0o000);
+    try {
+      const store = new SpeechAssetStore({
+        root: null,
+        fetchImpl: async () => new Response(bytes),
+      });
+      await expect(
+        store.materialize(model, file, join(locked, 'app', file.name), { download: true }),
+      ).rejects.toMatchObject({ code: 'EACCES' });
+    } finally {
+      await chmod(locked, 0o755);
+    }
+  },
+);
 
 it('cancelled waiters leave a live writer alone', async () => {
   const cache = join(root, 'cache');

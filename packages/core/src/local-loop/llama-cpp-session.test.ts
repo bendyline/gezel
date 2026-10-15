@@ -1751,63 +1751,63 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
   it.each([
     { model: 'lfm2.5-24b-a2b-q4', expected: 1024 },
     { model: 'lfm2.5-2.6b-q4', expected: 4096 },
-  ])('caps the engine reasoning budget on constrained turns for $model', async ({
-    model,
-    expected,
-  }) => {
-    const bodies: Array<Record<string, unknown>> = [];
-    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
-      return sseResponse([
-        {
-          choices: [
-            {
-              index: 0,
-              delta: {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: 'call_write',
-                    type: 'function',
-                    function: {
-                      name: 'write_file',
-                      arguments: '{"path":"index.html","content":"<!doctype html>"}',
+  ])(
+    'caps the engine reasoning budget on constrained turns for $model',
+    async ({ model, expected }) => {
+      const bodies: Array<Record<string, unknown>> = [];
+      globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+        return sseResponse([
+          {
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_write',
+                      type: 'function',
+                      function: {
+                        name: 'write_file',
+                        arguments: '{"path":"index.html","content":"<!doctype html>"}',
+                      },
                     },
-                  },
-                ],
+                  ],
+                },
               },
-            },
-          ],
-        },
-        { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
-        '[DONE]',
-      ]);
-    }) as typeof fetch;
+            ],
+          },
+          { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+          '[DONE]',
+        ]);
+      }) as typeof fetch;
 
-    const provider = new ExternalLlamaServer({ baseUrl: 'http://lfm.test' });
-    const session = await provider.createSession({
-      systemMessage: 'sys',
-      model,
-      tuning: resolveTuning({
-        catalog: { reasoning: { enableThinking: true, thinkingBudget: 4096 } },
-      }),
-      externalTools: [
-        {
-          name: 'write_file',
-          description: 'Write a file.',
-          parameters: { type: 'object', additionalProperties: true },
-        },
-      ],
-    });
+      const provider = new ExternalLlamaServer({ baseUrl: 'http://lfm.test' });
+      const session = await provider.createSession({
+        systemMessage: 'sys',
+        model,
+        tuning: resolveTuning({
+          catalog: { reasoning: { enableThinking: true, thinkingBudget: 4096 } },
+        }),
+        externalTools: [
+          {
+            name: 'write_file',
+            description: 'Write a file.',
+            parameters: { type: 'object', additionalProperties: true },
+          },
+        ],
+      });
 
-    await session.sendAndWait(
-      'First move: create the workspace deliverable at workspace/index.html',
-    );
+      await session.sendAndWait(
+        'First move: create the workspace deliverable at workspace/index.html',
+      );
 
-    expect(bodies).toHaveLength(1);
-    expect(bodies[0]?.chat_template_kwargs).toMatchObject({ enable_thinking: false });
-    expect(bodies[0]?.reasoning_budget_tokens).toBe(expected);
-  });
+      expect(bodies).toHaveLength(1);
+      expect(bodies[0]?.chat_template_kwargs).toMatchObject({ enable_thinking: false });
+      expect(bodies[0]?.reasoning_budget_tokens).toBe(expected);
+    },
+  );
 
   it('downgrades a manifest-declared reasoning depth dial on constrained turns, for templates that have no enable_thinking to honor', async () => {
     const bodies: Array<Record<string, unknown>> = [];
