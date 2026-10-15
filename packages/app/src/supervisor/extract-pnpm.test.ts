@@ -136,6 +136,20 @@ describe('installPnpmIfNeeded', () => {
     await expect(readFile(next.entryPath!, 'utf8')).resolves.toBe('// fake pnpm entry\n');
   });
 
+  it('trusts a stamped install without re-reading the bundle', async () => {
+    await writeBundle('11.15.1');
+    const entryDigest = createHash('sha256').update('// fake pnpm entry\n').digest('hex');
+    await writeFile(join(bundleDir, 'sha256.txt'), bundleManifest(entryDigest), 'utf8');
+    await installPnpmIfNeeded({ home, bundleDir });
+    await writeFile(join(bundleDir, 'dist', 'pnpm.mjs'), '// not what the manifest says\n');
+
+    const next = await installPnpmIfNeeded({ home, bundleDir });
+    expect(next).toMatchObject({ action: 'up-to-date', verified: true });
+    await expect(
+      readFile(join(home, 'bin', 'pnpm-runtime', 'dist', 'pnpm.mjs'), 'utf8'),
+    ).resolves.toBe('// fake runtime\n');
+  });
+
   it('does not bypass a broken source manifest for an up-to-date install', async () => {
     await writeBundle('11.15.1');
     const entryDigest = createHash('sha256').update('// fake pnpm entry\n').digest('hex');

@@ -1711,8 +1711,8 @@ export async function startProductService(
   // failing settle never starves the others: finding delegation closes
   // the linked finding (cancel reopens it); code reviews flip their
   // record to complete/canceled.
-  // Assigned once media search exists; a settle before then has nothing to release.
-  let optionalDownloads: OptionalDownloads | undefined = undefined;
+  // Filled in once media search exists; a settle before then has nothing to release.
+  const optionalDownloadsRef: { value?: OptionalDownloads } = {};
   tasks.setTaskSettledHook(async ({ projectId, task, outcome }) => {
     // The terminal step activates nothing, so its XP (and the task's) is
     // noted here rather than in the step hook.
@@ -1728,7 +1728,9 @@ export async function startProductService(
     void chat
       .postTaskWrapUp(task, outcome)
       .catch((err) => log.warn(`[service] task wrap-up failed for ${task.ref}: ${String(err)}`));
-    if (isOwnerLaunchedCompletion(task, outcome)) void optionalDownloads?.firstProjectDone();
+    if (isOwnerLaunchedCompletion(task, outcome)) {
+      void optionalDownloadsRef.value?.firstProjectDone();
+    }
     await contentIndex
       .settleFindingsForTask(projectId, task.ref, outcome)
       .catch((err) => log.warn(`[service] finding settle failed for ${task.ref}: ${String(err)}`));
@@ -1859,7 +1861,7 @@ export async function startProductService(
     readConfig: () => store.readConfig(),
     backgroundDownloads: backgroundDownloadsAllowed(),
   });
-  optionalDownloads = new OptionalDownloads({
+  const optionalDownloads = new OptionalDownloads({
     readConfig: () => store.readConfig(),
     writeConfig: (patch) => store.writeConfig(patch),
     firstUseHeld: () => indexingHold.isActive(),
@@ -1877,6 +1879,7 @@ export async function startProductService(
       });
     },
   });
+  optionalDownloadsRef.value = optionalDownloads;
   if (knowledge) {
     await knowledge.start();
     search.setKnowledgeSearch({
@@ -2768,7 +2771,7 @@ export async function startProductService(
         void relevance.bootWarm().catch(() => {});
         void mediaSearch
           .bootWarm({ install: false })
-          .then(() => optionalDownloads?.boot())
+          .then(() => optionalDownloads.boot())
           .catch(() => {});
       },
       () => stopping,
@@ -2786,7 +2789,7 @@ export async function startProductService(
     async stop() {
       stopping = true;
       for (const cancel of cancelBootWork) cancel();
-      optionalDownloads?.stop();
+      optionalDownloads.stop();
       // Model workers refuse new work from here and drain while the rest
       // shuts down; each is terminated once idle, never mid-run, because
       // process.exit tearing one down inside onnxruntime aborts the process.

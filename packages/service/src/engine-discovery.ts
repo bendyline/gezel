@@ -6,6 +6,7 @@ import { electronNativeBinCandidates } from '@bendyline/gezel-client/node';
 import { reuseVerifiedElectronNativeBinaries } from '@bendyline/gezel-inference/internal/engines/electron-native-reuse';
 import { effectiveEngineRelease } from '@bendyline/gezel-inference/internal/engines/native-manifest';
 import { discoverNativeBinaries } from '@bendyline/gezel/native';
+import { nativePayloadVerificationPath } from '@bendyline/gezel/paths';
 const log = createLogger('engines');
 export async function prepareNativeEngines(home: string, bootConfig: GezelConfig): Promise<void> {
   // System-service launches (Windows GezelService NSSM-wrapped daemon,
@@ -26,7 +27,10 @@ export async function prepareNativeEngines(home: string, bootConfig: GezelConfig
       existsSync(candidate),
     );
     if (installedCandidates.length > 0) {
-      const reuse = await reuseVerifiedElectronNativeBinaries({ candidates: installedCandidates });
+      const reuse = await reuseVerifiedElectronNativeBinaries({
+        candidates: installedCandidates,
+        cacheFile: nativePayloadVerificationPath(home),
+      });
       if (reuse.reused) {
         log.info(`[native] ${reuse.reason}: ${reuse.nativeBinDir}`);
       } else {

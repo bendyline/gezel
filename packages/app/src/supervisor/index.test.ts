@@ -21,6 +21,7 @@ import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { nativePayloadVerificationPath } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Hoisted mock context so vi.mock factories can read state set per-test.
@@ -1302,6 +1303,7 @@ describe('Branch 3 — embedded', () => {
     expect(reuseVerifiedElectronNativeBinaries).toHaveBeenCalledWith({
       candidates: [ctx.nativeRoot],
       allowStandaloneMacPayload: true,
+      cacheFile: nativePayloadVerificationPath(testHome),
     });
     await svc.shutdown();
   });
@@ -1342,6 +1344,7 @@ describe('Branch 3 — embedded', () => {
     const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
     expect(reuseVerifiedElectronNativeBinaries).toHaveBeenCalledWith({
       candidates: [installedRoot],
+      cacheFile: nativePayloadVerificationPath(testHome),
     });
     await svc.shutdown();
   });
@@ -1368,12 +1371,15 @@ describe('Branch 3 — embedded', () => {
     const svc = await connectOrStart(baseOpts({ forceEmbedded: true }));
 
     expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(installedRoot);
+    // One cache for both calls, so each keeps the other's records.
     expect(reuseVerifiedElectronNativeBinaries).toHaveBeenNthCalledWith(1, {
       candidates: [ctx.nativeRoot],
       allowStandaloneMacPayload: true,
+      cacheFile: nativePayloadVerificationPath(testHome),
     });
     expect(reuseVerifiedElectronNativeBinaries).toHaveBeenNthCalledWith(2, {
       candidates: [installedRoot],
+      cacheFile: nativePayloadVerificationPath(testHome),
     });
     await svc.shutdown();
   });

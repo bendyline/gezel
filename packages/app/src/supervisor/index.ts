@@ -25,7 +25,7 @@ import {
   readLlamaQuarantine,
   resolveAvailableLlamaBinary,
 } from '@bendyline/gezel/native';
-import { gezelPaths } from '@bendyline/gezel/paths';
+import { gezelPaths, nativePayloadVerificationPath } from '@bendyline/gezel/paths';
 import {
   type AutostartInstallOptions,
   type ManagedAutostart,
@@ -1246,16 +1246,19 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
       if (developmentCandidates.length > 0 || installedCandidates.length > 0) {
         try {
           const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
+          const cacheFile = nativePayloadVerificationPath(opts.home);
           let reuse =
             developmentCandidates.length > 0
               ? await reuseVerifiedElectronNativeBinaries({
                   candidates: developmentCandidates,
                   allowStandaloneMacPayload: true,
+                  cacheFile,
                 })
               : undefined;
           if (!reuse?.reused && installedCandidates.length > 0) {
             const installedReuse = await reuseVerifiedElectronNativeBinaries({
               candidates: installedCandidates,
+              cacheFile,
             });
             reuse = reuse
               ? {

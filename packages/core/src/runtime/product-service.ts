@@ -53,12 +53,7 @@ import {
 } from '../schemas/api.js';
 import type { ProjectTypeTool } from '../schemas/catalog.js';
 import type { Craftbook, CraftbookSample } from '../schemas/craftbook.js';
-import {
-  type ChatEvent,
-  type ChatMessage,
-  type ProviderName,
-  ProviderNameSchema,
-} from '../schemas/gezel.js';
+import type { ChatEvent, ChatMessage, ProviderName } from '../schemas/gezel.js';
 import {
   type MobileModelInventory,
   type MobileProvider,
@@ -110,13 +105,13 @@ import { portableInputLimitError } from './inference-limits.js';
 import { PORTABLE_HANDOFF_LIMITS } from './inference-limits.js';
 import { resolvePortableKlerkModel } from './klerk-model.js';
 import { PortableEngineHost } from './local-loop-host.js';
-import { pickLocalProvider } from './local-provider.js';
 import {
   portableFileTurnContext,
   preparePortableMessage,
   validatePortableMessageHints,
 } from './message-delivery.js';
 import { handlePortableModelsRoute, modelBudget } from './model-budget.js';
+import { portableSessionModel, portableTurnRoute, serverModelParts } from './model-routing.js';
 import { buildPortableInstructions } from './portable-instructions.js';
 import { portableSampling, portableTuning } from './portable-sampling.js';
 import { portableToolSurface } from './product-tools.js';
@@ -139,7 +134,6 @@ import {
   type PortablePairedServer,
   type PortableRemoteHost,
   PortableRemoteServers,
-  RemoteServerUnreachableError,
 } from './remote-servers.js';
 import type { PortableScripts } from './script-host.js';
 import { handlePortableScriptRoute } from './script-routes.js';
@@ -181,22 +175,6 @@ export {
 } from './turn-attachments.js';
 /** This device's own providers, or a paired server's model. */
 type TurnProviderId = MobileProviderId | 'remote';
-/**
- * Where a turn runs. `notice` is set when a conversation on a paired server's
- * model runs here instead, because the server isn't reachable.
- */
-type TurnRoute =
-  | { kind: 'local'; providerId: MobileProviderId; provider: MobileProvider; notice?: string }
-  | {
-      kind: 'remote';
-      providerId: 'remote';
-      server: PortablePairedServer;
-      /** `remote:<remoteId>/<the server's id>`, as the conversation stores it. */
-      modelId: string;
-      serverModel: string;
-      contextWindow: number;
-      parameterSize?: string;
-    };
 /** Crew handoffs share one count per chain; a person's message starts a new chain. */
 type HandoffChain = { count: number };
 type Turn = {
@@ -253,12 +231,8 @@ type KnownSession = SessionScope & { providerName?: ProviderName };
 /** A phone holds a handful of prompts in memory at most. */
 const MAX_ACTIVE_TURNS = 16;
 const MAX_QUEUED_PER_SESSION = 20;
-/** A server's window when it is there but could not say in time, and never said before. */
-const REMOTE_FALLBACK_CONTEXT = 16_384;
 /** The desktop's reply budget for a model on another device. */
 const REMOTE_REPLY_MAX_TOKENS = 8_192;
-/** How recent a server's last answer must be for a turn to go to it unprobed. */
-const TURN_FRESH_MS = 15_000;
 /** Engines the status pill can name. */
 const ENGINE_PHASE_PROVIDERS = [
   'llama-cpp',
@@ -273,14 +247,6 @@ const ENGINE_LOOP_PHASES = new Set(['loading_model', 'prefill', 'generating']);
 function withNotice(notice: string | undefined, warnings: readonly string[]) {
   const all = notice ? [notice, ...warnings] : [...warnings];
   return all.length ? { warnings: all } : {};
-}
-/** A server's `<provider>:<model>` id, split; an unknown provider reads as `remote`. */
-function serverModelParts(id: string): { providerName: ProviderName; modelId: string } {
-  const colon = id.indexOf(':');
-  const provider = ProviderNameSchema.safeParse(colon > 0 ? id.slice(0, colon) : '');
-  return provider.success
-    ? { providerName: provider.data, modelId: id.slice(colon + 1) }
-    : { providerName: 'remote', modelId: id };
 }
 
 export class PortableProductService {
@@ -968,96 +934,18 @@ export class PortableProductService {
     });
   }
 
-  /**
-   * The provider and model a new conversation with this gezel starts on: a
-   * paired server's model when the gezel or this device's default names one
-   * it is still paired with, otherwise this device's own.
-   */
   async newSessionModel(
     gezel: { provider?: ProviderName; parsed: { frontmatter: { model?: string } } } | null,
     config: GezelConfig,
   ): Promise<{ providerName: ProviderName; model: string; inventory?: MobileModelInventory }> {
-    const requested = gezel?.provider ?? config.provider ?? 'llama-cpp';
-    const pinned = gezel?.parsed.frontmatter.model;
-    if (requested === 'remote') {
-      const model = pinned && parseRemoteModelId(pinned) ? pinned : config.defaultModel?.remote;
-      const target = model ? parseRemoteModelId(model) : null;
-      if (model && target && (await this.remotes.server(target.remoteId)))
-        return { providerName: 'remote', model };
-    }
-    const providerName =
-      requested === 'remote'
-        ? ((await this.localFallback())?.providerId ?? 'llama-cpp')
-        : MobileProviderIdSchema.parse(requested);
-    const inventory = providerName === 'llama-cpp' ? await this.inference.models?.() : undefined;
-    const model =
-      (requested === 'remote' ? undefined : pinned) ?? inventory?.selectedModelId ?? providerName;
-    return { providerName, model, ...(inventory ? { inventory } : {}) };
+    return portableSessionModel(this.modelRoutingHost(), gezel, config);
   }
 
-  /** The provider a turn falls back to when its server is away: this device's own. */
-  private localFallback() {
-    return pickLocalProvider({ providers: () => this.providers(), inference: this.inference });
-  }
-
-  /**
-   * Where this turn runs. A conversation on a paired server's model runs
-   * there while the server answers. When it doesn't (it is asleep, or this
-   * device left its network), the turn runs on this device's own model and
-   * says so, and the conversation goes back to the server once it answers.
-   */
-  private async turnRoute(session: ChatSession, config: GezelConfig): Promise<TurnRoute> {
-    if (session.providerName !== 'remote') {
-      const providerId = MobileProviderIdSchema.parse(session.providerName);
-      const provider = (await this.providers()).find((item) => item.id === providerId);
-      if (!provider || provider.availability !== 'available')
-        throw new ProductError(
-          provider?.reason ?? 'Choose an available on-device model in Settings.',
-          409,
-        );
-      return { kind: 'local', providerId, provider };
-    }
-    const modelId = session.model ?? config.defaultModel?.remote ?? '';
-    const target = parseRemoteModelId(modelId);
-    const server = target ? await this.remotes.server(target.remoteId) : null;
-    if (!target || !server)
-      throw new ProductError(
-        'The device this conversation ran on is no longer connected. Connect it again in Settings → Artificial Intelligence, or start a conversation with another model.',
-        409,
-      );
-    // A turn trusts a recent answer less than a listing does: a phone that
-    // just left the network should not wait on a server it can't reach.
-    if ((await this.remotes.check(server.remoteId, TURN_FRESH_MS)) === 'online') {
-      try {
-        const known = server.knownModels?.find((model) => model.id === modelId);
-        const contextWindow =
-          (await this.remotes.admit(server, target.modelId)) ??
-          known?.contextWindow ??
-          REMOTE_FALLBACK_CONTEXT;
-        return {
-          kind: 'remote',
-          providerId: 'remote',
-          server,
-          modelId,
-          serverModel: target.modelId,
-          contextWindow,
-          ...(known?.parameterSize ? { parameterSize: known.parameterSize } : {}),
-        };
-      } catch (error) {
-        if (!(error instanceof RemoteServerUnreachableError))
-          throw new ProductError(error instanceof Error ? error.message : String(error), 409);
-      }
-    }
-    const fallback = await this.localFallback();
-    if (!fallback)
-      throw new ProductError(
-        `${server.displayName} isn't reachable right now, and this device has no model of its own ready. Join its network again, or set up a model on this device in Settings → Artificial Intelligence.`,
-        409,
-      );
+  private modelRoutingHost() {
     return {
-      kind: 'local',
-      ...fallback,
-      notice: `${server.displayName} isn't reachable right now, so this reply came from this device's own model.`,
+      providers: () => this.providers(),
+      inference: this.inference,
+      remotes: this.remotes,
     };
   }
 
@@ -1274,7 +1162,7 @@ export class PortableProductService {
           'Answer or skip the pending question before continuing this conversation.',
           409,
         );
-      const route = await this.turnRoute(session, config);
+      const route = await portableTurnRoute(this.modelRoutingHost(), session, config);
       check();
       const providerId = route.providerId;
       const capabilities =

@@ -9,8 +9,15 @@ import {
   duckdbInstallDir,
   duckdbPlatformKey,
 } from '@bendyline/gezel/native';
-import { sha256File, verifyBundleManifest } from './bundle-manifest.js';
+import { runtimeInstallStampPath } from '@bendyline/gezel/paths';
+import { readBundleManifest, sha256File, verifyBundleManifest } from './bundle-manifest.js';
 import { redirectAsarToUnpacked } from './extract-bundle.js';
+import {
+  type InstallStamp,
+  clearInstallStamp,
+  installStampMatches,
+  writeInstallStamp,
+} from './install-stamp.js';
 
 export interface DuckdbInstallOptions {
   /** User home root — binary lands at `<home>/engines/duckdb/<version>/`. */
@@ -53,7 +60,8 @@ export function defaultDuckdbBundleDir(mainMetaUrl: string): string {
  * DuckDB is vendored unmodified — these are the DuckDB Foundation's own
  * signed, notarized bytes — so nothing here re-signs anything. The integrity
  * chain is: pinned digest in core → verified download at build time →
- * `sha256.txt` in the bundle → re-hash here → re-hash after the copy.
+ * `sha256.txt` in the bundle → re-hash here → re-hash after the copy → an
+ * install stamp, so later launches check the copy's metadata, not its bytes.
  *
  * A missing bundle is not fatal (`no-bundle`): DuckDB powers the data
  * features, and a daemon without it degrades to "query engine unavailable"
@@ -83,6 +91,29 @@ export async function installDuckdbIfNeeded(
   const installedBinary = join(installDir, binaryName);
   const sentinelPath = join(installDir, '.verified.json');
 
+  // A copy verified on an earlier launch is trusted while its stamp matches;
+  // see install-stamp.ts. Bundles without a manifest are verified in full.
+  const expectedDigest = (await readBundleManifest(bundleDir))?.get(binaryName);
+  const stamp: InstallStamp | null = expectedDigest
+    ? {
+        path: runtimeInstallStampPath(home, 'duckdb'),
+        identity: `${shippedVersion} ${expectedDigest}`,
+        root: installDir,
+        files: [binaryName],
+      }
+    : null;
+  if (stamp && expectedDigest && (await installStampMatches(stamp))) {
+    if (!existsSync(sentinelPath)) {
+      await writeSentinel(sentinelPath, shippedVersion, expectedDigest);
+    }
+    return {
+      binaryPath: installedBinary,
+      version: shippedVersion,
+      action: 'up-to-date',
+      verified: true,
+    };
+  }
+
   const integrity = await verifyBundleManifest(bundleDir, [binaryName]);
   if (!integrity.ok) {
     logger?.warn?.(
@@ -103,6 +134,7 @@ export async function installDuckdbIfNeeded(
       if (!existsSync(sentinelPath)) {
         await writeSentinel(sentinelPath, shippedVersion, bundleDigest);
       }
+      if (stamp) await writeInstallStamp(stamp);
       return {
         binaryPath: installedBinary,
         version: shippedVersion,
@@ -115,6 +147,7 @@ export async function installDuckdbIfNeeded(
     );
   }
 
+  await clearInstallStamp(runtimeInstallStampPath(home, 'duckdb'));
   await mkdir(installDir, { recursive: true });
   logger?.info?.(
     hadPrevious
@@ -153,6 +186,7 @@ export async function installDuckdbIfNeeded(
     );
   }
   await writeSentinel(sentinelPath, shippedVersion, bundleDigest);
+  if (stamp) await writeInstallStamp(stamp);
 
   return {
     binaryPath: installedBinary,

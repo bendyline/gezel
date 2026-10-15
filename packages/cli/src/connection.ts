@@ -43,7 +43,7 @@ import {
   stopOwnedDaemon,
   systemSharedAssetsDir,
 } from '@bendyline/gezel-client/node';
-import { gezelPaths } from '@bendyline/gezel/paths';
+import { gezelHome, gezelPaths, nativePayloadVerificationPath } from '@bendyline/gezel/paths';
 import { installSignalCleanup } from './signal-cleanup.js';
 
 /** Global flags shared across commands (defined on the root program). */
@@ -704,7 +704,10 @@ async function prepareStandaloneAssets(): Promise<void> {
   const candidates = electronNativeBinCandidates();
   if (candidates.length === 0) return;
   const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
-  await reuseVerifiedElectronNativeBinaries({ candidates });
+  await reuseVerifiedElectronNativeBinaries({
+    candidates,
+    cacheFile: nativePayloadVerificationPath(gezelHome()),
+  });
 }
 
 interface CliGrantInput {

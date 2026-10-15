@@ -106,6 +106,46 @@ describe('machine-shared Store mount', () => {
     );
   });
 
+  it('rebuilds a zeroed shared project.json in place from the history beside it', async () => {
+    const sharedProjectDir = join(sharedHome, 'projects', 'shared-project');
+    await writeFile(join(sharedProjectDir, 'project.json'), Buffer.alloc(217));
+    const created = JSON.stringify({
+      id: 'created',
+      at: '2026-05-28T03:18:29.816Z',
+      kind: 'project.created',
+      summary: 'Created project "Shared Project"',
+      projectId: 'shared-project',
+      details: { name: 'Shared Project' },
+    });
+    const voorman = JSON.stringify({
+      id: 'voorman',
+      at: '2026-05-28T03:18:29.952Z',
+      kind: 'project.voorman.changed',
+      summary: 'Set voorman',
+      projectId: 'shared-project',
+      details: { voormanGezelId: 'ada' },
+    });
+    await writeFile(
+      join(sharedProjectDir, 'history.jsonl'),
+      `${created}\n${'\u0000'.repeat(64)}${voorman}\n`,
+    );
+
+    const store = new Store({ home: userHome });
+    await store.ensureLayout();
+    expect(await store.listProjects()).toEqual([
+      expect.objectContaining({
+        id: 'shared-project',
+        name: 'Shared Project',
+        voormanGezelId: 'ada',
+        storageScope: 'machine-shared',
+      }),
+    ]);
+    expect(
+      JSON.parse(await readFile(join(sharedProjectDir, 'project.json'), 'utf8')),
+    ).toMatchObject({ id: 'shared-project', name: 'Shared Project' });
+    expect(existsSync(join(userHome, 'projects', 'shared-project', 'project.json'))).toBe(false);
+  });
+
   it('renames a shared gezel without changing the cross-account id', async () => {
     const store = new Store({ home: userHome });
     await store.ensureLayout();

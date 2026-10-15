@@ -186,6 +186,103 @@ describe('Electron native reuse', () => {
     expect(result.reason).toContain('unexpected: injected.dll');
   });
 
+  describe('with a verification cache', () => {
+    const bytes = Buffer.from('signed executable fixture');
+
+    async function cachedPayload(cacheFile?: string) {
+      const root = await mkdtemp(join(tmpdir(), 'gezel-electron-native-'));
+      roots.push(root);
+      const dir = join(root, 'win32-x64');
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'gezel-device-health.exe'), bytes);
+      const options: ElectronNativeReuseOptions = {
+        candidates: [root],
+        platform: 'win32',
+        arch: 'x64',
+        release: '9.9.9',
+        manifest: {
+          schemaVersion: 2,
+          release: '9.9.9',
+          platforms: {
+            'win32-x64': {
+              files: {
+                'gezel-device-health.exe': {
+                  sha256: createHash('sha256').update(bytes).digest('hex'),
+                  sizeBytes: bytes.length,
+                  signature: 'bendyline',
+                },
+              },
+              symlinks: {},
+            },
+          },
+        },
+        cacheFile: cacheFile ?? join(root, 'home', 'engines', 'native-payload', 'verified.json'),
+      };
+      return { dir, options };
+    }
+
+    it('keeps what a separate call verified against the same cache', async () => {
+      // A dev launch checks the checkout's payload and the installed app's in
+      // two calls; neither may erase the other's records.
+      const checkout = await cachedPayload();
+      const installed = await cachedPayload(checkout.options.cacheFile);
+      await verifyNativeBinaries(checkout.options);
+      await verifyNativeBinaries(installed.options);
+
+      expect((await verifyNativeBinaries(checkout.options)).reason).toContain(
+        '(0 of 1 files hashed)',
+      );
+      expect((await verifyNativeBinaries(installed.options)).reason).toContain(
+        '(0 of 1 files hashed)',
+      );
+    });
+
+    it('does not hash an unchanged payload again', async () => {
+      const { options } = await cachedPayload();
+      const first = await verifyNativeBinaries(options);
+      expect(first).toMatchObject({ reused: true });
+      expect(first.reason).toContain('(1 of 1 files hashed)');
+
+      const second = await verifyNativeBinaries(options);
+      expect(second).toMatchObject({ reused: true });
+      expect(second.reason).toContain('(0 of 1 files hashed)');
+    });
+
+    it('hashes a file again once it is edited, and rejects bytes that changed', async () => {
+      const { dir, options } = await cachedPayload();
+      await verifyNativeBinaries(options);
+      // Past one clock tick, so the edit's file times differ from the first pass.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await writeFile(
+        join(dir, 'gezel-device-health.exe'),
+        Buffer.from('signed executable fixturE'),
+      );
+
+      const result = await verifyNativeBinaries(options);
+      expect(result.reused).toBe(false);
+      expect(result.reason).toContain('sha256 mismatch: win32-x64/gezel-device-health.exe');
+    });
+
+    it('still rejects an unpinned DLL planted beside a cached payload', async () => {
+      const { dir, options } = await cachedPayload();
+      await verifyNativeBinaries(options);
+      await writeFile(join(dir, 'injected.dll'), 'not pinned');
+
+      const result = await verifyNativeBinaries(options);
+      expect(result.reused).toBe(false);
+      expect(result.reason).toContain('unexpected: injected.dll');
+    });
+
+    it('verifies in full when the cache is unreadable', async () => {
+      const { options } = await cachedPayload();
+      await verifyNativeBinaries(options);
+      await writeFile(options.cacheFile!, '{ not json');
+
+      const result = await verifyNativeBinaries(options);
+      expect(result.reason).toContain('(1 of 1 files hashed)');
+    });
+  });
+
   it('assesses the signed parent app, never a bare native file, for notarization', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'gezel-electron-app-'));
     roots.push(temp);
