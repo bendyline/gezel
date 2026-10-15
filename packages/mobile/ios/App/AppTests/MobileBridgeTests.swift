@@ -440,10 +440,12 @@ final class MobileBridgeTests: XCTestCase {
             await until(() => Array.from(document.querySelectorAll('.file-viewer-panel')).find(visible)?.textContent.includes('The same artifact drawer works on iOS.'), 'artifact in shared editor');
             await openNavigation();
             await clickButton('Documents', document.querySelector('[data-testid="app-sidebar"]'));
-            await until(() => visible(button('Back to files')) || visible(button('iOS notes')), 'shared document library');
-            if (visible(button('Back to files'))) await clickButton('Back to files');
-            await clickButton('iOS notes');
-            await until(() => Array.from(document.querySelectorAll('.file-viewer-panel')).find(visible)?.textContent.includes('Saved through the shared product API.'), 'shared document viewer');
+            // Navigation is a transition: the project's artifact viewer, with its own Back to files, stays on screen until the library commits.
+            const library = await until(() => { const view = document.querySelector('[data-testid="documents-view"]'); return visible(view) && view; }, 'shared document library');
+            await until(() => visible(button('Back to files', library)) || visible(button('iOS notes', library)), 'shared document library files');
+            if (visible(button('Back to files', library))) await clickButton('Back to files', library);
+            await clickButton('iOS notes', library);
+            await until(() => Array.from(library.querySelectorAll('.file-viewer-panel')).find(visible)?.textContent.includes('Saved through the shared product API.'), 'shared document viewer');
             check(document.documentElement.scrollWidth <= innerWidth + 1, 'Document viewer overflows');
             return true;
             """#)
