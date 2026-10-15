@@ -17,3 +17,18 @@ export function applyAutostartRuntimeArguments(
   if (!home || home.includes('\0')) throw new Error('Invalid --gezel-autostart-home argument');
   env.GEZEL_HOME = home;
 }
+
+/**
+ * True when an OS autostart registration (LaunchAgent, systemd user unit,
+ * logon task) started this daemon. Those managers relaunch a daemon that
+ * exits unsuccessfully, so a refusal that is not a fault — another daemon
+ * already owns the home — has to exit 0. Exiting 1 there had launchd
+ * relaunching the refused daemon every ten seconds for as long as the owner
+ * lived, each attempt loading the whole service bundle to be refused again.
+ */
+export function isAutostartLaunch(
+  argv: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.GEZEL_AUTOSTART === '1' || argv.some((arg) => arg.startsWith(AUTOSTART_HOME_PREFIX));
+}

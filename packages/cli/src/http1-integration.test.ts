@@ -60,7 +60,7 @@ it.each([
       response.end(
         JSON.stringify(
           req.url === '/api/health'
-            ? { ok: true, version: 'test' }
+            ? { ok: true, version: 'test', apiCompat: { floor: 1, current: 1 } }
             : req.url === '/api/gezels'
               ? { gezels: [] }
               : {},

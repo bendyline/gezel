@@ -72,8 +72,8 @@ differs by platform because the isolation does:
   virtualizes AppData and the registry, not the profile root), so the canonical
   runtime directory is readable directly.
 
-Judging it ([store-compat.ts](../packages/app/src/supervisor/store-compat.ts))
-uses the `apiCompat` range on `/api/health`, **never version equality**. The
+Judging it (`evaluateApiCompat` in [core api-compat.ts](../packages/core/src/api-compat.ts),
+shared with the CLI and the app SDK) uses the `apiCompat` range on `/api/health`, **never version equality**. The
 two channels ship on different schedules, so a version difference is the normal
 case; an exact-match check would send every store user to a private daemon the
 day either side shipped a patch. A daemon with no `apiCompat` predates the

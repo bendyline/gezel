@@ -44,7 +44,6 @@ import {
   stopAmbientMonitoring,
 } from './ambient-display/host.js';
 import { autostart } from './autostart/index.js';
-import { resolveAutostartNodePath, resolveAutostartPnpmPath } from './autostart/runtime.js';
 import { devToolsAllowed } from './devtools-policy.js';
 import { resumeEarnedNotifications, startEarnedNotifications } from './earned-notifications.js';
 import { buildEditableContextMenuTemplate } from './editable-context-menu.js';
@@ -77,7 +76,7 @@ import { splashStage } from './splash-stage.js';
 import { getStartAtLogin, launchedAtLogin, setStartAtLogin } from './start-at-login.js';
 import { type StoreBuildInfo, detectStoreBuild } from './store-build.js';
 import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
-import { type Connection, connectOrStart } from './supervisor/index.js';
+import { type Connection, autostartDefinition, connectOrStart } from './supervisor/index.js';
 import { updateActiveTraySessions, waitForTrayActivityRetry } from './tray-activity.js';
 import { type EngagementMode, TrayController } from './tray.js';
 import { parseMacUninstallSelection, scheduleMacUninstall } from './uninstaller/macos.js';
@@ -1238,24 +1237,15 @@ ipcMain.handle('gezel:autostart:status', async () => {
 });
 ipcMain.handle('gezel:autostart:install', async () => {
   try {
-    const gezelHome = process.env.GEZEL_HOME || join(homedir(), '.gezel');
-    const nodePath = await resolveAutostartNodePath({
+    // The same definition the supervisor's launch-time handover checks the
+    // unit against, so enabling autostart never registers a tree that the
+    // next launch would immediately have to repair.
+    const definition = await autostartDefinition({
+      home: process.env.GEZEL_HOME || join(homedir(), '.gezel'),
       packaged: app.isPackaged,
-      home: gezelHome,
-      bundledNodePath: process.env.GEZEL_NODE_PATH,
+      ...(storeBuild.channel ? { storeProfile: true } : {}),
     });
-    const pnpmPath = await resolveAutostartPnpmPath({
-      packaged: app.isPackaged,
-      home: gezelHome,
-      bundledPnpmPath: process.env.GEZEL_PNPM_PATH,
-    });
-    const gezeldPath = resolveInstalledGezeld();
-    await autostart.install({
-      nodePath,
-      pnpmPath,
-      gezeldPath,
-      gezelHome,
-    });
+    await autostart.install(definition);
     return { ok: true as const };
   } catch (err) {
     return { ok: false as const, error: (err as Error).message };
@@ -1323,17 +1313,6 @@ ipcMain.handle('gezel:restart-service', async (_event, reason?: string) => {
     return { ok: false as const, error: (err as Error).message };
   }
 });
-
-function resolveInstalledGezeld(): string {
-  const home = process.env.GEZEL_HOME || join(homedir(), '.gezel');
-  const p = join(home, 'service', 'dist', 'bin', 'gezeld.js');
-  if (!existsSync(p)) {
-    throw new Error(
-      `Gezel service has not been extracted yet (expected ${p}). Restart Gezel once in packaged mode so the bundle lands, then try again.`,
-    );
-  }
-  return p;
-}
 
 // Native folder picker, exposed to the renderer via preload.cjs.
 ipcMain.handle(

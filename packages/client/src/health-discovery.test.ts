@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_HEALTH_TIMEOUT_MS, requestDaemonHealth } from './health-discovery.js';
+import {
+  DEFAULT_HEALTH_TIMEOUT_MS,
+  probeDaemonCompatibility,
+  requestDaemonHealth,
+} from './health-discovery.js';
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -112,4 +116,37 @@ describe('health discovery deadline', () => {
       expect(vi.getTimerCount()).toBe(0);
     },
   );
+});
+
+describe('probeDaemonCompatibility', () => {
+  const answering = (body: unknown, status = 200) =>
+    (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+
+  it('accepts a daemon whose generation range contains ours, whatever its version', async () => {
+    await expect(
+      probeDaemonCompatibility('https://127.0.0.1:1', {
+        fetch: answering({ ok: true, version: '9.9.9', apiCompat: { floor: 1, current: 1 } }),
+      }),
+    ).resolves.toEqual({ compatible: true, version: '9.9.9' });
+  });
+
+  it('declines a daemon that predates the handshake, naming the caller', async () => {
+    await expect(
+      probeDaemonCompatibility('https://127.0.0.1:1', {
+        fetch: answering({ ok: true, version: '1.26226.50' }),
+        client: 'this gezel CLI',
+      }),
+    ).resolves.toEqual({
+      compatible: false,
+      version: '1.26226.50',
+      code: 'no-handshake',
+      reason: 'the Gezel service (1.26226.50) is older than this gezel CLI can connect to',
+    });
+  });
+
+  it('rejects when the daemon does not answer OK, like a daemon that is not running', async () => {
+    await expect(
+      probeDaemonCompatibility('https://127.0.0.1:1', { fetch: answering({}, 503) }),
+    ).rejects.toThrow('HTTP 503');
+  });
 });

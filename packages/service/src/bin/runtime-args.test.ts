@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { applyAutostartRuntimeArguments } from './runtime-args.js';
+import { applyAutostartRuntimeArguments, isAutostartLaunch } from './runtime-args.js';
+
+describe('isAutostartLaunch', () => {
+  it('recognizes the LaunchAgent / systemd marker and the Windows task argument', () => {
+    expect(isAutostartLaunch([], { GEZEL_AUTOSTART: '1' })).toBe(true);
+    expect(isAutostartLaunch(['--gezel-autostart-home=C:\\Users\\Test\\.gezel'], {})).toBe(true);
+  });
+
+  it('treats an ordinary launch as not autostarted', () => {
+    expect(isAutostartLaunch([], {})).toBe(false);
+    expect(isAutostartLaunch([], { GEZEL_AUTOSTART: '0' })).toBe(false);
+  });
+});
 
 describe('applyAutostartRuntimeArguments', () => {
   it('restores the pinned home supplied by Windows Task Scheduler', () => {

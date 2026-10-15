@@ -5,7 +5,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { HealthResponse } from '@bendyline/gezel';
+import { type HealthResponse, evaluateApiCompat } from '@bendyline/gezel';
 import {
   GezelClient,
   createTrustingFetch,
@@ -26,6 +26,13 @@ import {
   resolveAvailableLlamaBinary,
 } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
+import {
+  type AutostartInstallOptions,
+  type ManagedAutostart,
+  managedAutostart,
+} from '../autostart/index.js';
+import { resolveAutostartNodePath, resolveAutostartPnpmPath } from '../autostart/runtime.js';
+import { autostartServesHome, handOverToAutostart } from './autostart-handover.js';
 import { describeOwnedChildState, formatDiagnosticError } from './diagnostics.js';
 import { defaultBundlePaths, extractBundleIfNeeded, readBundleMeta } from './extract-bundle.js';
 import { defaultDuckdbBundleDir, installDuckdbIfNeeded } from './extract-duckdb.js';
@@ -51,7 +58,6 @@ import {
   shouldRunRuntimesInPlace,
 } from './run-in-place.js';
 import { resolveSharedServiceTree } from './shared-service-tree.js';
-import { evaluateStoreCompat } from './store-compat.js';
 import {
   type SystemServiceRuntime,
   readSystemServiceRuntime,
@@ -186,6 +192,11 @@ const ADOPT_HEALTH_POLL_MS = 1_000;
 interface SupervisedServiceInit {
   systemServiceHome?: string;
   fallbackReason?: ServiceFallbackReason | null;
+  /**
+   * The autostart unit was stopped this session because it could not be
+   * brought onto the shipped service, so quitting must not start it again.
+   */
+  autostartDeclined?: boolean;
 }
 
 /**
@@ -457,7 +468,7 @@ export class SupervisedService extends EventEmitter {
     const health = await healthWithTimeout(
       buildHealthClient(this._baseUrl, this._token, this._cert),
     );
-    const verdict = evaluateStoreCompat(health);
+    const verdict = evaluateApiCompat(health);
     if (!verdict.compatible) {
       throw new Error(`the installed Gezel service is no longer compatible: ${verdict.reason}`);
     }
@@ -688,11 +699,35 @@ export class SupervisedService extends EventEmitter {
     // installed. This avoids racing a newly spawned child past shutdown.
     if (this.transitionInFlight) await this.transitionInFlight.catch(() => {});
     this.stopHealthWatch();
+    const ownedChild = this.child;
     if (this.child) await gracefullyStop(this.child, this.durableChildLogger());
     if (this.embeddedStop) await this.embeddedStop();
+    if (ownedChild) await this.handOverToAutostartOnQuit();
     await this.logRotator.close();
     this.child = undefined;
     this.embeddedStop = undefined;
+  }
+
+  /**
+   * A registered autostart daemon that found our child holding the home stood
+   * down instead of crash-looping (gezeld exits 0 under autostart when it is
+   * refused the lock). That happens when autostart is enabled mid-session or
+   * the boot handover had to decline. Autostart promises a daemon while the
+   * app is closed, so start it now that the home is free.
+   */
+  private async handOverToAutostartOnQuit(): Promise<void> {
+    if (!this.opts.packaged || this.opts.storeProfile || this.init.autostartDeclined) return;
+    const autostart = managedAutostart();
+    if (!autostart) return;
+    try {
+      if (!(await autostartServesHome(autostart, this.opts.home, this.opts.logger))) return;
+      await autostart.restart();
+      this.opts.logger?.info?.('[supervisor] handed the home over to the autostart daemon');
+    } catch (error) {
+      this.opts.logger?.warn?.(
+        `[supervisor] could not hand over to the autostart daemon: ${errorMessage(error)}`,
+      );
+    }
   }
 
   private detachResources(): void {
@@ -787,7 +822,7 @@ export class SupervisedService extends EventEmitter {
         previousVersion !== undefined &&
         previousVersion !== health.version
       ) {
-        const verdict = evaluateStoreCompat(health);
+        const verdict = evaluateApiCompat(health);
         if (!verdict.compatible) {
           this.opts.logger?.warn?.(
             `[supervisor] adopted service updated to ${health.version} and is no longer compatible`,
@@ -1518,6 +1553,12 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
 interface ConnectFlow {
   inheritedReason: ServiceFallbackReason | null;
   allowMachineRecheck: boolean;
+  /** The autostart handover already ran for this launch; never run it twice. */
+  autostartSettled?: boolean;
+  /** It ran and stopped the unit, so the app serves itself and must not restart it on quit. */
+  autostartDeclined?: boolean;
+  /** A spawn already lost the home to another daemon once; do not chase it again. */
+  spawnRaceRetried?: boolean;
 }
 
 async function connectResolved(
@@ -1597,6 +1638,19 @@ async function connectResolved(
       sourceMode: 'system-service',
       message: `System service was unavailable: ${outcome.message}`,
     });
+  }
+
+  if (
+    (mode.kind === 'local-adopt' || mode.kind === 'local-spawn-packaged') &&
+    opts.packaged &&
+    !opts.storeProfile &&
+    !flow.autostartSettled
+  ) {
+    const autostart = managedAutostart();
+    if (autostart) {
+      const handover = await connectViaAutostart(opts, flow, autostart);
+      if (handover !== 'continue') return handover;
+    }
   }
 
   if (mode.kind === 'local-adopt') {
@@ -1707,7 +1761,7 @@ async function connectResolved(
             `Stale gezeld pid=${runtime.pid} did not exit after the bounded stop ladder; refusing to spawn another writer`,
           );
         }
-        return await respawnPackagedAfterMismatch(opts);
+        return await respawnPackagedAfterMismatch(opts, flow);
       }
     } else {
       // Dev-mode staleness check: compare the workspace
@@ -1772,12 +1826,15 @@ async function connectResolved(
         {
           fallbackReason:
             flow.inheritedReason ?? (await machineServiceMissing(opts, 'local-spawn-packaged')),
+          autostartDeclined: flow.autostartDeclined === true,
         },
       );
       svc.attachSpawned(result.child);
       return svc;
     } catch (err) {
       if (isLiveDaemonUnhealthyError(err)) throw err;
+      const raced = await reconnectAfterSpawnRace(opts, flow, err);
+      if (raced) return raced;
       opts.logger?.warn?.(
         `[supervisor] packaged spawn failed: ${(err as Error).message}; falling back to embedded`,
       );
@@ -2170,11 +2227,116 @@ async function machineServiceMissing(
 }
 
 /**
+ * Run the autostart handover for a packaged per-user launch. Returns the
+ * service when the app adopted the autostart daemon, the re-resolved
+ * connection when the handover declined (the unit is stopped, so the
+ * ordinary per-user branches can serve without a manager relaunching a
+ * competitor), or `'continue'` when no unit is registered.
+ */
+async function connectViaAutostart(
+  opts: ConnectOptions,
+  flow: ConnectFlow,
+  autostart: ManagedAutostart,
+): Promise<SupervisedService | 'continue'> {
+  const handover = await handOverToAutostart({
+    home: opts.home,
+    autostart,
+    definition: () => autostartDefinition(opts),
+    shippedVersion: await shippedServiceVersion(),
+    readRuntime,
+    isProcessAlive,
+    healthVersion: async (runtime) =>
+      (await healthWithTimeout(buildHealthClient(runtime.baseUrl, runtime.token, runtime.cert)))
+        .version,
+    stopPid: (pid) => stopProcessByPid(pid, opts.logger),
+    ...(opts.logger ? { logger: opts.logger } : {}),
+  });
+  if (handover.kind === 'not-registered') return 'continue';
+  if (handover.kind === 'adopted') {
+    return new SupervisedService(
+      'local-adopt',
+      handover.runtime.baseUrl,
+      handover.runtime.token,
+      handover.runtime.cert,
+      opts,
+      {
+        fallbackReason: flow.inheritedReason ?? (await machineServiceMissing(opts, 'local-adopt')),
+      },
+    );
+  }
+  const perUser = await resolvePerUserMode({
+    home: opts.home,
+    packaged: opts.packaged,
+    devSpawn: opts.devSpawn,
+    forceEmbedded: opts.forceEmbedded,
+    ...(opts.logger ? { logger: opts.logger } : {}),
+  });
+  return connectResolved(opts, perUser, {
+    ...flow,
+    autostartSettled: true,
+    autostartDeclined: true,
+  });
+}
+
+/**
+ * What an autostart registration for this install points at: the service tree
+ * this launch spawns from (the installer's shared tree when adopted, otherwise
+ * this account's extracted copy) and the verified bundled runtimes. Never
+ * `~/.gezel/service` by assumption — once the shared tree is adopted nothing
+ * refreshes that directory, and a unit pinned there runs whichever release
+ * last extracted it.
+ */
+export async function autostartDefinition(
+  opts: Pick<ConnectOptions, 'home' | 'packaged' | 'storeProfile' | 'logger'>,
+): Promise<AutostartInstallOptions> {
+  const gezeldPath = opts.packaged
+    ? join(await preparePackagedInstall(opts), 'dist', 'bin', 'gezeld.js')
+    : resolveDaemonEntry(import.meta.url);
+  const nodePath = await resolveAutostartNodePath({
+    packaged: opts.packaged,
+    home: opts.home,
+    bundledNodePath: process.env.GEZEL_NODE_PATH,
+  });
+  const pnpmPath = await resolveAutostartPnpmPath({
+    packaged: opts.packaged,
+    home: opts.home,
+    bundledPnpmPath: process.env.GEZEL_PNPM_PATH,
+  });
+  return { nodePath, gezeldPath, gezelHome: opts.home, ...(pnpmPath ? { pnpmPath } : {}) };
+}
+
+/**
+ * Our spawned daemon lost the home to another one that started at the same
+ * moment. That daemon is unverified, so it is never adopted here: the
+ * per-user modes are resolved again, once, which version-checks it like any
+ * daemon found at launch. Returns null for any other spawn failure.
+ */
+async function reconnectAfterSpawnRace(
+  opts: ConnectOptions,
+  flow: ConnectFlow,
+  error: unknown,
+): Promise<SupervisedService | null> {
+  if (flow.spawnRaceRetried || !isLostSpawnRace(error)) return null;
+  opts.logger?.warn?.(`[supervisor] ${errorMessage(error)}; re-checking the daemon that won`);
+  const perUser = await resolvePerUserMode({
+    home: opts.home,
+    packaged: opts.packaged,
+    devSpawn: opts.devSpawn,
+    forceEmbedded: opts.forceEmbedded,
+    ...(opts.logger ? { logger: opts.logger } : {}),
+  });
+  return connectResolved(opts, perUser, { ...flow, spawnRaceRetried: true });
+}
+
+/**
  * Packaged-mode version mismatch: the running daemon is pinned at an old
  * release. Try to respawn — this will extract our newer bundle and launch
  * it fresh. Falls through to embedded if the respawn itself fails.
  */
-async function respawnPackagedAfterMismatch(opts: ConnectOptions): Promise<SupervisedService> {
+async function respawnPackagedAfterMismatch(
+  opts: ConnectOptions,
+  flow: ConnectFlow,
+): Promise<SupervisedService> {
   try {
     const result = await spawnChildFromInstall(opts);
     const svc = new SupervisedService(
@@ -2183,11 +2345,14 @@ async function respawnPackagedAfterMismatch(opts: ConnectOptions): Promise<Super
       result.token,
       result.cert,
       opts,
+      { autostartDeclined: flow.autostartDeclined === true },
     );
     svc.attachSpawned(result.child);
     return svc;
   } catch (err) {
     if (isLiveDaemonUnhealthyError(err)) throw err;
+    const raced = await reconnectAfterSpawnRace(opts, flow, err);
+    if (raced) return raced;
     opts.logger?.warn?.(
       `[supervisor] post-mismatch respawn failed: ${(err as Error).message}; falling back to embedded`,
     );
@@ -2236,7 +2401,7 @@ async function connectStoreService(
     });
   }
 
-  const verdict = evaluateStoreCompat(health);
+  const verdict = evaluateApiCompat(health);
   if (!verdict.compatible) {
     opts.logger?.info?.(`[supervisor] declining the installed Gezel service: ${verdict.reason}`);
     const reason = await useLocalInfrastructureForCompatibility(opts, {
@@ -2426,7 +2591,9 @@ async function probeRemote(baseUrl: string, token: string): Promise<void> {
  * rather than recomputing `gezelPaths(home).install` — the whole point is that
  * the answer is sometimes not that path.
  */
-async function preparePackagedInstall(opts: ConnectOptions): Promise<string> {
+async function preparePackagedInstall(
+  opts: Pick<ConnectOptions, 'home' | 'storeProfile' | 'logger'>,
+): Promise<string> {
   // The store lane on macOS ships the service tree unpacked and imports it
   // where it sits. Extracting a second copy of executable code into the
   // container is what guideline 2.4.5 describes, and the tarball's reason for
@@ -2609,6 +2776,14 @@ function assertNeverMode(mode: never): never {
 
 function isLiveDaemonUnhealthyError(error: unknown): boolean {
   return error instanceof Error && error.name === 'LiveDaemonUnhealthyError';
+}
+
+function isLostSpawnRace(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === 'DaemonExitedDuringStartupError' &&
+    typeof (error as { holderPid?: unknown }).holderPid === 'number'
+  );
 }
 
 async function startEmbeddedRaw(

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { requestDaemonHealth } from '@bendyline/gezel-client/node';
+import { judgeDaemonHealth, requestDaemonHealth } from '@bendyline/gezel-client/node';
 import { type SdkTransport, createSdkTransport } from './tls.js';
 import type { DetectResult } from './types.js';
 
@@ -59,6 +59,7 @@ export async function detectGezel(opts: DetectGezelOptions = {}): Promise<Detect
   let running = false;
   let failed = false;
   let version: string | undefined;
+  let compatible: boolean | undefined;
   try {
     const res = await requestDaemonHealth(runtime.baseUrl, {
       fetch: transport.fetch,
@@ -66,6 +67,7 @@ export async function detectGezel(opts: DetectGezelOptions = {}): Promise<Detect
     });
     if (res.ok) {
       running = true;
+      compatible = judgeDaemonHealth(res.body).compatible;
       if (
         res.body &&
         typeof res.body === 'object' &&
@@ -87,6 +89,7 @@ export async function detectGezel(opts: DetectGezelOptions = {}): Promise<Detect
     running,
     baseUrl: runtime.baseUrl,
     ...(version ? { version } : {}),
+    ...(compatible === undefined ? {} : { compatible }),
   };
 }
 

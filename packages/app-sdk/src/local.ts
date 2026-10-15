@@ -2,10 +2,12 @@ import { readFile } from 'node:fs/promises';
 import {
   DaemonNotRunningError,
   discoverOrSpawn,
+  judgeDaemonHealth,
   readSystemServiceEndpoint,
   requestDaemonHealth,
 } from '@bendyline/gezel-client/node';
 import { GezelApp } from './client.js';
+import { assertCompatibleDaemon, incompatibleDaemon } from './compat.js';
 import { authorize } from './connect.js';
 import { readRuntimeForConnect } from './detect.js';
 import { GezelSdkError } from './errors.js';
@@ -37,6 +39,9 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
       connectInput.fetch,
       tlsCertPath,
     );
+    await withTransport(configured, () =>
+      assertCompatibleDaemon(connectInput.baseUrl as string, configured.fetch),
+    );
     const authorized = await authorizeTransport(connectInput, configured);
     return {
       ...authorized,
@@ -66,7 +71,7 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
     const discovered = await readRuntimeForConnect(daemon?.home, connectInput.fetch);
     if (!discovered) throw daemonNotRunning();
     try {
-      await probeHealth(discovered.baseUrl, discovered.fetch);
+      await assertCompatibleDaemon(discovered.baseUrl, discovered.fetch);
     } catch (error) {
       if (discovered.destroy) await discovered.destroy();
       else await discovered.close?.();
@@ -99,6 +104,9 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
   }
 
   const transport = createSdkTransport(resolved.cert, connectInput.fetch);
+  if (resolved.outcome === 'adopted') {
+    await withTransport(transport, () => assertCompatibleDaemon(resolved.baseUrl, transport.fetch));
+  }
   const addInToken = gezelAddIn
     ? await exchangeOwnerForAddInGrant(
         resolved.baseUrl,
@@ -175,9 +183,15 @@ async function discoverLegacyFullService(
     if (!response.ok || !response.body || typeof response.body !== 'object') return null;
     const health = response.body as { serviceRole?: string };
     if (health.serviceRole !== undefined && health.serviceRole !== 'legacy-full') return null;
+    // An outdated legacy-full service still holds this machine's product
+    // data, so it is never skipped for the per-user daemon: that would show
+    // a different, possibly empty, set of projects with nothing said.
+    const compat = judgeDaemonHealth(response.body);
+    if (!compat.compatible) throw incompatibleDaemon(compat.code, compat.reason, compat.version);
     adopted = true;
     return { baseUrl: endpoint.baseUrl, cert: endpoint.cert, ...transport };
-  } catch {
+  } catch (error) {
+    if (error instanceof GezelSdkError && error.code === 'daemon_incompatible') throw error;
     return null;
   } finally {
     if (!adopted) {
@@ -213,6 +227,9 @@ export async function authorizeLocalOwner(
     throw error;
   }
   const transport = createSdkTransport(resolved.cert, input.fetch);
+  if (resolved.outcome === 'adopted') {
+    await withTransport(transport, () => assertCompatibleDaemon(resolved.baseUrl, transport.fetch));
+  }
   return {
     baseUrl: resolved.baseUrl,
     token: resolved.token,
@@ -291,15 +308,14 @@ function userDaemonEnv(home: string | undefined, preferCanonicalPort?: boolean):
   };
 }
 
-async function probeHealth(baseUrl: string, fetchImpl: typeof fetch): Promise<void> {
+/** Release a transport the caller has not taken ownership of when `run` fails. */
+async function withTransport<T>(transport: SdkTransport, run: () => Promise<T>): Promise<T> {
   try {
-    const response = await requestDaemonHealth(baseUrl, { fetch: fetchImpl });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  } catch (cause) {
-    throw new GezelSdkError('gezel daemon is not responding', {
-      code: 'daemon_not_running',
-      cause,
-    });
+    return await run();
+  } catch (error) {
+    if (transport.destroy) await transport.destroy();
+    else await transport.close?.();
+    throw error;
   }
 }
 

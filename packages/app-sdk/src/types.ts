@@ -31,6 +31,14 @@ export interface DetectResult {
   baseUrl?: string;
   /** Daemon version (semver) when health probe succeeded. */
   version?: string;
+  /**
+   * Whether this SDK can use the running daemon: its `apiCompat` range
+   * includes this SDK's API generation. Present when `running`. A daemon
+   * can be up and still unusable — one predating the handshake, or one
+   * that no longer serves this SDK's generation — and `connect` then fails
+   * with `daemon_incompatible` rather than `daemon_not_running`.
+   */
+  compatible?: boolean;
 }
 
 export interface ConnectInput {
