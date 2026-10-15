@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { GezelClient } from './client.js';
 import {
+  DaemonExitedDuringStartupError,
   type SpawnLike,
   SpawnedDaemonExitedError,
   discoverOrSpawn,
@@ -55,8 +56,13 @@ const sampleRuntime: RuntimeInfo = {
   cert: null,
 };
 
-/** The runtime files a fake child (pid 9999) writes once it is up. */
-const childRuntime: RuntimeInfo = { ...sampleRuntime, pid: 9999 };
+/** What the daemon from `makeFakeChild()` publishes once it is up. */
+const spawnedRuntime: RuntimeInfo = {
+  ...sampleRuntime,
+  pid: 9999,
+  port: 45679,
+  baseUrl: 'http://127.0.0.1:45679',
+};
 
 function fakeClient() {
   return new GezelClient({
@@ -164,7 +170,7 @@ describe('discoverOrSpawn', () => {
         timeoutMs: 100,
         pollIntervalMs: 1,
         spawnFn,
-        readRuntimeFn: async () => childRuntime,
+        readRuntimeFn: async () => spawnedRuntime,
         isProcessAliveFn: () => true,
         clientFactory: fakeClient,
         forceSpawn: true,
@@ -211,7 +217,7 @@ describe('discoverOrSpawn', () => {
         timeoutMs: 100,
         pollIntervalMs: 1,
         spawnFn,
-        readRuntimeFn: async () => childRuntime,
+        readRuntimeFn: async () => spawnedRuntime,
         isProcessAliveFn: () => true,
         clientFactory: fakeClient,
         forceSpawn: true,
@@ -230,7 +236,7 @@ describe('discoverOrSpawn', () => {
         timeoutMs: 100,
         pollIntervalMs: 1,
         spawnFn,
-        readRuntimeFn: async () => childRuntime,
+        readRuntimeFn: async () => spawnedRuntime,
         isProcessAliveFn: () => true,
         clientFactory: fakeClient,
         forceSpawn: true,
@@ -374,7 +380,7 @@ describe('discoverOrSpawn', () => {
     const readRuntimeFn = vi.fn(async () => {
       reads += 1;
       // First read: no runtime yet. Second read: runtime is written.
-      return reads === 1 ? null : sampleRuntime;
+      return reads === 1 ? null : spawnedRuntime;
     });
     const result = await discoverOrSpawn({
       daemonEntry: '/fake/gezeld.js',
@@ -391,7 +397,7 @@ describe('discoverOrSpawn', () => {
       process.platform === 'win32' ? true : undefined,
     );
     expect(result.outcome).toBe('spawned');
-    expect(result.pid).toBe(sampleRuntime.pid);
+    expect(result.pid).toBe(spawnedRuntime.pid);
     // Detached spawns don't return a child handle.
     expect(result.child).toBeUndefined();
   });
@@ -453,7 +459,7 @@ describe('discoverOrSpawn', () => {
       reads += 1;
       // First read returns stale runtime (dead pid); later reads return a
       // fresh runtime after spawn.
-      return reads === 1 ? { ...sampleRuntime, pid: 9 } : sampleRuntime;
+      return reads === 1 ? { ...sampleRuntime, pid: 9 } : spawnedRuntime;
     });
     const isProcessAliveFn = (pid: number) => pid !== 9;
     const result = await discoverOrSpawn({
@@ -489,7 +495,7 @@ describe('discoverOrSpawn', () => {
     let reads = 0;
     const readRuntimeFn = vi.fn(async () => {
       reads += 1;
-      return reads === 1 ? null : sampleRuntime;
+      return reads === 1 ? null : spawnedRuntime;
     });
     const result = await discoverOrSpawn({
       daemonEntry: '/fake/gezeld.js',
@@ -507,11 +513,16 @@ describe('discoverOrSpawn', () => {
 
   it('forceSpawn skips adoption but still polls for the fresh daemon', async () => {
     const spawnFn = vi.fn(() => makeFakeChild());
-    // readRuntime always returns a live-looking runtime. WITHOUT forceSpawn
-    // this would be adopted; WITH it we must spawn anew and then detect the
-    // fresh daemon via the poll (the poll uses the same readRuntimeFn, which
-    // is exactly why a null override would have blinded it and timed out).
-    const readRuntimeFn = vi.fn(async () => childRuntime);
+    // The first poll still sees the old daemon's live runtime. WITHOUT
+    // forceSpawn it would be adopted; WITH it we must spawn anew and then
+    // detect the fresh daemon via the poll (the poll uses the same
+    // readRuntimeFn, which is exactly why a null override would have blinded
+    // it and timed out).
+    let reads = 0;
+    const readRuntimeFn = vi.fn(async () => {
+      reads += 1;
+      return reads === 1 ? sampleRuntime : spawnedRuntime;
+    });
     const result = await discoverOrSpawn({
       daemonEntry: '/fake/gezeld.js',
       forceSpawn: true,
@@ -524,6 +535,90 @@ describe('discoverOrSpawn', () => {
     });
     expect(spawnFn).toHaveBeenCalledTimes(1);
     expect(result.outcome).toBe('spawned');
+    expect(result.pid).toBe(spawnedRuntime.pid);
+  });
+
+  // Regression: an autostart daemon relaunched by launchd's KeepAlive won the
+  // single-instance lock, our child exited 1, and the poll accepted the
+  // winner's runtime — so the app reported a version from August while
+  // believing it had spawned the one it shipped.
+  it('never hands back a daemon that won the home from its own child', async () => {
+    const child = makeFakeChild();
+    const spawnFn = vi.fn(() => child);
+    let reads = 0;
+    const readRuntimeFn = vi.fn(async () => {
+      reads += 1;
+      if (reads === 2) {
+        child.emit('exit', 1, null);
+      }
+      return reads === 1 ? null : sampleRuntime;
+    });
+    const clientFactory = vi.fn(fakeClient);
+    const error = await discoverOrSpawn({
+      daemonEntry: '/fake/gezeld.js',
+      detached: false,
+      pollIntervalMs: 5,
+      timeoutMs: 500,
+      spawnFn,
+      readRuntimeFn,
+      isProcessAliveFn: () => true,
+      clientFactory,
+    }).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(DaemonExitedDuringStartupError);
+    expect(error).toMatchObject({ exitCode: 1, holderPid: sampleRuntime.pid });
+    expect(String(error)).toMatch(/another daemon \(pid 1234\) already owns this home/);
+    expect(clientFactory).not.toHaveBeenCalled();
+  });
+
+  it('keeps waiting for its own child while another runtime is still published', async () => {
+    const spawnFn = vi.fn(() => makeFakeChild());
+    let reads = 0;
+    const readRuntimeFn = vi.fn(async () => {
+      reads += 1;
+      return reads <= 3 ? sampleRuntime : spawnedRuntime;
+    });
+    const clientFactory = vi.fn(fakeClient);
+    const result = await discoverOrSpawn({
+      daemonEntry: '/fake/gezeld.js',
+      forceSpawn: true,
+      pollIntervalMs: 5,
+      timeoutMs: 500,
+      spawnFn,
+      readRuntimeFn,
+      isProcessAliveFn: () => true,
+      clientFactory,
+    });
+    expect(result.pid).toBe(spawnedRuntime.pid);
+    expect(clientFactory).toHaveBeenCalledTimes(1);
+    expect(clientFactory).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: spawnedRuntime.baseUrl }),
+    );
+  });
+
+  it('reports a child that dies during startup without waiting out the deadline', async () => {
+    const child = makeFakeChild();
+    const spawnFn = vi.fn(() => {
+      setTimeout(() => child.emit('exit', 1, null), 0);
+      return child;
+    });
+    const startedAt = Date.now();
+    const error = await discoverOrSpawn({
+      daemonEntry: '/fake/gezeld.js',
+      detached: false,
+      pollIntervalMs: 5,
+      timeoutMs: 5_000,
+      spawnFn,
+      readRuntimeFn: async () => null,
+      isProcessAliveFn: () => false,
+      clientFactory: fakeClient,
+    }).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(DaemonExitedDuringStartupError);
+    expect(error).toMatchObject({ exitCode: 1, holderPid: null });
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(child.listenerCount('exit')).toBe(0);
+    expect(child.listenerCount('error')).toBe(0);
   });
 
   it("forceSpawn never mistakes another daemon's runtime files for its own", async () => {
@@ -548,18 +643,23 @@ describe('discoverOrSpawn', () => {
     ).rejects.toThrow(SpawnedDaemonExitedError);
   });
 
-  it('an unforced spawn still adopts the daemon that won a concurrent start', async () => {
+  it('an unforced spawn reports the daemon that won a concurrent start for the caller to check', async () => {
+    const child = makeFakeChild();
     let reads = 0;
-    const result = await discoverOrSpawn({
+    const error = await discoverOrSpawn({
       daemonEntry: '/fake/gezeld.js',
       pollIntervalMs: 2,
       timeoutMs: 200,
-      spawnFn: vi.fn(() => makeFakeChild()),
+      spawnFn: vi.fn(() => {
+        setTimeout(() => child.emit('exit', 1, null), 10);
+        return child;
+      }),
       readRuntimeFn: async () => (reads++ === 0 ? null : sampleRuntime),
       isProcessAliveFn: () => true,
       clientFactory: fakeClient,
-    });
-    expect(result).toMatchObject({ outcome: 'spawned', pid: sampleRuntime.pid });
+    }).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(DaemonExitedDuringStartupError);
+    expect(error).toMatchObject({ code: 1, exitCode: 1, holderPid: sampleRuntime.pid });
   });
 
   it('times out when the daemon never writes its runtime files', async () => {
@@ -586,7 +686,7 @@ describe('discoverOrSpawn', () => {
     let reads = 0;
     const readRuntimeFn = async () => {
       reads += 1;
-      return reads >= 2 ? sampleRuntime : null;
+      return reads >= 2 ? spawnedRuntime : null;
     };
     let healthCalls = 0;
     const clientFactory = () =>
@@ -636,7 +736,7 @@ describe('discoverOrSpawn', () => {
         timeoutMs: 40,
         healthTimeoutMs: 8,
         spawnFn,
-        readRuntimeFn: async () => childRuntime,
+        readRuntimeFn: async () => spawnedRuntime,
         isProcessAliveFn: () => true,
         clientFactory,
       }),

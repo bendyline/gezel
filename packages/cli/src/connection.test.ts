@@ -19,6 +19,7 @@ import {
   ensureProjectForFolder,
   fileTokenStorage,
   findHealthySystemService,
+  incompatibleDaemonCliError,
   isSystemProductServiceRole,
   normalizeServiceUrl,
   resolveCliAppId,
@@ -125,6 +126,7 @@ describe('system-service selection', () => {
               version: 'test',
               ...(serviceRole ? { serviceRole } : {}),
               startedAt: new Date(0).toISOString(),
+              apiCompat: { floor: 1, current: 1 },
             }),
           },
         ),
@@ -133,9 +135,72 @@ describe('system-service selection', () => {
         baseUrl: endpoint.baseUrl,
         home: endpoint.home,
         fetch: globalThis.fetch,
+        version: 'test',
+        compat: { compatible: true },
       });
     },
   );
+
+  it('marks a legacy service that predates the API handshake as incompatible', async () => {
+    const found = await findHealthySystemService(
+      {},
+      {
+        readEndpoint: async () => ({
+          port: 6228,
+          baseUrl: 'http://127.0.0.1:6228',
+          cert: null,
+          home: '/machine/gezel',
+        }),
+        probeHealth: async () => ({
+          ok: true,
+          version: '1.26200.4',
+          serviceRole: 'legacy-full',
+          startedAt: new Date(0).toISOString(),
+        }),
+      },
+    );
+    expect(found?.compat).toMatchObject({ compatible: false, code: 'no-handshake' });
+  });
+});
+
+describe('incompatible daemon errors', () => {
+  it('names the stale per-user service and the two ways out', () => {
+    const error = cliGrantError(
+      new GezelSdkError('The Gezel service (1.26226.50) is older than this app can connect to', {
+        code: 'daemon_incompatible',
+        cause: {
+          code: 'no-handshake',
+          reason: 'the Gezel service (1.26226.50) is older than this app can connect to',
+          version: '1.26226.50',
+        },
+      }),
+      'the local Gezel daemon',
+    );
+    expect(error.message).toBe(
+      'The Gezel service (1.26226.50) running for this user is older than this gezel CLI can use. Open the Gezel app, which replaces an outdated service when it starts, or stop it with `gezel stop --daemon` and run this command again.',
+    );
+  });
+
+  it('tells the user to update the CLI when the CLI is the old side', () => {
+    const error = incompatibleDaemonCliError({
+      code: 'client-too-old',
+      reason: 'this gezel CLI speaks Gezel API generation 1; the Gezel service (2.0.0) serves 2-3',
+      version: '2.0.0',
+      systemService: false,
+    });
+    expect(error.message).toContain('npm install -g @bendyline/gezel-cli');
+  });
+
+  it('never suggests stopping a machine-wide service from the CLI', () => {
+    const error = incompatibleDaemonCliError({
+      code: 'no-handshake',
+      reason: 'the Gezel service (1.26200.4) is older than this gezel CLI can connect to',
+      version: '1.26200.4',
+      systemService: true,
+    });
+    expect(error.message).toContain('Update the Gezel app');
+    expect(error.message).not.toContain('gezel stop');
+  });
 });
 
 describe('machine-engine broker reporting', () => {

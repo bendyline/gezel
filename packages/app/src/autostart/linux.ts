@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -52,6 +52,7 @@ Type=simple
 ExecStart=${quoteSystemd(opts.nodePath)} ${quoteSystemd(opts.gezeldPath)}
 Environment=${quoteSystemd(`GEZEL_HOME=${opts.gezelHome}`)}
 Environment=${quoteSystemd(`GEZEL_NODE_PATH=${opts.nodePath}`)}
+Environment="GEZEL_AUTOSTART=1"
 ${opts.pnpmPath ? `Environment=${quoteSystemd(`GEZEL_PNPM_PATH=${opts.pnpmPath}`)}` : ''}
 Restart=on-failure
 RestartSec=3
@@ -69,10 +70,12 @@ export async function install(
   await mkdir(userUnitDir(deps), { recursive: true });
   await writeFile(unitPath(deps), buildUnit(opts));
   await exec('systemctl', ['--user', 'daemon-reload']);
-  await exec('systemctl', ['--user', 'enable', '--now', UNIT_NAME]);
+  await exec('systemctl', ['--user', 'enable', UNIT_NAME]);
   // Migrate the pre-rename USER unit (never the system-scope unit of the
   // same legacy name) only after the replacement is enabled, so a failure
-  // above can't leave the user with no autostart at all.
+  // above can't leave the user with no autostart at all. It is stopped before
+  // the replacement starts: both point at the same home, and the second to
+  // start would only stand down.
   if (existsSync(legacyUnitPath(deps))) {
     try {
       await exec('systemctl', ['--user', 'disable', '--now', LEGACY_UNIT_NAME]);
@@ -84,6 +87,57 @@ export async function install(
       await exec('systemctl', ['--user', 'daemon-reload']);
     } catch {
       /* best-effort */
+    }
+  }
+  // `enable --now` leaves an already-running unit on its old ExecStart; a
+  // re-registration exists precisely to move the daemon onto new code.
+  await exec('systemctl', ['--user', 'restart', UNIT_NAME]);
+}
+
+/**
+ * The `GEZEL_HOME` the registered unit serves (the current name, else the
+ * pre-rename one), or null when neither is registered.
+ */
+export async function registeredHome(deps?: LinuxAutostartDeps): Promise<string | null> {
+  for (const path of [unitPath(deps), legacyUnitPath(deps)]) {
+    let unit: string;
+    try {
+      unit = await readFile(path, 'utf8');
+    } catch {
+      continue;
+    }
+    const match = /^Environment="GEZEL_HOME=((?:[^"\\]|\\.)*)"$/m.exec(unit);
+    return match?.[1] === undefined ? null : match[1].replace(/\\(.)/g, '$1');
+  }
+  return null;
+}
+
+/** True when the registered unit is exactly what {@link install} would write. */
+export async function isCurrent(
+  opts: AutostartInstallOptions,
+  deps?: LinuxAutostartDeps,
+): Promise<boolean> {
+  if (existsSync(legacyUnitPath(deps))) return false;
+  try {
+    return (await readFile(unitPath(deps), 'utf8')) === buildUnit(opts);
+  } catch {
+    return false;
+  }
+}
+
+export async function restart(deps?: LinuxAutostartDeps): Promise<void> {
+  const exec = deps?.exec ?? defaultExec;
+  await exec('systemctl', ['--user', 'restart', UNIT_NAME]);
+}
+
+/** Stop the daemon until the next login; the unit stays enabled. */
+export async function stop(deps?: LinuxAutostartDeps): Promise<void> {
+  const exec = deps?.exec ?? defaultExec;
+  for (const name of [UNIT_NAME, LEGACY_UNIT_NAME]) {
+    try {
+      await exec('systemctl', ['--user', 'stop', name]);
+    } catch {
+      /* not loaded */
     }
   }
 }

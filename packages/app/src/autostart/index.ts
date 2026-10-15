@@ -22,6 +22,39 @@ export interface AutostartInstallOptions {
   gezelHome: string;
 }
 
+/**
+ * The service-manager side of autostart, on the platforms whose unit relaunches
+ * a daemon that exits unsuccessfully (launchd, systemd). There the unit — not
+ * the app — owns the daemon's lifetime, so stopping or restarting it by pid
+ * only starts a race with the manager's relaunch; every lifecycle change goes
+ * through the manager instead. Windows' logon task relaunches nothing, so the
+ * supervisor's ordinary stop-and-respawn already works there.
+ */
+export interface ManagedAutostart {
+  /**
+   * The `GEZEL_HOME` the registered unit serves, or null when none is
+   * registered. There is one unit per OS account, so a unit serving another
+   * home (a `--gezel-home` sandbox, a test) is not this launch's to manage.
+   */
+  registeredHome(): Promise<string | null>;
+  /** True when the registered unit is exactly what {@link install} would write for `opts`. */
+  isCurrent(opts: AutostartInstallOptions): Promise<boolean>;
+  /** Write the unit for `opts` and (re)start its daemon from it. */
+  install(opts: AutostartInstallOptions): Promise<void>;
+  /** Stop the daemon if it runs, then start it from the registered unit. */
+  restart(): Promise<void>;
+  /** Stop the daemon until the next login; the registration itself stays. */
+  stop(): Promise<void>;
+}
+
+export function managedAutostart(
+  platform: NodeJS.Platform = process.platform,
+): ManagedAutostart | null {
+  if (platform === 'darwin') return darwin;
+  if (platform === 'linux') return linux;
+  return null;
+}
+
 function impl(): AutostartModule {
   if (process.platform === 'darwin') return darwin;
   if (process.platform === 'linux') return linux;
