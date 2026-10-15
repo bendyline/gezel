@@ -47,7 +47,13 @@ import run_2026_09_07_dgx_spark_class from './runs/2026-09-07-dgx-spark-class.js
 import run_2026_09_18_dgx_spark_class from './runs/2026-09-18-dgx-spark-class.json' with {
   type: 'json',
 };
+import run_2026_10_11_m5max_six_providers from './runs/2026-10-11-m5max-six-providers.json' with {
+  type: 'json',
+};
 import run_2026_10_12_dgx_spark_class from './runs/2026-10-12-dgx-spark-class.json' with {
+  type: 'json',
+};
+import run_2026_10_12_m5max_cli_integration from './runs/2026-10-12-m5max-cli-integration.json' with {
   type: 'json',
 };
 
@@ -69,5 +75,7 @@ export const RUN_SHARDS: ScorecardDataset[] = [
   run_2026_09_04_win32_amd_ryzen_9_7950x3d_16_core_proces as unknown as ScorecardDataset,
   run_2026_09_07_dgx_spark_class as unknown as ScorecardDataset,
   run_2026_09_18_dgx_spark_class as unknown as ScorecardDataset,
+  run_2026_10_11_m5max_six_providers as unknown as ScorecardDataset,
   run_2026_10_12_dgx_spark_class as unknown as ScorecardDataset,
+  run_2026_10_12_m5max_cli_integration as unknown as ScorecardDataset,
 ];

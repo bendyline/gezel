@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 1,
+  "auditPath": "docs/evals/scorecard-publication-2026-10.json",
+  "campaigns": [
+    {
+      "runId": "2026-10-11-m5max-six-providers",
+      "campaignRoot": "evals/runs/scorecard-six-providers-2026-10-10a",
+      "campaignSha256": "14ad410acdc81729d7e1cc7d1dfcddf70f30530864e08bf0d0ba1f349f0fa927",
+      "expectedTrials": 247,
+      "scope": "suite",
+      "count": 1,
+      "note": "Compares Claude Sonnet 5.5 and GPT-6 Luna, each reached two ways (through its maker's API and through its command-line app), with two models running on the Mac itself. Generalist mode was on. The run stopped early because of a fault in our test equipment, so a few tasks never ran. Some failures came from our tests or from how gezel connected to the command-line apps, not from the models, and are not counted against them. A model without a result for every task in a set is left out of that table rather than counted as passing. The command-line apps were tested again on October 12 after those problems were fixed.",
+      "models": {
+        "claude-cli": {
+          "label": "Claude Sonnet 5.5 · Claude CLI",
+          "tier": "cloud"
+        },
+        "claude-api": {
+          "label": "Claude Sonnet 5.5 · Anthropic API",
+          "tier": "cloud"
+        },
+        "codex-cli": {
+          "label": "GPT-6 Luna · Codex CLI",
+          "tier": "cloud"
+        },
+        "openai-api": {
+          "label": "GPT-6 Luna · OpenAI API",
+          "tier": "cloud"
+        },
+        "qwen-mlx": {
+          "label": "Qwen 3.8 27B Q4",
+          "tier": "medium",
+          "parameterSize": "27B",
+          "quantization": "Q4"
+        },
+        "gemma-mlx": {
+          "label": "Gemma 4 31B Q4",
+          "tier": "medium",
+          "parameterSize": "31B",
+          "quantization": "Q4"
+        }
+      },
+      "classificationCorrections": [
+        {
+          "cellId": "r1-codex-cli-core-ops-runbook-anomaly",
+          "failureClass": "grader",
+          "reason": "Two successful file_change events retain only status: completed. They have no saved path or patch, so the evaluator cannot establish the final STEP 4 mutation chronology. The adapter extracts only top-level path/kind/diff and does not retain a changes collection. Historical result remains failed; the later pass is a different observation.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json"
+          ]
+        },
+        {
+          "cellId": "r1-claude-cli-core-ops-runbook-anomaly",
+          "failureClass": "grader",
+          "reason": "The provenance checker does not recognize native Read/Write/Edit or prefixed mcp__gezel__ mutation names. Normalizing copies of the recorded events changes all three source-order checks from failure to success. Both full conflict-synthesis graders then pass 13/13. Historical result remains failed; the later pass is a different observation.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json"
+          ]
+        },
+        {
+          "cellId": "r1-claude-cli-core-conflict-synthesis",
+          "failureClass": "grader",
+          "reason": "The provenance checker does not recognize native Read/Write/Edit or prefixed mcp__gezel__ mutation names. Normalizing copies of the recorded events changes all three source-order checks from failure to success. Both full conflict-synthesis graders then pass 13/13. Historical result remains failed; the later pass is a different observation.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json"
+          ]
+        },
+        {
+          "cellId": "r1-claude-cli-productivity-conflict-synthesis",
+          "failureClass": "grader",
+          "reason": "The provenance checker does not recognize native Read/Write/Edit or prefixed mcp__gezel__ mutation names. Normalizing copies of the recorded events changes all three source-order checks from failure to success. Both full conflict-synthesis graders then pass 13/13. Historical result remains failed; the later pass is a different observation.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json"
+          ]
+        },
+        {
+          "cellId": "r1-claude-cli-productivity-docblocks-theme-roundtrip",
+          "failureClass": "infra",
+          "reason": "Claude CLI runtime configuration silently skips HTTP MCP extras. All four affected trials recorded zero fixture calls, whereas the matching API trials made successful fixture calls. Historical result remains failed; the later pass is a different observation.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json"
+          ]
+        },
+        {
+          "cellId": "r1-claude-cli-productivity-craftbook-research-to-document",
+          "failureClass": "infra",
+          "reason": "Claude CLI runtime configuration silently skips HTTP MCP extras. All four affected trials recorded zero fixture calls, whereas the matching API trials made successful fixture calls. Historical result remains failed; the later pass is a different observation.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json"
+          ]
+        },
+        {
+          "cellId": "r1-claude-cli-productivity-craftbook-powerpoint-deck",
+          "failureClass": "infra",
+          "reason": "Claude CLI runtime configuration silently skips HTTP MCP extras. All four affected trials recorded zero fixture calls, whereas the matching API trials made successful fixture calls. Historical result remains failed; the later pass is a different observation.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json"
+          ]
+        },
+        {
+          "cellId": "r1-claude-cli-productivity-wikipedia-research-brief",
+          "failureClass": "infra",
+          "reason": "Claude CLI runtime configuration silently skips HTTP MCP extras. All four affected trials recorded zero fixture calls, whereas the matching API trials made successful fixture calls. Historical result remains failed; the later pass is a different observation.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json"
+          ]
+        },
+        {
+          "cellId": "r1-claude-cli-developer-craftbook-bug-fix-tdd",
+          "failureClass": "infra",
+          "reason": "Successful mcp__gezel__write_artifact calls wrote the reproduction and diagnosis. requireChange checks accept only the bare write_artifact name, causing bounded handoff recovery and a step_stalled pause. Changing only the tool name in diagnostic copies makes all four recorded checkpoint writes satisfy the deliverable predicate. The actual source fix was never reached. Historical result remains failed; the later pass is a different observation.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json"
+          ]
+        },
+        {
+          "cellId": "r1-codex-cli-complex-work-craftbook-route-multi",
+          "failureClass": "grader",
+          "reason": "Both final press releases give an October 14 opening as Oct. 14. The evaluator accepts only 14 october, october 14, or 2026-10-14. Codex also has a separate October 11 publication dateline, which should not be confused with the opening date. Historical result remains failed; the later pass is a different observation.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json"
+          ]
+        },
+        {
+          "cellId": "r1-claude-cli-complex-work-craftbook-route-multi",
+          "failureClass": "grader",
+          "reason": "Both final press releases give an October 14 opening as Oct. 14. The evaluator accepts only 14 october, october 14, or 2026-10-14. Codex also has a separate October 11 publication dateline, which should not be confused with the opening date. Historical result remains failed; the later pass is a different observation.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json"
+          ]
+        },
+        {
+          "cellId": "r1-claude-cli-complex-work-craftbook-export-generalize",
+          "failureClass": "grader",
+          "reason": "The completed supplier-intake/1 task used the two-step supplier-quarterly-intake recipe and produced all four distinct Q1/Q2 outputs. A parallel three-step supplier-intake-recipe was unused. The evaluator ranks matching recipes by step count, selects the unused one and reports no task. Its subsequent repair is routed to a worker without coordinator authority. Historical result remains failed; the later pass is a different observation.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json"
+          ]
+        },
+        {
+          "cellId": "r1-gemma-mlx-core-conflict-synthesis",
+          "failureClass": "grader",
+          "reason": "The core artifact explicitly says engineering supersedes product, finance is authoritative and org is current. The checker splits indented Resolution bullets from their parent conflict entries, then falsely reports all three precedence reasons absent. Duplicate Open Questions sections are a separate quality flaw; the recorded 10/13 stop is a parsing false negative.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/reporting/failure-audit.json"
+          ]
+        }
+      ],
+      "excludedTrials": [
+        {
+          "cellId": "r1-codex-cli-productivity-docblocks-theme-roundtrip",
+          "reason": "Codex never reached the evaluator's local test services: the harness passed its test certificate only through NODE_EXTRA_CA_CERTS, which Codex ignores, and signed it with SHA-1, which Codex rejects. No test-service call was recorded.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json",
+            "evals/runs/cli-fix-validation-2026-10-12b/reporting/tls-probe/result.json"
+          ]
+        },
+        {
+          "cellId": "r1-codex-cli-productivity-craftbook-research-to-document",
+          "reason": "Codex never reached the evaluator's local test services: the harness passed its test certificate only through NODE_EXTRA_CA_CERTS, which Codex ignores, and signed it with SHA-1, which Codex rejects. No test-service call was recorded.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json",
+            "evals/runs/cli-fix-validation-2026-10-12b/reporting/tls-probe/result.json"
+          ]
+        },
+        {
+          "cellId": "r1-codex-cli-productivity-craftbook-powerpoint-deck",
+          "reason": "Codex never reached the evaluator's local test services: the harness passed its test certificate only through NODE_EXTRA_CA_CERTS, which Codex ignores, and signed it with SHA-1, which Codex rejects. No test-service call was recorded.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json",
+            "evals/runs/cli-fix-validation-2026-10-12b/reporting/tls-probe/result.json"
+          ]
+        },
+        {
+          "cellId": "r1-codex-cli-productivity-wikipedia-research-brief",
+          "reason": "Codex never reached the evaluator's local test services: the harness passed its test certificate only through NODE_EXTRA_CA_CERTS, which Codex ignores, and signed it with SHA-1, which Codex rejects. No test-service call was recorded.",
+          "evidence": [
+            "evals/runs/scorecard-six-providers-2026-10-10a/cli-failure-investigation.json",
+            "evals/runs/cli-fix-validation-2026-10-12b/reporting/tls-probe/result.json"
+          ]
+        }
+      ]
+    },
+    {
+      "runId": "2026-10-12-m5max-cli-integration",
+      "campaignRoot": "evals/runs/cli-fix-validation-2026-10-12b",
+      "campaignSha256": "d8c0c103a221f1579aa1b93e30b98c2950ef74147672aeb372960c2dbe7cb81a",
+      "expectedTrials": 22,
+      "scope": "subset",
+      "count": 1,
+      "note": "Tests Claude CLI and Codex CLI again on the nine tasks where they ran into trouble on October 11, plus two they had passed, after fixes to gezel and to our tests. Each task ran once on each app. The Research to Word task was allowed 45 minutes instead of 30. This covers 11 tasks, not the full set.",
+      "models": {
+        "claude-cli": {
+          "label": "Claude Sonnet 5.5 · Claude CLI",
+          "tier": "cloud"
+        },
+        "codex-cli": {
+          "label": "GPT-6 Luna · Codex CLI",
+          "tier": "cloud"
+        }
+      },
+      "excludedTrials": [
+        {
+          "cellId": "r1-codex-cli-productivity-docblocks-theme-roundtrip",
+          "reason": "Codex rejected the evaluator's SHA-1 test certificate and never reached the local test services. No test-service call was recorded. Rerun the same day after the harness switched to SHA-256.",
+          "evidence": [
+            "evals/runs/cli-fix-validation-2026-10-12b/verification-scorecard.json",
+            "evals/runs/cli-fix-validation-2026-10-12b/reporting/tls-probe/result.json"
+          ]
+        },
+        {
+          "cellId": "r1-codex-cli-productivity-wikipedia-research-brief",
+          "reason": "Codex rejected the evaluator's SHA-1 test certificate and never reached the local test services. No test-service call was recorded. Rerun the same day after the harness switched to SHA-256.",
+          "evidence": [
+            "evals/runs/cli-fix-validation-2026-10-12b/verification-scorecard.json",
+            "evals/runs/cli-fix-validation-2026-10-12b/reporting/tls-probe/result.json"
+          ]
+        },
+        {
+          "cellId": "r1-codex-cli-productivity-craftbook-powerpoint-deck",
+          "reason": "Codex rejected the evaluator's SHA-1 test certificate and never reached the local test services. No test-service call was recorded. Rerun the same day after the harness switched to SHA-256.",
+          "evidence": [
+            "evals/runs/cli-fix-validation-2026-10-12b/verification-scorecard.json",
+            "evals/runs/cli-fix-validation-2026-10-12b/reporting/tls-probe/result.json"
+          ]
+        },
+        {
+          "cellId": "r1-codex-cli-productivity-craftbook-research-to-document",
+          "reason": "Codex rejected the evaluator's SHA-1 test certificate and never reached the local test services. No test-service call was recorded. Rerun the same day after the harness switched to SHA-256.",
+          "evidence": [
+            "evals/runs/cli-fix-validation-2026-10-12b/verification-scorecard.json",
+            "evals/runs/cli-fix-validation-2026-10-12b/reporting/tls-probe/result.json"
+          ]
+        }
+      ],
+      "harnessRerun": {
+        "campaignRoot": "evals/runs/cli-tls-validation-2026-10-12a",
+        "campaignSha256": "a816b41332d6b473a8c5bdf007b276123cd7891ef3422c8a9579613ff61b9398",
+        "expectedTrials": 4,
+        "harnessChanges": ["mock/mock-server.ts"]
+      }
+    }
+  ]
+}

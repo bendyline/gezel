@@ -133,7 +133,7 @@ export function headlineRunForSuite(
   suiteId: string,
 ): ScorecardRun | null {
   const covering = dataset.runs
-    .filter((run) => run.suites.includes(suiteId))
+    .filter((run) => run.scope !== 'subset' && run.suites.includes(suiteId))
     .sort((a, b) => b.provenance.startedAt.localeCompare(a.provenance.startedAt));
   return covering[0] ?? null;
 }
@@ -284,6 +284,7 @@ export function describeProvenance(run: ScorecardRun, engines: readonly string[]
     // differently on llama.cpp and MLX, and a sweep may deliberately run a
     // non-default engine. Omitting it invites the reader to assume their own.
     ...(unique.length > 0 ? [unique.join(' + ')] : []),
+    ...(run.scope === 'subset' ? ['focused subset'] : []),
     `${p.count} trial${p.count === 1 ? '' : 's'} per task`,
     p.startedAt.slice(0, 10),
     `gezel ${p.harnessCommit}`,
@@ -300,8 +301,25 @@ export function provenanceDifferences(a: ScorecardRun, b: ScorecardRun): string[
   const out: string[] = [];
   if (a.provenance.device.label !== b.provenance.device.label) out.push('different device');
   if (a.provenance.harnessCommit !== b.provenance.harnessCommit) out.push('different gezel build');
+  else if (
+    (a.provenance.sourceHash &&
+      b.provenance.sourceHash &&
+      a.provenance.sourceHash !== b.provenance.sourceHash) ||
+    (a.provenance.serviceBuildHash &&
+      b.provenance.serviceBuildHash &&
+      a.provenance.serviceBuildHash !== b.provenance.serviceBuildHash)
+  )
+    out.push('different source/build contents');
   if (a.provenance.gildeVersion !== b.provenance.gildeVersion)
     out.push('different catalog version');
+  else if (
+    a.provenance.catalogHash &&
+    b.provenance.catalogHash &&
+    a.provenance.catalogHash !== b.provenance.catalogHash
+  )
+    out.push('different catalog contents');
   if (a.provenance.count !== b.provenance.count) out.push('different trial count');
+  if (a.scope !== b.scope && (a.scope === 'subset' || b.scope === 'subset'))
+    out.push('different task coverage');
   return out;
 }

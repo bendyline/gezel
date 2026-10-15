@@ -1,0 +1,2137 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "2026-10-11-m5max-six-providers",
+      "provenance": {
+        "startedAt": "2026-10-11T02:23:37.480Z",
+        "device": {
+          "label": "Mac · Apple M5 Max",
+          "platform": "darwin",
+          "arch": "arm64",
+          "memoryGb": 128,
+          "osRelease": "darwin 27.0.0",
+          "cpuModel": "Apple M5 Max",
+          "gpuModel": "Apple M5 Max (integrated GPU)"
+        },
+        "harnessCommit": "985c646b2e13",
+        "sourceHash": "fb853a4716469c74fa5034f56e409bc3c2f5c9fab3c897af15dfd15bd11b1e61",
+        "serviceBuildHash": "86c9f490d2d6e9a6c0cfbc2b88f5ba2d7dbd5f3404aecb0c96d72eef61583dad",
+        "catalogHash": "3075160c242a693bbe669eb52fbb9eaa606f79fcd0a93ea46b5a3cc9d0113141",
+        "gildeVersion": "0.1.94",
+        "count": 1,
+        "judgeModelId": null
+      },
+      "scope": "suite",
+      "suites": [
+        "core",
+        "productivity",
+        "developer",
+        "complex-work"
+      ],
+      "scenariosBySuite": {
+        "core": [
+          "tictactoe",
+          "petshop",
+          "tankcombat",
+          "schema-migration",
+          "failing-tests-spec",
+          "symptom-debug",
+          "data-wrangle",
+          "incident-postmortem",
+          "ops-runbook-anomaly",
+          "plan-and-estimate",
+          "conflict-synthesis"
+        ],
+        "productivity": [
+          "constrained-comms",
+          "craftbook-week-plan",
+          "craftbook-ab-test-readout",
+          "craftbook-annotated-bibliography",
+          "records-intake",
+          "plan-and-estimate",
+          "meeting-followup",
+          "craftbook-spreadsheet-model",
+          "conflict-synthesis",
+          "docblocks-theme-roundtrip",
+          "craftbook-research-to-document",
+          "craftbook-powerpoint-deck",
+          "wikipedia-research-brief"
+        ],
+        "developer": [
+          "fix-squisq-bugs",
+          "dev-craftbook-routing",
+          "interface-contract",
+          "craftbook-code-review",
+          "craftbook-api-contract-review",
+          "craftbook-deep-security-review",
+          "large-pr-review",
+          "craftbook-codemod-sweep",
+          "craftbook-refactor-module",
+          "craftbook-bug-fix-tdd"
+        ],
+        "complex-work": [
+          "craftbook-find-vs-create",
+          "craftbook-edit-midtask",
+          "craftbook-invoice-run",
+          "craftbook-author-linear",
+          "craftbook-route-multi",
+          "craftbook-export-generalize",
+          "craftbook-author-params",
+          "craftbook-author-gate-script",
+          "craftbook-author-fanout"
+        ]
+      },
+      "note": "Compares Claude Sonnet 5.5 and GPT-6 Luna, each reached two ways (through its maker's API and through its command-line app), with two models running on the Mac itself. Generalist mode was on. The run stopped early because of a fault in our test equipment, so a few tasks never ran. Some failures came from our tests or from how gezel connected to the command-line apps, not from the models, and are not counted against them. A model without a result for every task in a set is left out of that table rather than counted as passing. The command-line apps were tested again on October 12 after those problems were fixed."
+    }
+  ],
+  "results": [
+    {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Claude CLI",
+      "engine": "anthropic-cli",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "core",
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 34378
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 94365
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 60322
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 58081
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 12354
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 11575
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 16587
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 146838
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 92117
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 36681
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 463530
+        }
+      ]
+    },
+    {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Claude CLI",
+      "engine": "anthropic-cli",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "productivity",
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 21681
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 41605
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 26959
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 31814
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 47031
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 32239
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 21680
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 168933
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 147240
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 879508
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 217404
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 137450
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 819369
+        }
+      ]
+    },
+    {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Claude CLI",
+      "engine": "anthropic-cli",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "developer",
+      "cells": [
+        {
+          "scenarioId": "fix-squisq-bugs",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 32288
+        },
+        {
+          "scenarioId": "dev-craftbook-routing",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 22282
+        },
+        {
+          "scenarioId": "interface-contract",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 32112
+        },
+        {
+          "scenarioId": "craftbook-code-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 56588
+        },
+        {
+          "scenarioId": "craftbook-api-contract-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 237641
+        },
+        {
+          "scenarioId": "craftbook-deep-security-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 97708
+        },
+        {
+          "scenarioId": "large-pr-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 202426
+        },
+        {
+          "scenarioId": "craftbook-codemod-sweep",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 176387
+        },
+        {
+          "scenarioId": "craftbook-refactor-module",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 281680
+        },
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 164923
+        }
+      ]
+    },
+    {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Claude CLI",
+      "engine": "anthropic-cli",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "complex-work",
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 14792
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 76957
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 107087
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 88242
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 876962
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 827832
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 79337
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        }
+      ]
+    },
+    {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Anthropic API",
+      "engine": "anthropic",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "core",
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 29198
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 234358
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 59929
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 72343
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 12324
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 8019
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 17313
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 208772
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 21677
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 31576
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 47529
+        }
+      ]
+    },
+    {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Anthropic API",
+      "engine": "anthropic",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "productivity",
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 26549
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 51174
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 37016
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 46674
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 19050
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 31577
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 41820
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 88478
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 42094
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 40495
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 86879
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 71798
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 71858
+        }
+      ]
+    },
+    {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Anthropic API",
+      "engine": "anthropic",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "developer",
+      "cells": [
+        {
+          "scenarioId": "fix-squisq-bugs",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 23413
+        },
+        {
+          "scenarioId": "dev-craftbook-routing",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 21950
+        },
+        {
+          "scenarioId": "interface-contract",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 21816
+        },
+        {
+          "scenarioId": "craftbook-code-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 56573
+        },
+        {
+          "scenarioId": "craftbook-api-contract-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 96385
+        },
+        {
+          "scenarioId": "craftbook-deep-security-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 77347
+        },
+        {
+          "scenarioId": "large-pr-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 158862
+        },
+        {
+          "scenarioId": "craftbook-codemod-sweep",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 83862
+        },
+        {
+          "scenarioId": "craftbook-refactor-module",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 175791
+        },
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 99342
+        }
+      ]
+    },
+    {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Anthropic API",
+      "engine": "anthropic",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "complex-work",
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 24435
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 46869
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 68592
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 75682
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 73922
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 103252
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 45924
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · Codex CLI",
+      "engine": "codex-cli",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "core",
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 39613
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 337196
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 50593
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 103134
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 23029
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 12052
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 17038
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 42143
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 985261
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 32210
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 67183
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · Codex CLI",
+      "engine": "codex-cli",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "productivity",
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 32351
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 87374
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 47087
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 27254
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 37070
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 22106
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 267913
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 134036
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 42151
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · Codex CLI",
+      "engine": "codex-cli",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "developer",
+      "cells": [
+        {
+          "scenarioId": "fix-squisq-bugs",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 17740
+        },
+        {
+          "scenarioId": "dev-craftbook-routing",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 17369
+        },
+        {
+          "scenarioId": "interface-contract",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 27133
+        },
+        {
+          "scenarioId": "craftbook-code-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 72415
+        },
+        {
+          "scenarioId": "craftbook-api-contract-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 122334
+        },
+        {
+          "scenarioId": "craftbook-deep-security-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 82953
+        },
+        {
+          "scenarioId": "large-pr-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 87728
+        },
+        {
+          "scenarioId": "craftbook-codemod-sweep",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 130582
+        },
+        {
+          "scenarioId": "craftbook-refactor-module",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 252421
+        },
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 120821
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · Codex CLI",
+      "engine": "codex-cli",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "complex-work",
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 15150
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 137656
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 126921
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 77834
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 816883
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 67854
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 103181
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · OpenAI API",
+      "engine": "openai",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "core",
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 44284
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 159068
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 65200
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 52341
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 15706
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 21574
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 30180
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 77219
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 51832
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 23443
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 21563
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · OpenAI API",
+      "engine": "openai",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "productivity",
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 11562
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 71865
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 58368
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 21561
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 26200
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 21565
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 42068
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 128489
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 16572
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 49633
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 136916
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 117153
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 67825
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · OpenAI API",
+      "engine": "openai",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "developer",
+      "cells": [
+        {
+          "scenarioId": "fix-squisq-bugs",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 52080
+        },
+        {
+          "scenarioId": "dev-craftbook-routing",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 21543
+        },
+        {
+          "scenarioId": "interface-contract",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 36819
+        },
+        {
+          "scenarioId": "craftbook-code-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 56555
+        },
+        {
+          "scenarioId": "craftbook-api-contract-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 141859
+        },
+        {
+          "scenarioId": "craftbook-deep-security-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 112847
+        },
+        {
+          "scenarioId": "large-pr-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 122112
+        },
+        {
+          "scenarioId": "craftbook-codemod-sweep",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 135836
+        },
+        {
+          "scenarioId": "craftbook-refactor-module",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 296687
+        },
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 240160
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · OpenAI API",
+      "engine": "openai",
+      "tier": "cloud",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "complex-work",
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 24531
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 92122
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 91458
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 148389
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 244449
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 157260
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 92613
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 27B Q4",
+      "engine": "mlx",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "Q4",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "core",
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 126960
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 908489
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 212770
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 224607
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 64768
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 47658
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 83309
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 62983
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 113840
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 68121
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 304508
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 27B Q4",
+      "engine": "mlx",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "Q4",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "productivity",
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 52915
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 208956
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 178803
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 83050
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 62887
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 57896
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 138243
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 832451
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 249124
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 324524
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 521155
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 672024
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 545846
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 27B Q4",
+      "engine": "mlx",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "Q4",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "developer",
+      "cells": [
+        {
+          "scenarioId": "fix-squisq-bugs",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 465509
+        },
+        {
+          "scenarioId": "dev-craftbook-routing",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 54008
+        },
+        {
+          "scenarioId": "interface-contract",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3607928
+        },
+        {
+          "scenarioId": "craftbook-code-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 857529
+        },
+        {
+          "scenarioId": "craftbook-api-contract-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1018822
+        },
+        {
+          "scenarioId": "craftbook-deep-security-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 503542
+        },
+        {
+          "scenarioId": "large-pr-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1049189
+        },
+        {
+          "scenarioId": "craftbook-codemod-sweep",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1026408
+        },
+        {
+          "scenarioId": "craftbook-refactor-module",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3251295
+        },
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 887628
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 27B Q4",
+      "engine": "mlx",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "Q4",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "complex-work",
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 46529
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1034407
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1250151
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2673181
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1114841
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 4463044
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2449765
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-31b-q4",
+      "label": "Gemma 4 31B Q4",
+      "engine": "mlx",
+      "tier": "medium",
+      "parameterSize": "31B",
+      "quantization": "Q4",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "core",
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 168763
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 476055
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 405130
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1001129
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 216162
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 239991
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 310829
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1503526
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 320517
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 104233
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 1658089
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-31b-q4",
+      "label": "Gemma 4 31B Q4",
+      "engine": "mlx",
+      "tier": "medium",
+      "parameterSize": "31B",
+      "quantization": "Q4",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "productivity",
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 64356
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 361448
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 447217
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 124096
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 542582
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 108900
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 78446
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 857222
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 829786
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 350029
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 677750
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1070529
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1044868
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-31b-q4",
+      "label": "Gemma 4 31B Q4",
+      "engine": "mlx",
+      "tier": "medium",
+      "parameterSize": "31B",
+      "quantization": "Q4",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "developer",
+      "cells": [
+        {
+          "scenarioId": "fix-squisq-bugs",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1077995
+        },
+        {
+          "scenarioId": "dev-craftbook-routing",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 79470
+        },
+        {
+          "scenarioId": "interface-contract",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2153716
+        },
+        {
+          "scenarioId": "craftbook-code-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 438798
+        },
+        {
+          "scenarioId": "craftbook-api-contract-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1271074
+        },
+        {
+          "scenarioId": "craftbook-deep-security-review",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 363886
+        },
+        {
+          "scenarioId": "large-pr-review",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3337902
+        },
+        {
+          "scenarioId": "craftbook-codemod-sweep",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 889969
+        },
+        {
+          "scenarioId": "craftbook-refactor-module",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 4585428
+        },
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1512721
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-31b-q4",
+      "label": "Gemma 4 31B Q4",
+      "engine": "mlx",
+      "tier": "medium",
+      "parameterSize": "31B",
+      "quantization": "Q4",
+      "runId": "2026-10-11-m5max-six-providers",
+      "suiteId": "complex-work",
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 62342
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2564158
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1154784
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2336388
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 860032
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2462780
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1445526
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 2374136
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 0,
+          "successes": 0,
+          "nonModelFailures": 0
+        }
+      ]
+    }
+  ]
+}

@@ -192,9 +192,30 @@ describe('buildSuiteScoreboard', () => {
   it('returns null for a suite nothing has covered', () => {
     expect(buildSuiteScoreboard(dataset, 'productivity')).toBeNull();
   });
+
+  it('keeps a newer focused rerun separate from the full-suite headline', () => {
+    const focused = { ...run('r3'), scope: 'subset' as const };
+    const updated = {
+      ...dataset,
+      runs: [focused, ...dataset.runs],
+      results: [result('fast', 'r3', [['tictactoe', 1, 1, 0]]), ...dataset.results],
+    };
+    const board = buildSuiteScoreboard(updated, 'core');
+    expect(board?.run.id).toBe('r2');
+    expect(board?.otherRunScores.some((s) => s.run.id === 'r3')).toBe(true);
+    expect(describeProvenance(focused)).toContain('focused subset');
+  });
 });
 
 describe('provenance', () => {
+  it('distinguishes content changes on the same commit', () => {
+    const before = run('r1', { provenance: { sourceHash: 'a'.repeat(64) } });
+    const after = run('r2', { provenance: { sourceHash: 'b'.repeat(64) } });
+    expect(provenanceDifferences(before, after)).toContain('different source/build contents');
+    expect(ScorecardRunSchema.parse({ ...after, scope: 'subset' }).provenance.sourceHash).toBe(
+      'b'.repeat(64),
+    );
+  });
   it('stamps a table with device, sample size, date, and code versions', () => {
     expect(describeProvenance(run('r1'))).toBe(
       'Mac Studio (M4 Max) · 64 GB · 3 trials per task · 2026-08-01 · gezel abc1234 · catalog 0.1.15',

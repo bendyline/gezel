@@ -53,7 +53,7 @@
           "wikipedia-research-brief"
         ]
       },
-      "note": "Qwen 3.5 size-ladder comparison (2B/4B/9B/27B, all Q4) on a Ryzen 9 7950X3D + Radeon AI PRO R9700. Count 3; core and productivity only -- the developer and complex-work suites are deliberately omitted because this size range does not saturate core, so those cells would book zeros. llama.cpp on the Vulkan backend: this host has no NVIDIA driver, so the CUDA binaries were skipped. Not comparable to CUDA runs in this dataset."
+      "note": "Compares four sizes of Qwen 3.5 (2B, 4B, 9B and 27B, all Q4) on a Ryzen 9 7950X3D with a Radeon AI PRO R9700. Only general capability and office work were tested: models this size do not yet pass every general task, so the harder sets would mostly score zero. This computer has no NVIDIA graphics, so models ran on llama.cpp's Vulkan backend, and these results are not comparable to NVIDIA (CUDA) rounds."
     }
   ],
   "results": [
