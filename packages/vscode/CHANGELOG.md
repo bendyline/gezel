@@ -1,3 +1,13 @@
+## @bendyline/gezel-vscode [1.0.17](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-vscode%401.0.16...%40bendyline%2Fgezel-vscode%401.0.17) (2026-10-16)
+
+
+### Dependencies
+
+* **@bendyline/gezel:** upgraded to 1.2.6
+* **@bendyline/gezel-app-sdk:** upgraded to 1.1.6
+* **@bendyline/gezel-client:** upgraded to 1.2.6
+* **@bendyline/gezel-service:** upgraded to 1.2.6
+
 ## @bendyline/gezel-vscode [1.0.16](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-vscode%401.0.15...%40bendyline%2Fgezel-vscode%401.0.16) (2026-10-14)
 
 
