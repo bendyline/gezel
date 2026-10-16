@@ -1,3 +1,4 @@
+import { getLogLevel, setLogLevel } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
 import { type OpenAIImageClient, OpenAIImageProvider, pickSize } from './openai-image.js';
 
@@ -32,19 +33,28 @@ describe('OpenAIImageProvider.generate', () => {
     );
   });
 
-  it('snaps unsupported sizes (and warns) without erroring', async () => {
-    const warn = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-    const { client, generate } = fakeClient();
-    const provider = new OpenAIImageProvider({
-      apiKey: 'sk-test',
-      clientFactory: async () => client,
-    });
-    await provider.generate({ prompt: 'p', width: 800, height: 600 });
-    const callArgs = generate.mock.calls[0]![0];
-    // 800x600 (4:3 landscape) snaps to the closest landscape: 1536x1024
-    expect(['1024x1024', '1024x1536', '1536x1024']).toContain(callArgs.size);
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
+  it('snaps unsupported sizes (and logs the snap) without erroring', async () => {
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    // The snap is logged at info, and `pnpm validate` runs suites at warn.
+    const logLevel = getLogLevel();
+    setLogLevel('info');
+    try {
+      const { client, generate } = fakeClient();
+      const provider = new OpenAIImageProvider({
+        apiKey: 'sk-test',
+        clientFactory: async () => client,
+      });
+      await provider.generate({ prompt: 'p', width: 800, height: 600 });
+      const callArgs = generate.mock.calls[0]![0];
+      // 800x600 (4:3 landscape) snaps to the closest landscape: 1536x1024
+      expect(['1024x1024', '1024x1536', '1536x1024']).toContain(callArgs.size);
+      expect(stdout.mock.calls.map((c) => String(c[0])).join('')).toContain(
+        `[openai-image] snapped 800x600 → ${callArgs.size}`,
+      );
+    } finally {
+      setLogLevel(logLevel);
+      stdout.mockRestore();
+    }
   });
 
   it('omits `size` when no width/height provided (lets OpenAI auto-pick)', async () => {

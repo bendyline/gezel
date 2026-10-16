@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getLogLevel, setLogLevel } from '../log.js';
 import { lookupBehavior } from '../model-profile/registry.js';
 import { resolveTuning } from '../tuning-resolve.js';
 import { turnCancelledMessage } from '../turn-cancel.js';
@@ -258,6 +259,9 @@ describe('client-side thinking budget (engines without a native budget)', () => 
       }) as typeof fetch,
     });
     const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    // The assertions read an info line, and `pnpm validate` runs suites at warn.
+    const logLevel = getLogLevel();
+    setLogLevel('info');
     try {
       const session = await provider.createSession({
         systemMessage: 'You are a test.',
@@ -277,6 +281,7 @@ describe('client-side thinking budget (engines without a native budget)', () => 
       const reply = await session.sendAndWait('Make the deck.', { continuationMaxTokens: 32 });
       return { reply, requests, stdout: stdout.mock.calls.map((c) => String(c[0])).join('') };
     } finally {
+      setLogLevel(logLevel);
       stdout.mockRestore();
       await provider.shutdown();
     }
