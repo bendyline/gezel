@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { securityPolicyForLevel } from '@bendyline/gezel';
+import { getLogLevel, securityPolicyForLevel, setLogLevel } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
 import { ActivityTracker } from '../fs/activity-tracker.js';
@@ -1171,6 +1171,10 @@ describe('TaskScheduler — ambient project nudges', () => {
       now: () => now,
     });
     const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    // At warn (as `pnpm validate` runs) the line would be absent whatever the
+    // debug gate does.
+    const logLevel = getLogLevel();
+    setLogLevel('info');
     try {
       await scheduler.tick();
       await scheduler.tick();
@@ -1179,6 +1183,7 @@ describe('TaskScheduler — ambient project nudges', () => {
         'skip meester nudge — nudges disabled for this project',
       );
     } finally {
+      setLogLevel(logLevel);
       stdout.mockRestore();
     }
   });

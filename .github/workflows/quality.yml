@@ -16,6 +16,10 @@ env:
   # The UI production bundle includes Monaco and Squisq's diagram/media
   # workers. Vite needs more than Node's default ~2 GiB heap to transform it.
   NODE_OPTIONS: '--max-old-space-size=4096'
+  # The release runs every phase through `pnpm validate`, which defaults this
+  # to warn. Match it, or a test that reads an info line passes here and fails
+  # the release.
+  GEZEL_LOG_LEVEL: 'warn'
 
 permissions:
   contents: read
