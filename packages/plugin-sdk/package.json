@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-plugin-sdk",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Legacy helpers for authoring Gezel plugins; new integrations should use @bendyline/gezel-sdk.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "sdk", "plugins"],
