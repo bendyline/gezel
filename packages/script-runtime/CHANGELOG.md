@@ -1,3 +1,11 @@
+## @bendyline/gezel-script-runtime [1.0.6](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-script-runtime%401.0.5...%40bendyline%2Fgezel-script-runtime%401.0.6) (2026-10-16)
+
+
+### Dependencies
+
+* **@bendyline/gezel:** upgraded to 1.2.6
+* **@bendyline/gezel-sdk:** upgraded to 1.1.6
+
 ## @bendyline/gezel-script-runtime [1.0.5](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-script-runtime%401.0.4...%40bendyline%2Fgezel-script-runtime%401.0.5) (2026-10-14)
 
 
