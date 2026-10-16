@@ -1,3 +1,5 @@
+## @bendyline/gezel-connectors-spectral [1.0.7](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-connectors-spectral%401.0.6...%40bendyline%2Fgezel-connectors-spectral%401.0.7) (2026-10-16)
+
 ## @bendyline/gezel-connectors-spectral [1.0.6](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-connectors-spectral%401.0.5...%40bendyline%2Fgezel-connectors-spectral%401.0.6) (2026-10-14)
 
 ## @bendyline/gezel-connectors-spectral [1.0.5](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-connectors-spectral%401.0.4...%40bendyline%2Fgezel-connectors-spectral%401.0.5) (2026-08-15)
