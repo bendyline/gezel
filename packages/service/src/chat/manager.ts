@@ -3450,6 +3450,8 @@ export class ChatManager extends LocalEngineRuntime {
       capabilityFloor: ModelTier;
       reason: string;
     };
+    /** One question, one answer (`gezel run`); see `CreateChatSessionRequest.oneShot`. */
+    oneShot?: boolean;
   }): Promise<ChatSession> {
     const gezel = await this.store.getGezel(args.gezelId);
     if (!gezel) throw new Error(`agent ${args.gezelId} not found`);
@@ -3561,6 +3563,7 @@ export class ChatManager extends LocalEngineRuntime {
     }
     await this.store.writeSession(record);
     if (isScheduledRunSession(record)) this.events.markScheduledRun(record.id);
+    if (args.oneShot) this.cacheController?.markEphemeral(record.id);
     // Membership: opening a session for (gezel, project) implicitly pulls
     // the gezel onto the project's roster. Idempotent for repeat sessions
     // and fire-and-forget so a slow project.json write never blocks the

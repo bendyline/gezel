@@ -119,7 +119,9 @@ async function runStage(buildStage, options) {
 
 export async function runPackageBuilds(options = {}) {
   const root = options.repoRoot ?? repoRoot;
-  const inheritedEnv = options.env ?? process.env;
+  const inheritedEnv = { ...(options.env ?? process.env) };
+  // Keep routine logs out of builds while allowing an explicit debugging override.
+  inheritedEnv.GEZEL_LOG_LEVEL ||= 'warn';
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   return withDependencyReadLease(

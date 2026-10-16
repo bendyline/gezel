@@ -27,6 +27,12 @@ vi.mock('@bendyline/gezel', async (importOriginal) => {
       const name = namePicks.queue.shift();
       return name ? { name, gender: 'female' as const } : actual.pickRandomNameWithGender();
     },
+    pickUnusedGezelName: (inUse: ReadonlySet<string>) => {
+      for (let name = namePicks.queue.shift(); name; name = namePicks.queue.shift()) {
+        if (!inUse.has(name.toLowerCase())) return { name, gender: 'female' as const };
+      }
+      return actual.pickUnusedGezelName(inUse);
+    },
   };
 });
 

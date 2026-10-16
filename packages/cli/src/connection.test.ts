@@ -1,5 +1,5 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GezelSdkError } from '@bendyline/gezel-app-sdk';
@@ -11,6 +11,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   PENDING_GRANT_MINUTES,
+  applyHome,
   authorizeLocalOwnedDaemon,
   cliGrantError,
   cliUserDaemonEnv,
@@ -177,7 +178,7 @@ describe('incompatible daemon errors', () => {
       'the local Gezel daemon',
     );
     expect(error.message).toBe(
-      'The Gezel service (1.26226.50) running for this user is older than this gezel CLI can use. Open the Gezel app, which replaces an outdated service when it starts, or stop it with `gezel stop --daemon` and run this command again.',
+      'The Gezel service (1.26226.50) running for this user is older than this gezel CLI can use. Open the Gezel app, which replaces an outdated service when it starts, or stop it with `gezel stop` and run this command again.',
     );
   });
 
@@ -322,13 +323,13 @@ describe('CLI grant token storage', () => {
 describe('spawned daemon notice', () => {
   it('names the process that keeps running and how to stop it', () => {
     expect(spawnedDaemonNotice(4242)).toBe(
-      'Started the Gezel background service (pid 4242); it keeps running after this command. Stop it with `gezel stop --daemon`.\n',
+      'Started the Gezel background service (pid 4242); it keeps running after this command. Stop it with `gezel stop`.\n',
     );
   });
 
   it('still explains itself when the pid is unknown', () => {
     expect(spawnedDaemonNotice(undefined)).toBe(
-      'Started the Gezel background service; it keeps running after this command. Stop it with `gezel stop --daemon`.\n',
+      'Started the Gezel background service; it keeps running after this command. Stop it with `gezel stop`.\n',
     );
   });
 });
@@ -690,5 +691,48 @@ describe('CLI project lead', () => {
     await expect(ensureCliProjectLead(client, 'folder')).resolves.toBe('builder');
     expect(updateProject).toHaveBeenCalledWith('folder', { voormanGezelId: 'builder' });
     expect(createGezelFromTemplate).not.toHaveBeenCalled();
+  });
+});
+
+describe('applyHome', () => {
+  const KEYS = ['GEZEL_HOME', 'GEZEL_DISABLE_MACHINE_SHARED', 'GEZEL_SHARED_ASSETS_DIR'] as const;
+  let saved: Partial<Record<(typeof KEYS)[number], string>> = {};
+
+  function clearEnv() {
+    saved = {};
+    for (const key of KEYS) {
+      if (process.env[key] !== undefined) saved[key] = process.env[key];
+      delete process.env[key];
+    }
+  }
+
+  afterEach(() => {
+    for (const key of KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  it('keeps a home named with --home apart from the machine install', () => {
+    clearEnv();
+    applyHome({ home: join(tmpdir(), 'gezel-scratch-home') });
+
+    expect(process.env.GEZEL_DISABLE_MACHINE_SHARED).toBe('1');
+    expect(process.env.GEZEL_SHARED_ASSETS_DIR).toBeUndefined();
+  });
+
+  it('leaves the account home connected to the machine install', () => {
+    clearEnv();
+    applyHome({ home: join(homedir(), '.gezel') });
+
+    expect(process.env.GEZEL_DISABLE_MACHINE_SHARED).toBeUndefined();
+  });
+
+  it('lets a separate home opt back in', () => {
+    clearEnv();
+    process.env.GEZEL_DISABLE_MACHINE_SHARED = '0';
+    applyHome({ home: join(tmpdir(), 'gezel-scratch-home') });
+
+    expect(process.env.GEZEL_DISABLE_MACHINE_SHARED).toBe('0');
   });
 });

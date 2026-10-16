@@ -303,3 +303,58 @@ export async function waitForTask(
     timeout.dispose();
   }
 }
+
+/**
+ * One line from a task note: its heading and the first sentence after it.
+ * Pause notes open with a `#` heading ("Handoff failed — paused for help")
+ * and put the cause in the next paragraph.
+ */
+export function summarizeTaskNote(text: string, maxLength = 240): string {
+  const lines = text.split(/\r?\n/).map((line) => line.trim());
+  const headingIndex = lines.findIndex((line) => line.startsWith('#'));
+  const heading = headingIndex >= 0 ? lines[headingIndex]!.replace(/^#+\s*/, '') : '';
+  const body = lines
+    .slice(headingIndex + 1)
+    .find((line) => line.length > 0 && !line.startsWith('#'));
+  const sentence = body?.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? body ?? '';
+  const summary = heading && sentence ? `${heading}: ${sentence}` : heading || sentence;
+  return summary.length > maxLength ? `${summary.slice(0, maxLength - 1).trimEnd()}…` : summary;
+}
+
+/**
+ * Why a waited-on task stopped short, for the person at the terminal.
+ *
+ * WHY: `gezel do --wait` printed only `<ref>: blocked` and exited 2; the reason
+ * sat in the task notes and nothing pointed there (2026-10-15 npm audit).
+ */
+export async function blockedTaskReason(
+  client: Pick<GezelClient, 'listTaskNotes'>,
+  result: TaskWaitResult,
+): Promise<string | undefined> {
+  if (result.outcome !== 'blocked') return undefined;
+  if (result.questionIds?.length) {
+    return 'A gezel is waiting for your answer to a question. Answer it in the Gezel app or the interactive `gezel` terminal.';
+  }
+  if (result.task.status === 'draft') return 'The task is still a draft and has not started.';
+  const { notes } = await client
+    .listTaskNotes(result.task.projectId, result.task.num)
+    .catch(() => ({ notes: [] }));
+  const latest = [...notes].sort((a, b) => a.at.localeCompare(b.at)).at(-1);
+  return latest ? summarizeTaskNote(latest.text) || undefined : undefined;
+}
+
+/**
+ * The craftbooks whose command, title, category or tags contain every word,
+ * so `gezel craftbook list deck` finds the presentation books.
+ */
+export function filterCraftbooks(
+  books: readonly StartCraftbook[],
+  words: readonly string[],
+): StartCraftbook[] {
+  const needles = words.map((word) => word.trim().toLowerCase()).filter(Boolean);
+  if (needles.length === 0) return [...books];
+  return books.filter((book) => {
+    const haystack = [book.command, book.name, book.category, ...book.tags].join(' ').toLowerCase();
+    return needles.every((needle) => haystack.includes(needle));
+  });
+}

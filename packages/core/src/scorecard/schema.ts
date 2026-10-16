@@ -82,6 +82,19 @@ export const ScorecardProvenanceSchema = z
     device: ScorecardDeviceSchema,
     /** Short git sha of the gezel checkout that ran the sweep. */
     harnessCommit: z.string().min(1),
+    /** Content identities distinguish uncommitted fixes made on the same commit. */
+    sourceHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    serviceBuildHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    catalogHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
     /** Exact `@bendyline/gilde` version the catalog resolved. */
     gildeVersion: z.string().min(1),
     /** Trials per scenario requested. */
@@ -121,9 +134,11 @@ export const ScorecardRunSchema = z
     /** Stable id, e.g. "2026-08-09-mac-studio-m4max". */
     id: z.string().min(1),
     provenance: ScorecardProvenanceSchema,
+    /** Focused regression rounds must not silently become a full-suite headline. */
+    scope: z.enum(['suite', 'subset']).optional(),
     /** What the memory column measured on this device; see the schema above. */
     memoryCoverage: ScorecardMemoryCoverageSchema.optional(),
-    /** Suites this run covered end to end. */
+    /** Suites represented; zero-trial cells retain gaps in an unfinished sweep. */
     suites: z.array(z.string().min(1)).min(1),
     /**
      * Scenario ids per suite AS RUN. Pinned here rather than read from the

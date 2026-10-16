@@ -286,7 +286,7 @@ export interface CreateTokenStoreOptions {
    * lifecycle as {@link rootToken}: they're registered for lookup but
    * **never** written to `tokens.json` (so {@link issue}/{@link revoke}
    * flushes can't accidentally persist them). Used for the web-UI
-   * session token (`gezel start --web`) so the one-time browser URL
+   * session token (`gezel start --web`) so the per-launch browser URL
    * carries a dedicated, rotates-every-boot token instead of root.
    */
   ephemeralTokens?: Array<{

@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { pickRandomNameWithGender, pronounFormsForGender, pronounsForGender } from './names.js';
+import {
+  femaleNames,
+  gezelNamesInUse,
+  pickRandomNameWithGender,
+  pickUnusedGezelName,
+  pickUnusedSuggestedName,
+  pronounFormsForGender,
+  pronounsForGender,
+} from './names.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -47,5 +55,41 @@ describe('random gezel names', () => {
       .mockReturnValueOnce(0.04);
 
     expect(pickRandomNameWithGender().gender).toBe('female');
+  });
+});
+
+describe('unused gezel names', () => {
+  /** One `pickRandomNameWithGender` draw of `femaleNames[index]`, no NB flip. */
+  const drawFemale = (index: number) => [0.25, (index + 0.5) / femaleNames.length, 0.5];
+
+  it('counts ids and the ids names would slug to as taken', () => {
+    expect(gezelNamesInUse([{ id: 'yujin-2', name: 'Yujin Park' }])).toEqual(
+      new Set(['yujin-2', 'yujin-park']),
+    );
+  });
+
+  it('draws again when the name is already on the crew', () => {
+    const random = vi.spyOn(Math, 'random');
+    for (const value of [...drawFemale(0), ...drawFemale(1)]) random.mockReturnValueOnce(value);
+    const inUse = gezelNamesInUse([{ id: 'boekwachter', name: femaleNames[0]! }]);
+
+    expect(pickUnusedGezelName(inUse).name).toBe(femaleNames[1]);
+  });
+
+  it('prefers a template suggestion nobody has yet', () => {
+    const inUse = gezelNamesInUse([{ id: 'picasso', name: 'Picasso' }]);
+
+    expect(pickUnusedSuggestedName(['Picasso', 'Vermeer'], inUse).name).toBe('Vermeer');
+  });
+
+  it('falls back to an unused random name once every suggestion is taken', () => {
+    const inUse = gezelNamesInUse([
+      { id: 'picasso', name: 'Picasso' },
+      { id: 'vermeer', name: 'Vermeer' },
+    ]);
+
+    expect(['Picasso', 'Vermeer']).not.toContain(
+      pickUnusedSuggestedName(['Picasso', 'Vermeer'], inUse).name,
+    );
   });
 });

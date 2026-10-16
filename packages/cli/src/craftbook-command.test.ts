@@ -2,9 +2,12 @@ import type { Task } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  blockedTaskReason,
   craftbookDoLaunch,
+  filterCraftbooks,
   parseCraftbookArguments,
   resolveCraftbookInvocation,
+  summarizeTaskNote,
   waitForTask,
 } from './craftbook-command.js';
 import type { StartCraftbook } from './tui/craftbook-start.js';
@@ -420,5 +423,80 @@ describe('bounded task observation recovery', () => {
     };
     expect((await waitForTask(client, 'p/1', { timeoutMs: 5000 })).outcome).toBe('complete');
     expect(client.getTaskByRef).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('blocked task reasons', () => {
+  const PAUSE_NOTE = [
+    '# Handoff failed — paused for help',
+    '',
+    'The automatic handoff for step `scope` failed after its bounded retries. More detail.',
+    '',
+    'Retry the step, reassign it, or set the task active again.',
+  ].join('\n');
+
+  it('reads a pause note as its heading and first sentence', () => {
+    expect(summarizeTaskNote(PAUSE_NOTE)).toBe(
+      'Handoff failed — paused for help: The automatic handoff for step `scope` failed after its bounded retries.',
+    );
+  });
+
+  it('keeps a plain note and shortens a long one', () => {
+    expect(summarizeTaskNote('Waiting on the vendor quote')).toBe('Waiting on the vendor quote');
+    expect(summarizeTaskNote('x'.repeat(300), 20)).toBe(`${'x'.repeat(19)}…`);
+  });
+
+  const blocked = (task: Partial<Task>, questionIds?: string[]) => ({
+    task: { projectId: 'p', num: 1, ref: 'p/1', status: 'paused', ...task } as Task,
+    outcome: 'blocked' as const,
+    exitCode: 2,
+    ...(questionIds ? { questionIds } : {}),
+  });
+
+  it('reports the newest note of a paused task', async () => {
+    const client = {
+      listTaskNotes: vi.fn(async () => ({
+        notes: [
+          { id: 'b', at: '2026-10-15T20:34:42.504Z', author: 'system', text: PAUSE_NOTE },
+          { id: 'a', at: '2026-10-15T20:30:00.000Z', author: 'system', text: '# Started' },
+        ],
+      })),
+    };
+    expect(await blockedTaskReason(client as never, blocked({}))).toMatch(/^Handoff failed/);
+  });
+
+  it('points at a pending question instead of the notes', async () => {
+    const client = { listTaskNotes: vi.fn() };
+    expect(await blockedTaskReason(client as never, blocked({}, ['q1']))).toMatch(
+      /waiting for your answer/,
+    );
+    expect(client.listTaskNotes).not.toHaveBeenCalled();
+  });
+
+  it('says nothing for a task that finished', async () => {
+    const client = { listTaskNotes: vi.fn() };
+    const done = { ...blocked({ status: 'complete' }), outcome: 'complete' as const, exitCode: 0 };
+    expect(await blockedTaskReason(client as never, done)).toBeUndefined();
+  });
+});
+
+describe('filterCraftbooks', () => {
+  const book = (command: string, name: string, tags: string[] = []) =>
+    ({ command, name, tags, category: 'writing' }) as unknown as StartCraftbook;
+  const books = [
+    book('powerpoint-deck', 'PowerPoint Deck', ['slides']),
+    book('summarize-long', 'Summarize a Long Document'),
+  ];
+
+  it('lists everything without words', () => {
+    expect(filterCraftbooks(books, [])).toHaveLength(2);
+  });
+
+  it('matches every word against command, title and tags', () => {
+    expect(filterCraftbooks(books, ['SLIDES']).map((b) => b.command)).toEqual(['powerpoint-deck']);
+    expect(filterCraftbooks(books, ['long', 'summarize']).map((b) => b.command)).toEqual([
+      'summarize-long',
+    ]);
+    expect(filterCraftbooks(books, ['deck', 'summarize'])).toEqual([]);
   });
 });

@@ -56,7 +56,7 @@
           "wikipedia-research-brief"
         ]
       },
-      "note": "Five-model Ryzen AI HX 370 candidate screen using native binaries 0.1.38. Count 1; core and productivity only. Claude CLI judging ran post-hoc with Sonnet 4.6. Playwright Chromium was unavailable, so applicable browser-runtime checks were skipped."
+      "note": "A first look at five models on a Ryzen AI HX 370, using native engines 0.1.38. Only general capability and office work were tested. The Quality column was scored afterward by Claude Sonnet 4.6. The browser our tests use to check web pages was not available, so those checks were skipped."
     }
   ],
   "results": [

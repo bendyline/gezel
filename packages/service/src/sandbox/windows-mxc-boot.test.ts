@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   resolveVendoredMxc: vi.fn(),
@@ -19,7 +19,35 @@ vi.mock('./windows-mxc.js', () => ({
 
 import { awaitWindowsScriptSandboxBoot, startWindowsScriptSandbox } from './windows-mxc-boot.js';
 
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.stubEnv('GEZEL_SKIP_SYSTEM_BOOTSTRAP', undefined);
+  vi.stubEnv('GEZEL_MOCK_PROVIDER', undefined);
+});
+
+afterEach(() => vi.unstubAllEnvs());
+
 describe('startWindowsScriptSandbox', () => {
+  it.each(['GEZEL_SKIP_SYSTEM_BOOTSTRAP', 'GEZEL_MOCK_PROVIDER'])(
+    'uses only an installed launcher when %s skips boot downloads',
+    async (flag) => {
+      vi.stubEnv(flag, '1');
+      mocks.resolveWindowsMxcState.mockResolvedValue({ state: 'unavailable' });
+      mocks.resolveVendoredMxc.mockResolvedValue('C:/home/wxc-exec.exe');
+      const store = { readConfig: async () => ({}) } as never;
+
+      const stop = await startWindowsScriptSandbox(store, 'C:/home');
+      await awaitWindowsScriptSandboxBoot();
+      await stop();
+
+      expect(mocks.resolveVendoredMxc).toHaveBeenCalledWith(
+        'C:/home',
+        expect.objectContaining({ allowDownload: false }),
+      );
+      expect(mocks.resolveWindowsMxcState).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it('aborts the launcher download on stop and does nothing after it', async () => {
     mocks.resolveWindowsMxcState.mockResolvedValue({ state: 'unavailable' });
     let signal: AbortSignal | undefined;
@@ -34,6 +62,10 @@ describe('startWindowsScriptSandbox', () => {
     const store = { readConfig: async () => ({}) } as never;
     const stop = await startWindowsScriptSandbox(store, 'C:/home');
     await vi.waitFor(() => expect(mocks.resolveVendoredMxc).toHaveBeenCalledOnce());
+    expect(mocks.resolveVendoredMxc).toHaveBeenCalledWith(
+      'C:/home',
+      expect.objectContaining({ allowDownload: true }),
+    );
 
     await stop();
 

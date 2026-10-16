@@ -20,7 +20,7 @@ import type { PortableInference, PortableSampling } from '../mobile/inference.js
 import { classifyModelTier } from '../model-profile/local-model-tier.js';
 import { resolveProfile } from '../model-profile/registry.js';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
-import { pickRandomNameWithGender } from '../names.js';
+import { gezelNamesInUse, pickUnusedGezelName } from '../names.js';
 import { isOwnerLaunchedCompletion } from '../notifications/index.js';
 import {
   LEAN_PROFILE_REPLY_MAX_TOKENS,
@@ -2339,14 +2339,15 @@ export class PortableProductService {
   }
 
   private async recruit(role: string) {
-    const existing = (await this.store.listGezels()).find((member) =>
+    const roster = await this.store.listGezels();
+    const existing = roster.find((member) =>
       resolveRoleId(role)
         ? resolveRoleId(member.role) === resolveRoleId(role)
         : member.role?.toLowerCase() === role.toLowerCase(),
     );
     if (existing) return existing;
     return this.createGezel({
-      ...pickRandomNameWithGender(),
+      ...pickUnusedGezelName(gezelNamesInUse(roster)),
       role,
     });
   }

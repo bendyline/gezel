@@ -14,11 +14,17 @@ These are measured results, not estimates. Each number is the count of jobs a
 model actually finished correctly, checked by a program on a real machine.
 
 [How we test models](how-we-test-models.md) explains what was counted and
-what these numbers do not tell you. The short version: each job is run three
-times, a job passes only when every requirement is met, and runs lost to
+what these numbers do not tell you. Each round states its repeat count; jobs
+run fewer than three times show counts rather than percentages. A job passes
+only when every requirement is met, and runs lost to
 machine trouble are set aside rather than blamed on the model.
 
 ## Results by test round
+
+Focused reruns are labeled as subsets and retain their own round. They can
+verify a fix, but do not replace a full-suite comparison. Round notes explain
+unfinished coverage and documented evaluator failures; those failures remain
+recorded without being counted as model weaknesses.
 
 Each round has one table for each task set it ran, all measured on the same
 machine and build. Most rounds ran two sets. **General capability** covers

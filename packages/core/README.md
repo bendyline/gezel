@@ -1,11 +1,13 @@
 # @bendyline/gezel
 
-Core types, Zod schemas, path helpers and the gezel-markdown parser shared by
-every part of [gezel](https://github.com/bendyline/gezel).
+Core types, Zod schemas, path helpers and the `gezel.md` parser shared by
+every part of [Gezel](https://github.com/bendyline/gezel).
 
-This package is the single source of truth for gezel's wire types. Both the
-daemon and the web UI import it; its small runtime dependency set is limited to
-Zod and YAML parsing in addition to Node built-ins.
+This package is the single source of truth for Gezel's wire types. Both the
+service and the web UI import it. Its runtime dependencies are few: Zod,
+`yaml`, `@xmldom/xmldom` (XML parsing), and `@bendyline/gezk` (the knowledge
+catalog format), plus Node built-ins in the Node-only subpaths. Bundlers that
+resolve the `browser` condition get a main entry with no Node dependencies.
 
 ```bash
 npm install @bendyline/gezel
@@ -21,6 +23,15 @@ npm install @bendyline/gezel
 | `@bendyline/gezel/markdown` | The `gezel.md` frontmatter + sections parser |
 | `@bendyline/gezel/native` | Native binary discovery and platform keys |
 | `@bendyline/gezel/checks` | Gate-check primitives used by craftbook scripts |
+| `@bendyline/gezel/runtime` | The browser-safe product runtime (gezels, projects, sessions, scripts) over host-supplied storage, used where no Gezel service runs, such as the phone app |
+| `@bendyline/gezel/local-loop` | The turn loop for on-device models: tool-call recovery, turn policy, and repeat and failure tracking |
+| `@bendyline/gezel/poppetje` | The poppetje character schema, its catalogs, and seeding from a gezel id |
+| `@bendyline/gezel/svg` | SVG sanitizing |
+| `@bendyline/gezel/kokoro` | The Kokoro text-to-speech frontend: text normalization, pronunciation dictionaries, and letter-to-sound rules |
+| `@bendyline/gezel/speech-models` | Node only. The pinned speech-model catalog (Whisper, Kokoro) and `SpeechAssetStore`, verified downloads shared between apps |
+| `@bendyline/gezel/remote` | The client side of serving models between paired devices |
+| `@bendyline/gezel/app-models` | Zod schemas for the model list apps read from Gezel |
+| `@bendyline/gezel/eval` | The contract of Gezel's benchmark runner: jobs, trials, progress events, and scorecard rules |
 | `@bendyline/gezel/mobile-providers` | Zod schemas for on-device mobile inference: providers, model sources, downloads, inventory, and generation budgets |
 | `@bendyline/gezel/queue-status` | Zod schemas for `GET /api/queues`: provider queues, session send queues, task handoffs, and the engine cache and pool views |
 | `@bendyline/gezel/mobile-inference` | `createNativeInference()`, which adapts a native mobile inference plugin to the portable streaming, tool-calling, and cancellation contract |

@@ -41,6 +41,7 @@ import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as tar from 'tar';
+import { consumerCheckReportPath, writeConsumerCheckReport } from './consumer-check-report.mjs';
 import { blockingAdvisories, readAuditAllowlist } from './npm-consumer-audit.mjs';
 import { PUBLISHED_PACKAGE_DIRS, publishedPackageNames } from './published-packages.mjs';
 
@@ -112,10 +113,11 @@ const IMPORTABLE = [
   '@bendyline/gezel-mcp',
 ];
 
-let failures = 0;
+const failures = [];
+const reportPath = consumerCheckReportPath(repoRoot);
 const step = (name) => console.log(`\n── ${name}`);
 function fail(message) {
-  failures += 1;
+  failures.push(message);
   console.error(`  FAIL ${message}`);
 }
 function ok(message) {
@@ -985,13 +987,21 @@ try {
       expectedVersion: requireReleaseStamp ? coreVersion : undefined,
     });
   }
+} catch (error) {
+  fail(error.stack ?? String(error));
+  throw error;
 } finally {
-  if (keep) console.log(`\nleft the consumer project at ${root}`);
-  else rmSync(root, { recursive: true, force: true });
+  try {
+    writeConsumerCheckReport(reportPath, failures);
+  } finally {
+    if (keep) console.log(`\nleft the consumer project at ${root}`);
+    else rmSync(root, { recursive: true, force: true });
+  }
 }
 
-if (failures > 0) {
-  console.error(`\n${failures} consumer check(s) failed`);
+if (failures.length > 0) {
+  console.error(`\n${failures.length} consumer check(s) failed`);
+  console.error(`Consumer report: ${reportPath}`);
   process.exit(1);
 }
 console.log('\npacked-consumer checks passed');

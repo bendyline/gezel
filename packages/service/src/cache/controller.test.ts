@@ -324,3 +324,34 @@ describe('SessionCacheController — getAllStats', () => {
     expect(all.map((s) => s.providerName).sort()).toEqual(['llama-cpp', 'mlx']);
   });
 });
+
+describe('SessionCacheController — one-shot sessions', () => {
+  class EphemeralAdapter extends MockAdapter {
+    readonly ephemeral: string[] = [];
+    markEphemeral(sessionId: string): void {
+      this.ephemeral.push(sessionId);
+    }
+  }
+
+  it('tells a registered adapter about a one-shot session', () => {
+    const ctrl = new SessionCacheController({ now: fakeNow, disableReconcileTimer: true });
+    const adapter = new EphemeralAdapter('llama-cpp');
+    ctrl.registerAdapter(adapter);
+    ctrl.markEphemeral('run-1');
+    expect(adapter.ephemeral).toEqual(['run-1']);
+  });
+
+  it('remembers the session for an engine that starts after it was created', () => {
+    const ctrl = new SessionCacheController({ now: fakeNow, disableReconcileTimer: true });
+    ctrl.markEphemeral('run-1');
+    const adapter = new EphemeralAdapter('llama-cpp');
+    ctrl.registerAdapter(adapter);
+    expect(adapter.ephemeral).toEqual(['run-1']);
+  });
+
+  it('ignores adapters that keep nothing on disk', () => {
+    const ctrl = new SessionCacheController({ now: fakeNow, disableReconcileTimer: true });
+    ctrl.registerAdapter(new MockAdapter());
+    expect(() => ctrl.markEphemeral('run-1')).not.toThrow();
+  });
+});

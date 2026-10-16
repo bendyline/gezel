@@ -208,6 +208,11 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
    */
   private readonly restoredSessions = new Set<string>();
   /**
+   * Sessions that will never be resumed (see `markEphemeral`): a save seeds
+   * their gezel prefix file when it is missing and writes nothing else.
+   */
+  private readonly ephemeralSessions = new Set<string>();
+  /**
    * Latched off when this llama-server refuses slot save/restore (501
    * "This feature is not supported by multimodal" — fires for mmproj-
    * backed models like nemotron-nano-30b). Without the latch we'd POST
@@ -325,7 +330,12 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
       this.sessionPrefix.delete(id);
       this.sessionLayerPrefixes.delete(id);
       this.restoredSessions.delete(id);
+      this.ephemeralSessions.delete(id);
     }
+  }
+
+  markEphemeral(sessionId: string): void {
+    this.ephemeralSessions.add(sessionId);
   }
 
   async reportUsage(): Promise<readonly EngineCacheUsage[]> {
@@ -473,6 +483,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
         );
         this.sessionToSlot.delete(victimSession);
         this.slotToSession.delete(chosen);
+        this.ephemeralSessions.delete(victimSession);
       }
     }
 
@@ -601,6 +612,9 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
     if (generation !== this.engineGeneration) return false;
     const baseUrl = await this.resolveBaseUrl().catch(() => null);
     if (!baseUrl || generation !== this.engineGeneration) return false;
+    if (this.ephemeralSessions.has(sessionId)) {
+      return this.seedPrefixFromEphemeralSlot(baseUrl, slot, sessionId, generation);
+    }
     const filename = sessFilename(sessionId);
     const ok = await this.invokeSlotAction(baseUrl, slot, 'save', filename, generation);
     if (!ok) return false;
@@ -634,6 +648,30 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
       }
     }
     return true;
+  }
+
+  /**
+   * A one-shot session's only lasting value is the prompt prefix it shares
+   * with its gezel's next session. Save the slot straight to that prefix file
+   * when none exists yet; otherwise write nothing. Returns whether it wrote.
+   */
+  private async seedPrefixFromEphemeralSlot(
+    baseUrl: string,
+    slot: number,
+    sessionId: string,
+    generation: number,
+  ): Promise<boolean> {
+    if (!this.slotSavePath) return false;
+    const prefixId = this.sessionPrefix.get(sessionId);
+    if (!prefixId || this.seededPrefixes.has(prefixId)) return false;
+    const name = prefixFilename(prefixId);
+    if (await stat(join(this.slotSavePath, name)).catch(() => null)) {
+      this.seededPrefixes.add(prefixId);
+      return false;
+    }
+    const ok = await this.invokeSlotAction(baseUrl, slot, 'save', name, generation);
+    if (ok) this.seededPrefixes.add(prefixId);
+    return ok;
   }
 
   /** Try restore-by-session, then restore-by-prefix. Returns true if

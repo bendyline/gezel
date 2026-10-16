@@ -2,6 +2,7 @@
 // lists across 60+ countries, supplemented for geographic breadth. All Latin-script
 // and pronounceable in English.
 
+import { slugifyEntityName } from './runtime/entities.js';
 import type { GezelGender } from './schemas/gezel.js';
 
 export const maleNames: string[] = [
@@ -2125,4 +2126,42 @@ export function inferGenderForName(name: string): GezelGender {
   if (femaleNameSet.has(name)) return 'female';
   if (maleNameSet.has(name)) return 'male';
   return Math.random() < 0.5 ? 'female' : 'male';
+}
+
+/**
+ * What a new gezel's name must not collide with: every gezel's id and the id
+ * its name would slug to.
+ *
+ * WHY: the pool repeats, and the Store only suffixes the id (`-2`), so a fresh
+ * install met its Builder "Yujin" and its Boekwachter "Yujin" side by side
+ * (2026-10-15 npm audit). A crew of named characters cannot share names.
+ */
+export function gezelNamesInUse(gezels: ReadonlyArray<{ id: string; name: string }>): Set<string> {
+  return new Set(gezels.flatMap((gezel) => [gezel.id, slugifyEntityName(gezel.name)]));
+}
+
+/** A random first name, paired with a gender, that no gezel in `inUse` has. */
+export function pickUnusedGezelName(inUse: ReadonlySet<string>): {
+  name: string;
+  gender: GezelGender;
+} {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const pick = pickRandomNameWithGender();
+    if (!inUse.has(slugifyEntityName(pick.name))) return pick;
+  }
+  return pickRandomNameWithGender();
+}
+
+/**
+ * A template's suggested name ("Picasso", "Vermeer", …) that no gezel in
+ * `inUse` has, else a random unused name once every suggestion is taken.
+ */
+export function pickUnusedSuggestedName(
+  suggestions: readonly string[],
+  inUse: ReadonlySet<string>,
+): { name: string; gender: GezelGender } {
+  const free = suggestions.filter((name) => name.trim() && !inUse.has(slugifyEntityName(name)));
+  const suggested = free[Math.floor(Math.random() * free.length)];
+  if (suggested) return { name: suggested, gender: inferGenderForName(suggested) };
+  return pickUnusedGezelName(inUse);
 }

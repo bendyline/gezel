@@ -42,6 +42,24 @@ export const AppModelSchema = z
       .enum(['none', 'app-download', 'system-download', 'system-settings', 'unknown'])
       .optional(),
     download_bytes: bytes.optional(),
+    /** How a downloadable on-device model fits this machine's memory. */
+    fit: z
+      .object({
+        tier: z.enum(['fits', 'fits-offload', 'tight', 'too-big']),
+        label: z.string().max(256),
+        detail: z.string().max(4096),
+      })
+      .optional(),
+    /**
+     * How well a downloadable on-device model suits this machine, 0–100.
+     * `recommended` marks the single model first run would install.
+     */
+    recommendation: z
+      .object({
+        score: z.number().int().min(0).max(100),
+        recommended: z.boolean(),
+      })
+      .optional(),
     capabilities: AppModelCapabilitiesSchema.optional(),
     native_capabilities: AppModelCapabilitiesSchema.extend({
       structuredChat: z.boolean().optional(),

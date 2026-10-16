@@ -39,7 +39,13 @@ export async function startWindowsScriptSandbox(
       if (abort.signal.aborted || state.state !== 'unavailable' || resolveMxcExecutor()) return;
       // npm and CLI installs have no supervisor to lay the launcher down.
       const launcher = await resolveVendoredMxc(home, {
-        allowDownload: resolveSecurityPolicy(config).allowAppNetwork,
+        // One-shot CLI commands skip boot downloads before checking whether
+        // a model is ready. The sandbox probe must honor that same boundary;
+        // an already installed, verified launcher is still available offline.
+        allowDownload:
+          process.env.GEZEL_SKIP_SYSTEM_BOOTSTRAP !== '1' &&
+          process.env.GEZEL_MOCK_PROVIDER !== '1' &&
+          resolveSecurityPolicy(config).allowAppNetwork,
         signal: abort.signal,
       });
       if (launcher && !abort.signal.aborted) await resolveWindowsMxcState();

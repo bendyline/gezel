@@ -2,8 +2,9 @@ import {
   type GezelDetail,
   type GezelGender,
   type RoleId,
+  gezelNamesInUse,
   inferGenderForName,
-  pickRandomNameWithGender,
+  pickUnusedGezelName,
   resolveRoleId,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -154,7 +155,7 @@ export async function createFreshBoekwachter(
     name = chosen;
     gender = inferGenderForName(chosen);
   } else {
-    const random = pickRandomNameWithGender();
+    const random = pickUnusedGezelName(gezelNamesInUse(await store.listGezels().catch(() => [])));
     name = random.name;
     gender = random.gender;
   }

@@ -8,7 +8,8 @@ import {
   type Question,
   type Task,
   type TaskStatus,
-  pickRandomNameWithGender,
+  gezelNamesInUse,
+  pickUnusedGezelName,
 } from '@bendyline/gezel';
 import type {
   ConfigResponse,
@@ -594,7 +595,8 @@ export function App(props: {
     async (templateId: string) => {
       note(`recruiting ${templateId}…`);
       try {
-        const { name, gender } = pickRandomNameWithGender();
+        const { gezels: roster } = await client.listGezels();
+        const { name, gender } = pickUnusedGezelName(gezelNamesInUse(roster));
         const gezel = await client.createGezelFromTemplate(templateId, { name, gender });
         await refreshGezels();
         note(`${gezel.name} joined the project as ${gezel.role ?? templateId}.`);

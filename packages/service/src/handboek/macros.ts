@@ -640,6 +640,7 @@ export function renderScorecardMarkdown(
     )}**`,
   );
   const headlineCoverage = scorecardMemoryCoverage(board.run);
+  if (board.run.note) lines.push('', esc(board.run.note));
   const headlineNote = memoryCoverageNote(headlineCoverage, publishable);
   if (headlineNote) lines.push('', headlineNote);
   lines.push('');
@@ -678,6 +679,7 @@ export function renderScorecardMarkdown(
       )}**${why.length > 0 ? ` — ${why.join(', ')}` : ''}`,
     );
     const coverage = scorecardMemoryCoverage(run);
+    if (run.note) lines.push('', esc(run.note));
     const note = memoryCoverageNote(coverage, scores);
     if (note) lines.push('', note);
     lines.push('');
@@ -782,6 +784,7 @@ export function renderScorecardRunsMarkdown(
       `**${describeProvenance(entry.run, engines)}**${why.length > 0 ? ` — ${why.join(', ')}` : ''}`,
     );
     const coverage = scorecardMemoryCoverage(entry.run);
+    if (entry.run.note) lines.push('', esc(entry.run.note));
     const note = memoryCoverageNote(
       coverage,
       entry.suites.flatMap((suite) => suite.scores),
@@ -899,6 +902,7 @@ export function renderScorecardFilterHtml(
       }</p>`,
     );
     const coverage = scorecardMemoryCoverage(run);
+    if (run.note) parts.push(`<p class="hb-scorecard-round-note">${esc(run.note)}</p>`);
     const note = memoryCoverageNote(
       coverage,
       entry.suites.flatMap((suite) => suite.scores),

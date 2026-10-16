@@ -60,30 +60,30 @@ concurrency:
   group: release-npm
   cancel-in-progress: false
 
+# The canonical gate, `pnpm validate`, runs here on four runners at once,
+# because one runner no longer holds it. It blew a 90 min cap on 2026-08-22
+# (`test:coverage` went in unnoticed and has since moved out, to PR CI and
+# `pnpm all`). Then it crept to 142-148 min under a 150 min cap as the service
+# suite grew: that suite runs three times in the gate, about 30 min each, and
+# hosted-runner speed alone moved the whole gate between 84 min (2026-10-06)
+# and 145 (2026-10-14). On 2026-10-15 the cap cancelled it six minutes short.
+#
+# scripts/validate-workspace.mjs owns the split, not this file: `--phase=e2e`
+# and `--phase=stability` each build and then run the steps of
+# `validate:unlocked` they take, and `--phase=main` runs every step neither
+# takes. A check added to `validate` therefore lands in `main` without an edit
+# here. From the 2026-10-15 stage timings, on a slow runner: main ~75 min, a
+# stability pass ~50, e2e ~25.
+#
+# The caps are headroom over those numbers, not targets. PR CI hides how close
+# they are, because quality.yml fans the same work across more, smaller jobs.
+# When one is approached, move more of the chain into a phase rather than
+# raise it.
 jobs:
   verify:
     name: Verify release
     runs-on: ubuntu-latest
-    # `pnpm validate` deliberately uses the same serialized unit pass as PR CI,
-    # then repeats the UI, service, and interaction-heavy CLI TUI suites before
-    # the full Electron/browser E2E suites. It was still progressing at the old
-    # 60 min ceiling on 2026-08-11, and blew the 90 min one on 2026-08-22.
-    #
-    # This ceiling is load-bearing in a way PR CI hides: quality.yml fans the
-    # same work across parallel jobs (unit 60 min, stability 50 min, published
-    # 30 min), so a change can pass every PR check and still make this job
-    # unrunnable — `validate` runs all of it serially under ONE cap. That is
-    # how `test:coverage` went from a seconds-long static pass to an
-    # instrumented vitest run over 16 package roots unnoticed; it had already
-    # forced quality.yml's unit job from 45 to 60 min, and here it pushed a
-    # 79 min gate past 90. It is deliberately no longer in `validate` — it
-    # re-runs suites test:ci already ran to completion, so PR CI measures it
-    # separately on every pull request. The local `pnpm all` superset appends
-    # that coverage threshold check while keeping this release path unchanged.
-    #
-    # 150 is headroom over the ~100 min the gate needs after that removal, not
-    # a target. If it is approached again, split this job rather than raise it.
-    timeout-minutes: 150
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -121,15 +121,16 @@ jobs:
       - name: Install Chromium
         run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
 
-      # The canonical gate. Keep local, CI and release assurance identical:
-      # add mandatory checks to the root `validate` script rather than
-      # duplicating a step list here. `validate` includes the release-toolchain
-      # preflight, a release-stamped package rehearsal, `test:published`, and
-      # `check:packages`, covering tarball shape, size budgets, versioning,
-      # workspace-protocol resolution, and a real `npm install` of the tarballs
-      # into a non-workspace project followed by a daemon boot.
+      # The canonical gate, less the steps the other verify jobs take. Keep
+      # local, CI and release assurance identical: add mandatory checks to the
+      # root `validate` script rather than duplicating a step list here.
+      # `validate` includes the release-toolchain preflight, a release-stamped
+      # package rehearsal, `test:published`, and `check:packages`, covering
+      # tarball shape, size budgets, versioning, workspace-protocol
+      # resolution, and a real `npm install` of the tarballs into a
+      # non-workspace project followed by a daemon boot.
       - name: Canonical gate
-        run: xvfb-run -a pnpm validate
+        run: xvfb-run -a pnpm validate --phase=main
 
       - name: Audit licenses
         run: pnpm audit:licenses
@@ -147,9 +148,75 @@ jobs:
           path: artifacts/gezel.cdx.json
           retention-days: 14
 
+  verify-stability:
+    name: Verify release (stability pass ${{ matrix.pass }} of 3)
+    runs-on: ubuntu-latest
+    # `validate`'s `test:stability` repeats the UI, service and CLI TUI suites
+    # twice after `test:ci` ran them once; here each repeat gets a runner. Not
+    # fail-fast: whether a flake reproduces in the other pass is the point.
+    strategy:
+      fail-fast: false
+      matrix:
+        pass: [2, 3]
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      # Same reason as in `verify`: the prewarm loads the embedder from
+      # inference's built `dist/` before the phase's own `pnpm build` runs.
+      - name: Build the test embedder's dependencies
+        run: pnpm --filter "@bendyline/gezel-inference..." run build
+
+      - uses: ./.github/actions/setup-test-embedder
+
+      # The service suite's page-check tests skip their real-browser block
+      # when the shared ~/.cache/ms-playwright is empty, which would let a
+      # repeat pass skip tests the first pass ran.
+      - name: Install Chromium
+        run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
+
+      - name: Canonical gate (stability)
+        run: xvfb-run -a pnpm validate --phase=stability
+
+  verify-e2e:
+    name: Verify release (Electron and browser E2E)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      # The phase's `pnpm pw:install` fetches the browser; this adds the
+      # system libraries it needs on a fresh runner.
+      - name: Install Chromium
+        run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
+
+      - name: Canonical gate (E2E)
+        run: xvfb-run -a pnpm validate --phase=e2e
+
+      - name: Preserve failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-release-e2e-diagnostics
+          path: |
+            packages/app/test-results/
+            packages/app/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
   release:
     name: Publish packages
-    needs: verify
+    needs: [verify, verify-stability, verify-e2e]
     runs-on: ubuntu-latest
     # npm publish-time scanning can now delay artifact availability for tens of
     # minutes. Leave room for the 40-minute registry verifier plus build,

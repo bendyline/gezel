@@ -168,6 +168,16 @@ The release workflow runs the same canonical gate as CI: `pnpm validate`.
 **Add mandatory checks to that script, not to the workflow** — a release must
 never be able to be laxer than a pull request.
 
+The workflow runs that gate in phases on parallel runners
+(`pnpm validate --phase=main`, `--phase=stability`, `--phase=e2e`), because
+the serial chain outgrew one job's time limit. The split lives in
+[`scripts/validate-workspace.mjs`](../scripts/validate-workspace.mjs), not in
+the workflow. `stability` and `e2e` each take named steps of
+`validate:unlocked` and run them after `pnpm build`, and `main` runs every
+other step, so a new step needs no workflow edit. A plain `pnpm validate` still
+runs the whole chain serially. Passing the same flag runs one release job's
+share locally.
+
 Two of its steps exist specifically for npm:
 
 ### `pnpm test:published`
@@ -270,6 +280,12 @@ source and rebuilds core in a `finally`. It refuses to start unless
 at start-up" is not enough: an interrupted earlier run leaves the file already
 stamped, and a faithful restore then writes the release version straight back
 while reporting success.
+
+Consumer failures are saved with their error output under
+`.cache/consumer-checks/` (override the JSON file path with
+`GEZEL_CONSUMER_REPORT_PATH`). If the rehearsal fails, it repeats those errors
+after the cleanup rebuild and prints the report path. A successful core
+rebuild at the end of a failed rehearsal is cleanup, not the failing check.
 
 ## npm consumers get a lean dependency graph
 

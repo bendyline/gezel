@@ -56,6 +56,18 @@ function dataset(
 }
 
 describe('::handboek-model-scorecard', () => {
+  it('shows round caveats on every rendering surface and escapes HTML in notes', () => {
+    const data = dataset();
+    data.runs[0]!.note = 'Scope audit <script>example</script>';
+    for (const output of [
+      renderScorecardMarkdown(data, 'core', { includeTaskCount: true }),
+      renderScorecardRunsMarkdown(data, ['core'], { includeTaskCount: true }),
+      renderScorecardFilterHtml(data, ['core'], { includeTaskCount: true }),
+    ]) {
+      expect(output).toContain('Scope audit &lt;script&gt;example&lt;/script&gt;');
+      expect(output).not.toContain('<script>');
+    }
+  });
   it('degrades to a plain sentence before any sweep has been recorded', () => {
     const empty = ScorecardDatasetSchema.parse({ schemaVersion: 1, runs: [], results: [] });
     const md = renderScorecardMarkdown(empty, 'core', { includeTaskCount: true });

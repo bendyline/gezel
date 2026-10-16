@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "2026-10-12-m5max-cli-integration",
+      "provenance": {
+        "startedAt": "2026-10-12T15:09:36.346Z",
+        "device": {
+          "label": "Mac · Apple M5 Max",
+          "platform": "darwin",
+          "arch": "arm64",
+          "memoryGb": 128,
+          "osRelease": "darwin 27.0.0",
+          "cpuModel": "Apple M5 Max",
+          "gpuModel": "Apple M5 Max (integrated GPU)"
+        },
+        "harnessCommit": "5b41f675e65b",
+        "serviceBuildHash": "ffc4ecc21bc5cf7cb00ed5024fe5c0c5832af1045b1f49fd00826df04fdb212c",
+        "catalogHash": "3075160c242a693bbe669eb52fbb9eaa606f79fcd0a93ea46b5a3cc9d0113141",
+        "gildeVersion": "0.1.94",
+        "count": 1,
+        "judgeModelId": null
+      },
+      "scope": "subset",
+      "suites": [
+        "productivity",
+        "core",
+        "developer",
+        "complex-work"
+      ],
+      "scenariosBySuite": {
+        "productivity": [
+          "docblocks-theme-roundtrip",
+          "wikipedia-research-brief",
+          "craftbook-powerpoint-deck",
+          "craftbook-research-to-document"
+        ],
+        "core": [
+          "ops-runbook-anomaly",
+          "conflict-synthesis",
+          "tictactoe",
+          "data-wrangle"
+        ],
+        "developer": [
+          "craftbook-bug-fix-tdd"
+        ],
+        "complex-work": [
+          "craftbook-route-multi",
+          "craftbook-export-generalize"
+        ]
+      },
+      "note": "Tests Claude CLI and Codex CLI again on the nine tasks where they ran into trouble on October 11, plus two they had passed, after fixes to gezel and to our tests. Each task ran once on each app. The Research to Word task was allowed 45 minutes instead of 30. This covers 11 tasks, not the full set."
+    }
+  ],
+  "results": [
+    {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Claude CLI",
+      "engine": "anthropic-cli",
+      "tier": "cloud",
+      "runId": "2026-10-12-m5max-cli-integration",
+      "suiteId": "productivity",
+      "cells": [
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 26698
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 46699
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 192401
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 151869
+        }
+      ]
+    },
+    {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Claude CLI",
+      "engine": "anthropic-cli",
+      "tier": "cloud",
+      "runId": "2026-10-12-m5max-cli-integration",
+      "suiteId": "core",
+      "cells": [
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 52226
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 62099
+        },
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 34603
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 22243
+        }
+      ]
+    },
+    {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Claude CLI",
+      "engine": "anthropic-cli",
+      "tier": "cloud",
+      "runId": "2026-10-12-m5max-cli-integration",
+      "suiteId": "developer",
+      "cells": [
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 151675
+        }
+      ]
+    },
+    {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Claude CLI",
+      "engine": "anthropic-cli",
+      "tier": "cloud",
+      "runId": "2026-10-12-m5max-cli-integration",
+      "suiteId": "complex-work",
+      "cells": [
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 129451
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 97980
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · Codex CLI",
+      "engine": "codex-cli",
+      "tier": "cloud",
+      "runId": "2026-10-12-m5max-cli-integration",
+      "suiteId": "productivity",
+      "cells": [
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 37352
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 42386
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 157621
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 117633
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · Codex CLI",
+      "engine": "codex-cli",
+      "tier": "cloud",
+      "runId": "2026-10-12-m5max-cli-integration",
+      "suiteId": "core",
+      "cells": [
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 52176
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 27117
+        },
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 49843
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 57253
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · Codex CLI",
+      "engine": "codex-cli",
+      "tier": "cloud",
+      "runId": "2026-10-12-m5max-cli-integration",
+      "suiteId": "developer",
+      "cells": [
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 188068
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · Codex CLI",
+      "engine": "codex-cli",
+      "tier": "cloud",
+      "runId": "2026-10-12-m5max-cli-integration",
+      "suiteId": "complex-work",
+      "cells": [
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 178663
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 103169
+        }
+      ]
+    }
+  ]
+}

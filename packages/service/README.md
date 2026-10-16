@@ -1,11 +1,11 @@
 # @bendyline/gezel-service
 
-`gezeld` — the [gezel](https://github.com/bendyline/gezel) daemon. A local HTTP
+`gezeld`, the [Gezel](https://github.com/bendyline/gezel) service. A local HTTP
 service that owns chat sessions, routes to LLM providers, manages memories,
 tasks and projects, and reads and writes everything under `~/.gezel/`.
 
 This is what `@bendyline/gezel-cli` runs behind the scenes. Install it directly
-only if you are embedding gezel or running the daemon standalone.
+only if you are embedding Gezel or running the service standalone.
 
 ```bash
 npm install @bendyline/gezel-service
@@ -32,8 +32,12 @@ variables (see [Environment](#environment)); `npx gezeld --help` lists them.
 | Subpath | Contents |
 |---|---|
 | `@bendyline/gezel-service` | `startService()` and the service types |
-| `@bendyline/gezel-service/handboek` | Handbook rendering helpers |
-| `@bendyline/gezel-service/dist/bin/gezeld.js` | The daemon binary. Resolved by string from `@bendyline/gezel-client`'s `discoverOrSpawn()` — this export must never be removed |
+| `@bendyline/gezel-service/handboek` | Handboek rendering helpers |
+| `@bendyline/gezel-service/gezapp` | AI App (`.gezapp`) validation, packing, and reading, without starting the service |
+| `@bendyline/gezel-service/native-release` | The pinned native engine release and its archive digests, as data |
+| `@bendyline/gezel-service/media` | Image, audio, and video embedding for building knowledge catalogs |
+| `@bendyline/gezel-service/packaging` | Build-time helpers that stage the pinned native engines for an Electron app |
+| `@bendyline/gezel-service/dist/bin/gezeld.js` | The service executable, also installed as the `gezeld` command. Tools that start Gezel for you, such as the CLI and the app SDK, launch this file |
 
 ```ts
 import { startService } from '@bendyline/gezel-service';
@@ -43,12 +47,17 @@ console.log({ port, clientToken });
 await stop();
 ```
 
-## Optional local ML runtime
+## Optional peers
 
-The base npm install intentionally omits Transformers.js and Kokoro. Cloud
-providers, native engines, the HTTP API, terminal, MCP, UI, tasks, and file
-features work without them. Install the optional peers only when this npm
-deployment needs in-process memory embeddings or Kokoro text-to-speech:
+The base npm install leaves out a few large or native pieces. Cloud providers,
+native engines, the HTTP API, MCP, UI, tasks, and file features work without
+them. Install each only when this deployment needs it:
+
+| Package | Needed for |
+|---|---|
+| `@huggingface/transformers@^4.3.1` | In-process memory embeddings |
+| `kokoro-js@^1.2.1` | Kokoro text-to-speech |
+| `node-pty@^1.1.0` | The interactive terminal; without it, opening a terminal reports that `node-pty` is missing and everything else keeps working |
 
 ```bash
 npm install @huggingface/transformers@^4.3.1 kokoro-js@^1.2.1
@@ -77,25 +86,51 @@ this ML runtime with the reviewed overrides. Both paths use one Transformers
 ## Native engines
 
 On-device inference needs native engine binaries. They are not bundled — the
-daemon downloads them on first use from this repository's `native-v*` GitHub
-releases, verifying the release's `SHA256SUMS` against a digest baked into this
-package before trusting any individual archive hash. Set
-`GEZEL_LLAMA_SERVER_BIN` (and siblings) to point at your own builds instead, or
-`GEZEL_NATIVE_BIN_DIR` at a directory containing all of them.
+service downloads them on first use from the `native-v*` releases in the
+[Gezel repository](https://github.com/bendyline/gezel/releases/), verifying the
+release's `SHA256SUMS` against a digest built into this package before
+trusting any individual archive hash. Set `GEZEL_LLAMA_SERVER_BIN` (and
+siblings) to point at your own builds instead, or `GEZEL_NATIVE_BIN_DIR` at a
+directory containing all of them.
 
 Cloud providers need none of this.
+
+## Shared speech models
+
+Speech-to-text (Whisper) and text-to-speech (Kokoro) weights come from a pinned
+catalog in `@bendyline/gezel/speech-models`, a Node-only module of the
+`@bendyline/gezel` package that other desktop apps can use too. Every file is
+pinned by revision, size, and SHA-256 and verified before use.
+
+- Verified files are kept once per user, in
+  `<GEZEL_HOME>/engines/speech-assets/<sha256>`. Each app keeps its own
+  installation that hard links to those files (or copies them, without another
+  download, when they are on a different volume), so two apps never download
+  the same model twice, and removing one app's installation never breaks
+  another's.
+- Downloads and cleanup coordinate across processes; a cached file is deleted
+  only when no installation still uses it.
+- Lookup also finds models already present in Gezel's older model folders, in
+  read-only model homes (`GEZEL_READONLY_MODEL_HOMES`), and in the desktop
+  app's machine-wide assets folder. It never reads the machine service's
+  private state.
+- Nothing downloads on its own: a health check never fetches a model, and an
+  older Kokoro export updates only when you pull the model again.
+- An app that must keep its files to itself can give `SpeechAssetStore` a
+  `root` of `null`, which turns sharing off.
 
 ## Environment
 
 | Variable | Effect |
 |---|---|
 | `GEZEL_HOME` | State directory (default `~/.gezel`) |
+| `GEZEL_PORT` | Listen on this port. Default: 6228 when it is free, otherwise a free port |
 | `GEZEL_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` \| `silent` |
 | `GEZEL_MOCK_PROVIDER=1` | Deterministic provider, no credentials needed |
 | `GEZEL_SKIP_SYSTEM_BOOTSTRAP=1` | Skip first-boot background downloads |
-| `GEZEL_DISABLE_FIRST_USE_GRACE=1` | Treat a fresh home as an established install: background indexing starts at once instead of waiting out the first half hour and a ready chat model, and quiet nights are reported from day one. Test and eval harnesses set it |
-| `GEZEL_EMBEDDED_INFERENCE_ONLY=1` | Start `gezeld` as the inference-only host an app runs for its own model calls: `@bendyline/gezel-inference`'s surface (chat, Responses, embeddings, knowledge, model management) behind the daemon's loopback listener, with no product API, secret store, device identity, remote pairing or LAN serving. The app SDK sets it for an `inferenceOnly` child-hosted daemon |
-| `GEZEL_DAEMON_LOG_FILE=1` | Also write the daemon's output to `<home>/logs/service-YYYY-MM-DD.log` (10 MB rolls, 7 days kept). The CLI and app SDK set it when they start `gezeld` in the background |
+| `GEZEL_DISABLE_FIRST_USE_GRACE=1` | Treat a fresh home as an established install: background indexing starts at once instead of waiting out the first half hour and a ready chat model, and quiet nights are reported from day one. Useful for tests and automated runs |
+| `GEZEL_EMBEDDED_INFERENCE_ONLY=1` | Start `gezeld` as the inference-only host an app runs for its own model calls: `@bendyline/gezel-inference`'s surface (chat, Responses, embeddings, knowledge, model management) behind the service's loopback listener, with no product API, secret store, device identity, remote pairing or LAN serving. The app SDK sets it for an `inferenceOnly` child-hosted service |
+| `GEZEL_DAEMON_LOG_FILE=1` | Also write the service's output to `<home>/logs/service-YYYY-MM-DD.log` (10 MB rolls, 7 days kept). The CLI and app SDK set it when they start `gezeld` in the background |
 | `GEZEL_NATIVE_ENGINE_VERSION` | Override the pinned native release |
 
 ## Stability
@@ -103,32 +138,10 @@ Cloud providers need none of this.
 Public API under semver. The HTTP API is versioned separately under `/api`;
 prefer `@bendyline/gezel-client` over calling it directly.
 
+## Documentation
+
+- [Repository and full documentation](https://github.com/bendyline/gezel)
+- [Notices and third-party licenses](https://github.com/bendyline/gezel/blob/main/NOTICE.md)
+  (also shipped in this package as `dist/NOTICE.md`)
+
 MIT © Bendyline
-
-## Shared speech models
-
-Desktop speech weights use the Node-only `@bendyline/gezel/speech-models` API,
-shared with DocBlocks. The catalog pins Whisper GGML models, the timestamped
-Kokoro q8 ONNX export, and the eight curated English voices by revision, size,
-and SHA-256. The normal q8 provider loads a complete local model directory;
-its tiny tokenizer metadata ships with the API so adopting DocBlocks' model
-needs no network. Other explicitly configured quantizations retain their
-existing loader. Older standard Kokoro exports require an explicit model pull
-to update; a health check never downloads the new export.
-
-The per-user cache is `<GEZEL_HOME>/engines/speech-assets/<sha256>`. Each app
-keeps its own installation manifest and hard links to those verified bytes.
-A different filesystem falls back to copying verified bytes without another
-download. Downloads and cache collection coordinate through process locks;
-removing one installation releases only its links, and cache bytes are removed
-when no installation references them. Discovery reads legacy Gezel model
-folders, configured read-only model homes, and the public machine assets
-overlay. It never probes the machine service's private state. Machine-scope
-writes use `<GEZEL_SHARED_ASSETS_DIR>/models/speech-assets`.
-
-Existing local Whisper files join the cache when used. The first app to pull
-a model publishes the cache for the other app; use acquires independent file
-references before launching an engine. The speech runtime remains local to
-each application: reuse starts no daemon or consent flow. Sandboxed embedders
-can disable shared storage entirely. Release the core package containing the
-`./speech-models` export before updating a consumer's registry pin.

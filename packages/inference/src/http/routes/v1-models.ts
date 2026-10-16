@@ -1,13 +1,19 @@
 import {
   type ChatModelManifest,
+  type RecoDevice,
+  estimateManifestKvBytes,
   externalGezelModelId,
   isRecommendedModel,
+  localContextFloorTokens,
+  rateModelsForDevice,
   resolveDistributionProfile,
 } from '@bendyline/gezel';
 import type { AppModel } from '@bendyline/gezel/app-models';
 import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
+import { CapacityBroker } from '../../providers/native/capacity-broker.js';
 import type { ProviderName } from '../../providers/types.js';
+import { type MemoryProfile, detectMemoryProfileCached } from '../../system/memory.js';
 import type { InferenceContext as ServiceContext } from '../inference-context.js';
 import { appleSystemModel } from '../openai-compat/apple-model.js';
 import { resolveFallbackGezelId } from '../openai-compat/chat-target.js';
@@ -43,7 +49,14 @@ const LOCAL_PROVIDERS: readonly ProviderName[] = ['llama-cpp', 'mlx', 'ds4'];
 interface V1ModelsRouteOptions {
   /** List only on-device engines plus downloadable on-device catalog entries. */
   localOnly?: boolean;
+  /**
+   * This machine's memory, which downloadable entries are rated against.
+   * Defaults to the cached probe `/api/system/memory` reads.
+   */
+  memoryProfile?: () => Promise<MemoryProfile>;
 }
+
+type CatalogBackend = 'llama-cpp' | 'mlx' | 'ds4';
 
 type OpenAIModelEntry = AppModel;
 
@@ -71,62 +84,165 @@ function catalogCapabilities(
   };
 }
 
-function catalogBackend(manifest: ChatModelManifest): 'llama-cpp' | 'mlx' | 'ds4' | null {
+function catalogBackend(manifest: ChatModelManifest): CatalogBackend | null {
+  // ds4 has no portable fallback: `discoverNativeBinaries` stamps its binary
+  // only where a build for this host is on disk, which is the gate the
+  // Settings availability check reads too. Windows has none.
+  const ds4 = manifest.ds4 && process.env.GEZEL_DS4_SERVER_BIN ? 'ds4' : null;
   // Store hosts have no provisioned Python runtime. Only advertise models
   // backed by bundled native engines until a frozen MLX runtime ships.
   const store = resolveDistributionProfile().pythonProvisioning === 'frozen-only';
-  if (store) return manifest.llamaCpp ? 'llama-cpp' : manifest.ds4 ? 'ds4' : null;
+  if (store) return manifest.llamaCpp ? 'llama-cpp' : ds4;
   const preferred = resolveOnDeviceProvider(process.platform, process.arch);
   if (preferred === 'mlx' && manifest.mlx && !manifest.mlx.disabledReason) return 'mlx';
   if (preferred === 'llama-cpp' && manifest.llamaCpp) return 'llama-cpp';
   if (manifest.llamaCpp) return 'llama-cpp';
   if (manifest.mlx && !manifest.mlx.disabledReason && process.platform === 'darwin') return 'mlx';
-  if (manifest.ds4) return 'ds4';
-  return null;
+  return ds4;
 }
 
+/**
+ * What loading a catalog model would hold, priced as the capacity broker
+ * prices it: the catalog's measured pin when it has one, else the engine's
+ * estimate, plus KV at the context floor this machine launches with. ds4's
+ * figure already bounds its streamed working set, so it takes no extra KV.
+ */
+function footprintBytes(
+  { manifest, provider, source }: DownloadCandidate,
+  memory: MemoryProfile,
+): number {
+  const mmprojBytes = provider === 'llama-cpp' ? manifest.llamaCpp?.mmproj?.sizeBytes : undefined;
+  const weights =
+    source.residentBytes ??
+    CapacityBroker.estimateResidentBytes(
+      provider,
+      source.approxSizeBytes,
+      mmprojBytes ? { mmprojBytes } : undefined,
+    );
+  if (provider === 'ds4') return weights;
+  const ctxTokens = localContextFloorTokens({
+    totalRamBytes: memory.totalRamBytes,
+    gpuVramBytes: fastGpuBytes(memory),
+  });
+  // MLX keeps its cache in f16; llama.cpp's default q8_0 is the helper's default.
+  return (
+    weights +
+    estimateManifestKvBytes(manifest, {
+      ctxTokens,
+      ...(provider === 'mlx' ? { cacheScale: 1 } : {}),
+    })
+  );
+}
+
+/**
+ * An integrated adapter's advertised allocation is shared system RAM, not a
+ * fast pool beside it, so fit treats that host as RAM-paced (as Settings does).
+ */
+function fastGpuBytes(memory: MemoryProfile): number | null {
+  return memory.gpuMemoryKind === 'integrated' ? null : memory.gpuVramBytes;
+}
+
+function recoDevice(memory: MemoryProfile): RecoDevice {
+  return {
+    platform: memory.platform,
+    gpuVramBytes: fastGpuBytes(memory),
+    gpuMemoryKind: memory.gpuMemoryKind,
+    totalRamBytes: memory.totalRamBytes,
+    usableBytes: memory.usableBytes,
+    budgetBytes: memory.budgetBytes,
+  };
+}
+
+interface DownloadCandidate {
+  entry: OpenAIModelEntry;
+  manifest: ChatModelManifest;
+  provider: CatalogBackend;
+  /** The engine block this entry would download. */
+  source: { approxSizeBytes: number; residentBytes?: number; quantization?: string };
+}
+
+/** Curated order, for when this machine's memory could not be read. */
+function byCuratedScore(a: DownloadCandidate, b: DownloadCandidate): number {
+  const aRecommended = isRecommendedModel(a.manifest);
+  const bRecommended = isRecommendedModel(b.manifest);
+  if (aRecommended !== bRecommended) return aRecommended ? -1 : 1;
+  const score = (b.manifest.recoScore ?? 0) - (a.manifest.recoScore ?? 0);
+  return score || (a.entry.name ?? a.entry.id).localeCompare(b.entry.name ?? b.entry.id);
+}
+
+/**
+ * Downloadable models, each rated against this machine (`fit`,
+ * `recommendation`) and listed best first. A model too big to run here stays
+ * listed with `fit.tier: 'too-big'` and a 0 score, so a client decides
+ * whether to hide it.
+ */
 async function downloadableCatalogEntries(
   items: Awaited<ReturnType<ServiceContext['catalog']['list']>>,
   created: number,
   existingIds: ReadonlySet<string>,
+  memoryProfile: () => Promise<MemoryProfile>,
 ): Promise<OpenAIModelEntry[]> {
-  return items
-    .flatMap<{ entry: OpenAIModelEntry; manifest: ChatModelManifest }>((item) => {
-      const manifest = item.manifest;
-      if (manifest.kind !== 'chat-model') return [];
-      const provider = catalogBackend(manifest);
-      if (!provider) return [];
-      const id = `${provider}:${manifest.id}`;
-      if (existingIds.has(id)) return [];
-      return [
-        {
-          manifest,
-          entry: {
-            id,
-            object: 'model',
-            created,
-            owned_by: provider,
-            name: manifest.name,
-            availability: 'download-required',
-            preparation: 'app-download',
-            reason_code: 'model_download_required',
-            recovery_actions: ['prepare'],
-            locality: 'on-device',
-            download_bytes: manifest.approxSizeBytes,
-            ...(manifest.contextWindow ? { context_window: manifest.contextWindow } : {}),
-            capabilities: catalogCapabilities(manifest, provider),
-          },
+  const candidates = items.flatMap<DownloadCandidate>((item) => {
+    const manifest = item.manifest;
+    if (manifest.kind !== 'chat-model') return [];
+    const provider = catalogBackend(manifest);
+    const source =
+      provider === 'mlx' ? manifest.mlx : provider === 'ds4' ? manifest.ds4 : manifest.llamaCpp;
+    if (!provider || !source) return [];
+    const id = `${provider}:${manifest.id}`;
+    if (existingIds.has(id)) return [];
+    return [
+      {
+        manifest,
+        provider,
+        source,
+        entry: {
+          id,
+          object: 'model',
+          created,
+          owned_by: provider,
+          name: manifest.name,
+          availability: 'download-required',
+          preparation: 'app-download',
+          reason_code: 'model_download_required',
+          recovery_actions: ['prepare'],
+          locality: 'on-device',
+          download_bytes: manifest.approxSizeBytes,
+          ...(manifest.contextWindow ? { context_window: manifest.contextWindow } : {}),
+          capabilities: catalogCapabilities(manifest, provider),
         },
-      ];
-    })
-    .sort((a, b) => {
-      const aRecommended = isRecommendedModel(a.manifest);
-      const bRecommended = isRecommendedModel(b.manifest);
-      if (aRecommended !== bRecommended) return aRecommended ? -1 : 1;
-      const score = (b.manifest.recoScore ?? 0) - (a.manifest.recoScore ?? 0);
-      return score || (a.entry.name ?? a.entry.id).localeCompare(b.entry.name ?? b.entry.id);
-    })
-    .map(({ entry }) => entry);
+      },
+    ];
+  });
+  if (candidates.length === 0) return [];
+
+  const memory = await memoryProfile().catch(() => null);
+  if (!memory) return candidates.sort(byCuratedScore).map(({ entry }) => entry);
+
+  const rated = candidates.map((candidate) => {
+    const { entry, manifest, source } = candidate;
+    return {
+      id: entry.id,
+      residentBytes: footprintBytes(candidate, memory),
+      tags: manifest.tags,
+      supportsTools: manifest.supportsTools,
+      ...(manifest.recoScore !== undefined ? { recoScore: manifest.recoScore } : {}),
+      ...(manifest.licenseClass ? { licenseClass: manifest.licenseClass } : {}),
+      ...(source.quantization ? { quantization: source.quantization } : {}),
+    };
+  });
+  const entries = new Map(candidates.map(({ entry }) => [entry.id, entry]));
+  return rateModelsForDevice(rated, recoDevice(memory)).flatMap((rating) => {
+    const entry = entries.get(rating.id);
+    if (!entry) return [];
+    return [
+      {
+        ...entry,
+        fit: { tier: rating.fit.tier, label: rating.fit.label, detail: rating.fit.detail },
+        recommendation: { score: rating.score, recommended: rating.recommended },
+      },
+    ];
+  });
 }
 
 async function buildModelEntries(
@@ -206,7 +322,12 @@ async function buildModelEntries(
   );
   const availableEntries = buckets.flat();
   const existingIds = new Set([...gezelEntries, ...availableEntries].map((entry) => entry.id));
-  const downloadable = await downloadableCatalogEntries(catalogItems, created, existingIds);
+  const downloadable = await downloadableCatalogEntries(
+    catalogItems,
+    created,
+    existingIds,
+    options.memoryProfile ?? (() => detectMemoryProfileCached()),
+  );
   const apple = await appleSystemModel(created);
   return [...gezelEntries, ...apple, ...availableEntries, ...downloadable];
 }

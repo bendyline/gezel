@@ -26,6 +26,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { consumerCheckFailureSummary, consumerCheckReportPath } from './consumer-check-report.mjs';
 import { spawnPnpmSync } from './pnpm-cli.mjs';
 import { publishedPackageNames } from './published-packages.mjs';
 
@@ -49,6 +50,7 @@ if (existsSync(outputDir) && readdirSync(outputDir).some((file) => file.endsWith
 mkdirSync(outputDir, { recursive: true });
 
 const sourcePath = resolve(repoRoot, 'packages/core/src/browser.ts');
+const consumerReport = consumerCheckReportPath(repoRoot);
 
 /**
  * The development values of the two constants `prepare-package.mjs` stamps.
@@ -133,6 +135,8 @@ function runPnpm(args, options = {}) {
 }
 
 let failed = false;
+let consumerStarted = false;
+const failureMessages = [];
 try {
   console.log(`rehearsal: stamping @bendyline/gezel ${coreVersion}`);
   run(process.execPath, [resolve(repoRoot, 'scripts/prepare-package.mjs'), coreVersion], {
@@ -153,6 +157,7 @@ try {
   );
 
   console.log('rehearsal: installing and exercising the strict release set');
+  consumerStarted = true;
   run(
     process.execPath,
     [
@@ -161,11 +166,15 @@ try {
       outputDir,
       '--require-release-stamp',
     ],
-    { stdio: 'inherit' },
+    {
+      stdio: 'inherit',
+      env: { ...process.env, GEZEL_CONSUMER_REPORT_PATH: consumerReport },
+    },
   );
   console.log(`rehearsal: release candidate with core ${coreVersion} passed`);
 } catch (err) {
   failed = true;
+  failureMessages.push(err.message);
   console.error(err.message);
 } finally {
   writeFileSync(sourcePath, originalSource, 'utf8');
@@ -174,9 +183,9 @@ try {
   const restoredStamp = readStamp(readFileSync(sourcePath, 'utf8'));
   if (!isDevelopmentStamp(restoredStamp)) {
     failed = true;
-    console.error(
-      `rehearsal: packages/core/src/browser.ts was left stamped (${describeStamp(restoredStamp)}) — run \`git checkout -- packages/core/src/browser.ts\` before committing`,
-    );
+    const message = `rehearsal: packages/core/src/browser.ts was left stamped (${describeStamp(restoredStamp)}) — run \`git checkout -- packages/core/src/browser.ts\` before committing`;
+    failureMessages.push(message);
+    console.error(message);
   }
   let restore;
   let restoreError;
@@ -191,11 +200,16 @@ try {
   }
   if (restoreError || restore?.status !== 0) {
     failed = true;
-    console.error(
-      `rehearsal: failed to restore the development core build (${restoreError?.message ?? restore?.status})`,
-    );
+    const message = `rehearsal: failed to restore the development core build (${restoreError?.message ?? restore?.status})`;
+    failureMessages.push(message);
+    console.error(message);
   }
   if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true });
 }
 
-if (failed) process.exit(1);
+if (failed) {
+  console.error('\nrehearsal: FAILED (the core rebuild above was cleanup)');
+  for (const message of failureMessages) console.error(message);
+  if (consumerStarted) console.error(consumerCheckFailureSummary(consumerReport));
+  process.exit(1);
+}

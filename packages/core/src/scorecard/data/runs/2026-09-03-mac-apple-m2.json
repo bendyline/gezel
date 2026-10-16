@@ -56,7 +56,7 @@
           "wikipedia-research-brief"
         ]
       },
-      "note": "Three-model Apple M2 (16 GB) round using native binaries 0.1.38 on Metal. Count 1; core and productivity only — developer and complex-work were not run. Judged post-hoc with the Claude CLI (Sonnet 4.6). qwen3.8-27b-q2 is NOT measurable on this device: weights ~12.6 GB + KV ~2.1 GB at the required 32,768-token working window exceed the ~11.1 GB available, and raising GEZEL_CAPACITY_BUDGET_GB to 14 did not help because the binding constraint is physical RAM. qwen3.8-27b-iq1-s admits (weights ~8.9 GB, context clamped to 57,344 tokens/turn) but was excluded by preflight twice — 2.76 gen tok/s against the floor of 3, then a soft-progress stall — so no 27B cell is recorded. Trials ran with GEZEL_EVAL_HARD_PROGRESS_TIMEOUT_MS=2700000: at ~80-150 tok/s prefill a single healthy turn outlasts the 10-15 min progress windows most scenarios author, and the watchdog was terminating trials mid-prefill (gemma4-12b-q4 read 8/11 before the floor, 10/11 after). Not comparable to rounds measured without that floor."
+      "note": "Three models on an Apple M2 with 16 GB, using native engines 0.1.38. Only general capability and office work were tested. The Quality column was scored afterward by Claude Sonnet 4.6. Qwen 3.8 27B could not be measured: one version needs more memory than this Mac can spare, and the smallest version ran below our minimum speed of 3 tokens per second. This Mac reads long prompts slowly, so tasks were allowed 45 minutes without visible progress before being stopped; that makes this round not directly comparable to others."
     }
   ],
   "results": [

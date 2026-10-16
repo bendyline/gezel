@@ -441,6 +441,36 @@ It writes one `<run-id>.json` file per sweep in [packages/core/src/scorecard/dat
 Those checked-in files are the published record; the articles carry no numbers
 of their own, so a re-run updates what ships with no article edits.
 
+Reviewed private campaigns can be imported without starting new model calls:
+
+```bash
+pnpm scorecard:import-campaigns evals/campaigns/scorecard-six-providers-publication.json
+node scripts/run-with-dependency-lease.mjs --direct-node scripts/gen-scorecard-barrel.mjs
+```
+
+The manifest pins each campaign hash, repeat count, coverage scope and any
+evidence-backed failure-attribution corrections. The importer verifies the
+journal against raw results and fixed scores, preserves unrun cells, and writes
+one shard per original campaign. Focused reruns use `scope: subset`; their
+source/build hashes and notes stay separate even when Git commits match.
+`--check` verifies an existing import without rewriting it.
+
+Two fields handle trials the evaluator broke before the model could act, such
+as a test service the CLI could not connect to. `classificationCorrections`
+keep the failure but attribute it away from the model. `excludedTrials` drop
+it, leaving the cell unmeasured. A `harnessRerun` may fill excluded cells, but
+only when the rerun started from the same commit with the same service build,
+catalog, environment and CLI versions, and changed exactly the evaluator files
+it lists in `harnessChanges`; anything else is a separate round. The
+checked-in publication audit records published outcomes, fixed composites,
+each exclusion's cell and reason, and input hashes; it does not contain
+credentials or overwrite trial evidence. Inline judging remains in the
+original advisory files, not a pooled published score.
+
+Round notes render on every scorecard surface, so write them for the Handboek
+reader: plain language, no flags or environment variables. The audit carries
+the technical detail.
+
 The ceiling `--list` prints is the sum of authored timeouts, not an
 estimate — healthy models finish far inside them. For a full model set it is
 normal to accumulate the sweep across several sittings under one `--run-id`.

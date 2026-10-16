@@ -13,6 +13,7 @@ import {
   createLogger,
   getEngagementMode,
   isEngagementAllowed,
+  isSafeEntityId,
   parseTaskRef,
   rewritePromptDraftFileRefs,
   stringifyCraftbookParamValues,
@@ -62,6 +63,18 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
 
   app.post('/', async (c) => {
     const body = CreateChatSessionRequestSchema.parse(await c.req.json());
+    // A display name or a stale id is the caller's mistake. Unchecked, the
+    // id assertion in the path helpers threw a TypeError that surfaced as a
+    // bare 500 (`gezel run --gezel "Ship Tester"`, 2026-10-15 npm audit).
+    if (!isSafeEntityId(body.gezelId)) {
+      return c.json(
+        { error: `invalid gezel id ${JSON.stringify(body.gezelId)}`, code: 'invalid_entity_id' },
+        400,
+      );
+    }
+    if (!(await ctx.store.getGezel(body.gezelId))) {
+      return c.json({ error: `gezel ${body.gezelId} not found`, code: 'gezel_not_found' }, 404);
+    }
     const session = await ctx.chat.createSession(body);
     return c.json(session, 201);
   });
