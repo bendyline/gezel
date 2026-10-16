@@ -1,3 +1,5 @@
+## @bendyline/gezel [1.2.6](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel%401.2.5...%40bendyline%2Fgezel%401.2.6) (2026-10-16)
+
 ## @bendyline/gezel [1.2.5](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel%401.2.4...%40bendyline%2Fgezel%401.2.5) (2026-10-14)
 
 ## @bendyline/gezel [1.2.4](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel%401.2.3...%40bendyline%2Fgezel%401.2.4) (2026-10-10)
