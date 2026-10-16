@@ -4,7 +4,6 @@ import {
   estimateExactPerSlotKvBytesF16,
   estimateKvReserveBytes,
   estimateWindowedKvLinearization,
-  fitsSwaFullInFastMemory,
   planDenseFfnOffload,
   planMoeOffload,
 } from '@bendyline/gezel-inference/internal/providers/llama-cpp/offload-planner';
@@ -430,25 +429,6 @@ describe('estimateWindowedKvLinearization', () => {
     // The first 24 layers contain 4 global and 20 SWA layers.
     expect(w?.bytesPerToken).toBe(4 * 2 * (512 + 512) * 2);
     expect(w?.fixedBytes).toBe(20 * 2 * (256 + 256) * 2 * (512 + 2048));
-  });
-
-  it('selects full E4B on 16 GiB fast memory and windowed E4B on 8 GiB', () => {
-    const fullKvBytes = 7 * GiB;
-    const residentWeightsBytes = Math.round(4_275_373_792 * 1.2);
-    expect(
-      fitsSwaFullInFastMemory({
-        residentWeightsBytes,
-        fullKvBytes,
-        fastBudgetBytes: Math.floor(16 * GiB * 0.95),
-      }),
-    ).toBe(true);
-    expect(
-      fitsSwaFullInFastMemory({
-        residentWeightsBytes,
-        fullKvBytes,
-        fastBudgetBytes: Math.floor(8 * GiB * 0.95),
-      }),
-    ).toBe(false);
   });
 
   it('scales by the KV cache dtype', () => {

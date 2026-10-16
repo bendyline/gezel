@@ -5417,11 +5417,28 @@ async function resolveCraftbookTarget(args: {
   task?: string;
   craftbook?: string;
 }): Promise<CraftbookTarget> {
-  if (args.craftbook) return { kind: 'craftbook', id: args.craftbook };
   if (args.task) {
     const parsed = await parseRef(args.task);
-    return { kind: 'task', projectId: parsed.projectId, num: parsed.num, ref: args.task };
+    const target: CraftbookTarget = {
+      kind: 'task',
+      projectId: parsed.projectId,
+      num: parsed.num,
+      ref: args.task,
+    };
+    if (!args.craftbook) return target;
+    // Models name the task AND the book it runs, because the task's embedded
+    // copy keeps the template's id. Letting `craftbook` win sent every edit
+    // to the local template while the task kept running its unchanged copy,
+    // and reads came back from the same template, so the model saw its own
+    // edits and reported the task fixed (nemotron3.5-bolt on
+    // craftbook-edit-midtask, 2026-10-15). The task's copy is what runs.
+    const task = await api.getTask(parsed.projectId, parsed.num);
+    if (task.craftbook.id === args.craftbook) return target;
+    throw new Error(
+      `task ${args.task} runs its own copy of craftbook "${task.craftbook.id}", not "${args.craftbook}". Pass only \`task\` to change what that task runs, or only \`craftbook\` to edit the local template "${args.craftbook}".`,
+    );
   }
+  if (args.craftbook) return { kind: 'craftbook', id: args.craftbook };
   if (sessionCraftbookId) return { kind: 'craftbook', id: sessionCraftbookId };
   if (sessionTaskRef) {
     const parsed = await parseRef(sessionTaskRef);
@@ -5463,7 +5480,9 @@ const craftbookTargetArgs = {
   craftbook: z
     .string()
     .optional()
-    .describe('Local craftbook TEMPLATE id to edit. Omit → session craftbook.'),
+    .describe(
+      'Local craftbook TEMPLATE id to edit. Omit → session craftbook. With `task`, the task\'s own copy is edited.',
+    ),
 };
 
 const DELIVERABLE_KIND_HELP = `Artifact class (picks the enforced gate). One of: ${DeliverableKindSchema.options.join(', ')}. Loose values like "html", "md", "csv", "code", "game" are accepted. Omit to infer from the file extension.`;

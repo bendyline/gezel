@@ -1605,9 +1605,12 @@ export const GezelConfigSchema = z.object({
   llamaCppCacheReuse: z.number().int().min(0).optional(),
   /**
    * Use a full-size SWA (sliding-window-attention) KV cache
-   * (`--swa-full`) for SWA models (Gemma family). Trades memory for
-   * fewer recomputes at long context. Default unset (off — llama-server
-   * uses the memory-efficient windowed cache).
+   * (`--swa-full`) for SWA models (Gemma family). Buys prefix reuse across
+   * turns at the cost of memory AND decode speed: on gemma4-31b (2026-10-15)
+   * it decoded 17-25% slower and trials ran 19% longer, because decode reads
+   * each SWA layer's whole cache. Default unset (off — llama-server uses the
+   * memory-efficient windowed cache); a model manifest's `swaFull` applies
+   * when this is unset.
    *
    * Also the PRECONDITION for `llamaCppCacheReuse` on these models:
    * llama-server tests whether the loaded context can KV-shift and, for a

@@ -36,8 +36,9 @@ const GgufValueType = {
 } as const;
 type GgufValueType = (typeof GgufValueType)[keyof typeof GgufValueType];
 
-// `general.file_type` enum from llama.cpp/src/llama.h. Only the
-// common values — the enum has ~30 entries and upstream adds more.
+// `general.file_type` enum (`llama_ftype`) from llama.cpp's include/llama.h.
+// Copy new values from upstream rather than guessing: this table once mapped
+// 30 to BF16 (upstream 30 is IQ4_XS, BF16 is 32) and had no NVFP4 at all.
 // Anything unrecognised is reported by number.
 const FILE_TYPE_NAMES: Record<number, string> = {
   0: 'ALL_F32',
@@ -58,8 +59,24 @@ const FILE_TYPE_NAMES: Record<number, string> = {
   18: 'MOSTLY_Q6_K',
   19: 'MOSTLY_IQ2_XXS',
   20: 'MOSTLY_IQ2_XS',
+  21: 'MOSTLY_Q2_K_S',
+  22: 'MOSTLY_IQ3_XS',
   23: 'MOSTLY_IQ3_XXS',
-  30: 'MOSTLY_BF16',
+  24: 'MOSTLY_IQ1_S',
+  25: 'MOSTLY_IQ4_NL',
+  26: 'MOSTLY_IQ3_S',
+  27: 'MOSTLY_IQ3_M',
+  28: 'MOSTLY_IQ2_S',
+  29: 'MOSTLY_IQ2_M',
+  30: 'MOSTLY_IQ4_XS',
+  31: 'MOSTLY_IQ1_M',
+  32: 'MOSTLY_BF16',
+  36: 'MOSTLY_TQ1_0',
+  37: 'MOSTLY_TQ2_0',
+  38: 'MOSTLY_MXFP4_MOE',
+  39: 'MOSTLY_NVFP4',
+  40: 'MOSTLY_Q1_0',
+  41: 'MOSTLY_Q2_0',
 };
 
 /**

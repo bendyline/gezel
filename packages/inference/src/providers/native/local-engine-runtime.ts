@@ -1492,7 +1492,6 @@ export class LocalEngineRuntime {
       (residentContextWindow !== undefined && !overrideActive) || envNumCtx !== undefined;
 
     const {
-      autoKvCacheMaxBytes,
       defaultLocalEngineSlots,
       estimatePerSlotKvBytes,
       kvQuantScale,
@@ -1854,29 +1853,18 @@ export class LocalEngineRuntime {
           vramBytes: capacity.vramBytes,
         });
         // Mirror the launch path's windowed-cache admission (see
-        // buildLlamaCppProvider): when the launch will decline the Gemma
-        // `--swa-full` auto-default (or the windowed cache is pinned), the
-        // full-attention plan above overstates the real allocation — re-plan
-        // with the windowed linearization so the previewed window matches
-        // what the engine will actually grant.
+        // buildLlamaCppProvider): unless `swaFull` is pinned, a
+        // sliding-window model runs the windowed cache, which the
+        // full-attention plan above overstates — re-plan with the windowed
+        // linearization so the previewed window matches what the engine will
+        // actually grant.
         // Strict model-max deliberately does NOT gate this: for SWA models
         // the windowed cache is the only layout whose native-window KV can
         // fit real machines, and the strict minimum rides inside
         // `requirement.minimumPerTurnCtxTokens`, so the windowed
         // re-plan sheds slots or denies but never shortens the window.
         const explicitSwaFull = config.llamaCppSwaFull ?? manifestEngineConfig?.swaFull;
-        const fullCacheOverCeiling =
-          exactKvAtReference !== undefined &&
-          (exactKvAtReference / referenceCtx) * grantedCtx * slots > autoKvCacheMaxBytes();
-        const windowedCacheWillRun =
-          (!admission.minimumSatisfied ||
-            admission.clamped ||
-            admission.slots < slots ||
-            fullCacheOverCeiling) &&
-          (explicitSwaFull === false ||
-            (explicitSwaFull === undefined &&
-              isGemmaModel({ architecture: installed.architecture, modelId })));
-        if (windowedCacheWillRun) {
+        if (explicitSwaFull !== true) {
           const windowed = estimateWindowedKvLinearization({
             blockCount: summary.blockCount,
             embeddingLength: summary.embeddingLength,
@@ -1915,9 +1903,15 @@ export class LocalEngineRuntime {
               bytesPerToken: windowed.bytesPerToken,
               fixedPerSlotBytes: windowed.fixedBytes,
             };
-          } else if ((summary.slidingWindow ?? 0) > 0 || explicitSwaFull === undefined) {
-            // SWA model without a readable layout: the launch path leaves
-            // such a launch untouched — preview the requested window.
+          } else if (
+            (!admission.minimumSatisfied || admission.clamped || admission.slots < slots) &&
+            (explicitSwaFull === false
+              ? (summary.slidingWindow ?? 0) > 0
+              : isGemmaModel({ architecture: installed.architecture, modelId }))
+          ) {
+            // SWA model without a readable layout, over budget on full
+            // math: the launch path leaves such a launch untouched — preview
+            // the requested window.
             return { grantedCtx, slots, kvCacheType: kv, plannedFieldsOk: false };
           }
         }

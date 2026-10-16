@@ -425,8 +425,8 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
     async (value: TriState) => {
       showSavingState('saving');
       try {
-        // Auto (null) clears the override → on for the Gemma family, off
-        // otherwise. On/Off force the flag regardless of architecture.
+        // Auto (null) clears the override → the model's catalog entry
+        // decides, windowed when it is silent. On/Off force the flag.
         const next = await api.updateConfig({
           llamaCppSwaFull: value === 'auto' ? null : value === 'on',
         });
@@ -844,18 +844,18 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
             onChange={(e) => void saveSwaFull(e.target.value as TriState)}
             style={{ flex: 1, maxWidth: '20rem' }}
           >
-            <option value="auto">Auto — full only when it fits fast memory</option>
+            <option value="auto">Auto — windowed unless the model asks for full</option>
             <option value="on">On — always full cache (--swa-full)</option>
             <option value="off">Off — memory-efficient windowed cache</option>
           </select>
         </div>
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
           For sliding-window models (the Gemma family): retain old KV entries that the
-          memory-efficient windowed cache normally discards. This can enable prompt reuse and other
-          cache operations where the engine supports them, but its memory cost grows with context.{' '}
-          <em>Auto</em> uses the full cache only when the model weights and full KV cache fit in
-          fast memory — VRAM on a discrete GPU — and otherwise keeps the windowed cache. Takes
-          effect the next time the engine starts.
+          memory-efficient windowed cache normally discards. This enables prompt reuse across turns,
+          but its memory cost grows with context, and replies usually come more slowly because every
+          token reads the larger cache. <em>Auto</em> keeps the windowed cache unless the
+          model&apos;s catalog entry asks for the full one. Takes effect the next time the engine
+          starts.
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>

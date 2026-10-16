@@ -392,19 +392,19 @@ describe('LlamaCppSettings', () => {
   });
 
   // The SWA cache control is a tri-state select (Auto / On / Off). Auto keeps
-  // the memory-efficient cache unless weights + full KV fit in fast memory.
+  // the memory-efficient cache unless the model's catalog entry pins the full one.
   const findSwaSelect = () =>
     (screen.getAllByRole('combobox') as HTMLSelectElement[]).find((s) =>
-      within(s).queryByText(/full only when it fits fast memory/),
+      within(s).queryByText(/windowed unless the model asks for full/),
     )!;
 
-  it('explains that Auto is gated by fast-memory fit', async () => {
+  it('explains that Auto keeps the windowed cache', async () => {
     render(
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
     await openAdvanced();
     expect(findSwaSelect()).toHaveValue('auto');
-    expect(screen.getByText(/VRAM on a discrete GPU/)).toBeInTheDocument();
+    expect(screen.getByText(/replies usually come more slowly/)).toBeInTheDocument();
   });
 
   it('setting the full SWA cache to On saves llamaCppSwaFull: true', async () => {

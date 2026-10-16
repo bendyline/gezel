@@ -948,11 +948,9 @@ function envGrowthCeilingTokens(): number | null {
 }
 
 /**
- * The most KV cache an automatic choice plans for one llama.cpp engine:
- * adaptive growth stops here, and the Gemma `--swa-full` auto-default is
- * declined when its full-size cache would pass it. Explicit settings (a
- * numeric context, a pinned `swaFull`) are the operator's call and bypass it;
- * it never shortens the ladder-settled base window either.
+ * The most KV cache adaptive growth plans for one llama.cpp engine. An
+ * explicit numeric context is the operator's call and skips growth
+ * altogether, and the ceiling never shortens the ladder-settled base window.
  *
  * Past this a bigger cache buys nothing: llama.cpp's prefill and decode cost
  * follows the tokens actually present, not the reservation, so the rest only
@@ -1409,11 +1407,9 @@ export interface AdaptiveCtxGrowthResult {
  * settled slots and granted the un-grown request.
  *
  * Deliberately a second clamp pass rather than a bigger first request:
- * the first ladder pass sizes slot ceilings, the `--swa-full` fit verdict,
- * and RAM-spillover admission, all of which must stay anchored on the
- * practical 64K target — growing the request there would decline
- * `--swa-full` for models whose full cache fits at 64K and grow KV into
- * system-RAM spill on discrete cards.
+ * the first ladder pass sizes slot ceilings and RAM-spillover admission,
+ * both of which must stay anchored on the practical 64K target — growing
+ * the request there would grow KV into system-RAM spill on discrete cards.
  *
  * Slot trade: when `allowSlotTrade` is set and the target is out of reach
  * at the settled slot count, growth walks the count down — taking the
