@@ -317,8 +317,10 @@ export function createHttpModelManager(
             ? {
                 phase: 'downloading',
                 message: 'Downloading model',
-                bytesWritten: event.bytesWritten,
-                totalBytes: event.totalBytes,
+                // Install-wide, not one concurrently downloading MLX file's.
+                ...(event.bytesWrittenAll !== undefined && event.totalBytesAll !== undefined
+                  ? { bytesWritten: event.bytesWrittenAll, totalBytes: event.totalBytesAll }
+                  : { bytesWritten: event.bytesWritten, totalBytes: event.totalBytes }),
               }
             : { phase: 'verifying', message: 'Preparing model' },
         );

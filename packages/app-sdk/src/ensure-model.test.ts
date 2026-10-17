@@ -136,6 +136,49 @@ describe('ensureModel', () => {
     });
   });
 
+  it('reports install-wide bytes while MLX downloads files concurrently', async () => {
+    const client = {
+      getNativeEngineStatus: vi.fn().mockRejectedValue(new Error('old daemon')),
+      listMlxModels: vi
+        .fn()
+        .mockResolvedValueOnce({ models: [] })
+        .mockResolvedValue({ models: [{ id: 'sharded' }] }),
+    } as unknown as GezelClient;
+    const fileProgress = (bytesWritten: number, bytesWrittenAll: number) => ({
+      type: 'progress',
+      jobId: 'job-1',
+      modelId: 'mlx:sharded',
+      bytesWritten,
+      totalBytes: 100,
+      bytesWrittenAll,
+      totalBytesAll: 700,
+    });
+    const app = {
+      ensureModel: vi.fn().mockResolvedValue({
+        status: 'downloading',
+        model_id: 'mlx:sharded',
+        job_id: 'job-1',
+      }),
+      streamEnsureEvents: vi.fn(async function* () {
+        // Two shards interleaved: their own percentages alternate 60% / 20%.
+        yield fileProgress(60, 70);
+        yield fileProgress(20, 80);
+        yield { type: 'done', jobId: 'job-1', modelId: 'mlx:sharded' };
+      }),
+    } as unknown as GezelApp;
+    const events: EnsureProgressEvent[] = [];
+
+    await ensureModel(
+      { client, app, owned: false, platform: 'darwin', arch: 'arm64' },
+      { model: 'sharded', onEvent: (event) => events.push(event) },
+    );
+
+    expect(events.filter((event) => 'bytesWritten' in event)).toEqual([
+      { phase: 'weights', message: 'downloading sharded', bytesWritten: 70, totalBytes: 700 },
+      { phase: 'weights', message: 'downloading sharded', bytesWritten: 80, totalBytes: 700 },
+    ]);
+  });
+
   it('can prepare the engine without starting a model-weight download', async () => {
     const client = {
       getNativeEngineStatus: vi.fn().mockResolvedValue({
