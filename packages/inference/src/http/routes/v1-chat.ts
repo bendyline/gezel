@@ -28,6 +28,7 @@ import {
   resolvePinnedModelTarget,
 } from '../openai-compat/chat-target.js';
 import type { ChatTarget } from '../openai-compat/chat-target.js';
+import { engineFailure } from '../openai-compat/engine-failure.js';
 import { overlayOpenAiRequestTuning } from '../openai-compat/request-tuning.js';
 import {
   createStreamingDiagnostics,
@@ -683,13 +684,14 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
                 error: describeErrorChain(err),
               })}`,
             );
+            const failure = engineFailure(err);
             await stream
               .writeSSE({
                 data: JSON.stringify({
                   error:
                     err instanceof UnsupportedResponseFormatError
                       ? { message, type: 'invalid_request_error', code: err.code }
-                      : { message, type: 'server_error', code: 'provider_error' },
+                      : { message, type: failure.type, code: failure.code },
                 }),
               })
               .catch((sseErr) => {
@@ -817,6 +819,16 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
         );
       }
       const message = err instanceof Error ? err.message : String(err);
+      // Before the prose checks below: an engine's own message can contain
+      // "empty", and a typed failure says more than any substring does.
+      const failure = engineFailure(err);
+      if (failure.code !== 'provider_error') {
+        log.warn(`chat completion failed (${failure.code}): ${message}`);
+        return c.json(
+          { error: { message, type: failure.type, code: failure.code } },
+          failure.status,
+        );
+      }
       if (
         message.includes('messages must') ||
         message.includes('empty') ||

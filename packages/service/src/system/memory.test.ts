@@ -81,6 +81,34 @@ describe('memoryProfileForLlamaGpu', () => {
     expect(result.budgetBytes).toBe(Math.floor(32 * GiB * 0.7));
   });
 
+  it("credits an AMD APU's firmware carve-out, which system RAM no longer counts", () => {
+    const gpu = {
+      vramBytes: 8 * GiB,
+      name: 'AMD Radeon(TM) Graphics',
+      vendor: 'amd' as const,
+      memoryKind: 'integrated' as const,
+    };
+    const visible = 8 * GiB - 200 * 1024 ** 2;
+    const credited = memoryProfileForLlamaGpu('win32', visible, gpu, 8 * GiB);
+    const uncredited = memoryProfileForLlamaGpu('win32', visible, gpu);
+
+    expect(credited).toMatchObject({ gpuMemoryKind: 'integrated', gpuReservedBytes: 8 * GiB });
+    expect(uncredited.gpuReservedBytes).toBeUndefined();
+    // 7.5 GiB of the carve-out on top of the RAM share, for both figures.
+    expect(credited.budgetBytes - uncredited.budgetBytes).toBe(7.5 * GiB);
+    expect(credited.usableBytes - uncredited.usableBytes).toBe(7.5 * GiB);
+  });
+
+  it('never credits a carve-out to a GPU that is not integrated', () => {
+    const result = memoryProfileForLlamaGpu(
+      'linux',
+      32 * GiB,
+      { vramBytes: 12 * GiB, name: 'Intel Arc A770 Graphics', memoryKind: 'discrete' },
+      8 * GiB,
+    );
+    expect(result.gpuReservedBytes).toBeUndefined();
+  });
+
   it('still adds real discrete VRAM to the system-RAM share', () => {
     const result = memoryProfileForLlamaGpu('linux', 32 * GiB, {
       vramBytes: 12 * GiB,

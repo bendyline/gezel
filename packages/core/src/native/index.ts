@@ -36,7 +36,10 @@ export {
   llamaQuarantinePath,
   readLlamaQuarantine,
   recordLlamaQuarantine,
+  resolveLlamaFallbackBinary,
 } from './llama-quarantine.js';
+export type { EngineExit, UnrunnableBuild } from './unrunnable-build.js';
+export { formatExitCode, unrunnableBuildExit } from './unrunnable-build.js';
 export type {
   DiscoverInput,
   DiscoverResult,
@@ -70,6 +73,8 @@ export type {
   DeviceSafetyMode,
   DeviceSafetyPolicyInput,
   DeviceTelemetryFailurePolicy,
+  DeviceGpuAdapter,
+  DeviceSystemFacts,
   DeviceVendor,
   ResolvedDeviceSafetyPolicy,
   SystemDeviceHealthProbeOptions,
@@ -81,7 +86,9 @@ export {
   DeviceHealthGate,
   evaluateDeviceHealth,
   parseAmdSmiJson,
+  parseDeviceSystemFactsJson,
   parseNvidiaSmiCsv,
+  readDeviceSystemFacts,
   resolveDeviceSafetyPolicy,
 } from './device-health.js';
 export type { FindGpuPanicOptions, GpuPanicRecord } from './gpu-panic.js';

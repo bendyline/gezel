@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import type { MiddlewareHandler } from 'hono';
+import {
+  ENGINE_FAILURE_SUMMARIES,
+  isEngineFailureCode,
+} from '@bendyline/gezel-inference/internal/http/openai-compat/engine-failure';
+import type { Context, MiddlewareHandler } from 'hono';
 import { isUpstreamFetchErrorCode } from './upstream-fetch-error.js';
 export interface UnexpectedHttpErrorEvent {
   kind: 'unhandled_exception' | 'unsanitized_response';
@@ -24,6 +28,21 @@ export function notifyUnexpectedHttpError(
     );
   }
 }
+/** Swap the response body, carrying over only the headers a client needs. */
+function replaceBody(c: Context, prior: Response, body: unknown): Response {
+  const replacement = new Response(JSON.stringify(body), {
+    status: prior.status,
+    headers: { 'content-type': 'application/json; charset=UTF-8' },
+  });
+  for (const [name, value] of prior.headers) {
+    if (name.startsWith('access-control-') || name === 'vary' || name === 'retry-after') {
+      replacement.headers.set(name, value);
+    }
+  }
+  c.res = replacement;
+  return replacement;
+}
+
 export function opaqueServerErrors(
   log: { error: (message: string) => void },
   onUnexpectedHttpError?: UnexpectedHttpErrorHandler,
@@ -72,6 +91,21 @@ export function opaqueServerErrors(
         c.header('x-request-id', parsed.requestId);
         return;
       }
+      // A typed on-device engine failure from an OpenAI-compatible route
+      // (engine-failure.ts): an expected, actionable state with a stable code
+      // a connected app can act on. Keep the code; swap the provider's own
+      // message, which can name binaries and model paths, for its fixed summary.
+      const envelope = parsed.error as { code?: unknown } | null | undefined;
+      if (envelope && typeof envelope === 'object' && isEngineFailureCode(envelope.code)) {
+        replaceBody(c, prior, {
+          error: {
+            message: ENGINE_FAILURE_SUMMARIES[envelope.code],
+            type: 'server_error',
+            code: envelope.code,
+          },
+        });
+        return;
+      }
       // Broker outages, capacity denials, media-engine readiness failures, and
       // an unreachable third-party site are expected, actionable degraded
       // states rather than route exceptions.
@@ -108,16 +142,9 @@ export function opaqueServerErrors(
       },
       log,
     );
-    const replacement = new Response(JSON.stringify({ error: 'internal_error', requestId }), {
-      status: prior.status,
-      headers: { 'content-type': 'application/json; charset=UTF-8' },
-    });
-    for (const [name, value] of prior.headers) {
-      if (name.startsWith('access-control-') || name === 'vary' || name === 'retry-after') {
-        replacement.headers.set(name, value);
-      }
-    }
-    replacement.headers.set('x-request-id', requestId);
-    c.res = replacement;
+    replaceBody(c, prior, { error: 'internal_error', requestId }).headers.set(
+      'x-request-id',
+      requestId,
+    );
   };
 }

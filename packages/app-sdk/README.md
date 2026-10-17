@@ -463,7 +463,13 @@ Errors thrown by the SDK are `GezelSdkError` instances carrying both an HTTP `st
 - `tool_choice_function_not_supported_v1` — a specific function was pinned via object-form `tool_choice`
 - `embeddings_not_supported` — provider doesn't expose embeddings
 - `missing_scope:<scope>` — token is missing the requested scope
-- `provider_error` — backend provider call failed
+- `capacity_denied` — this machine does not have enough free memory to run the on-device model
+- `engine_busy` — the on-device engine is busy with another request; retry shortly
+- `engine_launch_failed` — the on-device engine process could not be started
+- `engine_crashed` — the on-device engine stopped unexpectedly; the next request restarts it, on another engine build when the crash proved this one cannot run here
+- `engine_not_ready` / `model_not_ready` — the engine or model is still downloading or loading
+- `context_length_exceeded` (HTTP 400) — the prompt is longer than the model's context window
+- `provider_error` — backend provider call failed for any other reason
 
 From the host entry:
 

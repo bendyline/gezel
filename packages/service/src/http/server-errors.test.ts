@@ -64,6 +64,38 @@ describe('opaqueServerErrors', () => {
     });
   });
 
+  it("keeps a chat route's engine-failure code but swaps its message for a fixed one", async () => {
+    const messages: string[] = [];
+    const app = new Hono();
+    app.use('*', opaqueServerErrors({ error: (message) => messages.push(message) }));
+    app.post('/v1/chat/completions', (c) =>
+      c.json(
+        {
+          error: {
+            message: 'child exited (code=3221225477) at C:\\Users\\alice\\gezel-llama-server.exe',
+            type: 'server_error',
+            code: 'engine_crashed',
+          },
+        },
+        500,
+      ),
+    );
+    app.post('/v1/other', (c) =>
+      c.json({ error: { message: 'C:\\Users\\alice', type: 'server_error', code: 'nope' } }, 500),
+    );
+
+    const crashed = await app.request('/v1/chat/completions', { method: 'POST' });
+    expect(crashed.status).toBe(500);
+    const body = (await crashed.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('engine_crashed');
+    expect(body.error.message).toBeTruthy();
+    expect(JSON.stringify(body)).not.toContain('alice');
+    expect(messages).toEqual([]);
+
+    const other = await app.request('/v1/other', { method: 'POST' });
+    expect(await other.json()).toMatchObject({ error: 'internal_error' });
+  });
+
   it('preserves the fixed machine-engine outage code without leaking details', async () => {
     const app = new Hono();
     app.use('*', opaqueServerErrors({ error: () => {} }));

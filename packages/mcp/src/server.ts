@@ -5481,7 +5481,7 @@ const craftbookTargetArgs = {
     .string()
     .optional()
     .describe(
-      'Local craftbook TEMPLATE id to edit. Omit → session craftbook. With `task`, the task\'s own copy is edited.',
+      "Local craftbook TEMPLATE id to edit. Omit → session craftbook. With `task`, the task's own copy is edited.",
     ),
 };
 

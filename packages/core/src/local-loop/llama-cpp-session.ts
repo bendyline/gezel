@@ -10,6 +10,7 @@
 
 import { CONDENSED_TOOL_OUTPUT_NOTICE, autoCompactedNotice } from '../context-notices.js';
 import { createLogger } from '../log.js';
+import { formatExitCode, unrunnableBuildExit } from '../native/unrunnable-build.js';
 import { leaksUntaggedReasoning } from '../ollama-models.js';
 import type { ProviderQueue } from '../runtime/provider-queue.js';
 import { AwakeBudget, createAwakeTimeout } from '../suspend-clock.js';
@@ -177,20 +178,26 @@ export class NativeEngineCrashedError extends Error {
     cause?: unknown,
   ) {
     const causeMessage = cause instanceof Error ? cause.message : cause ? String(cause) : '';
+    // Windows reports a crash as an exit status, never a signal.
     const detail = snapshot.panicKind
       ? ` (${snapshot.panicKind})`
       : snapshot.signal
         ? ` (${snapshot.signal})`
-        : '';
+        : snapshot.code
+          ? ` (exit ${formatExitCode(snapshot.code)})`
+          : '';
     // An unrunnable build is not a transient fault, so it must not be
     // described as one. "It will restart on the next request" is true of
     // a CUDA OOM and actively misleading here: the restart reproduces
-    // the crash byte-for-byte. Say what happened and what changes.
-    const unrunnable = snapshot.panicKind === 'illegal-instruction' && !snapshot.reachedReady;
+    // the crash byte-for-byte. Say what happened and what changes — the
+    // same decision quarantines the build (unrunnable-build.ts).
+    const backend = snapshot.diagnostics?.backend;
+    const unrunnable = unrunnableBuildExit(
+      snapshot,
+      typeof backend === 'string' ? backend : undefined,
+    );
     const outcome = unrunnable
-      ? 'This build cannot run on this machine — it uses CPU instructions this processor does not ' +
-        'support, or faulted inside GPU library startup. Gezel will switch to another engine ' +
-        'backend on the next request.'
+      ? `${unrunnable.summary} Gezel will switch to another engine backend on the next request.`
       : 'It will restart on the next request.';
     super(
       `[llama-cpp] on-device engine crashed${detail}; incident=${snapshot.incidentId}. ` +
