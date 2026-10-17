@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { GATE_DEFAULT_MAX_ATTEMPTS } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { craftbookStepMilestones } from './craftbooks/scenario.ts';
@@ -9,6 +10,7 @@ import { resolveEvalRunsDir } from './run-paths.ts';
 import {
   EVAL_UV_CACHE_ENV,
   PoisonedSessionRecoveryTracker,
+  activeRuntimeGate,
   attachableDeliverable,
   behaviorEnvForTrial,
   buildPoisonedSessionRecoveryMessage,
@@ -30,6 +32,7 @@ import {
   incompleteTranscripts,
   inflightDeferMsForEngine,
   isHarnessInterventionSettling,
+  largeModelKvFallback,
   linkUvTreeIntoTrial,
   llamaCppEvalLaunchOverridesForModel,
   llamaCppReasoningEffortEvalConfig,
@@ -1742,10 +1745,10 @@ describe('llamaCppEvalLaunchOverridesForModel', () => {
       GEZEL_LLAMA_PRE_FIRST_BYTE_TIMEOUT_MS: '900000',
       GEZEL_CAPACITY_BUDGET_GB: '110',
     });
-    expect(actual?.config).toMatchObject({
-      providerConcurrency: { 'llama-cpp': 1 },
-      llamaCppKvCacheType: 'q4_0',
-    });
+    expect(actual?.config).toMatchObject({ providerConcurrency: { 'llama-cpp': 1 } });
+    // KV precision is decided against the daemon's plan, not pinned by size.
+    expect(actual?.config).not.toHaveProperty('llamaCppKvCacheType');
+    expect(actual?.fallbackKvCacheType).toBe('q4_0');
     expect(actual?.config).not.toHaveProperty('modelTuning');
     expect(actual?.minTrialTimeoutMs).toBe(60 * 60_000);
     expect(actual?.hardProgressTimeoutMs).toBe(45 * 60_000);
@@ -1753,6 +1756,105 @@ describe('llamaCppEvalLaunchOverridesForModel', () => {
     expect(actual?.summary).toContain('numCtx=65536');
     expect(actual?.summary).toContain('hardProgressTimeout=45m');
     expect(actual?.summary).toContain('minTrialTimeout=60m');
+  });
+});
+
+describe('activeRuntimeGate', () => {
+  const plateauStart = Date.parse('2026-10-17T05:15:48Z');
+  const polishTask = (step: Record<string, unknown>, status = 'active') => ({
+    ref: 'quarterly-brief/1',
+    status,
+    activeStepId: 'polish',
+    craftbook: {
+      id: 'quarterly-brief-assembly',
+      name: 'Quarterly Brief Assembly',
+      entryStepId: 'draft',
+      steps: [{ id: 'polish', name: 'Polish and close', gate: { maxAttempts: 8 }, ...step }],
+    },
+  });
+
+  it('defers to a gate that rejected inside the plateau with attempts left', () => {
+    // nemotron3.5-bolt, 2026-10-17: first polish rejection at 05:21:40.
+    const task = polishTask({
+      gateAttempts: 1,
+      lastGateReject: { at: '2026-10-17T05:21:40Z', messageFingerprint: 'f', message: 'm' },
+    });
+    expect(activeRuntimeGate([task] as never, plateauStart)).toMatchObject({
+      ref: 'quarterly-brief/1',
+      stepId: 'polish',
+      attempts: 1,
+      maxAttempts: 8,
+    });
+  });
+
+  it('does not defer once the gate budget is spent, the task paused, or the rejection is stale', () => {
+    const reject = { messageFingerprint: 'f', message: 'm' };
+    const spent = polishTask({
+      gateAttempts: 8,
+      lastGateReject: { ...reject, at: '2026-10-17T05:21:40Z' },
+    });
+    const paused = polishTask(
+      { gateAttempts: 2, lastGateReject: { ...reject, at: '2026-10-17T05:21:40Z' } },
+      'paused',
+    );
+    const stale = polishTask({
+      gateAttempts: 2,
+      lastGateReject: { ...reject, at: '2026-10-17T05:10:00Z' },
+    });
+    expect(activeRuntimeGate([spent, paused, stale] as never, plateauStart)).toBeUndefined();
+  });
+
+  it('uses the runtime default budget when the gate sets none', () => {
+    const task = polishTask({
+      gate: {},
+      gateAttempts: GATE_DEFAULT_MAX_ATTEMPTS,
+      lastGateReject: { at: '2026-10-17T05:21:40Z', messageFingerprint: 'f', message: 'm' },
+    });
+    expect(activeRuntimeGate([task] as never, plateauStart)).toBeUndefined();
+  });
+});
+
+describe('largeModelKvFallback', () => {
+  const launch = llamaCppEvalLaunchOverridesForModel('nemotron3.5-super-vl-120b-nvfp4');
+
+  it('leaves KV to the product when its plan admits the full launch window', () => {
+    // Nemotron-H attends in 8 of 88 layers: f16 at 65K is 0.5 GiB.
+    const models = [{ id: 'nemotron3.5-super-vl-120b-nvfp4', effectiveContextWindow: 65536 }];
+    expect(
+      largeModelKvFallback({ launch, modelId: 'nemotron3.5-super-vl-120b-nvfp4', models }),
+    ).toBeUndefined();
+  });
+
+  it('pins q4_0 when the plan clamps the window or cannot admit it at all', () => {
+    // Dense attention in all 88 layers: f16 at 65K is 22 GiB.
+    const modelId = 'mistral-medium-3.5-128b-q4';
+    const largeLaunch = llamaCppEvalLaunchOverridesForModel(modelId);
+    expect(
+      largeModelKvFallback({
+        launch: largeLaunch,
+        modelId,
+        models: [{ id: modelId, effectiveContextWindow: 32768 }],
+      }),
+    ).toBe('q4_0');
+    expect(
+      largeModelKvFallback({
+        launch: largeLaunch,
+        modelId,
+        models: [{ id: modelId, contextSizingStatus: 'insufficient-memory' }],
+      }),
+    ).toBe('q4_0');
+  });
+
+  it('keeps the fallback when the daemon cannot price the model', () => {
+    expect(
+      largeModelKvFallback({ launch, modelId: 'nemotron3.5-super-vl-120b-nvfp4', models: [] }),
+    ).toBe('q4_0');
+  });
+
+  it('does nothing for a launch without a fallback', () => {
+    expect(
+      largeModelKvFallback({ launch: undefined, modelId: 'qwen3.6-35b-a3b-q4', models: [] }),
+    ).toBeUndefined();
   });
 });
 

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  evalGpuDrainState,
   isEvalNativeGpuProcessText,
   isSuccessfulBatch,
   isSuccessfulMatrix,
@@ -736,6 +737,22 @@ describe('matrix GPU settle', () => {
       true,
     );
     expect(isEvalNativeGpuProcessText('/opt/gezel/ds4-server --model deepseek.gguf')).toBe(true);
+  });
+
+  it('counts a GPU holding only non-eval clients as drained, so the settle still runs', async () => {
+    const text = async (app: { processName: string }) => app.processName;
+    const warpOnly = await evalGpuDrainState(
+      parseGpuComputeApps('43408, /usr/bin/warp-terminal\n'),
+      text,
+    );
+    expect(warpOnly.drained).toBe(true);
+    expect(warpOnly.ignored.map((app) => app.pid)).toEqual(['43408']);
+
+    const engineStillUp = await evalGpuDrainState(
+      parseGpuComputeApps('43408, /usr/bin/warp-terminal\n2031407, gezel-llama-server\n'),
+      text,
+    );
+    expect(engineStillUp.drained).toBe(false);
   });
 
   it('waits for GPU memory between local-engine scenarios', async () => {

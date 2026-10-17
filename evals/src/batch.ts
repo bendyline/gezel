@@ -593,6 +593,24 @@ export function isEvalNativeGpuProcessText(text: string): boolean {
   );
 }
 
+/**
+ * Whether every eval-native engine has left the GPU. Other compute clients
+ * are reported for the log but never block the wait or excuse the settle.
+ */
+export async function evalGpuDrainState(
+  apps: ReadonlyArray<GpuComputeApp>,
+  processText: (app: GpuComputeApp) => Promise<string>,
+): Promise<{ drained: boolean; ignored: Array<GpuComputeApp & { text: string }> }> {
+  const ignored: Array<GpuComputeApp & { text: string }> = [];
+  let evalApps = 0;
+  for (const app of apps) {
+    const text = await processText(app);
+    if (isEvalNativeGpuProcessText(text)) evalApps += 1;
+    else ignored.push({ ...app, text });
+  }
+  return { drained: evalApps === 0, ignored };
+}
+
 async function gpuProcessText(app: GpuComputeApp): Promise<string> {
   try {
     const cmdline = await readFile(`/proc/${app.pid}/cmdline`, 'utf8');
@@ -663,33 +681,25 @@ async function waitForEvalGpuProcessesToDrain(): Promise<void> {
         ['--query-compute-apps=pid,process_name', '--format=csv,noheader'],
         { timeout: 5000 },
       );
-      const activeApps = parseGpuComputeApps(stdout);
-      if (activeApps.length === 0) {
-        // No compute apps. Brief settle to let the driver finish
-        // releasing the CUDA buffer — empirically the OOM on the next
-        // spawn happens within the first 1-2s of the new
-        // ggml_cuda_init, so 3s of headroom is plenty.
+      const { drained, ignored } = await evalGpuDrainState(
+        parseGpuComputeApps(stdout),
+        gpuProcessText,
+      );
+      if (drained) {
+        // Brief settle to let the driver finish releasing the CUDA buffer —
+        // empirically the OOM on the next spawn happens within the first
+        // 1-2s of the new ggml_cuda_init, so 3s of headroom is plenty. An
+        // unrelated GPU client (a terminal, a browser) says nothing about
+        // that release, so it never skips the settle; it used to, and every
+        // trial on a desktop with warp-terminal spawned without one.
         await new Promise((r) => setTimeout(r, 3000));
+        const others =
+          ignored.length > 0
+            ? `; ignored non-eval apps ${ignored.map((app) => `${app.pid}:${app.processName || app.text}`).join(', ')}`
+            : '';
         // eslint-disable-next-line no-console
         console.log(
-          `[matrix] GPU compute apps drained after ${waitedMs}ms wait (+3s settle); next scenario clear to spawn`,
-        );
-        return;
-      }
-      const activeEvalApps: GpuComputeApp[] = [];
-      const ignoredApps: Array<GpuComputeApp & { text: string }> = [];
-      for (const app of activeApps) {
-        const text = await gpuProcessText(app);
-        if (isEvalNativeGpuProcessText(text)) {
-          activeEvalApps.push(app);
-        } else {
-          ignoredApps.push({ ...app, text });
-        }
-      }
-      if (activeEvalApps.length === 0) {
-        // eslint-disable-next-line no-console
-        console.log(
-          `[matrix] GPU compute apps active but none are eval-native; skipping settle wait (${ignoredApps.map((app) => `${app.pid}:${app.processName || app.text}`).join(', ')})`,
+          `[matrix] GPU compute apps drained after ${waitedMs}ms wait (+3s settle)${others}; next scenario clear to spawn`,
         );
         return;
       }
