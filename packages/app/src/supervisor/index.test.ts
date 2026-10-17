@@ -158,6 +158,21 @@ vi.mock('@bendyline/gezel/native', () => ({
     entries: Array<{ backend: string }>,
     backend: 'cuda' | 'vulkan' | 'metal' | 'cpu',
   ) => entries.some((e) => e.backend === backend),
+  // The NVIDIA driver check is core's to test; here the build check is the
+  // quarantine alone.
+  createLlamaBuildCheck: ({ quarantine }: { quarantine: Array<{ backend: string }> }) => {
+    const quarantined = new Set<string>();
+    return {
+      isUsable: (backend: string) => {
+        if (!quarantine.some((e) => e.backend === backend)) return true;
+        quarantined.add(backend);
+        return false;
+      },
+      cudaBlocker: () => null,
+      quarantinedOf: (skipped: string[]) => skipped.filter((b) => quarantined.has(b)),
+    };
+  },
+  publishLlamaCudaBlocker: () => {},
   resolveAvailableLlamaBinary: (
     preferredBackend: 'cuda' | 'vulkan' | 'metal' | 'cpu',
     resolveBinary: (backend: 'cuda' | 'vulkan' | 'metal' | 'cpu') => string | null,

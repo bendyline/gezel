@@ -99,6 +99,7 @@ const CARVE_OUT_DISPLAY_RESERVE_BYTES = 512 * 1024 ** 2;
 let detectedGpuVramBytes: number | null = null;
 let detectedGpuUnifiedMemory: boolean | undefined;
 let detectedGpuReservedBytes: number | null = null;
+let detectedGpuAddressableBytes: number | null = null;
 
 /**
  * Publish the measured accelerator pool. Called by `detectMemoryProfile`.
@@ -111,17 +112,23 @@ export function setDetectedGpuVramBytes(
   bytes: number | null,
   unifiedMemory?: boolean,
   reservedGpuBytes?: number | null,
+  gpuAddressableBytes?: number | null,
 ): void {
   detectedGpuVramBytes = positiveOrNull(bytes);
   detectedGpuUnifiedMemory = unifiedMemory;
   detectedGpuReservedBytes = positiveOrNull(reservedGpuBytes);
+  detectedGpuAddressableBytes = positiveOrNull(gpuAddressableBytes);
 }
 
 function positiveOrNull(bytes: number | null | undefined): number | null {
   return typeof bytes === 'number' && Number.isFinite(bytes) && bytes > 0 ? bytes : null;
 }
 
-/** What engines may hold of an integrated GPU's carve-out, after the display's share. */
+/**
+ * What engines may hold of memory an integrated GPU owns or can reach — its
+ * carve-out, or carve-out plus GTT — after the share the desktop it also
+ * drives needs.
+ */
 export function usableReservedGpuBytes(reservedGpuBytes: number | null | undefined): number {
   const reserved = positiveOrNull(reservedGpuBytes);
   if (reserved === null) return 0;
@@ -159,7 +166,9 @@ export interface CapacityBudget {
   budgetBytes: number;
   /**
    * The FAST pool inside that budget: usable VRAM on a discrete card, the
-   * whole budget on unified / CPU hosts. Size KV slots and prompt caches
+   * whole budget on unified / CPU hosts — except an integrated GPU that can
+   * reach less than that (Linux GTT; see
+   * {@link CapacityBudgetInput.gpuAddressableBytes}). Size KV slots and prompt caches
    * against this, not against {@link budgetBytes} — on a discrete card the
    * rest of the budget is system RAM that weights stream from, and putting
    * more KV there than the card holds is how a GPU OOMs.
@@ -207,6 +216,16 @@ export interface CapacityBudgetInput {
    * same rule as `gpuVramBytes`.
    */
   reservedGpuBytes?: number | null;
+  /**
+   * The most memory an integrated GPU can reach: on Linux amdgpu, its
+   * carve-out plus GTT, the window of system RAM the kernel lets it map
+   * (half of RAM by default). Caps the FAST pool on a unified host — the GPU
+   * cannot hold more KV or weights than this, whatever the RAM share says —
+   * while the admission budget keeps the rest for layers the CPU runs. Omit
+   * to fall back to the last published probe, under the same rule as
+   * `gpuVramBytes`.
+   */
+  gpuAddressableBytes?: number | null;
 }
 
 /**
@@ -255,6 +274,12 @@ export function computeCapacityBudget(input: CapacityBudgetInput = {}): Capacity
       ? input.reservedGpuBytes
       : input.unifiedMemory === undefined && input.gpuVramBytes === undefined
         ? detectedGpuReservedBytes
+        : null;
+  const gpuAddressableBytes =
+    input.gpuAddressableBytes !== undefined
+      ? input.gpuAddressableBytes
+      : input.unifiedMemory === undefined && input.gpuVramBytes === undefined
+        ? detectedGpuAddressableBytes
         : null;
 
   const highMemory = systemRamBytes >= HIGH_MEMORY_THRESHOLD_BYTES;
@@ -307,7 +332,12 @@ export function computeCapacityBudget(input: CapacityBudgetInput = {}): Capacity
     };
   }
 
-  const fastBytes = discrete ? vramBytes : auto;
+  const addressable = positiveOrNull(gpuAddressableBytes);
+  const fastBytes = discrete
+    ? vramBytes
+    : unified && addressable !== null
+      ? Math.min(auto, usableReservedGpuBytes(addressable))
+      : auto;
   return {
     budgetBytes: auto,
     fastBytes,

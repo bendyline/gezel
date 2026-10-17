@@ -38,6 +38,26 @@
  *   DLL CRT), so a GGML assert in model loading looks exactly like a driver
  *   fault by status alone; the printed-fault rule above is what tells them
  *   apart.
+ *
+ * ## Linux
+ *
+ * The same driver faults arrive as signals: SIGSEGV for an access violation,
+ * SIGABRT for a fail-fast abort or an uncaught exception (vulkan-hpp throws
+ * `vk::IncompatibleDriverError` from instance creation). A GPU build that
+ * dies silently by either before readiness counts, under the same printed-
+ * fault rule. SIGBUS is left out, as Windows leaves out its in-page error: a
+ * model file that fails to page in is the disk, not the build. SIGKILL is
+ * left out because the out-of-memory killer sends it.
+ *
+ * A Linux GPU build that cannot load its GPU library at all does not crash:
+ * ggml loads backends with dlopen and, in release builds, skips one that
+ * fails without a word, so the build runs on the CPU. Nothing here sees that.
+ *
+ * ## The one printed fault that counts
+ *
+ * `cuda-unsupported-device` — no kernel image for this GPU, or PTX the driver
+ * cannot compile — names the build and the machine, never the work. It is
+ * the only classified kind that counts.
  */
 
 const WINDOWS_UNRUNNABLE_STATUS: ReadonlyMap<number, string> = new Map([
@@ -51,10 +71,18 @@ const WINDOWS_UNRUNNABLE_STATUS: ReadonlyMap<number, string> = new Map([
   [0xc0000409, 'fail-fast abort'],
 ]);
 
+const LINUX_UNRUNNABLE_SIGNAL: ReadonlyMap<string, string> = new Map([
+  ['SIGSEGV', 'segmentation fault'],
+  ['SIGABRT', 'abort'],
+]);
+
 const GPU_LABEL: Readonly<Record<string, string>> = { cuda: 'CUDA', vulkan: 'Vulkan' };
 
 export interface UnrunnableBuild {
-  /** The quarantine entry's `signal`: `SIGILL`, or `exit:0xc0000005`. */
+  /**
+   * The quarantine entry's `signal`: a signal name (`SIGILL`, `SIGSEGV`),
+   * `exit:0xc0000005`, or `cuda-unsupported-device`.
+   */
   signal: string;
   /** For logs and the quarantine entry. */
   reason: string;
@@ -96,6 +124,17 @@ export function unrunnableBuildExit(
   platform: NodeJS.Platform = process.platform,
 ): UnrunnableBuild | null {
   if (exit.reachedReady) return null;
+  const gpu = backend && Object.hasOwn(GPU_LABEL, backend) ? GPU_LABEL[backend] : undefined;
+  if (exit.panicKind === 'cuda-unsupported-device') {
+    if (backend !== 'cuda') return null;
+    return {
+      signal: 'cuda-unsupported-device',
+      reason:
+        'CUDA reported no kernel image (or unusable PTX) for this GPU before the engine became ready — the CUDA build was not compiled for this GPU, or the driver is too old for it',
+      summary:
+        'The CUDA build has no code for this graphics card, or the driver is too old for it.',
+    };
+  }
   // `illegal-instruction` is the supervisor's own label for a SIGILL that
   // printed nothing, so it is the one classified kind that stays silent.
   if (exit.panicKind !== undefined && exit.panicKind !== 'illegal-instruction') return null;
@@ -110,8 +149,17 @@ export function unrunnableBuildExit(
         'not support, or faulted inside GPU library startup.',
     };
   }
-  const gpu = backend && Object.hasOwn(GPU_LABEL, backend) ? GPU_LABEL[backend] : undefined;
-  if (platform !== 'win32' || !gpu || exit.code === null) return null;
+  if (!gpu) return null;
+  if (platform === 'linux') {
+    const meaning = exit.signal ? LINUX_UNRUNNABLE_SIGNAL.get(exit.signal) : undefined;
+    if (!exit.signal || !meaning) return null;
+    return {
+      signal: exit.signal,
+      reason: `crashed with ${exit.signal} (${meaning}) before the engine became ready — the ${gpu} build cannot start with this machine's graphics driver or runtime`,
+      summary: `The ${gpu} build crashed while starting on this computer (${exit.signal}, ${meaning}).`,
+    };
+  }
+  if (platform !== 'win32' || exit.code === null) return null;
   const meaning = WINDOWS_UNRUNNABLE_STATUS.get(exit.code >>> 0);
   if (!meaning) return null;
   const status = formatExitCode(exit.code);

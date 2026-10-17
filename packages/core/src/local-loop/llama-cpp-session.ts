@@ -204,8 +204,12 @@ export class NativeEngineCrashedError extends Error {
       typeof backend === 'string' ? backend : undefined,
     );
     const remaining = verdict?.kind === 'strike' ? verdict.threshold - verdict.strikes : 0;
-    const outcome =
-      !unrunnable || !verdict
+    // An out-of-memory kill says nothing about the build, and a plain
+    // "it will restart" invites the same retry into the same shortage.
+    const outOfMemory = snapshot.panicKind === 'host-out-of-memory';
+    const outcome = outOfMemory
+      ? 'The computer ran out of memory, so Linux stopped the engine. It will restart on the next request; if this keeps happening, close programs that use a lot of memory, or choose a smaller model or a shorter context.'
+      : !unrunnable || !verdict
         ? 'It will restart on the next request.'
         : verdict.kind === 'quarantined'
           ? `${unrunnable.summary} Gezel will ${
@@ -217,7 +221,7 @@ export class NativeEngineCrashedError extends Error {
               remaining === 1 ? 'time' : 'times'
             } in a row, Gezel will switch to another engine backend.`;
     super(
-      `[llama-cpp] on-device engine crashed${detail}; incident=${snapshot.incidentId}. ` +
+      `[llama-cpp] on-device engine ${outOfMemory ? 'ran out of memory' : 'crashed'}${detail}; incident=${snapshot.incidentId}. ` +
         `${outcome}${causeMessage ? ` Transport reported: ${causeMessage}` : ''}`,
       { cause },
     );

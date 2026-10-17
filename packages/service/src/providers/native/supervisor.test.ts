@@ -80,6 +80,18 @@ describe('NativeEngineSupervisor', () => {
     expect(classifyNativeEnginePanic('routine CUDA initialization')).toBeUndefined();
   });
 
+  it('classifies a CUDA build with no code for the GPU apart from other CUDA errors', () => {
+    for (const line of [
+      'CUDA error: no kernel image is available for execution on the device',
+      'CUDA error: the provided PTX was compiled with an unsupported toolchain.',
+    ]) {
+      expect(classifyNativeEnginePanic(line)?.kind).toBe('cuda-unsupported-device');
+    }
+    expect(classifyNativeEnginePanic('CUDA error: unspecified launch failure')?.kind).toBe(
+      'cuda-error',
+    );
+  });
+
   it('rewrites every packaged ASAR launch path to its real unpacked location', () => {
     expect(
       normalizeNativeEngineLaunch({
@@ -1468,6 +1480,58 @@ not a process row
       reachedReady: true,
       panicKind: 'cuda-out-of-memory',
     });
+  });
+
+  /** A ready engine whose stderr the test writes, and the exits it reports. */
+  async function readyEngine(pid: number, oomKillCounts: number[]) {
+    let stderrHandler: ((buf: Buffer) => void) | undefined;
+    const child = makeFakeChild(pid);
+    child.stderr = {
+      on: (ev: string, fn: (buf: Buffer) => void) => {
+        if (ev === 'data') stderrHandler = fn;
+      },
+    };
+    const exits: Array<InferenceNativeEngineExitSnapshot> = [];
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: '/opt/gezel/gezel-llama-server',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9999',
+      }),
+      spawn: (() =>
+        child as unknown as ReturnType<
+          typeof import('node:child_process').spawn
+        >) as unknown as typeof import('node:child_process').spawn,
+      fetchImpl: async () => new Response('ok', { status: 200 }),
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 10_000_000,
+      idleTimeoutMs: 0,
+      onLog: () => {},
+      onExit: (snapshot) => void exits.push(snapshot),
+      psRunner: async () => [],
+      platform: 'linux',
+      readOomKillCount: () => oomKillCounts.shift() ?? null,
+    });
+    await sup.ensureRunning();
+    return { child, exits, write: (line: string) => stderrHandler!(Buffer.from(`${line}\n`)) };
+  }
+
+  it('labels a SIGKILL the out-of-memory killer sent, over the allocation line it printed', async () => {
+    const { child, exits, write } = await readyEngine(51840, [3, 4]);
+    write('CUDA error: out of memory');
+    child.emitExit(null, 'SIGKILL');
+    expect(exits[0]).toMatchObject({
+      signal: 'SIGKILL',
+      expected: false,
+      panicKind: 'host-out-of-memory',
+    });
+    expect(exits[0]?.panicLine).toContain('oom_kill 3 -> 4');
+  });
+
+  it('leaves a SIGKILL alone when the kernel killed nothing for memory', async () => {
+    const { child, exits } = await readyEngine(51841, [3, 3]);
+    child.emitExit(null, 'SIGKILL');
+    expect(exits[0]?.panicKind).toBeUndefined();
   });
 });
 

@@ -2089,7 +2089,16 @@ A notice the person can act on also appears where the action lives: a GPU
 backend Gezel switched off after it crashed several times in a row while
 starting shows on that engine's Settings tab as the same `.settings-notice`,
 with a plain "Try … again" button beneath the disclosure, and the rail copy
-names that tab.
+names that tab. Such a notice carries its `settingsSection`, and the rail line
+opens that tab rather than About. The same holds for an engine that is not
+using the GPU the machine has — a CUDA build the NVIDIA driver cannot run
+(restart, update the driver, or reinstall it), or a GPU build that started
+without its GPU. Its rail label names the fix when there is one ("Restart to
+use your GPU", "Update your NVIDIA driver"), and its copy says the engine
+returns to the GPU by itself once the cause is gone, because it does. An
+event rather than a condition — Linux's out-of-memory killer stopping the
+engine — never takes the rail: the failed chat already said so, and the
+engine's tab keeps a count for whoever comes looking.
 
 **The titlebar sheds words before it sheds pills.** The status cluster is
 open-ended — one engine pill per busy on-device engine, one queue chip per

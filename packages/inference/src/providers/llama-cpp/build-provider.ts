@@ -43,6 +43,7 @@ import { makeEngineKey } from '../native/engine-key.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
+import { noteGpuStartup, noteHostOutOfMemory } from './backend-health.js';
 import { adoptLlamaFallback } from './backend-quarantine.js';
 import { lastArgValue, readLlamaCppBuildMetadata } from './build-metadata.js';
 import {
@@ -55,6 +56,7 @@ import {
 import { type PlannerOffloadDecision, buildLlamaCppEngineArgs } from './engine-flags.js';
 import { readGgufSummaryAsync } from './gguf-metadata-async.js';
 import { type GgufSummary, effectiveLazyTensorBytes } from './gguf-metadata.js';
+import { GpuStartupWatch } from './gpu-startup-watch.js';
 import {
   type LlamaCppKvCacheType,
   isGemmaModel,
@@ -176,6 +178,8 @@ export async function buildLlamaCppProvider(opts: {
   // What the latest startup crash did to this build's standing, for the error
   // the failed start raises. `onExit` runs before `ensureRunning` rejects.
   let lastStartupCrash: { incidentId: string; verdict: StartupCrashVerdict } | null = null;
+  // Fresh for each launch: whether this start of a GPU build got its GPU.
+  let gpuWatch: GpuStartupWatch | null = null;
   // Preservation is a two-sided contract: launch llama-server with the
   // explicit preserve/no-preserve flag AND replay captured
   // `reasoning_content` only in the preserve case. v0.4.0 changed the server
@@ -928,6 +932,7 @@ export async function buildLlamaCppProvider(opts: {
                   liveMemory.gpuMemoryKind === 'integrated' ||
                   liveMemory.gpuMemoryKind === 'unified',
                 reservedGpuBytes: liveMemory.gpuReservedBytes ?? null,
+                gpuAddressableBytes: liveMemory.gpuAddressableBytes ?? null,
               }
             : {}),
         });
@@ -1329,12 +1334,23 @@ export async function buildLlamaCppProvider(opts: {
       providerHolder.current?.getCacheAdapter()?.resetEngineState();
       if (snapshot.expected) return;
       logFile.writeIncident(snapshot);
+      if (snapshot.panicKind === 'host-out-of-memory') {
+        noteHostOutOfMemory({
+          model: modelCatalogInfo?.id ?? defaultModelId,
+          whileStarting: !snapshot.reachedReady,
+        });
+        log.warn(
+          `[llama-server] Linux's out-of-memory killer stopped the engine (${modelCatalogInfo?.id ?? 'model'}, incident=${snapshot.incidentId}, ${snapshot.reachedReady ? 'while serving' : 'while loading'})`,
+        );
+        return;
+      }
       // A build that dies before it ever answers /health, without saying
       // why, may not be able to run here at all — and relaunching it on every
       // request just reproduces the crash while a working lower-tier build
       // sits in the next directory. Count it; a few in a row write it down so
       // the next launch routes around it. Which exits qualify (a silent
-      // SIGILL; on Windows, a GPU build's crash status) is decided in
+      // SIGILL; a GPU build's silent crash status on Windows or signal on
+      // Linux; a CUDA build with no code for this GPU) is decided in
       // unrunnable-build.ts, how many in llama-quarantine.ts.
       const backend = binaryBackend;
       const unrunnable = unrunnableBuildExit(snapshot, backend);
@@ -1381,11 +1397,23 @@ export async function buildLlamaCppProvider(opts: {
       }
     },
     // Any start that reaches readiness proves the build runs here, so the
-    // crashes before it were not in a row.
+    // crashes before it were not in a row. It does not prove the build got
+    // its GPU: a GPU backend that cannot load or initialize leaves the engine
+    // on the CPU without crashing (gpu-startup-watch.ts).
     onReady: () => {
       if (binaryBackend) clearLlamaStartupStrikes(home, binaryBackend);
+      const unused = gpuWatch?.verdict() ?? null;
+      noteGpuStartup(unused);
+      if (unused) {
+        log.warn(
+          `[llama-server] the ${unused.backend} build started without its GPU (${unused.reason}${unused.detail ? `: ${unused.detail}` : ''}); every token runs on the CPU`,
+        );
+      }
     },
-    onRawLine: (line) => providerHolder.current?.onStdoutLine(line),
+    onRawLine: (line) => {
+      gpuWatch?.observe(line);
+      providerHolder.current?.onStdoutLine(line);
+    },
     // GPU-OOM recovery ladder: when a start dies of VRAM exhaustion and the
     // planner's offload decision was in play, degrade it one step
     // (partial split → all expert/FFN weights to RAM → engine-owned fit) and let the
@@ -1438,6 +1466,7 @@ export async function buildLlamaCppProvider(opts: {
       return true;
     },
     resolveLaunch: async () => {
+      gpuWatch = new GpuStartupWatch(binaryBackend);
       const port = cachedPort ?? (await pickFreePort());
       cachedPort = port;
       // Prepend the binary's own directory to PATH so the OS finds the

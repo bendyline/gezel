@@ -1,3 +1,4 @@
+import type { LlamaCppBackendHealthResponse } from '@bendyline/gezel';
 import type { UpdateState } from './api.js';
 import { RELEASES_URL, releaseUrl } from './github-urls.js';
 import { localEngineSettingsLabel } from './views/local-engine-label.js';
@@ -35,6 +36,8 @@ export type SystemNoticeId =
   | 'update-install-failed'
   | 'update-check-failed'
   | 'engine-backend-quarantined'
+  | 'engine-gpu-unused'
+  | 'engine-out-of-memory'
   | 'child-process-denied';
 
 export interface SystemNotice {
@@ -58,6 +61,11 @@ export interface SystemNotice {
    * policy and the two can never drift.
    */
   reportable?: boolean;
+  /**
+   * The Settings section the rail opens, when the notice lives with its
+   * action there rather than in About.
+   */
+  settingsSection?: string;
 }
 
 /**
@@ -365,6 +373,127 @@ export function engineBackendNotice(input: {
     // start is a build or driver bug, and the machine profile in the report
     // is exactly what triaging it needs.
     reportable: true,
+    settingsSection: LLAMA_SETTINGS_SECTION,
+  };
+}
+
+/** The llama.cpp engine's Settings section, where its notices and actions live. */
+const LLAMA_SETTINGS_SECTION = 'llamaCpp';
+
+/**
+ * The engine is not getting the GPU this machine has, and nothing else says
+ * so: it keeps answering, every token on a slower path.
+ *
+ * Two sources, root cause first. Discovery passed over the CUDA build because
+ * the NVIDIA driver cannot run it (Linux) — a restart or a driver update fixes
+ * that, and Gezel picks CUDA again by itself. Or a GPU build started without
+ * its GPU: the GPU library failed to load or found nothing, which leaves the
+ * engine on the processor while every label says CUDA or Vulkan.
+ */
+export function engineGpuNotice(input: {
+  health?: LlamaCppBackendHealthResponse | null;
+  platform?: string;
+}): SystemNotice | null {
+  const health = input.health;
+  if (!health) return null;
+  const blocker = health.cudaBlocker;
+  const unused = health.gpuUnused;
+  if (!blocker && !unused) return null;
+  const tab = `Settings → ${localEngineSettingsLabel('llama-cpp', input.platform)}`;
+  // A fallback build that also started without a GPU leaves the processor.
+  const running = unused ? 'cpu' : health.running;
+  const instead =
+    running === 'cpu'
+      ? 'every reply is computed on the processor, which is much slower than this machine can do'
+      : `Gezel is using ${engineBackendLabel(running)} instead, which still uses a GPU but is usually slower`;
+  const technical = [blocker?.detail, unused ? gpuUnusedTechnical(unused) : undefined]
+    .filter(Boolean)
+    .join('\n');
+
+  if (blocker?.kind === 'restart-required') {
+    return {
+      id: 'engine-gpu-unused',
+      railLabel: 'Restart to use your GPU',
+      title: 'Restart your computer to finish the NVIDIA driver update.',
+      body: `An NVIDIA driver update is installed but not loaded yet, and CUDA will not run until the computer restarts. Until then ${instead}. After the restart Gezel uses your NVIDIA GPU again by itself.`,
+      technical,
+      reportable: false,
+      settingsSection: LLAMA_SETTINGS_SECTION,
+    };
+  }
+  if (blocker?.kind === 'driver-too-old') {
+    const needed = blocker.required ? `version ${blocker.required} or newer` : 'a newer version';
+    return {
+      id: 'engine-gpu-unused',
+      railLabel: 'Update your NVIDIA driver',
+      title: 'Your NVIDIA driver is too old for Gezel’s CUDA engine.',
+      body: `The driver installed here${blocker.installed ? ` (${blocker.installed})` : ''} is older than the CUDA engine needs, so ${instead}. Update the NVIDIA driver to ${needed} and restart your computer; Gezel then uses CUDA by itself.`,
+      technical,
+      reportable: false,
+      settingsSection: LLAMA_SETTINGS_SECTION,
+    };
+  }
+  if (blocker?.kind === 'module-not-loaded') {
+    return {
+      id: 'engine-gpu-unused',
+      railLabel: 'Your GPU is not in use',
+      title: 'The NVIDIA driver is installed but not running.',
+      body: `Linux did not load the NVIDIA driver, so ${instead}. This usually happens after a system update when the driver was not rebuilt for the new kernel, or when Secure Boot blocks it. Reinstalling the NVIDIA driver and restarting your computer usually fixes it, and Gezel then uses the GPU again by itself.`,
+      technical,
+      reportable: false,
+      settingsSection: LLAMA_SETTINGS_SECTION,
+    };
+  }
+  if (!unused) return null;
+  const label = engineBackendLabel(unused.backend);
+  const why =
+    unused.reason === 'init-failed'
+      ? 'CUDA would not run on the graphics card'
+      : unused.reason === 'no-devices'
+        ? 'the graphics driver offered no graphics card it could use'
+        : 'it did not load its GPU library';
+  return {
+    id: 'engine-gpu-unused',
+    railLabel: 'Not using your GPU',
+    title: `Gezel’s ${label} engine is not using your graphics card.`,
+    body: `The engine is running, but ${why}, so ${instead}. Updating or reinstalling your graphics driver usually fixes it. Until then you can choose another backend in ${tab}.`,
+    technical,
+    // A GPU library that never loaded can be a packaging fault of ours; a
+    // driver that refused is the machine's.
+    reportable: unused.reason === 'not-loaded',
+    settingsSection: LLAMA_SETTINGS_SECTION,
+  };
+}
+
+function gpuUnusedTechnical(unused: NonNullable<LlamaCppBackendHealthResponse['gpuUnused']>) {
+  return `${unused.backend} build started without a GPU device (${unused.reason})${unused.detail ? `: ${unused.detail}` : ''}`;
+}
+
+/**
+ * Linux's out-of-memory killer stopped the engine. An event rather than a
+ * standing condition, so it never reaches the rail — the failed chat already
+ * said so. The engine's Settings tab keeps it in view for someone who comes
+ * looking for why replies keep failing.
+ */
+export function engineOutOfMemoryNotice(input: {
+  health?: LlamaCppBackendHealthResponse | null;
+}): SystemNotice | null {
+  const oom = input.health?.outOfMemory;
+  if (!oom) return null;
+  const when = new Date(oom.at).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+  const times = oom.count === 1 ? 'once' : `${oom.count} times`;
+  const what = `${oom.whileStarting ? 'loading' : 'running'} ${oom.model ?? 'a model'}`;
+  return {
+    id: 'engine-out-of-memory',
+    railLabel: null,
+    title: 'This computer ran out of memory for the on-device engine.',
+    body: `Linux stopped the engine ${times} since Gezel started, most recently on ${when} while ${what}. Closing other programs that use a lot of memory, choosing a smaller model, or shortening the context usually prevents it.`,
+    technical: `out-of-memory kills: ${oom.count}; latest ${oom.at} (${oom.whileStarting ? 'while loading' : 'while serving'})`,
+    reportable: false,
+    settingsSection: LLAMA_SETTINGS_SECTION,
   };
 }
 
@@ -410,6 +539,7 @@ export function railSystemNotices(input: {
   quarantinedBackends?: readonly string[];
   runningBackend?: string;
   childProcessDenied?: boolean;
+  backendHealth?: LlamaCppBackendHealthResponse | null;
 }): SystemNotice[] {
   return [
     // Ahead of the service notices on purpose: those describe a service that
@@ -423,6 +553,10 @@ export function railSystemNotices(input: {
     engineBackendNotice({
       ...(input.quarantinedBackends ? { quarantined: input.quarantinedBackends } : {}),
       ...(input.runningBackend ? { running: input.runningBackend } : {}),
+      ...(input.platform ? { platform: input.platform } : {}),
+    }),
+    engineGpuNotice({
+      health: input.backendHealth ?? null,
       ...(input.platform ? { platform: input.platform } : {}),
     }),
     updateNotice(input.update, input.platform),

@@ -51,6 +51,26 @@ export {
 } from './llama-quarantine.js';
 export type { EngineExit, StartupCrashVerdict, UnrunnableBuild } from './unrunnable-build.js';
 export { formatExitCode, unrunnableBuildExit } from './unrunnable-build.js';
+export type { LlamaBuildCheck } from './llama-build-check.js';
+export {
+  LLAMA_CUDA_BLOCKER_ENV,
+  createLlamaBuildCheck,
+  publishLlamaCudaBlocker,
+  readLlamaCudaBlocker,
+} from './llama-build-check.js';
+export type {
+  NvidiaCudaBlocker,
+  NvidiaCudaBlockerKind,
+  NvidiaDriverIo,
+} from './nvidia-driver.js';
+export {
+  compareDriverVersions,
+  linuxCudaBuildBlocker,
+  minimumNvidiaDriverForCuda,
+  nvidiaCudaBlocker,
+  nvidiaLibraryVersion,
+  parseNvidiaModuleVersion,
+} from './nvidia-driver.js';
 export type {
   DiscoverInput,
   DiscoverResult,

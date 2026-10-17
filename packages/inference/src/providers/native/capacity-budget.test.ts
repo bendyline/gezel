@@ -66,6 +66,40 @@ describe('an integrated GPU with a firmware carve-out', () => {
     ).toBe(0);
   });
 
+  it('caps the fast pool at what the GPU can reach under Linux GTT, not the admission budget', () => {
+    // 32 GiB laptop, 2 GiB carve-out, GTT at its default half of the rest.
+    const visible = 30 * GiB;
+    const host = { systemRamBytes: visible, gpuVramBytes: 2 * GiB + 15 * GiB, unifiedMemory: true };
+    const uncapped = computeCapacityBudget({ ...host, reservedGpuBytes: 2 * GiB });
+    const capped = computeCapacityBudget({
+      ...host,
+      reservedGpuBytes: 2 * GiB,
+      gpuAddressableBytes: 2 * GiB + 15 * GiB,
+    });
+    expect(capped.budgetBytes).toBe(uncapped.budgetBytes);
+    expect(uncapped.fastBytes).toBe(uncapped.budgetBytes);
+    expect(capped.fastBytes).toBe(usableReservedGpuBytes(17 * GiB));
+    expect(capped.fastBytes).toBeLessThan(capped.budgetBytes);
+    expect(capped.concurrencySizingBytes).toBeLessThanOrEqual(capped.fastBytes);
+  });
+
+  it('never lets a GTT figure raise the fast pool, or touch a discrete card', () => {
+    const generous = computeCapacityBudget({
+      systemRamBytes: 30 * GiB,
+      gpuVramBytes: 2 * GiB,
+      unifiedMemory: true,
+      gpuAddressableBytes: 64 * GiB,
+    });
+    expect(generous.fastBytes).toBe(generous.budgetBytes);
+    const card = computeCapacityBudget({
+      systemRamBytes: 32 * GiB,
+      gpuVramBytes: 12 * GiB,
+      unifiedMemory: false,
+      gpuAddressableBytes: 4 * GiB,
+    });
+    expect(card.fastBytes).toBe(card.vramBytes);
+  });
+
   it('leaves the display at least 512 MiB of the carve-out', () => {
     expect(usableReservedGpuBytes(512 * MiB)).toBe(0);
     expect(usableReservedGpuBytes(3 * GiB)).toBe(2.5 * GiB);

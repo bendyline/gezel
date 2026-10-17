@@ -1,5 +1,5 @@
 import type { SystemDiagnostics } from '@bendyline/gezel';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
@@ -104,9 +104,15 @@ function autostartLabel(): string {
  * This page is the notice's only full home — the navigation rail carries at
  * most a one-line label pointing back here.
  */
-function SystemNoticeNote({ notice }: { notice: SystemNotice }) {
+export function SystemNoticeNote({
+  notice,
+  style,
+}: {
+  notice: SystemNotice;
+  style?: CSSProperties;
+}) {
   return (
-    <div className="settings-notice" data-testid={`settings-notice-${notice.id}`}>
+    <div className="settings-notice" data-testid={`settings-notice-${notice.id}`} style={style}>
       <strong>{notice.title}</strong>
       <span>
         {notice.body}

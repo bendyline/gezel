@@ -467,6 +467,7 @@ Errors thrown by the SDK are `GezelSdkError` instances carrying both an HTTP `st
 - `engine_busy` — the on-device engine is busy with another request; retry shortly
 - `engine_launch_failed` — the on-device engine process could not be started
 - `engine_crashed` — the on-device engine stopped unexpectedly; the next request restarts it, on another engine build when the crash proved this one cannot run here
+- `engine_out_of_memory` — the computer ran out of memory and Linux stopped the on-device engine; the next request restarts it, but sending the same request into the same shortage fails the same way
 - `engine_not_ready` / `model_not_ready` — the engine or model is still downloading or loading
 - `context_length_exceeded` (HTTP 400) — the prompt is longer than the model's context window
 - `provider_error` — backend provider call failed for any other reason

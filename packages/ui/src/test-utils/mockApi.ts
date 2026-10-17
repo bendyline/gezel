@@ -365,6 +365,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   },
   getLlamaCppContextSizing: { policy: 'adaptive' },
   getLlamaCppQuarantine: { entries: [], strikeThreshold: 3 },
+  getLlamaCppBackendHealth: {},
   getModelContextOverrides: { overrides: {} },
   // Copilot is an on-demand install, so most gates read this rather than a
   // stored token. Default to installed so tests that predate the gating keep

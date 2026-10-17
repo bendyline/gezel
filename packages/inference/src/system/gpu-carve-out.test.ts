@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { gpuCarveOutBytes, gpuVendorFromPciId, matchGpuAdapter } from './gpu-carve-out.js';
+import {
+  gpuCarveOutBytes,
+  gpuVendorFromPciId,
+  linuxGpuAddressableBytes,
+  linuxGpuCarveOutBytes,
+  matchGpuAdapter,
+} from './gpu-carve-out.js';
 
 const GiB = 1024 ** 3;
 const MiB = 1024 ** 2;
@@ -88,6 +94,76 @@ describe("gpuCarveOutBytes with Windows' adapter figure", () => {
         visibleRamBytes: visible,
         deviceBytes: 8 * GiB,
         adapterDedicatedBytes: 0,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('linuxGpuCarveOutBytes', () => {
+  const amd = (dedicatedBytes: number) => ({ vendorId: 0x1002, dedicatedBytes });
+  // A 128 GiB Strix Halo with 96 GiB set aside for the GPU. The kernel sees
+  // ~31 GiB; Vulkan reports the carve-out plus a GTT of half of that.
+  const visible = 128 * GiB - 96 * GiB - 500 * MiB;
+  const vulkan = 96 * GiB + Math.floor(visible / 2);
+
+  it("takes amdgpu's VRAM figure for the only AMD GPU", () => {
+    expect(
+      linuxGpuCarveOutBytes({
+        adapters: [amd(96 * GiB)],
+        visibleRamBytes: visible,
+        deviceBytes: vulkan,
+      }),
+    ).toBe(96 * GiB);
+  });
+
+  it('gives up when it cannot tell which AMD GPU is the integrated one', () => {
+    expect(
+      linuxGpuCarveOutBytes({
+        adapters: [amd(512 * MiB), amd(16 * GiB)],
+        visibleRamBytes: visible,
+        deviceBytes: vulkan,
+      }),
+    ).toBeNull();
+    expect(
+      linuxGpuCarveOutBytes({ adapters: [], visibleRamBytes: visible, deviceBytes: vulkan }),
+    ).toBeNull();
+  });
+
+  it('refuses a carve-out larger than everything Vulkan reports, or none at all', () => {
+    expect(
+      linuxGpuCarveOutBytes({
+        adapters: [amd(96 * GiB)],
+        visibleRamBytes: visible,
+        deviceBytes: 16 * GiB,
+      }),
+    ).toBeNull();
+    expect(
+      linuxGpuCarveOutBytes({ adapters: [amd(0)], visibleRamBytes: visible, deviceBytes: vulkan }),
+    ).toBeNull();
+  });
+
+  it('adds GTT to the carve-out for what the GPU can reach', () => {
+    expect(
+      linuxGpuAddressableBytes([
+        { vendorId: 0x1002, dedicatedBytes: 2 * GiB, sharedSystemBytes: 15 * GiB },
+      ]),
+    ).toBe(17 * GiB);
+    // Without GTT, or with two AMD GPUs, there is nothing to say.
+    expect(linuxGpuAddressableBytes([amd(2 * GiB)])).toBeNull();
+    expect(
+      linuxGpuAddressableBytes([
+        { vendorId: 0x1002, dedicatedBytes: 2 * GiB, sharedSystemBytes: 15 * GiB },
+        { vendorId: 0x1002, dedicatedBytes: 16 * GiB, sharedSystemBytes: 15 * GiB },
+      ]),
+    ).toBeNull();
+  });
+
+  it('ignores other vendors', () => {
+    expect(
+      linuxGpuCarveOutBytes({
+        adapters: [{ vendorId: 0x8086, dedicatedBytes: 8 * GiB }],
+        visibleRamBytes: visible,
+        deviceBytes: vulkan,
       }),
     ).toBeNull();
   });

@@ -337,6 +337,7 @@ export class LocalEngineRuntime {
               memoryProfile.gpuMemoryKind === 'integrated' ||
               memoryProfile.gpuMemoryKind === 'unified',
             reservedGpuBytes: memoryProfile.gpuReservedBytes ?? null,
+            gpuAddressableBytes: memoryProfile.gpuAddressableBytes ?? null,
           }
         : {}),
       allowRamSpillover: config.allowRamSpillover ?? null,

@@ -51,5 +51,6 @@ export async function measuredCapacityBudget(): Promise<CapacityBudget> {
     gpuVramBytes: profile.gpuVramBytes,
     unifiedMemory: profile.gpuMemoryKind === 'integrated' || profile.gpuMemoryKind === 'unified',
     reservedGpuBytes: profile.gpuReservedBytes ?? null,
+    gpuAddressableBytes: profile.gpuAddressableBytes ?? null,
   });
 }

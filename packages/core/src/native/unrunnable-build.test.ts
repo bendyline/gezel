@@ -41,9 +41,54 @@ describe('unrunnableBuildExit', () => {
     // An ordinary exit code, or a status outside the list, is not a build fault.
     expect(unrunnableBuildExit(beforeReady(1), 'vulkan', 'win32')).toBeNull();
     expect(unrunnableBuildExit(beforeReady(0xc000013a), 'vulkan', 'win32')).toBeNull();
-    // POSIX reports these as signals; only SIGILL qualifies there.
-    expect(unrunnableBuildExit(beforeReady(null, 'SIGSEGV'), 'cuda', 'linux')).toBeNull();
+    // Linux reports crashes as signals, never as an NTSTATUS exit code.
     expect(unrunnableBuildExit(beforeReady(ACCESS_VIOLATION), 'cuda', 'linux')).toBeNull();
+  });
+
+  it("treats a Linux GPU build's silent SIGSEGV or SIGABRT before readiness as unrunnable", () => {
+    const segv = unrunnableBuildExit(beforeReady(null, 'SIGSEGV'), 'vulkan', 'linux');
+    expect(segv?.signal).toBe('SIGSEGV');
+    expect(segv?.summary).toContain('Vulkan');
+    expect(segv?.summary).not.toContain('PC');
+    expect(unrunnableBuildExit(beforeReady(null, 'SIGABRT'), 'cuda', 'linux')?.signal).toBe(
+      'SIGABRT',
+    );
+  });
+
+  it('leaves Linux signals that are not build faults alone', () => {
+    // The out-of-memory killer, a stop, and a model that failed to page in.
+    for (const signal of ['SIGKILL', 'SIGTERM', 'SIGBUS']) {
+      expect(unrunnableBuildExit(beforeReady(null, signal), 'cuda', 'linux')).toBeNull();
+    }
+    expect(unrunnableBuildExit(beforeReady(null, 'SIGSEGV'), 'cpu', 'linux')).toBeNull();
+    expect({
+      ready: unrunnableBuildExit(
+        { ...beforeReady(null, 'SIGSEGV'), reachedReady: true },
+        'cuda',
+        'linux',
+      ),
+      explained: unrunnableBuildExit(
+        { ...beforeReady(null, 'SIGABRT'), panicKind: 'assertion-failed' },
+        'vulkan',
+        'linux',
+      ),
+      // macOS ships one Metal build with nothing beside it to fall back to.
+      darwin: unrunnableBuildExit(beforeReady(null, 'SIGSEGV'), 'vulkan', 'darwin'),
+    }).toEqual({ ready: null, explained: null, darwin: null });
+  });
+
+  it('counts a CUDA build with no code for this GPU, the one printed fault about the build', () => {
+    const noKernel = { ...beforeReady(null, 'SIGABRT'), panicKind: 'cuda-unsupported-device' };
+    expect(unrunnableBuildExit(noKernel, 'cuda', 'linux')?.signal).toBe('cuda-unsupported-device');
+    expect(
+      unrunnableBuildExit(
+        { ...beforeReady(0xc0000409), panicKind: 'cuda-unsupported-device' },
+        'cuda',
+        'win32',
+      )?.signal,
+    ).toBe('cuda-unsupported-device');
+    expect(unrunnableBuildExit({ ...noKernel, reachedReady: true }, 'cuda', 'linux')).toBeNull();
+    expect(unrunnableBuildExit(noKernel, 'vulkan', 'linux')).toBeNull();
   });
 
   it('leaves a crash the engine explained to whatever owns that fault', () => {

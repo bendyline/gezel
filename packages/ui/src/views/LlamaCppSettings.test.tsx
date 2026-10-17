@@ -45,6 +45,7 @@ describe('LlamaCppSettings', () => {
     );
     vi.mocked(api.getLlamaCppContextSizing).mockResolvedValue({ policy: 'adaptive' });
     vi.mocked(api.getLlamaCppQuarantine).mockResolvedValue({ entries: [], strikeThreshold: 3 });
+    vi.mocked(api.getLlamaCppBackendHealth).mockResolvedValue({});
     vi.mocked(api.updateLlamaCppContextSizing).mockImplementation(async (policy) => ({ policy }));
     vi.mocked(api.getLlamaCppLog).mockResolvedValue({
       path: '/tmp/llamacpp.log',
@@ -410,6 +411,93 @@ describe('LlamaCppSettings', () => {
       await waitFor(() => expect(api.getLlamaCppQuarantine).toHaveBeenCalled());
       await screen.findByRole('option', { name: /First local model/ });
       expect(screen.queryByTestId('llama-quarantine-vulkan')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('an engine that is not getting the GPU this machine has', () => {
+    it('asks for a newer NVIDIA driver instead of a restart that changes nothing', async () => {
+      vi.mocked(api.getLlamaCppBackendHealth).mockResolvedValue({
+        running: 'vulkan',
+        cudaBlocker: {
+          kind: 'driver-too-old',
+          installed: '570.86.10',
+          required: '580.65.06',
+          cudaToolkit: '13.0',
+          detail: 'NVIDIA driver 570.86.10 is older than 580.65.06',
+        },
+      });
+      render(
+        <LlamaCppSettings
+          config={BASE_CONFIG}
+          onConfigChanged={vi.fn()}
+          health={{ ...BASE_HEALTH, llamaCppBackend: 'vulkan' } as HealthResponse}
+        />,
+      );
+
+      const notice = await screen.findByTestId('settings-notice-engine-gpu-unused');
+      expect(notice).toBeVisible();
+      expect(notice).toHaveTextContent('Your NVIDIA driver is too old');
+      expect(notice).toHaveTextContent('version 580.65.06 or newer');
+      // Auto-detect found CUDA and runs Vulkan, but a restart would pass CUDA
+      // over again: the notice, not the restart hint, is the answer.
+      await openAdvanced();
+      await screen.findByText(/Engine backend/);
+      expect(screen.queryByText(/Restart the app to apply/)).not.toBeInTheDocument();
+    });
+
+    it('says a GPU build is running without its GPU', async () => {
+      vi.mocked(api.getLlamaCppBackendHealth).mockResolvedValue({
+        running: 'cuda',
+        gpuUnused: {
+          backend: 'cuda',
+          reason: 'init-failed',
+          detail: 'CUDA driver version is insufficient for CUDA runtime version',
+          at: '2026-10-17T10:00:00.000Z',
+        },
+      });
+      render(
+        <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
+      );
+
+      const notice = await screen.findByTestId('settings-notice-engine-gpu-unused');
+      expect(notice).toHaveTextContent('is not using your graphics card');
+      expect(notice).toHaveTextContent('driver version is insufficient');
+    });
+
+    it('keeps count of the times Linux ran out of memory', async () => {
+      vi.mocked(api.getLlamaCppBackendHealth).mockResolvedValue({
+        outOfMemory: {
+          count: 1,
+          at: '2026-10-17T10:00:00.000Z',
+          model: 'qwen3.6-27b-q8',
+          whileStarting: false,
+        },
+      });
+      render(
+        <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
+      );
+
+      const notice = await screen.findByTestId('settings-notice-engine-out-of-memory');
+      expect(notice).toHaveTextContent('Linux stopped the engine once');
+      expect(notice).toHaveTextContent('while running qwen3.6-27b-q8');
+    });
+
+    it('stays quiet for an external engine this machine does not launch', async () => {
+      vi.mocked(api.getLlamaCppBackendHealth).mockResolvedValue({
+        running: 'cuda',
+        gpuUnused: { backend: 'cuda', reason: 'not-loaded', at: '2026-10-17T10:00:00.000Z' },
+      });
+      render(
+        <LlamaCppSettings
+          config={{ ...BASE_CONFIG, llamaCppBaseUrl: 'http://10.0.0.1:8080' } as ConfigResponse}
+          onConfigChanged={vi.fn()}
+          health={BASE_HEALTH}
+        />,
+      );
+
+      await waitFor(() => expect(api.getLlamaCppBackendHealth).toHaveBeenCalled());
+      await screen.findByRole('option', { name: /First local model/ });
+      expect(screen.queryByTestId('settings-notice-engine-gpu-unused')).not.toBeInTheDocument();
     });
   });
 

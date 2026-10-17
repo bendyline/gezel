@@ -20,8 +20,9 @@ import {
 } from '@bendyline/gezel-client/node';
 import {
   LLAMA_ENGINE_VERSION,
+  createLlamaBuildCheck,
   detectLlamaBackend,
-  isBinaryQuarantined,
+  publishLlamaCudaBlocker,
   readLlamaQuarantine,
   resolveAvailableLlamaBinary,
 } from '@bendyline/gezel/native';
@@ -1367,6 +1368,9 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     // resolution entirely — so spawn and embedded launches would keep
     // relaunching a build already known to crash on this machine.
     const quarantine = readLlamaQuarantine(opts.home);
+    // The same check also passes over a Linux CUDA build the NVIDIA driver
+    // cannot run (nvidia-driver.ts), which would otherwise start on the CPU.
+    const check = createLlamaBuildCheck({ quarantine, platform: process.platform });
     const checkoutLlamaCompatibility = new Map<
       string,
       ReturnType<typeof verifyLlamaBinaryAgainstCheckoutPin>
@@ -1398,22 +1402,28 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
             : {}),
         }),
       override === undefined || override === 'auto',
-      quarantine.length > 0
-        ? (backend, path) => !isBinaryQuarantined(quarantine, backend, path)
-        : undefined,
+      check.isUsable,
     );
+    const cudaBlocker = check.cudaBlocker();
+    publishLlamaCudaBlocker(cudaBlocker);
+    if (cudaBlocker) {
+      opts.logger?.warn?.(
+        `[supervisor] llama-server cuda build passed over: ${cudaBlocker.detail} (${cudaBlocker.kind})`,
+      );
+    }
     if (resolved) {
       process.env.GEZEL_LLAMA_SERVER_BIN = resolved.path;
       process.env.GEZEL_LLAMA_SERVER_BACKEND = resolved.backend;
-      for (const skipped of resolved.skippedUnusable ?? []) {
+      const quarantined = check.quarantinedOf(resolved.skippedUnusable ?? []);
+      for (const skipped of quarantined) {
         const entry = quarantine.find((e) => e.backend === skipped);
         opts.logger?.warn?.(
           `[supervisor] llama-server ${skipped} build is quarantined on this machine ` +
             `(${entry?.signal ?? 'crashed'}): ${entry?.reason ?? 'crashed before becoming ready'}`,
         );
       }
-      if (resolved.skippedUnusable?.length) {
-        process.env.GEZEL_LLAMA_QUARANTINED = resolved.skippedUnusable.join(',');
+      if (quarantined.length > 0) {
+        process.env.GEZEL_LLAMA_QUARANTINED = quarantined.join(',');
       }
       if (resolved.fallbackFrom && !resolved.skippedUnusable?.length) {
         opts.logger?.info?.(

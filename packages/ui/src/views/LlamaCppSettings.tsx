@@ -1,5 +1,6 @@
 import type {
   HealthResponse,
+  LlamaCppBackendHealthResponse,
   LlamaCppContextSizing,
   LlamaCppQuarantineResponse,
 } from '@bendyline/gezel';
@@ -11,7 +12,8 @@ import { EngineBudgetStrip } from '../components/EngineBudgetStrip.js';
 import { EngineClonePicker } from '../components/EngineClonePicker.js';
 import { LlamaCppModelManager } from '../components/LlamaCppModelManager.js';
 import { MachineHealthSettings } from '../components/MachineHealthSettings.js';
-import { engineBackendLabel } from '../system-notices.js';
+import { engineBackendLabel, engineGpuNotice, engineOutOfMemoryNotice } from '../system-notices.js';
+import { SystemNoticeNote } from './SettingsSystemStatus.js';
 import { localEngineSettingsLabel } from './local-engine-label.js';
 
 type QuarantineEntry = LlamaCppQuarantineResponse['entries'][number];
@@ -118,15 +120,22 @@ function vendorSuffix(v: 'amd' | 'nvidia' | 'intel' | undefined): string {
 function needsRestart(
   config: ConfigResponse | null,
   health: HealthResponse | null | undefined,
+  backendHealth?: LlamaCppBackendHealthResponse | null,
 ): boolean {
   if (!health?.llamaCppBackend) return false; // no signal yet, don't nag
   const currentlyRunning = health.llamaCppBackend;
+  const override = config?.llamaCppBackendOverride;
+  const pinned = Boolean(override && override !== 'auto');
   // What WOULD run if we restarted right now: the override if pinned,
   // otherwise whatever the hardware probe found.
   const wouldRun =
-    config?.llamaCppBackendOverride && config.llamaCppBackendOverride !== 'auto'
-      ? config.llamaCppBackendOverride
+    override && override !== 'auto'
+      ? override
       : (health.llamaCppDetectedBackend ?? currentlyRunning);
+  // Likewise a CUDA build the driver cannot run: auto-detect passes it over
+  // on every launch until a restart or driver update, which its own notice
+  // asks for.
+  if (!pinned && wouldRun === 'cuda' && backendHealth?.cudaBlocker) return false;
   // A quarantined backend is detected but unusable, so it is NOT what
   // would run — resolution routes around it every launch. Without this,
   // a machine whose CUDA build crashes reads as permanently
@@ -221,6 +230,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
   const [contextSizing, setContextSizing] = useState<LlamaCppContextSizing>('adaptive');
   const [contextSizingLoading, setContextSizingLoading] = useState(true);
   const [quarantine, setQuarantine] = useState<LlamaCppQuarantineResponse | null>(null);
+  const [backendHealth, setBackendHealth] = useState<LlamaCppBackendHealthResponse | null>(null);
   const [lifting, setLifting] = useState<QuarantineEntry['backend'] | null>(null);
   const [liftResult, setLiftResult] = useState<{
     backend: QuarantineEntry['backend'];
@@ -312,6 +322,14 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
       })
       .catch(() => {
         /* An engine owner that predates the route reports nothing switched off. */
+      });
+    void api
+      .getLlamaCppBackendHealth()
+      .then((response) => {
+        if (!cancelled) setBackendHealth(response);
+      })
+      .catch(() => {
+        /* An engine owner that predates the route reports nothing wrong. */
       });
     return () => {
       cancelled = true;
@@ -612,6 +630,17 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
   const pinnedBackend =
     config?.llamaCppBackendOverride !== undefined && config.llamaCppBackendOverride !== 'auto';
   const quarantined = pinnedBackend || hasExternalBaseUrl ? [] : (quarantine?.entries ?? []);
+  // An external engine is not one this machine launches, so neither notice
+  // would describe it.
+  const gpuNotice = hasExternalBaseUrl
+    ? null
+    : engineGpuNotice({
+        health: backendHealth,
+        ...(health?.platform ? { platform: health.platform } : {}),
+      });
+  const outOfMemoryNotice = hasExternalBaseUrl
+    ? null
+    : engineOutOfMemoryNotice({ health: backendHealth });
 
   return (
     <div>
@@ -652,6 +681,12 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
             {engineBackendLabel(liftResult.backend)} is back on. Gezel tries it the next time it
             starts a model, and switches it off again only if it keeps failing to start.
           </output>
+        )}
+        {[gpuNotice, outOfMemoryNotice].map(
+          (notice) =>
+            notice && (
+              <SystemNoticeNote key={notice.id} notice={notice} style={{ marginTop: '0.75rem' }} />
+            ),
         )}
       </section>
 
@@ -777,7 +812,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
             ))}
           </select>
           <span className="muted" style={{ fontSize: '0.85rem' }}>
-            {needsRestart(config, health) ? 'Restart the app to apply' : ''}
+            {needsRestart(config, health, backendHealth) ? 'Restart the app to apply' : ''}
           </span>
         </div>
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>

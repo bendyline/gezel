@@ -16,6 +16,7 @@ import {
   pinnedEngineArchiveBytes,
 } from '../../engines/native-manifest.js';
 import { KNOWN_ENGINES, isKnownEngine } from '../../engines/registry.js';
+import { llamaBackendHealthView } from '../../providers/llama-cpp/backend-health.js';
 import {
   isLlamaBackend,
   liftLlamaQuarantine,
@@ -264,6 +265,13 @@ export function enginesRoutes(ctx: EngineContext): Hono {
    * this to the machine engine.
    */
   app.get('/llama-cpp/quarantine', (c) => c.json(llamaQuarantineView(ctx.home)));
+
+  /**
+   * Whether llama-server is getting this machine's hardware: a CUDA build the
+   * driver cannot run, a GPU build that started without its GPU, the
+   * out-of-memory killer. Engine-owner state, proxied like the quarantine.
+   */
+  app.get('/llama-cpp/backend-health', (c) => c.json(llamaBackendHealthView()));
 
   app.delete('/llama-cpp/quarantine/:backend', async (c) => {
     const backend = c.req.param('backend');

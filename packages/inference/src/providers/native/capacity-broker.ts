@@ -86,6 +86,8 @@ export interface CapacityBrokerOptions {
    * `gpuVramBytes`/`unifiedMemory` as one description of the host.
    */
   reservedGpuBytes?: number | null;
+  /** What an integrated GPU can reach — see {@link CapacityBudgetInput.gpuAddressableBytes}. */
+  gpuAddressableBytes?: number | null;
   /**
    * May co-resident models spill into system RAM? `null`/omitted follows
    * {@link autoAllowRamSpillover} for this host. See
@@ -307,6 +309,7 @@ export class CapacityBroker {
   private readonly unifiedMemory: boolean | undefined;
   private readonly gpuVramBytes: number | null | undefined;
   private readonly reservedGpuBytes: number | null | undefined;
+  private readonly gpuAddressableBytes: number | null | undefined;
   private explicitAllowRamSpillover: boolean | null;
   private readonly reservations = new Map<EngineKey, number>();
 
@@ -315,6 +318,7 @@ export class CapacityBroker {
     this.unifiedMemory = opts.unifiedMemory;
     this.gpuVramBytes = opts.gpuVramBytes;
     this.reservedGpuBytes = opts.reservedGpuBytes;
+    this.gpuAddressableBytes = opts.gpuAddressableBytes;
     this.explicitAllowRamSpillover = opts.allowRamSpillover ?? null;
     this.explicitBudgetBytes = opts.budgetBytes ?? null;
     // Assigned by applyBudget; the definite-assignment dance TS wants for
@@ -352,6 +356,9 @@ export class CapacityBroker {
             ...(this.reservedGpuBytes === undefined
               ? {}
               : { reservedGpuBytes: this.reservedGpuBytes }),
+            ...(this.gpuAddressableBytes === undefined
+              ? {}
+              : { gpuAddressableBytes: this.gpuAddressableBytes }),
           }),
     });
   }

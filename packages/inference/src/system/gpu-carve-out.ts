@@ -24,6 +24,12 @@
  * carve-out fits inside that same gap, a shared view is far larger than it
  * (a few hundred MB of firmware reservations is the usual gap without one).
  *
+ * Linux answers through the amdgpu driver instead (see
+ * {@link linuxGpuCarveOutBytes}). Installed RAM is not readable there without
+ * root, and the Vulkan figure cannot stand in: llama.cpp sums every heap of an
+ * integrated GPU, and RADV reports an APU's GTT — borrowed system RAM — beside
+ * the carve-out.
+ *
  * Anything uncertain answers null — integrated GPUs budgeted from system RAM
  * alone, as before.
  */
@@ -55,12 +61,61 @@ export function gpuCarveOutBytes(input: {
   return fits(deviceBytes) === null ? null : Math.min(deviceBytes, missing);
 }
 
+/**
+ * An AMD APU's carve-out on Linux: amdgpu's `mem_info_vram_total`, which on an
+ * APU is the frame buffer firmware reserved before the kernel counted RAM, so
+ * it is absent from MemTotal. Read only for the one amdgpu device there is —
+ * sysfs does not say which of two is integrated — and only when it fits in
+ * what Vulkan reports, which for an integrated GPU is the carve-out plus GTT.
+ * The caller has already decided the GPU llama.cpp picked is integrated.
+ */
+export function linuxGpuCarveOutBytes(input: {
+  /** amdgpu devices from sysfs (`readAmdgpuAdapters`). */
+  adapters: readonly GpuAdapterFacts[];
+  visibleRamBytes: number;
+  /** Memory the integrated GPU reports for itself through Vulkan. */
+  deviceBytes: number;
+}): number | null {
+  const carveOut = soleAmdgpuAdapter(input.adapters)?.dedicatedBytes;
+  if (carveOut === undefined || carveOut > input.deviceBytes + MATCH_TOLERANCE_BYTES) return null;
+  return gpuCarveOutBytes({
+    installedRamBytes: null,
+    visibleRamBytes: input.visibleRamBytes,
+    deviceBytes: input.deviceBytes,
+    adapterDedicatedBytes: carveOut,
+  });
+}
+
+/**
+ * Everything an AMD APU can reach on Linux: its carve-out plus GTT, the
+ * window of system RAM amdgpu lets it map (half of RAM on recent kernels
+ * unless `ttm.pages_limit` raises it). Past that, allocations fail however
+ * much RAM is free. Null without both figures for the one amdgpu device.
+ */
+export function linuxGpuAddressableBytes(adapters: readonly GpuAdapterFacts[]): number | null {
+  const adapter = soleAmdgpuAdapter(adapters);
+  const gtt = adapter?.sharedSystemBytes;
+  if (adapter?.dedicatedBytes === undefined || gtt === undefined || !(gtt > 0)) return null;
+  return adapter.dedicatedBytes + gtt;
+}
+
+/** The one amdgpu device, or null when there are none or several. */
+function soleAmdgpuAdapter(adapters: readonly GpuAdapterFacts[]): GpuAdapterFacts | null {
+  const amd = adapters.filter(
+    (adapter) =>
+      gpuVendorFromPciId(adapter.vendorId) === 'amd' && adapter.dedicatedBytes !== undefined,
+  );
+  return amd.length === 1 ? (amd[0] ?? null) : null;
+}
+
 /** The part of a helper adapter record (`DeviceGpuAdapter`) this module reads. */
 export interface GpuAdapterFacts {
   name?: string;
   vendorId: number;
   integrated?: boolean;
   dedicatedBytes?: number;
+  /** System RAM the adapter may borrow on top of its own (Linux: GTT). */
+  sharedSystemBytes?: number;
 }
 
 const nameKey = (name: string) =>

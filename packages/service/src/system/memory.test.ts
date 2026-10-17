@@ -99,6 +99,24 @@ describe('memoryProfileForLlamaGpu', () => {
     expect(credited.usableBytes - uncredited.usableBytes).toBe(7.5 * GiB);
   });
 
+  it('bounds a Linux APU by what it can reach under GTT', () => {
+    const gpu = {
+      vramBytes: 2 * GiB + 15 * GiB,
+      name: 'AMD Radeon 780M Graphics (RADV PHOENIX)',
+      vendor: 'amd' as const,
+      memoryKind: 'integrated' as const,
+    };
+    const visible = 30 * GiB;
+    const bounded = memoryProfileForLlamaGpu('linux', visible, gpu, 2 * GiB, 4 * GiB);
+    const unbounded = memoryProfileForLlamaGpu('linux', visible, gpu, 2 * GiB);
+    expect(bounded.gpuAddressableBytes).toBe(4 * GiB);
+    expect(bounded.budgetBytes).toBe(unbounded.budgetBytes);
+    // 4 GiB less the desktop's 512 MiB, well under half of RAM plus the carve-out.
+    expect(bounded.usableBytes).toBe(3.5 * GiB);
+    expect(unbounded.gpuAddressableBytes).toBeUndefined();
+    expect(unbounded.usableBytes).toBe(15 * GiB + 1.5 * GiB);
+  });
+
   it('never credits a carve-out to a GPU that is not integrated', () => {
     const result = memoryProfileForLlamaGpu(
       'linux',

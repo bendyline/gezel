@@ -47,6 +47,7 @@ import type {
   ListInstalledAudioModelsResponse,
   ListInstalledImageModelsResponse,
   ListInstalledVideoModelsResponse,
+  LlamaCppBackendHealthResponse,
   LlamaCppContextSizing,
   LlamaCppContextSizingResponse,
   LlamaCppQuarantineResponse,
@@ -3399,6 +3400,16 @@ export class GezelClient {
    */
   getLlamaCppQuarantine(): Promise<LlamaCppQuarantineResponse> {
     return this.request('GET', '/api/engines/llama-cpp/quarantine');
+  }
+
+  /**
+   * Whether llama-server is getting this machine's hardware: a CUDA build the
+   * driver cannot run, a GPU build that started without its GPU, the Linux
+   * out-of-memory killer. An empty object is the healthy answer; a 404 from
+   * an older daemon means none are reported.
+   */
+  getLlamaCppBackendHealth(): Promise<LlamaCppBackendHealthResponse> {
+    return this.request('GET', '/api/engines/llama-cpp/backend-health');
   }
 
   /**

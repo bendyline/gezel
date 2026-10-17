@@ -96,6 +96,19 @@ describe('an on-device engine failure on /v1/chat/completions', () => {
     });
   });
 
+  it('tells an out-of-memory kill apart from a crash', async () => {
+    const oom = Object.assign(
+      coded('[llama-cpp] on-device engine ran out of memory', 'native-engine-crash'),
+      {
+        panicKind: 'host-out-of-memory',
+      },
+    );
+    running = await startFailingEngine(oom);
+    const res = await post(chat);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: { code: 'engine_out_of_memory' } });
+  });
+
   it('finds the code on a wrapped cause', async () => {
     const launch = coded('spawn EPERM', 'engine-launch');
     running = await startFailingEngine(new Error('engine start failed', { cause: launch }));

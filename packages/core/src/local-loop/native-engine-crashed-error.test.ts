@@ -47,6 +47,19 @@ describe('NativeEngineCrashedError', () => {
     );
   });
 
+  it('says an out-of-memory kill was the computer running out of memory, not a crash', () => {
+    const error = new NativeEngineCrashedError({
+      ...silentStartupCrash,
+      signal: 'SIGKILL',
+      panicKind: 'host-out-of-memory',
+      reachedReady: true,
+    });
+    expect(error.message).toMatch(/^\[llama-cpp\] on-device engine ran out of memory/);
+    expect(error.message).toContain('The computer ran out of memory, so Linux stopped the engine.');
+    expect(error.message).not.toMatch(/crashed|cannot run on this machine/i);
+    expect(error.panicKind).toBe('host-out-of-memory');
+  });
+
   it('promises nothing it was not told', () => {
     const error = new NativeEngineCrashedError(silentStartupCrash);
     expect(error.message).toContain('It will restart on the next request.');

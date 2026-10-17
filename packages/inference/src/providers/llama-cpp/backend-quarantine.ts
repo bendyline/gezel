@@ -17,8 +17,10 @@ import {
   type LlamaBackend,
   type ResolvedLlamaBinary,
   clearLlamaQuarantine,
+  createLlamaBuildCheck,
   isBinaryQuarantined,
   llamaVariantBinaryPath,
+  publishLlamaCudaBlocker,
   readLlamaQuarantine,
   resolveLlamaFallbackBinary,
   resolveLlamaVariantBinary,
@@ -109,13 +111,19 @@ export function liftLlamaQuarantine(
   const binary = process.env.GEZEL_LLAMA_SERVER_BIN;
   const running = envBackend('GEZEL_LLAMA_SERVER_BACKEND');
   if (opts.pinned || !binary || !running) return { cleared, restored: null };
-  const quarantine = readLlamaQuarantine(home);
+  // Discovery's own check: a CUDA build the driver cannot run stays passed
+  // over, whatever else was lifted.
+  const check = createLlamaBuildCheck({
+    quarantine: readLlamaQuarantine(home),
+    platform: process.platform,
+  });
   const best = resolveLlamaVariantBinary(
     binary,
     running,
     envBackend('GEZEL_LLAMA_DETECTED_BACKEND') ?? backend,
-    (candidate, path) => !isBinaryQuarantined(quarantine, candidate, path),
+    check.isUsable,
   );
+  publishLlamaCudaBlocker(check.cudaBlocker());
   if (!best || best.backend === running) return { cleared, restored: null };
   process.env.GEZEL_LLAMA_SERVER_BIN = best.path;
   process.env.GEZEL_LLAMA_SERVER_BACKEND = best.backend;

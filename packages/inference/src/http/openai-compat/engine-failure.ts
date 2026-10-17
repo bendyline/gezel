@@ -15,6 +15,7 @@ export type EngineFailureCode =
   | 'engine_busy'
   | 'engine_launch_failed'
   | 'engine_crashed'
+  | 'engine_out_of_memory'
   | 'context_length_exceeded'
   | 'engine_not_ready'
   | 'model_not_ready';
@@ -46,6 +47,8 @@ export const ENGINE_FAILURE_SUMMARIES: Readonly<Record<EngineFailureCode, string
   engine_busy: 'The on-device engine is busy with another request. Try again shortly.',
   engine_launch_failed: 'The on-device engine could not be started on this machine.',
   engine_crashed: 'The on-device engine stopped unexpectedly. Try again.',
+  engine_out_of_memory:
+    'This computer ran out of memory and the on-device engine was stopped. Close other programs or use a smaller model, then try again.',
   context_length_exceeded: 'The prompt is longer than this model can read at once.',
   engine_not_ready: 'The on-device engine is still getting ready. Try again shortly.',
   model_not_ready: 'This model is not ready yet.',
@@ -70,6 +73,13 @@ function internalCode(err: unknown): EngineFailureCode | undefined {
     seen.add(current);
     const code = (current as { code?: unknown }).code;
     const wire = typeof code === 'string' ? WIRE_CODES.get(code) : undefined;
+    // A crash the out-of-memory killer caused is a capacity fact, not a fault.
+    if (
+      wire === 'engine_crashed' &&
+      (current as { panicKind?: unknown }).panicKind === 'host-out-of-memory'
+    ) {
+      return 'engine_out_of_memory';
+    }
     if (wire) return wire;
     current = (current as { cause?: unknown }).cause;
   }
