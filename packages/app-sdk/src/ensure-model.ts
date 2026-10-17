@@ -231,11 +231,14 @@ async function downloadModel(
       break;
     }
     if (event.type === 'progress') {
+      // Prefer the install-wide counters: per-file ones from concurrent MLX
+      // downloads make a single progress bar jump between files.
       emit({
         phase: 'weights',
         message: `downloading ${model}`,
-        bytesWritten: event.bytesWritten,
-        totalBytes: event.totalBytes,
+        ...(event.bytesWrittenAll !== undefined && event.totalBytesAll !== undefined
+          ? { bytesWritten: event.bytesWrittenAll, totalBytes: event.totalBytesAll }
+          : { bytesWritten: event.bytesWritten, totalBytes: event.totalBytes }),
       });
     } else if (event.type === 'error') {
       throw new GezelSdkError(`downloading ${model} failed: ${event.error}`, {

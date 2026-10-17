@@ -125,4 +125,36 @@ describe('embedding model management', () => {
     expect(manager.cancellation).toBe('observation');
     await manager.close();
   });
+  it('reports install-wide bytes when concurrent files report their own', async () => {
+    let ready = false;
+    const fileProgress = (bytesWritten: number, bytesWrittenAll: number) => ({
+      type: 'progress' as const,
+      jobId: 'job',
+      modelId: model.id,
+      bytesWritten,
+      totalBytes: 100,
+      bytesWrittenAll,
+      totalBytesAll: 700,
+    });
+    const manager = createHttpModelManager({
+      models: async () => ({
+        object: 'list',
+        data: [{ ...model, availability: ready ? 'available' : 'download-required' }],
+      }),
+      ensureModel: async () => ({ status: 'downloading', model_id: model.id, job_id: 'job' }),
+      streamEnsureEvents: async function* () {
+        yield fileProgress(60, 70);
+        yield fileProgress(20, 80);
+        ready = true;
+        yield { type: 'done' as const, jobId: 'job', modelId: model.id };
+      },
+    });
+    const onProgress = vi.fn();
+    await manager.prepare(model.id, { allowDownload: true, onProgress });
+    expect(onProgress.mock.calls.map(([event]) => [event.bytesWritten, event.totalBytes])).toEqual([
+      [70, 700],
+      [80, 700],
+    ]);
+    await manager.close();
+  });
 });
