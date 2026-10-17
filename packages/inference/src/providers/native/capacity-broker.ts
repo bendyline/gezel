@@ -81,6 +81,12 @@ export interface CapacityBrokerOptions {
    */
   gpuVramBytes?: number | null;
   /**
+   * An integrated GPU's firmware carve-out — see
+   * {@link CapacityBudgetInput.reservedGpuBytes}. Travels with
+   * `gpuVramBytes`/`unifiedMemory` as one description of the host.
+   */
+  reservedGpuBytes?: number | null;
+  /**
    * May co-resident models spill into system RAM? `null`/omitted follows
    * {@link autoAllowRamSpillover} for this host. See
    * {@link CapacityBroker.coResidencyBytes}.
@@ -300,6 +306,7 @@ export class CapacityBroker {
   private readonly systemRamBytes: number;
   private readonly unifiedMemory: boolean | undefined;
   private readonly gpuVramBytes: number | null | undefined;
+  private readonly reservedGpuBytes: number | null | undefined;
   private explicitAllowRamSpillover: boolean | null;
   private readonly reservations = new Map<EngineKey, number>();
 
@@ -307,6 +314,7 @@ export class CapacityBroker {
     this.systemRamBytes = (opts.systemRamBytes ?? totalmem)();
     this.unifiedMemory = opts.unifiedMemory;
     this.gpuVramBytes = opts.gpuVramBytes;
+    this.reservedGpuBytes = opts.reservedGpuBytes;
     this.explicitAllowRamSpillover = opts.allowRamSpillover ?? null;
     this.explicitBudgetBytes = opts.budgetBytes ?? null;
     // Assigned by applyBudget; the definite-assignment dance TS wants for
@@ -341,6 +349,9 @@ export class CapacityBroker {
         : {
             ...(this.unifiedMemory === undefined ? {} : { unifiedMemory: this.unifiedMemory }),
             ...(this.gpuVramBytes === undefined ? {} : { gpuVramBytes: this.gpuVramBytes }),
+            ...(this.reservedGpuBytes === undefined
+              ? {}
+              : { reservedGpuBytes: this.reservedGpuBytes }),
           }),
     });
   }
@@ -1185,10 +1196,10 @@ export interface CtxMemoryClampInput {
    */
   freeSystemRamBytes?: number;
   /**
-   * Usable VRAM on a discrete card; MUST be 0 on unified/shared-pool
-   * hosts, where the "VRAM" is the same physical RAM `freeSystemRamBytes`
-   * measures and adding it would double-count. `computeCapacityBudget`
-   * already reports `vramBytes: 0` for those hosts — pass its value.
+   * Usable VRAM on a discrete card. On a unified/shared-pool host it MUST be
+   * only an integrated GPU's firmware carve-out, which `freeSystemRamBytes`
+   * never sees; any "VRAM" that is the same physical RAM would double-count.
+   * `computeCapacityBudget` reports exactly that — pass its value.
    */
   vramBytes: number;
   minPerTurnCtxTokens?: number;
@@ -1360,7 +1371,7 @@ export interface AdaptiveCtxGrowthInput {
   fastBudgetBytes: number;
   committedOtherBytes?: number;
   budgetKind: CapacityBudget['kind'];
-  /** Usable VRAM on a discrete card (`liveBudget.vramBytes`); 0 elsewhere. */
+  /** Usable VRAM on a discrete card (`liveBudget.vramBytes`); ignored elsewhere. */
   vramBytes: number;
   /**
    * Graphics memory free right now on a discrete card, as device admission

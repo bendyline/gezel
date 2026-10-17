@@ -24,6 +24,10 @@
 #include <pdh.h>
 #include <pdhmsg.h>
 #include <tlhelp32.h>
+// DXCore declares its adapter-attribute GUIDs with DEFINE_GUID. Defining them
+// in this, the helper's only translation unit, avoids linking dxguid.
+#include <initguid.h>
+#include <dxcore.h>
 #else
 #include <dlfcn.h>
 #endif
@@ -886,6 +890,180 @@ void probe_linux_sysfs(ProbeReport& report) {
 
 #endif
 
+// One GPU as the OS describes it. On an integrated GPU, `dedicated_bytes` is
+// memory firmware carved out for it — outside the OS's RAM count — while
+// `shared_system_bytes` is how much ordinary RAM it may borrow on top.
+struct GpuAdapter {
+  std::string luid;
+  std::uint32_t vendor_id = 0;
+  std::uint32_t device_id = 0;
+  std::optional<std::string> name;
+  std::optional<bool> integrated;
+  std::optional<std::uint64_t> dedicated_bytes;
+  std::optional<std::uint64_t> dedicated_system_bytes;
+  std::optional<std::uint64_t> shared_system_bytes;
+  std::optional<std::string> driver_version;
+};
+
+// Static facts about the machine, as opposed to the telemetry `sample`
+// reports: read once per daemon run rather than on every poll.
+struct SystemFacts {
+  // RAM physically installed. The OS's own total omits whatever firmware
+  // reserves, an integrated GPU's carve-out among it; the daemon compares the
+  // two to find that carve-out.
+  std::optional<std::uint64_t> installed_ram_bytes;
+  std::vector<GpuAdapter> adapters;
+  std::vector<std::string> diagnostics;
+};
+
+std::string serialize_system(const SystemFacts& facts) {
+  std::ostringstream out;
+  out << "{\"schemaVersion\":1";
+  write_number_field(out, "installedRamBytes", facts.installed_ram_bytes);
+  out << ",\"adapters\":[";
+  for (std::size_t index = 0; index < facts.adapters.size(); ++index) {
+    if (index > 0) out << ',';
+    const GpuAdapter& adapter = facts.adapters[index];
+    out << "{\"luid\":\"" << json_escape(adapter.luid) << "\",\"vendorId\":"
+        << adapter.vendor_id << ",\"deviceId\":" << adapter.device_id;
+    if (adapter.name) out << ",\"name\":\"" << json_escape(*adapter.name) << '"';
+    write_bool_field(out, "integrated", adapter.integrated);
+    write_number_field(out, "dedicatedBytes", adapter.dedicated_bytes);
+    write_number_field(out, "dedicatedSystemBytes", adapter.dedicated_system_bytes);
+    write_number_field(out, "sharedSystemBytes", adapter.shared_system_bytes);
+    if (adapter.driver_version) {
+      out << ",\"driverVersion\":\"" << json_escape(*adapter.driver_version) << '"';
+    }
+    out << '}';
+  }
+  out << "],\"diagnostics\":";
+  write_string_array(out, facts.diagnostics);
+  out << '}';
+  return out.str();
+}
+
+#ifdef _WIN32
+// Same `0xHIGH_0xLOW` spelling as the adapter LUIDs in GPU process counters.
+std::string format_luid(const LUID& luid) {
+  std::ostringstream out;
+  out << "0x" << std::uppercase << std::hex << std::setfill('0') << std::setw(8)
+      << static_cast<std::uint32_t>(luid.HighPart) << "_0x" << std::setw(8)
+      << luid.LowPart;
+  return out.str();
+}
+
+// The four 16-bit fields of a WDDM driver version, e.g. 31.0.24033.1003.
+std::string format_driver_version(std::uint64_t version) {
+  std::ostringstream out;
+  out << ((version >> 48) & 0xFFFF) << '.' << ((version >> 32) & 0xFFFF) << '.'
+      << ((version >> 16) & 0xFFFF) << '.' << (version & 0xFFFF);
+  return out.str();
+}
+
+template <typename T>
+std::optional<T> adapter_property(IDXCoreAdapter* adapter, DXCoreAdapterProperty property) {
+  if (!adapter->IsPropertySupported(property)) return std::nullopt;
+  T value{};
+  if (FAILED(adapter->GetProperty(property, sizeof(T), &value))) return std::nullopt;
+  return value;
+}
+
+std::optional<std::string> adapter_description(IDXCoreAdapter* adapter) {
+  if (!adapter->IsPropertySupported(DXCoreAdapterProperty::DriverDescription)) {
+    return std::nullopt;
+  }
+  size_t size = 0;
+  if (FAILED(adapter->GetPropertySize(DXCoreAdapterProperty::DriverDescription, &size)) ||
+      size == 0) {
+    return std::nullopt;
+  }
+  std::vector<char> buffer(size, '\0');
+  if (FAILED(adapter->GetProperty(DXCoreAdapterProperty::DriverDescription, size,
+                                  buffer.data()))) {
+    return std::nullopt;
+  }
+  buffer.back() = '\0';
+  return std::string(buffer.data());
+}
+
+// DXCore reads these from the kernel driver without creating a device, so a
+// GPU whose user-mode driver is broken still describes itself here.
+void probe_gpu_adapters(SystemFacts& facts) {
+  DynamicLibrary library = load_system_library(L"dxcore.dll");
+  if (!library) {
+    facts.diagnostics.push_back("adapters: DXCore not available (needs Windows 10 2004+)");
+    return;
+  }
+  using CreateFactory = HRESULT(WINAPI*)(REFIID, void**);
+  const CreateFactory create = load_symbol<CreateFactory>(library, "DXCoreCreateAdapterFactory");
+  IDXCoreAdapterFactory* factory = nullptr;
+  IDXCoreAdapterList* list = nullptr;
+  const GUID attributes[] = {DXCORE_ADAPTER_ATTRIBUTE_D3D11_GRAPHICS};
+  if (!create ||
+      FAILED(create(__uuidof(IDXCoreAdapterFactory), reinterpret_cast<void**>(&factory))) ||
+      FAILED(factory->CreateAdapterList(1, attributes, __uuidof(IDXCoreAdapterList),
+                                        reinterpret_cast<void**>(&list)))) {
+    facts.diagnostics.push_back("adapters: DXCore adapter list unavailable");
+    if (factory) factory->Release();
+    close_library(library);
+    return;
+  }
+  const std::uint32_t count = list->GetAdapterCount();
+  for (std::uint32_t index = 0; index < count; ++index) {
+    IDXCoreAdapter* adapter = nullptr;
+    if (FAILED(list->GetAdapter(index, __uuidof(IDXCoreAdapter),
+                                reinterpret_cast<void**>(&adapter)))) {
+      continue;
+    }
+    const auto luid = adapter_property<LUID>(adapter, DXCoreAdapterProperty::InstanceLuid);
+    const auto hardware = adapter_property<DXCoreHardwareID>(adapter, DXCoreAdapterProperty::HardwareID);
+    // Software adapters (the Basic Render Driver) own no memory.
+    if (luid && hardware &&
+        adapter_property<bool>(adapter, DXCoreAdapterProperty::IsHardware) == true) {
+      GpuAdapter entry;
+      entry.luid = format_luid(*luid);
+      entry.vendor_id = hardware->vendorID;
+      entry.device_id = hardware->deviceID;
+      entry.name = adapter_description(adapter);
+      entry.integrated = adapter_property<bool>(adapter, DXCoreAdapterProperty::IsIntegrated);
+      entry.dedicated_bytes =
+          adapter_property<std::uint64_t>(adapter, DXCoreAdapterProperty::DedicatedAdapterMemory);
+      entry.dedicated_system_bytes =
+          adapter_property<std::uint64_t>(adapter, DXCoreAdapterProperty::DedicatedSystemMemory);
+      entry.shared_system_bytes =
+          adapter_property<std::uint64_t>(adapter, DXCoreAdapterProperty::SharedSystemMemory);
+      if (const auto version =
+              adapter_property<std::uint64_t>(adapter, DXCoreAdapterProperty::DriverVersion)) {
+        entry.driver_version = format_driver_version(*version);
+      }
+      facts.adapters.push_back(std::move(entry));
+    }
+    adapter->Release();
+  }
+  list->Release();
+  factory->Release();
+  close_library(library);
+}
+#endif
+
+SystemFacts sample_system() {
+  SystemFacts facts;
+#ifdef _WIN32
+  ULONGLONG kilobytes = 0;
+  if (GetPhysicallyInstalledSystemMemory(&kilobytes) && kilobytes > 0) {
+    facts.installed_ram_bytes = static_cast<std::uint64_t>(kilobytes) * 1024;
+  } else {
+    // Some VMs and firmware publish no usable SMBIOS memory table.
+    facts.diagnostics.push_back("installed-ram: unavailable (error " +
+                                std::to_string(GetLastError()) + ")");
+  }
+  probe_gpu_adapters(facts);
+#else
+  facts.diagnostics.push_back("installed-ram: not read on this platform");
+#endif
+  return facts;
+}
+
 ProbeReport sample_devices() {
   ProbeReport report;
   probe_nvml(report);
@@ -928,6 +1106,34 @@ int self_test() {
       return 1;
     }
   }
+  SystemFacts facts;
+  facts.installed_ram_bytes = 17179869184ULL;
+  GpuAdapter igpu;
+  igpu.luid = "0x00000000_0x0000D2F1";
+  igpu.vendor_id = 0x1002;
+  igpu.device_id = 0x15BF;
+  igpu.name = "AMD Radeon(TM) Graphics";
+  igpu.integrated = true;
+  igpu.dedicated_bytes = 8589934592ULL;
+  igpu.shared_system_bytes = 4152360960ULL;
+  igpu.driver_version = "31.0.24033.1003";
+  facts.adapters.push_back(igpu);
+  if (serialize_system(facts) !=
+      "{\"schemaVersion\":1,\"installedRamBytes\":17179869184,\"adapters\":[{\"luid\":"
+      "\"0x00000000_0x0000D2F1\",\"vendorId\":4098,\"deviceId\":5567,\"name\":\"AMD "
+      "Radeon(TM) Graphics\",\"integrated\":true,\"dedicatedBytes\":8589934592,"
+      "\"sharedSystemBytes\":4152360960,\"driverVersion\":\"31.0.24033.1003\"}],"
+      "\"diagnostics\":[]}") {
+    std::cerr << "self-test failed: system facts contract\n";
+    return 1;
+  }
+#ifdef _WIN32
+  if (format_luid(LUID{0x0000D2F1, 0}) != "0x00000000_0x0000D2F1" ||
+      format_driver_version(0x001F00005DE103EBULL) != "31.0.24033.1003") {
+    std::cerr << "self-test failed: adapter formatting\n";
+    return 1;
+  }
+#endif
   if (parse_number(std::optional<std::string>("123.5")) != 123.5 ||
       parse_number(std::optional<std::string>("not-a-number"))) {
     std::cerr << "self-test failed: numeric parser\n";
@@ -961,6 +1167,7 @@ void print_help() {
       << "Gezel device health helper\n\n"
       << "Usage:\n"
       << "  gezel-device-health sample --json\n"
+      << "  gezel-device-health system --json\n"
       << "  gezel-device-health --self-test\n";
 }
 
@@ -974,6 +1181,10 @@ int main(int argc, char** argv) {
   }
   if (argc == 3 && std::string(argv[1]) == "sample" && std::string(argv[2]) == "--json") {
     std::cout << serialize_report(sample_devices()) << '\n';
+    return 0;
+  }
+  if (argc == 3 && std::string(argv[1]) == "system" && std::string(argv[2]) == "--json") {
+    std::cout << serialize_system(sample_system()) << '\n';
     return 0;
   }
   print_help();

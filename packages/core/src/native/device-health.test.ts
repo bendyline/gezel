@@ -7,7 +7,9 @@ import {
   evaluateDeviceHealth,
   parseAmdSmiJson,
   parseDeviceHealthHelperJson,
+  parseDeviceSystemFactsJson,
   parseNvidiaSmiCsv,
+  readDeviceSystemFacts,
   resolveDeviceSafetyPolicy,
 } from './device-health.js';
 
@@ -387,5 +389,81 @@ describe('DeviceHealthGate', () => {
     await gate.status(0);
     await gate.status(0);
     expect(logs.filter((line) => line.includes('helper: no supported adapter'))).toHaveLength(1);
+  });
+});
+
+describe('device system facts', () => {
+  it('reads installed RAM from the helper contract', () => {
+    expect(
+      parseDeviceSystemFactsJson(
+        '{"schemaVersion":1,"installedRamBytes":17179869184,"diagnostics":[]}',
+      ),
+    ).toEqual({ installedRamBytes: 17179869184 });
+  });
+
+  it('reads the GPU adapters Windows lists, dropping only a malformed one', () => {
+    const facts = parseDeviceSystemFactsJson(
+      JSON.stringify({
+        schemaVersion: 1,
+        installedRamBytes: 17179869184,
+        adapters: [
+          {
+            luid: '0x00000000_0x0000D2F1',
+            vendorId: 4098,
+            deviceId: 5567,
+            name: 'AMD Radeon(TM) Graphics',
+            integrated: true,
+            dedicatedBytes: 8589934592,
+            sharedSystemBytes: 4152360960,
+            driverVersion: '31.0.24033.1003',
+          },
+          { luid: 42, vendorId: 4318 },
+        ],
+        diagnostics: [],
+      }),
+    );
+    expect(facts?.adapters).toEqual([
+      {
+        luid: '0x00000000_0x0000D2F1',
+        vendorId: 0x1002,
+        deviceId: 5567,
+        name: 'AMD Radeon(TM) Graphics',
+        integrated: true,
+        dedicatedBytes: 8 * 1024 ** 3,
+        sharedSystemBytes: 4152360960,
+        driverVersion: '31.0.24033.1003',
+      },
+    ]);
+  });
+
+  it('leaves out a missing or unusable figure, and rejects another contract', () => {
+    expect(parseDeviceSystemFactsJson('{"schemaVersion":1,"diagnostics":["x"]}')).toEqual({});
+    expect(parseDeviceSystemFactsJson('{"schemaVersion":1,"installedRamBytes":-1}')).toEqual({});
+    expect(parseDeviceSystemFactsJson('{"schemaVersion":2,"installedRamBytes":1}')).toBeNull();
+    expect(parseDeviceSystemFactsJson('Gezel device health helper')).toBeNull();
+  });
+
+  it('asks the helper for the system command', async () => {
+    const calls: string[][] = [];
+    const facts = await readDeviceSystemFacts({
+      helperPath: 'gezel-device-health.exe',
+      commandRunner: async (command, args) => {
+        calls.push([command, ...args]);
+        return { stdout: '{"schemaVersion":1,"installedRamBytes":8589934592}', stderr: '' };
+      },
+    });
+    expect(calls).toEqual([['gezel-device-health.exe', 'system', '--json']]);
+    expect(facts).toEqual({ installedRamBytes: 8589934592 });
+  });
+
+  it('knows nothing from a helper that predates the command, or no helper', async () => {
+    const older = await readDeviceSystemFacts({
+      helperPath: 'gezel-device-health.exe',
+      commandRunner: async () => {
+        throw new Error('Command failed with exit code 2');
+      },
+    });
+    expect(older).toEqual({});
+    expect(await readDeviceSystemFacts({ helperPath: null })).toEqual({});
   });
 });

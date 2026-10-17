@@ -35,9 +35,13 @@
  * crash still reports.
  */
 
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import type { LlamaBackend } from './llama-backend.js';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import {
+  type LlamaBackend,
+  type ResolvedLlamaBinary,
+  resolveAvailableLlamaBinary,
+} from './llama-backend.js';
 
 export interface LlamaQuarantineEntry {
   backend: LlamaBackend;
@@ -152,6 +156,42 @@ export function recordLlamaQuarantine(
   mkdir(dirname(path));
   writeFile(path, `${JSON.stringify(file, null, 2)}\n`);
   return entry;
+}
+
+/**
+ * The build to launch in place of `backend`'s, which was just quarantined:
+ * the next one down discovery's own fallback chain, from the sibling
+ * directory each bundled variant ships in (`<platformKey>-<backend>/`).
+ *
+ * Discovery reads the quarantine only at startup, so without this a crash
+ * routed around nothing until the app restarted — every retry in between
+ * relaunched the build that had just been written down as unrunnable.
+ *
+ * Null for a variant-less layout (one build, nothing beside it) or when
+ * nothing usable is bundled below; the quarantine then applies from the
+ * next start, as before.
+ */
+export function resolveLlamaFallbackBinary(
+  binaryPath: string,
+  backend: LlamaBackend,
+  isUsable: (backend: LlamaBackend, path: string) => boolean,
+  fileExists: (path: string) => boolean = existsSync,
+): ResolvedLlamaBinary | null {
+  const variantDir = dirname(binaryPath);
+  const suffix = `-${backend}`;
+  if (!basename(variantDir).endsWith(suffix)) return null;
+  const root = dirname(variantDir);
+  const platformKey = basename(variantDir).slice(0, -suffix.length);
+  const file = basename(binaryPath);
+  return resolveAvailableLlamaBinary(
+    backend,
+    (candidate) => {
+      const path = join(root, `${platformKey}-${candidate}`, file);
+      return fileExists(path) ? path : null;
+    },
+    true,
+    (candidate, path) => candidate !== backend && isUsable(candidate, path),
+  );
 }
 
 function isEntry(value: unknown): value is LlamaQuarantineEntry {

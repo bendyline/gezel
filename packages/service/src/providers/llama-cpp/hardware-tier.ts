@@ -18,6 +18,7 @@ import {
   kvQuantScale,
   liveLaunchCapBytes,
 } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { usableReservedGpuBytes } from '@bendyline/gezel-inference/internal/providers/native/capacity-budget';
 import { measureAvailableGpuBytes } from '@bendyline/gezel-inference/internal/providers/native/device-capacity';
 import { detectMemoryProfile } from '@bendyline/gezel-inference/internal/system/memory';
 
@@ -143,7 +144,10 @@ export async function liveLaunchView(): Promise<LiveLaunchView> {
   // programs hold, and so must the prediction.
   const launchCapBytes = liveLaunchCapBytes({
     budgetBytes: mem.budgetBytes,
-    vramBytes: discrete ? Math.min(mem.usableBytes, freeGpuBytes ?? mem.usableBytes) : 0,
+    // An integrated GPU's carve-out is memory free-RAM readings never see.
+    vramBytes: discrete
+      ? Math.min(mem.usableBytes, freeGpuBytes ?? mem.usableBytes)
+      : usableReservedGpuBytes(mem.gpuReservedBytes),
   });
   return {
     platform: mem.platform,

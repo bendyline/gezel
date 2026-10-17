@@ -25,8 +25,25 @@ No vendor library is redistributed. An unavailable driver/API is reported in
 
 ```text
 gezel-device-health sample --json
+gezel-device-health system --json
 gezel-device-health --self-test
 ```
+
+`sample` is telemetry, read on every poll. `system` reports static facts about
+the machine, read once per daemon run. On Windows:
+
+- `installedRamBytes` (`GetPhysicallyInstalledSystemMemory`), which the daemon
+  compares with the OS's own RAM total to find memory firmware set aside for
+  an integrated GPU.
+- `adapters`: each hardware GPU as DXCore describes it (Windows 10 2004+) —
+  LUID, PCI vendor/device id, name, whether it is integrated, its dedicated
+  memory (an integrated GPU's carve-out), dedicated system memory, the shared
+  system memory it may borrow, and driver version. DXCore reads these from the
+  kernel driver without creating a device. The daemon prefers them to guesses
+  from the GPU's name.
+
+A helper that predates `system` prints usage and exits non-zero; the daemon
+reads that as "unknown".
 
 The emitted contract is versioned with `schemaVersion: 1`. New fields may be
 added compatibly; incompatible changes require a new schema version and a

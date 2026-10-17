@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -91,7 +91,11 @@ test(
 
 test('build locks live in the checkout and nested builds inherit their separate owner', async (t) => {
   const root = await fixture(t);
-  assert.equal(await buildOutputLeasePath(root), join(root, '.cache', 'build-output-lease'));
+  // The lease canonicalizes the checkout, and macOS tmpdir sits behind /var -> /private/var.
+  assert.equal(
+    await buildOutputLeasePath(root),
+    join(await realpath(root), '.cache', 'build-output-lease'),
+  );
   await withDependencyReadLease(root, async ({ leaseEnv: dependencyEnv }) => {
     await withBuildOutputLease(root, async ({ leaseEnv: buildEnv }) => {
       assert.notEqual(

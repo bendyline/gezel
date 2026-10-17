@@ -8,7 +8,13 @@ import {
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { LlamaBackend } from '@bendyline/gezel/native';
-import { recordLlamaQuarantine } from '@bendyline/gezel/native';
+import {
+  isBinaryQuarantined,
+  readLlamaQuarantine,
+  recordLlamaQuarantine,
+  resolveLlamaFallbackBinary,
+  unrunnableBuildExit,
+} from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { mmprojBudgetBytes, nativeVisionEnabledFor } from '../../chat/vision-capability.js';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
@@ -163,6 +169,10 @@ export async function buildLlamaCppProvider(opts: {
     ? undefined
     : (process.env.GEZEL_LLAMA_SERVER_URL ?? config.llamaCppBaseUrl);
   const binary = process.env.GEZEL_LLAMA_SERVER_BIN;
+  // Read together with the binary: after a quarantine the env points at the
+  // fallback build, and a crash of THIS build must be charged to its own
+  // backend, not to whatever the env names by then.
+  const binaryBackend = process.env.GEZEL_LLAMA_SERVER_BACKEND as LlamaBackend | undefined;
   // Preservation is a two-sided contract: launch llama-server with the
   // explicit preserve/no-preserve flag AND replay captured
   // `reasoning_content` only in the preserve case. v0.4.0 changed the server
@@ -914,6 +924,7 @@ export async function buildLlamaCppProvider(opts: {
                 unifiedMemory:
                   liveMemory.gpuMemoryKind === 'integrated' ||
                   liveMemory.gpuMemoryKind === 'unified',
+                reservedGpuBytes: liveMemory.gpuReservedBytes ?? null,
               }
             : {}),
         });
@@ -1315,33 +1326,48 @@ export async function buildLlamaCppProvider(opts: {
       providerHolder.current?.getCacheAdapter()?.resetEngineState();
       if (snapshot.expected) return;
       logFile.writeIncident(snapshot);
-      // A build that dies by SIGILL before it ever answers /health has
-      // not failed at a task — it cannot run on this CPU at all, and
-      // relaunching it on every request just reproduces the crash while
-      // a working lower-tier build sits in the same directory. Write it
-      // down so the next launch routes around it.
-      //
-      // Deliberately narrow: only SIGILL, and only before readiness.
-      // A SIGSEGV during startup can be a corrupt model file, and any
-      // crash after readiness is attributable to the work rather than
-      // the binary — quarantining a backend over either would demote
-      // users to slow engines for transient reasons.
-      if (snapshot.signal !== 'SIGILL' || snapshot.reachedReady) return;
-      const backend = process.env.GEZEL_LLAMA_SERVER_BACKEND as LlamaBackend | undefined;
-      if (!backend) return;
+      // A build that dies before it ever answers /health has not failed at a
+      // task — it cannot run here at all, and relaunching it on every request
+      // just reproduces the crash while a working lower-tier build sits in
+      // the next directory. Write it down so the next launch routes around
+      // it. Which exits qualify (SIGILL; on Windows, a GPU build's crash
+      // status) is decided in unrunnable-build.ts.
+      const backend = binaryBackend;
+      const unrunnable = unrunnableBuildExit(snapshot, backend);
+      if (!backend || !unrunnable) return;
       const entry = recordLlamaQuarantine(home, {
         backend,
         binaryPath: binary,
-        signal: 'SIGILL',
-        reason:
-          'crashed with SIGILL before the engine became ready — this build uses CPU instructions ' +
-          'this machine does not support, or faulted inside GPU library startup',
+        signal: unrunnable.signal,
+        reason: unrunnable.reason,
       });
-      if (entry) {
-        log.warn(
-          `[llama-server] quarantined the ${backend} build after SIGILL (incident=${snapshot.incidentId}); the next launch will fall back to another backend`,
-        );
-      }
+      if (!entry) return;
+      log.warn(
+        `[llama-server] quarantined the ${backend} build after ${unrunnable.signal} (incident=${snapshot.incidentId}); the next launch will fall back to another backend`,
+      );
+      // Discovery reads the quarantine only at startup. Point the env at the
+      // fallback now, so the pool's rebuild of this failed engine on the next
+      // request launches it instead of the build just written down. A pinned
+      // backend is a decision, and discovery never routes around one either;
+      // an env that has already moved on belongs to someone else's fallback.
+      const pinned =
+        config.llamaCppBackendOverride !== undefined && config.llamaCppBackendOverride !== 'auto';
+      if (pinned || process.env.GEZEL_LLAMA_SERVER_BIN !== binary) return;
+      const quarantine = readLlamaQuarantine(home);
+      const fallback = resolveLlamaFallbackBinary(
+        binary,
+        backend,
+        (candidate, path) => !isBinaryQuarantined(quarantine, candidate, path),
+      );
+      if (!fallback) return;
+      process.env.GEZEL_LLAMA_SERVER_BIN = fallback.path;
+      process.env.GEZEL_LLAMA_SERVER_BACKEND = fallback.backend;
+      const quarantined = new Set(process.env.GEZEL_LLAMA_QUARANTINED?.split(',').filter(Boolean));
+      quarantined.add(backend);
+      process.env.GEZEL_LLAMA_QUARANTINED = [...quarantined].join(',');
+      log.warn(
+        `[llama-server] the next launch uses the ${fallback.backend} build: ${fallback.path}`,
+      );
     },
     onRawLine: (line) => providerHolder.current?.onStdoutLine(line),
     // GPU-OOM recovery ladder: when a start dies of VRAM exhaustion and the
