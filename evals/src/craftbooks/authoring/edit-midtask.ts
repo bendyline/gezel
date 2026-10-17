@@ -1,6 +1,7 @@
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../../types.ts';
 import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
+  completedTaskSteps,
   ensureAuthoringProject,
   ensureAuthoringWorker,
   findTaskForCraftbook,
@@ -207,6 +208,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     // counting them reported bytes before anything was produced. Only the
     // summary the model writes counts.
     bytes: progressBytes(summaryText),
+    milestones: completedTaskSteps(task),
     deliverableMissing: summaryText === null || summaryText.length === 0,
     repairPath: `task ${task.ref} craftbook`,
     repairDirective: [
