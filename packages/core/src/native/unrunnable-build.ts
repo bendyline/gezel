@@ -9,6 +9,17 @@
  * demoting a backend over it would leave people on a slow engine for a
  * transient reason.
  *
+ * So does only a death the engine did not explain. When it printed a fault
+ * the panic classifier recognizes — an assertion, a CUDA error, an
+ * out-of-memory — the line says what failed, and that is a model, a context
+ * size or a kernel, not the build. The offload ladder and the person own
+ * those. A build that cannot run here dies silently: a missing DLL, a driver
+ * fault, an instruction the CPU lacks.
+ *
+ * One such crash still quarantines nothing: `recordLlamaStartupCrash`
+ * (llama-quarantine.ts) counts it, and only `LLAMA_QUARANTINE_STRIKES` in a
+ * row, with no successful start between them, write a build down.
+ *
  * ## Windows
  *
  * A POSIX build that cannot run dies by SIGILL. A Windows process never
@@ -21,15 +32,12 @@
  * - illegal / privileged instruction — the SIGILL equivalent.
  * - DLL not found, missing entry point, failed DLL init, wrong image format —
  *   the build cannot load against this machine's driver or runtime DLLs.
- * - access violation and fail-fast abort — how a Vulkan or CUDA driver fault,
- *   or a GGML assert in backend init, ends the process. These are the broad
- *   ones: an access violation can also come from a corrupt model. They are
- *   still taken, because the cost is bounded — only GPU builds are ever
- *   demoted (the CPU build is the floor), and the entry is pinned to the
- *   binary's bytes, so the next engine release lifts it.
- *
- * GPU out-of-memory deaths are excluded: the offload-degrade ladder owns
- * those, and demoting to CPU would hide a capacity problem as a driver one.
+ * - access violation and fail-fast abort — how a Vulkan or CUDA driver fault
+ *   ends the process. These are the broad ones. `abort()` and an uncaught C++
+ *   exception also exit 0xc0000409 (measured, under both the static and the
+ *   DLL CRT), so a GGML assert in model loading looks exactly like a driver
+ *   fault by status alone; the printed-fault rule above is what tells them
+ *   apart.
  */
 
 const WINDOWS_UNRUNNABLE_STATUS: ReadonlyMap<number, string> = new Map([
@@ -62,6 +70,16 @@ export interface EngineExit {
   panicKind?: string;
 }
 
+/**
+ * What one unrunnable-looking startup crash did to its build's standing. A
+ * `strike` leaves the build in use; `quarantined` wrote it down, and
+ * `switchedTo` names the build this process launches instead (absent when
+ * nothing usable sits beside it, so the switch waits for the next start).
+ */
+export type StartupCrashVerdict =
+  | { kind: 'strike'; strikes: number; threshold: number }
+  | { kind: 'quarantined'; switchedTo?: string };
+
 /** `0xc0000005` for an NTSTATUS, the plain number for an ordinary exit code. */
 export function formatExitCode(code: number): string {
   const unsigned = code >>> 0;
@@ -78,6 +96,9 @@ export function unrunnableBuildExit(
   platform: NodeJS.Platform = process.platform,
 ): UnrunnableBuild | null {
   if (exit.reachedReady) return null;
+  // `illegal-instruction` is the supervisor's own label for a SIGILL that
+  // printed nothing, so it is the one classified kind that stays silent.
+  if (exit.panicKind !== undefined && exit.panicKind !== 'illegal-instruction') return null;
   if (exit.signal === 'SIGILL') {
     return {
       signal: 'SIGILL',
@@ -91,9 +112,6 @@ export function unrunnableBuildExit(
   }
   const gpu = backend && Object.hasOwn(GPU_LABEL, backend) ? GPU_LABEL[backend] : undefined;
   if (platform !== 'win32' || !gpu || exit.code === null) return null;
-  if (exit.panicKind === 'cuda-out-of-memory' || exit.panicKind === 'vulkan-out-of-memory') {
-    return null;
-  }
   const meaning = WINDOWS_UNRUNNABLE_STATUS.get(exit.code >>> 0);
   if (!meaning) return null;
   const status = formatExitCode(exit.code);

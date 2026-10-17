@@ -198,6 +198,37 @@ describe('NativeEngineSupervisor', () => {
     });
   });
 
+  it('tells its owner when a start reaches readiness, and survives a hook that throws', async () => {
+    // The llama build provider clears a build's startup-crash strikes here:
+    // a start that answered proves the crashes before it were not in a row.
+    const child = makeFakeChild(4244);
+    const ready: string[] = [];
+    const logs: string[] = [];
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: 'fake-engine',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9997',
+      }),
+      spawn: (() => child as never) as never,
+      fetchImpl: async () => new Response('ok', { status: 200 }),
+      idleTimeoutMs: 0,
+      healthIntervalMs: 10_000_000,
+      onLog: (line) => void logs.push(line),
+      onReady: (launch) => {
+        ready.push(launch.baseUrl);
+        throw new Error('hook failed');
+      },
+      psRunner: async () => [],
+    });
+
+    await expect(sup.ensureRunning()).resolves.toMatchObject({ baseUrl: 'http://127.0.0.1:9997' });
+
+    expect(ready).toEqual(['http://127.0.0.1:9997']);
+    expect(logs.some((line) => line.includes('onReady hook threw: hook failed'))).toBe(true);
+    await sup.stop();
+  });
+
   it('runs the pre-stop hook against the live engine before signalling it', async () => {
     // The engine's own shutdown flush gets the three-second SIGTERM→SIGKILL
     // grace; a long session's KV cache does not fit in it. The hook runs

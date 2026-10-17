@@ -2085,6 +2085,11 @@ tray. Derivation lives in
 [system-notices.ts](../packages/ui/src/system-notices.ts), so the rail and
 Settings can never drift apart. The one update outcome that *is* worth
 interrupting for — a verified update waiting to install — also stays a banner.
+A notice the person can act on also appears where the action lives: a GPU
+backend Gezel switched off after it crashed several times in a row while
+starting shows on that engine's Settings tab as the same `.settings-notice`,
+with a plain "Try … again" button beneath the disclosure, and the rail copy
+names that tab.
 
 **The titlebar sheds words before it sheds pills.** The status cluster is
 open-ended — one engine pill per busy on-device engine, one queue chip per

@@ -1,4 +1,8 @@
-import type { HealthResponse, LlamaCppContextSizing } from '@bendyline/gezel';
+import type {
+  HealthResponse,
+  LlamaCppContextSizing,
+  LlamaCppQuarantineResponse,
+} from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import type { LlamaCppInstalledModel } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -7,7 +11,10 @@ import { EngineBudgetStrip } from '../components/EngineBudgetStrip.js';
 import { EngineClonePicker } from '../components/EngineClonePicker.js';
 import { LlamaCppModelManager } from '../components/LlamaCppModelManager.js';
 import { MachineHealthSettings } from '../components/MachineHealthSettings.js';
+import { engineBackendLabel } from '../system-notices.js';
 import { localEngineSettingsLabel } from './local-engine-label.js';
+
+type QuarantineEntry = LlamaCppQuarantineResponse['entries'][number];
 
 interface Props {
   config: ConfigResponse | null;
@@ -131,6 +138,70 @@ function needsRestart(
 }
 
 /**
+ * A build the engine switched off after it crashed while starting, with the
+ * way back. Same form as the install-health notices in Settings → About: a
+ * headline, the plain explanation, the raw reason behind a disclosure.
+ */
+function EngineQuarantineNotice({
+  entry,
+  running,
+  lifting,
+  disabled,
+  error,
+  onLift,
+}: {
+  entry: QuarantineEntry;
+  running: string | undefined;
+  lifting: boolean;
+  disabled: boolean;
+  error: string | undefined;
+  onLift: () => void;
+}) {
+  const label = engineBackendLabel(entry.backend);
+  const when = new Date(entry.at).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+  const crashed = entry.crashes
+    ? `It crashed ${entry.crashes} times in a row while starting, most recently on ${when}`
+    : `It crashed while starting on ${when}`;
+  const instead =
+    running && running !== entry.backend
+      ? `, so Gezel is using ${engineBackendLabel(running)} instead. Local models still work, just more slowly.`
+      : '. Gezel uses another backend the next time it starts.';
+  return (
+    <div
+      className="settings-notice"
+      data-testid={`llama-quarantine-${entry.backend}`}
+      style={{ marginTop: '0.75rem' }}
+    >
+      <strong>{label} is switched off on this machine.</strong>
+      <span>
+        {crashed}
+        {instead} If you have updated your graphics driver or restarted your computer since then,
+        try it again. Gezel switches it off again only if it keeps failing to start.
+      </span>
+      <details>
+        <summary>Technical details</summary>
+        <p>
+          {entry.reason} ({entry.signal})
+        </p>
+      </details>
+      <div className="new-row" style={{ marginTop: '0.5rem' }}>
+        <button type="button" disabled={disabled} onClick={onLift}>
+          {lifting ? 'Turning it back on…' : `Try ${label} again`}
+        </button>
+      </div>
+      {error && (
+        <p className="error" style={{ marginTop: '0.5rem' }}>
+          Could not turn {label} back on: {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
  * Dedicated tab for llama.cpp — mirrors OllamaSettings in
  * structure but the knob set is much smaller: most of the
  * complexity Ollama surfaces (num_ctx, three separate timeouts,
@@ -149,6 +220,12 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [contextSizing, setContextSizing] = useState<LlamaCppContextSizing>('adaptive');
   const [contextSizingLoading, setContextSizingLoading] = useState(true);
+  const [quarantine, setQuarantine] = useState<LlamaCppQuarantineResponse | null>(null);
+  const [lifting, setLifting] = useState<QuarantineEntry['backend'] | null>(null);
+  const [liftResult, setLiftResult] = useState<{
+    backend: QuarantineEntry['backend'];
+    error?: string;
+  } | null>(null);
   const savingResetTimer = useRef<number | null>(null);
   const mounted = useRef(true);
 
@@ -224,6 +301,37 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .getLlamaCppQuarantine()
+      .then((response) => {
+        if (!cancelled) setQuarantine(response);
+      })
+      .catch(() => {
+        /* An engine owner that predates the route reports nothing switched off. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const liftQuarantine = useCallback(async (backend: QuarantineEntry['backend']) => {
+    setLifting(backend);
+    setLiftResult(null);
+    try {
+      const next = await api.clearLlamaCppQuarantine(backend);
+      if (!mounted.current) return;
+      setQuarantine(next);
+      setLiftResult({ backend });
+    } catch (err) {
+      if (!mounted.current) return;
+      setLiftResult({ backend, error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      if (mounted.current) setLifting(null);
+    }
   }, []);
 
   const saveBaseUrl = useCallback(async () => {
@@ -499,6 +607,11 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
 
   const currentDefault = config?.defaultModel?.['llama-cpp'];
   const hasExternalBaseUrl = Boolean(config?.llamaCppBaseUrl);
+  // A pinned backend launches as pinned and is never routed around, so a
+  // quarantine entry changes nothing while the pin stands.
+  const pinnedBackend =
+    config?.llamaCppBackendOverride !== undefined && config.llamaCppBackendOverride !== 'auto';
+  const quarantined = pinnedBackend || hasExternalBaseUrl ? [] : (quarantine?.entries ?? []);
 
   return (
     <div>
@@ -523,6 +636,23 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           )}
           {saving === 'saved' && <span className="muted small">saved ✓</span>}
         </div>
+        {quarantined.map((entry) => (
+          <EngineQuarantineNotice
+            key={entry.backend}
+            entry={entry}
+            running={quarantine?.running ?? health?.llamaCppBackend}
+            lifting={lifting === entry.backend}
+            disabled={lifting !== null}
+            error={liftResult?.backend === entry.backend ? liftResult.error : undefined}
+            onLift={() => void liftQuarantine(entry.backend)}
+          />
+        ))}
+        {liftResult && !liftResult.error && (
+          <output className="muted small" style={{ display: 'block', marginTop: '0.75rem' }}>
+            {engineBackendLabel(liftResult.backend)} is back on. Gezel tries it the next time it
+            starts a model, and switches it off again only if it keeps failing to start.
+          </output>
+        )}
       </section>
 
       {installed.length > 1 && (

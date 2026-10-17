@@ -188,6 +188,11 @@ export interface NativeEngineSupervisorOptions {
   /** Called for both expected and unexpected exits after a snapshot is sealed. */
   onExit?: (snapshot: NativeEngineExitSnapshot) => void | Promise<void>;
   /**
+   * Called each time a start reaches readiness. Errors are caught and logged;
+   * a failing hook never fails the start.
+   */
+  onReady?: (launch: NativeEngineLaunch) => void;
+  /**
    * Consulted after a start attempt fails (child died or never became
    * ready — not spawn errors, and not crashes after readiness). Return
    * true to re-resolve the launch spec and try again in the same
@@ -393,6 +398,7 @@ export class NativeEngineSupervisor {
   private readonly fetchImpl: typeof fetch;
   private readonly onLog: (line: string) => void;
   private readonly onExit?: (snapshot: NativeEngineExitSnapshot) => void | Promise<void>;
+  private readonly onReady?: (launch: NativeEngineLaunch) => void;
   private readonly recoverStartup?: (info: {
     panicKind?: NativeEnginePanicKind | undefined;
     attempt: number;
@@ -489,6 +495,7 @@ export class NativeEngineSupervisor {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.onLog = opts.onLog ?? ((line) => log.info(line));
     if (opts.onExit) this.onExit = opts.onExit;
+    if (opts.onReady) this.onReady = opts.onReady;
     if (opts.recoverStartup) this.recoverStartup = opts.recoverStartup;
     if (opts.onRawLine) this.onRawLine = opts.onRawLine;
     this.logPrefix = opts.logPrefix ?? '[native]';
@@ -935,6 +942,13 @@ export class NativeEngineSupervisor {
       this.state = { kind: 'running', launch, child, healthFails: 0 };
       this.resetIdleTimer();
       this.startHealthWatch();
+      try {
+        this.onReady?.(launch);
+      } catch (hookErr) {
+        this.onLog(
+          `${this.logPrefix} onReady hook threw: ${hookErr instanceof Error ? hookErr.message : hookErr}`,
+        );
+      }
     } catch (err) {
       // The panic classifier state is cleared by handleExit — read it now,
       // before killGracefully drives the exit, so the recovery hook below

@@ -29,16 +29,27 @@ export type {
   ResolvedLlamaBinary,
 } from './llama-backend.js';
 export { detectLlamaBackend, resolveAvailableLlamaBinary } from './llama-backend.js';
-export type { LlamaQuarantineEntry, QuarantineIo } from './llama-quarantine.js';
+export type {
+  LlamaQuarantineEntry,
+  LlamaQuarantineStrike,
+  QuarantineIo,
+} from './llama-quarantine.js';
 export {
+  LLAMA_QUARANTINE_STRIKES,
   binaryFingerprint,
+  clearLlamaQuarantine,
+  clearLlamaStartupStrikes,
   isBinaryQuarantined,
   llamaQuarantinePath,
+  llamaVariantBinaryPath,
   readLlamaQuarantine,
+  readLlamaQuarantineStrikes,
   recordLlamaQuarantine,
+  recordLlamaStartupCrash,
   resolveLlamaFallbackBinary,
+  resolveLlamaVariantBinary,
 } from './llama-quarantine.js';
-export type { EngineExit, UnrunnableBuild } from './unrunnable-build.js';
+export type { EngineExit, StartupCrashVerdict, UnrunnableBuild } from './unrunnable-build.js';
 export { formatExitCode, unrunnableBuildExit } from './unrunnable-build.js';
 export type {
   DiscoverInput,

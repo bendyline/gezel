@@ -16,6 +16,11 @@ import {
   pinnedEngineArchiveBytes,
 } from '../../engines/native-manifest.js';
 import { KNOWN_ENGINES, isKnownEngine } from '../../engines/registry.js';
+import {
+  isLlamaBackend,
+  liftLlamaQuarantine,
+  llamaQuarantineView,
+} from '../../providers/llama-cpp/backend-quarantine.js';
 import { EngineBusyError } from '../../providers/native/capacity-broker.js';
 import type { EngineRuntimeContext as EngineContext } from '../engine-runtime-context.js';
 import { invalidateModelsCache } from '../model-inventory-cache.js';
@@ -249,6 +254,35 @@ export function enginesRoutes(ctx: EngineContext): Hono {
       await ctx.chat.resetClient({ deferBusy: true });
     }
     return c.json({ policy: effective });
+  });
+
+  /**
+   * llama-server builds switched off on this machine after crashing while
+   * starting, and the undo behind the engine's Settings tab. Engine-owner
+   * state like the policies above: the quarantine file lives in the home of
+   * the process that launches the engines, so packaged user daemons proxy
+   * this to the machine engine.
+   */
+  app.get('/llama-cpp/quarantine', (c) => c.json(llamaQuarantineView(ctx.home)));
+
+  app.delete('/llama-cpp/quarantine/:backend', async (c) => {
+    const backend = c.req.param('backend');
+    if (!isLlamaBackend(backend)) {
+      return c.json({ error: 'backend must be "cuda", "vulkan", "metal", or "cpu"' }, 400);
+    }
+    const override = (await ctx.store.readConfig()).llamaCppBackendOverride;
+    const { restored } = liftLlamaQuarantine(ctx.home, backend, {
+      pinned: override !== undefined && override !== 'auto',
+    });
+    if (restored) {
+      log.info(`llama-server ${backend} quarantine lifted; next launch uses ${restored.path}`);
+      // Engines resolve their binary when the provider is built, so a resident
+      // engine keeps running the fallback until it restarts. Same soft reset
+      // as the policies above: idle engines go now, busy ones after their turn.
+      invalidateModelsCache();
+      await ctx.chat.resetClient({ deferBusy: true });
+    }
+    return c.json(llamaQuarantineView(ctx.home));
   });
 
   /**

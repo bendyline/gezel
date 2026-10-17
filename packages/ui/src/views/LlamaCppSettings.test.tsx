@@ -44,6 +44,7 @@ describe('LlamaCppSettings', () => {
       async (patch) => ({ ...BASE_CONFIG, ...patch }) as ConfigResponse,
     );
     vi.mocked(api.getLlamaCppContextSizing).mockResolvedValue({ policy: 'adaptive' });
+    vi.mocked(api.getLlamaCppQuarantine).mockResolvedValue({ entries: [], strikeThreshold: 3 });
     vi.mocked(api.updateLlamaCppContextSizing).mockImplementation(async (policy) => ({ policy }));
     vi.mocked(api.getLlamaCppLog).mockResolvedValue({
       path: '/tmp/llamacpp.log',
@@ -328,6 +329,87 @@ describe('LlamaCppSettings', () => {
     });
     await waitFor(() => {
       expect(screen.getByText(/engine started ok/)).toBeInTheDocument();
+    });
+  });
+
+  describe('a build switched off after crashing while starting', () => {
+    const switchedOff = {
+      entries: [
+        {
+          backend: 'vulkan' as const,
+          signal: 'exit:0xc0000005',
+          reason: 'exited with 0xc0000005 (access violation) before the engine became ready',
+          at: '2026-10-17T14:00:00.000Z',
+          crashes: 3,
+        },
+      ],
+      strikeThreshold: 3,
+      running: 'cpu' as const,
+    };
+    const fallbackHealth = {
+      ...BASE_HEALTH,
+      llamaCppBackend: 'cpu',
+      llamaCppDetectedBackend: 'vulkan',
+      llamaCppQuarantinedBackends: ['vulkan'],
+    } as HealthResponse;
+
+    it('says what happened and turns the build back on', async () => {
+      vi.mocked(api.getLlamaCppQuarantine).mockResolvedValue(switchedOff);
+      vi.mocked(api.clearLlamaCppQuarantine).mockResolvedValue({
+        entries: [],
+        strikeThreshold: 3,
+        running: 'vulkan',
+      });
+      render(
+        <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={fallbackHealth} />,
+      );
+
+      // Outside the collapsed Advanced section: it explains a slow engine.
+      const notice = await screen.findByTestId('llama-quarantine-vulkan');
+      expect(notice).toBeVisible();
+      expect(notice).toHaveTextContent('GPU (Vulkan) is switched off on this machine.');
+      expect(notice).toHaveTextContent('It crashed 3 times in a row while starting');
+      expect(notice).toHaveTextContent('so Gezel is using CPU instead');
+      expect(notice).toHaveTextContent('(exit:0xc0000005)');
+
+      await userEvent.click(within(notice).getByRole('button', { name: 'Try GPU (Vulkan) again' }));
+
+      await waitFor(() => expect(api.clearLlamaCppQuarantine).toHaveBeenCalledWith('vulkan'));
+      expect(await screen.findByText(/GPU \(Vulkan\) is back on\./)).toBeInTheDocument();
+      expect(screen.queryByTestId('llama-quarantine-vulkan')).not.toBeInTheDocument();
+    });
+
+    it('keeps the notice and says why when the build cannot be turned back on', async () => {
+      vi.mocked(api.getLlamaCppQuarantine).mockResolvedValue(switchedOff);
+      vi.mocked(api.clearLlamaCppQuarantine).mockRejectedValue(new Error('engine owner offline'));
+      render(
+        <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={fallbackHealth} />,
+      );
+
+      const notice = await screen.findByTestId('llama-quarantine-vulkan');
+      await userEvent.click(within(notice).getByRole('button', { name: 'Try GPU (Vulkan) again' }));
+
+      expect(
+        await within(notice).findByText(
+          'Could not turn GPU (Vulkan) back on: engine owner offline',
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/is back on/)).not.toBeInTheDocument();
+    });
+
+    it('stays quiet while a pinned backend decides what runs', async () => {
+      vi.mocked(api.getLlamaCppQuarantine).mockResolvedValue(switchedOff);
+      render(
+        <LlamaCppSettings
+          config={{ ...BASE_CONFIG, llamaCppBackendOverride: 'cpu' } as ConfigResponse}
+          onConfigChanged={vi.fn()}
+          health={fallbackHealth}
+        />,
+      );
+
+      await waitFor(() => expect(api.getLlamaCppQuarantine).toHaveBeenCalled());
+      await screen.findByRole('option', { name: /First local model/ });
+      expect(screen.queryByTestId('llama-quarantine-vulkan')).not.toBeInTheDocument();
     });
   });
 

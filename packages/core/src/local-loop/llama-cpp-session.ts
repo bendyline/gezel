@@ -10,7 +10,11 @@
 
 import { CONDENSED_TOOL_OUTPUT_NOTICE, autoCompactedNotice } from '../context-notices.js';
 import { createLogger } from '../log.js';
-import { formatExitCode, unrunnableBuildExit } from '../native/unrunnable-build.js';
+import {
+  type StartupCrashVerdict,
+  formatExitCode,
+  unrunnableBuildExit,
+} from '../native/unrunnable-build.js';
 import { leaksUntaggedReasoning } from '../ollama-models.js';
 import type { ProviderQueue } from '../runtime/provider-queue.js';
 import { AwakeBudget, createAwakeTimeout } from '../suspend-clock.js';
@@ -176,6 +180,8 @@ export class NativeEngineCrashedError extends Error {
   constructor(
     readonly snapshot: NativeEngineExitSnapshot,
     cause?: unknown,
+    /** What the crash did to its build's standing, when the owner counted it. */
+    verdict?: StartupCrashVerdict,
   ) {
     const causeMessage = cause instanceof Error ? cause.message : cause ? String(cause) : '';
     // Windows reports a crash as an exit status, never a signal.
@@ -186,19 +192,30 @@ export class NativeEngineCrashedError extends Error {
         : snapshot.code
           ? ` (exit ${formatExitCode(snapshot.code)})`
           : '';
-    // An unrunnable build is not a transient fault, so it must not be
-    // described as one. "It will restart on the next request" is true of
-    // a CUDA OOM and actively misleading here: the restart reproduces
-    // the crash byte-for-byte. Say what happened and what changes — the
-    // same decision quarantines the build (unrunnable-build.ts).
+    // Say what the restart will actually do. Only the crash that completes
+    // a build's strikes changes anything (llama-quarantine.ts); before that
+    // the same build relaunches, and "Gezel will switch" would be untrue.
+    // The strike copy avoids "cannot run on this machine", which the chat
+    // reads as "do not offer Retry", because retrying is how the count
+    // advances.
     const backend = snapshot.diagnostics?.backend;
     const unrunnable = unrunnableBuildExit(
       snapshot,
       typeof backend === 'string' ? backend : undefined,
     );
-    const outcome = unrunnable
-      ? `${unrunnable.summary} Gezel will switch to another engine backend on the next request.`
-      : 'It will restart on the next request.';
+    const remaining = verdict?.kind === 'strike' ? verdict.threshold - verdict.strikes : 0;
+    const outcome =
+      !unrunnable || !verdict
+        ? 'It will restart on the next request.'
+        : verdict.kind === 'quarantined'
+          ? `${unrunnable.summary} Gezel will ${
+              verdict.switchedTo
+                ? 'switch to another engine backend on the next request.'
+                : 'use another engine backend the next time it starts.'
+            }`
+          : `It will restart on the next request. If it fails to start ${remaining} more ${
+              remaining === 1 ? 'time' : 'times'
+            } in a row, Gezel will switch to another engine backend.`;
     super(
       `[llama-cpp] on-device engine crashed${detail}; incident=${snapshot.incidentId}. ` +
         `${outcome}${causeMessage ? ` Transport reported: ${causeMessage}` : ''}`,

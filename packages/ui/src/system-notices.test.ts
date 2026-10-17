@@ -309,6 +309,16 @@ describe('engineBackendNotice', () => {
     expect(notice?.railLabel).toBe('Running on GPU (Vulkan)');
   });
 
+  it('points to the engine tab where the backend can be turned back on', () => {
+    const notice = engineBackendNotice({
+      quarantined: ['vulkan'],
+      running: 'cpu',
+      platform: 'win32',
+    });
+    expect(notice?.body).toContain('several times in a row');
+    expect(notice?.body).toContain('turn it back on from Settings → This PC (llama).');
+  });
+
   it('is absent when nothing is quarantined', () => {
     expect(engineBackendNotice({})).toBeNull();
     expect(engineBackendNotice({ quarantined: [], running: 'cuda' })).toBeNull();

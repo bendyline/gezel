@@ -7,12 +7,11 @@ import {
   estimateLlamaCppResidentBytes,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import type { LlamaBackend } from '@bendyline/gezel/native';
+import type { LlamaBackend, StartupCrashVerdict } from '@bendyline/gezel/native';
 import {
-  isBinaryQuarantined,
-  readLlamaQuarantine,
-  recordLlamaQuarantine,
-  resolveLlamaFallbackBinary,
+  LLAMA_QUARANTINE_STRIKES,
+  clearLlamaStartupStrikes,
+  recordLlamaStartupCrash,
   unrunnableBuildExit,
 } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
@@ -44,6 +43,7 @@ import { makeEngineKey } from '../native/engine-key.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
+import { adoptLlamaFallback } from './backend-quarantine.js';
 import { lastArgValue, readLlamaCppBuildMetadata } from './build-metadata.js';
 import {
   matchNvidiaRuntimeDevice,
@@ -173,6 +173,9 @@ export async function buildLlamaCppProvider(opts: {
   // fallback build, and a crash of THIS build must be charged to its own
   // backend, not to whatever the env names by then.
   const binaryBackend = process.env.GEZEL_LLAMA_SERVER_BACKEND as LlamaBackend | undefined;
+  // What the latest startup crash did to this build's standing, for the error
+  // the failed start raises. `onExit` runs before `ensureRunning` rejects.
+  let lastStartupCrash: { incidentId: string; verdict: StartupCrashVerdict } | null = null;
   // Preservation is a two-sided contract: launch llama-server with the
   // explicit preserve/no-preserve flag AND replay captured
   // `reasoning_content` only in the preserve case. v0.4.0 changed the server
@@ -1326,24 +1329,35 @@ export async function buildLlamaCppProvider(opts: {
       providerHolder.current?.getCacheAdapter()?.resetEngineState();
       if (snapshot.expected) return;
       logFile.writeIncident(snapshot);
-      // A build that dies before it ever answers /health has not failed at a
-      // task — it cannot run here at all, and relaunching it on every request
-      // just reproduces the crash while a working lower-tier build sits in
-      // the next directory. Write it down so the next launch routes around
-      // it. Which exits qualify (SIGILL; on Windows, a GPU build's crash
-      // status) is decided in unrunnable-build.ts.
+      // A build that dies before it ever answers /health, without saying
+      // why, may not be able to run here at all — and relaunching it on every
+      // request just reproduces the crash while a working lower-tier build
+      // sits in the next directory. Count it; a few in a row write it down so
+      // the next launch routes around it. Which exits qualify (a silent
+      // SIGILL; on Windows, a GPU build's crash status) is decided in
+      // unrunnable-build.ts, how many in llama-quarantine.ts.
       const backend = binaryBackend;
       const unrunnable = unrunnableBuildExit(snapshot, backend);
       if (!backend || !unrunnable) return;
-      const entry = recordLlamaQuarantine(home, {
+      const { strikes, entry } = recordLlamaStartupCrash(home, {
         backend,
         binaryPath: binary,
         signal: unrunnable.signal,
         reason: unrunnable.reason,
       });
-      if (!entry) return;
+      if (!entry) {
+        if (strikes === 0) return;
+        lastStartupCrash = {
+          incidentId: snapshot.incidentId,
+          verdict: { kind: 'strike', strikes, threshold: LLAMA_QUARANTINE_STRIKES },
+        };
+        log.warn(
+          `[llama-server] the ${backend} build crashed before it was ready (${unrunnable.signal}, incident=${snapshot.incidentId}); ${strikes} of ${LLAMA_QUARANTINE_STRIKES} in a row switch it off`,
+        );
+        return;
+      }
       log.warn(
-        `[llama-server] quarantined the ${backend} build after ${unrunnable.signal} (incident=${snapshot.incidentId}); the next launch will fall back to another backend`,
+        `[llama-server] quarantined the ${backend} build after ${strikes} crashes in a row (${unrunnable.signal}, incident=${snapshot.incidentId}); the next launch will fall back to another backend`,
       );
       // Discovery reads the quarantine only at startup. Point the env at the
       // fallback now, so the pool's rebuild of this failed engine on the next
@@ -1352,22 +1366,24 @@ export async function buildLlamaCppProvider(opts: {
       // an env that has already moved on belongs to someone else's fallback.
       const pinned =
         config.llamaCppBackendOverride !== undefined && config.llamaCppBackendOverride !== 'auto';
-      if (pinned || process.env.GEZEL_LLAMA_SERVER_BIN !== binary) return;
-      const quarantine = readLlamaQuarantine(home);
-      const fallback = resolveLlamaFallbackBinary(
-        binary,
-        backend,
-        (candidate, path) => !isBinaryQuarantined(quarantine, candidate, path),
-      );
-      if (!fallback) return;
-      process.env.GEZEL_LLAMA_SERVER_BIN = fallback.path;
-      process.env.GEZEL_LLAMA_SERVER_BACKEND = fallback.backend;
-      const quarantined = new Set(process.env.GEZEL_LLAMA_QUARANTINED?.split(',').filter(Boolean));
-      quarantined.add(backend);
-      process.env.GEZEL_LLAMA_QUARANTINED = [...quarantined].join(',');
-      log.warn(
-        `[llama-server] the next launch uses the ${fallback.backend} build: ${fallback.path}`,
-      );
+      const fallback =
+        pinned || process.env.GEZEL_LLAMA_SERVER_BIN !== binary
+          ? null
+          : adoptLlamaFallback(home, binary, backend);
+      lastStartupCrash = {
+        incidentId: snapshot.incidentId,
+        verdict: { kind: 'quarantined', ...(fallback ? { switchedTo: fallback.backend } : {}) },
+      };
+      if (fallback) {
+        log.warn(
+          `[llama-server] the next launch uses the ${fallback.backend} build: ${fallback.path}`,
+        );
+      }
+    },
+    // Any start that reaches readiness proves the build runs here, so the
+    // crashes before it were not in a row.
+    onReady: () => {
+      if (binaryBackend) clearLlamaStartupStrikes(home, binaryBackend);
     },
     onRawLine: (line) => providerHolder.current?.onStdoutLine(line),
     // GPU-OOM recovery ladder: when a start dies of VRAM exhaustion and the
@@ -1600,6 +1616,8 @@ export async function buildLlamaCppProvider(opts: {
     supervisor,
     logFile,
     slotSavePath,
+    startupCrashVerdict: (incidentId) =>
+      lastStartupCrash?.incidentId === incidentId ? lastStartupCrash.verdict : undefined,
     // Lets `listModels()` enumerate every installed model (not just
     // the resident one) so `/v1/models` + pickers see the full set
     // the engine pool can serve.

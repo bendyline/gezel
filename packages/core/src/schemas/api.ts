@@ -799,6 +799,38 @@ export const LlamaCppContextSizingResponseSchema = z.object({
 });
 export type LlamaCppContextSizingResponse = z.infer<typeof LlamaCppContextSizingResponseSchema>;
 
+const LlamaCppBackendNameSchema = z.enum(['cuda', 'vulkan', 'metal', 'cpu']);
+
+/**
+ * `/api/engines/llama-cpp/quarantine` — llama-server builds the engine owner
+ * has switched off on this machine after they crashed while starting (see
+ * `llama-quarantine.ts`). Lists only entries for the build on disk now; one
+ * whose binary an update replaced no longer applies and is left out.
+ */
+export const LlamaCppQuarantineResponseSchema = z.object({
+  entries: z.array(
+    z.object({
+      backend: LlamaCppBackendNameSchema,
+      /** `SIGILL`, or `exit:<code>` (`exit:0xc0000005`). */
+      signal: z.string(),
+      /** Technical explanation, for a "Technical details" disclosure. */
+      reason: z.string(),
+      /** ISO 8601 timestamp of the crash that completed the strikes. */
+      at: z.string(),
+      /**
+       * Crashes in a row that switched the build off. Absent for entries
+       * written before strikes, which switched it off on the first crash.
+       */
+      crashes: z.number().int().positive().optional(),
+    }),
+  ),
+  /** Crashes in a row that quarantine a build. */
+  strikeThreshold: z.number().int().positive(),
+  /** The build the engine launches now, when one is resolved. */
+  running: LlamaCppBackendNameSchema.optional(),
+});
+export type LlamaCppQuarantineResponse = z.infer<typeof LlamaCppQuarantineResponseSchema>;
+
 /**
  * Wire shapes for the per-model context override surface
  * (`/api/engines/:engine/model-context`). The response map is keyed by the

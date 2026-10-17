@@ -1,5 +1,6 @@
 import type { UpdateState } from './api.js';
 import { RELEASES_URL, releaseUrl } from './github-urls.js';
+import { localEngineSettingsLabel } from './views/local-engine-label.js';
 
 export { releaseUrl };
 
@@ -323,7 +324,8 @@ const BACKEND_LABEL: Record<string, string> = {
   cpu: 'CPU',
 };
 
-function backendLabel(backend?: string): string {
+/** How the notices and the engine's Settings tab name a llama.cpp backend. */
+export function engineBackendLabel(backend?: string): string {
   return (backend && BACKEND_LABEL[backend]) ?? backend ?? 'another backend';
 }
 
@@ -343,18 +345,20 @@ function backendLabel(backend?: string): string {
 export function engineBackendNotice(input: {
   quarantined?: readonly string[];
   running?: string;
+  platform?: string;
 }): SystemNotice | null {
   const demoted = input.quarantined?.[0];
   if (!demoted) return null;
   return {
     id: 'engine-backend-quarantined',
-    railLabel: `Running on ${backendLabel(input.running)}`,
-    title: `Gezel switched off ${backendLabel(demoted)} on this machine.`,
+    railLabel: `Running on ${engineBackendLabel(input.running)}`,
+    title: `Gezel switched off ${engineBackendLabel(demoted)} on this machine.`,
     body: [
-      `The ${backendLabel(demoted)} engine crashed every time it started here, so Gezel is using`,
-      `${backendLabel(input.running)} instead. Everything still works — local models are just`,
-      'slower than this machine is capable of. Gezel retries automatically once a Gezel update',
-      'ships a new engine build, and updating your GPU driver is worth trying in the meantime.',
+      `The ${engineBackendLabel(demoted)} engine crashed several times in a row while starting here,`,
+      `so Gezel is using ${engineBackendLabel(input.running)} instead. Everything still works — local`,
+      'models are just slower than this machine is capable of. Gezel retries automatically once a',
+      'Gezel update ships a new engine build. After updating your GPU driver, you can turn it back',
+      `on from Settings → ${localEngineSettingsLabel('llama-cpp', input.platform)}.`,
     ].join(' '),
     technical: `quarantined backends: ${input.quarantined?.join(', ')}`,
     // The most report-worthy of the lot: a backend that crashes on every
@@ -419,6 +423,7 @@ export function railSystemNotices(input: {
     engineBackendNotice({
       ...(input.quarantinedBackends ? { quarantined: input.quarantinedBackends } : {}),
       ...(input.runningBackend ? { running: input.runningBackend } : {}),
+      ...(input.platform ? { platform: input.platform } : {}),
     }),
     updateNotice(input.update, input.platform),
   ].filter((n): n is SystemNotice => n !== null && n.railLabel !== null);
