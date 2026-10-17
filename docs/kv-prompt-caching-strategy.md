@@ -1282,22 +1282,25 @@ Two consequences were acted on:
    only cost reuse on multi-slot dense engines. Now passed at any slot count.
    (Blast radius is modest here: all 55 observed launches on this box
    auto-sized to `slots: 1` under the KV memory ceiling.)
-2. **`--swa-full` silently decides whether Gemma gets prefix reuse at all.**
-   The flag is auto-enabled for Gemma only when weights + full KV fit fast
-   memory (`swaFullAutoFits`). On a machine where they do not, Gemma launches
-   windowed and *also* loses `cache_reuse`. A memory decision is therefore
-   doubling as a cache-reuse decision, which is worth knowing when a
-   smaller-RAM machine shows unexpectedly poor prefill reuse.
-3. **The auto-default is also declined past the automatic KV ceiling**
+2. **`--swa-full` is opt-in, so Gemma runs without `cache_reuse`.** Gemma
+   used to get the full cache by default whenever weights + full KV fit fast
+   memory. Since 2026-10-15 it gets it only from an explicit `llamaCppSwaFull`
+   or manifest `swaFull`. Measured on gemma4-31b (DGX Spark, 64K x 1 slot, 14
+   paired agentic trials): the full cache raised prefix reuse from 0.60 to
+   0.72, but decoded 17-25% slower at every context depth (26.1 vs 33.9 tok/s
+   overall, identical MTP acceptance), because decode reads each SWA layer's
+   whole cache. Trials took 19% longer in total with it, at 78 GB reserved
+   against 27 GB. The full cache costs speed as well as memory; it is not a
+   speed trade. Admission prices the windowed cache for every unpinned
+   sliding-window launch (`estimateWindowedKvLinearization`). Write-up:
+   `evals/runs/ab-swa-full-2026-10/RESULTS.md`.
+3. **Adaptive growth stops at the automatic KV ceiling**
    (`AUTO_KV_CACHE_MAX_BYTES`, 32 GiB, overridable with
-   `GEZEL_LLAMA_AUTO_KV_MAX_GB`), even where the full cache fits. gemma4-31b's
-   full cache is 55 GiB at 64K against 6 GiB windowed (880 vs 80 KiB/token
-   plus a ~1.2 GiB window block per slot), and on a 121 GB DGX Spark adaptive
-   growth had taken it to 69.6 GiB for a window its trials never used past
-   42K. The same ceiling stops adaptive growth for every model, and on a
-   shared memory pool growth also leaves half of what the base launch leaves
-   free (`ADAPTIVE_GROWTH_SHARED_FREE_SHARE`). A pinned `swaFull` keeps the
-   full cache, and an explicit context size skips growth altogether.
+   `GEZEL_LLAMA_AUTO_KV_MAX_GB`). On a 121 GB DGX Spark growth had taken
+   gemma4-31b's then-default full cache to 69.6 GiB for a window its trials
+   never used past 42K. On a shared memory pool growth also leaves half of
+   what the base launch leaves free (`ADAPTIVE_GROWTH_SHARED_FREE_SHARE`). An
+   explicit context size skips growth altogether.
 
 Still open: whether the qwen preamble-above-tools problem (see the MLX
 section) is worth fixing on llama-cpp too. It is the same template property

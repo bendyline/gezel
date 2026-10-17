@@ -47,8 +47,10 @@ import type {
   ListInstalledAudioModelsResponse,
   ListInstalledImageModelsResponse,
   ListInstalledVideoModelsResponse,
+  LlamaCppBackendHealthResponse,
   LlamaCppContextSizing,
   LlamaCppContextSizingResponse,
+  LlamaCppQuarantineResponse,
   MediaModelFitResponse,
   ModelContextOverridesResponse,
   ModelsFitNowResponse,
@@ -3389,6 +3391,39 @@ export class GezelClient {
     policy: LlamaCppContextSizing,
   ): Promise<LlamaCppContextSizingResponse> {
     return this.request('PUT', '/api/engines/llama-cpp/context-sizing', { policy });
+  }
+
+  /**
+   * llama-server builds the engine owner switched off on this machine after
+   * they crashed while starting. A 404 from an older daemon means none are
+   * reported.
+   */
+  getLlamaCppQuarantine(): Promise<LlamaCppQuarantineResponse> {
+    return this.request('GET', '/api/engines/llama-cpp/quarantine');
+  }
+
+  /**
+   * Whether llama-server is getting this machine's hardware: a CUDA build the
+   * driver cannot run, a GPU build that started without its GPU, the Linux
+   * out-of-memory killer. An empty object is the healthy answer; a 404 from
+   * an older daemon means none are reported.
+   */
+  getLlamaCppBackendHealth(): Promise<LlamaCppBackendHealthResponse> {
+    return this.request('GET', '/api/engines/llama-cpp/backend-health');
+  }
+
+  /**
+   * Turn a switched-off build back on. The next engine launch tries it, and
+   * it is switched off again only after it fails to start that many times in
+   * a row once more.
+   */
+  clearLlamaCppQuarantine(
+    backend: LlamaCppQuarantineResponse['entries'][number]['backend'],
+  ): Promise<LlamaCppQuarantineResponse> {
+    return this.request(
+      'DELETE',
+      `/api/engines/llama-cpp/quarantine/${encodeURIComponent(backend)}`,
+    );
   }
 
   /**

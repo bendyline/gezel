@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   childProcessNotice,
   engineBackendNotice,
+  engineGpuNotice,
+  engineOutOfMemoryNotice,
   railSystemNotices,
   serviceNotice,
   updateNotice,
@@ -309,6 +311,16 @@ describe('engineBackendNotice', () => {
     expect(notice?.railLabel).toBe('Running on GPU (Vulkan)');
   });
 
+  it('points to the engine tab where the backend can be turned back on', () => {
+    const notice = engineBackendNotice({
+      quarantined: ['vulkan'],
+      running: 'cpu',
+      platform: 'win32',
+    });
+    expect(notice?.body).toContain('several times in a row');
+    expect(notice?.body).toContain('turn it back on from Settings → This PC (llama).');
+  });
+
   it('is absent when nothing is quarantined', () => {
     expect(engineBackendNotice({})).toBeNull();
     expect(engineBackendNotice({ quarantined: [], running: 'cuda' })).toBeNull();
@@ -321,6 +333,113 @@ describe('engineBackendNotice', () => {
       runningBackend: 'vulkan',
     });
     expect(notices.map((n) => n.id)).toContain('engine-backend-quarantined');
+  });
+});
+
+describe('engineGpuNotice', () => {
+  const tooOld = {
+    kind: 'driver-too-old' as const,
+    installed: '570.86.10',
+    required: '580.65.06',
+    cudaToolkit: '13.0',
+    detail: 'NVIDIA driver 570.86.10 is older than 580.65.06',
+  };
+
+  it('is absent while the engine has its GPU', () => {
+    expect(engineGpuNotice({})).toBeNull();
+    expect(engineGpuNotice({ health: { running: 'cuda' } })).toBeNull();
+  });
+
+  it('asks for the driver the CUDA build needs, and says what runs meanwhile', () => {
+    const notice = engineGpuNotice({ health: { running: 'vulkan', cudaBlocker: tooOld } });
+    expect(notice?.railLabel).toBe('Update your NVIDIA driver');
+    expect(notice?.body).toContain('(570.86.10)');
+    expect(notice?.body).toContain('version 580.65.06 or newer');
+    expect(notice?.body).toContain('GPU (Vulkan) instead');
+    expect(notice?.technical).toContain('older than 580.65.06');
+    // The machine's driver, not a fault of ours.
+    expect(notice?.reportable).toBe(false);
+    expect(notice?.settingsSection).toBe('llamaCpp');
+  });
+
+  it('asks for a restart when a driver update is waiting, and promises the GPU back', () => {
+    const notice = engineGpuNotice({
+      health: {
+        running: 'cpu',
+        cudaBlocker: {
+          kind: 'restart-required',
+          installed: '580.95.05',
+          loaded: '570.86.10',
+          detail: 'x',
+        },
+      },
+    });
+    expect(notice?.railLabel).toBe('Restart to use your GPU');
+    expect(notice?.body).toContain('computed on the processor');
+    expect(notice?.body).toContain('uses your NVIDIA GPU again by itself');
+  });
+
+  it('explains a GPU build that started without its GPU, in the engine’s own words', () => {
+    const notice = engineGpuNotice({
+      health: {
+        running: 'cuda',
+        gpuUnused: {
+          backend: 'cuda',
+          reason: 'init-failed',
+          detail: 'CUDA driver version is insufficient for CUDA runtime version',
+          at: '2026-10-17T10:00:00.000Z',
+        },
+      },
+      platform: 'linux',
+    });
+    expect(notice?.railLabel).toBe('Not using your GPU');
+    expect(notice?.title).toContain('NVIDIA GPU (CUDA)');
+    expect(notice?.body).toContain('CUDA would not run on the graphics card');
+    expect(notice?.body).toContain('computed on the processor');
+    expect(notice?.technical).toContain('driver version is insufficient');
+    expect(notice?.reportable).toBe(false);
+  });
+
+  it('solicits a report only for a GPU library that never loaded', () => {
+    const notice = engineGpuNotice({
+      health: {
+        running: 'vulkan',
+        gpuUnused: { backend: 'vulkan', reason: 'not-loaded', at: '2026-10-17T10:00:00.000Z' },
+      },
+    });
+    expect(notice?.reportable).toBe(true);
+  });
+
+  it('reaches the rail, and opens the engine tab rather than About', () => {
+    const notices = railSystemNotices({
+      update: null,
+      backendHealth: { running: 'vulkan', cudaBlocker: tooOld },
+    });
+    expect(notices.map((n) => n.id)).toEqual(['engine-gpu-unused']);
+    expect(notices[0]?.settingsSection).toBe('llamaCpp');
+    expect(engineBackendNotice({ quarantined: ['cuda'], running: 'vulkan' })?.settingsSection).toBe(
+      'llamaCpp',
+    );
+  });
+});
+
+describe('engineOutOfMemoryNotice', () => {
+  it('counts the stops and never takes the rail', () => {
+    const health = {
+      outOfMemory: {
+        count: 2,
+        at: '2026-10-17T10:00:00.000Z',
+        model: 'qwen3.6-27b-q8',
+        whileStarting: true,
+      },
+    };
+    const notice = engineOutOfMemoryNotice({ health });
+    expect(notice?.railLabel).toBeNull();
+    expect(notice?.body).toContain('Linux stopped the engine 2 times');
+    expect(notice?.body).toContain('while loading qwen3.6-27b-q8');
+    expect(notice?.reportable).toBe(false);
+    expect(railSystemNotices({ update: null, backendHealth: health })).toEqual([]);
+    expect(engineOutOfMemoryNotice({ health: {} })).toBeNull();
   });
 });
 

@@ -92,9 +92,26 @@ export type NativeEnginePanicKind =
   | 'cuda-out-of-memory'
   | 'cuda-illegal-memory-access'
   | 'cuda-device-assert'
+  /**
+   * The CUDA build carries no code this GPU can run: no kernel image for its
+   * architecture, or PTX the installed driver is too old to compile. A fact
+   * about the build and the machine, never the work, so unlike every other
+   * printed fault it counts toward the build's quarantine. The linux-arm64
+   * CUDA build ships GB10 kernels only, so any other arm64 NVIDIA GPU dies
+   * this way on every start.
+   */
+  | 'cuda-unsupported-device'
   | 'cuda-error'
   | 'vulkan-out-of-memory'
   | 'assertion-failed'
+  /**
+   * Linux's out-of-memory killer stopped the engine: it died by SIGKILL
+   * that the supervisor did not send, and the kernel's `oom_kill` counter
+   * rose while it ran. The computer ran out of memory — the model and
+   * everything else running together did not fit — so it is never a
+   * fault of the build, and moving weights from GPU to RAM cannot help.
+   */
+  | 'host-out-of-memory'
   /**
    * SIGILL. Every other kind is recognized from a line the engine
    * printed; this one is inferred from the signal, because a binary

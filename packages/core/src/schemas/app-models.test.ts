@@ -20,6 +20,18 @@ describe('public app model boundaries', () => {
       }).success,
     ).toBe(false);
   });
+  it('keeps install-wide progress counters alongside per-file ones', () => {
+    const event = {
+      type: 'progress',
+      jobId: 'job',
+      modelId: 'mlx:fixture',
+      bytesWritten: 60,
+      totalBytes: 100,
+      bytesWrittenAll: 70,
+      totalBytesAll: 700,
+    };
+    expect(AppEnsureEventSchema.parse(event)).toEqual(event);
+  });
   it('preserves additive server metadata while validating fields used for decisions', () => {
     const entry = {
       id: 'fixture',

@@ -16,7 +16,8 @@ import { useTransformStream } from './useTransformStream.js';
  * with {Klerk}" row with live metacommentary while the Klerk works,
  * and the transformation view — the captured selection before the run,
  * then an editable Before/After or Monaco-diff result with an explicit
- * Apply/Cancel. Cancel (or Escape / backdrop) commits nothing.
+ * Apply/Cancel. Cancel (or Escape) commits nothing; a click outside is
+ * ignored so it cannot discard the instruction or a result.
  */
 
 export interface TransformDialogProps {
@@ -84,7 +85,11 @@ export function TransformDialog({
     >
       <Dialog.Portal>
         <Dialog.Overlay />
-        <Dialog.Content className="gz-transform-dialog">
+        <Dialog.Content
+          className="gz-transform-dialog"
+          // A stray click outside must not throw away the instruction or a result.
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <form onSubmit={handleSubmit} style={{ display: 'contents' }}>
             <Dialog.Title asChild>
               <h3>{insertMode ? 'Add content with AI' : 'Edit with AI'}</h3>

@@ -1487,6 +1487,68 @@ describe('consolidated MCP tools', () => {
     expect(text).toContain('NOT saved');
   });
 
+  // The task's embedded craftbook keeps its template's id, so models pass
+  // both `task` and `craftbook`. `craftbook` used to win: every edit went to
+  // the local template while the task ran its unchanged copy.
+  describe('craftbook target with both task and craftbook', () => {
+    const taskFixture = {
+      ref: 'project-a/1',
+      title: 'Quarterly brief',
+      craftbook: {
+        id: 'quarterly-brief-assembly',
+        name: 'Quarterly Brief Assembly',
+        entryStepId: 'draft',
+        steps: [{ id: 'draft', name: 'Draft the brief', prompt: 'Write it.' }],
+      },
+    };
+
+    it("targets the task's own copy when craftbook names the book that task runs", async () => {
+      handler = (url, method) => {
+        if (method === 'GET' && url.pathname === '/api/projects/project-a/tasks/1') {
+          return taskFixture;
+        }
+        throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+      };
+
+      const result = await client.callTool({
+        name: 'craftbook_read',
+        arguments: { task: 'project-a/1', craftbook: 'quarterly-brief-assembly' },
+      });
+      const text = (result.content as Array<{ type: string; text?: string }>)
+        .map((item) => item.text ?? '')
+        .join('\n');
+
+      expect(result.isError).toBeFalsy();
+      expect(text).toContain('"target": "task project-a/1"');
+    });
+
+    it('refuses, naming both choices, when task and craftbook name different books', async () => {
+      handler = (url, method) => {
+        if (method === 'GET' && url.pathname === '/api/projects/project-a/tasks/1') {
+          return taskFixture;
+        }
+        throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+      };
+
+      const result = await client.callTool({
+        name: 'craftbook_add_step',
+        arguments: {
+          task: 'project-a/1',
+          craftbook: 'some-other-book',
+          name: 'Verify',
+          prompt: 'Check the brief.',
+        },
+      });
+      const text = (result.content as Array<{ type: string; text?: string }>)
+        .map((item) => item.text ?? '')
+        .join('\n');
+
+      expect(result.isError).toBe(true);
+      expect(text).toContain('runs its own copy of craftbook "quarterly-brief-assembly"');
+      expect(text).toContain('Pass only `task`');
+    });
+  });
+
   // Every `project` argument in this file is resolved through
   // `resolveProjectId` because models reach for the display name they see
   // in chat. The projectId half of a task REF was not, so

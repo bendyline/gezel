@@ -512,6 +512,18 @@ ${FROZEN_NAMED_OWNER_ACTIONS.replaceAll('Phil Okeke', 'TBD')}`;
     expect(verdict.success).toBe(true);
   });
 
+  it('allows a peak sentence that pairs a p99 duration with a named saturation percentage', () => {
+    // Wild-caught 2026-10-15 (nemotron3.5-bolt): correct, and rejected on all
+    // four repair attempts because only "p99 with 99%" was inspected.
+    const pairedPeak = `${GROUNDED_REFERENCE}\n\nThe incident peaked at 13.1% error rate and 5180ms p99 with 99% connection-pool saturation.`;
+    const verdict = evaluateIncidentPostmortem(pairedPeak);
+
+    expect(
+      verdict.failures.find((failure) => failure.startsWith('no-unsupported-certainty')),
+    ).toBeUndefined();
+    expect(verdict.success).toBe(true);
+  });
+
   it('rejects assigning the pool-saturation percentage to p99/latency', () => {
     const conflatedMetrics = `${GROUNDED_REFERENCE}\n\nThe p99 latency metric itself saturated, spiking to 99% of its maximum observed value.`;
     const verdict = evaluateIncidentPostmortem(conflatedMetrics);

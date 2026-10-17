@@ -251,7 +251,7 @@ function anyExists(paths: string[], probe: (p: string) => boolean): string | nul
   return null;
 }
 
-const LINUX_CUDA_DRIVER_PATHS = [
+export const LINUX_CUDA_DRIVER_PATHS = [
   '/usr/lib/x86_64-linux-gnu/libcuda.so.1',
   '/usr/lib/aarch64-linux-gnu/libcuda.so.1',
   '/usr/lib64/libcuda.so.1',

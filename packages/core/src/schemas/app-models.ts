@@ -79,7 +79,16 @@ export const AppEnsureResultSchema = z.discriminatedUnion('status', [
 ]);
 const job = { jobId: id, modelId: id };
 export const AppEnsureEventSchema = z.discriminatedUnion('type', [
-  z.object({ ...job, type: z.literal('progress'), bytesWritten: bytes, totalBytes: bytes }),
+  z.object({
+    ...job,
+    type: z.literal('progress'),
+    bytesWritten: bytes,
+    totalBytes: bytes,
+    // MLX fetches a model's files concurrently; `bytesWritten`/`totalBytes`
+    // are then one file's counters and these are the whole install's.
+    bytesWrittenAll: bytes.optional(),
+    totalBytesAll: bytes.optional(),
+  }),
   z.object({ ...job, type: z.literal('verifying'), file: z.string().max(4096).optional() }),
   z.object({ ...job, type: z.literal('extracting-metadata') }),
   z.object({

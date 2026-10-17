@@ -1,4 +1,9 @@
-import type { HealthResponse, LlamaCppContextSizing } from '@bendyline/gezel';
+import type {
+  HealthResponse,
+  LlamaCppBackendHealthResponse,
+  LlamaCppContextSizing,
+  LlamaCppQuarantineResponse,
+} from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import type { LlamaCppInstalledModel } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -7,7 +12,11 @@ import { EngineBudgetStrip } from '../components/EngineBudgetStrip.js';
 import { EngineClonePicker } from '../components/EngineClonePicker.js';
 import { LlamaCppModelManager } from '../components/LlamaCppModelManager.js';
 import { MachineHealthSettings } from '../components/MachineHealthSettings.js';
+import { engineBackendLabel, engineGpuNotice, engineOutOfMemoryNotice } from '../system-notices.js';
+import { SystemNoticeNote } from './SettingsSystemStatus.js';
 import { localEngineSettingsLabel } from './local-engine-label.js';
+
+type QuarantineEntry = LlamaCppQuarantineResponse['entries'][number];
 
 interface Props {
   config: ConfigResponse | null;
@@ -111,15 +120,22 @@ function vendorSuffix(v: 'amd' | 'nvidia' | 'intel' | undefined): string {
 function needsRestart(
   config: ConfigResponse | null,
   health: HealthResponse | null | undefined,
+  backendHealth?: LlamaCppBackendHealthResponse | null,
 ): boolean {
   if (!health?.llamaCppBackend) return false; // no signal yet, don't nag
   const currentlyRunning = health.llamaCppBackend;
+  const override = config?.llamaCppBackendOverride;
+  const pinned = Boolean(override && override !== 'auto');
   // What WOULD run if we restarted right now: the override if pinned,
   // otherwise whatever the hardware probe found.
   const wouldRun =
-    config?.llamaCppBackendOverride && config.llamaCppBackendOverride !== 'auto'
-      ? config.llamaCppBackendOverride
+    override && override !== 'auto'
+      ? override
       : (health.llamaCppDetectedBackend ?? currentlyRunning);
+  // Likewise a CUDA build the driver cannot run: auto-detect passes it over
+  // on every launch until a restart or driver update, which its own notice
+  // asks for.
+  if (!pinned && wouldRun === 'cuda' && backendHealth?.cudaBlocker) return false;
   // A quarantined backend is detected but unusable, so it is NOT what
   // would run — resolution routes around it every launch. Without this,
   // a machine whose CUDA build crashes reads as permanently
@@ -128,6 +144,70 @@ function needsRestart(
   // notice (system-notices.ts) that explains the real situation.
   if (health.llamaCppQuarantinedBackends?.includes(wouldRun)) return false;
   return wouldRun !== currentlyRunning;
+}
+
+/**
+ * A build the engine switched off after it crashed while starting, with the
+ * way back. Same form as the install-health notices in Settings → About: a
+ * headline, the plain explanation, the raw reason behind a disclosure.
+ */
+function EngineQuarantineNotice({
+  entry,
+  running,
+  lifting,
+  disabled,
+  error,
+  onLift,
+}: {
+  entry: QuarantineEntry;
+  running: string | undefined;
+  lifting: boolean;
+  disabled: boolean;
+  error: string | undefined;
+  onLift: () => void;
+}) {
+  const label = engineBackendLabel(entry.backend);
+  const when = new Date(entry.at).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+  const crashed = entry.crashes
+    ? `It crashed ${entry.crashes} times in a row while starting, most recently on ${when}`
+    : `It crashed while starting on ${when}`;
+  const instead =
+    running && running !== entry.backend
+      ? `, so Gezel is using ${engineBackendLabel(running)} instead. Local models still work, just more slowly.`
+      : '. Gezel uses another backend the next time it starts.';
+  return (
+    <div
+      className="settings-notice"
+      data-testid={`llama-quarantine-${entry.backend}`}
+      style={{ marginTop: '0.75rem' }}
+    >
+      <strong>{label} is switched off on this machine.</strong>
+      <span>
+        {crashed}
+        {instead} If you have updated your graphics driver or restarted your computer since then,
+        try it again. Gezel switches it off again only if it keeps failing to start.
+      </span>
+      <details>
+        <summary>Technical details</summary>
+        <p>
+          {entry.reason} ({entry.signal})
+        </p>
+      </details>
+      <div className="new-row" style={{ marginTop: '0.5rem' }}>
+        <button type="button" disabled={disabled} onClick={onLift}>
+          {lifting ? 'Turning it back on…' : `Try ${label} again`}
+        </button>
+      </div>
+      {error && (
+        <p className="error" style={{ marginTop: '0.5rem' }}>
+          Could not turn {label} back on: {error}
+        </p>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -149,6 +229,13 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [contextSizing, setContextSizing] = useState<LlamaCppContextSizing>('adaptive');
   const [contextSizingLoading, setContextSizingLoading] = useState(true);
+  const [quarantine, setQuarantine] = useState<LlamaCppQuarantineResponse | null>(null);
+  const [backendHealth, setBackendHealth] = useState<LlamaCppBackendHealthResponse | null>(null);
+  const [lifting, setLifting] = useState<QuarantineEntry['backend'] | null>(null);
+  const [liftResult, setLiftResult] = useState<{
+    backend: QuarantineEntry['backend'];
+    error?: string;
+  } | null>(null);
   const savingResetTimer = useRef<number | null>(null);
   const mounted = useRef(true);
 
@@ -224,6 +311,45 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .getLlamaCppQuarantine()
+      .then((response) => {
+        if (!cancelled) setQuarantine(response);
+      })
+      .catch(() => {
+        /* An engine owner that predates the route reports nothing switched off. */
+      });
+    void api
+      .getLlamaCppBackendHealth()
+      .then((response) => {
+        if (!cancelled) setBackendHealth(response);
+      })
+      .catch(() => {
+        /* An engine owner that predates the route reports nothing wrong. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const liftQuarantine = useCallback(async (backend: QuarantineEntry['backend']) => {
+    setLifting(backend);
+    setLiftResult(null);
+    try {
+      const next = await api.clearLlamaCppQuarantine(backend);
+      if (!mounted.current) return;
+      setQuarantine(next);
+      setLiftResult({ backend });
+    } catch (err) {
+      if (!mounted.current) return;
+      setLiftResult({ backend, error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      if (mounted.current) setLifting(null);
+    }
   }, []);
 
   const saveBaseUrl = useCallback(async () => {
@@ -425,8 +551,8 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
     async (value: TriState) => {
       showSavingState('saving');
       try {
-        // Auto (null) clears the override → on for the Gemma family, off
-        // otherwise. On/Off force the flag regardless of architecture.
+        // Auto (null) clears the override → the model's catalog entry
+        // decides, windowed when it is silent. On/Off force the flag.
         const next = await api.updateConfig({
           llamaCppSwaFull: value === 'auto' ? null : value === 'on',
         });
@@ -499,6 +625,22 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
 
   const currentDefault = config?.defaultModel?.['llama-cpp'];
   const hasExternalBaseUrl = Boolean(config?.llamaCppBaseUrl);
+  // A pinned backend launches as pinned and is never routed around, so a
+  // quarantine entry changes nothing while the pin stands.
+  const pinnedBackend =
+    config?.llamaCppBackendOverride !== undefined && config.llamaCppBackendOverride !== 'auto';
+  const quarantined = pinnedBackend || hasExternalBaseUrl ? [] : (quarantine?.entries ?? []);
+  // An external engine is not one this machine launches, so neither notice
+  // would describe it.
+  const gpuNotice = hasExternalBaseUrl
+    ? null
+    : engineGpuNotice({
+        health: backendHealth,
+        ...(health?.platform ? { platform: health.platform } : {}),
+      });
+  const outOfMemoryNotice = hasExternalBaseUrl
+    ? null
+    : engineOutOfMemoryNotice({ health: backendHealth });
 
   return (
     <div>
@@ -523,6 +665,29 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           )}
           {saving === 'saved' && <span className="muted small">saved ✓</span>}
         </div>
+        {quarantined.map((entry) => (
+          <EngineQuarantineNotice
+            key={entry.backend}
+            entry={entry}
+            running={quarantine?.running ?? health?.llamaCppBackend}
+            lifting={lifting === entry.backend}
+            disabled={lifting !== null}
+            error={liftResult?.backend === entry.backend ? liftResult.error : undefined}
+            onLift={() => void liftQuarantine(entry.backend)}
+          />
+        ))}
+        {liftResult && !liftResult.error && (
+          <output className="muted small" style={{ display: 'block', marginTop: '0.75rem' }}>
+            {engineBackendLabel(liftResult.backend)} is back on. Gezel tries it the next time it
+            starts a model, and switches it off again only if it keeps failing to start.
+          </output>
+        )}
+        {[gpuNotice, outOfMemoryNotice].map(
+          (notice) =>
+            notice && (
+              <SystemNoticeNote key={notice.id} notice={notice} style={{ marginTop: '0.75rem' }} />
+            ),
+        )}
       </section>
 
       {installed.length > 1 && (
@@ -647,7 +812,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
             ))}
           </select>
           <span className="muted" style={{ fontSize: '0.85rem' }}>
-            {needsRestart(config, health) ? 'Restart the app to apply' : ''}
+            {needsRestart(config, health, backendHealth) ? 'Restart the app to apply' : ''}
           </span>
         </div>
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
@@ -844,18 +1009,18 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
             onChange={(e) => void saveSwaFull(e.target.value as TriState)}
             style={{ flex: 1, maxWidth: '20rem' }}
           >
-            <option value="auto">Auto — full only when it fits fast memory</option>
+            <option value="auto">Auto — windowed unless the model asks for full</option>
             <option value="on">On — always full cache (--swa-full)</option>
             <option value="off">Off — memory-efficient windowed cache</option>
           </select>
         </div>
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
           For sliding-window models (the Gemma family): retain old KV entries that the
-          memory-efficient windowed cache normally discards. This can enable prompt reuse and other
-          cache operations where the engine supports them, but its memory cost grows with context.{' '}
-          <em>Auto</em> uses the full cache only when the model weights and full KV cache fit in
-          fast memory — VRAM on a discrete GPU — and otherwise keeps the windowed cache. Takes
-          effect the next time the engine starts.
+          memory-efficient windowed cache normally discards. This enables prompt reuse across turns,
+          but its memory cost grows with context, and replies usually come more slowly because every
+          token reads the larger cache. <em>Auto</em> keeps the windowed cache unless the
+          model&apos;s catalog entry asks for the full one. Takes effect the next time the engine
+          starts.
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>

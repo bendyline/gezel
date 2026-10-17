@@ -91,7 +91,9 @@ export function isExpectedAvailabilityError(detail?: ChatTurnErrorDetail): boole
     detail?.code === 'engine-busy' ||
     // Waiting on a first download is not a defect to report.
     detail?.code === 'model-not-ready' ||
-    detail?.code === 'engine-not-ready'
+    detail?.code === 'engine-not-ready' ||
+    // Linux stopped the engine because the computer ran out of memory.
+    detail?.panicKind === 'host-out-of-memory'
   );
 }
 

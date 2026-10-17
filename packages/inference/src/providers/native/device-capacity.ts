@@ -197,7 +197,7 @@ export function configuredEngineMemoryBytes(config: {
  * `configuredBytes` for the machine's automatic ceilings.
  */
 export function staticCapacityCeilings(
-  budget: Pick<CapacityBudget, 'budgetBytes' | 'fastBytes' | 'kind'>,
+  budget: Pick<CapacityBudget, 'budgetBytes' | 'fastBytes' | 'kind' | 'vramBytes'>,
   ramBytes: number,
   configuredBytes?: number,
 ): { budgetBytes: number; gpuBudgetBytes: number } {
@@ -208,10 +208,14 @@ export function staticCapacityCeilings(
   return {
     budgetBytes,
     // Keep non-reclaimable accelerator commitments on the conservative curve;
-    // a larger RAM budget is not permission to wire the whole machine.
+    // a larger RAM budget is not permission to wire the whole machine. An
+    // integrated GPU's carve-out (`vramBytes` on a unified host) is already
+    // the GPU's, and sits outside `ramBytes`.
     gpuBudgetBytes: Math.min(
       budgetBytes,
-      budget.kind === 'unified' ? Math.min(budget.fastBytes, ramBytes * 0.75) : budget.fastBytes,
+      budget.kind === 'unified'
+        ? Math.min(budget.fastBytes, ramBytes * 0.75 + budget.vramBytes)
+        : budget.fastBytes,
     ),
   };
 }

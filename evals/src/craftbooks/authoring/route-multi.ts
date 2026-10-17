@@ -5,6 +5,7 @@ import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
   AUTHORING_PROJECT_PIN,
   authoredCraftbookSummaries,
+  completedTaskSteps,
   ensureAuthoringProject,
   findTaskForCraftbookAnywhere,
   finishAuthoringPoll,
@@ -255,6 +256,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     // consecutive rounds — each time telling the model its 0-byte
     // out/press-release.md "EXISTS" and not to recreate it.
     bytes: progressBytes(release),
+    milestones: completedTaskSteps(found?.task),
     deliverableMissing: release === null || release.length === 0,
     repairPath: RELEASE_PATH,
     repairDirective: [

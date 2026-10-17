@@ -2,18 +2,27 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { discoverNativeBinaries } from './discover.js';
+import { type DiscoverInput, discoverNativeBinaries } from './discover.js';
 import { duckdbInstallDir } from './duckdb-pin.js';
 import { recordLlamaQuarantine } from './llama-quarantine.js';
 
 let home: string;
 let nativeBinDir: string;
 
+/**
+ * Every case here describes its host through probe overrides, so the real
+ * NVIDIA driver of the machine running the suite must not decide a CUDA case.
+ */
+const discover = (input: DiscoverInput) =>
+  discoverNativeBinaries({ cudaBlockerFor: () => null, ...input });
+
 const ENGINE_ENV_VARS = [
   'GEZEL_LLAMA_SERVER_BIN',
   'GEZEL_LLAMA_SERVER_BACKEND',
   'GEZEL_LLAMA_DETECTED_BACKEND',
   'GEZEL_LLAMA_DETECTED_VENDOR',
+  'GEZEL_LLAMA_QUARANTINED',
+  'GEZEL_LLAMA_CUDA_BLOCKER',
   'GEZEL_DS4_SERVER_BIN',
   'GEZEL_SD_SERVER_BIN',
   'GEZEL_WHISPER_SERVER_BIN',
@@ -60,7 +69,7 @@ describe('discoverNativeBinaries — Windows + NVIDIA (system service case)', ()
     const healthBin = stageBinary(nativeBinDir, 'win32-x64', 'gezel-device-health', 'win32');
     const uvBin = stageBinary(nativeBinDir, 'win32-x64', 'uv', 'win32');
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'win32',
@@ -96,7 +105,7 @@ describe('discoverNativeBinaries — gezel- prefixed binaries (post-rename)', ()
     mkdirSync(dirname(duckBin), { recursive: true });
     writeFileSync(duckBin, '');
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -118,7 +127,7 @@ describe('discoverNativeBinaries — gezel- prefixed binaries (post-rename)', ()
     stageBinary(nativeBinDir, 'linux-x64', 'sd-server', 'linux'); // legacy
     const gezelBin = stageBinary(nativeBinDir, 'linux-x64', 'gezel-sd-server', 'linux');
 
-    discoverNativeBinaries({
+    discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -140,7 +149,7 @@ describe('discoverNativeBinaries — short-circuits', () => {
     process.env.GEZEL_UV_BIN = '/already/set/uv';
     process.env.GEZEL_DUCKDB_BIN = '/already/set/duckdb';
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -160,7 +169,7 @@ describe('discoverNativeBinaries — short-circuits', () => {
     // bare CLI launches (the CLI doesn't stamp GEZEL_NATIVE_BIN_DIR).
     // The Settings dropdown still needs detected-backend / vendor so
     // the user can see what hardware they're on.
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       platform: 'linux',
       arch: 'x64',
@@ -180,7 +189,7 @@ describe('discoverNativeBinaries — short-circuits', () => {
   });
 
   it('returns no-platform-key entries on unsupported platforms', () => {
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'freebsd' as NodeJS.Platform,
@@ -202,7 +211,7 @@ describe('discoverNativeBinaries — Apple Silicon', () => {
     const llamaBin = stageBinary(nativeBinDir, 'darwin-arm64', 'llama-server', 'darwin');
     const uvBin = stageBinary(nativeBinDir, 'darwin-arm64', 'uv', 'darwin');
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'darwin',
@@ -220,7 +229,7 @@ describe('discoverNativeBinaries — Linux + AMD Vulkan', () => {
   it('probes Vulkan and resolves the vulkan llama-server', () => {
     const llamaBin = stageBinary(nativeBinDir, 'linux-x64-vulkan', 'llama-server', 'linux');
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -244,7 +253,7 @@ describe('discoverNativeBinaries — Linux ARM64 packaging fallback', () => {
   it('uses the CPU build when Vulkan is detected but no ARM64 Vulkan build is bundled', () => {
     const cpuBin = stageBinary(nativeBinDir, 'linux-arm64-cpu', 'gezel-llama-server', 'linux');
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -272,7 +281,7 @@ describe('discoverNativeBinaries — Linux ARM64 packaging fallback', () => {
   it('does not silently replace an explicit Vulkan override with CPU', () => {
     stageBinary(nativeBinDir, 'linux-arm64-cpu', 'gezel-llama-server', 'linux');
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -298,7 +307,7 @@ describe('discoverNativeBinaries — automatic backend cascade', () => {
     const vulkanBin = stageBinary(nativeBinDir, 'linux-x64-vulkan', 'gezel-llama-server', 'linux');
     stageBinary(nativeBinDir, 'linux-x64-cpu', 'gezel-llama-server', 'linux');
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -325,7 +334,7 @@ describe('discoverNativeBinaries — automatic backend cascade', () => {
   it('falls through a missing Vulkan build to CPU when CUDA is also absent', () => {
     const cpuBin = stageBinary(nativeBinDir, 'linux-x64-cpu', 'gezel-llama-server', 'linux');
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -351,7 +360,7 @@ describe('discoverNativeBinaries — override', () => {
     // CPU binary, not the CUDA one.
     const cpuBin = stageBinary(nativeBinDir, 'win32-x64-cpu', 'llama-server', 'win32');
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'win32',
@@ -399,7 +408,7 @@ describe('discoverNativeBinaries — a bundled build that cannot run here', () =
     });
     const warnings: string[] = [];
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -419,6 +428,36 @@ describe('discoverNativeBinaries — a bundled build that cannot run here', () =
     expect(warnings.some((w) => w.includes('quarantined') && w.includes('SIGILL'))).toBe(true);
   });
 
+  it('passes over a CUDA build the NVIDIA driver cannot run, without quarantining it', () => {
+    const bins = stageAllVariants();
+    const warnings: string[] = [];
+
+    const result = discover({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'linux',
+      arch: 'x64',
+      llamaProbeOverride: cudaProbe,
+      cudaBlockerFor: () => ({
+        kind: 'restart-required',
+        installed: '580.95.05',
+        loaded: '570.86.10',
+        detail: 'NVIDIA driver library 580.95.05 does not match the loaded kernel module 570.86.10',
+      }),
+      logger: { warn: (m) => void warnings.push(m) },
+    });
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBe(bins.vulkan);
+    expect(process.env.GEZEL_LLAMA_DETECTED_BACKEND).toBe('cuda');
+    expect(result.llamaBackend?.cudaBlocker?.kind).toBe('restart-required');
+    expect(JSON.parse(process.env.GEZEL_LLAMA_CUDA_BLOCKER ?? '{}').kind).toBe('restart-required');
+    // A driver state is not a crash: nothing is written down, nothing to lift.
+    expect(result.llamaBackend?.quarantined).toBeUndefined();
+    expect(process.env.GEZEL_LLAMA_QUARANTINED).toBeUndefined();
+    expect(result.llamaBackend?.reason).toContain('cuda passed over (restart-required)');
+    expect(warnings.some((w) => w.includes('passed over') && w.includes('570.86.10'))).toBe(true);
+  });
+
   it('re-enables the backend once the binary is replaced', () => {
     const bins = stageAllVariants();
     recordLlamaQuarantine(home, {
@@ -430,7 +469,7 @@ describe('discoverNativeBinaries — a bundled build that cannot run here', () =
     // A native release lands a repaired build at the same path.
     writeFileSync(bins.cuda, 'rebuilt with portable CPU dispatch');
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -452,7 +491,7 @@ describe('discoverNativeBinaries — a bundled build that cannot run here', () =
       reason: 'crashed with SIGILL before the engine became ready',
     });
 
-    const result = discoverNativeBinaries({
+    const result = discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -475,7 +514,7 @@ describe('discoverNativeBinaries — sd-server CUDA preference', () => {
     const cudaSd = stageBinary(nativeBinDir, 'linux-x64-cuda', 'gezel-sd-server', 'linux');
     stageBinary(nativeBinDir, 'linux-x64', 'gezel-sd-server', 'linux');
 
-    discoverNativeBinaries({
+    discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -497,7 +536,7 @@ describe('discoverNativeBinaries — sd-server CUDA preference', () => {
     stageBinary(nativeBinDir, 'linux-x64-cuda', 'gezel-sd-server', 'linux');
     const portableSd = stageBinary(nativeBinDir, 'linux-x64', 'gezel-sd-server', 'linux');
 
-    discoverNativeBinaries({
+    discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',
@@ -512,7 +551,7 @@ describe('discoverNativeBinaries — sd-server CUDA preference', () => {
     stageBinary(nativeBinDir, 'linux-x64-cuda', 'gezel-llama-server', 'linux');
     const portableSd = stageBinary(nativeBinDir, 'linux-x64', 'gezel-sd-server', 'linux');
 
-    discoverNativeBinaries({
+    discover({
       home,
       nativeBinDirOverride: nativeBinDir,
       platform: 'linux',

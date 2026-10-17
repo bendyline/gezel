@@ -9,6 +9,8 @@ import type {
 } from '@bendyline/gezel';
 import {
   type DeviceHealthStatusSnapshot,
+  type DeviceSystemFacts,
+  readDeviceSystemFacts,
   windowsHeadlessSpawnOptions,
 } from '@bendyline/gezel/native';
 import {
@@ -21,8 +23,17 @@ import {
   computeCapacityBudget,
   setDetectedGpuVramBytes,
 } from '../providers/native/capacity-budget.js';
+import { readAmdgpuAdapters } from './amdgpu-adapters.js';
 import type { DarwinSystemMemorySnapshot } from './darwin-memory.js';
 import type { GezelProcessMemorySnapshot } from './gezel-process-memory.js';
+import {
+  type GpuAdapterFacts,
+  gpuCarveOutBytes,
+  gpuVendorFromPciId,
+  linuxGpuAddressableBytes,
+  linuxGpuCarveOutBytes,
+  matchGpuAdapter,
+} from './gpu-carve-out.js';
 
 const exec = promisify(execFile);
 
@@ -47,6 +58,18 @@ export interface MemoryProfile {
   gpuVramBytes: number | null;
   /** Whether the reported GPU pool is separate from or shared with system RAM. */
   gpuMemoryKind: GpuMemoryKind;
+  /**
+   * Memory firmware set aside for an integrated GPU, outside
+   * `totalRamBytes` (see gpu-carve-out.ts). Present only when measured; a
+   * budget built from this profile must pass it on as `reservedGpuBytes`.
+   */
+  gpuReservedBytes?: number;
+  /**
+   * The most memory an integrated GPU can reach (Linux amdgpu: carve-out
+   * plus GTT; see gpu-carve-out.ts). Present only when measured; a budget
+   * built from this profile must pass it on as `gpuAddressableBytes`.
+   */
+  gpuAddressableBytes?: number;
   /** Where `usableBytes` comes from. Drives the UI's wording. */
   source: MemorySource;
   /**
@@ -153,20 +176,67 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
   // `--list-devices` — the same number the MoE offload planner uses. Use it
   // so a Radeon box gets a real GPU budget (and the "runs on CPU" copy stops
   // lying) instead of the 50%-of-RAM CPU fallback below.
-  const gpu = await detectLlamaGpuVram();
-  if (gpu !== null) {
-    const profile = memoryProfileForLlamaGpu(plat, totalRam, gpu);
+  const probed = await detectLlamaGpuVram();
+  if (probed !== null) {
+    // Windows' own description of the same GPU, when the helper can list it,
+    // replaces the guesses made from its name.
+    const facts = await systemFacts();
+    const adapter = facts?.adapters ? matchGpuAdapter(facts.adapters, probed.name) : null;
+    const vendor = (adapter ? gpuVendorFromPciId(adapter.vendorId) : undefined) ?? probed.vendor;
+    const gpu = {
+      ...probed,
+      memoryKind:
+        adapter?.integrated === undefined
+          ? probed.memoryKind
+          : adapter.integrated
+            ? ('integrated' as const)
+            : ('discrete' as const),
+      ...(vendor ? { vendor } : {}),
+    };
+    const reservedGpuBytes =
+      gpu.memoryKind !== 'integrated'
+        ? null
+        : plat === 'win32'
+          ? gpuCarveOutBytes({
+              installedRamBytes: facts?.installedRamBytes ?? null,
+              visibleRamBytes: totalRam,
+              deviceBytes: gpu.vramBytes,
+              adapterDedicatedBytes: adapter?.integrated ? (adapter.dedicatedBytes ?? null) : null,
+            })
+          : plat === 'linux' && gpu.vendor === 'amd'
+            ? linuxGpuCarveOutBytes({
+                adapters: amdgpuAdapters(),
+                visibleRamBytes: totalRam,
+                deviceBytes: gpu.vramBytes,
+              })
+            : null;
+    // Linux bounds an APU by GTT as well; Windows' shared-memory limit is
+    // not read, so the RAM share stands there as before.
+    const addressableGpuBytes =
+      gpu.memoryKind === 'integrated' && plat === 'linux' && gpu.vendor === 'amd'
+        ? linuxGpuAddressableBytes(amdgpuAdapters())
+        : null;
+    const profile = memoryProfileForLlamaGpu(
+      plat,
+      totalRam,
+      gpu,
+      reservedGpuBytes,
+      addressableGpuBytes,
+    );
     // The ambient capacity broker accepts only a VRAM byte count. Publishing
     // an integrated adapter's shared allocation there would add it to RAM a
-    // second time, so publish null for that host class.
+    // second time, so publish null for that host class — and its carve-out,
+    // which is the one part of it that is not RAM, separately.
     setDetectedGpuVramBytes(
       profile.gpuMemoryKind === 'integrated' ? null : gpu.vramBytes,
       profile.gpuMemoryKind === 'integrated' || profile.gpuMemoryKind === 'unified',
+      profile.gpuReservedBytes ?? null,
+      profile.gpuAddressableBytes ?? null,
     );
-    // Vendor comes from the device name in the SAME probe (e.g. "AMD Radeon
-    // …" / "Intel Arc …"), so the label always matches the card we sized —
-    // never "AMD" for an Intel GPU. Undefined for unrecognized names → the
-    // UI shows a generic "GPU".
+    // Vendor comes from the SAME probe — the matched adapter's PCI id, else
+    // the device name (e.g. "AMD Radeon …" / "Intel Arc …") — so the label
+    // always matches the card we sized, never "AMD" for an Intel GPU.
+    // Undefined for unrecognized devices → the UI shows a generic "GPU".
     return profile;
   }
 
@@ -200,6 +270,10 @@ export function memoryProfileForLlamaGpu(
     vendor?: LlamaGpuVendor;
     memoryKind: LlamaGpuMemoryKind;
   },
+  /** An integrated GPU's firmware carve-out (gpu-carve-out.ts); ignored otherwise. */
+  reservedGpuBytes: number | null = null,
+  /** The most an integrated GPU can reach (Linux GTT, gpu-carve-out.ts); ignored otherwise. */
+  addressableGpuBytes: number | null = null,
 ): MemoryProfile {
   const ratioLooksUnified = gpu.vramBytes >= totalRamBytes * 0.75;
   const gpuMemoryKind: GpuMemoryKind =
@@ -211,22 +285,40 @@ export function memoryProfileForLlamaGpu(
           ? 'unified'
           : 'unknown';
   const shared = gpuMemoryKind === 'integrated' || gpuMemoryKind === 'unified';
+  const reserved =
+    gpuMemoryKind === 'integrated' && reservedGpuBytes !== null && reservedGpuBytes > 0
+      ? reservedGpuBytes
+      : null;
+  const addressable =
+    gpuMemoryKind === 'integrated' && addressableGpuBytes !== null && addressableGpuBytes > 0
+      ? addressableGpuBytes
+      : null;
   const budget = computeCapacityBudget({
     systemRamBytes: totalRamBytes,
     gpuVramBytes: gpu.vramBytes,
     unifiedMemory: shared,
+    reservedGpuBytes: reserved,
+    gpuAddressableBytes: addressable,
   });
   return {
     platform,
     totalRamBytes,
     gpuVramBytes: gpu.vramBytes,
     gpuMemoryKind,
+    ...(reserved !== null ? { gpuReservedBytes: reserved } : {}),
+    ...(addressable !== null ? { gpuAddressableBytes: addressable } : {}),
     source: gpuMemoryKind === 'integrated' ? 'gpu-integrated' : 'gpu-vulkan',
     // A consumer iGPU is effectively system-memory-paced. Keep the same
     // conservative fast-fit ceiling as CPU fallback while the broker may
-    // admit up to its single-pool unified ceiling.
+    // admit up to its single-pool unified ceiling. A carve-out adds what the
+    // budget credits from it (`vramBytes`), since none of it is in RAM. Where
+    // GTT is known, what the GPU can reach at all (`fastBytes`) bounds both.
     usableBytes:
-      gpuMemoryKind === 'integrated' ? Math.floor(totalRamBytes * 0.5) : budget.fastBytes,
+      gpuMemoryKind !== 'integrated'
+        ? budget.fastBytes
+        : addressable !== null
+          ? Math.min(Math.floor(totalRamBytes * 0.5) + budget.vramBytes, budget.fastBytes)
+          : Math.floor(totalRamBytes * 0.5) + budget.vramBytes,
     budgetBytes: budget.budgetBytes,
     ...(gpu.vendor ? { gpuVendor: gpu.vendor } : {}),
   };
@@ -734,6 +826,33 @@ function isKnownUnifiedNvidiaDevice(name: string): boolean {
  * profile while the driver is truly hung.
  */
 const NVIDIA_MEMORY_PROBE_TIMEOUT_MS = 10_000;
+
+let cachedSystemFacts: Promise<DeviceSystemFacts | null> | null = null;
+
+/**
+ * Static facts from the bundled device-health helper — installed RAM and
+ * Windows' list of GPUs — read once per process: neither changes without a
+ * reboot. Null off Windows. Empty without the helper, or from one that
+ * predates the `system` command, which leaves every decision on the
+ * name-based guesses it made before.
+ */
+function systemFacts(): Promise<DeviceSystemFacts | null> {
+  cachedSystemFacts ??= readSystemFacts();
+  return cachedSystemFacts;
+}
+
+async function readSystemFacts(): Promise<DeviceSystemFacts | null> {
+  if (osPlatform() !== 'win32') return null;
+  return readDeviceSystemFacts();
+}
+
+let cachedAmdgpuAdapters: GpuAdapterFacts[] | null = null;
+
+/** amdgpu devices from sysfs, read once per process like the Windows facts. */
+function amdgpuAdapters(): GpuAdapterFacts[] {
+  cachedAmdgpuAdapters ??= readAmdgpuAdapters();
+  return cachedAmdgpuAdapters;
+}
 
 async function probeNvidiaMemory(): Promise<NvidiaMemoryProbe | null> {
   try {

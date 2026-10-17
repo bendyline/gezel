@@ -81,6 +81,14 @@ export interface CapacityBrokerOptions {
    */
   gpuVramBytes?: number | null;
   /**
+   * An integrated GPU's firmware carve-out — see
+   * {@link CapacityBudgetInput.reservedGpuBytes}. Travels with
+   * `gpuVramBytes`/`unifiedMemory` as one description of the host.
+   */
+  reservedGpuBytes?: number | null;
+  /** What an integrated GPU can reach — see {@link CapacityBudgetInput.gpuAddressableBytes}. */
+  gpuAddressableBytes?: number | null;
+  /**
    * May co-resident models spill into system RAM? `null`/omitted follows
    * {@link autoAllowRamSpillover} for this host. See
    * {@link CapacityBroker.coResidencyBytes}.
@@ -300,6 +308,8 @@ export class CapacityBroker {
   private readonly systemRamBytes: number;
   private readonly unifiedMemory: boolean | undefined;
   private readonly gpuVramBytes: number | null | undefined;
+  private readonly reservedGpuBytes: number | null | undefined;
+  private readonly gpuAddressableBytes: number | null | undefined;
   private explicitAllowRamSpillover: boolean | null;
   private readonly reservations = new Map<EngineKey, number>();
 
@@ -307,6 +317,8 @@ export class CapacityBroker {
     this.systemRamBytes = (opts.systemRamBytes ?? totalmem)();
     this.unifiedMemory = opts.unifiedMemory;
     this.gpuVramBytes = opts.gpuVramBytes;
+    this.reservedGpuBytes = opts.reservedGpuBytes;
+    this.gpuAddressableBytes = opts.gpuAddressableBytes;
     this.explicitAllowRamSpillover = opts.allowRamSpillover ?? null;
     this.explicitBudgetBytes = opts.budgetBytes ?? null;
     // Assigned by applyBudget; the definite-assignment dance TS wants for
@@ -341,6 +353,12 @@ export class CapacityBroker {
         : {
             ...(this.unifiedMemory === undefined ? {} : { unifiedMemory: this.unifiedMemory }),
             ...(this.gpuVramBytes === undefined ? {} : { gpuVramBytes: this.gpuVramBytes }),
+            ...(this.reservedGpuBytes === undefined
+              ? {}
+              : { reservedGpuBytes: this.reservedGpuBytes }),
+            ...(this.gpuAddressableBytes === undefined
+              ? {}
+              : { gpuAddressableBytes: this.gpuAddressableBytes }),
           }),
     });
   }
@@ -948,11 +966,9 @@ function envGrowthCeilingTokens(): number | null {
 }
 
 /**
- * The most KV cache an automatic choice plans for one llama.cpp engine:
- * adaptive growth stops here, and the Gemma `--swa-full` auto-default is
- * declined when its full-size cache would pass it. Explicit settings (a
- * numeric context, a pinned `swaFull`) are the operator's call and bypass it;
- * it never shortens the ladder-settled base window either.
+ * The most KV cache adaptive growth plans for one llama.cpp engine. An
+ * explicit numeric context is the operator's call and skips growth
+ * altogether, and the ceiling never shortens the ladder-settled base window.
  *
  * Past this a bigger cache buys nothing: llama.cpp's prefill and decode cost
  * follows the tokens actually present, not the reservation, so the rest only
@@ -1187,10 +1203,10 @@ export interface CtxMemoryClampInput {
    */
   freeSystemRamBytes?: number;
   /**
-   * Usable VRAM on a discrete card; MUST be 0 on unified/shared-pool
-   * hosts, where the "VRAM" is the same physical RAM `freeSystemRamBytes`
-   * measures and adding it would double-count. `computeCapacityBudget`
-   * already reports `vramBytes: 0` for those hosts — pass its value.
+   * Usable VRAM on a discrete card. On a unified/shared-pool host it MUST be
+   * only an integrated GPU's firmware carve-out, which `freeSystemRamBytes`
+   * never sees; any "VRAM" that is the same physical RAM would double-count.
+   * `computeCapacityBudget` reports exactly that — pass its value.
    */
   vramBytes: number;
   minPerTurnCtxTokens?: number;
@@ -1362,7 +1378,7 @@ export interface AdaptiveCtxGrowthInput {
   fastBudgetBytes: number;
   committedOtherBytes?: number;
   budgetKind: CapacityBudget['kind'];
-  /** Usable VRAM on a discrete card (`liveBudget.vramBytes`); 0 elsewhere. */
+  /** Usable VRAM on a discrete card (`liveBudget.vramBytes`); ignored elsewhere. */
   vramBytes: number;
   /**
    * Graphics memory free right now on a discrete card, as device admission
@@ -1409,11 +1425,9 @@ export interface AdaptiveCtxGrowthResult {
  * settled slots and granted the un-grown request.
  *
  * Deliberately a second clamp pass rather than a bigger first request:
- * the first ladder pass sizes slot ceilings, the `--swa-full` fit verdict,
- * and RAM-spillover admission, all of which must stay anchored on the
- * practical 64K target — growing the request there would decline
- * `--swa-full` for models whose full cache fits at 64K and grow KV into
- * system-RAM spill on discrete cards.
+ * the first ladder pass sizes slot ceilings and RAM-spillover admission,
+ * both of which must stay anchored on the practical 64K target — growing
+ * the request there would grow KV into system-RAM spill on discrete cards.
  *
  * Slot trade: when `allowSlotTrade` is set and the target is out of reach
  * at the settled slot count, growth walks the count down — taking the

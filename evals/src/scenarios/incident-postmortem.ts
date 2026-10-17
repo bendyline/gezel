@@ -257,7 +257,17 @@ function conflatesLatencyWithPercentageSaturation(text: string): boolean {
     )?.[0];
     if (!candidate) continue;
 
+    // A percentage that names its own metric ("99% connection-pool saturation")
+    // is attributed to that metric, whatever latency figure sits beside it.
+    // The match above ends at the "%", so read the words that follow it in
+    // the clause: "5180ms p99 with 99% connection-pool saturation" is a correct
+    // two-metric statement, and failed every repair attempt before this check.
+    const percentageNamesSaturation =
+      /^\s*(?:of\s+(?:the\s+)?)?(?:connection[-\s]?pool\s+|pool\s+)?(?:saturat\w*|utili[sz]ation|pool\s+(?:usage|utili[sz]ation))\b/i.test(
+        clause.slice(clause.indexOf(candidate) + candidate.length),
+      );
     const separatesMeasuredLatencyFromSaturation =
+      percentageNamesSaturation ||
       /\b\d+(?:\.\d+)?\s*(?:ms|milliseconds?|s|sec(?:onds?)?)\b[\s\S]{0,100}\b(?:connection[-\s]?pool\s+)?saturat\w*\b/i.test(
         candidate,
       ) ||
