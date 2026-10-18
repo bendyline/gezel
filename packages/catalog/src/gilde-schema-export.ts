@@ -37,6 +37,7 @@ import {
   ImageModelIdentitySchema,
   ImageModelVersionManifestSchema,
   KnowledgeCatalogIdentitySchema,
+  KnowledgeCatalogKeywordsSchema,
   KnowledgeCatalogVersionManifestSchema,
   ProjectTypeIdentitySchema,
   ProjectTypeVersionManifestSchema,
@@ -66,6 +67,7 @@ export const GILDE_SCHEMA_EXPORTS: Array<[filename: string, schema: z.ZodType]> 
   ['video-model-version.schema.json', VideoModelVersionManifestSchema],
   ['knowledge-catalog-identity.schema.json', KnowledgeCatalogIdentitySchema],
   ['knowledge-catalog-version.schema.json', KnowledgeCatalogVersionManifestSchema],
+  ['knowledge-catalog-keywords.schema.json', KnowledgeCatalogKeywordsSchema],
   ['craftbook-doc.schema.json', CraftbookDocSchema],
   ['craftbook-test.schema.json', CraftbookTestSpecSchema],
 ];

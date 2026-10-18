@@ -10,6 +10,7 @@ import {
   type GezelConfig,
   type SessionTelemetryListResponse,
   type Task,
+  ds4FitsFullResidency,
 } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { startAutoAnswerer } from './auto-answer.ts';
@@ -2413,17 +2414,15 @@ export function ds4EvalShouldUseSsdStreaming(opts?: {
   arch?: string;
 }): boolean {
   if (opts?.ssdStreamingSupported === false) return false;
-  const totalRamBytes = opts?.totalRamBytes ?? totalmem();
-  const modelSizeBytes = opts?.modelSizeBytes;
-  const platform = opts?.platform ?? process.platform;
-  const arch = opts?.arch ?? process.arch;
-  const unifiedMemoryTarget = arch === 'arm64' && (platform === 'darwin' || platform === 'linux');
-  const fullResidencyHeadroomBytes = 32 * 1024 ** 3;
-  return !(
-    unifiedMemoryTarget &&
-    modelSizeBytes &&
-    modelSizeBytes + (opts?.companionBytes ?? 0) + fullResidencyHeadroomBytes <= totalRamBytes
-  );
+  // The product's own gate, not a copy: a hand copy kept the old 32 GiB
+  // headroom and would have streamed models the daemon now runs resident.
+  return !ds4FitsFullResidency({
+    modelSizeBytes: opts?.modelSizeBytes,
+    totalRamBytes: opts?.totalRamBytes ?? totalmem(),
+    companionBytes: opts?.companionBytes,
+    platform: opts?.platform ?? process.platform,
+    arch: opts?.arch ?? process.arch,
+  });
 }
 
 /** Select the eval broker budget from an explicit host-memory measurement. */

@@ -3,3 +3,4 @@ export * from './question.js';
 export * from './rank.js';
 export * from './request.js';
 export * from './render.js';
+export * from './shape.js';

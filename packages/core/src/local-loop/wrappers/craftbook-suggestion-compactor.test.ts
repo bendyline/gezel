@@ -120,3 +120,20 @@ it('does not turn unbound recipe details into an executable launch', () => {
     '1. Report (id: report) [bundled, 2 step(s), 8% match] — Draft a report.\n\nCandidate recipe details (not a launch call): {"craftbookId":"report","description":"Create a new project for the report."}\nSearch scope: "default". The search scope does not select a destination.';
   expect(compactCraftbookSuggestion(text)).toBeNull();
 });
+
+it('keeps a required input tag on the leading candidate', () => {
+  const text = FULL_RESULT.replace(
+    '[SETUP REQUIRED: docblocks] —',
+    '[SETUP REQUIRED: docblocks] [needs params.source = the workspace path of ONE file (.docx)] —',
+  );
+  const compact = JSON.parse(compactCraftbookSuggestion(text)!) as {
+    recommendedCraftbook: { description: string; requiredInputs: string; setupRequired: string[] };
+  };
+  expect(compact.recommendedCraftbook.requiredInputs).toBe(
+    'params.source = the workspace path of ONE file (.docx)',
+  );
+  expect(compact.recommendedCraftbook.setupRequired).toEqual(['docblocks']);
+  expect(compact.recommendedCraftbook.description).toBe(
+    'Turn source content into a real editable PowerPoint file.',
+  );
+});

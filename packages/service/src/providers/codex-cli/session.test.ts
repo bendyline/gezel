@@ -1,4 +1,14 @@
-import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
@@ -92,6 +102,19 @@ describe('CodexCliSession', () => {
     expect(body).toContain('[mcp_servers.gezel]');
     expect(body).toContain('GEZEL_TOKEN = "tk"');
     expect(body).toContain('default_tools_approval_mode = "approve"');
+  });
+
+  it('stamps the session home on every turn so the runtime sweep sees it as in use', async () => {
+    const codex = await makeFakeCodex(happyPathStream);
+    const deps = buildDeps({ binaryPath: codex });
+    const home = join(deps.runtimeDir, 'proj-1', 'sess-1');
+    await mkdir(home, { recursive: true });
+    const lastWeek = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    await utimes(home, lastWeek, lastWeek);
+
+    await new CodexCliSession(deps).sendAndWait('hello');
+
+    expect((await stat(home)).mtimeMs).toBeGreaterThan(Date.now() - 60 * 1000);
   });
 
   it.each([undefined, 'existing-thread'])(

@@ -431,6 +431,8 @@ import {
 import {
   cleanGenerativePrompt,
   expandVideoPrompt,
+  fixedFunctionImageHandoff,
+  fixedFunctionImagePath,
   formatFixedFunctionResult,
   stripGezelMentions,
 } from './fixed-function-adapters.js';
@@ -470,6 +472,7 @@ import {
   maybeGateExpectedDeliverable,
   workspaceDeliverableReady,
 } from './observable-progress.js';
+import { sessionHoldsQueueSlot } from './one-shot-caller.js';
 import {
   liveTurnToolNames,
   resolveContinuationBudget,
@@ -550,6 +553,10 @@ import {
 } from './turn-intent-plan.js';
 import { buildUnsavedFileClaimNudge, detectUnsavedFileClaim } from './unsaved-file-claim.js';
 import { UsageTracker } from './usage.js';
+import {
+  hasSuccessfulWorkspaceMutation,
+  isValidationRepairMutationTurn,
+} from './validation-repair.js';
 import {
   buildWireTranscriptCheckpoint,
   restoreFromWireTranscript,
@@ -2546,6 +2553,20 @@ export class ChatManager extends LocalEngineRuntime {
    */
   isSessionTurnPending(sessionId: string): boolean {
     return this.inflight.has(sessionId) || this.sendQueue.depth(sessionId) > 0;
+  }
+
+  /**
+   * True while this session has a turn pending on an on-device engine. A route
+   * serving that turn's own tool call must not wait on another local model
+   * call: the turn holds the engine's queue slot while it waits for the tool
+   * (ds4 runs one request with no background reserve), so the call queues
+   * behind its own caller and nothing reaches the engine until the deadline.
+   * An unknown provider counts as local — the deterministic path is the safe one.
+   */
+  holdsLocalEngineTurn(sessionId: string): boolean {
+    if (!this.isSessionTurnPending(sessionId)) return false;
+    const providerName = this.states.get(sessionId)?.record.providerName;
+    return providerName === undefined || isLocalProvider(providerName);
   }
 
   /**
@@ -11383,6 +11404,11 @@ export class ChatManager extends LocalEngineRuntime {
       onQueueWait?: (info: { aheadOf: number }) => void;
       /** Cancel this ephemeral provider turn and release its session. */
       signal?: AbortSignal;
+      /**
+       * The chat session whose tool call is waiting on this one-shot, e.g. a
+       * script it ran that calls `llm.oneShot`. See {@link sessionHoldsQueueSlot}.
+       */
+      onBehalfOfSessionId?: string;
     } = {},
   ): Promise<string> {
     if (this.shuttingDown) throw serviceShutdownAbortError();
@@ -11644,6 +11670,12 @@ export class ChatManager extends LocalEngineRuntime {
         ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
       });
     });
+    const callerHoldsSlot = sessionHoldsQueueSlot(provider.queue, opts.onBehalfOfSessionId);
+    if (callerHoldsSlot) {
+      oneShotLog.info(
+        `skipping the queue${opts.jobLabel ? ` (${opts.jobLabel})` : ''}: caller ${opts.onBehalfOfSessionId} holds its slot`,
+      );
+    }
     try {
       // One-shot completions default to background work so they do not cut
       // in front of active chat. Explicitly user-awaited utilities can opt
@@ -11666,6 +11698,7 @@ export class ChatManager extends LocalEngineRuntime {
             ...(actorLabel ? { actorLabel } : {}),
             ...(opts.jobLabel ? { job: opts.jobLabel } : {}),
             ...(opts.onQueueWait ? { onQueueWait: opts.onQueueWait } : {}),
+            ...(callerHoldsSlot ? { bypassQueue: true } : {}),
           },
         }),
       );
@@ -16999,58 +17032,6 @@ function researchTargetForToolCall(
   return undefined;
 }
 
-function fixedFunctionImagePath(path: string | null | undefined): string | null {
-  const trimmed = path?.trim();
-  return trimmed && isExpectedImageDeliverablePath(trimmed) ? trimmed : null;
-}
-
-/**
- * Recover per-message image handoff metadata from the seed text. messageGezel
- * intentionally reuses the target's ordinary session, so its
- * expectedDeliverable is appended as an annotation rather than persisted on
- * the ChatSession record. Fixed-function gezels bypass the LLM that normally
- * reads that annotation and therefore have to consume it here.
- */
-function fixedFunctionImageHandoff(text: string): { prompt: string; saveAs?: string } {
-  const withoutMentions = stripGezelMentions(text).trim();
-  const annotationPath = fixedFunctionImagePath(
-    /\[Deliverable expected as an IMAGE FILE at `([^`]+)`/i.exec(withoutMentions)?.[1],
-  );
-  const explicitCall = extractExplicitGenerateImageCall(withoutMentions);
-  const saveAs = annotationPath ?? explicitCall.saveAs;
-
-  let prompt = withoutMentions
-    .replace(/^\s*\[(?:Message|Question) from [^\]\n]+\]:\s*/i, '')
-    .replace(/\s*\[Deliverable expected as an IMAGE FILE at `[^`]+`\.[\s\S]*\]\s*$/i, '')
-    .replace(
-      /\s*(?:then\s+)?(?:call|use)\s+`?generate_image\s*\(\s*\{[\s\S]{0,1000}?\}\s*\)`?\.?\s*$/i,
-      '',
-    )
-    .trim();
-  if (explicitCall.prompt) prompt = explicitCall.prompt;
-  return {
-    prompt: prompt || withoutMentions,
-    ...(saveAs ? { saveAs } : {}),
-  };
-}
-
-function extractExplicitGenerateImageCall(text: string): { prompt?: string; saveAs?: string } {
-  const body = /\bgenerate_image\s*\(\s*\{([\s\S]{0,1000}?)\}\s*\)/i.exec(text)?.[1];
-  if (!body) return {};
-  const quotedField = (field: 'prompt' | 'saveAs'): string | undefined => {
-    const match = new RegExp(`["']?${field}["']?\\s*:\\s*(["'\x60])([\\s\\S]*?)\\1`, 'i').exec(
-      body,
-    );
-    return match?.[2]?.trim() || undefined;
-  };
-  const prompt = quotedField('prompt');
-  const saveAs = fixedFunctionImagePath(quotedField('saveAs')) ?? undefined;
-  return {
-    ...(prompt ? { prompt } : {}),
-    ...(saveAs ? { saveAs } : {}),
-  };
-}
-
 /**
  * Eval-only provider lock accepted from the harness. Deliberately limited to
  * local providers: this seam exists to keep a local capability trial local,
@@ -17303,58 +17284,6 @@ function latestExpectedFilePath(messages: Array<{ content?: string }>): string |
     if (filePath) return filePath;
   }
   return null;
-}
-
-const VALIDATION_REPAIR_CHECK_PREFIX_RE = /^\[(?:runtime|scenario) check\b/i;
-const VALIDATION_REPAIR_REPEAT_PREFIX_RE =
-  /^REPEAT(?: APPEND| COMBINED)? MISS\s+—\s+attempt\s+\d+\s+on\s+`[^`\r\n]+`:/i;
-const VALIDATION_REPAIR_FULL_REWRITE_PREFIX_RE =
-  /^GATE_FULL_REWRITE:\s+\d+\s+completed repairs of\s+`[^`\r\n]+`\s+have failed this scenario check\b/i;
-
-/**
- * True for the validation-repair messages emitted by the runtime and eval
- * feedback loops. `sniff-feedback.ts` prepends exact stage markers to the
- * ordinary `[scenario check]` body after the first miss; classifying only the
- * nested check header made those repeat turns look like ordinary tool-only
- * chat and triggered an unnecessary closing-summary continuation.
- *
- * Keep this prefix-shaped rather than searching the whole prompt. Ordinary
- * user prose may discuss "repeat misses" or quote a scenario check without
- * being an active validation turn.
- */
-export function isValidationRepairPrompt(prompt: string): boolean {
-  const body = prompt
-    .trimStart()
-    .replace(/^\[Message from [^\]\r\n]+\]:\s*/i, '')
-    .trimStart();
-  if (VALIDATION_REPAIR_CHECK_PREFIX_RE.test(body)) return true;
-  if (VALIDATION_REPAIR_FULL_REWRITE_PREFIX_RE.test(body)) return true;
-  if (!VALIDATION_REPAIR_REPEAT_PREFIX_RE.test(body)) return false;
-
-  const firstLineEnd = body.indexOf('\n');
-  if (firstLineEnd < 0) return false;
-  return VALIDATION_REPAIR_CHECK_PREFIX_RE.test(body.slice(firstLineEnd + 1).trimStart());
-}
-
-const VALIDATION_REPAIR_MUTATION_TOOLS: ReadonlySet<string> = new Set([
-  'write_file',
-  'append_to_file',
-  'replace_in_file',
-  'replace_lines',
-]);
-
-function hasSuccessfulWorkspaceMutation(
-  toolCalls: ReadonlyArray<{ name: string; success: boolean }>,
-): boolean {
-  return toolCalls.some((tc) => tc.success && VALIDATION_REPAIR_MUTATION_TOOLS.has(tc.name));
-}
-
-function isValidationRepairMutationTurn(
-  prompt: string,
-  toolCalls: ReadonlyArray<{ name: string; success: boolean }>,
-): boolean {
-  if (!isValidationRepairPrompt(prompt)) return false;
-  return hasSuccessfulWorkspaceMutation(toolCalls);
 }
 
 /**

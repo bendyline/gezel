@@ -155,6 +155,8 @@ export interface TurnCtx extends ModelCtx {
    * prelude hooks run, and only when `prompt.work-options-prelude` is on.
    */
   workOptions?: SuggestWorkResult;
+  /** `ordinal` under the `prompt.work-options-ordinal` ablation: the note numbers its options. */
+  workOptionIds?: 'ordinal';
 }
 
 /**

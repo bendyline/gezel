@@ -19,6 +19,7 @@
  */
 
 import { stripGezelMentions as stripGezelMentionMarkup } from '@bendyline/gezel';
+import { isExpectedImageDeliverablePath } from './deliverable-paths.js';
 
 export interface FixedFunctionAdapter {
   /**
@@ -52,6 +53,58 @@ export interface FixedFunctionAdapter {
  */
 export function stripGezelMentions(text: string): string {
   return stripGezelMentionMarkup(text);
+}
+
+export function fixedFunctionImagePath(path: string | null | undefined): string | null {
+  const trimmed = path?.trim();
+  return trimmed && isExpectedImageDeliverablePath(trimmed) ? trimmed : null;
+}
+
+/**
+ * Recover per-message image handoff metadata from the seed text. messageGezel
+ * intentionally reuses the target's ordinary session, so its
+ * expectedDeliverable is appended as an annotation rather than persisted on
+ * the ChatSession record. Fixed-function gezels bypass the LLM that normally
+ * reads that annotation and therefore have to consume it here.
+ */
+export function fixedFunctionImageHandoff(text: string): { prompt: string; saveAs?: string } {
+  const withoutMentions = stripGezelMentions(text).trim();
+  const annotationPath = fixedFunctionImagePath(
+    /\[Deliverable expected as an IMAGE FILE at `([^`]+)`/i.exec(withoutMentions)?.[1],
+  );
+  const explicitCall = extractExplicitGenerateImageCall(withoutMentions);
+  const saveAs = annotationPath ?? explicitCall.saveAs;
+
+  let prompt = withoutMentions
+    .replace(/^\s*\[(?:Message|Question) from [^\]\n]+\]:\s*/i, '')
+    .replace(/\s*\[Deliverable expected as an IMAGE FILE at `[^`]+`\.[\s\S]*\]\s*$/i, '')
+    .replace(
+      /\s*(?:then\s+)?(?:call|use)\s+`?generate_image\s*\(\s*\{[\s\S]{0,1000}?\}\s*\)`?\.?\s*$/i,
+      '',
+    )
+    .trim();
+  if (explicitCall.prompt) prompt = explicitCall.prompt;
+  return {
+    prompt: prompt || withoutMentions,
+    ...(saveAs ? { saveAs } : {}),
+  };
+}
+
+function extractExplicitGenerateImageCall(text: string): { prompt?: string; saveAs?: string } {
+  const body = /\bgenerate_image\s*\(\s*\{([\s\S]{0,1000}?)\}\s*\)/i.exec(text)?.[1];
+  if (!body) return {};
+  const quotedField = (field: 'prompt' | 'saveAs'): string | undefined => {
+    const match = new RegExp(`["']?${field}["']?\\s*:\\s*(["'\x60])([\\s\\S]*?)\\1`, 'i').exec(
+      body,
+    );
+    return match?.[2]?.trim() || undefined;
+  };
+  const prompt = quotedField('prompt');
+  const saveAs = fixedFunctionImagePath(quotedField('saveAs')) ?? undefined;
+  return {
+    ...(prompt ? { prompt } : {}),
+    ...(saveAs ? { saveAs } : {}),
+  };
 }
 
 /**

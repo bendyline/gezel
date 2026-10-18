@@ -6,7 +6,7 @@
  * Related: runtime-files.ts (config), invoker.ts (errors), session.test.ts.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { normalizeCodexPermissionMode } from '@bendyline/gezel';
 import type { CodexReasoningEffort } from '@bendyline/gezel-inference/internal/providers/codex-cli/reasoning';
@@ -326,6 +326,10 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
       config,
       installSafetyHook: safetyHookInstalled,
     });
+    // runtime-sweep.ts ages homes by this mtime, so mark the turn. A failed
+    // stamp only makes the home look older; it must not fail the turn.
+    const turnStartedAt = new Date();
+    await utimes(path, turnStartedAt, turnStartedAt).catch(() => {});
     return { codexHome, env: codexEnv, safetyHookInstalled };
   }
 

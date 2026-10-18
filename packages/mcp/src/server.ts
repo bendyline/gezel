@@ -50,6 +50,7 @@ import {
   gezelNotFoundMessage,
   gezelRosterHint,
   isAnswerEnvelope,
+  isOrdinalWorkOptionId,
   matchProjectTypeForBrief,
   normalizeArtifactPath,
   parseWorkOptionId,
@@ -206,6 +207,8 @@ import {
   CraftbookInvocationParamsArgSchema,
   binaryDocumentCraftbookRequest,
   buildBinaryDocumentTaskDescription,
+  craftbookInputFailureText,
+  craftbookRequiredInputs,
   craftbookSuggestionGuidance,
   normalizeCraftbookInvocationParams,
   suggestedCraftbookInvocation,
@@ -5155,7 +5158,15 @@ server.tool(
           missing.length > 0
             ? ` [SETUP REQUIRED: ${missing.map((need) => need.toolsetId).join(', ')}]`
             : '';
-        return `${i + 1}. ${s.name} (id: ${s.id}) [${s.source}, ${s.stepCount} step(s), ${pct}% match]${setup}${desc}`;
+        const manifest = projectCraftbooks?.items.find(
+          (item) => item.manifest.kind === 'craftbook-template' && item.manifest.id === s.id,
+        )?.manifest;
+        const inputs =
+          manifest?.kind === 'craftbook-template'
+            ? craftbookRequiredInputs(manifest.paramSchema)
+            : null;
+        const needs = inputs ? ` [needs ${inputs}]` : '';
+        return `${i + 1}. ${s.name} (id: ${s.id}) [${s.source}, ${s.stepCount} step(s), ${pct}% match]${setup}${needs}${desc}`;
       })
       .join('\n');
     const top = res.suggestions[0]!;
@@ -5411,6 +5422,33 @@ async function runInvokeCraftbook({
       },
     );
   } catch (err) {
+    const details = (err as { details?: { code?: unknown; param?: unknown } }).details;
+    if (details?.code === 'task-input' && typeof details.param === 'string') {
+      const paramSchema = await api
+        .listProjectCraftbooks(resolvedProject)
+        .then((listing) => {
+          const manifest = listing.items.find(
+            (item) =>
+              item.manifest.kind === 'craftbook-template' && item.manifest.id === craftbookId,
+          )?.manifest;
+          return manifest?.kind === 'craftbook-template' ? manifest.paramSchema : undefined;
+        })
+        .catch(() => undefined);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: craftbookInputFailureText({
+              craftbookId,
+              param: details.param,
+              daemonMessage: unwrapApiError(err),
+              paramSchema,
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
     return {
       content: [{ type: 'text' as const, text: `invoke_craftbook failed: ${unwrapApiError(err)}` }],
       isError: true,
@@ -8244,6 +8282,12 @@ async function resolveBareWorkOption(
   const bare = raw.trim().replace(/^[\s[("'`]+|[\s\])"'`.,;:]+$/g, '');
   if (!bare || bare.includes(':')) return null;
   const listed = await rankingForTurn(project, request).catch(() => null);
+  // A list position: the numbered note's ids, or a model reading "1." off
+  // the semantic list.
+  if (isOrdinalWorkOptionId(bare)) {
+    const nth = listed?.options[Number(bare) - 1];
+    return nth ? parseWorkOptionId(nth.id) : null;
+  }
   const fromList = listed?.options.find((o) => o.id.endsWith(`:${bare}`));
   if (fromList) return parseWorkOptionId(fromList.id);
   const types = await listRoutableProjectTypes().catch(() => []);

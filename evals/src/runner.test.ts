@@ -1953,6 +1953,18 @@ describe('ds4 eval residency policy', () => {
     ).toBe(false);
   });
 
+  it('loads GLM 5.3 Q2 with its vision encoder fully on a 121.6 GiB DGX Spark', () => {
+    expect(
+      ds4EvalShouldUseSsdStreaming({
+        totalRamBytes: Math.round(121.63 * GB),
+        modelSizeBytes: Math.round(89.88 * GB),
+        companionBytes: Math.round(1.53 * GB),
+        platform: 'linux',
+        arch: 'arm64',
+      }),
+    ).toBe(false);
+  });
+
   it('never asks an architecture without expert streaming support to stream', () => {
     expect(
       ds4EvalShouldUseSsdStreaming({
@@ -1988,7 +2000,7 @@ describe('ds4 eval residency policy', () => {
     expect(
       ds4EvalShouldUseSsdStreaming({
         totalRamBytes: 128 * GB,
-        modelSizeBytes: 95 * GB,
+        modelSizeBytes: 103 * GB,
         companionBytes: 2 * GB,
         platform: 'darwin',
         arch: 'arm64',

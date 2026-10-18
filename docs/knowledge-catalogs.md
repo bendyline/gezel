@@ -809,6 +809,27 @@ Individual encyclopedia articles should not flood the global recent-selection
 model. `KnowledgeView` keeps its document selection internally and accepts a
 navigation intent when titlebar search opens a knowledge result.
 
+### Suggestion keywords
+
+Each gilde catalog may carry `keywords.json` beside its identity manifest
+(`KnowledgeCatalogKeywordsSchema` in core): the phrases a person might type
+that the catalog covers, so Gezel can suggest a catalog that is not
+installed. `articles` lines are generated from the catalog's own titles and
+aliases ("Spokane, Washington | Spokane | The Lilac City"; split with
+`knowledgeKeywordArticle`); `terms` are hand-written, and are the only
+phrases for catalogs with no Parquet companion; `matchCase` phrases match
+only with their capitalization ("Bend", "Frozen"). Read it with
+`CatalogService.readItemFile('knowledge-catalog', id, 'keywords.json')` and
+match it with core's `PhraseIndex`. It is authored in gilde
+(`authoring/knowledge-keywords/`, `npm run build-knowledge-keywords`), never
+by hand.
+
+The suggestion that consumes it is not built yet. Its rules, agreed so far:
+never suggest a catalog whose article the person already has installed, hold
+every suggestion behind a global off switch (`config.knowledge`), suggest
+only when a factual turn found nothing to cite or the same catalog keeps
+coming up, and keep the matching on the device.
+
 ## Qualla Wikipedia production
 
 Qualla already has the right ingestion primitives:

@@ -7,7 +7,9 @@ import { probeForScenario, rescoreTrial } from './rescore.ts';
 /**
  * Read-out for the suggest_work / start_work A/B: per arm, per category, and
  * paired against the baseline per model. Rows come from each trial's
- * `result.json`, whose `diagnostics` the route probes write.
+ * `result.json`, whose `diagnostics` the route probes write. Any other
+ * scenario (a whole first project, say) is an `end-to-end` row scored on
+ * its own pass/fail.
  *
  * Trials pair on (probe, rep): rep k of a probe in one arm against rep k in
  * the other. Reps of one probe are not independent — a probe the model finds
@@ -20,7 +22,7 @@ export interface RouteTrialRow {
   arm: string;
   scenarioId: string;
   probe: string;
-  category: ProbeCategory | 'unknown';
+  category: ProbeCategory | 'unknown' | 'end-to-end';
   /** Not used to set suggest_work's floors (probes.ts). */
   heldOut: boolean;
   rep: number;
@@ -58,7 +60,7 @@ export async function readRouteRows(
   for (const model of await listDirs(root)) {
     for (const arm of await listDirs(join(root, model))) {
       for (const scenarioId of await listDirs(join(root, model, arm))) {
-        if (!scenarioId.startsWith('route-')) continue;
+        const routeProbe = scenarioId.startsWith('route-');
         const trials = (await listDirs(join(root, model, arm, scenarioId))).sort();
         let rep = 0;
         for (const trial of trials) {
@@ -77,13 +79,15 @@ export async function readRouteRows(
             arm,
             scenarioId,
             probe: typeof d.probe === 'string' ? d.probe : scenarioId.replace(/^route-/, ''),
-            category: (typeof d.category === 'string' ? d.category : 'unknown') as
-              | ProbeCategory
-              | 'unknown',
+            category: routeProbe
+              ? ((typeof d.category === 'string' ? d.category : 'unknown') as
+                  | ProbeCategory
+                  | 'unknown')
+              : 'end-to-end',
             heldOut: d.heldOut === true,
             rep: rep++,
-            accepted: d.accepted === true,
-            kindAccepted: d.kindAccepted === true,
+            accepted: routeProbe ? d.accepted === true : result.success === true,
+            kindAccepted: routeProbe ? d.kindAccepted === true : result.success === true,
             routeKind: route.kind ?? (result.success ? 'unknown' : 'none'),
             ...(route.target ? { routeTarget: route.target } : {}),
             callsBeforeRoute: typeof d.callsBeforeRoute === 'number' ? d.callsBeforeRoute : null,
@@ -104,7 +108,7 @@ export async function readRouteRows(
           // Re-read every trial with a transcript, including one that hit the
           // ceiling while a consult it opened was still running.
           const verdict =
-            opts.rescore && !row.excluded
+            opts.rescore && routeProbe && !row.excluded
               ? await rescoreTrial(join(root, model, arm, scenarioId, trial), scenarioId)
               : null;
           if (verdict) {
@@ -166,7 +170,7 @@ export function summarizeArm(rows: readonly RouteTrialRow[]): Omit<ArmSummary, '
     if (row.accepted) cell.accepted++;
   }
   const self = rows.filter((r) => r.category === 'self');
-  const clear = rows.filter((r) => r.category !== 'ask');
+  const clear = rows.filter((r) => r.category !== 'ask' && r.category !== 'end-to-end');
   const exact = rows.filter((r) => r.category === 'exact');
   const calls = rows.map((r) => r.callsBeforeRoute).filter((n): n is number => n !== null);
   return {

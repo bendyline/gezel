@@ -3,6 +3,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { homedir, totalmem } from 'node:os';
 import { join } from 'node:path';
 import {
+  DS4_FULL_RESIDENCY_HEADROOM_BYTES,
   GEZEL_VERSION,
   type NativeCapacityCommand,
   NativeCapacityCommandSchema,
@@ -191,6 +192,21 @@ export function configuredEngineMemoryBytes(config: {
 }
 
 /**
+ * GPU bytes a unified host may commit to one launch. macOS keeps 0.75 × RAM,
+ * near where Metal's recommended GPU working set sits. Linux unified hosts
+ * (DGX Spark GB10) have no such limit, so a large one may commit all but the
+ * OS reserve ds4's residency gate keeps: on a 121.6 GiB Spark, 0.75 × RAM
+ * (91.2 GiB) refused a GLM 5.3 Q2 launch that runs at 105 GiB with ~9 GiB to
+ * spare. Smaller Linux hosts stay on the 0.75 curve, which is the larger one there.
+ */
+function unifiedGpuCeilingBytes(ramBytes: number, platform: NodeJS.Platform): number {
+  const curve = ramBytes * 0.75;
+  return platform === 'linux'
+    ? Math.max(curve, ramBytes - DS4_FULL_RESIDENCY_HEADROOM_BYTES)
+    : curve;
+}
+
+/**
  * The ledger's static ceilings: a request above either is refused at acquire,
  * whatever else is running. Shared with the media fit check so a model the
  * download pages hide is exactly one the launch path refuses. Omit
@@ -200,6 +216,7 @@ export function staticCapacityCeilings(
   budget: Pick<CapacityBudget, 'budgetBytes' | 'fastBytes' | 'kind' | 'vramBytes'>,
   ramBytes: number,
   configuredBytes?: number,
+  platform: NodeJS.Platform = process.platform,
 ): { budgetBytes: number; gpuBudgetBytes: number } {
   const budgetBytes =
     configuredBytes === undefined
@@ -207,14 +224,14 @@ export function staticCapacityCeilings(
       : Math.min(configuredBytes, budget.budgetBytes);
   return {
     budgetBytes,
-    // Keep non-reclaimable accelerator commitments on the conservative curve;
-    // a larger RAM budget is not permission to wire the whole machine. An
-    // integrated GPU's carve-out (`vramBytes` on a unified host) is already
-    // the GPU's, and sits outside `ramBytes`.
+    // Non-reclaimable accelerator commitments get their own ceiling: a larger
+    // RAM budget is not permission to wire the whole machine. An integrated
+    // GPU's carve-out (`vramBytes` on a unified host) is already the GPU's,
+    // and sits outside `ramBytes`.
     gpuBudgetBytes: Math.min(
       budgetBytes,
       budget.kind === 'unified'
-        ? Math.min(budget.fastBytes, ramBytes * 0.75 + budget.vramBytes)
+        ? Math.min(budget.fastBytes, unifiedGpuCeilingBytes(ramBytes, platform) + budget.vramBytes)
         : budget.fastBytes,
     ),
   };

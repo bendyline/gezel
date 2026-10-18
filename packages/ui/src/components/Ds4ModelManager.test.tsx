@@ -110,33 +110,46 @@ function catalogModel(opts: {
   };
 }
 
-describe('Ds4ModelManager', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.mocked(api.listDs4Models).mockResolvedValue({ models: [] });
-    vi.mocked(api.listDs4ActiveInstalls).mockResolvedValue({ installs: [] });
-    vi.mocked(api.listCatalogItems).mockResolvedValue({
-      items: [
-        catalogModel({
-          id: 'deepseek-v4-flash-284b-q4',
-          name: 'DeepSeek V4 Flash (FP4)',
-          quantization: 'Q4_K',
-          downloadGiB: 153,
-          residentGiB: 80,
-          cacheGiB: 64,
-        }),
-        catalogModel({
-          id: 'deepseek-v4-flash-284b-q2',
-          name: 'DeepSeek V4 Flash (IQ2_XXS)',
-          quantization: 'IQ2_XXS',
-          downloadGiB: 81,
-          residentGiB: 36,
-          cacheGiB: 32,
-        }),
-      ],
-    } as never);
+// File scope, so every suite starts from the same baseline. clearAllMocks keeps
+// implementations, so each mock a test overrides is reset here too: a context
+// plan leaking from one test into the next once let a fit assertion pass only
+// when it caught the render before that plan landed.
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(api.getMemoryProfile).mockResolvedValue({
+    platform: 'darwin',
+    totalRamBytes: 128 * GiB,
+    gpuVramBytes: null,
+    source: 'darwin-unified',
+    usableBytes: Math.floor(128 * GiB * 0.6),
   });
+  vi.mocked(api.listDs4ContextPlans).mockResolvedValue({ plans: {} } as never);
+  vi.mocked(api.listModelFitness).mockResolvedValue({ records: [], probing: [] });
+  vi.mocked(api.listDs4Models).mockResolvedValue({ models: [] });
+  vi.mocked(api.listDs4ActiveInstalls).mockResolvedValue({ installs: [] });
+  vi.mocked(api.listCatalogItems).mockResolvedValue({
+    items: [
+      catalogModel({
+        id: 'deepseek-v4-flash-284b-q4',
+        name: 'DeepSeek V4 Flash (FP4)',
+        quantization: 'Q4_K',
+        downloadGiB: 153,
+        residentGiB: 80,
+        cacheGiB: 64,
+      }),
+      catalogModel({
+        id: 'deepseek-v4-flash-284b-q2',
+        name: 'DeepSeek V4 Flash (IQ2_XXS)',
+        quantization: 'IQ2_XXS',
+        downloadGiB: 81,
+        residentGiB: 36,
+        cacheGiB: 32,
+      }),
+    ],
+  } as never);
+});
 
+describe('Ds4ModelManager', () => {
   it('uses streaming-specific fit language and catalog names', async () => {
     vi.mocked(api.getMemoryProfile).mockResolvedValue({
       platform: 'darwin',
@@ -370,6 +383,26 @@ describe('Ds4ModelManager', () => {
   });
 
   it('does not offer installation when fixed model state cannot preserve system headroom', async () => {
+    // 16 GiB leaves nothing above the system reserve, so neither build's fixed
+    // state (resident minus expert cache) fits however far the cache shrinks.
+    vi.mocked(api.getMemoryProfile).mockResolvedValue({
+      platform: 'darwin',
+      totalRamBytes: 16 * GiB,
+      gpuVramBytes: null,
+      source: 'darwin-unified',
+      usableBytes: Math.floor(16 * GiB * 0.6),
+    });
+
+    render(<Ds4ModelManager />);
+
+    await waitFor(() => expect(screen.getAllByText('needs more memory')).toHaveLength(2));
+    expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+  });
+
+  it('offers a reduced-cache install only where the fixed state fits under the reserve', async () => {
+    // 32 GiB less the 24 GiB reserve leaves 8 GiB. The IQ2_XXS build's 4 GiB
+    // of fixed state fits there with its cache cut down; the FP4 build's 16 GiB
+    // does not.
     vi.mocked(api.getMemoryProfile).mockResolvedValue({
       platform: 'darwin',
       totalRamBytes: 32 * GiB,
@@ -380,8 +413,14 @@ describe('Ds4ModelManager', () => {
 
     render(<Ds4ModelManager />);
 
-    await waitFor(() => expect(screen.getAllByText('needs more memory')).toHaveLength(2));
-    expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+    const reduced = (await screen.findByText('reduced cache · much slower')).closest('tr');
+    expect(reduced).toHaveTextContent('DeepSeek V4 Flash (IQ2_XXS)');
+    expect(within(reduced as HTMLElement).getByRole('button', { name: 'Download' })).toBeVisible();
+    const refused = screen.getByText('needs more memory').closest('tr');
+    expect(refused).toHaveTextContent('DeepSeek V4 Flash (FP4)');
+    expect(
+      within(refused as HTMLElement).queryByRole('button', { name: 'Download' }),
+    ).not.toBeInTheDocument();
   });
 
   it('signals an installed catalog update and offers an in-place update action', async () => {

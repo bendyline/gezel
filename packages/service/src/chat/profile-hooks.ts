@@ -10,6 +10,7 @@ import {
   type SuggestWorkResult,
   type TurnMessageOrigin,
   createLogger,
+  shapeWorkOptions,
 } from '@bendyline/gezel';
 import type {
   ModelCtx,
@@ -198,6 +199,14 @@ export async function resolveUserPromptPrelude(
   if (!profile) return null;
   const cfg = await store.readConfig().catch(() => null);
   const isMeester = cfg?.meesterGezelId === state.record.gezelId;
+  // The stage-2 ablations of the pre-ranked note (prompt-work-options-variants).
+  const has = (id: string) => profile.behaviors.some((entry) => entry.id === id);
+  const shapedWorkOptions = workOptions
+    ? shapeWorkOptions(workOptions, {
+        noGuidance: has('prompt.work-options-no-guidance'),
+        ...(has('prompt.work-options-top-one') ? { maxOptions: 1 } : {}),
+      })
+    : undefined;
   const turnCtx: TurnCtx = {
     ...modelCtxFromProfile(profile, state),
     sessionId: state.record.id,
@@ -210,7 +219,10 @@ export async function resolveUserPromptPrelude(
     assistantContent: '',
     continuationCount: 0,
     ...(libraryRecall.length > 0 ? { libraryRecall } : {}),
-    ...(workOptions ? { workOptions } : {}),
+    ...(shapedWorkOptions ? { workOptions: shapedWorkOptions } : {}),
+    ...(shapedWorkOptions && has('prompt.work-options-ordinal')
+      ? { workOptionIds: 'ordinal' as const }
+      : {}),
   };
   for (const entry of profile.behaviors) {
     const hook = entry.behavior.userPromptPrelude;

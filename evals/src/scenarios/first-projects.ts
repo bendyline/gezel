@@ -17,11 +17,16 @@
  *    route with no meester turn, on the book's bundled sample when it has
  *    one; it passes when that task completes (its gates hold the deliverable).
  *
+ * Each typed card also runs as `first-project-<id>-paraphrase`, the same
+ * request in the words a person would use (no "Start a project to…"), which
+ * is the case the welcome's own wording cannot cover.
+ *
  * `first-projects` is its own suite: every trial is a full first project.
  */
 
 import { FIRST_PROJECTS, type FirstProject, type Task } from '@bendyline/gezel';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
+import { TYPED_FIRST_PROJECT_PARAPHRASES } from '../work-routing/probes.ts';
 
 /**
  * Candidates the welcome does not offer yet. Everything it does offer is
@@ -205,19 +210,49 @@ async function readBoard(
   return files;
 }
 
-function typedScenario(first: Extract<FirstProject, { kind: 'type' }>): EvalScenario {
+/**
+ * The meester has answered and has no turn running. A typed route creates its
+ * project inside that turn, so a turn that ended without one went somewhere
+ * else — a recipe in Default, an untyped project, a question to the person —
+ * and the trial would otherwise wait out its 40 minutes for nothing.
+ */
+async function meesterTurnOver(client: EvalContext['client'], meesterId: string): Promise<boolean> {
+  const inflight = await client
+    .listInflightTurns({ gezelId: meesterId })
+    .catch(() => ({ inflight: [null] }));
+  if (inflight.inflight.length > 0) return false;
+  const { sessions } = await client
+    .listChatSessions({ gezelId: meesterId })
+    .catch(() => ({ sessions: [] }));
+  for (const listed of sessions ?? []) {
+    const session = await client.getChatSession(listed.id).catch(() => null);
+    if (session?.messages?.some((m) => m.role === 'assistant')) return true;
+  }
+  return false;
+}
+
+function typedScenario(
+  first: Extract<FirstProject, { kind: 'type' }>,
+  paraphrase?: string,
+): EvalScenario {
   return {
-    id: `first-project-${first.id}`,
-    description: `First project "${first.title}": the meester routes it to ${first.typeId} and its lead fills the board.`,
-    prompt: first.prompt,
+    id: `first-project-${first.id}${paraphrase ? '-paraphrase' : ''}`,
+    description: `First project "${first.title}"${paraphrase ? " in the person's own words" : ''}: the meester routes it to ${first.typeId} and its lead fills the board.`,
+    prompt: paraphrase ?? first.prompt,
     timeoutMs: TRIAL_BUDGET_MS,
     repairPolicy: FIRST_PROJECT_REPAIR,
-    successCheck: async ({ client, logChanged }: EvalContext): Promise<SuccessCheckResult> => {
+    successCheck: async ({
+      client,
+      meesterId,
+      logChanged,
+    }: EvalContext): Promise<SuccessCheckResult> => {
       const projects = await client.listProjects().catch(() => ({ projects: [] }));
+      let typed = false;
       for (const summary of projects.projects ?? []) {
         if (summary.id === 'default' || summary.id === 'shared') continue;
         const project = await client.getProject(summary.id).catch(() => null);
         if (project?.projectType?.id !== first.typeId) continue;
+        typed = true;
         const tasks = await client.listProjectTasks(summary.id).catch(() => ({ tasks: [] }));
         // A type's schedules are created before its kickoff: social-feed opens
         // on two cron tasks that wait for their tick, and judging task 1 failed
@@ -251,6 +286,14 @@ function typedScenario(first: Extract<FirstProject, { kind: 'type' }>): EvalScen
               diagnostics: { ref: kickoff.ref, board: short },
             }
           : verdict;
+      }
+      if (!typed && (await meesterTurnOver(client, meesterId))) {
+        return {
+          done: true,
+          success: false,
+          reason: `the meester finished its turn without starting a ${first.typeId} project`,
+          diagnostics: { routedElsewhere: true },
+        };
       }
       return { done: false };
     },
@@ -300,7 +343,12 @@ function craftbookScenario(first: Extract<FirstProject, { kind: 'craftbook' }>):
 }
 
 export function firstProjectScenarios(): EvalScenario[] {
-  return FIRST_PROJECT_CANDIDATES.map((first) =>
+  const scenarios = FIRST_PROJECT_CANDIDATES.map((first) =>
     first.kind === 'type' ? typedScenario(first) : craftbookScenario(first),
   );
+  for (const first of FIRST_PROJECTS) {
+    const paraphrase = TYPED_FIRST_PROJECT_PARAPHRASES[first.id];
+    if (first.kind === 'type' && paraphrase) scenarios.push(typedScenario(first, paraphrase));
+  }
+  return scenarios;
 }

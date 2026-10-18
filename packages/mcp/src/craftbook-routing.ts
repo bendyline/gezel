@@ -1,4 +1,9 @@
-import { fillMainContentParam } from '@bendyline/gezel';
+import {
+  type Craftbook,
+  type CraftbookInputParam,
+  craftbookInputParams,
+  fillMainContentParam,
+} from '@bendyline/gezel';
 import { z } from 'zod';
 import {
   type BinaryDocumentCraftbookRoute,
@@ -35,6 +40,55 @@ export function inferCraftbookJobParams(args: {
     ...(args.params ? { params: args.params } : {}),
     ...(args.jobDescription !== undefined ? { message: args.jobDescription } : {}),
   });
+}
+
+function describeInputShape(input: CraftbookInputParam): string {
+  const types = input.spec.accept ? ` (${input.spec.accept.join(', ')})` : '';
+  return input.spec.kind === 'file'
+    ? `the workspace path of ONE file${types}`
+    : `the workspace path of one folder${types}`;
+}
+
+function requiredInputParams(paramSchema: unknown): CraftbookInputParam[] {
+  return craftbookInputParams(paramSchema as Craftbook['paramSchema']).filter((i) => i.required);
+}
+
+/**
+ * What a craftbook must be handed before it can start, phrased as the
+ * `params` a model passes. The launch form's own wording ("Choose the
+ * spreadsheet…") names no param, so a model that omitted one cannot repair
+ * the call; it also needs the shape (one file vs a folder) to judge whether
+ * the book fits a job before launching it.
+ */
+export function craftbookRequiredInputs(paramSchema: unknown): string | null {
+  const inputs = requiredInputParams(paramSchema);
+  if (inputs.length === 0) return null;
+  return inputs.map((input) => `params.${input.key} = ${describeInputShape(input)}`).join('; ');
+}
+
+/** invoke_craftbook's answer to a launch the daemon refused for a missing or unusable input. */
+export function craftbookInputFailureText(args: {
+  craftbookId: string;
+  param: string;
+  daemonMessage: string;
+  paramSchema: unknown;
+}): string {
+  const input = craftbookInputParams(args.paramSchema as Craftbook['paramSchema']).find(
+    (candidate) => candidate.key === args.param,
+  );
+  const shape = input
+    ? describeInputShape(input)
+    : 'the workspace path of the file or folder it works on';
+  return [
+    `invoke_craftbook failed: craftbook "${args.craftbookId}" was not started — ${args.daemonMessage}`,
+    `It needs params.${args.param} = ${shape}; prefix "artifacts:" for one in the artifacts drawer.`,
+    'Find the path with list_dir, then call invoke_craftbook again with that param.',
+    input?.spec.kind === 'file'
+      ? 'This book works on one file; if the job spans several files it does not fit — compare the other candidates before falling back to a generic task.'
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 /** Build the concrete follow-up advertised by suggest_craftbook. */
