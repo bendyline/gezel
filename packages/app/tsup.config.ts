@@ -15,6 +15,9 @@ export default defineConfig({
     // Windows-only: run by the NSIS hook before each elevated recursive ACL
     // sweep to remove links that lead out of the swept tree.
     'neutralize-reparse-points': 'src/neutralize-reparse-points.ts',
+    // Forked by the supervisor when GEZEL_SERVICE_HOST=utility, so the service
+    // runs in an Electron utility process instead of the browser process.
+    'utility-service-entry': 'src/supervisor/utility-service-entry.ts',
   },
   format: ['esm'],
   dts: false,

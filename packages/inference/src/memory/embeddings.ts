@@ -24,7 +24,9 @@ import type { ModelDownloadProgress } from '@bendyline/gezel-knowledge';
 import { retireModelWorker } from '../utils/retire-model-worker.js';
 import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import {
+  ModelWorkCancelledError,
   PipelineLoadError,
+  cancelInFlightModelWork,
   daemonEmbedderPin,
   daemonEmbedderVerified,
   passageInstruction,
@@ -57,6 +59,19 @@ export class EmbeddingsUnavailableError extends EmbeddingsDisabledError {
     super(reason);
     this.name = 'EmbeddingsUnavailableError';
     this.message = `memory embeddings temporarily unavailable: ${reason}`;
+  }
+}
+
+/**
+ * The service is stopping. Callers that keep per-item retry budgets check
+ * `shuttingDown` so a quit never counts against a file the way a real model
+ * failure does.
+ */
+export class EmbeddingsShuttingDownError extends EmbeddingsUnavailableError {
+  readonly shuttingDown = true;
+  constructor() {
+    super('the service is shutting down');
+    this.name = 'EmbeddingsShuttingDownError';
   }
 }
 
@@ -124,6 +139,7 @@ interface WorkerReply {
   fatal?: boolean;
   retryable?: boolean;
   optionalPeerMissing?: boolean;
+  cancelled?: boolean;
 }
 
 let worker: Worker | null = null;
@@ -181,6 +197,11 @@ function onMessage(msg: WorkerReply): void {
   }
   pending.delete(msg.id);
   if (pending.size === 0) worker?.unref();
+  if (msg.cancelled) {
+    // Our own shutdown cancel: no cooldown, no profile outage, nothing disabled.
+    p.reject(new EmbeddingsShuttingDownError());
+    return;
+  }
   if (msg.error) {
     if (p.profileId) {
       if (!p.localFilesOnly && (msg.fatal || msg.retryable))
@@ -263,6 +284,7 @@ async function embedInProcess(texts: string[]): Promise<number[][]> {
   try {
     return await runEmbed(texts);
   } catch (err) {
+    if (err instanceof ModelWorkCancelledError) throw new EmbeddingsShuttingDownError();
     if (err instanceof PipelineLoadError) {
       if (err.retryable) {
         markTemporarilyUnavailable(err.message);
@@ -310,17 +332,26 @@ function markDisabled(message: string, optionalPeerMissing = false): void {
   log.error('[memory] underlying error:', message);
 }
 
-const SHUTTING_DOWN = 'the service is shutting down';
-
 /**
  * Close for service shutdown: refuse new work (it would start a worker, or
- * load the model in-process, as the process exits), then terminate the worker
- * once its in-flight work has finished, waiting at most `drainMs`.
+ * load the model in-process, as the process exits), cancel what is in flight,
+ * then terminate the worker once it is idle, waiting at most `drainMs`.
+ *
+ * The cancel is what makes the wait short: a first-run model download stops at
+ * once, and an embedding run stops at its next sub-batch. Without it the drain
+ * expired with the download still going, and every caller awaiting that
+ * embedding (index enrichment among them) held shutdown until the app's quit
+ * timeout.
  */
 export async function shutdownEmbeddings(drainMs: number): Promise<void> {
   closed = true;
   const w = worker;
-  if (!w) return;
+  if (!w) {
+    // In-process fallback: any run in flight is on this thread.
+    cancelInFlightModelWork();
+    return;
+  }
+  if (pending.size > 0) w.postMessage({ cancel: true });
   if (await retireModelWorker(w, () => pending.size === 0, drainMs)) {
     if (worker === w) worker = null;
     return;
@@ -335,7 +366,7 @@ export function openEmbeddings(): void {
 
 /** Embed `texts`, preferring the worker and degrading to in-process. */
 async function embedMany(texts: string[]): Promise<number[][]> {
-  if (closed) throw new EmbeddingsUnavailableError(SHUTTING_DOWN);
+  if (closed) throw new EmbeddingsShuttingDownError();
   if (disabledByEnv()) throw new EmbeddingsDisabledError(ENV_DISABLED_REASON);
   if (disabledReason) throw new EmbeddingsDisabledError(disabledReason);
   const temporaryReason = currentUnavailableReason();
@@ -427,7 +458,7 @@ export async function embedKnowledgeQuery(
   } = {},
 ): Promise<number[]> {
   const { onDownloadProgress, localFilesOnly = false } = opts;
-  if (closed) throw new EmbeddingsUnavailableError(SHUTTING_DOWN);
+  if (closed) throw new EmbeddingsShuttingDownError();
   // The default daemon pipeline may fetch weights on a cold load.
   if (!localFilesOnly && sharesDaemonEmbedder(profile)) {
     const vector = await embedQuery(text);

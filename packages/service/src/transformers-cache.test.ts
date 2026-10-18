@@ -395,6 +395,36 @@ describe('ensureVerifiedModelFile', () => {
     ]);
   });
 
+  it('stops when its signal aborts and leaves nothing behind', async () => {
+    const dir = await freshCacheDir();
+    // Large enough that the slow server is still sending when the abort lands.
+    const { host } = await serve({ body: Buffer.alloc(8 * 1024 * 1024, 7) });
+    const controller = new AbortController();
+    const download = ensureVerifiedModelFile(dir, MODEL, pinned, {
+      ...source(host),
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 30);
+
+    await expect(download).rejects.toThrow();
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(await readdir(join(dir, 'Xenova', 'test-model', 'onnx'))).toEqual([]);
+  });
+
+  it('does not start a download whose signal already aborted', async () => {
+    const dir = await freshCacheDir();
+    const { host, requests } = await serve({});
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      ensureVerifiedModelFile(dir, MODEL, pinned, { ...source(host), signal: controller.signal }),
+    ).rejects.toThrow();
+
+    expect(requests).toEqual([]);
+  });
+
   it('leaves nothing behind when the connection drops mid-file', async () => {
     const dir = await freshCacheDir();
     const { host } = await serve({ cutAfter: 64 * 1024 });
