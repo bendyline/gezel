@@ -27,6 +27,21 @@ import { sanitizeSvg } from '../../icon/sanitize.js';
 import type { ServiceContext } from '../context.js';
 import { buildTimeline } from './timeline.js';
 
+/**
+ * How `/ensure` drafts a bespoke persona. A session token means the request is
+ * a model's own tool call (`ensure_gezel`, `ask_specialist`, `delegate_*`);
+ * when that turn runs on an on-device engine, a Klerk one-shot would queue
+ * behind it and time out after 120 s having reached nothing (ds4, 2026-10-17).
+ * Everyone else keeps the authored one-shot.
+ */
+export function ensureBespokeMode(
+  auth: { appId: string; scopes: readonly string[] } | undefined,
+  chat: { holdsLocalEngineTurn(sessionId: string): boolean },
+): 'generated' | 'static' {
+  if (!auth?.scopes.includes('session') || !auth.appId.startsWith('session:')) return 'generated';
+  return chat.holdsLocalEngineTurn(auth.appId.slice('session:'.length)) ? 'static' : 'generated';
+}
+
 export function gezelRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
@@ -317,6 +332,7 @@ export function gezelRoutes(ctx: ServiceContext): Hono {
         store: ctx.store,
         catalog: ctx.catalog,
         chat: ctx.chat,
+        bespokeMode: ensureBespokeMode(c.get('auth'), ctx.chat),
       });
       return c.json(result);
     } catch (err) {

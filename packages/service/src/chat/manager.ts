@@ -470,6 +470,7 @@ import {
   maybeGateExpectedDeliverable,
   workspaceDeliverableReady,
 } from './observable-progress.js';
+import { sessionHoldsQueueSlot } from './one-shot-caller.js';
 import {
   liveTurnToolNames,
   resolveContinuationBudget,
@@ -2546,6 +2547,20 @@ export class ChatManager extends LocalEngineRuntime {
    */
   isSessionTurnPending(sessionId: string): boolean {
     return this.inflight.has(sessionId) || this.sendQueue.depth(sessionId) > 0;
+  }
+
+  /**
+   * True while this session has a turn pending on an on-device engine. A route
+   * serving that turn's own tool call must not wait on another local model
+   * call: the turn holds the engine's queue slot while it waits for the tool
+   * (ds4 runs one request with no background reserve), so the call queues
+   * behind its own caller and nothing reaches the engine until the deadline.
+   * An unknown provider counts as local — the deterministic path is the safe one.
+   */
+  holdsLocalEngineTurn(sessionId: string): boolean {
+    if (!this.isSessionTurnPending(sessionId)) return false;
+    const providerName = this.states.get(sessionId)?.record.providerName;
+    return providerName === undefined || isLocalProvider(providerName);
   }
 
   /**
@@ -11383,6 +11398,11 @@ export class ChatManager extends LocalEngineRuntime {
       onQueueWait?: (info: { aheadOf: number }) => void;
       /** Cancel this ephemeral provider turn and release its session. */
       signal?: AbortSignal;
+      /**
+       * The chat session whose tool call is waiting on this one-shot, e.g. a
+       * script it ran that calls `llm.oneShot`. See {@link sessionHoldsQueueSlot}.
+       */
+      onBehalfOfSessionId?: string;
     } = {},
   ): Promise<string> {
     if (this.shuttingDown) throw serviceShutdownAbortError();
@@ -11644,6 +11664,12 @@ export class ChatManager extends LocalEngineRuntime {
         ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
       });
     });
+    const callerHoldsSlot = sessionHoldsQueueSlot(provider.queue, opts.onBehalfOfSessionId);
+    if (callerHoldsSlot) {
+      oneShotLog.info(
+        `skipping the queue${opts.jobLabel ? ` (${opts.jobLabel})` : ''}: caller ${opts.onBehalfOfSessionId} holds its slot`,
+      );
+    }
     try {
       // One-shot completions default to background work so they do not cut
       // in front of active chat. Explicitly user-awaited utilities can opt
@@ -11666,6 +11692,7 @@ export class ChatManager extends LocalEngineRuntime {
             ...(actorLabel ? { actorLabel } : {}),
             ...(opts.jobLabel ? { job: opts.jobLabel } : {}),
             ...(opts.onQueueWait ? { onQueueWait: opts.onQueueWait } : {}),
+            ...(callerHoldsSlot ? { bypassQueue: true } : {}),
           },
         }),
       );

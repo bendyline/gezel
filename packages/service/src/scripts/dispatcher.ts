@@ -70,6 +70,8 @@ export interface DispatcherContext {
   initiatedByGezel?: boolean;
   /** The gezel whose chat called the script, when one did. */
   gezelId?: string;
+  /** That chat's session: its turn is waiting on this run. */
+  sessionId?: string;
 }
 
 /**
@@ -491,6 +493,7 @@ export function buildDispatcher(deps: DispatcherDeps): {
         return oneShot(prompt, opts.timeoutMs ?? 120_000, {
           model: opts.model,
           jobLabel: 'script · llm.oneShot',
+          ...(ctx.sessionId ? { onBehalfOfSessionId: ctx.sessionId } : {}),
         });
       },
     },

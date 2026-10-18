@@ -74,7 +74,7 @@ its engine was built for, co-versioned with the pin in `VERSION`:
 |---|---|---|
 | `deepseek-v4-flash-284b-q2` | [`antirez/deepseek-v4-gguf`](https://huggingface.co/antirez/deepseek-v4-gguf) IQ2_XXS | ~81 GiB |
 | `deepseek-v4-flash-284b-q4` | same repo, routed Q4_K | ~153 GiB |
-| `glm-5.3-flash-320b-q2` | [`antirez/glm-5.3-flash-gguf`](https://huggingface.co/antirez/glm-5.3-flash-gguf) IQ2_XXS/Q2_K + model-matched vision encoder | ~91 GiB |
+| `glm-5.3-flash-320b-q2` | [`antirez/glm-5.3-flash-gguf`](https://huggingface.co/antirez/glm-5.3-flash-gguf) IQ2_XXS/Q2_K + model-matched vision encoder | ~91 GiB (90 GiB GGUF + 1 GiB encoder) |
 | `glm-5.2-754b-q2` | [`antirez/glm-5.2-gguf`](https://huggingface.co/antirez/glm-5.2-gguf) routed IQ2_XXS | ~197 GiB |
 | `qwen3.8-flash-next-q2` | [`antirez/qwen3.8-flash-next-gguf`](https://huggingface.co/antirez/qwen3.8-flash-next-gguf) IQ2_XXS/Q2_K; 41.73 GiB resident weights + 95.37 GiB disk-only n-grams | 137.10 GiB |
 | — (upstream-only pending a full local install) | [`antirez/deepseek-v4.1-flash-gguf`](https://huggingface.co/antirez/deepseek-v4.1-flash-gguf) Q2; 151.8 GiB main weights + 188.8 GiB disk-only Engrams | 340.6 GiB |
@@ -122,14 +122,22 @@ Re-validate GGUF compatibility whenever bumping the pin in `VERSION`.
   specialist handoffs. DeepSeek V4.1 can stream experts, but
   its Engram tables likewise remain disk-only in every mode.
 - For routed-expert models, full residency is normally a config-only expert override. Gezel honors
-  `ds4SsdStreaming:false` only when the exact GGUF plus 32 GiB of headroom fits
+  `ds4SsdStreaming:false` only when the exact GGUF plus 24 GiB of headroom fits
   a unified-memory arm64 machine; unknown model sizes and discrete-GPU systems
   stay streamed. This distinction matters on a 128 GiB Mac: the ~81 GiB Q2
-  GGUF can fit fully, while the ~153 GiB Q4 GGUF cannot.
+  GGUF can fit fully, while the ~153 GiB Q4 GGUF cannot. The headroom was 32
+  GiB until 2026-10-17; it came down so GLM 5.3 Q2 runs resident on 128 GB
+  machines, accepting that it also admits the 90.89 GiB DeepSeek q2q4 build
+  (see `DS4_FULL_RESIDENCY_HEADROOM_BYTES` in core's `model-fit.ts`).
 - The measured GB10 Q2 working set was ~105 GiB at 128K context and ~107 GiB
   at 262K context. That result motivated the old 128 GiB full-residency default,
   but it was specific to Q2 and must not be generalized to the much larger Q4
-  build.
+  build. GLM 5.3 Q2 with its vision encoder holds a steady 105.2 GiB on the
+  same machine at 32K context, about 12 GiB above ds4's own plan line.
+- On a Linux unified-memory host, device admission lets one launch commit GPU
+  bytes up to RAM minus the same 24 GiB (macOS keeps 0.75 × RAM). Under the
+  old 0.75 × RAM ceiling (91.2 GiB on a Spark), resident GLM was refused even
+  when it fit.
 - Models whose catalog declares `ssdStreamingSupported:false` do not receive
   the legacy 96 GiB full-residency broker floor. Their authored working set is
   used directly; otherwise the floor would reject Qwen's supported 64 GB

@@ -141,6 +141,34 @@ describe('desktop and portable script policy contract', () => {
     ).toMatchObject({ status: 'error', error: expect.stringContaining('off') });
     expect(completion).not.toHaveBeenCalled();
   });
+  it.each([
+    ['chat', { kind: 'chat', gezelId: 'noor', sessionId: 'meester-session' }, 'meester-session'],
+    ['manual', { kind: 'manual', userInitiated: true }, undefined],
+  ] as const)(
+    'names the waiting %s session to llm.oneShot so it cannot queue behind it',
+    async (_kind, trigger, expected) => {
+      const completion = vi.fn(async () => 'answer');
+      const scripts = new ScriptRunner({
+        store,
+        chat: { oneShotCompletion: completion } as unknown as ChatManager,
+        executor: {
+          execute: async (options) => {
+            await options.onRequest('llm.oneShot', { prompt: 'Summarize' });
+            return success;
+          },
+        },
+      });
+      const run = await scripts.run({
+        ...invocation,
+        trigger,
+        inlineSource: source('example', ['llm']),
+      });
+      expect(run.status).toBe('ok');
+      expect(completion).toHaveBeenCalledOnce();
+      const opts = (completion.mock.calls[0] as unknown[])[2] as { onBehalfOfSessionId?: string };
+      expect(opts.onBehalfOfSessionId).toBe(expected);
+    },
+  );
   it('retains the parent policy inside a nested script', async () => {
     await mkdir(join(home, 'projects/default/scripts'), { recursive: true });
     await writeFile(join(home, 'projects/default/scripts/child.ts'), source('child'));

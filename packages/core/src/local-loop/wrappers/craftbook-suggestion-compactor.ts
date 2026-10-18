@@ -4,7 +4,7 @@ import type { McpToolResult, McpToolWrapper } from '../mcp-wrapper-types.js';
 const NEXT_CALL_JSON_RE = /invoke_craftbook\((\{[^\n]+\})\)/;
 const NEXT_CALL_LEGACY_RE = /invoke_craftbook\(\{\s*craftbookId:\s*"([^"]+)"\s*\}\)/;
 const FIRST_MATCH_RE =
-  /^1\.\s+(.+?)\s+\(id:\s*([^)]+)\)\s+\[[^\]]*?(\d+)% match\](?:[^\S\n]+\[SETUP REQUIRED:\s*([^\]]+)\])?(?:[^\S\n]+—[^\S\n]+([^\n]+))?/m;
+  /^1\.\s+(.+?)\s+\(id:\s*([^)]+)\)\s+\[[^\]]*?(\d+)% match\](?:[^\S\n]+\[SETUP REQUIRED:\s*([^\]]+)\])?(?:[^\S\n]+\[needs\s+([^\]]+)\])?(?:[^\S\n]+—[^\S\n]+([^\n]+))?/m;
 
 interface CompactCraftbookRecommendation {
   recommendedCraftbook: {
@@ -13,6 +13,8 @@ interface CompactCraftbookRecommendation {
     description?: string;
     matchPercent?: number;
     setupRequired?: string[];
+    /** The params it cannot start without, e.g. `params.source = … ONE file`. */
+    requiredInputs?: string;
   };
   nextCall: {
     tool: 'invoke_craftbook';
@@ -44,11 +46,11 @@ export function compactCraftbookSuggestion(text: string): string | null {
 
   const craftbookId = nextArguments.craftbookId;
   const firstMatch = FIRST_MATCH_RE.exec(text);
-  if (firstMatch?.[2] !== craftbookId || !firstMatch[5]) return null;
+  if (firstMatch?.[2] !== craftbookId || !firstMatch[6]) return null;
   const recommendation: CompactCraftbookRecommendation = {
     recommendedCraftbook: {
       id: craftbookId,
-      description: firstMatch[5].trim(),
+      description: firstMatch[6].trim(),
       ...(firstMatch?.[2] === craftbookId && firstMatch[1] ? { name: firstMatch[1].trim() } : {}),
       ...(firstMatch?.[2] === craftbookId && firstMatch[3]
         ? { matchPercent: Number.parseInt(firstMatch[3], 10) }
@@ -61,6 +63,7 @@ export function compactCraftbookSuggestion(text: string): string | null {
               .filter(Boolean),
           }
         : {}),
+      ...(firstMatch[5] ? { requiredInputs: firstMatch[5].trim() } : {}),
     },
     nextCall: {
       tool: 'invoke_craftbook',

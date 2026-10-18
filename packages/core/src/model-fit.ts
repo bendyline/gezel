@@ -148,15 +148,21 @@ export function estimateMlxResidentBytes(approxSizeBytes: number): number {
  * and foreground apps, plus the CUDA/Metal context and the aligned-artifact
  * tree ds4 repacks the weights into.
  *
- * Derived on a 128 GiB Mac (an ~81 GiB GGUF measured at a ~103 GiB working
- * set) and since corroborated on CUDA: a DGX Spark GB10 (121.63 GiB) ran the
- * 80.76 GiB IQ2_XXS build at ~107 GiB of working set, i.e. ~26 GiB of overhead
- * over the file. The same 32 GiB therefore leaves real margin on both
- * backends, and it correctly REFUSES the 90.89 GiB mixed-precision build on
- * that machine — an override there drove MemAvailable from 117 GiB to 0.5 GiB
- * in about thirty seconds and the kernel killed the engine mid-load.
+ * Measured overhead over the file varies by model: on a DGX Spark GB10
+ * (121.63 GiB) the 80.76 GiB DeepSeek IQ2_XXS build runs at ~107 GiB (~26 GiB
+ * over the file, mostly ds4's aligned CUDA weight copies), and GLM 5.3 Q2
+ * (89.88 GiB + a 1.05 GiB vision encoder) holds a steady 105.2 GiB, leaving
+ * ~9 GiB available beside a desktop session (2026-10-17).
+ *
+ * Lowered from 32 GiB on 2026-10-17 so GLM 5.3 Q2 runs resident on 128 GB
+ * machines, as upstream intends. Accepted risk: 24 GiB also admits the 90.89
+ * GiB DeepSeek q2q4 build there, which was killed mid-load when forced
+ * resident on the Spark under the old rule (MemAvailable 117 GiB → 0.5 GiB in
+ * ~30 s). Its ~26 GiB overhead does not fit in 24 GiB; if it OOMs again, give
+ * the gate a per-model measured footprint rather than raising this for every
+ * model.
  */
-export const DS4_FULL_RESIDENCY_HEADROOM_BYTES = 32 * 1024 ** 3;
+export const DS4_FULL_RESIDENCY_HEADROOM_BYTES = 24 * 1024 ** 3;
 
 export interface Ds4FullResidencyInput {
   /** On-disk size of the selected GGUF. Unknown sizes never qualify. */

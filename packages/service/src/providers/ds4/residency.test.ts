@@ -81,8 +81,8 @@ describe('DS4 residency policy', () => {
     const companion = Math.round(5.58 * GB);
     const linuxArm = { platform: 'linux' as const, arch: 'arm64' };
     // On the measured Spark the companion does NOT tip the verdict — 80.76 +
-    // 5.58 + 32 = 118.34 against 121.63 — and the observed peak (116.5 GiB)
-    // stayed under that. Kept as a regression pin so the accounting change
+    // 5.58 + 24 = 110.34 against 121.63 — and the observed peak (116.5 GiB)
+    // stayed under 121.63. Kept as a regression pin so the accounting change
     // cannot silently start refusing the configuration it was validated on.
     expect(
       canUseDs4FullResidency({
@@ -93,8 +93,8 @@ describe('DS4 residency policy', () => {
       }),
     ).toBe(true);
     // A slightly smaller host is where ignoring it would have been an OOM:
-    // weights alone clear 118 GiB, weights plus companion do not.
-    const tight = { modelSizeBytes: model, totalRamBytes: 118 * GB, ...linuxArm };
+    // weights alone clear 108 GiB, weights plus companion do not.
+    const tight = { modelSizeBytes: model, totalRamBytes: 108 * GB, ...linuxArm };
     expect(canUseDs4FullResidency(tight)).toBe(true);
     expect(canUseDs4FullResidency({ ...tight, companionBytes: companion })).toBe(false);
   });
@@ -128,7 +128,18 @@ describe('DS4 residency policy', () => {
   });
 
   it('uses model size plus fixed headroom for the full-residency gate', () => {
-    expect(DS4_FULL_RESIDENCY_HEADROOM_BYTES).toBe(32 * GB);
+    expect(DS4_FULL_RESIDENCY_HEADROOM_BYTES).toBe(24 * GB);
+    // GLM 5.3 Q2 plus its vision encoder on a 121.63 GiB DGX Spark: the reason
+    // the headroom came down from 32 GiB. It runs at a steady 105.2 GiB there.
+    expect(
+      canUseDs4FullResidency({
+        modelSizeBytes: Math.round(89.88 * GB),
+        companionBytes: ds4VisionResidentBytes(1_127_280_960),
+        totalRamBytes: Math.round(121.63 * GB),
+        platform: 'linux',
+        arch: 'arm64',
+      }),
+    ).toBe(true);
     expect(
       canUseDs4FullResidency({
         modelSizeBytes: 81 * GB,
@@ -163,7 +174,7 @@ describe('DS4 residency policy', () => {
         catalogResidentBytes: 80 * GB,
         totalRamBytes: 128 * GB,
       }),
-    ).toEqual({ cacheGb: 80, requestedGb: 96, clamped: true, safe: true });
+    ).toEqual({ cacheGb: 88, requestedGb: 96, clamped: true, safe: true });
   });
 
   it('reserves the broker ceiling for a fully resident model', () => {
@@ -174,7 +185,8 @@ describe('DS4 residency policy', () => {
 
   it('admits the wired working set, not the RAM floor, as GPU bytes', () => {
     // deepseek-v4-flash-284b-q2 on a 121.6 GiB DGX Spark: 80.76 GiB of resident
-    // weights, a 96 GiB RAM floor, and a 0.75 x RAM (91.2 GiB) GPU ceiling.
+    // weights and a 96 GiB RAM floor. The GPU bytes must also clear the 0.75 x
+    // RAM curve a 128 GiB Mac keeps (Linux unified hosts allow RAM - 24 GiB).
     const workingSetBytes = Math.round(80.76 * GB);
     const gpuBytes = ds4AdmissionGpuBytes({
       workingSetBytes,

@@ -3,6 +3,8 @@ import {
   CraftbookInvocationParamsArgSchema,
   binaryDocumentCraftbookRequest,
   buildBinaryDocumentTaskDescription,
+  craftbookInputFailureText,
+  craftbookRequiredInputs,
   craftbookSuggestionGuidance,
   inferCraftbookJobParams,
   normalizeCraftbookInvocationParams,
@@ -194,5 +196,67 @@ describe('start_project binary craftbook routing', () => {
         missionObjectives: 'Ship index.html in the workspace.',
       }),
     ).toBeNull();
+  });
+});
+
+describe('craftbook input guidance', () => {
+  const singleFile = {
+    type: 'object',
+    required: ['source'],
+    properties: {
+      source: {
+        type: 'string',
+        title: 'Spreadsheet',
+        input: { kind: 'file', accept: ['.csv', '.tsv'] },
+      },
+      workPath: { type: 'string', default: '{{task.dir}}' },
+    },
+  };
+
+  it('names each required input as the param a model passes, with its shape', () => {
+    expect(craftbookRequiredInputs(singleFile)).toBe(
+      'params.source = the workspace path of ONE file (.csv, .tsv)',
+    );
+    expect(
+      craftbookRequiredInputs({
+        type: 'object',
+        required: ['notes'],
+        properties: { notes: { type: 'string', input: { kind: 'folder' } } },
+      }),
+    ).toBe('params.notes = the workspace path of one folder');
+  });
+
+  it('says nothing for a book with no required input', () => {
+    expect(craftbookRequiredInputs(undefined)).toBeNull();
+    expect(
+      craftbookRequiredInputs({
+        type: 'object',
+        properties: { photos: { type: 'string', input: { kind: 'folder' } } },
+      }),
+    ).toBeNull();
+  });
+
+  it('turns the launch form refusal into the call that repairs it', () => {
+    const text = craftbookInputFailureText({
+      craftbookId: 'tidy-spreadsheet',
+      param: 'source',
+      daemonMessage: 'Choose the spreadsheet this craftbook works on.',
+      paramSchema: singleFile,
+    });
+    expect(text).toContain('Choose the spreadsheet this craftbook works on.');
+    expect(text).toContain('params.source = the workspace path of ONE file (.csv, .tsv)');
+    expect(text).toContain('list_dir');
+    expect(text).toContain('works on one file');
+  });
+
+  it('still names the param when the book manifest is unavailable', () => {
+    const text = craftbookInputFailureText({
+      craftbookId: 'x',
+      param: 'source',
+      daemonMessage: 'Choose the folder this craftbook works on.',
+      paramSchema: undefined,
+    });
+    expect(text).toContain('params.source = the workspace path of the file or folder');
+    expect(text).not.toContain('works on one file');
   });
 });
