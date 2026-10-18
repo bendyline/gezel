@@ -317,6 +317,25 @@ describe('readGgufSummary', () => {
     expect(s.fileTypeName).toBe('UNKNOWN_999');
   });
 
+  it('names file_type values by the upstream llama_ftype enum (30 is IQ4_XS, 32 BF16, 39 NVFP4)', () => {
+    const nameFor = (fileType: number) => {
+      const path = join(dir, `ftype-${fileType}.gguf`);
+      writeFileSync(
+        path,
+        new GgufBuilder()
+          .header(3, 0n)
+          .metaString('general.architecture', 'imagined')
+          .metaU32('general.file_type', fileType)
+          .finish(),
+      );
+      return readGgufSummary(path).fileTypeName;
+    };
+    expect(nameFor(30)).toBe('MOSTLY_IQ4_XS');
+    expect(nameFor(32)).toBe('MOSTLY_BF16');
+    expect(nameFor(38)).toBe('MOSTLY_MXFP4_MOE');
+    expect(nameFor(39)).toBe('MOSTLY_NVFP4');
+  });
+
   it('reads the KV-estimate attention dims', () => {
     const blob = new GgufBuilder()
       .header(3, 0n)

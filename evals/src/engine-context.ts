@@ -22,8 +22,9 @@
  * - `with its required <n>-token working window` — capacity-broker.ts
  *   `formatContextCapacityDenial`, the loud refusal when even one slot
  *   cannot hold the model-aware minimum.
- * - `declining the --swa-full auto-default` — manager.ts, the Gemma
- *   full-cache decline that preserves the window instead of clamping it.
+ * - `declining the --swa-full auto-default` — the Gemma full-cache decline
+ *   that preserved the window instead of clamping it. Builds since
+ *   2026-10-15 never emit it (the auto-default is gone); kept for older runs.
  */
 
 export interface EngineContextClamp {

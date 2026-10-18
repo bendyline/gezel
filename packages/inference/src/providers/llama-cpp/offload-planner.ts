@@ -631,10 +631,9 @@ const SWA_UBATCH_MARGIN_TOKENS = 2048;
  * than the layer ratio — global layers carry fewer KV heads at wider head
  * dims (31b: 10 layers × 4 heads × 512+512 vs 50 layers × 16 heads ×
  * 256+256) — so full-attention math overstates the windowed cache ~14×
- * and using it for admission over-clamps or over-denies exactly the
- * launches the `--swa-full` decline is trying to keep whole (the
- * 2026-08-04 gemma4-26b sweep shipped 19–56K windows on a 65536 request
- * this way).
+ * and using it for admission over-clamps or over-denies launches the
+ * windowed cache holds easily (the 2026-08-04 gemma4-26b sweep shipped
+ * 19–56K windows on a 65536 request this way).
  *
  * Returns undefined when the header lacks the SWA layout (no window, no
  * pattern, length mismatches) so callers fall back to their conservative
@@ -739,27 +738,4 @@ export function estimateWindowedKvLinearization(
       swaElemsPerToken * bytesPerElement * (slidingWindow + SWA_UBATCH_MARGIN_TOKENS) * loops,
     ),
   };
-}
-
-export interface SwaFullFastMemoryFitInput {
-  residentWeightsBytes: number;
-  fullKvBytes: number;
-  /** Already safety-discounted fast-memory budget (VRAM on a discrete GPU). */
-  fastBudgetBytes: number;
-  /** Fast-memory reservations held by models that are already resident. */
-  committedOtherBytes?: number | undefined;
-}
-
-/**
- * Whether Auto may keep `--swa-full` without spilling the model or KV cache
- * out of the fast pool. The capacity budget already reserves driver/OS
- * headroom, so this comparison must not discount it a second time.
- */
-export function fitsSwaFullInFastMemory(input: SwaFullFastMemoryFitInput): boolean {
-  const required = Math.max(0, input.residentWeightsBytes) + Math.max(0, input.fullKvBytes);
-  const available = Math.max(
-    0,
-    input.fastBudgetBytes - Math.max(0, input.committedOtherBytes ?? 0),
-  );
-  return Number.isFinite(required) && Number.isFinite(available) && required <= available;
 }

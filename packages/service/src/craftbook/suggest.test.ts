@@ -83,6 +83,51 @@ describe('rankCraftbookSuggestions', () => {
     expect(await rankCraftbookSuggestions('', books, { embedder: fakeEmbedder })).toEqual([]);
     expect(await rankCraftbookSuggestions('anything', [], { embedder: fakeEmbedder })).toEqual([]);
   });
+
+  it('ranks on words rather than wait out a loading embedder, and finishes the load', async () => {
+    let release: () => void = () => {};
+    const loaded = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let batched = 0;
+    const loadingEmbedder = {
+      embed: async (t: string) => {
+        await loaded;
+        return fakeVec(t);
+      },
+      embedBatch: async (ts: string[]) => {
+        batched += ts.length;
+        return ts.map(fakeVec);
+      },
+    };
+    const res = await rankCraftbookSuggestions('review this pr', books, {
+      embedder: loadingEmbedder,
+      coldEmbedderBudgetMs: 20,
+      embedderStatus: () => 'warming',
+    });
+    expect(res[0]?.id).toBe('pull-request-review');
+    expect(res[0]?.semantic).toBeUndefined();
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(batched).toBe(books.length);
+  });
+
+  it('waits for a ready embedder whatever the budget', async () => {
+    const slowEmbedder = {
+      embed: async (t: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        return fakeVec(t);
+      },
+      embedBatch: async (ts: string[]) => ts.map(fakeVec),
+    };
+    const res = await rankCraftbookSuggestions('make a space shooter', books, {
+      embedder: slowEmbedder,
+      coldEmbedderBudgetMs: 5,
+      embedderStatus: () => 'ready',
+    });
+    expect(res[0]?.id).toBe('arcade-game');
+    expect(res[0]?.semantic).toBeDefined();
+  });
 });
 
 describe('lexical-only mode (embeddings unavailable)', () => {

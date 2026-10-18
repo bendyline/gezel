@@ -224,17 +224,36 @@ export function shouldConstrainToExactCraftbookInvocation(args: {
   );
 }
 
-/** Render the compact per-turn instruction from the same plan shown in the composer. */
-export function renderTurnIntentPrelude(plan: TurnIntentPlan): string | null {
+/** The call an exact craftbook route requires, in the roster's own vocabulary. */
+function requiredCraftbookCall(plan: TurnIntentPlan, workRouting: boolean): string | null {
+  if (!plan.craftbook) return null;
+  if (workRouting)
+    return `start_work(${JSON.stringify({ option: `craftbook:${plan.craftbook.id}` })})`;
+  const args = JSON.stringify({
+    craftbookId: plan.craftbook.id,
+    description: plan.craftbook.invocation.description,
+    ...(plan.craftbook.invocation.params ? { params: plan.craftbook.invocation.params } : {}),
+  });
+  return `invoke_craftbook(${args})`;
+}
+
+/**
+ * Render the compact per-turn instruction from the same plan shown in the
+ * composer. Under `tools.work-routing` the exact route names `start_work`,
+ * and the specialist route stands down: `suggest_work` offers the project
+ * and the specialist side by side, and a prelude choosing for it would
+ * contradict the list.
+ */
+export function renderTurnIntentPrelude(
+  plan: TurnIntentPlan,
+  opts: { workRouting?: boolean } = {},
+): string | null {
+  const workRouting = opts.workRouting === true;
   if (plan.route === 'craftbook' && plan.craftbook && plan.output) {
-    const args = JSON.stringify({
-      craftbookId: plan.craftbook.id,
-      description: plan.craftbook.invocation.description,
-      ...(plan.craftbook.invocation.params ? { params: plan.craftbook.invocation.params } : {}),
-    });
-    return `(System route for this turn: the user asked for a real ${plan.output.label}. Use the existing “${plan.craftbook.name}” procedure now. Your required action is \`invoke_craftbook(${args})\`. Do not start a new project, delegate this as developer work, substitute Markdown/HTML, or claim the output is unavailable because you cannot see a direct file-conversion tool. The invoked procedure supplies its workers with the production capabilities they need.)`;
+    const call = requiredCraftbookCall(plan, workRouting);
+    return `(System route for this turn: the user asked for a real ${plan.output.label}. Use the existing “${plan.craftbook.name}” procedure now. Your required action is \`${call}\`. Do not start a new project, delegate this as developer work, substitute Markdown/HTML, or claim the output is unavailable because you cannot see a direct file-conversion tool. The invoked procedure supplies its workers with the production capabilities they need.)`;
   }
-  if (plan.route === 'specialist' && plan.specialist) {
+  if (plan.route === 'specialist' && plan.specialist && !workRouting) {
     return `(System route for this turn: this is implementation work. Route it to a ${plan.specialist.label} gezel with your team tools instead of attempting the code changes yourself.)`;
   }
   return null;
@@ -251,21 +270,18 @@ export function falseCapabilityDenialCorrection(args: {
   plan: TurnIntentPlan;
   assistantContent: string;
   toolCalls: readonly ChatMessageToolCall[];
+  workRouting?: boolean;
 }): string | null {
   if (args.plan.route !== 'craftbook' || !args.plan.craftbook || !args.plan.output) return null;
   if (!CAPABILITY_DENIAL_RE.test(args.assistantContent)) return null;
+  const launchTools = ['invoke_craftbook', 'start_work'];
   if (
-    args.toolCalls.some(
-      (call) => call.name === 'invoke_craftbook' || call.name.endsWith('__invoke_craftbook'),
+    args.toolCalls.some((call) =>
+      launchTools.some((tool) => call.name === tool || call.name.endsWith(`__${tool}`)),
     )
   )
     return null;
 
-  const invocation = args.plan.craftbook.invocation;
-  const toolArgs = JSON.stringify({
-    craftbookId: args.plan.craftbook.id,
-    description: invocation.description,
-    ...(invocation.params ? { params: invocation.params } : {}),
-  });
-  return `Correction: that capability is available through the preselected “${args.plan.craftbook.name}” procedure. Do not explain the tool boundary or ask to set up a project. Call \`invoke_craftbook(${toolArgs})\` now, then briefly tell the user the ${args.plan.output.label} work has started.`;
+  const call = requiredCraftbookCall(args.plan, args.workRouting === true);
+  return `Correction: that capability is available through the preselected “${args.plan.craftbook.name}” procedure. Do not explain the tool boundary or ask to set up a project. Call \`${call}\` now, then briefly tell the user the ${args.plan.output.label} work has started.`;
 }

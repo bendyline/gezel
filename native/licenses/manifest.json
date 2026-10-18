@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "engines": {
     "ds4": {
-      "tag": "main-2026-09-16",
-      "commit": "8db1d1d155cb0400a86a86b9c62d0defb3a6148b",
+      "tag": "main-2026-10-07",
+      "commit": "fc80bd695da76ee14bcb86820bf900a5cdfda806",
       "files": ["LICENSE-ds4-MIT.txt", "LICENSE-ds4-rax-BSD-3-Clause.txt", "LICENSE-yarn-MIT.txt"]
     },
     "llama-cpp": {
-      "tag": "v0.6.0",
-      "commit": "d81235049384534c167caea52b85a694f6103d14",
+      "tag": "v0.7.0",
+      "commit": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
       "files": [
         "LICENSE-ggml-MIT.txt",
         "LICENSE-yarn-MIT.txt",

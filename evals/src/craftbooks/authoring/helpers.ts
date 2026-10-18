@@ -501,6 +501,24 @@ export function unfinishedTaskFailure(args: {
   return `task ${args.ref}${source} has status "${args.status}" — advance THIS task to a terminal step with advance_task_step/set_task_status. Do NOT invoke the recipe again or create a second task: a new task starts the work over and does not count.`;
 }
 
+/**
+ * Steps the graded task has finished — the authoring scenarios' `milestones`.
+ *
+ * Once the deliverable is right, the only failure left is "task not finished",
+ * and its text does not change as the task walks its steps. The retry-loop
+ * plateau key therefore froze while the task advanced, and a slower model was
+ * killed as stuck mid-recipe: Super VL on route-multi (10/11 checks, killed in
+ * Editorial review after finishing Draft) and author-linear, and qwen3.8-27b on
+ * route-multi with the identical key (2026-10-16). A finished step is a unit
+ * of work, the same as a finished fanout run.
+ */
+export function completedTaskSteps(
+  task: { craftbook?: { steps?: ReadonlyArray<{ completedAt?: string }> } } | null | undefined,
+): number | undefined {
+  const steps = task?.craftbook?.steps;
+  return steps ? steps.filter((step) => step.completedAt !== undefined).length : undefined;
+}
+
 /** Sum of text lengths — a cheap monotonic-ish progress proxy. */
 export function progressBytes(...parts: Array<string | null | undefined>): number {
   return parts.reduce((acc, part) => acc + (part?.length ?? 0), 0);

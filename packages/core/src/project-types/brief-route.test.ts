@@ -284,6 +284,9 @@ describe('fillProjectTypeParams — first-project readers', () => {
     expect(
       one('household', 'Who eats here?', 'Plan a week of meals for two adults and a toddler.'),
     ).toBe('two adults and a toddler');
+    expect(one('household', 'Who eats here?', 'Two of us, no meat, cheap dinners please.')).toBe(
+      'Two of us',
+    );
   });
 
   it('reads what is being learned', () => {
@@ -324,6 +327,13 @@ describe('fillProjectTypeParams — first-project readers', () => {
         'Plan a week of LinkedIn posts for my pottery studio.',
       ),
     ).toBe('pottery studio');
+    expect(
+      one(
+        'brand',
+        'Who does this feed speak for?',
+        'I want to post on LinkedIn every day about our family brewery.',
+      ),
+    ).toBe('family brewery');
   });
 
   it('starts a required style choice from its default, never a free-text placeholder', () => {

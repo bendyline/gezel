@@ -213,6 +213,23 @@ export const MEESTER_STRIPPED_CRAFTBOOK_TOOLS: readonly string[] = [
  *     into it, and less still deleting from it; `list_documents` /
  *     `read_document` / `search_documents` stay.
  */
+/** The coordinator routing pair the `tools.work-routing` behavior surfaces. */
+export const WORK_ROUTING_TOOLS: readonly string[] = ['suggest_work', 'start_work'];
+
+/**
+ * What `suggest_work` + `start_work` replace on a default-roster Meester:
+ * the craftbook launcher and every project-starting macro. `apply_project_type`
+ * stays — retrofitting an existing project is a different job.
+ */
+export const WORK_ROUTING_REPLACED_TOOLS: readonly string[] = [
+  'list_craftbooks',
+  'suggest_craftbook',
+  'invoke_craftbook',
+  'start_project',
+  'start_project_from_type',
+  'list_project_types',
+];
+
 const MEESTER_STRIPPED_TOOLS: ReadonlySet<string> = new Set([
   'list_suggested_work',
   'enable_suggested_work',
@@ -670,6 +687,14 @@ export function computeToolAllowlist(opts: {
    */
   rolesAsTools?: boolean;
   /**
+   * Set when the `tools.work-routing` behavior is active. A default-roster
+   * Meester trades its craftbook launcher and project macros
+   * ({@link WORK_ROUTING_REPLACED_TOOLS}) for `suggest_work` + `start_work`.
+   * Off / undefined keeps both work-routing tools off every surface, the
+   * unfiltered modes included, so the surface stays byte-identical.
+   */
+  workRouting?: boolean;
+  /**
    * True when this gezel is the current project's assigned voorman, even if
    * their persisted role is Reviewer/Developer/etc. Removes the role-typed
    * escalation tools that would resolve back to the current gezel.
@@ -752,13 +777,18 @@ export function computeToolAllowlist(opts: {
   const gatesActive =
     stripWebSearch || stripWikipediaSearch || stripGitHub || stripRunGit || securityGatesActive;
 
+  const unfilteredTools = (): Set<string> => {
+    const all = allBuiltinTools();
+    if (!opts.workRouting) for (const name of WORK_ROUTING_TOOLS) all.delete(name);
+    return all;
+  };
   if (mode === 'never') {
     if (!gatesActive) return null;
-    return applyGates(allBuiltinTools());
+    return applyGates(unfilteredTools());
   }
   if (mode === 'small-model' && tier !== 'tiny') {
     if (!gatesActive) return null;
-    return applyGates(allBuiltinTools());
+    return applyGates(unfilteredTools());
   }
 
   const hasToolsetOverride = !!opts.toolsetsGroupOverride && opts.toolsetsGroupOverride.length > 0;
@@ -811,6 +841,10 @@ export function computeToolAllowlist(opts: {
   if (!hasToolsetOverride && canonicalRoleKey(opts.role) === 'meester') {
     const next = new Set(resolved);
     for (const name of MEESTER_STRIPPED_TOOLS) next.delete(name);
+    if (opts.workRouting) {
+      for (const name of WORK_ROUTING_REPLACED_TOOLS) next.delete(name);
+      for (const name of WORK_ROUTING_TOOLS) next.add(name);
+    }
     resolved = next;
   }
   // Trim the Meester-only kickoff tools from a default-roster Voorman (see

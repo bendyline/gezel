@@ -143,6 +143,28 @@ describe('shared TOC references', () => {
       handle.documentsPage({ topicId: 'news', descendants: false }).documents.map((d) => d.id),
     ).toEqual(['polo']);
   });
+  it('places each document and slug initial where the listing order puts it', () => {
+    const scopes = [
+      {},
+      { topicId: 'news' },
+      { topicId: 'day-22', descendants: false },
+      { topicId: 'day-28', descendants: false },
+    ];
+    for (const scope of scopes) {
+      const ids = handle.documentsPage(scope).documents.map((d) => d.id);
+      for (const [index, id] of ids.entries()) {
+        expect(handle.documentPosition(id, scope)).toBe(index);
+      }
+    }
+    // Curated (ordinal) documents lead the listing; only the alphabetical
+    // tail is indexed by initial, at its absolute position.
+    expect(handle.documentInitials({ topicId: 'news' })).toEqual([
+      { initial: 'z', offset: 2, count: 1 },
+    ]);
+    expect(handle.documentInitials({ topicId: 'day-28', descendants: false })).toEqual([]);
+    expect(handle.documentPosition('alpha', { topicId: 'day-22', descendants: false })).toBeNull();
+    expect(handle.documentPosition('missing')).toBeNull();
+  });
   it('deduplicates parent and whole-catalog pages and paginates after deduplication', () => {
     expect(handle.documentsPage({ topicId: 'news' }).total).toBe(3);
     expect(handle.documentsPage().total).toBe(3);

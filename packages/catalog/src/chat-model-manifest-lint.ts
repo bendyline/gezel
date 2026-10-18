@@ -52,7 +52,12 @@ interface LooseManifest {
     profiles?: Record<string, unknown>;
   };
   behaviors?: Array<string | { id?: string }>;
-  llamaCpp?: { residentBytes?: number; huggingfaceRepo?: string; quantization?: string };
+  llamaCpp?: {
+    residentBytes?: number;
+    huggingfaceRepo?: string;
+    quantization?: string;
+    excludeBackends?: string[];
+  };
   mlx?: {
     residentBytes?: number;
     huggingfaceRepo?: string;
@@ -306,6 +311,20 @@ export function lintChatModelManifest(manifest: LooseManifest): ManifestLintRepo
       modelId,
       rule: 'mlx-nonstandard-quant-format',
       detail: `mlx quantization "${manifest.mlx?.quantization}" is not one of MLX's standard affine widths — confirm Metal has first-class kernels for it (nvfp4 targets NVIDIA Blackwell; MXFP4 is native for some upstreams and legitimate there)`,
+    });
+  }
+  // llama.cpp's Metal backend has no NVFP4 matmul: the file loads and those
+  // layers run on the CPU, which reads to a Mac user as a broken model. The
+  // label only catches a file named for the format; a mixed file (Nemotron 3.5
+  // Bolt is IQ2_XXS experts over NVFP4 Mamba layers) needs the author's read.
+  if (
+    /nvfp4/i.test(manifest.llamaCpp?.quantization ?? '') &&
+    !manifest.llamaCpp?.excludeBackends?.includes('metal')
+  ) {
+    warnings.push({
+      modelId,
+      rule: 'llamacpp-nvfp4-reaches-metal',
+      detail: `llamaCpp quantization "${manifest.llamaCpp?.quantization}" has no Metal kernels in llama.cpp — add "excludeBackends": ["metal"] with an excludeReason so Macs are not offered it`,
     });
   }
 

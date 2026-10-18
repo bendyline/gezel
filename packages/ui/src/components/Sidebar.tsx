@@ -1,6 +1,7 @@
 import type {
   GezelSummary,
   HealthResponse,
+  LlamaCppBackendHealthResponse,
   Project,
   RecentTab,
   RecentTabArea,
@@ -329,10 +330,20 @@ export function Sidebar({
   // slower. One fetch, same pattern as HealthStrip — the rail is the
   // only surface that shows it without the user going looking.
   const [engineHealth, setEngineHealth] = useState<HealthResponse | null>(null);
+  // Same reason, from the process that runs the engines (the machine engine
+  // in packaged installs): a GPU the engine is not using. Fetched once, like
+  // health; an older engine owner answers 404 and reports nothing. A portable
+  // host has no engine owner to ask (it answers 501), so it is not asked.
+  const [backendHealth, setBackendHealth] = useState<LlamaCppBackendHealthResponse | null>(null);
   useEffect(() => {
     api
       .health()
       .then(setEngineHealth)
+      .catch(() => {});
+    if (!runtimeCapabilities().daemonSettings) return;
+    api
+      .getLlamaCppBackendHealth()
+      .then(setBackendHealth)
       .catch(() => {});
   }, []);
   const systemNotices = railSystemNotices({
@@ -345,6 +356,7 @@ export function Sidebar({
       : {}),
     ...(engineHealth?.llamaCppBackend ? { runningBackend: engineHealth.llamaCppBackend } : {}),
     ...(engineHealth?.childProcessSpawn === 'denied' ? { childProcessDenied: true } : {}),
+    backendHealth,
   });
 
   // ── Live entity lists ───────────────────────────────────────────
@@ -1260,11 +1272,12 @@ export function Sidebar({
                 onClick={() => {
                   // Stash for the not-yet-mounted case, open the area, then fire
                   // the event for the already-open-on-another-section case.
-                  requestSettingsSection('about');
+                  const section = notice.settingsSection ?? 'about';
+                  requestSettingsSection(section);
                   onOpenArea('settings');
                   window.dispatchEvent(
                     new CustomEvent('gezel:navigate', {
-                      detail: { view: 'settings', section: 'about' },
+                      detail: { view: 'settings', section },
                     }),
                   );
                 }}

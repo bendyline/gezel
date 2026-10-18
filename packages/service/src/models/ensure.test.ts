@@ -76,6 +76,7 @@ function makeOrchestrator(opts: {
   mlx?: Parameters<typeof stubMlx>[0];
   catalog?: Parameters<typeof stubCatalog>[0];
   onInstallStart?: (info: { backend: 'llama-cpp' | 'mlx' | 'ds4'; catalogId: string }) => void;
+  llamaBackend?: string;
 }) {
   return createEnsureModelOrchestrator({
     llamaCpp: stubLlamaCpp(opts.llamaCpp ?? {}),
@@ -83,6 +84,7 @@ function makeOrchestrator(opts: {
     mlx: stubMlx(opts.mlx ?? {}),
     catalog: stubCatalog(opts.catalog ?? {}),
     ...(opts.onInstallStart ? { onInstallStart: opts.onInstallStart } : {}),
+    resolveLlamaBackend: () => opts.llamaBackend,
   });
 }
 
@@ -139,6 +141,28 @@ describe('EnsureModelOrchestrator — validation', () => {
     await expect(o.ensure('llama-cpp:mlx-only-model')).rejects.toMatchObject({
       code: 'no_source_for_backend',
     });
+  });
+
+  it('refuses a llama.cpp source that excludes the running backend, before any job', async () => {
+    const nvfp4 = {
+      llamaCpp: { url: 'x', excludeBackends: ['metal'], excludeReason: 'No NVFP4 kernels.' },
+    };
+    const o = await makeOrchestrator({ catalog: { nvfp4 }, llamaBackend: 'metal' });
+    await expect(o.ensure('llama-cpp:nvfp4')).rejects.toMatchObject({
+      code: 'no_source_for_backend',
+      message: expect.stringContaining('Apple Metal llama.cpp engine: No NVFP4 kernels.'),
+    });
+    const onCuda = await makeOrchestrator({
+      catalog: { nvfp4 },
+      llamaCpp: { installed: new Set(['nvfp4']) },
+      llamaBackend: 'cuda',
+    });
+    await expect(onCuda.ensure('llama-cpp:nvfp4')).resolves.toMatchObject({ status: 'ready' });
+    const unknown = await makeOrchestrator({
+      catalog: { nvfp4 },
+      llamaCpp: { installed: new Set(['nvfp4']) },
+    });
+    await expect(unknown.ensure('llama-cpp:nvfp4')).resolves.toMatchObject({ status: 'ready' });
   });
 });
 

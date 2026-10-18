@@ -799,6 +799,97 @@ export const LlamaCppContextSizingResponseSchema = z.object({
 });
 export type LlamaCppContextSizingResponse = z.infer<typeof LlamaCppContextSizingResponseSchema>;
 
+const LlamaCppBackendNameSchema = z.enum(['cuda', 'vulkan', 'metal', 'cpu']);
+
+/**
+ * `/api/engines/llama-cpp/quarantine` — llama-server builds the engine owner
+ * has switched off on this machine after they crashed while starting (see
+ * `llama-quarantine.ts`). Lists only entries for the build on disk now; one
+ * whose binary an update replaced no longer applies and is left out.
+ */
+export const LlamaCppQuarantineResponseSchema = z.object({
+  entries: z.array(
+    z.object({
+      backend: LlamaCppBackendNameSchema,
+      /** A signal (`SIGILL`), `exit:<code>` (`exit:0xc0000005`), or `cuda-unsupported-device`. */
+      signal: z.string(),
+      /** Technical explanation, for a "Technical details" disclosure. */
+      reason: z.string(),
+      /** ISO 8601 timestamp of the crash that completed the strikes. */
+      at: z.string(),
+      /**
+       * Crashes in a row that switched the build off. Absent for entries
+       * written before strikes, which switched it off on the first crash.
+       */
+      crashes: z.number().int().positive().optional(),
+    }),
+  ),
+  /** Crashes in a row that quarantine a build. */
+  strikeThreshold: z.number().int().positive(),
+  /** The build the engine launches now, when one is resolved. */
+  running: LlamaCppBackendNameSchema.optional(),
+});
+export type LlamaCppQuarantineResponse = z.infer<typeof LlamaCppQuarantineResponseSchema>;
+
+/**
+ * `/api/engines/llama-cpp/backend-health` — what the engine owner knows about
+ * whether llama-server is getting the hardware this machine has. Each field
+ * is present only while its condition holds, so an empty object is the
+ * healthy answer. Owned by the process that launches the engines (proxied to
+ * the machine engine in packaged installs), unlike `/api/health`.
+ */
+export const LlamaCppBackendHealthResponseSchema = z.object({
+  /** The build the engine launches now. */
+  running: LlamaCppBackendNameSchema.optional(),
+  /**
+   * Linux: the CUDA build was passed over because the NVIDIA driver cannot
+   * run it. Re-checked on every launch, so a restart or a driver update
+   * brings CUDA back by itself.
+   */
+  cudaBlocker: z
+    .object({
+      kind: z.enum(['module-not-loaded', 'restart-required', 'driver-too-old']),
+      /** The installed driver (the library's version). */
+      installed: z.string().optional(),
+      /** The loaded kernel module, when it differs from `installed`. */
+      loaded: z.string().optional(),
+      /** The oldest driver the build accepts. */
+      required: z.string().optional(),
+      cudaToolkit: z.string().optional(),
+      /** Technical explanation, for a "Technical details" disclosure. */
+      detail: z.string(),
+    })
+    .optional(),
+  /**
+   * The latest start of a GPU build ran without its GPU — every token on the
+   * CPU. Cleared by a start that found it.
+   */
+  gpuUnused: z
+    .object({
+      backend: z.enum(['cuda', 'vulkan']),
+      /** `init-failed`: CUDA refused to start. `no-devices`: none usable. `not-loaded`: the GPU library never loaded. */
+      reason: z.enum(['init-failed', 'no-devices', 'not-loaded']),
+      /** The engine's own words, when it gave any. */
+      detail: z.string().optional(),
+      /** ISO 8601. */
+      at: z.string(),
+    })
+    .optional(),
+  /** Linux's out-of-memory killer stopped the engine since the engine owner started. */
+  outOfMemory: z
+    .object({
+      count: z.number().int().positive(),
+      /** ISO 8601 timestamp of the latest. */
+      at: z.string(),
+      /** The model that was running, when known. */
+      model: z.string().optional(),
+      /** True when the latest one hit while the model was loading. */
+      whileStarting: z.boolean(),
+    })
+    .optional(),
+});
+export type LlamaCppBackendHealthResponse = z.infer<typeof LlamaCppBackendHealthResponseSchema>;
+
 /**
  * Wire shapes for the per-model context override surface
  * (`/api/engines/:engine/model-context`). The response map is keyed by the
@@ -1605,9 +1696,12 @@ export const GezelConfigSchema = z.object({
   llamaCppCacheReuse: z.number().int().min(0).optional(),
   /**
    * Use a full-size SWA (sliding-window-attention) KV cache
-   * (`--swa-full`) for SWA models (Gemma family). Trades memory for
-   * fewer recomputes at long context. Default unset (off — llama-server
-   * uses the memory-efficient windowed cache).
+   * (`--swa-full`) for SWA models (Gemma family). Buys prefix reuse across
+   * turns at the cost of memory AND decode speed: on gemma4-31b (2026-10-15)
+   * it decoded 17-25% slower and trials ran 19% longer, because decode reads
+   * each SWA layer's whole cache. Default unset (off — llama-server uses the
+   * memory-efficient windowed cache); a model manifest's `swaFull` applies
+   * when this is unset.
    *
    * Also the PRECONDITION for `llamaCppCacheReuse` on these models:
    * llama-server tests whether the loaded context can KV-shift and, for a

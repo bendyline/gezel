@@ -41,7 +41,12 @@ import {
 } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 
-import { gezelHome, gezelPaths, readConfigRaw } from '@bendyline/gezel/paths';
+import {
+  gezelHome,
+  gezelPaths,
+  readConfigRaw,
+  suggestVectorCacheFile,
+} from '@bendyline/gezel/paths';
 import { type ServerType, serve } from '@hono/node-server';
 import { AmbientDashboardGenerator } from './ambient/dashboard-generator.js';
 import { createAppServeController } from './app-serve/controller.js';
@@ -63,7 +68,10 @@ import {
 } from './connectors/product-wiring.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
-import { clearCraftbookSuggestVectorCache } from './craftbook/suggest.js';
+import {
+  clearCraftbookSuggestVectorCache,
+  configureCraftbookSuggestVectorCache,
+} from './craftbook/suggest.js';
 import { createCraftbookTerminalCommands } from './craftbook/terminal-commands.js';
 import { DebugFlag } from './debug/flag.js';
 import {
@@ -531,6 +539,7 @@ export async function startProductService(
   // as a provider closure (re-read on every disk access, so a live content
   // activation flips the whole catalog without a reconstruct).
   const gildeUpdates = await GildeUpdateManager.create({ home, store, history });
+  configureCraftbookSuggestVectorCache(suggestVectorCacheFile(home));
   gildeUpdates.onContentChanged(() => {
     invalidateModelsCache();
     clearCraftbookSuggestVectorCache();

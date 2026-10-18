@@ -87,6 +87,15 @@ export interface CatalogDocumentMeta {
   locations?: KnowledgeLocation[];
 }
 
+/** One slug initial of a listing: where it first appears and how many documents share it. */
+export interface CatalogDocumentInitial {
+  /** The slug's first character, as stored (slugs are usually lowercase ASCII). */
+  initial: string;
+  /** Zero-based position of its first document in `documentsPage` order. */
+  offset: number;
+  count: number;
+}
+
 export interface CatalogAssetInfo {
   /** Archive path under `assets/`. */
   path: string;
@@ -109,6 +118,18 @@ export interface CatalogAssetRead extends CatalogAssetInfo {
  * the validator refuses cycles and depth beyond MAX_KNOWLEDGE_TOPIC_DEPTH.
  */
 const TOPIC_WALK_MAX_DEPTH = 32;
+
+/**
+ * The browse order of `documentsPage`, over `listingRows` columns: curated
+ * documents by ordinal first, then the rest alphabetically by slug.
+ */
+const LISTING_ORDER = '(ordinal IS NULL), ordinal, slug, id';
+
+/** Ranks each document's placements so a shared reference lists once, at its first. */
+const SHARED_PLACEMENT_RANK = `ranked AS (
+  SELECT *, ROW_NUMBER() OVER (PARTITION BY document_id
+    ORDER BY (ordinal IS NULL), ordinal, sort_key, topic_id) AS placement_rank FROM scoped
+)`;
 
 /** What a media row (0.8) carries beyond its text: the asset, its kind, and the span. */
 export interface CatalogChunkMedia {
@@ -222,7 +243,7 @@ export class CatalogHandle {
     private readonly router: CatalogDb,
   ) {
     this.schemaVersion = router.schemaVersion;
-    this.spatial = new DocumentSpatialIndex(router.db, router.schemaVersion === 3);
+    this.spatial = new DocumentSpatialIndex(router.db);
     this.meta = {};
     for (const row of router.db.prepare('SELECT key, value FROM meta').all() as Array<{
       key: string;
@@ -641,22 +662,7 @@ export class CatalogHandle {
     if (this.schemaVersion >= 4 && opts.topicId) {
       return this.sharedDocumentsPage(opts.topicId, descendants, limit, offset);
     }
-    let scope = '';
-    let where = '';
-    const params: unknown[] = [];
-    if (opts.topicId && descendants) {
-      scope = `WITH RECURSIVE sub(id, depth) AS (
-                 SELECT ?, 0
-                 UNION ALL
-                 SELECT t.id, sub.depth + 1 FROM topics t JOIN sub ON t.parent_id = sub.id
-                 WHERE sub.depth < ${TOPIC_WALK_MAX_DEPTH}
-               )`;
-      where = 'WHERE topic_id IN (SELECT id FROM sub)';
-      params.push(opts.topicId);
-    } else if (opts.topicId) {
-      where = 'WHERE topic_id = ?';
-      params.push(opts.topicId);
-    }
+    const { scope, where, params } = this.plainScope(opts.topicId, descendants);
     const total = Number(
       (
         this.router.db
@@ -675,6 +681,106 @@ export class CatalogHandle {
     return { documents, total };
   }
 
+  /**
+   * Where each slug initial first appears in `documentsPage` order, for an
+   * A–Z index over the listing. Only the alphabetical part counts: documents
+   * with an ordinal are listed first in their curated order, so a fully
+   * curated listing has no initials.
+   */
+  documentInitials(
+    opts: { topicId?: string; descendants?: boolean } = {},
+  ): CatalogDocumentInitial[] {
+    const { sql, params } = this.listingRows(opts.topicId, opts.descendants ?? true);
+    const rows = this.router.db
+      .prepare(
+        `SELECT initial, MIN(position) AS position, COUNT(*) AS n FROM (
+           SELECT substr(slug, 1, 1) AS initial, ordinal,
+                  ROW_NUMBER() OVER (ORDER BY ${LISTING_ORDER}) - 1 AS position
+           FROM (${sql})
+         ) WHERE ordinal IS NULL GROUP BY initial ORDER BY position`,
+      )
+      .all(...(params as [])) as Array<{
+      initial: string;
+      position: number | bigint;
+      n: number | bigint;
+    }>;
+    return rows.map((r) => ({
+      initial: r.initial,
+      offset: Number(r.position),
+      count: Number(r.n),
+    }));
+  }
+
+  /** A document's zero-based position in `documentsPage` order; null when the listing lacks it. */
+  documentPosition(
+    documentId: string,
+    opts: { topicId?: string; descendants?: boolean } = {},
+  ): number | null {
+    const { sql, params } = this.listingRows(opts.topicId, opts.descendants ?? true);
+    const row = this.router.db
+      .prepare(
+        `SELECT position FROM (
+           SELECT id, ROW_NUMBER() OVER (ORDER BY ${LISTING_ORDER}) - 1 AS position FROM (${sql})
+         ) WHERE id = ?`,
+      )
+      .get(...(params as []), documentId) as { position: number | bigint } | undefined;
+    return row ? Number(row.position) : null;
+  }
+
+  /** A listing's documents as `id, slug, ordinal` rows, ordered by LISTING_ORDER. */
+  private listingRows(
+    topicId: string | undefined,
+    descendants: boolean,
+  ): { sql: string; params: unknown[] } {
+    if (this.schemaVersion >= 4 && topicId) {
+      return {
+        sql: `${this.sharedScope(descendants)}, ${SHARED_PLACEMENT_RANK}
+          SELECT d.id AS id, d.slug AS slug, p.ordinal AS ordinal
+          FROM documents d JOIN ranked p ON p.document_id = d.id AND p.placement_rank = 1`,
+        params: [topicId],
+      };
+    }
+    const { scope, where, params } = this.plainScope(topicId, descendants);
+    const ordinal = this.schemaVersion >= 3 ? 'ordinal' : 'NULL';
+    return {
+      sql: `${scope} SELECT id, slug, ${ordinal} AS ordinal FROM documents ${where}`,
+      params,
+    };
+  }
+
+  private plainScope(
+    topicId: string | undefined,
+    descendants: boolean,
+  ): { scope: string; where: string; params: unknown[] } {
+    if (topicId && descendants) {
+      return {
+        scope: `WITH RECURSIVE sub(id, depth) AS (
+                 SELECT ?, 0
+                 UNION ALL
+                 SELECT t.id, sub.depth + 1 FROM topics t JOIN sub ON t.parent_id = sub.id
+                 WHERE sub.depth < ${TOPIC_WALK_MAX_DEPTH}
+               )`,
+        where: 'WHERE topic_id IN (SELECT id FROM sub)',
+        params: [topicId],
+      };
+    }
+    if (topicId) return { scope: '', where: 'WHERE topic_id = ?', params: [topicId] };
+    return { scope: '', where: '', params: [] };
+  }
+
+  /** The topic's placements (schema 4) as `scoped`; binds the topic id once. */
+  private sharedScope(descendants: boolean): string {
+    const sub = descendants
+      ? `SELECT ?, 0 UNION ALL SELECT t.id, sub.depth + 1 FROM topics t
+         JOIN sub ON t.parent_id = sub.id WHERE sub.depth < ${TOPIC_WALK_MAX_DEPTH}`
+      : 'SELECT ?, 0';
+    return `WITH RECURSIVE sub(id, depth) AS (${sub}), scoped AS (
+      SELECT td.document_id, td.topic_id, td.ordinal, t.sort_key
+      FROM topic_documents td JOIN topics t ON t.id = td.topic_id
+      WHERE td.topic_id IN (SELECT id FROM sub)
+    )`;
+  }
+
   /** A reference is a placement, not a duplicate result or a redirect page. */
   private sharedDocumentsPage(
     topicId: string,
@@ -685,15 +791,7 @@ export class CatalogHandle {
     documents: CatalogDocumentMeta[];
     total: number;
   } {
-    const sub = descendants
-      ? `SELECT ?, 0 UNION ALL SELECT t.id, sub.depth + 1 FROM topics t
-         JOIN sub ON t.parent_id = sub.id WHERE sub.depth < ${TOPIC_WALK_MAX_DEPTH}`
-      : 'SELECT ?, 0';
-    const scope = `WITH RECURSIVE sub(id, depth) AS (${sub}), scoped AS (
-      SELECT td.document_id, td.topic_id, td.ordinal, t.sort_key
-      FROM topic_documents td JOIN topics t ON t.id = td.topic_id
-      WHERE td.topic_id IN (SELECT id FROM sub)
-    )`;
+    const scope = this.sharedScope(descendants);
     const total = Number(
       (
         this.router.db
@@ -704,10 +802,7 @@ export class CatalogHandle {
     const documents = (
       this.router.db
         .prepare(
-          `${scope}, ranked AS (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY document_id
-          ORDER BY (ordinal IS NULL), ordinal, sort_key, topic_id) AS placement_rank FROM scoped
-      ) SELECT ${this.documentColumns('d', 'p')}
+          `${scope}, ${SHARED_PLACEMENT_RANK} SELECT ${this.documentColumns('d', 'p')}
         FROM documents d JOIN ranked p ON p.document_id = d.id AND p.placement_rank = 1
         ORDER BY (p.ordinal IS NULL), p.ordinal, d.slug, d.id LIMIT ? OFFSET ?`,
         )

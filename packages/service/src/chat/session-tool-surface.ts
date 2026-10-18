@@ -30,6 +30,7 @@ import { promptConditionallyReferencedTools, promptMandatedTools } from './promp
 import {
   EXTERNAL_SERVICE_TOOLS,
   MEESTER_STRIPPED_CRAFTBOOK_TOOLS,
+  WORK_ROUTING_TOOLS,
   type WebSearchBackendName,
   computeToolAllowlist,
   constrainAllowlistForDirectFileWork,
@@ -143,6 +144,8 @@ export interface ResolveSessionToolSurfaceOptions {
   appItemFocus?: boolean;
   consultationMode?: boolean;
   rolesAsTools?: boolean;
+  /** `tools.work-routing`: a Meester routes through suggest_work / start_work. */
+  workRouting?: boolean;
   /** Current gezel owns this project (`project.voormanGezelId === gezelId`). */
   isProjectVoorman?: boolean;
   webSearchProvider?: WebSearchBackendName;
@@ -415,6 +418,7 @@ export async function resolveSessionToolSurface(
     ...(opts.projectMode ? { projectMode: opts.projectMode } : {}),
     ...(opts.consultationMode ? { consultationMode: true } : {}),
     ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),
+    ...(opts.workRouting ? { workRouting: true } : {}),
     ...(opts.isProjectVoorman ? { isProjectVoorman: true } : {}),
     ...(opts.webSearchProvider ? { webSearchProvider: opts.webSearchProvider } : {}),
     ...(opts.factualWriting ? { factualWriting: true } : {}),
@@ -735,9 +739,10 @@ export async function resolveSessionToolSurface(
       role: opts.role,
       latestUserMessage: opts.latestUserMessage,
     }) &&
-    Boolean(allowlist?.has('invoke_craftbook'));
+    Boolean(allowlist?.has('invoke_craftbook') || allowlist?.has('start_work'));
   if (exactCraftbookConstrained) {
-    allowlist = new Set(['invoke_craftbook']);
+    // Under `tools.work-routing` the one action is start_work("craftbook:<id>").
+    allowlist = new Set([allowlist?.has('start_work') ? 'start_work' : 'invoke_craftbook']);
     opts.onClamp?.('exact-craftbook-invocation');
   }
 
@@ -930,6 +935,10 @@ export async function resolveSessionToolSurface(
 }
 
 const MEESTER_PROJECT_ORCHESTRATION_TOOLS = [
+  // The work-routing pair replaces start_project and the craftbook pair
+  // under `tools.work-routing`; absent from the allowlist otherwise.
+  'suggest_work',
+  'start_work',
   'start_project',
   'fetch_repo',
   'fetch_diff',
@@ -1048,6 +1057,10 @@ function logStepFloorRestore(
 }
 
 const MEESTER_TOOL_CAP_PRIORITY = [
+  // Under `tools.work-routing` these replace start_project and the craftbook
+  // launcher, so they hold its place at the head of the tiny-tier cut.
+  'suggest_work',
+  'start_work',
   'start_project',
   'fetch_repo',
   'fetch_diff',
@@ -1620,7 +1633,9 @@ function constrainAllowlistForProjectOrchestration(
   opts?: { rolesAsTools?: boolean; suppressRoleDelegation?: boolean },
 ): Set<string> {
   const projectTools = MEESTER_PROJECT_ORCHESTRATION_TOOLS;
-  if (!allowlist) return new Set(projectTools);
+  if (!allowlist) {
+    return new Set(projectTools.filter((tool) => !WORK_ROUTING_TOOLS.includes(tool)));
+  }
   const constrained = new Set<string>();
   for (const tool of projectTools) {
     if (allowlist.has(tool)) constrained.add(tool);

@@ -8,9 +8,11 @@ import {
   estimateLlamaCppResidentBytes,
   estimateManifestKvBytes,
   estimateMlxResidentBytes,
+  llamaCppBackendExclusion,
   localContextFloorTokens,
   pickRecommendedModel,
 } from '@bendyline/gezel';
+import { currentLlamaCppBackend } from '@bendyline/gezel-inference/internal/providers/llama-cpp/backend-health';
 import { resolveLlamaCppKvCacheType } from '@bendyline/gezel-inference/internal/providers/llama-cpp/kv-cache-type';
 import {
   computeHeadroomFor,
@@ -18,6 +20,7 @@ import {
   kvQuantScale,
   liveLaunchCapBytes,
 } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
+import { usableReservedGpuBytes } from '@bendyline/gezel-inference/internal/providers/native/capacity-budget';
 import { measureAvailableGpuBytes } from '@bendyline/gezel-inference/internal/providers/native/device-capacity';
 import { detectMemoryProfile } from '@bendyline/gezel-inference/internal/system/memory';
 
@@ -143,7 +146,10 @@ export async function liveLaunchView(): Promise<LiveLaunchView> {
   // programs hold, and so must the prediction.
   const launchCapBytes = liveLaunchCapBytes({
     budgetBytes: mem.budgetBytes,
-    vramBytes: discrete ? Math.min(mem.usableBytes, freeGpuBytes ?? mem.usableBytes) : 0,
+    // An integrated GPU's carve-out is memory free-RAM readings never see.
+    vramBytes: discrete
+      ? Math.min(mem.usableBytes, freeGpuBytes ?? mem.usableBytes)
+      : usableReservedGpuBytes(mem.gpuReservedBytes),
   });
   return {
     platform: mem.platform,
@@ -178,7 +184,9 @@ export async function liveLaunchView(): Promise<LiveLaunchView> {
  */
 export async function detectModelTier(models: readonly ChatModelManifest[]): Promise<TierDecision> {
   const view = await liveLaunchView();
+  const backend = view.platform === 'darwin' ? undefined : currentLlamaCppBackend();
   const candidates = models
+    .filter((m) => !llamaCppBackendExclusion(m.llamaCpp, backend))
     .map((m) => toRecoCandidate(m, view.platform, view.machine))
     .filter((c): c is RecoModelInput => c !== null);
   const pick = pickRecommendedModel(candidates, view.device);

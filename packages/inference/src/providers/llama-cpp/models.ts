@@ -36,7 +36,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
-import { createLogger } from '@bendyline/gezel';
+import { createLogger, llamaCppBackendExclusion, llamaCppBackendLabel } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
   type ModelBundleSource,
@@ -71,6 +71,7 @@ import {
 } from '../../models/storage-roots.js';
 import { checkDiskSpace, describeDiskShortfall } from '../../utils/disk-space.js';
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
+import { currentLlamaCppBackend } from './backend-health.js';
 import { ggufQuantizationTag, readGgufSummary } from './gguf-metadata.js';
 import { backfillGgufQuantization } from './gguf-quantization-backfill.js';
 
@@ -353,6 +354,11 @@ export interface LlamaCppModelManagerOptions {
    * throwing callback never breaks the install.
    */
   onInstalled?: (info: { engine: 'llama-cpp' | 'ds4'; id: string }) => void;
+  /**
+   * The llama-server backend installs are judged against for a catalog
+   * source's `excludeBackends`. Test seam — defaults to the process's own.
+   */
+  resolveBackend?: () => string | undefined;
 }
 
 /**
@@ -371,6 +377,7 @@ export class LlamaCppModelManager {
   private readonly fetchImpl: typeof fetch;
   private readonly engine: 'llama-cpp' | 'ds4';
   private readonly onInstalled?: (info: { engine: 'llama-cpp' | 'ds4'; id: string }) => void;
+  private readonly resolveBackend: () => string | undefined;
   /**
    * In-flight installs. `install()` registers an entry on first yield
    * and clears it in the iterator's `finally` block, so consumers
@@ -392,6 +399,7 @@ export class LlamaCppModelManager {
     this.catalog = opts.catalog;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.onInstalled = opts.onInstalled;
+    this.resolveBackend = opts.resolveBackend ?? currentLlamaCppBackend;
   }
 
   /**
@@ -771,6 +779,17 @@ export class LlamaCppModelManager {
           error: `chat-model "${catalogId}" has no ${this.engine} source`,
         };
         return;
+      }
+      if (this.engine === 'llama-cpp') {
+        const backend = this.resolveBackend();
+        const excluded = llamaCppBackendExclusion(manifest.llamaCpp, backend);
+        if (excluded && backend) {
+          yield {
+            type: 'error',
+            error: `chat-model "${catalogId}" is not available on the ${llamaCppBackendLabel(backend)} llama.cpp engine: ${excluded}`,
+          };
+          return;
+        }
       }
       tracked.totalBytes = installSrc.approxSizeBytes;
       yield* this.runInstall(catalogId, manifest, tracked, skipSha, includeMmproj);
@@ -1280,7 +1299,13 @@ function planDownloads(
       sha256: string;
       sizeBytes: number;
     };
-    draftModel?: { filename: string; sha256: string; sizeBytes: number };
+    draftModel?: {
+      huggingfaceRepo?: string;
+      revision?: string;
+      filename: string;
+      sha256: string;
+      sizeBytes: number;
+    };
   },
   /**
    * Whether to also fetch the vision projector. On by default: fetch what the
@@ -1350,6 +1375,10 @@ function planDownloads(
   // after install without a second download.
   if (src.draftModel) {
     out.push({
+      ...(src.draftModel.huggingfaceRepo
+        ? { huggingfaceRepo: src.draftModel.huggingfaceRepo }
+        : {}),
+      ...(src.draftModel.revision ? { revision: src.draftModel.revision } : {}),
       repoPath: src.draftModel.filename,
       destFilename: basename(src.draftModel.filename),
       sha256: src.draftModel.sha256,

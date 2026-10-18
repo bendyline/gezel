@@ -5,11 +5,16 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { resolveAvailableLlamaBinary } from './llama-backend.js';
 import type { LlamaQuarantineEntry, QuarantineIo } from './llama-quarantine.js';
 import {
+  LLAMA_QUARANTINE_STRIKES,
   binaryFingerprint,
+  clearLlamaQuarantine,
+  clearLlamaStartupStrikes,
   isBinaryQuarantined,
   llamaQuarantinePath,
   readLlamaQuarantine,
+  readLlamaQuarantineStrikes,
   recordLlamaQuarantine,
+  recordLlamaStartupCrash,
 } from './llama-quarantine.js';
 
 const dirs: string[] = [];
@@ -135,6 +140,119 @@ describe('llama quarantine', () => {
     await writeFile(path, 'abc');
     expect(binaryFingerprint(path)).toMatch(/^3:\d+$/);
     expect(binaryFingerprint(join(home, 'absent'))).toBeNull();
+  });
+});
+
+describe('startup-crash strikes', () => {
+  const bin = 'C:/Gezel/native/win32-x64-vulkan/gezel-llama-server.exe';
+  const crash = {
+    backend: 'vulkan' as const,
+    binaryPath: bin,
+    signal: 'exit:0xc0000005',
+    reason: 'access violation before ready',
+  };
+  const stat = { [bin]: { size: 25888, mtimeMs: 1_792_000_000_000 } };
+
+  it('quarantines only the third crash in a row', () => {
+    const io = fakeIo(stat);
+    expect(LLAMA_QUARANTINE_STRIKES).toBe(3);
+    expect(recordLlamaStartupCrash(memoryHome, crash, io)).toEqual({ strikes: 1, entry: null });
+    expect(recordLlamaStartupCrash(memoryHome, crash, io)).toEqual({ strikes: 2, entry: null });
+    expect(readLlamaQuarantine(memoryHome, io)).toEqual([]);
+    expect(readLlamaQuarantineStrikes(memoryHome, io)).toMatchObject([
+      { backend: 'vulkan', count: 2, signal: 'exit:0xc0000005' },
+    ]);
+
+    const third = recordLlamaStartupCrash(memoryHome, crash, io);
+
+    expect(third.strikes).toBe(3);
+    expect(third.entry).toMatchObject({ backend: 'vulkan', crashes: 3 });
+    expect(isBinaryQuarantined(readLlamaQuarantine(memoryHome, io), 'vulkan', bin, io)).toBe(true);
+    expect(readLlamaQuarantineStrikes(memoryHome, io)).toEqual([]);
+  });
+
+  it('starts the count over once a start reaches readiness', () => {
+    const io = fakeIo(stat);
+    recordLlamaStartupCrash(memoryHome, crash, io);
+    recordLlamaStartupCrash(memoryHome, crash, io);
+
+    expect(clearLlamaStartupStrikes(memoryHome, 'vulkan', io)).toBe(true);
+
+    expect(recordLlamaStartupCrash(memoryHome, crash, io)).toEqual({ strikes: 1, entry: null });
+  });
+
+  it('writes nothing on readiness when there was no count', () => {
+    const io = fakeIo(stat);
+    expect(clearLlamaStartupStrikes(memoryHome, 'vulkan', io)).toBe(false);
+    expect(io.files.size).toBe(0);
+  });
+
+  it('starts the count over when an update replaces the binary', () => {
+    const io = fakeIo(stat);
+    recordLlamaStartupCrash(memoryHome, crash, io);
+    recordLlamaStartupCrash(memoryHome, crash, io);
+    const upgraded = fakeIo({ [bin]: { size: 26000, mtimeMs: 1_793_000_000_000 } });
+    upgraded.files.set(
+      llamaQuarantinePath(memoryHome),
+      io.files.get(llamaQuarantinePath(memoryHome)) ?? '',
+    );
+
+    expect(recordLlamaStartupCrash(memoryHome, crash, upgraded)).toEqual({
+      strikes: 1,
+      entry: null,
+    });
+  });
+
+  it("keeps one backend's count while another is quarantined", () => {
+    const cuda = 'C:/Gezel/native/win32-x64-cuda/gezel-llama-server.exe';
+    const io = fakeIo({ ...stat, [cuda]: { size: 30000, mtimeMs: 1 } });
+    recordLlamaStartupCrash(memoryHome, crash, io);
+    recordLlamaQuarantine(
+      memoryHome,
+      { backend: 'cuda', binaryPath: cuda, signal: 'SIGILL', reason: 'r' },
+      io,
+    );
+
+    expect(readLlamaQuarantineStrikes(memoryHome, io)).toMatchObject([
+      { backend: 'vulkan', count: 1 },
+    ]);
+    expect(readLlamaQuarantine(memoryHome, io).map((e) => e.backend)).toEqual(['cuda']);
+  });
+
+  it('lifting a quarantine clears the entry and its count, so the build starts fresh', () => {
+    const io = fakeIo(stat);
+    for (let i = 0; i < LLAMA_QUARANTINE_STRIKES; i++)
+      recordLlamaStartupCrash(memoryHome, crash, io);
+    expect(readLlamaQuarantine(memoryHome, io)).toHaveLength(1);
+
+    expect(clearLlamaQuarantine(memoryHome, 'vulkan', io)).toBe(true);
+
+    expect(readLlamaQuarantine(memoryHome, io)).toEqual([]);
+    expect(recordLlamaStartupCrash(memoryHome, crash, io)).toEqual({ strikes: 1, entry: null });
+    expect(clearLlamaQuarantine(memoryHome, 'cuda', io)).toBe(false);
+  });
+
+  it('reads a file written before strikes, whose entries carry no count', () => {
+    const io = fakeIo(stat);
+    io.files.set(
+      llamaQuarantinePath(memoryHome),
+      JSON.stringify({
+        schemaVersion: 1,
+        entries: [
+          {
+            backend: 'vulkan',
+            fingerprint: '25888:1792000000000',
+            signal: 'SIGILL',
+            reason: 'r',
+            at: 'x',
+          },
+        ],
+      }),
+    );
+
+    expect(readLlamaQuarantine(memoryHome, io)[0]?.crashes).toBeUndefined();
+    expect(readLlamaQuarantineStrikes(memoryHome, io)).toEqual([]);
+    expect(isBinaryQuarantined(readLlamaQuarantine(memoryHome, io), 'vulkan', bin, io)).toBe(true);
   });
 });
 

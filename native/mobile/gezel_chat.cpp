@@ -6,11 +6,17 @@
 // few pieces it contributes are ported here from the pinned revision and named
 // after their originals:
 //
-//   oaicompat_chat_params_parse   server-common.cpp  request -> template inputs
+//   oaicompat_chat_params_parse   server-common.cpp  request -> chat session
 //   make_llama_cmpl_schema         server-schema.cpp  fields -> sampling, stops
+//   apply_chat_session             server-task.h      session -> grammar, stops
 //   process_token                  server-context.cpp stop words, limits, EOS
 //   update_chat_msg                server-task.cpp    streaming parse and diffs
 //   to_json_oaicompat_chat_stream  server-task.cpp    chunk and error shapes
+//
+// Since llama.cpp v0.7.0 the template's grammar, triggers, preserved tokens,
+// parser and message delimiters live on a common_chat_session built from the
+// request, not in the request JSON; the session also parses the reply as it is
+// fed.
 //
 // Keep them in step with the pin: tests in chat-tests.cpp compare against
 // upstream's own fixtures.
@@ -118,14 +124,6 @@ json grammar_trigger_to_json(const common_grammar_trigger & trigger) {
     return out;
 }
 
-common_grammar_trigger grammar_trigger_from_json(const json & in) {
-    common_grammar_trigger trigger;
-    trigger.type = (common_grammar_trigger_type) in.at("type").get<int>();
-    trigger.value = in.at("value").get<std::string>();
-    if (trigger.type == COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN) trigger.token = (llama_token) in.at("token").get<int>();
-    return trigger;
-}
-
 // ---- common: sampling defaults from the model (common_init_sampler_from_model) --
 
 /**
@@ -174,7 +172,8 @@ common_params_sampling base_sampling(const llama_model * model) {
 
 // ---- server-common: oaicompat_chat_params_parse ----------------------------
 
-json chat_params_parse(json body, const chat_config & opt, const common_chat_templates * tmpls) {
+json chat_params_parse(json body, const chat_config & opt, const common_chat_templates * tmpls,
+                       const llama_vocab * vocab, common_chat_session & out_session) {
     json llama_params;
 
     auto tools = json_value(body, "tools", json());
@@ -272,7 +271,6 @@ json chat_params_parse(json body, const chat_config & opt, const common_chat_tem
     inputs.enable_thinking = opt.enable_thinking && common_chat_templates_support_enable_thinking(tmpls);
     if (!inputs.tools.empty() && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
         if (body.contains("grammar")) throw std::invalid_argument("Cannot use custom grammar constraints with tools.");
-        llama_params["parse_tool_calls"] = true;
     }
 
     // merge the template args provided from command line with the args provided in the user request
@@ -305,32 +303,20 @@ json chat_params_parse(json body, const chat_config & opt, const common_chat_tem
     }
 
     // Apply chat template to the list of messages
-    auto chat_params = common_chat_templates_apply(tmpls, inputs);
+    common_chat_session_params session_params;
+    session_params.echo = json_value(body, "echo", false);
+    out_session = common_chat_session(tmpls, vocab, inputs, session_params);
 
-    llama_params["chat_format"] = static_cast<int>(chat_params.format);
-    llama_params["prompt"] = chat_params.prompt;
-    if (!chat_params.grammar.empty()) {
-        llama_params["grammar"] = chat_params.grammar;
-        llama_params["grammar_type"] = std::string("tool_calls");
-    }
-    llama_params["grammar_lazy"] = chat_params.grammar_lazy;
-    auto grammar_triggers = json::array();
-    for (const auto & trigger : chat_params.grammar_triggers) grammar_triggers.push_back(grammar_trigger_to_json(trigger));
-    llama_params["grammar_triggers"] = grammar_triggers;
-    llama_params["preserved_tokens"] = chat_params.preserved_tokens;
-    llama_params["generation_prompt"] = chat_params.generation_prompt;
-    for (const auto & stop : chat_params.additional_stops) llama_params["stop"].push_back(stop);
-    llama_params["message_delimiters"] = chat_params.message_delimiters.to_json();
-    if (!chat_params.parser.empty()) llama_params["chat_parser"] = chat_params.parser;
+    llama_params["prompt"] = out_session.prompt().str();
 
     // Reasoning budget: pass parameters through to sampling layer
     {
         int reasoning_budget = json_value(body, "reasoning_budget_tokens", json_value(body, "thinking_budget_tokens", -1));
         if (reasoning_budget == -1) reasoning_budget = opt.reasoning_budget;
-        if (!chat_params.thinking_end_tags.empty()) {
+        if (!out_session.thinking_end_tags().empty()) {
             llama_params["reasoning_budget_tokens"] = reasoning_budget;
-            llama_params["reasoning_budget_start_tag"] = chat_params.thinking_start_tag;
-            llama_params["reasoning_budget_end_tags"] = chat_params.thinking_end_tags;
+            llama_params["reasoning_budget_start_tag"] = out_session.thinking_start_tag();
+            llama_params["reasoning_budget_end_tags"] = out_session.thinking_end_tags();
             llama_params["reasoning_budget_message"] =
                 json_value(body, "reasoning_budget_message", opt.reasoning_budget_message);
             llama_params["reasoning_control"] = json_value(body, "reasoning_control", false);
@@ -342,6 +328,13 @@ json chat_params_parse(json body, const chat_config & opt, const common_chat_tem
         // Exception: if "n_predict" is present, we overwrite the value specified earlier by "max_tokens"
         if (!llama_params.contains(item.key()) || item.key() == "n_predict") llama_params[item.key()] = item.value();
     }
+
+    // the session owns these; apply_chat_session hands them to the sampler
+    for (const char * key : {"grammar_lazy", "grammar_triggers", "preserved_tokens"}) llama_params.erase(key);
+    if (!out_session.grammar().empty()) {
+        llama_params.erase("grammar");
+        llama_params.erase("json_schema");
+    }
     return llama_params;
 }
 
@@ -349,7 +342,6 @@ json chat_params_parse(json body, const chat_config & opt, const common_chat_tem
 
 struct chat_task {
     common_params_sampling sampling;
-    common_chat_parser_params parser;
     int32_t n_predict = -1;
     std::vector<std::string> antiprompt;
     bool stream = false;
@@ -398,11 +390,9 @@ void bool_field(const json & data, const char * name, bool & value) {
     with_field(name, [&] { value = data.at(name).get<bool>(); });
 }
 
-chat_task task_from_params(const json & data, const llama_vocab * vocab, const common_params_sampling & defaults,
-                           const chat_config & opt) {
+chat_task task_from_params(const json & data, const llama_vocab * vocab, const common_params_sampling & defaults) {
     chat_task task;
     task.sampling = defaults;
-    task.parser.reasoning_format = opt.reasoning_format;
     task.prompt = data.at("prompt").get<std::string>();
 
     bool_field(data, "timings_per_token", task.timings_per_token);
@@ -466,65 +456,8 @@ chat_task task_from_params(const json & data, const llama_vocab * vocab, const c
         });
         break;
     }
-    bool_field(data, "grammar_lazy", task.sampling.grammar_lazy);
-
-    if (has_value(data, "chat_format"))
-        with_field("chat_format", [&] {
-            task.parser.format = static_cast<common_chat_format>(data.at("chat_format").get<int>());
-        });
-    if (has_value(data, "reasoning_format"))
-        with_field("reasoning_format", [&] {
-            task.parser.reasoning_format =
-                common_reasoning_format_from_name(data.at("reasoning_format").get<std::string>());
-        });
-    if (has_value(data, "generation_prompt"))
-        with_field("generation_prompt", [&] {
-            const std::string s = data.at("generation_prompt").get<std::string>();
-            task.parser.generation_prompt = s;
-            task.sampling.generation_prompt = s;
-        });
-    bool_field(data, "parse_tool_calls", task.parser.parse_tool_calls);
-    if (has_value(data, "chat_parser"))
-        with_field("chat_parser", [&] { task.parser.parser.load(data.at("chat_parser").get<std::string>()); });
     if (has_value(data, "continue_final_message"))
-        with_field("continue_final_message", [&] {
-            task.parser.is_continuation =
-                common_chat_continuation_parse(data.at("continue_final_message")) != COMMON_CHAT_CONTINUATION_NONE;
-        });
-
-    if (has_value(data, "preserved_tokens"))
-        with_field("preserved_tokens", [&] {
-            for (const auto & t : data.at("preserved_tokens")) {
-                auto ids = common_tokenize(vocab, t.get<std::string>(), false, true);
-                if (ids.size() == 1) task.sampling.preserved_tokens.insert(ids[0]);
-            }
-        });
-    if (has_value(data, "grammar_triggers"))
-        with_field("grammar_triggers", [&] {
-            for (const auto & t : data.at("grammar_triggers")) {
-                auto trigger = grammar_trigger_from_json(t);
-                if (trigger.type == COMMON_GRAMMAR_TRIGGER_TYPE_WORD) {
-                    const auto & word = trigger.value;
-                    auto ids = common_tokenize(vocab, word, false, true);
-                    if (ids.size() == 1) {
-                        auto token = ids[0];
-                        if (task.sampling.preserved_tokens.find(token) == task.sampling.preserved_tokens.end())
-                            throw std::runtime_error("Grammar trigger word should be marked as preserved token: " + word);
-                        common_grammar_trigger by_token;
-                        by_token.type = COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN;
-                        by_token.value = word;
-                        by_token.token = token;
-                        task.sampling.grammar_triggers.push_back(std::move(by_token));
-                    } else {
-                        task.sampling.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, word});
-                    }
-                } else {
-                    task.sampling.grammar_triggers.emplace_back(std::move(trigger));
-                }
-            }
-            if (task.sampling.grammar_lazy && task.sampling.grammar_triggers.empty())
-                throw std::runtime_error("Error: no triggers set for lazy grammar!");
-        });
+        with_field("continue_final_message", [&] { common_chat_continuation_parse(data.at("continue_final_message")); });
 
     bool_field(data, "reasoning_control", task.sampling.reasoning_control);
     hard_num_field(data, {"reasoning_budget_tokens"}, task.sampling.reasoning_budget_tokens, -1, INT32_MAX);
@@ -585,6 +518,14 @@ chat_task task_from_params(const json & data, const llama_vocab * vocab, const c
     return task;
 }
 
+// ---- server-task: apply_chat_session ---------------------------------------
+
+void apply_chat_session(chat_task & task, const common_chat_session & session) {
+    if (!session.has_template()) return;
+    session.apply_sampling(task.sampling);
+    task.antiprompt.insert(task.antiprompt.end(), session.additional_stops().begin(), session.additional_stops().end());
+}
+
 // ---- server-task: streaming parse and chunk shapes ------------------------
 
 json diff_to_json(const common_chat_msg_diff & diff) {
@@ -610,17 +551,19 @@ json diff_to_json(const common_chat_msg_diff & diff) {
 }
 
 struct stream_state {
-    common_chat_parser_params parser;
-    std::string generated_text;
+    common_chat_session session;
+    // A continued message starts from its prefill, which the session parsed.
     common_chat_msg chat_msg;
     std::vector<std::string> generated_tool_call_ids;
     std::string cmpl_id = "chatcmpl-" + random_string();
     std::time_t created = std::time(nullptr);
 
-    common_chat_msg update(const std::string & text_added, bool is_partial, std::vector<common_chat_msg_diff> & diffs) {
-        generated_text += text_added;
+    explicit stream_state(common_chat_session chat_session)
+        : session(std::move(chat_session)), chat_msg(session.msg()) {}
+
+    common_chat_msg update(const common_chat_input & added, bool is_partial, std::vector<common_chat_msg_diff> & diffs) {
         auto previous = chat_msg;
-        auto next = common_chat_parse(generated_text, is_partial, parser);
+        auto next = is_partial ? session.feed(added) : session.finish(added);
         if (!next.empty()) {
             next.set_tool_call_ids(generated_tool_call_ids, random_string);
             chat_msg = next;
@@ -725,20 +668,24 @@ int32_t chat_impl(gezel_llama_engine & engine, const std::string & request, cons
     auto tmpls = templates_for(engine);
     const llama_vocab * vocab = llama_model_get_vocab(engine.model);
     chat_task task;
-    common_chat_msg_delimiters delimiters;
+    common_chat_session session;
     try {
-        const json params = chat_params_parse(body, engine.chat, tmpls);
-        task = task_from_params(params, vocab, base_sampling(engine.model), engine.chat);
-        delimiters = common_chat_msg_delimiters_parse(json_value(params, "message_delimiters", json::array()));
+        const json params = chat_params_parse(body, engine.chat, tmpls, vocab, session);
+        task = task_from_params(params, vocab, base_sampling(engine.model));
+        apply_chat_session(task, session);
         if (options.flags & GEZEL_LLAMA_CHAT_RENDER_ONLY) {
-            json out{{"prompt", params.at("prompt")},
-                     {"chat_format", common_chat_format_name(task.parser.format)},
-                     {"grammar", json_value(params, "grammar", std::string())},
-                     {"grammar_lazy", json_value(params, "grammar_lazy", false)},
-                     {"grammar_triggers", json_value(params, "grammar_triggers", json::array())},
-                     {"preserved_tokens", json_value(params, "preserved_tokens", json::array())},
-                     {"stop", json_value(params, "stop", json::array())},
-                     {"generation_prompt", json_value(params, "generation_prompt", std::string())}};
+            json triggers = json::array();
+            for (const auto & trigger : task.sampling.grammar_triggers) triggers.push_back(grammar_trigger_to_json(trigger));
+            json preserved = json::array();
+            for (const auto token : task.sampling.preserved_tokens) preserved.push_back(common_token_to_piece(vocab, token, true));
+            json out{{"prompt", task.prompt},
+                     {"chat_format", common_chat_format_name(session.format())},
+                     {"grammar", task.sampling.grammar.grammar},
+                     {"grammar_lazy", task.sampling.grammar_lazy},
+                     {"grammar_triggers", triggers},
+                     {"preserved_tokens", preserved},
+                     {"stop", task.antiprompt},
+                     {"generation_prompt", session.generation_prompt()}};
             emit(out);
             return GEZEL_LLAMA_OK;
         }
@@ -771,8 +718,7 @@ int32_t chat_impl(gezel_llama_engine & engine, const std::string & request, cons
     // which an older turn re-rendered differently still starts the same way,
     // and a few tokens before the end, ahead of a generation prompt that
     // renders differently once the reply is history.
-    delimiters.tokenize(vocab);
-    const auto last_user = delimiters.split(tokens).last_user_message_pos();
+    const auto last_user = session.message_delimiters().split(tokens).last_user_message_pos();
     std::vector<size_t> checkpoints;
     if (last_user > 0) checkpoints.push_back(static_cast<size_t>(last_user));
     if (tokens.size() > 4) checkpoints.push_back(tokens.size() - 4);
@@ -785,9 +731,7 @@ int32_t chat_impl(gezel_llama_engine & engine, const std::string & request, cons
     // see the reply only, as in llama-server.
     engine.progress_phase.store(GEZEL_LLAMA_PHASE_GENERATING, std::memory_order_release);
 
-    stream_state state;
-    state.parser = task.parser;
-    if (state.parser.is_continuation) state.chat_msg = common_chat_parse("", true, state.parser);
+    stream_state state(std::move(session));
     auto emit_diffs = [&](const std::vector<common_chat_msg_diff> & diffs) {
         for (const auto & diff : diffs) emit(state.delta_chunk(diff_to_json(diff)));
     };
@@ -799,7 +743,8 @@ int32_t chat_impl(gezel_llama_engine & engine, const std::string & request, cons
         for (const auto & chunk : chunks) emit(chunk);
     };
 
-    std::string generated_text;
+    // The text with the tokens behind it: the session's parser reads both.
+    common_chat_input generated;
     size_t n_sent_text = 0;
     int32_t n_decoded = 0;
     bool stopped_by_word = false;
@@ -819,16 +764,16 @@ int32_t chat_impl(gezel_llama_engine & engine, const std::string & request, cons
         engine.progress_generated.store(result.generated_tokens, std::memory_order_relaxed);
         const bool special = task.sampling.preserved_tokens.find(token) != task.sampling.preserved_tokens.end();
         const std::string token_str = common_token_to_piece(engine.context, token, special);
-        generated_text += token_str;
+        generated.append(token_str, token);
         const bool is_eog = llama_vocab_is_eog(vocab, token);
         bool has_next_token = true;
 
         // process_token: stop words, context and length limits, EOS
-        std::string text_to_send;
-        const bool incomplete = validate_utf8(generated_text) < generated_text.size();
+        common_chat_input text_to_send;
+        const bool incomplete = validate_utf8(generated.text) < generated.text.size();
         if (!incomplete) {
-            size_t pos = std::min(n_sent_text, generated_text.size());
-            const std::string str_test = generated_text.substr(pos);
+            size_t pos = std::min(n_sent_text, generated.text.size());
+            const std::string str_test = generated.text.substr(pos);
             bool send_text = true;
             size_t stop_pos = std::string::npos;
             for (const auto & word : task.antiprompt) {
@@ -840,8 +785,8 @@ int32_t chat_impl(gezel_llama_engine & engine, const std::string & request, cons
             if (stop_pos != std::string::npos) {
                 stopped_by_word = true;
                 has_next_token = false;
-                generated_text.erase(generated_text.begin() + static_cast<std::ptrdiff_t>(pos + stop_pos), generated_text.end());
-                pos = std::min(n_sent_text, generated_text.size());
+                generated.truncate(pos + stop_pos);
+                pos = std::min(n_sent_text, generated.text.size());
             } else if (!is_eog) {
                 size_t partial = std::string::npos;
                 for (const auto & word : task.antiprompt) {
@@ -851,7 +796,7 @@ int32_t chat_impl(gezel_llama_engine & engine, const std::string & request, cons
                 send_text = partial == std::string::npos;
             }
             if (send_text) {
-                text_to_send = generated_text.substr(pos, std::string::npos);
+                text_to_send = generated.substr(pos);
                 n_sent_text += text_to_send.size();
             }
             if (result.output_bytes + text_to_send.size() > options.max_output_bytes)
@@ -893,7 +838,7 @@ int32_t chat_impl(gezel_llama_engine & engine, const std::string & request, cons
 
     // Final: a full (non-partial) parse, then the finish and usage chunks.
     std::vector<common_chat_msg_diff> diffs;
-    const auto msg = state.update("", false, diffs);
+    const auto msg = state.update(common_chat_input(), false, diffs);
     emit_diffs(diffs);
     std::string finish_reason = "length";
     if (stopped_by_word || stopped_by_eos) finish_reason = msg.tool_calls.empty() ? "stop" : "tool_calls";

@@ -29,6 +29,8 @@ export interface KnowledgeWorkerRequest {
     | 'validate'
     | 'topics'
     | 'documentsPage'
+    | 'documentInitials'
+    | 'documentPosition'
     | 'nearbyDocuments'
     | 'getDocument'
     | 'getChunk'

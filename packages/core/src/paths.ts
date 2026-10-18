@@ -786,6 +786,11 @@ export function globalIndexDbFile(root: string): string {
   return join(globalIndexDir(root), 'global.db');
 }
 
+/** Embedded craftbook and project-type texts for suggestions. Rebuildable. */
+export function suggestVectorCacheFile(root: string): string {
+  return join(globalIndexDir(root), 'suggest-vectors.json');
+}
+
 /** Per-project JSONL holding events scoped to that project. Always local. */
 export function projectHistoryFile(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'history.jsonl');

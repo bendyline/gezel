@@ -6,8 +6,10 @@ import { basename, dirname, join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import {
   ChatModelTuningSchema,
+  GATE_DEFAULT_MAX_ATTEMPTS,
   type GezelConfig,
   type SessionTelemetryListResponse,
+  type Task,
 } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { startAutoAnswerer } from './auto-answer.ts';
@@ -1243,6 +1245,32 @@ export async function runTrial(
         : {}),
       firstRunCompleted: true,
     });
+    // Ask the configured daemon whether its own KV choice admits the launch
+    // context before anything starts the engine. An explicit KV knob above
+    // has already decided, so it is never second-guessed.
+    if (
+      engine === 'llama-cpp' &&
+      llamaEvalLaunch?.fallbackKvCacheType &&
+      !evalLlamaKvCache &&
+      !process.env.GEZEL_EVAL_KV_CACHE_TYPE
+    ) {
+      // An unreadable plan prices nothing: largeModelKvFallback then keeps
+      // the fallback, which is what every large-model trial pinned before.
+      const models = await client
+        .listLlamaCppModels()
+        .then((response) => response.models)
+        .catch(() => []);
+      const pinned = largeModelKvFallback({
+        launch: llamaEvalLaunch,
+        modelId: opts.modelId,
+        models,
+      });
+      const row = models.find((model) => model.id === opts.modelId);
+      if (pinned) await client.updateConfig({ llamaCppKvCacheType: pinned });
+      log(
+        `[trial] large-model kv: ${pinned ? `pinned ${pinned}` : 'product plan'} (planned window ${row?.effectiveContextWindow ?? 'unknown'}${row?.contextSizingStatus ? `, ${row.contextSizingStatus}` : ''})`,
+      );
+    }
     log(
       `[trial] provider=${engine}${evalLlamaSpecType ? ` llamaSpec=${evalLlamaSpecType}` : ''}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.generalistMode ? ` generalistMode=${opts.generalistMode}` : ''}${scenario.repairPolicy ? ` repairPolicy=${scenario.repairPolicy}` : ''}${scenario.modelNetworkAccess ? ` modelNetwork=${scenario.modelNetworkAccess}` : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
     );
@@ -1854,6 +1882,10 @@ export function evalDaemonEnvForTrial(opts: {
           // downloading that model before the task starts.
           GEZEL_KNOWLEDGE_PREWARM_TIMEOUT_MS:
             process.env.GEZEL_EVAL_KNOWLEDGE_PREWARM_TIMEOUT_MS ?? '30000',
+          // One embedder download for every trial: in a fresh home each
+          // route probe downloaded bge-small before its first reply (~45 s).
+          GEZEL_HF_CACHE_DIR:
+            process.env.GEZEL_HF_CACHE_DIR ?? join(defaultCacheRoot(), 'engines', 'hf-cache'),
         }
       : {}),
     ...(opts.retrievalTrace ? { GEZEL_RETRIEVAL_TRACE: '1' } : {}),
@@ -2038,6 +2070,12 @@ export interface LlamaCppEvalLaunchOverrides {
   minTrialTimeoutMs?: number;
   hardProgressTimeoutMs?: number;
   summary?: string;
+  /**
+   * KV precision to pin only when the product's own plan cannot admit the
+   * launch context. Applied after the trial config is written, by asking the
+   * trial daemon for its plan ({@link largeModelKvFallback}).
+   */
+  fallbackKvCacheType?: NonNullable<GezelConfig['llamaCppKvCacheType']>;
 }
 
 export function llamaCppReasoningEvalLaunchOverrides(
@@ -2167,8 +2205,13 @@ export function llamaCppEvalLaunchOverridesForModel(
   // can spend the entire admission budget on KV before the first turn.
   // Keep this eval-scoped. The prior 49K cap was below observed working sets:
   // Qwen 122B and Nemotron Super repeatedly reached 59–62K during deep repair.
-  // One q4_0-KV slot at 65K still fits the 110 GB frontier-host budget under
-  // the capacity broker's conservative weights + KV + compute-headroom model.
+  //
+  // KV precision is the product's call unless its plan cannot admit 65K.
+  // Parameter count says nothing about KV size: at 65K, f16 KV is 0.5 GiB for
+  // Nemotron-H 120B (8 of 88 layers attend) and 22 GiB for Mistral Medium
+  // 128B, and Laguna 118B's 98 GiB of resident weights leave room only for
+  // q4_0. Pinning q4_0 by size ran Nemotron 3.5 Super VL on a 4-bit cache its
+  // own plan never needed (2026-10-16).
   const numCtx = '65536';
   return {
     extraEnv: {
@@ -2179,13 +2222,41 @@ export function llamaCppEvalLaunchOverridesForModel(
     },
     config: {
       providerConcurrency: { 'llama-cpp': 1 },
-      llamaCppKvCacheType: 'q4_0',
     },
+    fallbackKvCacheType: 'q4_0',
     minTrialTimeoutMs: 60 * 60_000,
     hardProgressTimeoutMs: 45 * 60_000,
     summary:
-      'llama-cpp large-model eval override: numCtx=65536, concurrency=1, kvCache=q4_0, capacityBudget=110GB, tuning=catalog, startup/pre-first-byte=900s, hardProgressTimeout=45m, minTrialTimeout=60m',
+      'llama-cpp large-model eval override: numCtx=65536, concurrency=1, kvCache=product plan (q4_0 when it cannot admit numCtx), capacityBudget=110GB, tuning=catalog, startup/pre-first-byte=900s, hardProgressTimeout=45m, minTrialTimeout=60m',
   };
+}
+
+/**
+ * The KV precision to pin for a large-model launch, given the trial daemon's
+ * plan for the model — undefined when the product's own choice admits the
+ * full launch context.
+ *
+ * The plan row comes from `/api/llama-cpp/models`, which runs the same
+ * admission math as the launch: `effectiveContextWindow` is the granted
+ * per-turn window, `contextSizingStatus` marks a denial. A row the daemon
+ * could not price (no window reported) keeps the fallback, which is what
+ * every large-model trial used before.
+ */
+export function largeModelKvFallback(args: {
+  launch: Pick<LlamaCppEvalLaunchOverrides, 'extraEnv' | 'fallbackKvCacheType'> | undefined;
+  modelId: string;
+  models: ReadonlyArray<{
+    id: string;
+    effectiveContextWindow?: number;
+    contextSizingStatus?: string;
+  }>;
+}): NonNullable<GezelConfig['llamaCppKvCacheType']> | undefined {
+  const fallback = args.launch?.fallbackKvCacheType;
+  if (!fallback) return undefined;
+  const numCtx = Number(args.launch?.extraEnv?.GEZEL_LLAMA_NUM_CTX);
+  const row = args.models.find((model) => model.id === args.modelId);
+  if (!row || row.contextSizingStatus !== undefined || !Number.isFinite(numCtx)) return fallback;
+  return (row.effectiveContextWindow ?? 0) >= numCtx ? undefined : fallback;
 }
 
 /**
@@ -3499,6 +3570,26 @@ export async function pollUntilDone(
             sniffPlateauStartingTurnStarts = currentTurnStarts;
             continue;
           }
+          // A gate that rejected inside this plateau and has attempts left
+          // is judging the work itself; its budget, not this window, ends
+          // the loop. See activeRuntimeGate.
+          const judgingGate = activeRuntimeGate(
+            await Promise.resolve()
+              .then(() => args.client.listTasks())
+              .then((response) => response.tasks)
+              .catch(() => []),
+            sniffPlateauStartedAt,
+          );
+          if (judgingGate) {
+            args.log(
+              `[poll] retry-loop deferred: sniff "${currentSniffKey}" plateaued ${Math.round(plateauMs / 60_000)}m, but task ${judgingGate.ref} step "${judgingGate.stepId}" gate rejected ${Math.round((Date.now() - judgingGate.rejectedAt) / 1000)}s ago with ${judgingGate.attempts}/${judgingGate.maxAttempts} attempts used — the gate's budget bounds this loop`,
+            );
+            sniffPlateauStartedAt = Date.now();
+            sniffPlateauStartingToolCalls = currentToolCalls;
+            sniffPlateauStartingWriteCalls = currentWriteCalls;
+            sniffPlateauStartingTurnStarts = currentTurnStarts;
+            continue;
+          }
           // STALL joins LONG here: both are wall-clock-only triggers, so both
           // have to check whether a turn is still running before calling it
           // stuck. FAST and CHATTER stay out — they are count-based and hold
@@ -4769,6 +4860,38 @@ export function retryLoopFastPathTripped(input: {
   // artifact re-emitted. Only a stable path set is the stubborn-rewriter
   // shape this path exists to catch.
   return input.currentPathSignature === input.startingPathSignature;
+}
+
+/**
+ * An active task step whose runtime gate rejected work since `sinceMs` and
+ * still has attempts left — the runtime's own bounded loop is in charge.
+ *
+ * The retry loop exists to stop a model re-emitting one artifact forever. A
+ * gated step already bounds that: every rejection spends an attempt, and the
+ * task pauses for help when they run out. Killing inside that budget judged
+ * the step before the runtime had: nemotron3.5-bolt on craftbook-edit-midtask
+ * (2026-10-17) was cut off 2 minutes after the polish gate's first rejection,
+ * with 7 of its 8 attempts unused. Once the budget is spent the task is no
+ * longer active, this returns nothing, and the retry loop judges as before.
+ */
+export function activeRuntimeGate(
+  tasks: ReadonlyArray<Pick<Task, 'ref' | 'status' | 'activeStepId' | 'craftbook'>>,
+  sinceMs: number,
+):
+  | { ref: string; stepId: string; attempts: number; maxAttempts: number; rejectedAt: number }
+  | undefined {
+  for (const task of tasks) {
+    if (task.status !== 'active' || !task.activeStepId) continue;
+    const step = task.craftbook?.steps?.find((candidate) => candidate.id === task.activeStepId);
+    if (!step?.gate) continue;
+    const attempts = step.gateAttempts ?? 0;
+    const maxAttempts = step.gate.maxAttempts ?? GATE_DEFAULT_MAX_ATTEMPTS;
+    const rejectedAt = Date.parse(step.lastGateReject?.at ?? '');
+    if (attempts > 0 && attempts < maxAttempts && rejectedAt >= sinceMs) {
+      return { ref: task.ref, stepId: step.id, attempts, maxAttempts, rejectedAt };
+    }
+  }
+  return undefined;
 }
 
 export function retryLoopChatterTripped(args: {

@@ -5,8 +5,9 @@ import type { ReactNode } from 'react';
  * line, a determinate or indeterminate bar, and the one action that applies —
  * Cancel while it runs, Retry once it failed. Shared by the llama.cpp, MLX
  * and knowledge-catalog managers so a download reads the same everywhere.
- * Cancel is always offered: installs are server-owned background jobs, so
- * this row can cancel installs another window or the bootstrap started.
+ * Cancel is offered for every install job: they are server-owned background
+ * jobs, so this row can cancel installs another window or the bootstrap
+ * started. A row with no job to cancel leaves `onCancel` out.
  */
 export function InstallProgressRow({
   title,
@@ -21,7 +22,7 @@ export function InstallProgressRow({
   /** `null` renders the indeterminate bar. */
   percent: number | null;
   tone?: 'normal' | 'warning' | 'error';
-  onCancel: () => void;
+  onCancel?: () => void;
   /** Shown instead of Cancel when `tone` is `error`. */
   onRetry?: () => void;
 }) {
@@ -37,11 +38,11 @@ export function InstallProgressRow({
           <button type="button" className="gz-link-button" onClick={onRetry}>
             Retry
           </button>
-        ) : (
+        ) : onCancel ? (
           <button type="button" className="gz-link-button" onClick={onCancel}>
             Cancel
           </button>
-        )}
+        ) : null}
       </div>
       {clamped === null ? (
         <div className="ollama-pull-bar ollama-pull-bar-indeterminate">

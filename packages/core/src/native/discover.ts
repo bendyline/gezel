@@ -37,9 +37,11 @@ import { join } from 'node:path';
 import { duckdbInstalledBinary } from './duckdb-pin.js';
 import { detectLlamaBackend, resolveAvailableLlamaBinary } from './llama-backend.js';
 import type { DetectInput, GpuVendorHint, LlamaBackend } from './llama-backend.js';
+import { createLlamaBuildCheck, publishLlamaCudaBlocker } from './llama-build-check.js';
 import { LLAMA_ENGINE_VERSION } from './llama-engine-version.js';
-import { isBinaryQuarantined, readLlamaQuarantine } from './llama-quarantine.js';
+import { readLlamaQuarantine } from './llama-quarantine.js';
 import type { LlamaQuarantineEntry } from './llama-quarantine.js';
+import type { NvidiaCudaBlocker } from './nvidia-driver.js';
 import { resolvePlatformKey } from './platform-key.js';
 
 export type NativeBinaryName =
@@ -85,6 +87,12 @@ export interface DiscoverInput {
    * this unset and the list is read from `<home>/engines/llama-cpp/`.
    */
   quarantine?: readonly LlamaQuarantineEntry[];
+  /**
+   * Test seam — the NVIDIA driver check for a Linux CUDA build
+   * (nvidia-driver.ts). Production callers leave it unset and the host's
+   * driver is read.
+   */
+  cudaBlockerFor?: (binaryPath: string) => NvidiaCudaBlocker | null;
   /** Optional logger; the service passes its own to thread service-style logs. */
   logger?: { info?: (m: string) => void; warn?: (m: string) => void };
 }
@@ -116,6 +124,8 @@ export interface DiscoverResult {
      * user to infer it from a slow session.
      */
     quarantined?: LlamaBackend[];
+    /** Why the CUDA build was passed over for one the driver can run. */
+    cudaBlocker?: NvidiaCudaBlocker;
   };
 }
 
@@ -240,6 +250,11 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
       // discovery; the common case is an empty list and no extra I/O
       // beyond the (missing) file.
       const quarantine = input.quarantine ?? readLlamaQuarantine(input.home);
+      const check = createLlamaBuildCheck({
+        quarantine,
+        platform,
+        ...(input.cudaBlockerFor ? { cudaBlockerFor: input.cudaBlockerFor } : {}),
+      });
       const resolved = resolveAvailableLlamaBinary(
         probe.backend,
         (backend) =>
@@ -254,10 +269,16 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
           // native trees staged before multi-variant packaging.
           resolveNativeBinaryUnder(dir, 'llama-server', platformKey, platform, fileExists),
         allowFallbacks,
-        quarantine.length > 0
-          ? (backend, path) => !isBinaryQuarantined(quarantine, backend, path)
-          : undefined,
+        check.isUsable,
       );
+      const cudaBlocker = check.cudaBlocker();
+      publishLlamaCudaBlocker(cudaBlocker);
+      if (cudaBlocker) {
+        result.llamaBackend.cudaBlocker = cudaBlocker;
+        log?.warn?.(
+          `[native] llama-server cuda build passed over: ${cudaBlocker.detail} (${cudaBlocker.kind})`,
+        );
+      }
       if (resolved) {
         process.env.GEZEL_LLAMA_SERVER_BIN = resolved.path;
         process.env.GEZEL_LLAMA_SERVER_BACKEND = resolved.backend;
@@ -265,7 +286,8 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
         // reads the log looking for a packaging bug that isn't there.
         // `skippedUnusable` means the build shipped and does not run
         // here; `fallbackFrom` alone means it was never bundled.
-        for (const skipped of resolved.skippedUnusable ?? []) {
+        const quarantined = check.quarantinedOf(resolved.skippedUnusable ?? []);
+        for (const skipped of quarantined) {
           const entry = quarantine.find((e) => e.backend === skipped);
           log?.warn?.(
             `[native] llama-server ${skipped} build is quarantined on this machine ` +
@@ -274,14 +296,20 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
         }
         if (resolved.skippedUnusable?.length) {
           result.llamaBackend.backend = resolved.backend;
-          result.llamaBackend.reason =
-            `${probe.reason}; ${resolved.skippedUnusable.join(', ')} quarantined after crashing ` +
-            `on this machine, using ${resolved.backend}`;
-          result.llamaBackend.quarantined = [...resolved.skippedUnusable];
-          // Published like the other backend facts so /api/health can
-          // forward it — a demotion the user never sees is the failure
-          // mode this whole mechanism exists to end.
-          process.env.GEZEL_LLAMA_QUARANTINED = resolved.skippedUnusable.join(',');
+          const why = [
+            ...(quarantined.length > 0
+              ? [`${quarantined.join(', ')} quarantined after crashing on this machine`]
+              : []),
+            ...(cudaBlocker ? [`cuda passed over (${cudaBlocker.kind})`] : []),
+          ];
+          result.llamaBackend.reason = `${probe.reason}; ${why.join('; ')}, using ${resolved.backend}`;
+          if (quarantined.length > 0) {
+            result.llamaBackend.quarantined = quarantined;
+            // Published like the other backend facts so /api/health can
+            // forward it — a demotion the user never sees is the failure
+            // mode this whole mechanism exists to end.
+            process.env.GEZEL_LLAMA_QUARANTINED = quarantined.join(',');
+          }
         } else if (resolved.fallbackFrom) {
           result.llamaBackend.backend = resolved.backend;
           result.llamaBackend.reason = `${probe.reason}; no bundled ${resolved.fallbackFrom} binary, using ${resolved.backend}`;

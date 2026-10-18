@@ -1487,7 +1487,18 @@ export const ChatModelLlamaCppSourceSchema = z
      */
     draftModel: z
       .object({
-        /** Filename within the same HF repo. May include a subdirectory. */
+        /**
+         * Optional repository override when the drafter is published apart
+         * from the target GGUF (NVIDIA ships Nemotron 3.5 Bolt's LiLiCorr
+         * drafter in its own repo). Absent inherits the enclosing source repo.
+         */
+        huggingfaceRepo: z
+          .string()
+          .regex(/^[A-Za-z0-9_\-.]+\/[A-Za-z0-9_\-.]+$/)
+          .optional(),
+        /** Immutable drafter-repository revision. Absent inherits the parent revision. */
+        revision: z.string().optional(),
+        /** Filename within the repo. May include a subdirectory. */
         filename: z.string(),
         /** SHA-256 of the draft GGUF, lifted from HF LFS metadata. */
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -1495,6 +1506,16 @@ export const ChatModelLlamaCppSourceSchema = z
         sizeBytes: z.number().int().positive(),
       })
       .optional(),
+    /**
+     * llama-server backends this GGUF must not be offered or run on. A
+     * tensor type a backend has no kernel for falls back to the CPU there:
+     * an NVFP4 file "works" on Metal at a fraction of its speed, which reads
+     * as a broken model. Hidden from the download list, refused at install
+     * and launch. Read through `llamaCppBackendExclusion`.
+     */
+    excludeBackends: z.array(z.enum(['cuda', 'vulkan', 'metal', 'cpu'])).optional(),
+    /** Plain sentence shown with an excluded backend, saying why. */
+    excludeReason: z.string().min(1).optional(),
   })
   .refine(
     (v) => {
@@ -2648,7 +2669,24 @@ export type KnowledgeCatalogItemManifest = z.infer<typeof KnowledgeCatalogItemMa
 
 // ─ Identity / version unions ────────────────────────────────────────
 
-export const CatalogItemIdentitySchema = z.discriminatedUnion('kind', [
+// The unions and the summary/detail shapes below carry explicit types so the
+// published declarations reference each member schema instead of writing all
+// nine manifests out again per schema. That repetition is what pushes
+// `@bendyline/gezel` past its packed-size budget (tests/published).
+export const CatalogItemIdentitySchema: z.ZodDiscriminatedUnion<
+  [
+    typeof ToolsetIdentitySchema,
+    typeof GezelTemplateIdentitySchema,
+    typeof CraftbookTemplateIdentitySchema,
+    typeof ProjectTypeIdentitySchema,
+    typeof ConnectorTypeIdentitySchema,
+    typeof ChatModelIdentitySchema,
+    typeof ImageModelIdentitySchema,
+    typeof VideoModelIdentitySchema,
+    typeof KnowledgeCatalogIdentitySchema,
+  ],
+  'kind'
+> = z.discriminatedUnion('kind', [
   ToolsetIdentitySchema,
   GezelTemplateIdentitySchema,
   CraftbookTemplateIdentitySchema,
@@ -2663,7 +2701,20 @@ export type CatalogItemIdentity = z.infer<typeof CatalogItemIdentitySchema>;
 
 // ─ Top-level resolved union + helpers ───────────────────────────────
 
-export const CatalogItemManifestSchema = z.discriminatedUnion('kind', [
+export const CatalogItemManifestSchema: z.ZodDiscriminatedUnion<
+  [
+    typeof ToolsetManifestSchema,
+    typeof GezelTemplateManifestSchema,
+    typeof CraftbookTemplateManifestSchema,
+    typeof ProjectTypeManifestSchema,
+    typeof ConnectorTypeManifestSchema,
+    typeof ChatModelManifestSchema,
+    typeof ImageModelManifestSchema,
+    typeof VideoModelManifestSchema,
+    typeof KnowledgeCatalogItemManifestSchema,
+  ],
+  'kind'
+> = z.discriminatedUnion('kind', [
   ToolsetManifestSchema,
   GezelTemplateManifestSchema,
   CraftbookTemplateManifestSchema,
@@ -2696,7 +2747,14 @@ export type CatalogKind = z.infer<typeof CatalogKindSchema>;
  * the auth-gated `/api/catalog/.../file/...` endpoint can't carry the
  * bearer token; built-in toolsets embed their SVG directly here.
  */
-export const CatalogItemSummarySchema = z.object({
+export const CatalogItemSummarySchema: z.ZodObject<{
+  sourceId: z.ZodString;
+  kind: typeof CatalogKindSchema;
+  manifest: typeof CatalogItemManifestSchema;
+  logoUrl: z.ZodOptional<z.ZodString>;
+  iconSvg: z.ZodOptional<z.ZodString>;
+  unavailableReason: z.ZodOptional<z.ZodString>;
+}> = z.object({
   sourceId: z.string(),
   kind: CatalogKindSchema,
   manifest: CatalogItemManifestSchema,
@@ -2713,12 +2771,23 @@ export const CatalogItemSummarySchema = z.object({
 });
 export type CatalogItemSummary = z.infer<typeof CatalogItemSummarySchema>;
 
-export const ListCatalogItemsResponseSchema = z.object({
+export const ListCatalogItemsResponseSchema: z.ZodObject<{
+  items: z.ZodArray<typeof CatalogItemSummarySchema>;
+}> = z.object({
   items: z.array(CatalogItemSummarySchema),
 });
 export type ListCatalogItemsResponse = z.infer<typeof ListCatalogItemsResponseSchema>;
 
-export const CatalogItemDetailSchema = CatalogItemSummarySchema.extend({
+export const CatalogItemDetailSchema: z.ZodObject<{
+  sourceId: z.ZodString;
+  kind: typeof CatalogKindSchema;
+  manifest: typeof CatalogItemManifestSchema;
+  logoUrl: z.ZodOptional<z.ZodString>;
+  iconSvg: z.ZodOptional<z.ZodString>;
+  unavailableReason: z.ZodOptional<z.ZodString>;
+  readme: z.ZodOptional<z.ZodString>;
+  about: z.ZodOptional<z.ZodString>;
+}> = CatalogItemSummarySchema.extend({
   /** Rendered README markdown, if present alongside the manifest. */
   readme: z.string().optional(),
   /** For gezel templates: the loaded about.md content. */

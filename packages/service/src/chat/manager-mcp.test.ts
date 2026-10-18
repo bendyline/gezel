@@ -1064,6 +1064,128 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     );
   }, 30_000);
 
+  describe('under tools.work-routing', () => {
+    beforeEach(() => {
+      process.env.GEZEL_FORCE_BEHAVIORS = 'tools.work-routing';
+    });
+    afterEach(() => {
+      delete process.env.GEZEL_FORCE_BEHAVIORS;
+    });
+
+    async function meesterSession() {
+      const meester = await store.createGezel({ name: 'Mila', role: 'Meester' });
+      await store.writeConfig({
+        provider: 'copilot',
+        toolFilterMode: 'never',
+        meesterGezelId: meester.id,
+      });
+      return manager.createSession({ gezelId: meester.id, projectId: 'default' });
+    }
+
+    it('routes an exact format straight to start_work and launches the book', async () => {
+      const docblocks = await svc.context.catalog.get('toolset', 'docblocks');
+      if (!docblocks || docblocks.manifest.kind !== 'toolset') {
+        throw new Error('DocBlocks catalog fixture missing');
+      }
+      await store.writeInstalledToolsets({ kind: 'project', projectId: 'default' }, [
+        {
+          toolsetId: 'docblocks',
+          sourceId: docblocks.sourceId,
+          version: docblocks.manifest.version,
+          installedAt: '2026-10-16T00:00:00.000Z',
+          runtime: docblocks.manifest.runtime,
+        },
+      ]);
+      const session = await meesterSession();
+      // The exact route leaves start_work as the one callable tool, so the
+      // model starts the pre-resolved option without ranking first.
+      mock.scriptToolCalls([
+        { name: 'start_work', arguments: { option: 'craftbook:powerpoint-deck' } },
+      ]);
+      mock.script('The PowerPoint recipe is running.');
+      const toolEvents: Extract<import('@bendyline/gezel').ChatEvent, { type: 'tool' }>[] = [];
+      const unsubscribe = events.subscribe(session.id, (event) => {
+        if (event.type === 'tool') toolEvents.push(event);
+      });
+
+      await manager.send(session.id, 'Can you create a PowerPoint about the Battle of Ypres?');
+      unsubscribe();
+
+      const sends = mock.calls.filter((call) => call.kind === 'send');
+      expect(sends[0]?.prompt).toContain('start_work({"option":"craftbook:powerpoint-deck"})');
+      expect(sends[0]?.prompt).not.toContain('invoke_craftbook(');
+      expect(mock.toolCallOutputs.map((output) => output.name)).toEqual(['start_work']);
+      expect(mock.toolCallOutputs[0]?.output).toContain('Invoked craftbook "powerpoint-deck"');
+      const launched = (await store.listProjectTasks('default')).find(
+        (task) => task.craftbook.id === 'powerpoint-deck',
+      );
+      expect(launched?.description).toBe('Can you create a PowerPoint about the Battle of Ypres?');
+      // The deck's topic is the one the exact route binds on the daemon.
+      expect(launched?.craftbookParams?.topic).toBe('the Battle of Ypres');
+      const startEvent = toolEvents.find((event) => event.name === 'start_work');
+      expect(startEvent?.card).toMatchObject({
+        kind: 'craftbook-start',
+        craftbookId: 'powerpoint-deck',
+        taskRef: launched?.ref,
+      });
+    }, 30_000);
+
+    it('ranks with suggest_work, then opens the typed project named from the request', async () => {
+      const session = await meesterSession();
+      mock.scriptToolCalls([{ name: 'suggest_work', arguments: {} }]);
+      mock.scriptToolCalls([{ name: 'start_work', arguments: { option: 'type:trip-planner' } }]);
+      mock.script('Looking.', 'Starting your trip.');
+
+      await manager.send(
+        session.id,
+        'Plan a trip to Lisbon next spring for the four of us, about a week, with a packing list.',
+      );
+      await manager.drainBackground();
+
+      expect(mock.toolCallOutputs.map((output) => output.name)).toEqual([
+        'suggest_work',
+        'start_work',
+      ]);
+      expect(mock.toolCallOutputs[0]?.output).toMatch(/^1\. \[type:trip-planner\]/m);
+      expect(mock.toolCallOutputs[1]?.output).toContain('as a Trip');
+      const projects = await store.listProjects();
+      const trip = projects.find((p) => p.name === 'Plan a trip to Lisbon next spring');
+      expect(trip).toBeDefined();
+      expect((await store.getProject(trip!.id))?.projectType?.id).toBe('trip-planner');
+    }, 30_000);
+
+    it('reads an option id copied without its prefix', async () => {
+      const session = await meesterSession();
+      mock.scriptToolCalls([{ name: 'start_work', arguments: { option: 'trip-planner' } }]);
+      mock.script('Starting your trip.');
+
+      await manager.send(
+        session.id,
+        'Plan a trip to Lisbon next spring for the four of us, about a week, with a packing list.',
+      );
+      await manager.drainBackground();
+
+      expect(mock.toolCallOutputs[0]?.output).toContain('as a Trip');
+    }, 30_000);
+
+    it('lists the real ids when an option names nothing', async () => {
+      const session = await meesterSession();
+      mock.scriptToolCalls([{ name: 'start_work', arguments: { option: 'holiday' } }]);
+      mock.script('Let me check.');
+
+      await manager.send(
+        session.id,
+        'Plan a trip to Lisbon next spring for the four of us, about a week, with a packing list.',
+      );
+
+      expect(mock.toolCallOutputs[0]?.output).toContain('"holiday" is not one of');
+      expect(mock.toolCallOutputs[0]?.output).toContain('"type:trip-planner"');
+      expect((await store.listProjects()).some((p) => p.projectType?.id === 'trip-planner')).toBe(
+        false,
+      );
+    }, 30_000);
+  });
+
   it('stamps a step-advance card on the advance_task_step tool call', async () => {
     const task = await svc.context.tasks.create('default', {
       title: 'Two-step march',

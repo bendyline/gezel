@@ -14,6 +14,7 @@ import {
   danglingVirtualStoreLinks,
   dependencyStatus,
   parsePnpmInstallArgs,
+  pinnedPnpmMismatch,
   pnpmInstallLockPath,
   reportDependencyStatus,
   runPnpmFetchChild,
@@ -567,6 +568,47 @@ test('deps:install refuses to report success while the tree still differs', asyn
   assert.equal(code, 1);
   assert.match(errors.join('\n'), /still differs/);
   assert.match(errors.join('\n'), /@bendyline\/gilde.*0\.1\.41.*0\.1\.45/);
+});
+
+test('deps:install refuses a pnpm major other than the packageManager pin before fetching', async (t) => {
+  const root = await fixture(t);
+  await stalePinnedDependency(root, { installed: '0.1.41', wanted: '0.1.45' });
+  const manifestPath = join(root, 'package.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  await writeFile(manifestPath, JSON.stringify({ ...manifest, packageManager: 'pnpm@11.15.1' }));
+  const errors = [];
+  const restore = console.error;
+  console.error = (message) => errors.push(message);
+  let code;
+  try {
+    code = await runSerializedPnpmInstall({
+      repoRoot: root,
+      dependencyLockProbeFn: () => [],
+      // Name the pnpm outright: with PATH empty, Windows has no pnpm.cmd to
+      // resolve one from and the resolver throws before the version check.
+      pnpmMismatchFn: (repoRoot) =>
+        pinnedPnpmMismatch(repoRoot, {
+          env: { PATH: '', GEZEL_PNPM_CLI: join(repoRoot, 'pnpm') },
+          versionOfFn: () => '12.6.0',
+        }),
+      spawnPnpmFn: () => {
+        throw new Error('pnpm fetch must not start under a mismatched pnpm major');
+      },
+    });
+  } finally {
+    console.error = restore;
+  }
+
+  assert.equal(code, 1);
+  assert.match(errors.join('\n'), /pins pnpm@11\.15\.1, but the pnpm here is 12\.6\.0/);
+  assert.match(errors.join('\n'), /node_modules was left untouched/);
+});
+
+test('a pnpm on the pinned major passes the version check', async (t) => {
+  const root = await fixture(t);
+  await writeFile(join(root, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.15.1' }));
+  assert.equal(pinnedPnpmMismatch(root, { versionOfFn: () => '11.16.0' }), null);
+  assert.equal(pinnedPnpmMismatch(root, { versionOfFn: () => null }), null);
 });
 
 test('deps:install relinks every importer after a lockfile change instead of filtering', async (t) => {

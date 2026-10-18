@@ -22,8 +22,6 @@
  * these shapes by construction.
  */
 
-import { isGemmaModel } from './kv-cache-type.js';
-
 /** The subset of `GezelConfig` this builder reads (global overrides). */
 export interface GlobalLlamaCppFlags {
   llamaCppFlashAttn?: boolean | 'on' | 'off' | 'auto';
@@ -127,24 +125,6 @@ export interface EngineFlagInput {
    * when the client also replays `reasoning_content`.
    */
   reasoningPreserve?: boolean | undefined;
-  /**
-   * The model's GGUF `general.architecture`, for the Gemma-family auto
-   * defaults (sliding-window full cache). Undefined disables the arch
-   * heuristic; an explicit config/manifest `swaFull` still applies.
-   */
-  architecture?: string | undefined;
-  /** The resolved model id, a fallback for `architecture` (see isGemmaModel). */
-  modelId?: string | undefined;
-  /**
-   * Whether resident weights plus the full SWA KV cache fit the host's
-   * fast-memory pool (VRAM on a discrete GPU). The exact estimate honors
-   * per-layer SWA dimensions and shared-KV layers. `false` declines the
-   * auto-default so a low-memory device keeps the model's full context on
-   * the windowed cache instead of spilling or OOMing. `undefined` (unknown
-   * host/metadata) and `true` retain the compatibility default. An explicit
-   * config/manifest `swaFull` wins regardless.
-   */
-  swaFullAutoFits?: boolean | undefined;
   /**
    * The llama-server build's backend (`cuda`, `vulkan`, `metal`, `cpu`).
    * Only a GPU backend can receive the GPU-resident thread default.
@@ -254,9 +234,6 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     installedDraftModelPath,
     reasoningFormat,
     reasoningPreserve,
-    architecture,
-    modelId,
-    swaFullAutoFits,
     backend,
     hostCpuCount,
   } = input;
@@ -337,27 +314,20 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   //
   // So the engine already declines it precisely when it cannot honour it,
   // which is what the warning is for. Withholding the flag ourselves only
-  // cost reuse on multi-slot dense engines. Note the coupling this exposes:
-  // the memory-driven `--swa-full` decision below also silently decides
-  // whether Gemma gets any cross-request prefix reuse at all.
+  // cost reuse on multi-slot dense engines. Gemma therefore gets it only
+  // with a pinned `--swa-full` below.
   const explicitCacheReuse = config.llamaCppCacheReuse ?? perModel?.cacheReuse;
   const cacheReuse = explicitCacheReuse ?? DEFAULT_CACHE_REUSE;
   if (cacheReuse > 0) args.push('--cache-reuse', String(cacheReuse));
 
   // ── SWA full cache (`--swa-full`) ─────────────────────────────────
-  // Tri-state: explicit config/manifest `true`/`false` wins; `undefined`
-  // at both layers falls through to the Gemma-family auto-default. Gemma's
-  // sliding-window attention refuses cross-request prefix reuse under the
-  // memory-efficient windowed cache; the full cache preserves old SWA KV
-  // for cache operations by allocating full-context storage on every
-  // cache-owning layer. The cost varies sharply with model geometry, so
-  // Auto is gated on `swaFullAutoFits`: when weights + full KV do not fit
-  // fast memory, Gemma launches with the windowed cache instead.
-  const swaFull =
-    config.llamaCppSwaFull ??
-    perModel?.swaFull ??
-    (swaFullAutoFits !== false && isGemmaModel({ architecture, modelId }));
-  if (swaFull) args.push('--swa-full');
+  // Opt-in only: an explicit config/manifest `swaFull`. Gemma used to get
+  // it by default for cross-request prefix reuse, until a paired A/B on
+  // gemma4-31b (2026-10-15) showed the full cache decodes 17-25% slower at
+  // every context depth, because decode reads each sliding-window layer's
+  // whole cache, and costs 51 GB more at 64K. Trials ran 19% longer in
+  // total despite the better reuse.
+  if (config.llamaCppSwaFull ?? perModel?.swaFull) args.push('--swa-full');
 
   // ── Thread / batch overrides ──────────────────────────────────────
   // The GPU-resident default needs positive evidence that no model compute
@@ -409,7 +379,8 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     }
     const nMax = config.llamaCppSpecDraftNMax ?? perModel?.spec?.nMax;
     if (typeof nMax === 'number') args.push('--spec-draft-n-max', String(nMax));
-    // v0.6.0 supports probabilistic selection only for MTP/simple drafts.
+    // v0.7.0 supports probabilistic selection only for MTP/simple drafts
+    // (DFlash/LiLiCorr ignore it).
     // Leave the upstream greedy default untouched unless explicitly set.
     if (
       (safeSpecType === 'draft-mtp' || safeSpecType === 'draft-simple') &&

@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   gpuMemoryKindFromName,
   gpuVendorFromName,
@@ -6,6 +9,7 @@ import {
   parseLlamaDevices,
   parseNvidiaRuntimeDevices,
   pickBestGpuDevice,
+  probeLlamaDevices,
 } from '@bendyline/gezel-inference/internal/providers/llama-cpp/devices';
 import { describe, expect, it } from 'vitest';
 
@@ -176,5 +180,52 @@ describe('gpuMemoryKindFromName', () => {
 
   it('does not guess for an unrecognized Vulkan device', () => {
     expect(gpuMemoryKindFromName('Some Future Accelerator')).toBe('unknown');
+  });
+});
+
+describe('probeLlamaDevices cache', () => {
+  const GiB = 1024 ** 3;
+  const igpu = { id: 'Vulkan0', name: 'AMD Radeon(TM) Graphics', totalMiB: 3072, freeMiB: 3000 };
+
+  async function homeWithCache(systemRamBytes?: number): Promise<string> {
+    const home = await mkdtemp(join(tmpdir(), 'gezel-devices-'));
+    await mkdir(join(home, 'engines', 'llama-cpp'), { recursive: true });
+    await writeFile(
+      join(home, 'engines', 'llama-cpp', 'devices.json'),
+      JSON.stringify({ devices: [igpu], probedAt: 'then', cached: false, systemRamBytes }),
+    );
+    return home;
+  }
+
+  // A missing binary makes a fresh probe come back empty, which tells the
+  // two paths apart without spawning anything real.
+  const probe = (home: string, systemRamBytes: number) =>
+    probeLlamaDevices({ binaryPath: join(home, 'missing-llama-server'), home, systemRamBytes });
+
+  it('serves the cache while the OS reports the RAM it was probed with', async () => {
+    const home = await homeWithCache(13 * GiB);
+    try {
+      expect(await probe(home, 13 * GiB)).toMatchObject({ cached: true, devices: [igpu] });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('re-probes after a carve-out change moved RAM between the OS and the GPU', async () => {
+    const home = await homeWithCache(13 * GiB);
+    try {
+      expect(await probe(home, 8 * GiB)).toMatchObject({ cached: false, devices: [] });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('re-probes a cache written before the RAM figure was recorded', async () => {
+    const home = await homeWithCache();
+    try {
+      expect((await probe(home, 13 * GiB)).cached).toBe(false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });

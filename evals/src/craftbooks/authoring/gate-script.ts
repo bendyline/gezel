@@ -4,6 +4,7 @@ import {
   AUTHORING_PROJECT_PIN,
   AUTHORING_TOOL_STEER,
   checkGateScriptSubstance,
+  completedTaskSteps,
   craftbookGateScriptRefs,
   ensureAuthoringProject,
   ensureAuthoringWorker,
@@ -112,6 +113,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     nameHint: BOOK_NAME_HINT,
   });
   let gradeProjectId = projectId;
+  let taskSteps: number | undefined;
   let scriptSource: string | undefined;
   if (!book) {
     failures.push(
@@ -142,6 +144,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       );
     } else {
       gradeProjectId = found.projectId;
+      taskSteps = completedTaskSteps(found.task);
       if (found.task.status !== 'complete') {
         failures.push(
           unfinishedTaskFailure({
@@ -165,6 +168,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     totalChecks: TOTAL_CHECKS,
     failures,
     bytes: progressBytes(reportText, scriptSource, book ? book.craftbook.id : null),
+    milestones: taskSteps,
     // `scriptSource` is the gate script embedded in the authored book, not
     // the workspace deliverable this scenario waits on.
     deliverableMissing: noDeliverableWritten(reportText),

@@ -466,25 +466,26 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
       })),
     );
   }
-  const mcpServerSource = await readFile(
-    new URL('../../../mcp/src/server.ts', import.meta.url),
-    'utf8',
-  );
-  const mcpSourceCorpus = extractToolCallStringCorpus({
-    sourceText: mcpServerSource,
-    toolNames: toolNamesWithSchemas,
-  });
-  for (const entry of mcpSourceCorpus) {
-    const sourceContract = lintPromptToolSchemaContract({
-      prompt: entry.text,
-      toolContracts,
+  let mcpSourceStringCount = 0;
+  for (const file of ['server.ts', 'github-tools.ts']) {
+    const mcpSource = await readFile(new URL(`../../../mcp/src/${file}`, import.meta.url), 'utf8');
+    const mcpSourceCorpus = extractToolCallStringCorpus({
+      sourceText: mcpSource,
+      toolNames: toolNamesWithSchemas,
     });
-    staticSchemaErrors.push(
-      ...sourceContract.errors.map((finding) => ({
-        ...finding,
-        matrix: `mcp-source:server.ts:${entry.line}`,
-      })),
-    );
+    mcpSourceStringCount += mcpSourceCorpus.length;
+    for (const entry of mcpSourceCorpus) {
+      const sourceContract = lintPromptToolSchemaContract({
+        prompt: entry.text,
+        toolContracts,
+      });
+      staticSchemaErrors.push(
+        ...sourceContract.errors.map((finding) => ({
+          ...finding,
+          matrix: `mcp-source:${file}:${entry.line}`,
+        })),
+      );
+    }
   }
   const roleItems = (await catalog.list('gezel-template')).filter(
     (item) => item.manifest.kind === 'gezel-template' && !item.manifest.frontmatter?.fixedFunction,
@@ -557,6 +558,7 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
         resolveProfile({ manifest, tier, providerName: provider }),
       );
       const rolesAsTools = profileHasBehavior(profile, 'tools.gezels-as-roles');
+      const workRouting = profileHasBehavior(profile, 'tools.work-routing');
       const trimExecutorContext = profileHasBehavior(profile, 'prompt.executor-context-trim');
       const retrievalFirst = profileHasBehavior(profile, 'prompt.retrieval-first');
 
@@ -606,6 +608,7 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
               projectMode: PROJECT.mode,
               ...(scenario.consultationMode ? { consultationMode: true } : {}),
               ...(rolesAsTools ? { rolesAsTools: true } : {}),
+              ...(workRouting ? { workRouting: true } : {}),
               githubLinked: false,
               isGitRepo: false,
               securityPolicy: scenario.securityPolicy,
@@ -796,7 +799,7 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
     distinctPromptCount: new Set(cases.map((row) => row.promptHash)).size,
     distinctToolSurfaceCount: new Set(cases.map((row) => row.toolSurfaceHash)).size,
     toolSchemaCount: toolContracts.length,
-    mcpSourceStringCount: mcpSourceCorpus.length,
+    mcpSourceStringCount,
     cases,
     errors,
     warnings,

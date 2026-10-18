@@ -14,7 +14,6 @@ so concurrent replicas cannot observe a half-built view.
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -22,6 +21,13 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Callable, Optional, Tuple
+
+try:
+    import fcntl
+except ImportError:
+    # Windows has no fcntl. The MLX engine never runs there, but this module's
+    # stdlib suite does (python-suites.test.ts), so it must still import.
+    fcntl = None
 
 
 PLE_MARKER = ".ple.ple_embedding.ngram_embedding.shards."
@@ -122,7 +128,8 @@ def prepare_external_ple_view(
     lock_path = target.parent / f".{target.name}.lock"
     try:
         with lock_path.open("a+b") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            if fcntl is not None:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
             if _valid_view(target, signature):
                 return str(target), "reused", True
 

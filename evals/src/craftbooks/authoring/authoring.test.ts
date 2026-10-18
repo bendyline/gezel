@@ -11,6 +11,7 @@ import { GATE_HEADING, SEEDED_POLISH_PROMPT, seededPromptStillPresent } from './
 import { INVENTORY_JSON } from './gate-script.ts';
 import {
   checkGateScriptSubstance,
+  completedTaskSteps,
   craftbookGateScriptRefs,
   isStepGated,
   parseJsonRecords,
@@ -499,5 +500,28 @@ describe('unfinishedTaskFailure', () => {
     const text = unfinishedTaskFailure({ ref: 'quarterly-brief/1', status: 'paused' });
     expect(text).toContain('task quarterly-brief/1 has status "paused"');
     expect(text).not.toContain('(');
+  });
+});
+
+describe('completedTaskSteps', () => {
+  // The "task not finished" failure reads the same at every step, so the
+  // finished-step count is what lets the retry-loop plateau key move while a
+  // slow model walks the recipe.
+  it('counts the steps that have finished', () => {
+    const task = {
+      craftbook: {
+        steps: [
+          { id: 'draft', completedAt: '2026-10-16T12:02:50Z' },
+          { id: 'review' },
+          { id: 'finalize' },
+        ],
+      },
+    };
+    expect(completedTaskSteps(task)).toBe(1);
+  });
+
+  it('reports nothing when there is no task to count', () => {
+    expect(completedTaskSteps(null)).toBeUndefined();
+    expect(completedTaskSteps({})).toBeUndefined();
   });
 });

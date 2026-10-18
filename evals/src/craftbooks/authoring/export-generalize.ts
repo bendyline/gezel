@@ -5,6 +5,7 @@ import {
   AUTHORING_TOOL_STEER,
   type AuthoredCraftbookMatch,
   type AuthoringPollArgs,
+  completedTaskSteps,
   ensureAuthoringProject,
   ensureAuthoringWorker,
   findAuthoredCraftbooks,
@@ -421,6 +422,7 @@ async function assessRecipe(
       q2Clean,
       book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
     ),
+    milestones: completedTaskSteps(found?.task),
     deliverableMissing: noDeliverableWritten(q1Report, q1Clean, q2Report, q2Clean),
     repairPath: 'craftbook: supplier intake recipe',
     repairDirective: [

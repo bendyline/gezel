@@ -14,6 +14,8 @@ import {
   isMoEFromTags,
   isRetiredModel,
   launchFitsNow,
+  llamaCppBackendExclusion,
+  llamaCppBackendLabel,
   localContextFloorTokens,
 } from '@bendyline/gezel';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
@@ -172,6 +174,12 @@ interface Props {
   onModelsChanged?: () => void;
   /** When true, swap headings for compact copy suitable for onboarding. */
   compact?: boolean;
+  /**
+   * The llama-server backend this machine runs (`/api/health`
+   * `llamaCppBackend`). Entries whose catalog source excludes it are hidden,
+   * and shown without a Download button under "Show all".
+   */
+  backend?: string | undefined;
 }
 
 /**
@@ -179,7 +187,7 @@ interface Props {
  * OllamaModelManager structurally but talks to /api/llama-cpp/* and
  * always uses the `llamaCpp` source block from chat-model entries.
  */
-export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props) {
+export function LlamaCppModelManager({ onModelsChanged, compact = false, backend }: Props) {
   const {
     modelsLoading,
     models,
@@ -595,6 +603,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
             const m = asLlamaCppEntry(item.manifest);
             if (!m) return false;
             if (!showAll && isRetiredModel(m)) return false;
+            if (!showAll && llamaCppBackendExclusion(m.llamaCpp, backend)) return false;
             if (!showAll && memory) {
               // MoE-aware: keep any model that can RUN (incl. big MoE that
               // fits only via expert-offload to RAM) — hide only the truly
@@ -615,6 +624,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                 ? Math.min(100, Math.round((inflight.bytesWritten / inflight.totalBytes) * 100))
                 : null;
             const fit = memory ? catalogFit(m, memory) : null;
+            const excluded = llamaCppBackendExclusion(m.llamaCpp, backend);
             return (
               <div className="catalog-ollama-action">
                 <div className="catalog-ollama-meta">
@@ -636,6 +646,11 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                       manifest={m}
                       fallbackHref={huggingFaceRepoUrl(m.llamaCpp.huggingfaceRepo)}
                     />
+                    {excluded && backend && (
+                      <span className="gz-status-pill gz-status-pill--warn" title={excluded}>
+                        Not for {llamaCppBackendLabel(backend)}
+                      </span>
+                    )}
                     {fit && fit.tier !== 'fits' && (
                       <span
                         className={`gz-status-pill ${fit.tier === 'fits-offload' ? 'gz-status-pill--ok' : 'gz-status-pill--warn'}`}
@@ -690,22 +705,25 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                 </div>
                 <button
                   type="button"
-                  disabled={installed || needsAttention || Boolean(inflight)}
+                  disabled={installed || needsAttention || Boolean(inflight) || Boolean(excluded)}
                   onClick={() => startInstall(m.id)}
+                  {...(excluded ? { title: excluded } : {})}
                 >
                   {installed
                     ? 'On device'
-                    : inflight
-                      ? inflight.phase === 'downloading'
-                        ? pct !== null
-                          ? `Downloading… ${pct}%`
-                          : 'Downloading…'
-                        : inflight.phase === 'verifying'
-                          ? 'Verifying…'
-                          : 'Reading metadata…'
-                      : needsAttention
-                        ? 'Needs attention above'
-                        : 'Download'}
+                    : excluded
+                      ? 'Not available here'
+                      : inflight
+                        ? inflight.phase === 'downloading'
+                          ? pct !== null
+                            ? `Downloading… ${pct}%`
+                            : 'Downloading…'
+                          : inflight.phase === 'verifying'
+                            ? 'Verifying…'
+                            : 'Reading metadata…'
+                        : needsAttention
+                          ? 'Needs attention above'
+                          : 'Download'}
                 </button>
               </div>
             );

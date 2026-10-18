@@ -233,6 +233,8 @@ export interface ModelFileSource {
   remoteHost: string;
   remotePathTemplate: string;
   fetchImpl?: typeof fetch;
+  /** Abandons the download (shutdown); the partial file is removed as on any failure. */
+  signal?: AbortSignal;
 }
 
 const VERIFIED_MARKER_SUFFIX = '.gezel-verified';
@@ -306,11 +308,13 @@ async function downloadVerified(
   target: string,
   pinned: PinnedModelFile,
   fetchImpl: typeof fetch,
+  signal?: AbortSignal,
 ): Promise<void> {
   const partial = `${target}${PARTIAL_DOWNLOAD_INFIX}${process.pid}-${randomUUID().slice(0, 8)}`;
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    const response = await fetchImpl(url);
+    signal?.throwIfAborted();
+    const response = await fetchImpl(url, signal ? { signal } : undefined);
     if (!response.ok || !response.body) {
       throw new Error(`HTTP ${response.status} downloading ${pinned.file}`);
     }
@@ -321,6 +325,8 @@ async function downloadVerified(
     const hash = createHash('sha256');
     let received = 0;
     for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      // A fetchImpl that ignores the signal still stops at the next chunk.
+      signal?.throwIfAborted();
       hash.update(chunk);
       received += chunk.byteLength;
       let offset = 0;
@@ -395,6 +401,7 @@ export async function ensureVerifiedModelFile(
     target,
     pinned,
     source.fetchImpl ?? fetch,
+    source.signal,
   );
   await writeMarker(marker, target, pinned.digest);
   return 'downloaded';

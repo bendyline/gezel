@@ -11,19 +11,29 @@
  *                                                     with that profile;
  *                                                     reportProgress: send the
  *                                                     model download's bytes
+ *                   { cancel: true }                — shutdown: stop the
+ *                                                     download and runs in flight
  *   worker → host:  { id, progress }                — interim, zero or more
  *                   { id, vectors }                 — success
  *                   { id, error, fatal,             — failure (fatal ⇒ model
- *                     retryable, optionalPeerMissing } unloadable, disable for
- *                                                     good; optionalPeerMissing
+ *                     retryable, optionalPeerMissing, unloadable, disable for
+ *                     cancelled }                     good; optionalPeerMissing
  *                                                     ⇒ the peer is just not
  *                                                     installed; retryable ⇒ a
- *                                                     short host-side cooldown)
+ *                                                     short host-side cooldown;
+ *                                                     cancelled ⇒ stopped by a
+ *                                                     cancel, not a fault)
  */
 
 import { parentPort } from 'node:worker_threads';
 import type { KnowledgeEmbeddingProfile } from '@bendyline/gezel';
-import { PipelineLoadError, runEmbed, runProfileQueryEmbed } from './embed-core.js';
+import {
+  ModelWorkCancelledError,
+  PipelineLoadError,
+  cancelInFlightModelWork,
+  runEmbed,
+  runProfileQueryEmbed,
+} from './embed-core.js';
 
 if (!parentPort) {
   throw new Error('embed-worker must be run as a worker thread');
@@ -38,7 +48,16 @@ interface EmbedRequest {
   localFilesOnly?: boolean;
 }
 
-port.on('message', (msg: EmbedRequest) => {
+/** Sent by the host at shutdown; each request it stops answers with `cancelled`. */
+interface CancelRequest {
+  cancel: true;
+}
+
+port.on('message', (msg: EmbedRequest | CancelRequest) => {
+  if ('cancel' in msg) {
+    cancelInFlightModelWork();
+    return;
+  }
   void (async () => {
     try {
       const vectors = msg.profile
@@ -59,6 +78,7 @@ port.on('message', (msg: EmbedRequest) => {
         fatal: err instanceof PipelineLoadError && !err.retryable,
         retryable: err instanceof PipelineLoadError && err.retryable,
         optionalPeerMissing: err instanceof PipelineLoadError && err.optionalPeerMissing,
+        cancelled: err instanceof ModelWorkCancelledError,
       });
     }
   })();

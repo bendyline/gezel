@@ -43,7 +43,7 @@ const log = createLogger('perf');
 /**
  * A gap is measured to within one beat, so this has to stay well inside
  * `STALL_RECORD_MS`. At the same period, a pause long enough to log leaves the
- * watchdog late by more than half the gap, which is what `isMainThreadBlock`
+ * watchdog late by more than half the heartbeat's lateness, which is what `isMainThreadBlock`
  * needs to rule the main thread out.
  */
 export const BEAT_MS = 250;
@@ -67,9 +67,17 @@ const PROFILE_KEEP = 20;
 const LABEL_MAX = 200;
 
 /**
+ * A watchdog tick later than this is kept. Half the smallest recordable
+ * lateness: a shorter one cannot rule the main thread out. The floor was a
+ * whole period, which threw away the witness's own evidence of a sub-second
+ * pause of the whole process, so such pauses were filed as main-thread blocks
+ * (idle processes on a swapping machine collected dozens a minute).
+ */
+const WATCHDOG_KEEP_LATE_MS = (STALL_RECORD_MS - BEAT_MS) / 2;
+
+/**
  * The witness. It keeps its own late ticks and, asked about a gap, answers
- * with the worst one since the gap began. A tick late by less than a period is
- * not kept: it cannot reach half of a recordable gap.
+ * with the worst one since the gap began.
  *
  * It sleeps on a futex instead of running an event loop: a worker woken by its
  * own timer cost about 1.6 context switches per tick on Windows, against 1.0
@@ -80,6 +88,7 @@ const LABEL_MAX = 200;
 const WATCHDOG_SOURCE = `
 const { parentPort, receiveMessageOnPort, workerData } = require('node:worker_threads');
 const tickMs = workerData.tickMs;
+const keepLateMs = workerData.keepLateMs;
 const asked = new Int32Array(workerData.asked);
 const lateTicks = [];
 let lastTick = Date.now();
@@ -89,7 +98,7 @@ for (;;) {
   if (now - lastTick >= tickMs) {
     const lateMs = now - lastTick - tickMs;
     lastTick = now;
-    if (lateMs >= tickMs) {
+    if (lateMs >= keepLateMs) {
       lateTicks.push({ at: now, lateMs });
       if (lateTicks.length > 32) lateTicks.shift();
     }
@@ -116,9 +125,72 @@ interface WatchdogReport {
  * A stale heartbeat is a main-thread block only when the watchdog itself kept
  * time. When the watchdog was late by a comparable amount, the process or the
  * host was paused, and blaming whatever was in flight would be a false lead.
+ *
+ * Lateness against lateness: both threads sleep a beat between checks, so a
+ * pause delays each by about its length. Comparing the watchdog's lateness
+ * with the whole gap, beat included, filed short pauses as blocks.
  */
 export function isMainThreadBlock(report: WatchdogReport): boolean {
-  return report.watchdogLateMs < report.durationMs / 2;
+  return report.watchdogLateMs < (report.durationMs - BEAT_MS) / 2;
+}
+
+/** What a gap cost: the main thread's CPU, and the process's major page faults. */
+export interface StallCost {
+  /** Null where the runtime has no per-thread CPU accounting. */
+  cpuMs: number | null;
+  pageFaults: number;
+}
+
+interface StallCounters {
+  cpuMs: number | null;
+  pageFaults: number;
+}
+
+/** Fewer page faults than this in a stall is ordinary; more, with the thread idle, is swap. */
+const PAGING_MIN_FAULTS = 10;
+
+type ThreadCpuUsage = () => { user: number; system: number };
+
+/**
+ * Read at every beat. Both are single syscalls and add no wakeups. A stall's
+ * duration alone cannot say whether code ran: on a memory-starved machine most
+ * logged stalls were the thread waiting for its own pages to come back from
+ * swap, and their CPU profiles held no samples at all.
+ */
+function readStallCounters(): StallCounters {
+  const threadCpuUsage = (process as { threadCpuUsage?: ThreadCpuUsage }).threadCpuUsage;
+  const cpu = typeof threadCpuUsage === 'function' ? threadCpuUsage() : null;
+  return {
+    cpuMs: cpu ? (cpu.user + cpu.system) / 1_000 : null,
+    pageFaults: process.resourceUsage().majorPageFault,
+  };
+}
+
+function stallCostBetween(before: StallCounters, after: StallCounters): StallCost {
+  return {
+    cpuMs:
+      before.cpuMs !== null && after.cpuMs !== null
+        ? Math.max(0, Math.round(after.cpuMs - before.cpuMs))
+        : null,
+    pageFaults: Math.max(0, after.pageFaults - before.pageFaults),
+  };
+}
+
+/** Running code when it used at least half the stall; otherwise paging or waiting on something. */
+export function stallVerdict(
+  durationMs: number,
+  cost: StallCost,
+): 'running code' | 'paging' | 'blocked waiting' | undefined {
+  if (cost.cpuMs === null) return undefined;
+  if (cost.cpuMs >= durationMs / 2) return 'running code';
+  return cost.pageFaults >= PAGING_MIN_FAULTS ? 'paging' : 'blocked waiting';
+}
+
+export function describeStallCost(durationMs: number, cost: StallCost): string {
+  const faults = `${cost.pageFaults} page fault${cost.pageFaults === 1 ? '' : 's'}`;
+  const verdict = stallVerdict(durationMs, cost);
+  if (cost.cpuMs === null) return faults;
+  return `cpu ${formatPerfMs(cost.cpuMs)}, ${faults}${verdict ? `: ${verdict}` : ''}`;
 }
 
 interface ActiveWork {
@@ -339,6 +411,10 @@ class ResponsivenessMonitor {
    */
   private awaitingVerdicts = 0;
   private rollDeferred = false;
+  /** Counters at the last beat, so a gap's cost is the difference at the next one. */
+  private lastBeatCost = readStallCounters();
+  /** What each gap awaiting a verdict cost, keyed by its start. */
+  private readonly gapCosts = new Map<number, StallCost>();
 
   constructor(opts: ResponsivenessMonitorOptions) {
     this.beatTimer = setInterval(() => this.beat(), BEAT_MS);
@@ -450,10 +526,14 @@ class ResponsivenessMonitor {
     this.lastBeatAt = now;
     const gapMs = now - startedAt;
     this.delay.record(Math.max(1, Math.round((gapMs - BEAT_MS) * 1e6)));
+    const counters = readStallCounters();
+    const before = this.lastBeatCost;
+    this.lastBeatCost = counters;
     if (gapMs < STALL_RECORD_MS || !this.watchdog) {
       if (this.rollDeferred && this.awaitingVerdicts === 0) this.rollProfile();
       return;
     }
+    this.gapCosts.set(startedAt, stallCostBetween(before, counters));
     this.awaitingVerdicts += 1;
     this.watchdog.postMessage({ startedAt, durationMs: gapMs });
     Atomics.store(this.watchdogAsked, 0, 1);
@@ -475,7 +555,11 @@ class ResponsivenessMonitor {
     try {
       const worker = new Worker(WATCHDOG_SOURCE, {
         eval: true,
-        workerData: { tickMs: WATCHDOG_TICK_MS, asked: this.watchdogAsked.buffer },
+        workerData: {
+          tickMs: WATCHDOG_TICK_MS,
+          keepLateMs: WATCHDOG_KEEP_LATE_MS,
+          asked: this.watchdogAsked.buffer,
+        },
       });
       worker.on('message', (report: WatchdogReport) => this.onWatchdogReport(report));
       worker.on('error', (err) => {
@@ -495,8 +579,11 @@ class ResponsivenessMonitor {
   }
 
   private handleReport(report: WatchdogReport): void {
+    const cost = this.gapCosts.get(report.startedAt);
+    this.gapCosts.delete(report.startedAt);
     if (!isMainThreadBlock(report)) return;
     const now = Date.now();
+    const verdict = cost ? stallVerdict(report.durationMs, cost) : undefined;
     const stall: PerfStall = {
       at: new Date(report.startedAt).toISOString(),
       durationMs: report.durationMs,
@@ -507,6 +594,9 @@ class ResponsivenessMonitor {
         this.finished,
         now,
       ),
+      ...(cost?.cpuMs != null ? { cpuMs: cost.cpuMs } : {}),
+      ...(cost ? { pageFaults: cost.pageFaults } : {}),
+      ...(verdict ? { verdict } : {}),
     };
     pushRing(this.stalls, stall);
     if (report.durationMs < STALL_LOG_MS) return;
@@ -514,7 +604,8 @@ class ResponsivenessMonitor {
       stall.during.length > 0
         ? stall.during.map((w) => `${w.label} (${formatPerfMs(w.durationMs)})`).join(', ')
         : 'nothing tracked';
-    const line = `main thread blocked for ${formatPerfMs(report.durationMs)} — running: ${running}`;
+    const costText = cost ? ` (${describeStallCost(report.durationMs, cost)})` : '';
+    const line = `main thread blocked for ${formatPerfMs(report.durationMs)}${costText} — running: ${running}`;
     if (report.durationMs >= STALL_WARN_MS) log.warn(line);
     else log.info(line);
     void this.profiler.capture(report.startedAt, report.durationMs).then((name) => {

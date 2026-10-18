@@ -10,10 +10,12 @@ import {
   beginPerfRequest,
   beginPerfWork,
   describeClientReport,
+  describeStallCost,
   formatPerfMs,
   isMainThreadBlock,
   perfSnapshot,
   recordClientPerfReport,
+  stallVerdict,
   startResponsivenessMonitor,
   syncPerfProfiling,
   workDuring,
@@ -51,6 +53,25 @@ describe('stall classification', () => {
     expect(isMainThreadBlock({ startedAt: 0, durationMs: 10_000, watchdogLateMs: 9_900 })).toBe(
       false,
     );
+  });
+
+  it('files a short pause of the whole process as a pause, not a block', () => {
+    // A 400 ms pause: the heartbeat lands 350 ms late, the watchdog, part-way
+    // through its own sleep when the pause began, 200 ms late. Measured
+    // against the whole 600 ms gap that read as a block, on idle processes.
+    expect(isMainThreadBlock({ startedAt: 0, durationMs: 600, watchdogLateMs: 200 })).toBe(false);
+    expect(isMainThreadBlock({ startedAt: 0, durationMs: 600, watchdogLateMs: 0 })).toBe(true);
+  });
+
+  it('says whether a stall ran code, paged, or waited', () => {
+    expect(stallVerdict(1_200, { cpuMs: 1_100, pageFaults: 400 })).toBe('running code');
+    expect(stallVerdict(1_200, { cpuMs: 12, pageFaults: 340 })).toBe('paging');
+    expect(stallVerdict(1_200, { cpuMs: 12, pageFaults: 2 })).toBe('blocked waiting');
+    expect(stallVerdict(1_200, { cpuMs: null, pageFaults: 340 })).toBeUndefined();
+    expect(describeStallCost(1_200, { cpuMs: 12, pageFaults: 340 })).toBe(
+      'cpu 12ms, 340 page faults: paging',
+    );
+    expect(describeStallCost(1_200, { cpuMs: null, pageFaults: 1 })).toBe('1 page fault');
   });
 
   it('ranks the work that fits the block ahead of a long-poll that spanned it', () => {
@@ -123,6 +144,10 @@ describe('responsiveness monitor', () => {
     // Measured from the last beat before the block, so never short of it.
     expect(stall.durationMs).toBeGreaterThanOrEqual(1_500);
     expect(stall.during[0]?.label).toBe('GET /api/config');
+    // A busy loop: the thread was on the CPU the whole time.
+    expect(stall.cpuMs).toBeGreaterThanOrEqual(1_000);
+    expect(stall.verdict).toBe('running code');
+    expect(stall.pageFaults).toBeGreaterThanOrEqual(0);
     expect(perfSnapshot().eventLoopDelay?.maxMs).toBeGreaterThanOrEqual(1_500 - BEAT_MS);
     expect(perfSnapshot().slowRequests[0]).toMatchObject({
       method: 'GET',

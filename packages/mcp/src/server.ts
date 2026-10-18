@@ -35,23 +35,31 @@ import {
   SearchMemoryInputSchema,
   StartProjectInputSchema,
   StepBlueprintSchema,
+  type SuggestWorkResult,
   UpdateProjectInputSchema,
   WriteArtifactInputSchema,
   WriteDocumentInputSchema,
   WriteFileInputSchema,
   WriteTaskNoteInputSchema,
+  craftbookInputParams,
+  fillProjectTypeParams,
   findGezelInRoster,
   findProjectByReference,
   formatMediaClock,
   gezelNamesInUse,
   gezelNotFoundMessage,
   gezelRosterHint,
+  isAnswerEnvelope,
   matchProjectTypeForBrief,
   normalizeArtifactPath,
+  parseWorkOptionId,
+  projectNameFromRequest,
   projectNotFoundMessage,
   projectTypeNamedByBrief,
   projectTypesMentionedByBrief,
+  renderSuggestWorkResult,
   roleWithGloss,
+  routingRequestText,
 } from '@bendyline/gezel';
 /**
  * Gezel MCP Server
@@ -147,7 +155,6 @@ import {
   nearbyPathMatches,
   parseKnowledgeUri,
   pickUnusedGezelName,
-  prioritizePullsForCurrentBranch,
   readTaskNotesText,
   removeStepAndCleanEdges,
   reorderStepsArray,
@@ -214,6 +221,7 @@ import {
   normalizeDocumentOutputPath,
 } from './document-routing.js';
 import { normalizeGenerateImageToolArgs } from './generate-image-normalization.js';
+import { registerGitHubTools } from './github-tools.js';
 import {
   installedScriptMissHint,
   isPathShapedScriptName,
@@ -5300,104 +5308,115 @@ server.tool(
         "Run it in tonight's Night Shift instead of now. Use only when the user asks for it tonight or overnight.",
       ),
   },
-  async ({
-    craftbookId,
-    project,
-    title,
-    description,
-    version,
-    assignee,
-    params,
-    outputPath,
-    tonight,
-  }) => {
-    const resolvedProject = project ? await resolveProjectId(project) : projectId;
-    try {
-      const rootTurn = await currentRootTurnContext();
-      const effectiveDescription = description?.trim() || rootTurn?.userText;
-      const invocationParams = normalizeCraftbookInvocationParams(params, outputPath);
-      const invocation = {
-        craftbookId,
-        project: resolvedProject,
-        title,
-        description: effectiveDescription,
-        version,
-        assignee,
-        params: invocationParams,
-        ...(tonight ? { tonight: true } : {}),
-      };
-      const rootTurnId = rootTurn?.rootTurnId ?? null;
-      const launchInvocation = rootTurnId
-        ? {
-            ...invocation,
-            craftbookInvocationKey: rootTurnInvocationKey(rootTurnId, invocation),
-          }
-        : invocation;
-      const launched = rootTurnId
-        ? await invokeCraftbookRootTurnCache.run({
-            rootTurnId,
-            invocation,
-            execute: () => launchCraftbookTask(launchInvocation),
-            cacheResult: (result) => result.kind !== 'setup-required',
-          })
-        : { value: await launchCraftbookTask(launchInvocation), reused: false };
-      const launch = launched.value;
-      if (launch.kind === 'setup-required') {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: craftbookSetupRequiredText(craftbookId, launch.missing),
-            },
-          ],
-          isError: true,
-        };
-      }
-      const created = launch.task;
-      const stepCount = created.craftbook.steps.length;
-      const installedText =
-        launch.installed.length > 0
-          ? ` Installed or upgraded project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
-          : '';
-      const versionText =
-        launch.kind === 'created' && launch.ignoredVersion
-          ? ` Version "${launch.ignoredVersion}" is not one this craftbook offers, so the latest ran.`
-          : '';
-      const idempotentText = launched.reused
-        ? ' This identical craftbook invocation already succeeded in the current root turn; reused its task instead of creating a duplicate.'
-        : '';
-      // Structured contract: the full task rides in structuredContent so the
-      // chat runtime can derive the inline craftbook start card. The text is
-      // kept byte-identical to the pre-migration template — it is what the
-      // model reads, and manager-mcp assertions pin it.
-      return okResult(
-        TaskToolOutputSchema,
-        {
-          summary: `Invoked craftbook "${craftbookId}" — task ${created.ref}.`,
-          operation: 'invoke_craftbook',
-          ref: created.ref,
-          status: created.status,
-          ...(created.activeStepId ? { stepId: created.activeStepId } : {}),
-          task: created,
-          details: {
-            reused: launched.reused,
-            ...(launch.installed.length > 0 ? { installed: launch.installed } : {}),
-          },
-        },
-        {
-          text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${versionText}${idempotentText}`,
-        },
-      );
-    } catch (err) {
+  async (args) => runInvokeCraftbook(args),
+);
+
+/** invoke_craftbook's body; start_work's craftbook and task-here options run it too. */
+async function runInvokeCraftbook({
+  craftbookId,
+  project,
+  title,
+  description,
+  version,
+  assignee,
+  params,
+  outputPath,
+  tonight,
+}: {
+  craftbookId: string;
+  project?: string;
+  title?: string;
+  description?: string;
+  version?: string;
+  assignee?: AssigneeArg;
+  params?: Record<string, string>;
+  outputPath?: string;
+  tonight?: boolean;
+}) {
+  const resolvedProject = project ? await resolveProjectId(project) : projectId;
+  try {
+    const rootTurn = await currentRootTurnContext();
+    const effectiveDescription = description?.trim() || rootTurn?.userText;
+    const invocationParams = normalizeCraftbookInvocationParams(params, outputPath);
+    const invocation = {
+      craftbookId,
+      project: resolvedProject,
+      title,
+      description: effectiveDescription,
+      version,
+      assignee,
+      params: invocationParams,
+      ...(tonight ? { tonight: true } : {}),
+    };
+    const rootTurnId = rootTurn?.rootTurnId ?? null;
+    const launchInvocation = rootTurnId
+      ? {
+          ...invocation,
+          craftbookInvocationKey: rootTurnInvocationKey(rootTurnId, invocation),
+        }
+      : invocation;
+    const launched = rootTurnId
+      ? await invokeCraftbookRootTurnCache.run({
+          rootTurnId,
+          invocation,
+          execute: () => launchCraftbookTask(launchInvocation),
+          cacheResult: (result) => result.kind !== 'setup-required',
+        })
+      : { value: await launchCraftbookTask(launchInvocation), reused: false };
+    const launch = launched.value;
+    if (launch.kind === 'setup-required') {
       return {
         content: [
-          { type: 'text' as const, text: `invoke_craftbook failed: ${unwrapApiError(err)}` },
+          {
+            type: 'text' as const,
+            text: craftbookSetupRequiredText(craftbookId, launch.missing),
+          },
         ],
         isError: true,
       };
     }
-  },
-);
+    const created = launch.task;
+    const stepCount = created.craftbook.steps.length;
+    const installedText =
+      launch.installed.length > 0
+        ? ` Installed or upgraded project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
+        : '';
+    const versionText =
+      launch.kind === 'created' && launch.ignoredVersion
+        ? ` Version "${launch.ignoredVersion}" is not one this craftbook offers, so the latest ran.`
+        : '';
+    const idempotentText = launched.reused
+      ? ' This identical craftbook invocation already succeeded in the current root turn; reused its task instead of creating a duplicate.'
+      : '';
+    // Structured contract: the full task rides in structuredContent so the
+    // chat runtime can derive the inline craftbook start card. The text is
+    // kept byte-identical to the pre-migration template — it is what the
+    // model reads, and manager-mcp assertions pin it.
+    return okResult(
+      TaskToolOutputSchema,
+      {
+        summary: `Invoked craftbook "${craftbookId}" — task ${created.ref}.`,
+        operation: 'invoke_craftbook',
+        ref: created.ref,
+        status: created.status,
+        ...(created.activeStepId ? { stepId: created.activeStepId } : {}),
+        task: created,
+        details: {
+          reused: launched.reused,
+          ...(launch.installed.length > 0 ? { installed: launch.installed } : {}),
+        },
+      },
+      {
+        text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${versionText}${idempotentText}`,
+      },
+    );
+  } catch (err) {
+    return {
+      content: [{ type: 'text' as const, text: `invoke_craftbook failed: ${unwrapApiError(err)}` }],
+      isError: true,
+    };
+  }
+}
 
 /*
  * ── Unified craftbook editing ───────────────────────────────────────────
@@ -5417,11 +5436,28 @@ async function resolveCraftbookTarget(args: {
   task?: string;
   craftbook?: string;
 }): Promise<CraftbookTarget> {
-  if (args.craftbook) return { kind: 'craftbook', id: args.craftbook };
   if (args.task) {
     const parsed = await parseRef(args.task);
-    return { kind: 'task', projectId: parsed.projectId, num: parsed.num, ref: args.task };
+    const target: CraftbookTarget = {
+      kind: 'task',
+      projectId: parsed.projectId,
+      num: parsed.num,
+      ref: args.task,
+    };
+    if (!args.craftbook) return target;
+    // Models name the task AND the book it runs, because the task's embedded
+    // copy keeps the template's id. Letting `craftbook` win sent every edit
+    // to the local template while the task kept running its unchanged copy,
+    // and reads came back from the same template, so the model saw its own
+    // edits and reported the task fixed (nemotron3.5-bolt on
+    // craftbook-edit-midtask, 2026-10-15). The task's copy is what runs.
+    const task = await api.getTask(parsed.projectId, parsed.num);
+    if (task.craftbook.id === args.craftbook) return target;
+    throw new Error(
+      `task ${args.task} runs its own copy of craftbook "${task.craftbook.id}", not "${args.craftbook}". Pass only \`task\` to change what that task runs, or only \`craftbook\` to edit the local template "${args.craftbook}".`,
+    );
   }
+  if (args.craftbook) return { kind: 'craftbook', id: args.craftbook };
   if (sessionCraftbookId) return { kind: 'craftbook', id: sessionCraftbookId };
   if (sessionTaskRef) {
     const parsed = await parseRef(sessionTaskRef);
@@ -5463,7 +5499,9 @@ const craftbookTargetArgs = {
   craftbook: z
     .string()
     .optional()
-    .describe('Local craftbook TEMPLATE id to edit. Omit → session craftbook.'),
+    .describe(
+      "Local craftbook TEMPLATE id to edit. Omit → session craftbook. With `task`, the task's own copy is edited.",
+    ),
 };
 
 const DELIVERABLE_KIND_HELP = `Artifact class (picks the enforced gate). One of: ${DeliverableKindSchema.options.join(', ')}. Loose values like "html", "md", "csv", "code", "game" are accepted. Omit to infer from the file extension.`;
@@ -6959,9 +6997,12 @@ server.tool(
  * gezels deliberately calling start_project shouldn't accidentally
  * collide.
  */
+/** The macros that create a project, sharing one dedupe cache and one notice. */
+type MacroTool = 'start_project' | 'start_job' | 'start_work';
+
 const MACRO_IDEMPOTENCY_TTL_MS = 60_000;
 interface MacroCacheEntry {
-  tool: 'start_project' | 'start_job';
+  tool: MacroTool;
   projectId: string;
   resultText: string;
   expiresAt: number;
@@ -6974,7 +7015,7 @@ function macroCacheKey(name: string): string {
 
 function lookupMacroIdempotent(
   name: string,
-): { tool: 'start_project' | 'start_job'; resultText: string; projectId: string } | null {
+): { tool: MacroTool; resultText: string; projectId: string } | null {
   const key = macroCacheKey(name);
   const entry = macroCache.get(key);
   if (!entry) return null;
@@ -6986,7 +7027,7 @@ function lookupMacroIdempotent(
 }
 
 function recordMacroResult(
-  tool: 'start_project' | 'start_job',
+  tool: MacroTool,
   name: string,
   projectId: string,
   resultText: string,
@@ -7023,7 +7064,7 @@ async function findActiveMacroProject(name: string): Promise<{ id: string; name:
 }
 
 function duplicateMacroProjectNotice(
-  tool: 'start_project' | 'start_job',
+  tool: MacroTool,
   existing: {
     id: string;
     name: string;
@@ -7118,7 +7159,7 @@ function normalizeSpecialistRole(value: string | undefined): string {
 }
 
 function repoFetchRedirectForMacro(input: {
-  tool: 'start_project' | 'start_job';
+  tool: MacroTool;
   name: string;
   about: string;
   missionObjectives: string;
@@ -7439,7 +7480,7 @@ async function runBinaryDocumentProject(
     kickoffMessage?: string;
   },
   request: BinaryDocumentCraftbookRequest,
-  cacheTool: 'start_project' | 'start_job',
+  cacheTool: MacroTool,
 ) {
   const brief = resolveMacroBrief(input);
   const repoRedirect = repoFetchRedirectForMacro({ tool: cacheTool, ...brief });
@@ -7784,7 +7825,7 @@ const TYPED_KICKOFF_MIN_GROWTH_BYTES = 64;
 async function runTypedKickoff(
   brief: { name: string; about: string; missionObjectives: string; taskDescription?: string },
   routed: { match: BriefTypeMatch; type: RoutableProjectType },
-  opts: { cacheTool: 'start_project' | 'start_job'; taskTitle?: string; kickoffMessage?: string },
+  opts: { cacheTool: MacroTool; taskTitle?: string; kickoffMessage?: string },
 ): Promise<{ content: { type: 'text'; text: string }[] } | null> {
   const idempotent = lookupMacroIdempotent(brief.name);
   if (idempotent) {
@@ -7923,155 +7964,494 @@ server.tool(
   'start_project',
   GEZEL_TOOL_DESCRIPTIONS.start_project,
   StartProjectInputSchema.shape,
-  async ({ name, about, missionObjectives, taskDescription, taskTitle, kickoffMessage }) => {
-    const brief = resolveMacroBrief({ name, about, missionObjectives, taskDescription });
-    const binaryRequest = binaryDocumentCraftbookRequest(brief);
-    if (binaryRequest) {
-      return runBinaryDocumentProject(
-        { ...brief, taskTitle, kickoffMessage },
-        binaryRequest,
-        'start_project',
+  async (input) => runStartProject(input, 'start_project'),
+);
+
+/**
+ * The whole new-project path, in order: an exact binary document, a project
+ * type the brief names, the flat solo project under generalist kickoff, a
+ * repository redirect, and otherwise a crew project led by a fresh voorman.
+ * `start_project` and `start_work`'s `new-project` option are the same
+ * decision, so they share this one dispatcher.
+ */
+async function runStartProject(
+  input: {
+    name: string;
+    about?: string;
+    missionObjectives?: string;
+    taskDescription?: string;
+    taskTitle?: string;
+    kickoffMessage?: string;
+  },
+  tool: MacroTool,
+) {
+  const { name, about, missionObjectives, taskDescription, taskTitle, kickoffMessage } = input;
+  const brief = resolveMacroBrief({ name, about, missionObjectives, taskDescription });
+  const binaryRequest = binaryDocumentCraftbookRequest(brief);
+  if (binaryRequest) {
+    return runBinaryDocumentProject({ ...brief, taskTitle, kickoffMessage }, binaryRequest, tool);
+  }
+  const routed = await routeBriefToProjectType(brief);
+  if (routed) {
+    const typed = await runTypedKickoff(brief, routed, {
+      cacheTool: tool,
+      ...(taskTitle ? { taskTitle } : {}),
+      ...(kickoffMessage ? { kickoffMessage } : {}),
+    });
+    if (typed) return typed;
+  }
+  if (process.env.GEZEL_GENERALIST_KICKOFF === 'on') {
+    return runFlatProject({ ...brief, taskTitle, kickoffMessage }, tool);
+  }
+  const repoRedirect = repoFetchRedirectForMacro({ tool, ...brief });
+  if (repoRedirect) {
+    if (repoRedirect.url) {
+      return fetchRepoProject({
+        url: repoRedirect.url,
+        projectName: repoRedirect.projectName,
+        about: brief.about,
+        missionObjectives: brief.missionObjectives,
+        note: `[runtime] ${repoRedirect.message}`,
+        handoffReview: true,
+      });
+    }
+    return {
+      content: [{ type: 'text' as const, text: repoRedirect.message }],
+      isError: true,
+    };
+  }
+
+  const idempotent = lookupMacroIdempotent(brief.name);
+  if (idempotent) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `[runtime] A \`${idempotent.tool}\` call for "${brief.name}" completed moments ago — replaying the original result instead of creating a duplicate. END YOUR TURN; the voorman from the original call is already on it.\n\n${idempotent.resultText}`,
+        },
+      ],
+    };
+  }
+  const existingCrewProject = await findActiveMacroProject(brief.name);
+  if (existingCrewProject) {
+    return duplicateMacroProjectNotice(tool, existingCrewProject);
+  }
+  try {
+    const project = await api.createProject({
+      name: brief.name,
+      about: normalizeMarkdown(brief.about),
+      missionObjectives: normalizeMarkdown(brief.missionObjectives),
+      mode: 'crew',
+      lead: 'none',
+    });
+    const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
+    const voorman = await api.createGezelFromTemplate('voorman', {
+      name: gezelName,
+      gender: gezelGender,
+    });
+    await api.updateProject(project.id, { voormanGezelId: voorman.id });
+    const effectiveTaskDescription = buildKickoffTaskDescription({
+      ...brief,
+      ...(kickoffMessage ? { kickoffNote: kickoffMessage } : {}),
+    });
+    // HARD-PIN structure into the kickoff task so it isn't optional — an
+    // arcade-deluxe run showed even a capable worker ignores a soft "you
+    // should invoke" hint. A confident craftbook match is the signal to
+    // pin; we scaffold with a retargeted build-loop (roles intact for the
+    // crew) rather than instantiating the matched book raw — the raw book
+    // ships an `index.html` gate that never fires for non-HTML crew
+    // deliverables (wild-caught: interface-contract / tool-routing
+    // pinned but auto-advanced 0×). Best-effort: no match (or build-loop
+    // unavailable) → an ad-hoc plan-and-execute task, exactly as before.
+    const deliverable = defaultDeliverableForBrief({
+      ...brief,
+      taskDescription: effectiveTaskDescription,
+    });
+    const briefText = `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`;
+    // A document nobody named still gets the loop's gates and one writer:
+    // without a pin the voorman plans freely and hires a crew in silence.
+    const craftbookPick =
+      !deliverable || deliverable.document ? null : await pickCraftbookForBrief(project.id, brief);
+    const crewLoop =
+      deliverable && (craftbookPick || deliverable.document)
+        ? await buildCrewLoopSteps(
+            deliverable.path,
+            briefText,
+            deliverable.document ? documentProducerRole(briefText) : undefined,
+          )
+        : null;
+    // Single-channel kickoff: `dispatchEntry` hands the entry step to its
+    // resolved gezel as a task-scoped handoff (step prompt + gate contract
+    // in-prompt from turn 1) — there is no separate chat notification.
+    const task = crewLoop
+      ? await api.createTask(project.id, {
+          ...sessionTaskNamingMode,
+          title: taskTitle ?? kickoffTaskTitle(brief),
+          description: effectiveTaskDescription,
+          assignee: { kind: 'gezel', gezelId: voorman.id },
+          steps: crewLoop.steps,
+          entryStepId: crewLoop.entryStepId,
+          dispatchEntry: true,
+        })
+      : await api.createTask(project.id, {
+          ...sessionTaskNamingMode,
+          title: taskTitle ?? kickoffTaskTitle(brief),
+          description: effectiveTaskDescription,
+          assignee: { kind: 'gezel', gezelId: voorman.id },
+          steps: [
+            {
+              name: 'Plan and execute',
+              description: buildKickoffStepDescription(brief, { isCrew: true }),
+            },
+          ],
+          dispatchEntry: true,
+        });
+    const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
+    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as voorman. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project.`;
+    recordMacroResult(tool, brief.name, project.id, resultText);
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: resultText,
+        },
+      ],
+    };
+  } catch (err) {
+    return {
+      content: [{ type: 'text' as const, text: `${tool} failed: ${unwrapApiError(err)}` }],
+      isError: true,
+    };
+  }
+}
+
+/*
+ * ── Work routing ────────────────────────────────────────────────────────
+ *
+ * `suggest_work` ranks every kind of next step on the daemon (core
+ * `rankWorkOptions`) and `start_work` runs the one chosen, by id, through the
+ * same executors the older tools use: `runInvokeCraftbook`, `runTypedKickoff`
+ * and `runStartProject`. Both read the person's own message for the request,
+ * so a coordinator only has to copy an id. Registered always; a session sees
+ * them only under the `tools.work-routing` behavior.
+ */
+
+function workRoutingError(text: string) {
+  return { content: [{ type: 'text' as const, text }], isError: true };
+}
+
+/** This session's model-facing tools, as far as this child knows them. */
+function sessionToolNames(): string[] | undefined {
+  if (authorizedToolNames !== null) return [...authorizedToolNames];
+  if (allowedToolNames !== null) {
+    return [...allowedToolNames].filter((name) => !excludedToolNames.has(name));
+  }
+  return undefined;
+}
+
+/** The person's request for this turn, read together with what an answer answers. */
+async function personsRoutingRequest(): Promise<string | undefined> {
+  if (!sessionId) return undefined;
+  try {
+    const session = await api.getChatSession(sessionId);
+    const said = session.messages
+      .filter(
+        (m) =>
+          m.role === 'user' &&
+          !m.hidden &&
+          !m.from &&
+          m.origin !== 'system' &&
+          m.content.trim().length > 0,
+      )
+      .map((m) => m.content.trim());
+    const latest = said.at(-1);
+    if (!latest) return undefined;
+    const previous = isAnswerEnvelope(latest)
+      ? said
+          .slice(0, -1)
+          .reverse()
+          .find((text) => !isAnswerEnvelope(text))
+      : undefined;
+    return routingRequestText(latest, previous);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The last ranking per (root turn, project), so start_work can reuse its bindings. */
+const workOptionsByTurn = new Map<string, SuggestWorkResult>();
+const MAX_REMEMBERED_RANKINGS = 16;
+
+function rememberWorkOptions(key: string, result: SuggestWorkResult): void {
+  workOptionsByTurn.delete(key);
+  workOptionsByTurn.set(key, result);
+  while (workOptionsByTurn.size > MAX_REMEMBERED_RANKINGS) {
+    const oldest = workOptionsByTurn.keys().next().value;
+    if (oldest === undefined) break;
+    workOptionsByTurn.delete(oldest);
+  }
+}
+
+async function rankWorkForTurn(project: string, request: string): Promise<SuggestWorkResult> {
+  const tools = sessionToolNames();
+  const result = await api.suggestWork(project, { request, ...(tools ? { tools } : {}) });
+  const rootTurn = await currentRootTurnContext();
+  if (rootTurn) rememberWorkOptions(`${rootTurn.rootTurnId}|${project}`, result);
+  return result;
+}
+
+/** This turn's ranking for a project: the one suggest_work returned, or a fresh one. */
+async function rankingForTurn(project: string, request: string): Promise<SuggestWorkResult> {
+  const rootTurn = await currentRootTurnContext();
+  const remembered = rootTurn
+    ? workOptionsByTurn.get(`${rootTurn.rootTurnId}|${project}`)
+    : undefined;
+  return remembered ?? (await rankWorkForTurn(project, request));
+}
+
+/**
+ * Params the daemon bound for a craftbook option (a deck's topic), from this
+ * turn's ranking when there is one, otherwise from a fresh one. An id the
+ * ranking does not list still launches; it just gets no bound params.
+ */
+async function boundCraftbookParams(
+  project: string,
+  craftbookId: string,
+  request: string,
+): Promise<Record<string, string> | undefined> {
+  try {
+    const result = await rankingForTurn(project, request);
+    const option = result.options.find(
+      (o) => o.kind === 'craftbook' && o.craftbookId === craftbookId,
+    );
+    return option?.kind === 'craftbook' ? option.params : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * An id copied without its prefix (`language-trainer` for
+ * `type:language-trainer`) — the commonest way a small model gets one wrong.
+ * Read it against this turn's options first, then the catalog's project
+ * types and the project's craftbooks. Null when nothing it names exists.
+ */
+async function resolveBareWorkOption(
+  raw: string,
+  project: string,
+  request: string,
+): Promise<ReturnType<typeof parseWorkOptionId>> {
+  const bare = raw.trim().replace(/^[\s[("'`]+|[\s\])"'`.,;:]+$/g, '');
+  if (!bare || bare.includes(':')) return null;
+  const listed = await rankingForTurn(project, request).catch(() => null);
+  const fromList = listed?.options.find((o) => o.id.endsWith(`:${bare}`));
+  if (fromList) return parseWorkOptionId(fromList.id);
+  const types = await listRoutableProjectTypes().catch(() => []);
+  if (types.some((t) => t.id === bare)) return { kind: 'project-type', typeId: bare };
+  const books = await api.listProjectCraftbooks(project).catch(() => null);
+  if (books?.items.some((item) => item.manifest.id === bare)) {
+    return { kind: 'craftbook', craftbookId: bare };
+  }
+  return null;
+}
+
+server.tool(
+  'suggest_work',
+  "Find the right way to handle what the person asked for, before starting anything. Ranks every option at once: a craftbook (a ready-made procedure), a project type, a new project, a task in this project, or recurring work. It also says when the message is a question to answer yourself, or when to ask the person first. Then call start_work with the id of the option that fits. The person's own message is read for you.",
+  {
+    request: z
+      .string()
+      .optional()
+      .describe(
+        'Only when this turn has no message from the person (a handoff): what they asked for. Otherwise omit it; their own words are used.',
+      ),
+    project: z
+      .string()
+      .optional()
+      .describe('Project id or name the work belongs in. Defaults to the current project.'),
+  },
+  async ({ request, project }) => {
+    const resolvedProject = project ? await resolveProjectId(project) : projectId;
+    const text = (await personsRoutingRequest()) ?? request?.trim();
+    if (!text) {
+      return workRoutingError(
+        'There is no request in this turn to rank. Pass `request` with what the person asked for.',
       );
     }
-    const routed = await routeBriefToProjectType(brief);
-    if (routed) {
-      const typed = await runTypedKickoff(brief, routed, {
-        cacheTool: 'start_project',
-        ...(taskTitle ? { taskTitle } : {}),
-        ...(kickoffMessage ? { kickoffMessage } : {}),
-      });
-      if (typed) return typed;
-    }
-    if (process.env.GEZEL_GENERALIST_KICKOFF === 'on') {
-      return runFlatProject({ ...brief, taskTitle, kickoffMessage }, 'start_project');
-    }
-    const repoRedirect = repoFetchRedirectForMacro({
-      tool: 'start_project',
-      ...brief,
-    });
-    if (repoRedirect) {
-      if (repoRedirect.url) {
-        return fetchRepoProject({
-          url: repoRedirect.url,
-          projectName: repoRedirect.projectName,
-          about: brief.about,
-          missionObjectives: brief.missionObjectives,
-          note: `[runtime] ${repoRedirect.message}`,
-          handoffReview: true,
-        });
-      }
-      return {
-        content: [{ type: 'text' as const, text: repoRedirect.message }],
-        isError: true,
-      };
-    }
-
-    const idempotent = lookupMacroIdempotent(brief.name);
-    if (idempotent) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `[runtime] A \`${idempotent.tool}\` call for "${brief.name}" completed moments ago — replaying the original result instead of creating a duplicate. END YOUR TURN; the voorman from the original call is already on it.\n\n${idempotent.resultText}`,
-          },
-        ],
-      };
-    }
-    const existingCrewProject = await findActiveMacroProject(brief.name);
-    if (existingCrewProject) {
-      return duplicateMacroProjectNotice('start_project', existingCrewProject);
-    }
     try {
-      const project = await api.createProject({
-        name: brief.name,
-        about: normalizeMarkdown(brief.about),
-        missionObjectives: normalizeMarkdown(brief.missionObjectives),
-        mode: 'crew',
-        lead: 'none',
-      });
-      const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
-      const voorman = await api.createGezelFromTemplate('voorman', {
-        name: gezelName,
-        gender: gezelGender,
-      });
-      await api.updateProject(project.id, { voormanGezelId: voorman.id });
-      const effectiveTaskDescription = buildKickoffTaskDescription({
-        ...brief,
-        ...(kickoffMessage ? { kickoffNote: kickoffMessage } : {}),
-      });
-      // HARD-PIN structure into the kickoff task so it isn't optional — an
-      // arcade-deluxe run showed even a capable worker ignores a soft "you
-      // should invoke" hint. A confident craftbook match is the signal to
-      // pin; we scaffold with a retargeted build-loop (roles intact for the
-      // crew) rather than instantiating the matched book raw — the raw book
-      // ships an `index.html` gate that never fires for non-HTML crew
-      // deliverables (wild-caught: interface-contract / tool-routing
-      // pinned but auto-advanced 0×). Best-effort: no match (or build-loop
-      // unavailable) → an ad-hoc plan-and-execute task, exactly as before.
-      const deliverable = defaultDeliverableForBrief({
-        ...brief,
-        taskDescription: effectiveTaskDescription,
-      });
-      const briefText = `${brief.name} ${brief.about} ${brief.taskDescription ?? ''} ${effectiveTaskDescription}`;
-      // A document nobody named still gets the loop's gates and one writer:
-      // without a pin the voorman plans freely and hires a crew in silence.
-      const craftbookPick =
-        !deliverable || deliverable.document
-          ? null
-          : await pickCraftbookForBrief(project.id, brief);
-      const crewLoop =
-        deliverable && (craftbookPick || deliverable.document)
-          ? await buildCrewLoopSteps(
-              deliverable.path,
-              briefText,
-              deliverable.document ? documentProducerRole(briefText) : undefined,
-            )
-          : null;
-      // Single-channel kickoff: `dispatchEntry` hands the entry step to its
-      // resolved gezel as a task-scoped handoff (step prompt + gate contract
-      // in-prompt from turn 1) — there is no separate chat notification.
-      const task = crewLoop
-        ? await api.createTask(project.id, {
-            ...sessionTaskNamingMode,
-            title: taskTitle ?? kickoffTaskTitle(brief),
-            description: effectiveTaskDescription,
-            assignee: { kind: 'gezel', gezelId: voorman.id },
-            steps: crewLoop.steps,
-            entryStepId: crewLoop.entryStepId,
-            dispatchEntry: true,
-          })
-        : await api.createTask(project.id, {
-            ...sessionTaskNamingMode,
-            title: taskTitle ?? kickoffTaskTitle(brief),
-            description: effectiveTaskDescription,
-            assignee: { kind: 'gezel', gezelId: voorman.id },
-            steps: [
-              {
-                name: 'Plan and execute',
-                description: buildKickoffStepDescription(brief, { isCrew: true }),
-              },
-            ],
-            dispatchEntry: true,
-          });
-      const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
-      const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as voorman. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project.`;
-      recordMacroResult('start_project', brief.name, project.id, resultText);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: resultText,
-          },
-        ],
-      };
+      const result = await rankWorkForTurn(resolvedProject, text);
+      return { content: [{ type: 'text' as const, text: renderSuggestWorkResult(result) }] };
     } catch (err) {
-      return {
-        content: [{ type: 'text' as const, text: `start_project failed: ${unwrapApiError(err)}` }],
-        isError: true,
-      };
+      return workRoutingError(`suggest_work failed: ${unwrapApiError(err)}`);
     }
   },
 );
+
+server.tool(
+  'start_work',
+  'Start the option you chose from suggest_work, by its id: "craftbook:<id>", "type:<id>", "new-project", "task-here", or "recurring:<key>". The person\'s request and the destination are bound for you, so the id is all it needs. Returns who is working on it.',
+  {
+    option: z
+      .string()
+      .describe('The option id exactly as suggest_work listed it, e.g. "type:trip-planner".'),
+    project: z
+      .string()
+      .optional()
+      .describe(
+        'Existing project id or name for a craftbook, task or recurring option. Defaults to the current project.',
+      ),
+    name: z
+      .string()
+      .optional()
+      .describe('A project name for a new or typed project. Taken from the request when omitted.'),
+    details: z
+      .string()
+      .optional()
+      .describe("Only what the person's message does not already say. Usually omit it."),
+  },
+  async ({ option, project, name, details }) => {
+    const resolvedProject = project ? await resolveProjectId(project) : projectId;
+    const said = (await personsRoutingRequest()) ?? details?.trim();
+    if (!said) {
+      return workRoutingError(
+        'There is no request in this turn to start work for. Pass `details` with what the person asked for.',
+      );
+    }
+    const parsed =
+      parseWorkOptionId(option) ?? (await resolveBareWorkOption(option, resolvedProject, said));
+    if (!parsed) {
+      const listed = await rankingForTurn(resolvedProject, said).catch(() => null);
+      const ids = listed?.options.map((o) => `"${o.id}"`).join(', ');
+      return workRoutingError(
+        ids
+          ? `"${option}" is not one of this request's options. Use one of: ${ids}.`
+          : `"${option}" is not an option id. Use one from suggest_work: "craftbook:<id>", "type:<id>", "new-project", "task-here" or "recurring:<key>".`,
+      );
+    }
+    const extra = details?.trim();
+    const brief = extra && extra !== said ? `${said}\n\n${extra}` : said;
+    switch (parsed.kind) {
+      case 'craftbook': {
+        // An id no book has would reach the task API and come back as a bare
+        // `internal_error`, which reads to a small model as a broken tool.
+        const books = await api.listProjectCraftbooks(resolvedProject).catch(() => null);
+        const book = books?.items.find((item) => item.manifest.id === parsed.craftbookId);
+        if (books && !book) {
+          const listed = await rankingForTurn(resolvedProject, said).catch(() => null);
+          const ids = listed?.options.map((o) => `"${o.id}"`).join(', ');
+          return workRoutingError(
+            `There is no craftbook "${parsed.craftbookId}".${ids ? ` Use one of: ${ids}.` : ' Call suggest_work for the options that exist.'}`,
+          );
+        }
+        // A picked file cannot come from a chat message; the task API would
+        // answer "Choose the spreadsheet…", which reads as a question to ask.
+        const picker =
+          book?.manifest.kind === 'craftbook-template'
+            ? craftbookInputParams(book.manifest.paramSchema).find((input) => input.required)
+            : undefined;
+        if (picker) {
+          const listed = await rankingForTurn(resolvedProject, said).catch(() => null);
+          const ids = listed?.options
+            .filter((o) => o.id !== `craftbook:${parsed.craftbookId}`)
+            .map((o) => `"${o.id}"`)
+            .join(', ');
+          return workRoutingError(
+            `"${parsed.craftbookId}" needs its ${picker.title.toLowerCase()} picked in the app, so it cannot start from chat.${ids ? ` Use one of: ${ids}.` : ' Call suggest_work for the options that exist.'}`,
+          );
+        }
+        const params = await boundCraftbookParams(resolvedProject, parsed.craftbookId, said);
+        return runInvokeCraftbook({
+          craftbookId: parsed.craftbookId,
+          project: resolvedProject,
+          description: brief,
+          ...(params ? { params } : {}),
+        });
+      }
+      case 'task-here':
+        return runInvokeCraftbook({
+          craftbookId: 'build-loop',
+          project: resolvedProject,
+          description: brief,
+        });
+      case 'new-project':
+        return runStartProject(
+          { name: name?.trim() || projectNameFromRequest(said), taskDescription: brief },
+          'start_work',
+        );
+      case 'project-type':
+        return startTypedWork(parsed.typeId, said, brief, name);
+      case 'recurring':
+        return toggleRecurringWork(resolvedProject, parsed.key, parsed.pause);
+    }
+  },
+);
+
+/**
+ * A typed project for the type the coordinator chose. The type's parameters
+ * come from the person's sentence; when they cannot be read, the ordinary
+ * new-project path decides instead of opening the type on a placeholder.
+ */
+async function startTypedWork(typeId: string, said: string, brief: string, name?: string) {
+  const types = await listRoutableProjectTypes().catch(() => []);
+  const type = types.find((t) => t.id === typeId);
+  if (!type) {
+    return workRoutingError(
+      `There is no project type "${typeId}". Call suggest_work for the options that exist.`,
+    );
+  }
+  const projectName = name?.trim() || projectNameFromRequest(said, type.name);
+  const filled = fillProjectTypeParams(type.params, said);
+  if (filled) {
+    const dataFile = type.pages?.reads?.find((read) => read.source === 'workspace')?.path;
+    const typed = await runTypedKickoff(
+      resolveMacroBrief({ name: projectName, taskDescription: brief }),
+      {
+        type,
+        match: {
+          typeId: type.id,
+          hits: [],
+          params: filled.params,
+          assumed: filled.assumed,
+          ...(dataFile ? { dataFile } : {}),
+        },
+      },
+      { cacheTool: 'start_work' },
+    );
+    if (typed) return typed;
+  }
+  return runStartProject({ name: projectName, taskDescription: brief }, 'start_work');
+}
+
+async function toggleRecurringWork(project: string, key: string, pause: boolean) {
+  try {
+    if (pause) {
+      const { item } = await api.disableSuggestedWork(project, key);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Paused "${item.craftbookName ?? item.craftbookId}"${item.taskRef ? ` (host task ${item.taskRef})` : ''}. Its history is kept; switching it back on resumes it. Tell the person it is off.`,
+          },
+        ],
+      };
+    }
+    const { item, task } = await api.enableSuggestedWork(project, { key });
+    const cadence =
+      item.runMode === 'night-shift'
+        ? 'in the night shift'
+        : `on its schedule (${item.cron ?? 'cron'})`;
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Switched on "${item.craftbookName ?? item.craftbookId}" — it runs ${cadence}, host task ${task.ref}. Tell the person when it will first run.`,
+        },
+      ],
+    };
+  } catch (err) {
+    return workRoutingError(`start_work failed: ${unwrapApiError(err)}`);
+  }
+}
 
 async function runFlatProject(
   input: {
@@ -8083,7 +8463,7 @@ async function runFlatProject(
     taskTitle?: string;
     kickoffMessage?: string;
   },
-  cacheTool: 'start_project' | 'start_job',
+  cacheTool: MacroTool,
 ) {
   const {
     name,
@@ -12258,399 +12638,7 @@ server.tool(
 );
 
 // ── GitHub (PR + workflow operations) ──
-//
-// These tools wrap the per-project GitHub manager and PR client so
-// craftbooks (and free-form gezels) can review PRs, post comments,
-// open PRs, and watch CI without shelling out to the `gh` CLI. The
-// auth piggybacks on the github toolset PAT — no per-tool config.
-
-server.tool(
-  'github_pr_list',
-  "List open pull requests on the current project's linked GitHub repo. Returns title, author, branches, and PR number. When the project has a local checkout, PRs whose head matches the checked-out branch are listed first and explicitly marked as the default. Use this to find the right PR for a review or ship operation.",
-  {
-    project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
-  },
-  async ({ project }) => {
-    const resolved = project ? await resolveProjectId(project) : projectId;
-    try {
-      const [res, status] = await Promise.all([
-        api.listProjectGitHubPulls(resolved),
-        api.getProjectGitStatus(resolved).catch(() => null),
-      ]);
-      const prioritized = prioritizePullsForCurrentBranch(res.pulls, status?.branch);
-      if (!prioritized.pulls.length) {
-        return { content: [{ type: 'text' as const, text: 'No open pull requests.' }] };
-      }
-      const lines = prioritized.pulls.map((p) => {
-        const currentBranchMatch =
-          prioritized.currentBranch && p.headRef === prioritized.currentBranch;
-        return [
-          `#${p.number} — ${p.title} (${p.author}, ${p.headRef} → ${p.baseRef}${p.draft ? ', draft' : ''})`,
-          `  ${p.url}`,
-          ...(currentBranchMatch
-            ? [
-                `  Current branch match${prioritized.matchingCount === 1 ? ' — default' : ''}: ${prioritized.currentBranch}`,
-              ]
-            : []),
-        ].join('\n');
-      });
-      return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] };
-    } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `github_pr_list failed: ${msg}` }],
-        isError: true,
-      };
-    }
-  },
-);
-
-server.tool(
-  'github_pr_view',
-  'Fetch metadata for a single pull request: title, body, branches, state, mergeable, additions/deletions, changed file count. Use before /review or /ship to confirm scope.',
-  {
-    project: z.string().optional(),
-    number: z.number().int().positive().describe('PR number'),
-  },
-  async ({ project, number }) => {
-    const resolved = project ? await resolveProjectId(project) : projectId;
-    try {
-      const pr = await api.getProjectGitHubPull(resolved, number);
-      const lines = [
-        `#${pr.number} — ${pr.title}`,
-        `Author: ${pr.author}`,
-        `Branches: ${pr.headRef} → ${pr.baseRef}${pr.draft ? ' (draft)' : ''}`,
-        `State: ${pr.state}${pr.merged ? ', merged' : ''}${pr.mergeable === false ? ', NOT mergeable' : ''}`,
-        `Changes: +${pr.additions} −${pr.deletions} across ${pr.changedFiles} file(s)`,
-        `URL: ${pr.url}`,
-        '',
-        pr.body || '(no description)',
-      ];
-      return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
-    } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `github_pr_view failed: ${msg}` }],
-        isError: true,
-      };
-    }
-  },
-);
-
-server.tool(
-  'github_pr_files',
-  'List a bounded page of files changed in a PR. Defaults to compact metadata only so filenames later in a large PR are never hidden behind early patch bodies. Follow `nextOffset` until `hasMore: false`; set includePatch only for a small page, or use github_pr_file for one path.',
-  {
-    project: z.string().optional(),
-    number: z.number().int().positive(),
-    offset: z
-      .number()
-      .int()
-      .nonnegative()
-      .optional()
-      .describe('Zero-based file offset (default 0).'),
-    limit: z.number().int().min(1).max(200).optional().describe('Files per page (default 100).'),
-    paths: z
-      .array(z.string().min(1))
-      .max(50)
-      .optional()
-      .describe('Optional exact changed paths to select.'),
-    includePatch: z
-      .boolean()
-      .optional()
-      .describe('Include bounded patches for this page. Defaults false.'),
-  },
-  async ({ project, number, offset, limit, paths, includePatch }) => {
-    const resolved = project ? await resolveProjectId(project) : projectId;
-    try {
-      const res = await api.listProjectGitHubPullFiles(resolved, number, {
-        ...(offset !== undefined ? { offset } : {}),
-        ...(limit !== undefined ? { limit } : {}),
-        ...(paths ? { paths } : {}),
-        includePatch: includePatch === true,
-      });
-      if (!res.files.length) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: paths?.length
-                ? `No changed files matched: ${paths.join(', ')}`
-                : 'No file changes in this PR.',
-            },
-          ],
-        };
-      }
-      const blocks = res.files.map((f) => {
-        const header = `${f.filename} — ${f.status} (+${f.additions} −${f.deletions})`;
-        if (!f.patch) return header;
-        const truncation = f.patchTruncated
-          ? `\n[patch truncated: returned ${f.patch.length} of ${f.patchChars ?? '?'} chars; call github_pr_diff with path="${f.filename}" and nextOffset until complete]`
-          : '';
-        return `${header}\n\`\`\`diff\n${f.patch}\n\`\`\`${truncation}`;
-      });
-      const start = res.offset ?? offset ?? 0;
-      const total = res.totalFiles ?? res.files.length;
-      const end = start + res.files.length;
-      const coverage = [
-        `Coverage: files ${start + 1}-${end} of ${total}${res.allFiles !== undefined && res.allFiles !== total ? ` selected from ${res.allFiles} PR files` : ''}.`,
-        `Patches: ${res.includesPatch ? 'included where available' : 'omitted (metadata-only)'}.`,
-        res.hasMore
-          ? `hasMore: true; nextOffset: ${res.nextOffset ?? end}. Call github_pr_files again with that offset.`
-          : 'hasMore: false; this selection is complete.',
-      ].join('\n');
-      return {
-        content: [{ type: 'text' as const, text: `${coverage}\n\n${blocks.join('\n\n')}` }],
-      };
-    } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `github_pr_files failed: ${msg}` }],
-        isError: true,
-      };
-    }
-  },
-);
-
-server.tool(
-  'github_pr_file',
-  'Fetch one changed path and its bounded patch. Use this after github_pr_files identifies a file; if the patch is truncated, continue with github_pr_diff({ number, path, offset: nextOffset }).',
-  {
-    project: z.string().optional(),
-    number: z.number().int().positive(),
-    path: z.string().min(1).describe('Exact changed path from github_pr_files.'),
-  },
-  async ({ project, number, path }) => {
-    const resolved = project ? await resolveProjectId(project) : projectId;
-    try {
-      const res = await api.listProjectGitHubPullFiles(resolved, number, {
-        paths: [path],
-        limit: 1,
-        includePatch: true,
-      });
-      const file = res.files[0];
-      if (!file) {
-        return {
-          content: [{ type: 'text' as const, text: `Changed path not found: ${path}` }],
-          isError: true,
-        };
-      }
-      const header = `${file.filename} — ${file.status} (+${file.additions} −${file.deletions})`;
-      const patch = file.patch
-        ? `\n\n\`\`\`diff\n${file.patch}\n\`\`\``
-        : '\n\n(No patch returned.)';
-      const truncation = file.patchTruncated
-        ? `\n\nPatch truncated: returned ${file.patch?.length ?? 0} of ${file.patchChars ?? '?'} chars. Call github_pr_diff({ number: ${number}, path: ${JSON.stringify(file.filename)} }) and follow nextOffset.`
-        : '';
-      return { content: [{ type: 'text' as const, text: `${header}${patch}${truncation}` }] };
-    } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `github_pr_file failed: ${msg}` }],
-        isError: true,
-      };
-    }
-  },
-);
-
-server.tool(
-  'github_pr_diff',
-  'Fetch one explicit character page of a PR diff, optionally scoped to an exact changed path. The result always reports totalChars, truncated, and nextOffset; continue until truncated is false. For large PR discovery, page github_pr_files first instead of assuming one diff call is complete.',
-  {
-    project: z.string().optional(),
-    number: z.number().int().positive(),
-    path: z.string().min(1).optional().describe('Optional exact changed path.'),
-    offset: z.number().int().nonnegative().optional().describe('Character offset (default 0).'),
-    limit: z
-      .number()
-      .int()
-      .min(1)
-      .max(60_000)
-      .optional()
-      .describe('Characters to return (default 48,000; max 60,000).'),
-  },
-  async ({ project, number, path, offset, limit }) => {
-    const resolved = project ? await resolveProjectId(project) : projectId;
-    try {
-      const res = await api.getProjectGitHubPullDiff(resolved, number, {
-        ...(path ? { path } : {}),
-        ...(offset !== undefined ? { offset } : {}),
-        ...(limit !== undefined ? { limit } : {}),
-      });
-      const scope = res.path ? ` for ${res.path}` : '';
-      const start = res.offset ?? offset ?? 0;
-      const returned = res.returnedChars ?? res.diff.length;
-      const total = res.totalChars ?? res.diff.length;
-      const meta = [
-        `Diff page${scope}: chars ${start}-${start + returned} of ${total}.`,
-        res.truncated
-          ? `truncated: true; nextOffset: ${res.nextOffset ?? start + returned}. Continue with the same path and that offset.`
-          : 'truncated: false; this diff selection is complete.',
-      ].join('\n');
-      return {
-        content: [{ type: 'text' as const, text: `${meta}\n\n${res.diff || '(empty diff)'}` }],
-      };
-    } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `github_pr_diff failed: ${msg}` }],
-        isError: true,
-      };
-    }
-  },
-);
-
-server.tool(
-  'github_pr_comments',
-  "List comments on a PR — both top-level (issue) comments and inline review comments. Use before posting a new comment so you don't duplicate ground that's already been covered.",
-  {
-    project: z.string().optional(),
-    number: z.number().int().positive(),
-  },
-  async ({ project, number }) => {
-    const resolved = project ? await resolveProjectId(project) : projectId;
-    try {
-      const res = await api.listProjectGitHubPullComments(resolved, number);
-      if (!res.comments.length) {
-        return { content: [{ type: 'text' as const, text: 'No comments on this PR.' }] };
-      }
-      const lines = res.comments.map((c) => {
-        const tag = c.kind === 'review' && c.path ? `[review on ${c.path}]` : '[comment]';
-        return `${tag} ${c.author} @ ${c.createdAt}\n${c.body}`;
-      });
-      return { content: [{ type: 'text' as const, text: lines.join('\n\n---\n\n') }] };
-    } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `github_pr_comments failed: ${msg}` }],
-        isError: true,
-      };
-    }
-  },
-);
-
-server.tool(
-  'github_pr_comment',
-  'Post a top-level comment to a PR. Use this to surface a review summary, a question to the author, or a status update from a craftbook. Returns the new comment id + URL.',
-  {
-    project: z.string().optional(),
-    number: z.number().int().positive(),
-    body: z.string().min(1).describe('Markdown body of the comment.'),
-  },
-  async ({ project, number, body }) => {
-    const resolved = project ? await resolveProjectId(project) : projectId;
-    try {
-      const res = await api.createProjectGitHubPullComment(resolved, number, body);
-      return {
-        content: [{ type: 'text' as const, text: `Posted comment ${res.id} — ${res.url}` }],
-      };
-    } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `github_pr_comment failed: ${msg}` }],
-        isError: true,
-      };
-    }
-  },
-);
-
-server.tool(
-  'github_pr_create',
-  'Open a new pull request. `head` is the source branch (or `owner:branch` for cross-fork PRs); `base` is the target branch. Returns the new PR number + URL. The head branch must already exist on the remote; this tool does not commit or push local changes. If needed, ask the user to commit and push it from the project Git UI first.',
-  {
-    project: z.string().optional(),
-    title: z.string().min(1),
-    head: z.string().min(1).describe('Source branch (or owner:branch for cross-fork).'),
-    base: z.string().min(1).describe('Target branch (typically "main").'),
-    body: z.string().optional().describe('PR description (markdown).'),
-    draft: z.boolean().optional().describe('Open as a draft PR.'),
-  },
-  async ({ project, title, head, base, body, draft }) => {
-    const resolved = project ? await resolveProjectId(project) : projectId;
-    try {
-      const res = await api.createProjectGitHubPullRequest(resolved, {
-        title,
-        head,
-        base,
-        ...(body !== undefined ? { body } : {}),
-        ...(draft !== undefined ? { draft } : {}),
-      });
-      return {
-        content: [{ type: 'text' as const, text: `Opened PR #${res.number} — ${res.url}` }],
-      };
-    } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `github_pr_create failed: ${msg}` }],
-        isError: true,
-      };
-    }
-  },
-);
-
-server.tool(
-  'github_workflow_runs',
-  'List recent CI workflow runs for a branch. Used by /ship and /canary to wait for checks before merging or to confirm a deploy succeeded. Returns id, name, status, conclusion, URL.',
-  {
-    project: z.string().optional(),
-    branch: z.string().min(1),
-    limit: z.number().int().positive().max(100).optional(),
-  },
-  async ({ project, branch, limit }) => {
-    const resolved = project ? await resolveProjectId(project) : projectId;
-    try {
-      const res = await api.listProjectGitHubWorkflowRuns(resolved, branch, limit);
-      if (!res.runs.length) {
-        return {
-          content: [{ type: 'text' as const, text: `No workflow runs for branch ${branch}.` }],
-        };
-      }
-      const lines = res.runs.map(
-        (r) =>
-          `[${r.status}${r.conclusion ? `/${r.conclusion}` : ''}] ${r.name} — ${r.createdAt}\n  ${r.url}`,
-      );
-      return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] };
-    } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `github_workflow_runs failed: ${msg}` }],
-        isError: true,
-      };
-    }
-  },
-);
-
-server.tool(
-  'github_check_status',
-  'Combined check status for a ref (branch or sha). Returns the overall state — success/failure/pending/unknown — plus a per-check breakdown. Use this to decide whether a PR is safe to merge.',
-  {
-    project: z.string().optional(),
-    ref: z.string().min(1).describe('Branch name or commit sha.'),
-  },
-  async ({ project, ref }) => {
-    const resolved = project ? await resolveProjectId(project) : projectId;
-    try {
-      const res = await api.getProjectGitHubChecks(resolved, ref);
-      const header = `State: ${res.state} (${res.checks.length} check(s))`;
-      if (!res.checks.length) {
-        return {
-          content: [{ type: 'text' as const, text: `${header}\nNo checks reported for ${ref}.` }],
-        };
-      }
-      const lines = res.checks.map(
-        (c) =>
-          `• ${c.name} — ${c.status}${c.conclusion ? ` / ${c.conclusion}` : ''}${c.url ? `\n  ${c.url}` : ''}`,
-      );
-      return { content: [{ type: 'text' as const, text: `${header}\n${lines.join('\n')}` }] };
-    } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `github_check_status failed: ${msg}` }],
-        isError: true,
-      };
-    }
-  },
-);
+registerGitHubTools({ server, api, projectId, resolveProjectId, unwrapApiError });
 
 // ── Permission prompt (Claude CLI provider only) ──
 //

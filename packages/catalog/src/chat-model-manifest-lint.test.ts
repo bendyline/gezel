@@ -278,6 +278,17 @@ describe('lintChatModelManifest rules', () => {
       expect(r.errors.map((f) => f.rule)).not.toContain('mlx-nonstandard-quant-format');
     });
 
+    it('warns when an NVFP4 llama.cpp file is not kept off Metal, until it is', () => {
+      const nvfp4 = { residentBytes: 1, huggingfaceRepo: 'ggml-org/x-GGUF', quantization: 'NVFP4' };
+      const open = lintChatModelManifest({ ...complete, llamaCpp: nvfp4 });
+      expect(open.warnings.map((f) => f.rule)).toContain('llamacpp-nvfp4-reaches-metal');
+      const gated = lintChatModelManifest({
+        ...complete,
+        llamaCpp: { ...nvfp4, excludeBackends: ['metal'] },
+      });
+      expect(gated.warnings.map((f) => f.rule)).not.toContain('llamacpp-nvfp4-reaches-metal');
+    });
+
     it('is silent for a single-engine model', () => {
       const r = lintChatModelManifest(complete);
       expect(r.errors.map((f) => f.rule)).not.toContain('engine-quant-bits-mismatch');

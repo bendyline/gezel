@@ -1688,6 +1688,20 @@ the shelves is part of using the library, so it should not move the person to
 another area. Installs announce themselves, and the rail picks each one up
 while the dialog is still open.
 
+**A long directory scrolls as one list, with an A–Z index pinned beside it.**
+The Knowledge document list has no "Show more" step to press: pages load as
+either edge comes within reach, so the list can open in the middle and still
+scroll to both ends. It opens on the article being read (returning to the
+view, or to the list on a narrow screen, lands where the person was) and on
+the top of a topic they just picked. An alphabetical listing longer than a
+page gets `.knowledge-letter-index` down its left edge: `#` then A–Z as plain
+`--text-2xs` letters, not keys, since it is a ruler rather than a choice.
+The column's header and the index stay put; only the list moves. A letter
+with nothing under it stays in place, dimmed, so the ruler keeps its shape,
+and the letter at the top of the viewport takes `--accent-text`, which is
+the landing cue for a jump. Curated listings (the Handboek's) are not
+alphabetical and get no index.
+
 **A media hit says what matched and opens on it.** A search hit on a photo, a
 clip or a recording reads `Photo`, `Video · 1:30–2:00` or `Sound · 0:00–0:30`
 (`mediaSpanLabel` in core, the one wording for every surface). In the titlebar
@@ -2085,6 +2099,20 @@ tray. Derivation lives in
 [system-notices.ts](../packages/ui/src/system-notices.ts), so the rail and
 Settings can never drift apart. The one update outcome that *is* worth
 interrupting for — a verified update waiting to install — also stays a banner.
+A notice the person can act on also appears where the action lives: a GPU
+backend Gezel switched off after it crashed several times in a row while
+starting shows on that engine's Settings tab as the same `.settings-notice`,
+with a plain "Try … again" button beneath the disclosure, and the rail copy
+names that tab. Such a notice carries its `settingsSection`, and the rail line
+opens that tab rather than About. The same holds for an engine that is not
+using the GPU the machine has — a CUDA build the NVIDIA driver cannot run
+(restart, update the driver, or reinstall it), or a GPU build that started
+without its GPU. Its rail label names the fix when there is one ("Restart to
+use your GPU", "Update your NVIDIA driver"), and its copy says the engine
+returns to the GPU by itself once the cause is gone, because it does. An
+event rather than a condition — Linux's out-of-memory killer stopping the
+engine — never takes the rail: the failed chat already said so, and the
+engine's tab keeps a count for whoever comes looking.
 
 **The titlebar sheds words before it sheds pills.** The status cluster is
 open-ended — one engine pill per busy on-device engine, one queue chip per

@@ -216,6 +216,9 @@ export function extractToolCard(info: ToolCardSource): ToolCallCard | undefined 
   const sc = asRecord(info.structuredContent);
   if (!sc) return undefined;
   if (info.name === 'invoke_craftbook') return startCard(sc);
+  // A start_work craftbook or task option returns invoke_craftbook's payload;
+  // its project and recurring options carry no task, so they get no card.
+  if (info.name === 'start_work' && sc.operation === 'invoke_craftbook') return startCard(sc);
   if (info.name === 'advance_task_step') return advanceCard(sc, info.args);
   return undefined;
 }

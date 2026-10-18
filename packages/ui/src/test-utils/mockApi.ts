@@ -141,6 +141,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   knowledgeUpdates: { source: 'gilde', checkedAt: '2026-01-01T00:00:00.000Z', updates: [] },
   knowledgeCatalogTopics: { topics: [] },
   knowledgeCatalogDocuments: { documents: [], total: 0 },
+  knowledgeCatalogDocumentInitials: { initials: [] },
   knowledgeCatalogAssets: { assets: [] },
   fetchKnowledgeAsset: new Blob([], { type: 'image/png' }),
   searchKnowledge: { results: [] },
@@ -364,6 +365,8 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     canRepair: false,
   },
   getLlamaCppContextSizing: { policy: 'adaptive' },
+  getLlamaCppQuarantine: { entries: [], strikeThreshold: 3 },
+  getLlamaCppBackendHealth: {},
   getModelContextOverrides: { overrides: {} },
   // Copilot is an on-demand install, so most gates read this rather than a
   // stored token. Default to installed so tests that predate the gating keep

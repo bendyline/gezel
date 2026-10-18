@@ -101,6 +101,9 @@ export const PromptMeesterCraftbookPrelude: Behavior = {
 
   userPromptPrelude(ctx) {
     if (!ctx.isMeester) return null;
+    // suggest_work ranks recipes, authoring and every other route itself;
+    // this note would name tools that roster does not have.
+    if (ctx.availableToolNames.includes('suggest_work')) return null;
     if (INTER_GEZEL_FILE_HANDOFF_RE.test(ctx.userText)) return null;
     if (looksLikeLibraryLookupRequest(ctx.userText)) {
       return MEESTER_CRAFTBOOK_SELECT_PRELUDE;

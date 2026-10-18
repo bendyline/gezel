@@ -92,6 +92,20 @@ export function humanizeToolCall(
       return `Advanced ${str('ref') ?? 'the task'}`;
     case 'invoke_craftbook':
       return `Started ${str('craftbookId') ?? 'a craftbook'}`;
+    case 'suggest_work':
+      return 'Looked for the right way to do this';
+    case 'start_work': {
+      const option = str('option') ?? '';
+      const [kind, ...rest] = option.split(':');
+      const target = rest.join(':');
+      if (kind === 'craftbook' && target) return `Started ${target}`;
+      if (kind === 'type' && target) return `Started a ${target} project`;
+      if (option === 'new-project') return 'Started a new project';
+      if (option === 'task-here') return 'Started a task here';
+      if (kind === 'recurring-pause' && target) return 'Paused recurring work';
+      if (kind === 'recurring' && target) return 'Switched on recurring work';
+      return 'Started the work';
+    }
     case 'write_task_note':
       return `Left a note on ${str('ref') ?? 'the task'}`;
     case 'read_task_notes':

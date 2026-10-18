@@ -229,6 +229,32 @@ export function isFreshDownloadFailure(error: unknown, graphVerified: boolean): 
 const MAX_FRESH_DOWNLOAD_RETRIES = 3;
 let freshDownloadFailures = 0;
 
+/** Work abandoned because the host asked, at service shutdown. Not a model fault. */
+export class ModelWorkCancelledError extends Error {
+  constructor() {
+    super('model work was cancelled for shutdown');
+    this.name = 'ModelWorkCancelledError';
+  }
+}
+
+let cancelController = new AbortController();
+
+/**
+ * Abandon the model download in flight and stop embedding runs at their next
+ * sub-batch, so the worker reaches idle and can be terminated safely.
+ *
+ * Shutdown cannot simply terminate a busy worker (that aborts the process
+ * inside onnxruntime), and a first-run model download outlasted every drain:
+ * quitting during it held the app for 30 s, until the quit timeout. A download
+ * is plain network I/O, outside onnxruntime, so stopping it is safe; session
+ * creation and a single sub-batch still finish. Work that starts afterwards
+ * gets a fresh signal.
+ */
+export function cancelInFlightModelWork(): void {
+  cancelController.abort();
+  cancelController = new AbortController();
+}
+
 /** The daemon pin's ONNX graph, when it names one with a digest. */
 function pinnedGraph(): PinnedModelFile | null {
   const pin = daemonEmbedderPin();
@@ -242,6 +268,7 @@ let pipelinePromise: Promise<Pipeline> | null = null;
 /** Lazily create the feature-extraction pipeline; cached for the process. */
 export async function loadPipeline(): Promise<Pipeline> {
   if (!pipelinePromise) {
+    const signal = cancelController.signal;
     pipelinePromise = (async () => {
       let graphVerified = false;
       try {
@@ -270,6 +297,7 @@ export async function loadPipeline(): Promise<Pipeline> {
               const outcome = await ensureVerifiedModelFile(cacheDir, modelId, graph, {
                 remoteHost: env.remoteHost,
                 remotePathTemplate: env.remotePathTemplate,
+                signal,
               });
               graphVerified = true;
               if (outcome === 'downloaded') log.info(`[embed] downloaded ${modelId}/${graph.file}`);
@@ -281,6 +309,8 @@ export async function loadPipeline(): Promise<Pipeline> {
           },
         );
       } catch (err) {
+        // Before the retry bookkeeping: a cancelled download is not a failed one.
+        if (signal.aborted) throw new ModelWorkCancelledError();
         const missing = isMissingModule(err, TRANSFORMERS_MODULE);
         const message = missing
           ? 'Local memory embeddings are an optional npm feature. Install @huggingface/transformers@^4.3.1 alongside @bendyline/gezel-service (see the service README).'
@@ -312,9 +342,11 @@ export async function loadPipeline(): Promise<Pipeline> {
  */
 export async function runEmbed(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
+  const signal = cancelController.signal;
   const pipe = await loadPipeline();
   const out: number[][] = [];
   for (let i = 0; i < texts.length; i += MAX_BATCH) {
+    if (signal.aborted) throw new ModelWorkCancelledError();
     const slice = texts.slice(i, i + MAX_BATCH).map(capText);
     const result = await pipe(slice, { pooling: 'mean', normalize: true });
     for (const v of result.tolist()) out.push(v);

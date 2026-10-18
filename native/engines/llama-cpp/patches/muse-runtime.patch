@@ -1,5 +1,5 @@
 diff --git a/common/parsers/muse-glimmer.cpp b/common/parsers/muse-glimmer.cpp
-index add95697..7fab6bf6 100644
+index 78ff5072..0f5aff66 100644
 --- a/common/parsers/muse-glimmer.cpp
 +++ b/common/parsers/muse-glimmer.cpp
 @@ -16,6 +16,13 @@ common_chat_params common_chat_params_init_muse_glimmer(const common_chat_templa
@@ -46,10 +46,10 @@ index 4884299f..cbf6d7df 100644
              if (ctx->force_pos >= ctx->forced_tokens.size()) {
                  ctx->state = REASONING_BUDGET_DONE;
 diff --git a/tests/test-chat.cpp b/tests/test-chat.cpp
-index 30a7237e..1881bf02 100644
+index 01b2220d..5cb4e803 100644
 --- a/tests/test-chat.cpp
 +++ b/tests/test-chat.cpp
-@@ -6116,6 +6116,17 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
+@@ -6594,6 +6594,17 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
      {
          auto tst = peg_tester("models/templates/muse-glimmer.jinja", detailed_debug);
  
@@ -67,7 +67,7 @@ index 30a7237e..1881bf02 100644
          const std::string call_markup =
              "<atem:function_calls>\n"
              "<atem:invoke name=\"special_function\">\n"
-@@ -7161,33 +7172,59 @@ static void test_deepseek_v4_tool_result_ordering() {
+@@ -7889,34 +7900,68 @@ static void test_chat_session() {
  
  static void test_reasoning_budget_tokens_per_request() {
      LOG_DBG("%s\n", __func__);
@@ -99,13 +99,15 @@ index 30a7237e..1881bf02 100644
 -        {"reasoning_budget_tokens", 0},
 -    };
 -    std::vector<raw_buffer> out_files;
--    auto llama_params = oaicompat_chat_params_parse(body, opt, out_files);
+-    common_chat_session     out_session;
+-    auto llama_params = oaicompat_chat_params_parse(nullptr, body, opt, out_files, out_session);
 +        json body = {
 +            {"messages", json::array({json{{"role", "user"}, {"content", "hello"}}})},
 +            {"reasoning_budget_tokens", 0},
 +        };
 +        std::vector<raw_buffer> out_files;
-+        auto llama_params = oaicompat_chat_params_parse(body, opt, out_files);
++        common_chat_session     out_session;
++        auto llama_params = oaicompat_chat_params_parse(nullptr, body, opt, out_files, out_session);
  
 -    // The per-request value must win over the server default (-1).
 -    if (!llama_params.contains("reasoning_budget_tokens")) {
@@ -130,8 +132,16 @@ index 30a7237e..1881bf02 100644
 +                {"type", "function"},
 +                {"function", {{"name", "write_artifact"}, {"parameters", {{"type", "object"}}}}},
 +            }});
-+            const auto tool_params = oaicompat_chat_params_parse(body, opt, out_files);
-+            const std::regex trigger(tool_params.at("grammar_triggers").at(0).at("value").get<std::string>());
++            common_chat_session tool_session;
++            oaicompat_chat_params_parse(nullptr, body, opt, out_files, tool_session);
++            // The session owns the lazy-grammar triggers and hands them to the
++            // sampler; read them where the server does.
++            common_params_sampling sampling;
++            tool_session.apply_sampling(sampling);
++            if (sampling.grammar_triggers.empty()) {
++                throw std::runtime_error("Muse tool call produced no lazy-grammar trigger");
++            }
++            const std::regex trigger(sampling.grammar_triggers.at(0).value);
 +            // The sampler does NOT feed generation-prompt tokens into lazy
 +            // grammars. Test actual generated text, not prompt + generated text.
 +            for (const std::string text : {" to=write_artifact<|message|>",

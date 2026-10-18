@@ -632,7 +632,8 @@ Suggested first-party routes:
 | `DELETE /api/knowledge/catalogs/:id` | Remove this user's ref; reclaim only unreferenced private bytes |
 | `POST /api/knowledge/search` | Browser/global search with catalog/topic filters |
 | `GET /api/knowledge/catalogs/:id/topics` | Topic tree and counts |
-| `GET /api/knowledge/catalogs/:id/documents` | Paged document directory |
+| `GET /api/knowledge/catalogs/:id/documents?topic=&offset=&limit=&around=` | Paged document directory; `around=<docId>` opens the page holding that document (near its middle) and the response's `offset` says where the page starts |
+| `GET /api/knowledge/catalogs/:id/documents/initials?topic=` | Where each slug initial first appears in that listing, for an A–Z index (the alphabetical part only; curated documents with an ordinal lead and are not indexed) |
 | `GET /api/knowledge/catalogs/:id/documents/:docId` | Metadata + normalized Markdown body |
 
 The model-facing project search route does not accept arbitrary project ids;
@@ -921,6 +922,16 @@ package — exactly as chat models are trusted. The Ed25519-signed registry
 publishers; `BUILTIN_KNOWLEDGE_TRUST_ANCHORS` stays empty until one ships.
 The publisher id in manifests and citations is `bendyline`.
 
+`archiveBytes` is the archive alone. An install of a catalog whose profile is
+not the daemon's own embedder also fetches that profile's query model, which
+can outweigh the catalog (multilingual-e5-small is 487 MB). Its size lives in
+the profile registry (`knowledgeProfileQueryModelBytes`), not in gilde: it is a
+fact of the profile's pinned files, and released gilde versions are immutable,
+so a gilde field would reach only future releases. `/api/knowledge/available`
+reports it as `searchModelDownloadBytes` while the model's pinned files are not
+cached. Settings → Knowledge adds it to the catalog's size, and shows the model's
+download as one row however many catalogs are waiting on it.
+
 Source licensing, attribution, redistribution, and notice generation are a
 release gate. Preserve each article's stable source URL and revision
 metadata, ship required notices (`README.md` and `LICENSES/catalog.txt` are
@@ -1126,6 +1137,6 @@ profiles.
 
 
 Location discovery and radius-constrained retrieval are documented in
-[knowledge-spatial.md](knowledge-spatial.md). The 0.7 draft includes document
-point locations; existing Qualla regional 0.6 catalogs remain queryable through
-an explicit metadata adapter.
+[knowledge-spatial.md](knowledge-spatial.md). Gezk 0.7 includes document
+point locations, and the published `regional-*` catalogs carry them; older
+archives have none.

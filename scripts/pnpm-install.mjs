@@ -1,13 +1,14 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { dependencyLeasePath, withDependencyMutationLease } from './dependency-lease.mjs';
-import { spawnPnpm } from './pnpm-cli.mjs';
+import { readPathVar, resolvePnpmCli, spawnPnpm } from './pnpm-cli.mjs';
 import { inspectWindowsDependencyLocks } from './windows-dependency-locks.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
@@ -629,6 +630,100 @@ export async function runLockfileRefreshAndInstall(options = {}) {
   return runPreparedFrozenInstall({ ...options, args, allowPurge: false });
 }
 
+function pinnedPnpmVersion(repoRoot) {
+  try {
+    const manifest = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
+    return /^pnpm@(\d+\.\d+\.\d+)/.exec(manifest.packageManager ?? '')?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function majorOf(version) {
+  return Number.parseInt(version, 10);
+}
+
+function runPnpmVersion(invocation, cwd, env) {
+  const result = spawnSync(invocation.command, invocation.args, {
+    cwd,
+    env,
+    encoding: 'utf8',
+    shell: invocation.shell,
+    timeout: 30_000,
+  });
+  if (result.status !== 0) return null;
+  const lines = result.stdout.trim().split(/\r?\n/);
+  return lines.findLast((line) => /^\d+\.\d+\.\d+/.test(line.trim()))?.trim() ?? null;
+}
+
+function pnpmExecutablesOnPath(env) {
+  const seen = new Set();
+  const found = [];
+  for (const dir of readPathVar(env).split(delimiter)) {
+    if (!dir) continue;
+    const candidate = join(dir, 'pnpm');
+    if (!existsSync(candidate)) continue;
+    let real;
+    try {
+      real = realpathSync(candidate);
+    } catch {
+      continue;
+    }
+    if (seen.has(real)) continue;
+    seen.add(real);
+    found.push(candidate);
+  }
+  return found;
+}
+
+/**
+ * The flags these installs pass (`fetch --frozen-lockfile`,
+ * `--config.confirm-modules-purge`) and the pnpm-workspace.yaml settings that
+ * keep an install from purging node_modules are pnpm 11's. `pmOnFail: warn`
+ * lets another major run anyway: pnpm 12 rejected `fetch --frozen-lockfile`
+ * and ignored `confirmModulesPurge`. Answers the lines to print when the pnpm
+ * this script would launch is a different major from the packageManager pin,
+ * or null when it matches or cannot be probed.
+ */
+export function pinnedPnpmMismatch(repoRoot, options = {}) {
+  const pinned = pinnedPnpmVersion(repoRoot);
+  if (!pinned) return null;
+  const env = options.env ?? process.env;
+  const versionOf = options.versionOfFn ?? runPnpmVersion;
+  const invocation = resolvePnpmCli(['--version'], { env });
+  const active = versionOf(invocation, repoRoot, env);
+  if (!active || majorOf(active) === majorOf(pinned)) return null;
+
+  const onPath = process.platform === 'win32' ? [] : pnpmExecutablesOnPath(env);
+  let activePath = null;
+  if (invocation.command === process.execPath) activePath = invocation.args[0];
+  else if (isAbsolute(invocation.command)) activePath = invocation.command;
+  else activePath = onPath[0] ?? null;
+
+  const lines = [
+    `[pnpm-install] this checkout pins pnpm@${pinned}, but the pnpm here is ${active}${activePath ? ` (${activePath})` : ''}`,
+    `[pnpm-install] pnpm ${majorOf(active)} does not accept the flags these installs rely on; node_modules was left untouched`,
+  ];
+  const pinnedMajorCopy = onPath
+    .filter((path) => path !== activePath)
+    .find((path) => {
+      const version = versionOf(
+        { command: path, args: ['--version'], shell: false },
+        repoRoot,
+        env,
+      );
+      return version && majorOf(version) === majorOf(pinned);
+    });
+  if (pinnedMajorCopy) {
+    lines.push(
+      `[pnpm-install] pnpm ${majorOf(pinned)} is also on PATH at ${pinnedMajorCopy}: put ${dirname(pinnedMajorCopy)} ahead of ${activePath ? dirname(activePath) : 'the other pnpm'} on PATH, or remove the other pnpm`,
+    );
+  } else {
+    lines.push(`[pnpm-install] install pnpm ${pinned} and put it first on PATH`);
+  }
+  return lines;
+}
+
 export async function runSerializedPnpmInstall(options = {}) {
   const repoRoot = options.repoRoot ?? defaultRepoRoot;
   const args = options.args ?? [];
@@ -642,6 +737,14 @@ export async function runSerializedPnpmInstall(options = {}) {
       if (!repair && status.synchronized) {
         console.log('[pnpm-install] dependencies already present');
         return 0;
+      }
+
+      const pnpmMismatch = (options.pnpmMismatchFn ?? pinnedPnpmMismatch)(repoRoot, {
+        env: options.env,
+      });
+      if (pnpmMismatch) {
+        for (const line of pnpmMismatch) console.error(line);
+        return 1;
       }
 
       const installArgs = repair ? args : missingInstallArgs(repoRoot, args, status);

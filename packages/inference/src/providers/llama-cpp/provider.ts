@@ -37,6 +37,7 @@ import {
   engineRequestAbortError,
   parseEnvMs,
 } from '@bendyline/gezel/local-loop';
+import type { StartupCrashVerdict } from '@bendyline/gezel/native';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import type {
   NativeEngineLaunch,
@@ -95,6 +96,7 @@ export class LlamaCppProvider implements LLMProvider {
    */
   private toolGrammarFloor: { minToolCount: number; tier: ToolGrammarFallback } | null = null;
   private readonly supervisor?: NativeEngineSupervisor;
+  private readonly startupCrashVerdict?: (incidentId: string) => StartupCrashVerdict | undefined;
   /** Explicit base URL when no supervisor is managing the process. */
   private readonly externalBaseUrl?: string;
   private readonly defaultModel: string;
@@ -291,6 +293,12 @@ export class LlamaCppProvider implements LLMProvider {
      */
     supervisor?: NativeEngineSupervisor;
     /**
+     * What a startup crash did to its build's standing (strike or
+     * quarantine), looked up by incident id when a start fails, so the error
+     * says what the next request will actually do.
+     */
+    startupCrashVerdict?: (incidentId: string) => StartupCrashVerdict | undefined;
+    /**
      * Fixed base URL of an already-running llama-server. Used in
      * dev iteration and LAN-shared setups. Mutually exclusive with
      * `supervisor`.
@@ -411,6 +419,7 @@ export class LlamaCppProvider implements LLMProvider {
       throw new Error('[llama-cpp] supervisor and baseUrl are mutually exclusive');
     }
     if (opts.supervisor) this.supervisor = opts.supervisor;
+    if (opts.startupCrashVerdict) this.startupCrashVerdict = opts.startupCrashVerdict;
     if (opts.baseUrl) this.externalBaseUrl = opts.baseUrl.replace(/\/+$/, '');
     // Only register an evictor when we own the lifecycle. External-baseUrl
     // mode targets a llama-server the user runs themselves; we don't get
@@ -1036,7 +1045,11 @@ export class LlamaCppProvider implements LLMProvider {
     } catch (err) {
       const nativeExit = this.supervisor.lastExitSnapshot?.();
       if (nativeExit && !nativeExit.expected && nativeExit.exitedAt >= ensureStartedAt) {
-        throw new NativeEngineCrashedError(nativeExit, err);
+        throw new NativeEngineCrashedError(
+          nativeExit,
+          err,
+          this.startupCrashVerdict?.(nativeExit.incidentId),
+        );
       }
       throw err;
     }

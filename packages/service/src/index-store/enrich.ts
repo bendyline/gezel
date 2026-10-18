@@ -781,7 +781,10 @@ export async function embedOnlyFile(
     // Zero chunks (empty/unreadable file) is done for this hash, not retryable.
     store.markEmbedOnly(file.hash, file.path);
     return 'embedded';
-  } catch {
+  } catch (err) {
+    // A quit is not a failure of this file: counting it let repeated restarts
+    // during indexing use up a healthy file's capped attempts.
+    if ((err as { shuttingDown?: unknown } | null)?.shuttingDown === true) return 'unavailable';
     // An embed failure is usually process-wide (model failed to load). Record
     // the capped per-file attempt for poison-input safety, and tell the caller
     // to stop the batch rather than burn every file's budget in one outage.

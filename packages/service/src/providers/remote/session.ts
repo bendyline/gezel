@@ -11,7 +11,12 @@
  * appends the result to `priorMessages`, and POSTs again. B stays stateless.
  */
 
-import { autoCompactedNotice, awakeNow, createLogger } from '@bendyline/gezel';
+import {
+  autoCompactedNotice,
+  awakeNow,
+  createLogger,
+  isProjectStartingCall,
+} from '@bendyline/gezel';
 import {
   TOOL_IMAGES_MESSAGE,
   retireInspectedToolImages,
@@ -393,7 +398,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           } catch {
             /* leave empty — the tool will surface its own validation error */
           }
-          const isProjectMacro = call.name === 'start_project' || call.name === 'start_job';
+          const isProjectMacro = isProjectStartingCall(call.name, args);
           let output: string;
           let outputIsError = false;
           if (isProjectMacro && projectMacroResult) {

@@ -20,8 +20,9 @@ import {
 } from '@bendyline/gezel-client/node';
 import {
   LLAMA_ENGINE_VERSION,
+  createLlamaBuildCheck,
   detectLlamaBackend,
-  isBinaryQuarantined,
+  publishLlamaCudaBlocker,
   readLlamaQuarantine,
   resolveAvailableLlamaBinary,
 } from '@bendyline/gezel/native';
@@ -63,6 +64,14 @@ import {
   readSystemServiceRuntime,
   systemServiceHome,
 } from './system-service.js';
+import {
+  type PrewarmedUtilityService,
+  type UtilityServiceStartOptions,
+  defaultUtilityEntryPath,
+  prewarmUtilityService,
+  serviceHostFromEnv,
+  startUtilityHostedService,
+} from './utility-host.js';
 
 export interface ConnectOptions {
   home: string;
@@ -1113,7 +1122,54 @@ async function prepareStoreMachineInfrastructure(
  * returning — a misconfigured remote URL should be a loud error, not a
  * silent drift into embedded mode.
  */
+/** Taken by the first utility-hosted start of a `connectOrStart`; disposed if none comes. */
+let utilityPrewarm: PrewarmedUtilityService | null = null;
+
+/**
+ * The service module a prewarm can import before preparation finishes, or
+ * undefined when only preparation can say (a packaged tree that may still
+ * need extracting). Must agree with `startEmbeddedRaw`, which re-checks it.
+ */
+function prewarmServiceModuleUrl(opts: ConnectOptions): string | null | undefined {
+  const { tarballPath } = defaultBundlePaths(import.meta.url);
+  if (!existsSync(tarballPath)) return null;
+  if (shouldRunRuntimesInPlace({ storeProfile: opts.storeProfile === true })) {
+    const tree = inBundleServiceTree(import.meta.url);
+    if (tree) return pathToFileURL(join(tree, 'dist', 'index.js')).href;
+  }
+  return undefined;
+}
+
 export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedService> {
+  // Only where the service will most likely be embedded from the start: a
+  // forced embed (dev, --gezel-home) or a store build. Elsewhere embedded is
+  // a fallback, and a speculative child would usually be killed unused.
+  const serviceModuleUrl =
+    serviceHostFromEnv() === 'utility' && (opts.forceEmbedded || opts.storeProfile)
+      ? prewarmServiceModuleUrl(opts)
+      : undefined;
+  if (serviceModuleUrl !== undefined) {
+    try {
+      utilityPrewarm = prewarmUtilityService({
+        entryPath: defaultUtilityEntryPath(import.meta.url),
+        serviceModuleUrl,
+        env: process.env,
+      });
+    } catch (error) {
+      opts.logger?.warn?.(
+        `[supervisor] could not prewarm the service process: ${errorMessage(error)}`,
+      );
+    }
+  }
+  try {
+    return await connectOrStartPrepared(opts);
+  } finally {
+    utilityPrewarm?.dispose();
+    utilityPrewarm = null;
+  }
+}
+
+async function connectOrStartPrepared(opts: ConnectOptions): Promise<SupervisedService> {
   const developmentCompatibility = await prepareDevelopmentMachineInfrastructure(opts);
 
   // Most Electron E2Es use a fresh home and the system Node/pnpm already
@@ -1367,6 +1423,9 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     // resolution entirely — so spawn and embedded launches would keep
     // relaunching a build already known to crash on this machine.
     const quarantine = readLlamaQuarantine(opts.home);
+    // The same check also passes over a Linux CUDA build the NVIDIA driver
+    // cannot run (nvidia-driver.ts), which would otherwise start on the CPU.
+    const check = createLlamaBuildCheck({ quarantine, platform: process.platform });
     const checkoutLlamaCompatibility = new Map<
       string,
       ReturnType<typeof verifyLlamaBinaryAgainstCheckoutPin>
@@ -1398,22 +1457,28 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
             : {}),
         }),
       override === undefined || override === 'auto',
-      quarantine.length > 0
-        ? (backend, path) => !isBinaryQuarantined(quarantine, backend, path)
-        : undefined,
+      check.isUsable,
     );
+    const cudaBlocker = check.cudaBlocker();
+    publishLlamaCudaBlocker(cudaBlocker);
+    if (cudaBlocker) {
+      opts.logger?.warn?.(
+        `[supervisor] llama-server cuda build passed over: ${cudaBlocker.detail} (${cudaBlocker.kind})`,
+      );
+    }
     if (resolved) {
       process.env.GEZEL_LLAMA_SERVER_BIN = resolved.path;
       process.env.GEZEL_LLAMA_SERVER_BACKEND = resolved.backend;
-      for (const skipped of resolved.skippedUnusable ?? []) {
+      const quarantined = check.quarantinedOf(resolved.skippedUnusable ?? []);
+      for (const skipped of quarantined) {
         const entry = quarantine.find((e) => e.backend === skipped);
         opts.logger?.warn?.(
           `[supervisor] llama-server ${skipped} build is quarantined on this machine ` +
             `(${entry?.signal ?? 'crashed'}): ${entry?.reason ?? 'crashed before becoming ready'}`,
         );
       }
-      if (resolved.skippedUnusable?.length) {
-        process.env.GEZEL_LLAMA_QUARANTINED = resolved.skippedUnusable.join(',');
+      if (quarantined.length > 0) {
+        process.env.GEZEL_LLAMA_QUARANTINED = quarantined.join(',');
       }
       if (resolved.fallbackFrom && !resolved.skippedUnusable?.length) {
         opts.logger?.info?.(
@@ -2830,18 +2895,15 @@ async function startEmbeddedRaw(
     }>;
   };
   const { tarballPath, metaPath } = defaultBundlePaths(import.meta.url);
-  let mod: ServiceModule;
+  let serviceModuleUrl: string | null = null;
   if (existsSync(tarballPath)) {
     // Same adopt-or-extract decision the spawn path makes: the embedded
     // fallback imports the tree instead of executing it as a child, but the
     // bytes and the trust question are identical.
     const installDir = await preparePackagedInstall(opts);
-    const indexUrl = pathToFileURL(join(installDir, 'dist', 'index.js')).href;
-    mod = (await import(indexUrl)) as ServiceModule;
-  } else {
-    mod = (await import('@bendyline/gezel-service')) as ServiceModule;
+    serviceModuleUrl = pathToFileURL(join(installDir, 'dist', 'index.js')).href;
   }
-  const running = await mod.startService({
+  const startOptions: UtilityServiceStartOptions = {
     uiDir: opts.uiDir,
     home: opts.home,
     // The embedded desktop service is the daemon third-party clients
@@ -2855,8 +2917,37 @@ async function startEmbeddedRaw(
     machineEngineDiscovery:
       process.env.GEZEL_DISABLE_MACHINE_ENGINE !== '1' &&
       (opts.packaged || process.env.GEZEL_USE_MACHINE_ENGINE === '1'),
-    onRestartRequested,
-  });
+  };
+  if (serviceHostFromEnv() === 'utility') {
+    const prewarmed = utilityPrewarm;
+    utilityPrewarm = null;
+    const hosted = await startUtilityHostedService({
+      entryPath: defaultUtilityEntryPath(import.meta.url),
+      serviceModuleUrl,
+      startOptions,
+      env: process.env,
+      prewarmed,
+      ...(onRestartRequested ? { onRestartRequested } : {}),
+      // Through this process's streams, so the embedded log tee still
+      // mirrors the service's output into the rotator.
+      onOutput: (chunk, stream) => {
+        (stream === 'stdout' ? process.stdout : process.stderr).write(chunk);
+      },
+    });
+    const warmth = !hosted.prewarm
+      ? 'cold'
+      : hosted.prewarm.importMs === null
+        ? 'prewarmed, import still running at start'
+        : `prewarmed, imported in ${hosted.prewarm.importMs}ms before start`;
+    opts.logger?.info?.(
+      `[supervisor] utility-hosted service bound on ${hosted.baseUrl} (pid ${hosted.pid}, booted in ${hosted.bootMs}ms, ${warmth})`,
+    );
+    return { baseUrl: hosted.baseUrl, token: hosted.token, cert: hosted.cert, stop: hosted.stop };
+  }
+  const mod = (
+    serviceModuleUrl ? await import(serviceModuleUrl) : await import('@bendyline/gezel-service')
+  ) as ServiceModule;
+  const running = await mod.startService({ ...startOptions, onRestartRequested });
   const scheme = running.cert ? 'https' : 'http';
   opts.logger?.info?.(
     `[supervisor] embedded service bound on ${scheme}://127.0.0.1:${running.port}`,

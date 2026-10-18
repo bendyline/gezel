@@ -29,14 +29,48 @@ export type {
   ResolvedLlamaBinary,
 } from './llama-backend.js';
 export { detectLlamaBackend, resolveAvailableLlamaBinary } from './llama-backend.js';
-export type { LlamaQuarantineEntry, QuarantineIo } from './llama-quarantine.js';
+export type {
+  LlamaQuarantineEntry,
+  LlamaQuarantineStrike,
+  QuarantineIo,
+} from './llama-quarantine.js';
 export {
+  LLAMA_QUARANTINE_STRIKES,
   binaryFingerprint,
+  clearLlamaQuarantine,
+  clearLlamaStartupStrikes,
   isBinaryQuarantined,
   llamaQuarantinePath,
+  llamaVariantBinaryPath,
   readLlamaQuarantine,
+  readLlamaQuarantineStrikes,
   recordLlamaQuarantine,
+  recordLlamaStartupCrash,
+  resolveLlamaFallbackBinary,
+  resolveLlamaVariantBinary,
 } from './llama-quarantine.js';
+export type { EngineExit, StartupCrashVerdict, UnrunnableBuild } from './unrunnable-build.js';
+export { formatExitCode, unrunnableBuildExit } from './unrunnable-build.js';
+export type { LlamaBuildCheck } from './llama-build-check.js';
+export {
+  LLAMA_CUDA_BLOCKER_ENV,
+  createLlamaBuildCheck,
+  publishLlamaCudaBlocker,
+  readLlamaCudaBlocker,
+} from './llama-build-check.js';
+export type {
+  NvidiaCudaBlocker,
+  NvidiaCudaBlockerKind,
+  NvidiaDriverIo,
+} from './nvidia-driver.js';
+export {
+  compareDriverVersions,
+  linuxCudaBuildBlocker,
+  minimumNvidiaDriverForCuda,
+  nvidiaCudaBlocker,
+  nvidiaLibraryVersion,
+  parseNvidiaModuleVersion,
+} from './nvidia-driver.js';
 export type {
   DiscoverInput,
   DiscoverResult,
@@ -70,6 +104,8 @@ export type {
   DeviceSafetyMode,
   DeviceSafetyPolicyInput,
   DeviceTelemetryFailurePolicy,
+  DeviceGpuAdapter,
+  DeviceSystemFacts,
   DeviceVendor,
   ResolvedDeviceSafetyPolicy,
   SystemDeviceHealthProbeOptions,
@@ -81,7 +117,9 @@ export {
   DeviceHealthGate,
   evaluateDeviceHealth,
   parseAmdSmiJson,
+  parseDeviceSystemFactsJson,
   parseNvidiaSmiCsv,
+  readDeviceSystemFacts,
   resolveDeviceSafetyPolicy,
 } from './device-health.js';
 export type { FindGpuPanicOptions, GpuPanicRecord } from './gpu-panic.js';

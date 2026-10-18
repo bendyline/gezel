@@ -2,6 +2,7 @@ import {
   type CatalogItemSummary,
   type KnowledgeCatalogItemManifest,
   type KnowledgeInstallRequest,
+  type KnowledgeSearchModel,
   suggestKnowledgeCatalogs,
 } from '@bendyline/gezel';
 import type {
@@ -40,13 +41,15 @@ import { useInterests } from './useInterests.js';
 
 type InstallSource = KnowledgeInstallRequest['source'];
 
-interface ActiveInstall {
+export interface ActiveInstall {
   jobId: string;
   /** The catalog id for catalog installs; a file or URL install learns it at `done`. */
   catalogId?: string;
   phase: 'download' | 'verifying' | 'extract' | 'embedder' | 'retrying';
   bytesDone: number;
   bytesTotal: number;
+  /** The query model the `embedder` phase is fetching, from a daemon that names it. */
+  searchModel?: KnowledgeSearchModel;
   /** Set once the archive is unpacked, so the second `verifying` reads as the catalog check. */
   unpacked?: boolean;
   retrying?: { attempt: number; maxAttempts: number; delayMs: number; reason: string };
@@ -127,6 +130,79 @@ function progressPercent(inst: ActiveInstall): number | null {
   if (inst.error || inst.retrying || inst.bytesTotal <= 0) return null;
   if (inst.phase !== 'download' && inst.phase !== 'embedder') return null;
   return (inst.bytesDone / inst.bytesTotal) * 100;
+}
+
+/** One search model being fetched, and the installed catalogs waiting on it. */
+interface SearchModelDownload {
+  model: KnowledgeSearchModel;
+  bytesDone: number;
+  bytesTotal: number;
+  catalogs: string[];
+}
+
+/**
+ * Split the running installs into catalog rows and one row per search model.
+ * A catalog in its `embedder` phase is already installed; what is left is the
+ * model, and catalogs that share a profile share that one download.
+ */
+export function partitionInstalls(installs: Iterable<ActiveInstall>): {
+  catalogRows: ActiveInstall[];
+  modelRows: SearchModelDownload[];
+} {
+  const catalogRows: ActiveInstall[] = [];
+  const models = new Map<string, SearchModelDownload>();
+  for (const inst of installs) {
+    if (inst.phase !== 'embedder' || !inst.searchModel || inst.error || inst.retrying) {
+      catalogRows.push(inst);
+      continue;
+    }
+    const row = models.get(inst.searchModel.profileId) ?? {
+      model: inst.searchModel,
+      bytesDone: 0,
+      bytesTotal: 0,
+      catalogs: [],
+    };
+    row.bytesDone = Math.max(row.bytesDone, inst.bytesDone);
+    row.bytesTotal = Math.max(row.bytesTotal, inst.bytesTotal);
+    row.catalogs.push(installTitle(inst));
+    models.set(inst.searchModel.profileId, row);
+  }
+  return { catalogRows, modelRows: [...models.values()] };
+}
+
+function searchModelName(model: KnowledgeSearchModel): string {
+  return model.repo.split('/').pop() || model.repo;
+}
+
+function searchModelLabel(row: SearchModelDownload): string {
+  const audience = row.catalogs.length === 1 ? row.catalogs[0] : `${row.catalogs.length} catalogs`;
+  return row.bytesTotal > 0
+    ? `Search model for ${audience}: ${formatBytes(row.bytesDone)} of ${formatBytes(row.bytesTotal)}`
+    : `Preparing the search model for ${audience}…`;
+}
+
+/**
+ * A catalog's download size, counting the search model its install also
+ * fetches, so the number on the card is the number the download reaches.
+ */
+function DownloadSize({
+  archiveBytes,
+  searchModelBytes,
+  className,
+}: {
+  archiveBytes: number;
+  searchModelBytes?: number | undefined;
+  className?: string;
+}) {
+  if (!searchModelBytes) return <span className={className}>{formatBytes(archiveBytes)}</span>;
+  return (
+    <span
+      className={className}
+      title={`${formatBytes(archiveBytes)} catalog + ${formatBytes(searchModelBytes)} search model. The search model downloads once and serves every catalog that uses it.`}
+    >
+      {formatBytes(archiveBytes + searchModelBytes)} with search model
+    </span>
+  );
 }
 
 function asKnowledgeEntry(
@@ -243,7 +319,8 @@ export function KnowledgeCatalogManager() {
               existing.catalogId === remote.catalogId &&
               existing.phase === remote.phase &&
               existing.bytesDone === remote.bytesDone &&
-              existing.bytesTotal === remote.bytesTotal
+              existing.bytesTotal === remote.bytesTotal &&
+              existing.searchModel?.profileId === remote.searchModel?.profileId
             ) {
               continue;
             }
@@ -255,6 +332,7 @@ export function KnowledgeCatalogManager() {
               phase: remote.phase,
               bytesDone: remote.bytesDone,
               bytesTotal: remote.bytesTotal,
+              ...(remote.searchModel ? { searchModel: remote.searchModel } : {}),
               origin: 'remote',
             });
           }
@@ -287,13 +365,14 @@ export function KnowledgeCatalogManager() {
         const cur = prev.get(jobId);
         if (!cur) return prev;
         const next = new Map(prev);
-        const { retrying: _retrying, error: _error, ...rest } = cur;
+        const { retrying: _retrying, error: _error, searchModel: _searchModel, ...rest } = cur;
         next.set(jobId, {
           ...rest,
           ...(ev.phase === 'extract' ? { unpacked: true } : {}),
           phase: ev.phase,
           bytesDone: ev.bytesDone,
           bytesTotal: ev.bytesTotal || (ev.phase === cur.phase ? cur.bytesTotal : 0),
+          ...(ev.searchModel ? { searchModel: ev.searchModel } : {}),
         });
         return next;
       });
@@ -579,6 +658,7 @@ export function KnowledgeCatalogManager() {
   const isUrlSource = sourceKind === 'url';
   const hasValidDigest = /^[a-fA-F0-9]{64}$/.test(digestDraft.trim());
   const draftInstalling = [...installs.values()].some((i) => i.source && !i.error);
+  const { catalogRows, modelRows } = partitionInstalls(installs.values());
   const canInstall = sourceKind !== null && (!isUrlSource || hasValidDigest) && !draftInstalling;
 
   return (
@@ -591,7 +671,7 @@ export function KnowledgeCatalogManager() {
               : 'Downloading…'}
           </h4>
           <div className="ollama-pull-list">
-            {Array.from(installs.values()).map((inst) => (
+            {catalogRows.map((inst) => (
               <InstallProgressRow
                 key={inst.jobId}
                 title={<code>{installTitle(inst)}</code>}
@@ -600,6 +680,17 @@ export function KnowledgeCatalogManager() {
                 tone={inst.error ? 'error' : inst.retrying ? 'warning' : 'normal'}
                 onCancel={() => cancelInstall(inst.jobId)}
                 {...(inst.catalogId || inst.source ? { onRetry: () => retryInstall(inst) } : {})}
+              />
+            ))}
+            {modelRows.map((row) => (
+              // No Cancel: the catalogs are installed, and the model download
+              // belongs to the embedder, which finishes it whether or not a
+              // catalog job is still waiting.
+              <InstallProgressRow
+                key={`search-model:${row.model.profileId}`}
+                title={<code>{searchModelName(row.model)}</code>}
+                status={searchModelLabel(row)}
+                percent={row.bytesTotal > 0 ? (row.bytesDone / row.bytesTotal) * 100 : null}
               />
             ))}
           </div>
@@ -769,7 +860,11 @@ export function KnowledgeCatalogManager() {
               return (
                 <li key={c.id} className="knowledge-suggested-row">
                   <span className="knowledge-suggested-name">{c.name}</span>
-                  <span className="muted small">{formatBytes(c.archiveBytes)}</span>
+                  <DownloadSize
+                    className="muted small"
+                    archiveBytes={c.archiveBytes}
+                    searchModelBytes={c.searchModelDownloadBytes}
+                  />
                   <button
                     type="button"
                     disabled={Boolean(inflight)}
@@ -840,7 +935,12 @@ export function KnowledgeCatalogManager() {
             return (
               <div className="catalog-knowledge-action">
                 <div className="catalog-ollama-specs muted small">
-                  <span>{formatBytes(m.archiveBytes)}</span>
+                  <DownloadSize
+                    archiveBytes={m.archiveBytes}
+                    searchModelBytes={
+                      installed && !updateAvailable ? undefined : state?.searchModelDownloadBytes
+                    }
+                  />
                   <span>·</span>
                   <span>{m.documents.toLocaleString()} documents</span>
                   <span>·</span>

@@ -9495,7 +9495,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
       if (url.includes('/slots')) {
         // KV cache grows on every poll → probe reports "still decoding."
         slotsPolls += 1;
-        return new Response(JSON.stringify([{ id: 0, n_cache_tokens: 8000 + slotsPolls * 100 }]), {
+        return new Response(JSON.stringify([{ id: 0, n_prompt_tokens: 8000 + slotsPolls * 100 }]), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -9562,7 +9562,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
       const url = typeof input === 'string' ? input : input.toString();
       if (url.includes('/slots')) {
         // Static cache → no decode progress.
-        return new Response(JSON.stringify([{ id: 0, n_cache_tokens: 8000 }]), {
+        return new Response(JSON.stringify([{ id: 0, n_prompt_tokens: 8000 }]), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });

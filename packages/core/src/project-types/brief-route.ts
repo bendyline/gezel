@@ -652,7 +652,7 @@ function readHousehold(brief: string): string | null {
   );
   if (counted) return counted[0].trim();
   const us = brief.match(
-    new RegExp(`\\bthe\\s+${COUNT}\\s+of\\s+us\\b|\\bfamily\\s+of\\s+${COUNT}\\b`, 'i'),
+    new RegExp(`\\b(?:the\\s+)?${COUNT}\\s+of\\s+us\\b|\\bfamily\\s+of\\s+${COUNT}\\b`, 'i'),
   );
   return us ? us[0].trim() : null;
 }
@@ -695,7 +695,7 @@ function readBusiness(brief: string): string | null {
 }
 
 const VENTURE =
-  '(?:studio|shop|bakery|business|brand|company|caf[eé]|band|podcast|channel|restaurant|store|agency|practice|club|school|salon|gallery)';
+  '(?:studio|shop|bakery|business|brand|company|caf[eé]|band|podcast|channel|restaurant|store|agency|practice|club|school|salon|gallery|roastery|brewery|winery|distillery|farm|bistro|bar|pub|firm|startup|nonprofit|charity|clinic|gym|boutique|label|blog|newsletter)';
 const BUSINESS_RE = new RegExp(`\\b(?:my|our)\\s+((?:[\\p{L}'’-]+\\s+){0,3}${VENTURE})\\b`, 'iu');
 
 /** Who a feed speaks for: "posts for my pottery studio" → "pottery studio". */

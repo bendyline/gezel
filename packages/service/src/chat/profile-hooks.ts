@@ -7,6 +7,7 @@
 import {
   type ChatMessageToolCall,
   type ChatSession,
+  type SuggestWorkResult,
   type TurnMessageOrigin,
   createLogger,
 } from '@bendyline/gezel';
@@ -191,6 +192,7 @@ export async function resolveUserPromptPrelude(
   userText: string,
   messageOrigin: TurnMessageOrigin,
   libraryRecall: ReadonlyArray<{ path: string; snippet: string; score: number }> = [],
+  workOptions?: SuggestWorkResult,
 ): Promise<{ behaviorId: string; text: string } | null> {
   const profile = state.profile;
   if (!profile) return null;
@@ -208,6 +210,7 @@ export async function resolveUserPromptPrelude(
     assistantContent: '',
     continuationCount: 0,
     ...(libraryRecall.length > 0 ? { libraryRecall } : {}),
+    ...(workOptions ? { workOptions } : {}),
   };
   for (const entry of profile.behaviors) {
     const hook = entry.behavior.userPromptPrelude;

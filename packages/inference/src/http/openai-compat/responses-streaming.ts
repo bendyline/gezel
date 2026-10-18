@@ -6,6 +6,7 @@ import type {
   SendAndWaitOpts,
   TurnUsage,
 } from '../../providers/types.js';
+import { engineFailure } from './engine-failure.js';
 import { unwrapCustomToolInput } from './responses-translate.js';
 
 export type ResponsesToolKind = 'function' | 'custom';
@@ -1049,7 +1050,7 @@ export async function runResponsesStreaming(
     enqueue(
       serializer.fail(
         'The model provider failed while generating this response.',
-        'provider_error',
+        engineFailure(error).code,
       ),
     );
   } finally {

@@ -3,7 +3,6 @@ import { formatKnowledgeUri, mediaSpanLabel, parseKnowledgeUri } from '@bendylin
 import type {
   KnowledgeCatalogStatus,
   KnowledgeDocumentRead,
-  KnowledgeDocumentSummary,
   KnowledgeTopicNode,
 } from '@bendyline/gezel-client';
 import type { MediaProvider } from '@bendyline/squisq';
@@ -23,13 +22,13 @@ import { MODEL_INVENTORY_CHANGED_EVENT, changedInventoryKey } from '../model-inv
 import { Select } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 import { inlineBundledAssets } from './handboek/HandboekMediaProvider.js';
+import { KnowledgeDocumentListing } from './knowledge/KnowledgeDocumentListing.js';
 import { createKnowledgeMediaProvider } from './knowledge/KnowledgeMediaProvider.js';
 import '../styles/knowledge.css';
 
 const CATALOG_KEY = 'gezel:knowledge:catalog';
 const DOCUMENT_KEY = 'gezel:knowledge:document';
 const EXPANDED_KEY_PREFIX = 'gezel:knowledge:expanded:';
-const PAGE_SIZE = 50;
 
 interface TopicTreeNode extends KnowledgeTopicNode {
   children: TopicTreeNode[];
@@ -69,7 +68,7 @@ function writeExpandedTopics(catalogId: string, ids: Set<string>): void {
 /**
  * The Knowledge browser — installed reference catalogs, browsable through
  * the table of contents every `.gezk` ships. Catalog + topic rail on the
- * left, the paged document directory in the middle, the article on the
+ * left, the document directory in the middle, the article on the
  * right with its provenance (source, license, citation) always visible.
  * Document selection stays internal to the view: encyclopedia articles
  * never flood the global navigation model.
@@ -88,9 +87,6 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [expandedTopics, setExpandedTopics] = useState<Set<string>>(() => new Set());
   const topicIdPrefix = useId();
-  const [documents, setDocuments] = useState<KnowledgeDocumentSummary[] | null>(null);
-  const [documentsTotal, setDocumentsTotal] = useState(0);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(() => {
     if (initialCatalogId === 'handboek') return 'welcome';
     try {
@@ -212,28 +208,6 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
       alive = false;
     };
   }, [selectedCatalogId]);
-
-  // Document directory for the selected topic (or the whole catalog).
-  const loadDocuments = useCallback(
-    async (offset: number) => {
-      if (!selectedCatalogId) return;
-      const page = await api.knowledgeCatalogDocuments(selectedCatalogId, {
-        ...(selectedTopicId ? { topicId: selectedTopicId } : {}),
-        offset,
-        limit: PAGE_SIZE,
-      });
-      setDocumentsTotal(page.total);
-      setDocuments((prev) =>
-        offset === 0 || !prev ? page.documents : [...prev, ...page.documents],
-      );
-    },
-    [selectedCatalogId, selectedTopicId],
-  );
-
-  useEffect(() => {
-    setDocuments(null);
-    loadDocuments(0).catch(() => setDocuments([]));
-  }, [loadDocuments]);
 
   // The selected article body.
   useEffect(() => {
@@ -626,7 +600,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
           ← Topics
         </button>
         {query.trim() ? (
-          <>
+          <div className="knowledge-list-scroll">
             <div className="knowledge-list-header">Search results</div>
             {searching && (
               <p className="muted small" style={{ padding: '0 1rem' }}>
@@ -667,45 +641,22 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
                 </li>
               ))}
             </ul>
-          </>
+          </div>
         ) : (
-          <>
-            <div className="knowledge-list-header">
-              {selectedTopicId ? (topicNames.get(selectedTopicId) ?? 'Documents') : 'All documents'}
-            </div>
-            <ul className="knowledge-doc-list">
-              {(documents ?? []).map((d) => (
-                <li key={d.id}>
-                  <button
-                    type="button"
-                    className="knowledge-doc-row"
-                    aria-current={d.id === selectedDocId ? 'true' : undefined}
-                    onClick={() => {
-                      setSelectedDocId(d.id);
-                      setPlaying(null);
-                      setMobilePane('reader');
-                    }}
-                  >
-                    <span className="knowledge-doc-title">{d.title}</span>
-                    {d.summary && <span className="knowledge-doc-summary">{d.summary}</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {documents && documents.length < documentsTotal && (
-              <button
-                type="button"
-                className="knowledge-list-more"
-                disabled={loadingMore}
-                onClick={() => {
-                  setLoadingMore(true);
-                  void loadDocuments(documents.length).finally(() => setLoadingMore(false));
-                }}
-              >
-                {`Show more (${documentsTotal - documents.length} left)`}
-              </button>
-            )}
-          </>
+          <KnowledgeDocumentListing
+            catalogId={selectedCatalogId}
+            topicId={selectedTopicId}
+            title={
+              selectedTopicId ? (topicNames.get(selectedTopicId) ?? 'Documents') : 'All documents'
+            }
+            selectedDocId={selectedDocId}
+            revealKey={mobilePane}
+            onOpen={(documentId) => {
+              setSelectedDocId(documentId);
+              setPlaying(null);
+              setMobilePane('reader');
+            }}
+          />
         )}
       </section>
 
@@ -713,10 +664,8 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
         <button
           type="button"
           className="knowledge-nav-back"
-          onClick={() => {
-            setSelectedDocId(null);
-            setMobilePane('list');
-          }}
+          // The article stays open, so the list comes back on its row.
+          onClick={() => setMobilePane('list')}
         >
           ← Documents
         </button>

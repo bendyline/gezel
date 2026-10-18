@@ -29,6 +29,15 @@ export const PerfStallSchema = z.object({
   during: z.array(PerfWorkSchema),
   /** File name under `logs/perf/` when a CPU profile of the block was saved. */
   profile: z.string().optional(),
+  /**
+   * CPU the main thread used during the block, where the runtime reports it
+   * per thread. Far below `durationMs` means it was not running code.
+   */
+  cpuMs: z.number().nonnegative().optional(),
+  /** Major page faults across the process during the block: pages read back from disk or swap. */
+  pageFaults: z.number().int().nonnegative().optional(),
+  /** What the main thread was mostly doing, from `cpuMs` and `pageFaults`. */
+  verdict: z.enum(['running code', 'paging', 'blocked waiting']).optional(),
 });
 export type PerfStall = z.infer<typeof PerfStallSchema>;
 

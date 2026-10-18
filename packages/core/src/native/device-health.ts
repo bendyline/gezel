@@ -526,6 +526,112 @@ function defaultCommandRunner(
   });
 }
 
+/** One GPU as Windows describes it (DXCore), from the helper's `system` facts. */
+export interface DeviceGpuAdapter {
+  /** `0xHIGH_0xLOW`, the spelling GPU process counters use. */
+  luid: string;
+  /** PCI vendor id: 0x1002 AMD, 0x8086 Intel, 0x10DE NVIDIA, 0x5143 Qualcomm. */
+  vendorId: number;
+  deviceId: number;
+  name?: string;
+  /** Windows' own answer, not a guess from the name. */
+  integrated?: boolean;
+  /**
+   * Memory the adapter owns. On an integrated GPU, firmware carved it out
+   * before the OS counted RAM.
+   */
+  dedicatedBytes?: number;
+  dedicatedSystemBytes?: number;
+  /** Ordinary RAM the adapter may borrow on top of its own. */
+  sharedSystemBytes?: number;
+  driverVersion?: string;
+}
+
+/** Static machine facts from `gezel-device-health system --json`. */
+export interface DeviceSystemFacts {
+  /**
+   * RAM physically installed (Windows). The OS's own total omits whatever
+   * firmware reserves, an integrated GPU's carve-out among it.
+   */
+  installedRamBytes?: number;
+  /** Hardware GPUs (Windows 10 2004+); absent when they could not be listed. */
+  adapters?: DeviceGpuAdapter[];
+}
+
+function optionalByteCount(value: unknown): number | undefined {
+  const bytes = optionalFiniteNumber(value);
+  return bytes !== undefined && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : undefined;
+}
+
+/** One adapter entry, or null for one too malformed to use. */
+function parseGpuAdapter(value: unknown): DeviceGpuAdapter | null {
+  if (!value || typeof value !== 'object') return null;
+  const entry = value as Record<string, unknown>;
+  const vendorId = optionalByteCount(entry.vendorId);
+  const deviceId = optionalByteCount(entry.deviceId);
+  if (typeof entry.luid !== 'string' || vendorId === undefined || deviceId === undefined) {
+    return null;
+  }
+  const dedicatedBytes = optionalByteCount(entry.dedicatedBytes);
+  const dedicatedSystemBytes = optionalByteCount(entry.dedicatedSystemBytes);
+  const sharedSystemBytes = optionalByteCount(entry.sharedSystemBytes);
+  return {
+    luid: entry.luid,
+    vendorId,
+    deviceId,
+    ...(typeof entry.name === 'string' && entry.name.length > 0 ? { name: entry.name } : {}),
+    ...(typeof entry.integrated === 'boolean' ? { integrated: entry.integrated } : {}),
+    ...(dedicatedBytes !== undefined ? { dedicatedBytes } : {}),
+    ...(dedicatedSystemBytes !== undefined ? { dedicatedSystemBytes } : {}),
+    ...(sharedSystemBytes !== undefined ? { sharedSystemBytes } : {}),
+    ...(typeof entry.driverVersion === 'string' && entry.driverVersion.length > 0
+      ? { driverVersion: entry.driverVersion }
+      : {}),
+  };
+}
+
+/** Parse the `system` command's versioned JSON contract. */
+export function parseDeviceSystemFactsJson(stdout: string): DeviceSystemFacts | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(stdout) as unknown;
+  } catch {
+    return null;
+  }
+  if (!raw || typeof raw !== 'object') return null;
+  const root = raw as Record<string, unknown>;
+  if (root.schemaVersion !== 1) return null;
+  const installed = optionalByteCount(root.installedRamBytes);
+  // One malformed adapter costs only itself; the rest still describe the host.
+  const adapters = Array.isArray(root.adapters)
+    ? root.adapters.map(parseGpuAdapter).filter((entry) => entry !== null)
+    : undefined;
+  return {
+    ...(installed !== undefined && installed > 0 ? { installedRamBytes: installed } : {}),
+    ...(adapters !== undefined ? { adapters } : {}),
+  };
+}
+
+/**
+ * Static machine facts from the bundled helper. Empty without a helper, and
+ * from a helper that predates the `system` command: it prints usage and exits
+ * non-zero, which reads the same as "unknown".
+ */
+export async function readDeviceSystemFacts(
+  opts: Pick<SystemDeviceHealthProbeOptions, 'commandRunner' | 'timeoutMs' | 'helperPath'> = {},
+): Promise<DeviceSystemFacts> {
+  const helperPath =
+    opts.helperPath === undefined ? process.env.GEZEL_DEVICE_HEALTH_BIN : opts.helperPath;
+  if (!helperPath) return {};
+  try {
+    const run = opts.commandRunner ?? defaultCommandRunner;
+    const result = await run(helperPath, ['system', '--json'], opts.timeoutMs ?? 5_000);
+    return parseDeviceSystemFactsJson(result.stdout) ?? {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Create a best-effort multi-vendor probe. The bundled helper gets first
  * chance, then optional host SMI CLIs preserve compatibility with custom and

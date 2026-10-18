@@ -5,10 +5,17 @@ import {
   type GezelConfig,
   createLogger,
   estimateLlamaCppResidentBytes,
+  llamaCppBackendExclusion,
+  llamaCppBackendLabel,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import type { LlamaBackend } from '@bendyline/gezel/native';
-import { recordLlamaQuarantine } from '@bendyline/gezel/native';
+import type { LlamaBackend, StartupCrashVerdict } from '@bendyline/gezel/native';
+import {
+  LLAMA_QUARANTINE_STRIKES,
+  clearLlamaStartupStrikes,
+  recordLlamaStartupCrash,
+  unrunnableBuildExit,
+} from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { mmprojBudgetBytes, nativeVisionEnabledFor } from '../../chat/vision-capability.js';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
@@ -25,7 +32,6 @@ import {
 import {
   CapacityDeniedError,
   NOT_ENOUGH_MEMORY_MESSAGE,
-  autoKvCacheMaxBytes,
   availableSystemRamBytes,
   formatContextCapacityDenial,
   minViableLocalContextTokens,
@@ -39,6 +45,8 @@ import { makeEngineKey } from '../native/engine-key.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
+import { currentLlamaCppBackend, noteGpuStartup, noteHostOutOfMemory } from './backend-health.js';
+import { adoptLlamaFallback } from './backend-quarantine.js';
 import { lastArgValue, readLlamaCppBuildMetadata } from './build-metadata.js';
 import {
   matchNvidiaRuntimeDevice,
@@ -50,6 +58,7 @@ import {
 import { type PlannerOffloadDecision, buildLlamaCppEngineArgs } from './engine-flags.js';
 import { readGgufSummaryAsync } from './gguf-metadata-async.js';
 import { type GgufSummary, effectiveLazyTensorBytes } from './gguf-metadata.js';
+import { GpuStartupWatch } from './gpu-startup-watch.js';
 import {
   type LlamaCppKvCacheType,
   isGemmaModel,
@@ -62,7 +71,6 @@ import {
   estimateExactPerSlotKvBytesF16,
   estimateKvReserveBytes,
   estimateWindowedKvLinearization,
-  fitsSwaFullInFastMemory,
   planDenseFfnOffload,
   planMoeOffload,
 } from './offload-planner.js';
@@ -165,6 +173,15 @@ export async function buildLlamaCppProvider(opts: {
     ? undefined
     : (process.env.GEZEL_LLAMA_SERVER_URL ?? config.llamaCppBaseUrl);
   const binary = process.env.GEZEL_LLAMA_SERVER_BIN;
+  // Read together with the binary: after a quarantine the env points at the
+  // fallback build, and a crash of THIS build must be charged to its own
+  // backend, not to whatever the env names by then.
+  const binaryBackend = process.env.GEZEL_LLAMA_SERVER_BACKEND as LlamaBackend | undefined;
+  // What the latest startup crash did to this build's standing, for the error
+  // the failed start raises. `onExit` runs before `ensureRunning` rejects.
+  let lastStartupCrash: { incidentId: string; verdict: StartupCrashVerdict } | null = null;
+  // Fresh for each launch: whether this start of a GPU build got its GPU.
+  let gpuWatch: GpuStartupWatch | null = null;
   // Preservation is a two-sided contract: launch llama-server with the
   // explicit preserve/no-preserve flag AND replay captured
   // `reasoning_content` only in the preserve case. v0.4.0 changed the server
@@ -382,6 +399,23 @@ export async function buildLlamaCppProvider(opts: {
       noModelYetMessage('Local model', activeLlamaInstall(opts.llamaCppModels)),
       'model-not-ready',
     );
+  }
+  // Install refuses an excluded backend; this catches a model installed
+  // before the exclusion was authored, or copied in by hand.
+  if (modelCatalogInfo && opts.catalog) {
+    const engineBackend = binaryBackend ?? currentLlamaCppBackend();
+    const detail = await opts.catalog.get('chat-model', modelCatalogInfo.id).catch(() => null);
+    const excluded = llamaCppBackendExclusion(
+      detail?.manifest.kind === 'chat-model' ? detail.manifest.llamaCpp : undefined,
+      engineBackend,
+    );
+    if (excluded && engineBackend) {
+      const err = new Error(
+        `Local model: ${modelCatalogInfo.name} cannot run on the ${llamaCppBackendLabel(engineBackend)} llama.cpp engine. ${excluded} Pick another local model in Settings → ${localDeviceSettingsLabel()}.`,
+      );
+      (err as Error & { isActionable: boolean }).isActionable = true;
+      throw err;
+    }
   }
 
   // Per Phase 0 measurements on a cold Mac: Metal library compile is
@@ -775,13 +809,6 @@ export async function buildLlamaCppProvider(opts: {
   // back to the engine's own `--fit` / `-ngl auto`.
   let offloadDecision: PlannerOffloadDecision | undefined;
   let offloadBlockCount: number | undefined;
-  // Whether weights + full-attention KV at the requested context fit the
-  // fast-memory pool — VRAM on a discrete GPU. Gates the Gemma
-  // `--swa-full` auto-default (see `EngineFlagInput.swaFullAutoFits`). Set
-  // false to keep the full context on the windowed cache when Full would
-  // spill or require a slot/context reduction; undefined means it fits or
-  // the exact decision could not be computed.
-  let swaFullAutoFits: boolean | undefined;
   // Broker-ledger reservation for this launch: resident weights + the KV
   // the engine will actually allocate at the granted window and cache
   // mode. Undefined when the GGUF is unreadable — the pool builder then
@@ -867,21 +894,16 @@ export async function buildLlamaCppProvider(opts: {
       // under GEZEL_LLAMA_NUM_CTX — eval runs lift ceilings deliberately
       // and accept the memory consequences.
       //
-      // The fit verdict additionally gates the Gemma `--swa-full`
-      // auto-default, in BOTH branches: the full cache is a cache-operation
-      // performance trade, while the context window is capability. Auto
-      // therefore requires resident weights + exact full KV to fit the fast
-      // pool (VRAM on a discrete GPU); otherwise it keeps the full window on
-      // the windowed cache. Shared-KV layers and SWA-specific head dimensions
-      // are load-bearing here — E4B owns only 24 KV caches for 42 logical
-      // layers, and pricing all 42 at global dimensions overstated its two-slot
-      // 64K KV allocation as 21 GiB instead of llama.cpp's actual 7 GiB.
-      // When the windowed cache is what will run, the launch is NOT left
-      // ungated: admission re-plans with the windowed-KV linearization
-      // (SWA layers = fixed window-capped bytes, global layers = the only
-      // per-token cost), so a host too small even for the windowed cache
-      // still denies or clamps honestly instead of OOMing one machine
-      // class below the 2026-08-05 incident.
+      // A sliding-window model runs llama.cpp's windowed cache unless
+      // `swaFull` is pinned, and admission prices what runs: it re-plans
+      // with the windowed-KV linearization (SWA layers = fixed window-capped
+      // bytes, global layers = the only per-token cost), so a host too small
+      // even for the windowed cache still denies or clamps honestly instead
+      // of OOMing one machine class below the 2026-08-05 incident.
+      // Shared-KV layers and SWA-specific head dimensions are load-bearing
+      // in that math — E4B owns only 24 KV caches for 42 logical layers, and
+      // pricing all 42 at global dimensions overstated its two-slot 64K KV
+      // allocation as 21 GiB instead of llama.cpp's actual 7 GiB.
       {
         const REFERENCE_CTX = 4096;
         const exactKvAtReference = estimateKvReserveBytes({
@@ -928,25 +950,14 @@ export async function buildLlamaCppProvider(opts: {
                 unifiedMemory:
                   liveMemory.gpuMemoryKind === 'integrated' ||
                   liveMemory.gpuMemoryKind === 'unified',
+                reservedGpuBytes: liveMemory.gpuReservedBytes ?? null,
+                gpuAddressableBytes: liveMemory.gpuAddressableBytes ?? null,
               }
             : {}),
         });
         const fastBudgetBytes = brokerSnap?.enforced
           ? (opts.broker?.fastBudgetBytes() ?? liveBudget.fastBytes)
           : liveBudget.fastBytes;
-        const fullKvBytesAtRequested =
-          exactKvAtReference !== undefined
-            ? (exactKvAtReference / REFERENCE_CTX) * effectiveNumCtx * slots
-            : undefined;
-        const fullCacheFitsFastMemory =
-          fullKvBytesAtRequested !== undefined
-            ? fitsSwaFullInFastMemory({
-                residentWeightsBytes: residentBytes,
-                fullKvBytes: fullKvBytesAtRequested,
-                fastBudgetBytes,
-                committedOtherBytes,
-              })
-            : undefined;
         const admission = planCtxTokensForMemory({
           requestedPerTurnCtxTokens: effectiveNumCtx,
           slots,
@@ -958,28 +969,14 @@ export async function buildLlamaCppProvider(opts: {
           freeSystemRamBytes: availableSystemRamBytes(),
           vramBytes: liveBudget.vramBytes,
         });
+        // `--swa-full` runs only when pinned; every other launch of a
+        // sliding-window model gets llama.cpp's windowed cache.
         const explicitSwaFull = config.llamaCppSwaFull ?? manifestEngineConfig?.swaFull;
-        const swaFullAutoDefault =
-          explicitSwaFull === undefined &&
-          isGemmaModel({
-            architecture: modelCatalogInfo?.architecture,
-            modelId: defaultModelId ?? undefined,
-          });
-        // A full-size cache past the automatic KV ceiling is declined even
-        // where it fits: gemma4-31b's is 55 GB at 64K, 11x its windowed
-        // cache, for a cross-request reuse gain nobody had measured.
-        const kvCeilingBytes = autoKvCacheMaxBytes();
-        const fullCacheOverCeiling =
-          fullKvBytesAtRequested !== undefined && fullKvBytesAtRequested > kvCeilingBytes;
         const fullKvOverBudget =
-          fullCacheFitsFastMemory === false ||
-          fullCacheOverCeiling ||
-          !admission.minimumSatisfied ||
-          admission.slots < slots ||
-          admission.clamped;
+          !admission.minimumSatisfied || admission.slots < slots || admission.clamped;
         // The plan whose ladder (deny → shed slots → clamp) is enforced
         // below. Defaults to the full-attention plan; the windowed-cache
-        // branches replace it with windowed math or — only when the GGUF
+        // branch replaces it with windowed math or — only when the GGUF
         // hides its SWA layout — null (no safe estimate; launch untouched,
         // the pre-windowed-admission behavior).
         let ladderPlan: typeof admission | null = admission;
@@ -997,18 +994,17 @@ export async function buildLlamaCppProvider(opts: {
         // full-attention), and the strict minimum rides inside
         // `contextRequirement.minimumPerTurnCtxTokens`, so the windowed
         // re-plan below sheds slots or denies but never shortens the window.
-        const windowedCacheWillRun =
-          fullKvOverBudget && (swaFullAutoDefault || explicitSwaFull === false);
-        if (windowedCacheWillRun) {
-          // The denial, the slot reduction, and the clamp above are all
-          // driven by full-attention KV math, which overstates the windowed
-          // cache's real allocation (Gemma 4: global layers are both fewer
-          // AND cheaper per token than SWA layers — ~14× on 31b). Re-plan
-          // with the windowed linearization: SWA layers become a fixed,
-          // context-independent reservation; only global layers scale.
-          // Without it a 31b-class Gemma on a ~32 GB host would launch
-          // with NO context admission at all — the same lazy-Metal-wiring
-          // OOM this gate exists to prevent, one machine class down.
+        if (explicitSwaFull !== true) {
+          // The admission above is full-attention KV math, which overstates
+          // the windowed cache's real allocation (Gemma 4: global layers are
+          // both fewer AND cheaper per token than SWA layers — ~11× on 31b
+          // at 64K). Re-plan with the windowed linearization: SWA layers
+          // become a fixed, context-independent reservation; only global
+          // layers scale. Without it a 31b-class Gemma on a ~32 GB host
+          // would launch with NO context admission at all — the same
+          // lazy-Metal-wiring OOM this gate exists to prevent, one machine
+          // class down — and growth would price every token at the full
+          // slope.
           const windowed = estimateWindowedKvLinearization({
             blockCount: summary.blockCount,
             embeddingLength: summary.embeddingLength,
@@ -1029,51 +1025,6 @@ export async function buildLlamaCppProvider(opts: {
             ssmConvKernel: summary.ssmConvKernel,
             kvCacheType,
           });
-          if (swaFullAutoDefault) {
-            // Declining `--swa-full` dominates every full-math remedy:
-            // the context window is capability, the full cache is a
-            // session-switch performance trade. Weights-level admission
-            // stays with the capacity broker.
-            swaFullAutoFits = false;
-            const fastFitDetail =
-              fullCacheFitsFastMemory === false && fullKvBytesAtRequested !== undefined
-                ? `projected weights + full KV ${(
-                    (residentBytes + fullKvBytesAtRequested) / 1024 ** 3
-                  ).toFixed(1)} GiB exceeds available fast memory ${(
-                    Math.max(0, fastBudgetBytes - committedOtherBytes) / 1024 ** 3
-                  ).toFixed(1)} GiB`
-                : undefined;
-            const overCeilingOnly =
-              fullCacheOverCeiling &&
-              fullCacheFitsFastMemory !== false &&
-              admission.minimumSatisfied &&
-              admission.slots >= slots &&
-              !admission.clamped;
-            if (overCeilingOnly && fullKvBytesAtRequested !== undefined) {
-              // A policy choice on a machine that could hold the cache, not
-              // a shortage: info, not warn.
-              log.info(
-                [
-                  `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: the full SWA cache at the requested `,
-                  `${effectiveNumCtx * slots}-token total context would take `,
-                  `${(fullKvBytesAtRequested / 1024 ** 3).toFixed(1)} GiB, past the `,
-                  `${(kvCeilingBytes / 1024 ** 3).toFixed(1)} GiB automatic KV ceiling — keeping the full `,
-                  'context and declining the --swa-full auto-default instead; the windowed KV cache ',
-                  'holds it (cross-request prefix reuse unavailable).',
-                ].join(''),
-              );
-            } else {
-              log.warn(
-                [
-                  `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: the full SWA working set at the requested `,
-                  `${effectiveNumCtx * slots}-token total context does not fit fast memory — keeping the full `,
-                  'context and declining the --swa-full auto-default instead; the windowed KV cache ',
-                  'is what actually fits (cross-request prefix reuse unavailable). ',
-                  `Fit detail: ${fastFitDetail ?? admission.reason ?? 'over budget at the requested slot count'}`,
-                ].join(''),
-              );
-            }
-          }
           if (windowed) {
             ladderPlan = planCtxTokensForMemory({
               requestedPerTurnCtxTokens: effectiveNumCtx,
@@ -1090,16 +1041,25 @@ export async function buildLlamaCppProvider(opts: {
               bytesPerToken: windowed.bytesPerToken,
               fixedPerSlotBytes: windowed.fixedBytes,
             };
-          } else if ((summary.slidingWindow ?? 0) > 0 || swaFullAutoDefault) {
-            // A sliding-window model whose GGUF hides the layer layout:
-            // full math over-states the real cache and there is no exact
-            // substitute — leave the launch alone rather than over-clamp.
+          } else if (
+            fullKvOverBudget &&
+            (explicitSwaFull === false
+              ? (summary.slidingWindow ?? 0) > 0
+              : isGemmaModel({
+                  architecture: modelCatalogInfo?.architecture,
+                  modelId: defaultModelId ?? undefined,
+                }))
+          ) {
+            // A sliding-window model whose GGUF hides the layer layout,
+            // over budget on full math: that math over-states the real cache
+            // and there is no exact substitute — leave the launch alone
+            // rather than over-clamp.
             ladderPlan = null;
             ladderKvLinearization = null;
           }
-          // else: `swaFull: false` pinned on a model with no SWA layers at
-          // all — the flag is a no-op there and the full-attention plan IS
-          // the real allocation; fall through with it intact.
+          // else: no SWA layers at all, or a layout-less model that fits on
+          // full math — the full-attention plan stands (it IS the real
+          // allocation, or safely above it).
         }
         if (ladderPlan !== null && envNumCtx === undefined) {
           const windowedNote = ladderPlan === admission ? '' : ' (windowed KV admission)';
@@ -1174,20 +1134,12 @@ export async function buildLlamaCppProvider(opts: {
       }
 
       // Price the KV the engine will ACTUALLY allocate. Mirrors the
-      // `--swa-full` tri-state in buildLlamaCppEngineArgs (explicit config
-      // → manifest → Gemma auto-default gated on the fit verdict): an SWA
-      // model on the default windowed cache carries only its global layers
-      // per token plus a fixed window block per slot. Feeding the offload
-      // planner full-attention math for a windowed launch over-biased
-      // Gemma experts into system RAM for a cache that never materializes.
-      const effectiveSwaFull =
-        config.llamaCppSwaFull ??
-        manifestEngineConfig?.swaFull ??
-        (swaFullAutoFits !== false &&
-          isGemmaModel({
-            architecture: modelCatalogInfo?.architecture,
-            modelId: defaultModelId ?? undefined,
-          }));
+      // opt-in `--swa-full` in buildLlamaCppEngineArgs: an SWA model on the
+      // default windowed cache carries only its global layers per token
+      // plus a fixed window block per slot. Feeding the offload planner
+      // full-attention math for a windowed launch over-biased Gemma experts
+      // into system RAM for a cache that never materializes.
+      const effectiveSwaFull = config.llamaCppSwaFull ?? manifestEngineConfig?.swaFull ?? false;
       const windowedKvPlan = effectiveSwaFull
         ? undefined
         : estimateWindowedKvLinearization({
@@ -1401,35 +1353,86 @@ export async function buildLlamaCppProvider(opts: {
       providerHolder.current?.getCacheAdapter()?.resetEngineState();
       if (snapshot.expected) return;
       logFile.writeIncident(snapshot);
-      // A build that dies by SIGILL before it ever answers /health has
-      // not failed at a task — it cannot run on this CPU at all, and
-      // relaunching it on every request just reproduces the crash while
-      // a working lower-tier build sits in the same directory. Write it
-      // down so the next launch routes around it.
-      //
-      // Deliberately narrow: only SIGILL, and only before readiness.
-      // A SIGSEGV during startup can be a corrupt model file, and any
-      // crash after readiness is attributable to the work rather than
-      // the binary — quarantining a backend over either would demote
-      // users to slow engines for transient reasons.
-      if (snapshot.signal !== 'SIGILL' || snapshot.reachedReady) return;
-      const backend = process.env.GEZEL_LLAMA_SERVER_BACKEND as LlamaBackend | undefined;
-      if (!backend) return;
-      const entry = recordLlamaQuarantine(home, {
+      if (snapshot.panicKind === 'host-out-of-memory') {
+        noteHostOutOfMemory({
+          model: modelCatalogInfo?.id ?? defaultModelId,
+          whileStarting: !snapshot.reachedReady,
+        });
+        log.warn(
+          `[llama-server] Linux's out-of-memory killer stopped the engine (${modelCatalogInfo?.id ?? 'model'}, incident=${snapshot.incidentId}, ${snapshot.reachedReady ? 'while serving' : 'while loading'})`,
+        );
+        return;
+      }
+      // A build that dies before it ever answers /health, without saying
+      // why, may not be able to run here at all — and relaunching it on every
+      // request just reproduces the crash while a working lower-tier build
+      // sits in the next directory. Count it; a few in a row write it down so
+      // the next launch routes around it. Which exits qualify (a silent
+      // SIGILL; a GPU build's silent crash status on Windows or signal on
+      // Linux; a CUDA build with no code for this GPU) is decided in
+      // unrunnable-build.ts, how many in llama-quarantine.ts.
+      const backend = binaryBackend;
+      const unrunnable = unrunnableBuildExit(snapshot, backend);
+      if (!backend || !unrunnable) return;
+      const { strikes, entry } = recordLlamaStartupCrash(home, {
         backend,
         binaryPath: binary,
-        signal: 'SIGILL',
-        reason:
-          'crashed with SIGILL before the engine became ready — this build uses CPU instructions ' +
-          'this machine does not support, or faulted inside GPU library startup',
+        signal: unrunnable.signal,
+        reason: unrunnable.reason,
       });
-      if (entry) {
+      if (!entry) {
+        if (strikes === 0) return;
+        lastStartupCrash = {
+          incidentId: snapshot.incidentId,
+          verdict: { kind: 'strike', strikes, threshold: LLAMA_QUARANTINE_STRIKES },
+        };
         log.warn(
-          `[llama-server] quarantined the ${backend} build after SIGILL (incident=${snapshot.incidentId}); the next launch will fall back to another backend`,
+          `[llama-server] the ${backend} build crashed before it was ready (${unrunnable.signal}, incident=${snapshot.incidentId}); ${strikes} of ${LLAMA_QUARANTINE_STRIKES} in a row switch it off`,
+        );
+        return;
+      }
+      log.warn(
+        `[llama-server] quarantined the ${backend} build after ${strikes} crashes in a row (${unrunnable.signal}, incident=${snapshot.incidentId}); the next launch will fall back to another backend`,
+      );
+      // Discovery reads the quarantine only at startup. Point the env at the
+      // fallback now, so the pool's rebuild of this failed engine on the next
+      // request launches it instead of the build just written down. A pinned
+      // backend is a decision, and discovery never routes around one either;
+      // an env that has already moved on belongs to someone else's fallback.
+      const pinned =
+        config.llamaCppBackendOverride !== undefined && config.llamaCppBackendOverride !== 'auto';
+      const fallback =
+        pinned || process.env.GEZEL_LLAMA_SERVER_BIN !== binary
+          ? null
+          : adoptLlamaFallback(home, binary, backend);
+      lastStartupCrash = {
+        incidentId: snapshot.incidentId,
+        verdict: { kind: 'quarantined', ...(fallback ? { switchedTo: fallback.backend } : {}) },
+      };
+      if (fallback) {
+        log.warn(
+          `[llama-server] the next launch uses the ${fallback.backend} build: ${fallback.path}`,
         );
       }
     },
-    onRawLine: (line) => providerHolder.current?.onStdoutLine(line),
+    // Any start that reaches readiness proves the build runs here, so the
+    // crashes before it were not in a row. It does not prove the build got
+    // its GPU: a GPU backend that cannot load or initialize leaves the engine
+    // on the CPU without crashing (gpu-startup-watch.ts).
+    onReady: () => {
+      if (binaryBackend) clearLlamaStartupStrikes(home, binaryBackend);
+      const unused = gpuWatch?.verdict() ?? null;
+      noteGpuStartup(unused);
+      if (unused) {
+        log.warn(
+          `[llama-server] the ${unused.backend} build started without its GPU (${unused.reason}${unused.detail ? `: ${unused.detail}` : ''}); every token runs on the CPU`,
+        );
+      }
+    },
+    onRawLine: (line) => {
+      gpuWatch?.observe(line);
+      providerHolder.current?.onStdoutLine(line);
+    },
     // GPU-OOM recovery ladder: when a start dies of VRAM exhaustion and the
     // planner's offload decision was in play, degrade it one step
     // (partial split → all expert/FFN weights to RAM → engine-owned fit) and let the
@@ -1482,6 +1485,7 @@ export async function buildLlamaCppProvider(opts: {
       return true;
     },
     resolveLaunch: async () => {
+      gpuWatch = new GpuStartupWatch(binaryBackend);
       const port = cachedPort ?? (await pickFreePort());
       cachedPort = port;
       // Prepend the binary's own directory to PATH so the OS finds the
@@ -1508,9 +1512,6 @@ export async function buildLlamaCppProvider(opts: {
         // model output reaches `delta.content` for provider-side salvage.
         reasoningFormat: process.env.GEZEL_LLAMA_REASONING_FORMAT?.trim() || undefined,
         reasoningPreserve,
-        architecture: modelCatalogInfo?.architecture,
-        modelId: defaultModelId ?? undefined,
-        swaFullAutoFits,
         backend: llamaBuildMetadata?.backend ?? process.env.GEZEL_LLAMA_SERVER_BACKEND,
         hostCpuCount: availableParallelism(),
       });
@@ -1663,6 +1664,8 @@ export async function buildLlamaCppProvider(opts: {
     supervisor,
     logFile,
     slotSavePath,
+    startupCrashVerdict: (incidentId) =>
+      lastStartupCrash?.incidentId === incidentId ? lastStartupCrash.verdict : undefined,
     // Lets `listModels()` enumerate every installed model (not just
     // the resident one) so `/v1/models` + pickers see the full set
     // the engine pool can serve.

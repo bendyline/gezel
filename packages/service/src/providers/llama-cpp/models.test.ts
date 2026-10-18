@@ -648,6 +648,61 @@ describe('LlamaCppModelManager.install', () => {
     expect(err && 'error' in err ? err.error : '').toMatch(/no llama-cpp source/);
   });
 
+  it('refuses a source that excludes the running backend and downloads nothing', async () => {
+    const blob = buildGguf({ chatTemplate: '{{ messages }}' });
+    const manifest = {
+      schemaVersion: 1,
+      kind: 'chat-model',
+      id: 'nvfp4-model',
+      name: 'NVFP4 Model',
+      description: 'fixture',
+      tags: [],
+      maintainer: { name: 'Test' },
+      version: '1.0.0',
+      releasedAt: '2026-10-17T00:00:00Z',
+      availableVersions: ['1.0.0'],
+      parameterSize: '2B',
+      approxSizeBytes: blob.byteLength,
+      supportsTools: false,
+      llamaCpp: {
+        huggingfaceRepo: 'test/nvfp4',
+        filename: 'model.gguf',
+        sha256: sha256Hex(blob),
+        approxSizeBytes: blob.byteLength,
+        excludeBackends: ['metal'],
+        excludeReason: 'Metal runs NVFP4 on the CPU.',
+      },
+    } as ChatModelManifest;
+    const catalog = fakeCatalog(new Map([['nvfp4-model', manifest]]));
+    let fetched = 0;
+    const counting = (async (...args: Parameters<typeof fetch>) => {
+      fetched += 1;
+      return streamingFetch(blob)(...args);
+    }) as typeof fetch;
+    const onMetal = new LlamaCppModelManager({
+      home,
+      catalog,
+      fetchImpl: counting,
+      resolveBackend: () => 'metal',
+    });
+    const events = await drain(onMetal.install('nvfp4-model'));
+    const err = events.find((e) => e.type === 'error');
+    expect(err && 'error' in err ? err.error : '').toBe(
+      'chat-model "nvfp4-model" is not available on the Apple Metal llama.cpp engine: Metal runs NVFP4 on the CPU.',
+    );
+    expect(fetched).toBe(0);
+    expect(onMetal.getActiveInstalls()).toEqual([]);
+
+    const onCuda = new LlamaCppModelManager({
+      home,
+      catalog,
+      fetchImpl: counting,
+      resolveBackend: () => 'cuda',
+    });
+    const done = await drain(onCuda.install('nvfp4-model'));
+    expect(done.some((e) => e.type === 'done')).toBe(true);
+  });
+
   it('rejects unsafe ids', async () => {
     const mgr = new LlamaCppModelManager({
       home,
@@ -894,6 +949,80 @@ describe('LlamaCppModelManager.install', () => {
 
     const installed = await mgr.listInstalled();
     expect(installed[0]?.draftModelPath).toBe(join(dir, 'mtp-gemma-Q4_0.gguf'));
+  });
+
+  // NVIDIA publishes Nemotron 3.5 Bolt's LiLiCorr drafter in its own repo.
+  it('fetches a draft model published in its own repo at its own revision', async () => {
+    const weights = buildGguf({ arch: 'nemotron_h_moe', contextLength: 262144 });
+    const draft = buildGguf({ arch: 'dflash' });
+    const draftRevision = 'd'.repeat(40);
+    const catalog = fakeCatalog(
+      new Map<string, ChatModelManifest>([
+        [
+          'cross-repo-draft',
+          {
+            schemaVersion: 1,
+            kind: 'chat-model',
+            id: 'cross-repo-draft',
+            name: 'Cross-repo Draft',
+            description: 'fixture',
+            tags: [],
+            maintainer: { name: 'Test' },
+            version: '1.0.0',
+            releasedAt: '2026-10-17T00:00:00Z',
+            availableVersions: ['1.0.0'],
+            parameterSize: '74B',
+            approxSizeBytes: weights.byteLength,
+            supportsTools: true,
+            llamaCpp: {
+              huggingfaceRepo: 'test-org/target-GGUF',
+              revision: 'a'.repeat(40),
+              filename: 'target.gguf',
+              sha256: sha256Hex(weights),
+              approxSizeBytes: weights.byteLength,
+              quantization: 'IQ2_XXS',
+              draftModel: {
+                huggingfaceRepo: 'test-org/target-LiLiCorr-GGUF',
+                revision: draftRevision,
+                filename: 'target-LiLiCorr.gguf',
+                sha256: sha256Hex(draft),
+                sizeBytes: draft.byteLength,
+              },
+            },
+          } as ChatModelManifest,
+        ],
+      ]),
+    );
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const href = typeof input === 'string' ? input : input.toString();
+      requested.push(href);
+      const buf = href.includes('LiLiCorr') ? draft : weights;
+      return new Response(buf, {
+        status: 200,
+        headers: { 'content-length': String(buf.byteLength) },
+      });
+    }) as typeof fetch;
+    const mgr = new LlamaCppModelManager({ home, catalog, fetchImpl });
+    const events = await drain(mgr.install('cross-repo-draft'));
+    expect(
+      events.find((event) => event.type === 'done'),
+      JSON.stringify(events),
+    ).toBeDefined();
+    expect(
+      requested.some(
+        (url) =>
+          url.includes('test-org/target-LiLiCorr-GGUF') &&
+          url.includes(`/resolve/${draftRevision}/`) &&
+          url.includes('target-LiLiCorr.gguf'),
+      ),
+    ).toBe(true);
+    expect(requested.some((url) => url.includes('test-org/target-GGUF/resolve/'))).toBe(true);
+
+    const installed = await mgr.listInstalled();
+    expect(installed[0]?.draftModelPath).toBe(
+      join(home, 'engines', 'llama-cpp', 'models', 'cross-repo-draft', 'target-LiLiCorr.gguf'),
+    );
   });
 
   // Default OFF is the load-bearing half. Loading a projector makes

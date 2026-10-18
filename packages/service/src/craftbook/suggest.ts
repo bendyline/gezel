@@ -1,13 +1,17 @@
 import { type CraftbookBasedOn, type CraftbookSuggestion, createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { embedProfileId } from '@bendyline/gezel-inference/internal/memory/embed-core';
 import {
+  type EmbeddingPipelineStatus,
   EmbeddingsDisabledError,
   embed as defaultEmbed,
   embedBatch as defaultEmbedBatch,
+  embeddingPipelineStatus,
 } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import type { Store } from '../fs/store.js';
 import { scoreCandidate } from '../gezels/match.js';
 import { type ProjectGitStatusReader, listApplicableCraftbooks } from './applicable.js';
+import { SuggestVectorCache } from './suggest-vector-cache.js';
 
 const log = createLogger('craftbook');
 
@@ -95,19 +99,20 @@ const SEARCH_MIN_LEXICAL_SCORE = 0.08;
 const SEARCH_MAX_SUGGESTIONS = 2;
 
 /**
- * Production vector cache keyed by `id@version`. Bundled books bump their
- * version on edit, so a stale entry can't outlive its text. Only the
- * default (real) embedder reads/writes it; an injected embedder (tests)
- * bypasses the cache so fixtures never contaminate the live model's
- * vectors.
+ * Production vector cache, keyed by the text that was embedded, so an edited
+ * book can never reuse its old vector. Only the default (real) embedder
+ * reads/writes it; an injected embedder (tests) bypasses the cache so
+ * fixtures never contaminate the live model's vectors. In memory until the
+ * service names its file.
  */
-const vectorCache = new Map<string, number[]>();
+let vectorCache = new SuggestVectorCache({ profile: embedProfileId });
 
-/**
- * A live gilde activation can change a book's text under an `id@version`
- * key this process has already embedded — the version-bump assumption above
- * only holds within one content snapshot. Called on content-root flips.
- */
+/** Keep the vectors at `file` across restarts (`suggestVectorCacheFile`). */
+export function configureCraftbookSuggestVectorCache(file: string): void {
+  vectorCache = new SuggestVectorCache({ file, profile: embedProfileId });
+}
+
+/** Called on content-root flips; text keys already miss on changed text. */
 export function clearCraftbookSuggestVectorCache(): void {
   vectorCache.clear();
 }
@@ -117,6 +122,14 @@ export interface RankOptions {
   minScore?: number;
   /** Test seam — defaults to the real local embedding pipeline. */
   embedder?: Embedder;
+  /**
+   * How long to wait for an embedder that is still loading or downloading
+   * before ranking on words alone. The load carries on, so the next request
+   * ranks by meaning. Absent: wait for the load however long it takes.
+   */
+  coldEmbedderBudgetMs?: number;
+  /** Test seam for the embedder's readiness. */
+  embedderStatus?: () => EmbeddingPipelineStatus;
 }
 
 /**
@@ -141,7 +154,7 @@ export async function rankCraftbookSuggestions(
     );
   }
 
-  const semantic = await computeSemantic(query, candidates, opts.embedder);
+  const semantic = await computeSemantic(query, candidates, opts);
   // Scale-aware floor: blended vs lexical-only scores live on different
   // scales (see DEFAULT_MIN_SCORE_LEXICAL).
   const minScore = opts.minScore ?? (semantic ? DEFAULT_MIN_SCORE : DEFAULT_MIN_SCORE_LEXICAL);
@@ -164,19 +177,39 @@ export async function rankCraftbookSuggestions(
 async function computeSemantic(
   query: string,
   candidates: CraftbookCandidate[],
-  embedder?: Embedder,
+  opts: RankOptions,
 ): Promise<Map<string, number> | null> {
-  const useCache = !embedder;
-  const e = embedder ?? defaultEmbedder;
+  const useCache = !opts.embedder;
+  const e = opts.embedder ?? defaultEmbedder;
   try {
-    const qVec = await e.embed(query);
+    const status = (opts.embedderStatus ?? embeddingPipelineStatus)();
+    const queryVector = e.embed(query);
+    let qVec: number[];
+    if (opts.coldEmbedderBudgetMs !== undefined && (status === 'cold' || status === 'warming')) {
+      // A first request after launch (or on a new install, mid-download) would
+      // otherwise hold the turn for the model: ~45 s in a fresh eval home.
+      const loaded = await withinBudget(queryVector, opts.coldEmbedderBudgetMs);
+      if (!loaded) {
+        log.debug(`[craftbook] ranking on words while embeddings are ${status}`);
+        void queryVector
+          .then(() =>
+            computeSemantic(query, candidates, { ...opts, coldEmbedderBudgetMs: undefined }),
+          )
+          .catch(() => {});
+        return null;
+      }
+      qVec = loaded.value;
+    } else {
+      qVec = await queryVector;
+    }
+    if (useCache) await vectorCache.ready();
     const vecById = new Map<string, number[]>();
-    const need: { id: string; key: string; text: string }[] = [];
+    const need: { id: string; text: string }[] = [];
     for (const c of candidates) {
-      const key = `${c.id}@${c.version ?? '0'}`;
-      const cached = useCache ? vectorCache.get(key) : undefined;
+      const text = candidateText(c);
+      const cached = useCache ? vectorCache.get(text) : undefined;
       if (cached) vecById.set(c.id, cached);
-      else need.push({ id: c.id, key, text: candidateText(c) });
+      else need.push({ id: c.id, text });
     }
     if (need.length > 0) {
       const vecs = await e.embedBatch(need.map((n) => n.text));
@@ -184,7 +217,7 @@ async function computeSemantic(
         const v = vecs[i];
         if (!v) return;
         vecById.set(n.id, v);
-        if (useCache) vectorCache.set(n.key, v);
+        if (useCache) vectorCache.set(n.text, v);
       });
     }
     const out = new Map<string, number>();
@@ -201,6 +234,21 @@ async function computeSemantic(
       );
     }
     return null;
+  }
+}
+
+async function withinBudget<T>(work: Promise<T>, ms: number): Promise<{ value: T } | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  const settled = work.then((value) => ({ value }));
+  // A rejection after the timer won belongs to the background caller.
+  settled.catch(() => {});
+  try {
+    return await Promise.race([settled, timeout]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -231,12 +279,21 @@ function clamp01(x: number): number {
  */
 export async function suggestCraftbooks(
   deps: CraftbookSuggestionDeps,
-  opts: { projectId?: string; query: string; topK?: number; minScore?: number },
+  opts: {
+    projectId?: string;
+    query: string;
+    topK?: number;
+    minScore?: number;
+    coldEmbedderBudgetMs?: number;
+  },
 ): Promise<CraftbookSuggestion[]> {
   const candidates = await gatherCandidates(deps, opts.projectId);
   return rankCraftbookSuggestions(opts.query, candidates, {
     ...(opts.topK !== undefined ? { topK: opts.topK } : {}),
     ...(opts.minScore !== undefined ? { minScore: opts.minScore } : {}),
+    ...(opts.coldEmbedderBudgetMs !== undefined
+      ? { coldEmbedderBudgetMs: opts.coldEmbedderBudgetMs }
+      : {}),
   });
 }
 

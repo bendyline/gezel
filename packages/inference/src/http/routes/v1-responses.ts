@@ -21,6 +21,7 @@ import {
   resolveChatTarget,
   resolvePinnedModelTarget,
 } from '../openai-compat/chat-target.js';
+import { engineFailure } from '../openai-compat/engine-failure.js';
 import {
   runResponsesNonStreaming,
   runResponsesStreaming,
@@ -323,7 +324,7 @@ export function v1ResponsesRoutes(ctx: InferenceContext, opts: V1ResponsesRouteO
                   event: 'error',
                   data: JSON.stringify({
                     type: 'error',
-                    code: 'provider_error',
+                    code: engineFailure(err).code,
                     message: 'The response stream ended unexpectedly.',
                     param: null,
                   }),
@@ -372,6 +373,14 @@ export function v1ResponsesRoutes(ctx: InferenceContext, opts: V1ResponsesRouteO
           return invalidRequest(c, err.message, err.code);
         }
         const message = err instanceof Error ? err.message : String(err);
+        const failure = engineFailure(err);
+        if (failure.code !== 'provider_error') {
+          log.warn(`Responses request failed (${failure.code}): ${message}`);
+          return c.json(
+            { error: { message, type: failure.type, code: failure.code } },
+            failure.status,
+          );
+        }
         if (
           message.includes('messages must') ||
           message.includes('empty') ||

@@ -1,4 +1,5 @@
 import { ANCHORED_SCENARIOS, getScenario } from './scenarios/index.ts';
+import { WORK_ROUTING_SCENARIO_IDS } from './scenarios/work-routing.ts';
 import type { EvalScenario } from './types.ts';
 
 /**
@@ -69,6 +70,17 @@ export const SUITES: Record<string, EvalSuite> = {
   // (France, Valencia, Alaska) was an invocation failure, and the clamp change
   // that caused Alaska altered a code path with zero eval coverage. These are
   // fast-fail probes: they grade the handoff, not the deliverable.
+  // One message per trial to the Meester, scored on the route it takes and
+  // ended once that route is known. The instrument of the suggest_work /
+  // start_work A/B (`pnpm eval:ab-work-routing`); every arm runs the same probes.
+  'work-routing': {
+    id: 'work-routing',
+    description:
+      'Route probes: typed and paraphrased welcome requests, craftbooks, an exact-format deck, ' +
+      'new and in-project work, questions, a vague ask, a recipe ask, and a status check. ' +
+      'Scored on route kind and target; a minute or two per trial.',
+    scenarios: [...WORK_ROUTING_SCENARIO_IDS],
+  },
   routing: {
     id: 'routing',
     description:

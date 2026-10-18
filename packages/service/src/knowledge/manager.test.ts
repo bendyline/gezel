@@ -545,6 +545,15 @@ describe('KnowledgeManager — search model download progress', () => {
         [100, 300],
         [300, 300],
       ]);
+      const models = events.flatMap((e) =>
+        e.type === 'progress' && e.phase === 'embedder' ? [e.searchModel] : [],
+      );
+      expect(models).toEqual(
+        Array(3).fill({
+          profileId: MULTILINGUAL_E5_SMALL_1.id,
+          repo: MULTILINGUAL_E5_SMALL_1.model.repo,
+        }),
+      );
       expect(events.at(-1)?.type).toBe('done');
     } finally {
       await progressManager.stop();
@@ -660,13 +669,14 @@ describe('radius discovery and project scope', () => {
     });
     await local.start();
     try {
-      for (const id of ['qualla-region-a', 'qualla-region-b']) {
+      for (const id of ['regional-a', 'regional-b']) {
         const path = join(dir, `${id}.gezk`);
         await buildTestCatalog({
           id,
           outputPath: path,
           workDir: join(dir, `${id}-work`),
           withLocations: true,
+          withArticleIds: true,
         });
         expect((await runInstall(local, path)).some((e) => e.type === 'done')).toBe(true);
       }
@@ -676,9 +686,9 @@ describe('radius discovery and project scope', () => {
       };
       const first = await local.nearby(request, 'project');
       expect(first.total).toBe(2);
-      expect(first.documents[0]?.id).toBe('qualla-wikipedia-1');
+      expect(first.documents[0]?.id).toBe('wikipedia-1');
       const second = await local.nearby({ ...request, cursor: first.nextCursor }, 'project');
-      expect(second.documents[0]?.id).toBe('qualla-wikipedia-2');
+      expect(second.documents[0]?.id).toBe('wikipedia-2');
       expect(second.nextCursor).toBeUndefined();
       await expect(
         local.nearby(
@@ -696,9 +706,9 @@ describe('radius discovery and project scope', () => {
             vector: null,
             maxResults: 10,
             spatial: request.spatial,
-            catalogs: ['qualla-region-b'],
+            catalogs: ['regional-b'],
           })
-        ).every((hit) => hit.catalogId === 'qualla-region-b' && hit.distanceMeters !== undefined),
+        ).every((hit) => hit.catalogId === 'regional-b' && hit.distanceMeters !== undefined),
       ).toBe(true);
       expect((await local.nearby({ ...request, catalogs: [] }, 'project')).total).toBe(0);
       mode = 'off';

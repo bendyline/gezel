@@ -27,6 +27,7 @@ import type { NativeEngineExitSnapshot, NativeEnginePanicKind } from '@bendyline
 export type { NativeEngineExitSnapshot, NativeEnginePanicKind } from '@bendyline/gezel/local-loop';
 import type { ChildProcess } from 'node:child_process';
 import { spawn as nodeSpawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { awakeNow, createLogger } from '@bendyline/gezel';
 import { listProcessSnapshots } from '@bendyline/gezel-client/node';
@@ -188,6 +189,11 @@ export interface NativeEngineSupervisorOptions {
   /** Called for both expected and unexpected exits after a snapshot is sealed. */
   onExit?: (snapshot: NativeEngineExitSnapshot) => void | Promise<void>;
   /**
+   * Called each time a start reaches readiness. Errors are caught and logged;
+   * a failing hook never fails the start.
+   */
+  onReady?: (launch: NativeEngineLaunch) => void;
+  /**
    * Consulted after a start attempt fails (child died or never became
    * ready — not spawn errors, and not crashes after readiness). Return
    * true to re-resolve the launch spec and try again in the same
@@ -243,6 +249,13 @@ export interface NativeEngineSupervisorOptions {
   psRunner?: () => Promise<NativeProcessSnapshot[]>;
   /** Platform seam for Windows owner-liveness semantics in orphan tests. */
   platform?: NodeJS.Platform;
+  /**
+   * The kernel's running count of out-of-memory kills, or null when it
+   * cannot be read. Compared across a child's life to tell Linux's
+   * out-of-memory killer from any other SIGKILL. Defaults to `oom_kill` in
+   * `/proc/vmstat` on Linux (any account can read it) and null elsewhere.
+   */
+  readOomKillCount?: () => number | null;
   /**
    * Test seam paired with `psRunner` — invoked instead of
    * `process.kill(pid, 'SIGKILL')`. Lets unit tests assert which pids
@@ -393,6 +406,7 @@ export class NativeEngineSupervisor {
   private readonly fetchImpl: typeof fetch;
   private readonly onLog: (line: string) => void;
   private readonly onExit?: (snapshot: NativeEngineExitSnapshot) => void | Promise<void>;
+  private readonly onReady?: (launch: NativeEngineLaunch) => void;
   private readonly recoverStartup?: (info: {
     panicKind?: NativeEnginePanicKind | undefined;
     attempt: number;
@@ -404,6 +418,9 @@ export class NativeEngineSupervisor {
   private readonly psRunner: () => Promise<NativeProcessSnapshot[]>;
   private readonly killProcess: (pid: number, signal: NodeJS.Signals) => void;
   private readonly platform: NodeJS.Platform;
+  private readonly readOomKillCount: () => number | null;
+  /** `oom_kill` when the current child spawned; null where it cannot be read. */
+  private currentOomKills: number | null = null;
   // Ad-hoc log listeners attached at runtime (vs. the construction-time
   // `onLog` / `onRawLine` hooks). Used by the owning provider to
   // subscribe to engine log lines for the duration of a single request
@@ -489,12 +506,15 @@ export class NativeEngineSupervisor {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.onLog = opts.onLog ?? ((line) => log.info(line));
     if (opts.onExit) this.onExit = opts.onExit;
+    if (opts.onReady) this.onReady = opts.onReady;
     if (opts.recoverStartup) this.recoverStartup = opts.recoverStartup;
     if (opts.onRawLine) this.onRawLine = opts.onRawLine;
     this.logPrefix = opts.logPrefix ?? '[native]';
     this.readinessPath = opts.readinessPath ?? '/health';
     this.readyOnAnyResponse = opts.readyOnAnyResponse ?? false;
     this.platform = opts.platform ?? process.platform;
+    this.readOomKillCount =
+      opts.readOomKillCount ?? (this.platform === 'linux' ? readLinuxOomKillCount : () => null);
     this.psRunner = opts.psRunner ?? (() => defaultPsRunner(this.platform));
     this.killProcess = opts.killProcess ?? ((pid, sig) => process.kill(pid, sig));
   }
@@ -833,6 +853,7 @@ export class NativeEngineSupervisor {
     this.currentDiagnostics = launch.diagnostics ? { ...launch.diagnostics } : undefined;
     this.currentOutput = '';
     this.currentPanic = undefined;
+    this.currentOomKills = this.readOomKillCount();
     this.expectedExitReason = undefined;
     this.onLog(
       `${this.logPrefix} launch ${JSON.stringify({
@@ -935,6 +956,13 @@ export class NativeEngineSupervisor {
       this.state = { kind: 'running', launch, child, healthFails: 0 };
       this.resetIdleTimer();
       this.startHealthWatch();
+      try {
+        this.onReady?.(launch);
+      } catch (hookErr) {
+        this.onLog(
+          `${this.logPrefix} onReady hook threw: ${hookErr instanceof Error ? hookErr.message : hookErr}`,
+        );
+      }
     } catch (err) {
       // The panic classifier state is cleared by handleExit — read it now,
       // before killGracefully drives the exit, so the recovery hook below
@@ -1253,14 +1281,24 @@ export class NativeEngineSupervisor {
     // the output didn't already explain the death more precisely: an
     // engine that printed `CUDA error: …` and then took SIGILL on the
     // way down is a CUDA fault, not an unrunnable build.
-    const panic =
-      this.currentPanic ??
-      (signal === 'SIGILL'
-        ? {
-            kind: 'illegal-instruction' as const,
-            line: 'engine terminated by SIGILL (illegal instruction) with no diagnostic output',
-          }
-        : undefined);
+    // An out-of-memory kill outranks anything the engine printed: a CUDA or
+    // Vulkan allocation line on the way there is a symptom of the same
+    // shortage, and the GPU-to-RAM ladder those lines trigger cannot help
+    // when RAM is what ran out.
+    const oomKilled =
+      signal === 'SIGKILL' && !expected ? this.oomKillsSince(this.currentOomKills) : null;
+    const panic = oomKilled
+      ? {
+          kind: 'host-out-of-memory' as const,
+          line: `engine killed by the Linux out-of-memory killer (oom_kill ${oomKilled.before} -> ${oomKilled.after})`,
+        }
+      : (this.currentPanic ??
+        (signal === 'SIGILL'
+          ? {
+              kind: 'illegal-instruction' as const,
+              line: 'engine terminated by SIGILL (illegal instruction) with no diagnostic output',
+            }
+          : undefined));
     const snapshot: NativeEngineExitSnapshot = {
       incidentId: `native-${pid ?? 'unknown'}-${exitedAt}`,
       ...(pid !== undefined ? { pid } : {}),
@@ -1323,6 +1361,7 @@ export class NativeEngineSupervisor {
     this.currentDiagnostics = undefined;
     this.currentOutput = '';
     this.currentPanic = undefined;
+    this.currentOomKills = null;
     this.expectedExitReason = undefined;
     if (priorState.kind === 'stopped') return;
     this.onLog(`${this.logPrefix} exited (code=${code} signal=${signal ?? 'none'})`);
@@ -1587,6 +1626,18 @@ export class NativeEngineSupervisor {
     }
   }
 
+  /**
+   * The counter's movement since `before`, when it rose. Another process
+   * killed in the same window would also move it, but a child that died by a
+   * SIGKILL this supervisor did not send while the counter rose is, in
+   * practice, the one the killer chose.
+   */
+  private oomKillsSince(before: number | null): { before: number; after: number } | null {
+    if (before === null) return null;
+    const after = this.readOomKillCount();
+    return after !== null && after > before ? { before, after } : null;
+  }
+
   private clearFreezeTimer(): void {
     if (this.freezeTimer) {
       clearTimeout(this.freezeTimer);
@@ -1628,11 +1679,28 @@ export function classifyNativeEnginePanic(
   if (/CUDA error:.*device-side assert/i.test(line)) {
     return { kind: 'cuda-device-assert', line: clipped };
   }
+  if (
+    /CUDA error:\s*(?:no kernel image is available|the provided PTX was compiled with an unsupported toolchain)/i.test(
+      line,
+    )
+  ) {
+    return { kind: 'cuda-unsupported-device', line: clipped };
+  }
   if (/CUDA error:/i.test(line)) return { kind: 'cuda-error', line: clipped };
   if (/assert(?:ion)? failed|GGML_ASSERT/i.test(line)) {
     return { kind: 'assertion-failed', line: clipped };
   }
   return undefined;
+}
+
+/** `oom_kill` from `/proc/vmstat` (Linux 4.13+), or null when it cannot be read. */
+export function readLinuxOomKillCount(): number | null {
+  try {
+    const match = /^oom_kill (\d+)$/m.exec(readFileSync('/proc/vmstat', 'utf8'));
+    return match?.[1] ? Number(match[1]) : null;
+  } catch {
+    return null;
+  }
 }
 
 function panicPriority(kind: NativeEnginePanicKind): number {

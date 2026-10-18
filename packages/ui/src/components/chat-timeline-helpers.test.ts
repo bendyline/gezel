@@ -18,6 +18,13 @@ describe('a turn waiting on its first download', () => {
     expect(isExpectedAvailabilityError({ code: 'engine-not-ready' })).toBe(true);
   });
 
+  it('treats an out-of-memory stop as the machine running short, still worth a Retry', () => {
+    const oom = { code: 'native-engine-crash', panicKind: 'host-out-of-memory' };
+    expect(isExpectedAvailabilityError(oom)).toBe(true);
+    expect(isRetryableFailedTurn('[llama-cpp] on-device engine ran out of memory', oom)).toBe(true);
+    expect(isExpectedAvailabilityError({ code: 'native-engine-crash' })).toBe(false);
+  });
+
   it('offers Retry only while something is on its way', () => {
     expect(isRetryableFailedTurn(downloading, { code: 'model-not-ready' })).toBe(true);
     expect(isRetryableFailedTurn(nothingInstalled, { code: 'model-not-ready' })).toBe(false);

@@ -1,5 +1,5 @@
 import { readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -15,6 +15,20 @@ import { describe, expect, it } from 'vitest';
 
 const FORBIDDEN_PATTERNS = [/\bprocess\.env\s*=\s/, /\bObject\.assign\(\s*process\.env\b/];
 
+/** Repo-relative path → why its bulk env write cannot promote a secret. */
+const ALLOWED: Record<string, string> = {
+  // The supervisor forks this utility process early to prewarm the service
+  // import, then sends the environment it finished preparing. Every value is
+  // the supervisor's own `process.env` — the env the in-process service runs
+  // under — so this replays the parent's env, never a secret from elsewhere.
+  'packages/app/src/supervisor/utility-service-entry.ts':
+    'mirrors the supervisor process.env into its prewarmed service child',
+};
+
+function countMatches(src: string, re: RegExp): number {
+  return src.match(new RegExp(re.source, 'g'))?.length ?? 0;
+}
+
 async function walk(dir: string, out: string[]): Promise<void> {
   const entries = await readdir(dir, { withFileTypes: true });
   for (const e of entries) {
@@ -29,11 +43,12 @@ async function walk(dir: string, out: string[]): Promise<void> {
   }
 }
 
+// `URL#pathname` on Windows yields `/C:/...` (leading slash), which
+// corrupts `path.join` into `C:\C:\...`. fileURLToPath drops the
+// leading slash and normalizes separators.
+const root = fileURLToPath(new URL('../../../..', import.meta.url));
+
 async function collectSources(): Promise<string[]> {
-  // `URL#pathname` on Windows yields `/C:/...` (leading slash), which
-  // corrupts `path.join` into `C:\C:\...`. fileURLToPath drops the
-  // leading slash and normalizes separators.
-  const root = fileURLToPath(new URL('../../../..', import.meta.url));
   const packages = await readdir(join(root, 'packages'));
   const out: string[] = [];
   for (const pkg of packages) {
@@ -52,15 +67,21 @@ describe('process.env mutation guard', () => {
     const files = await collectSources();
     expect(files.length).toBeGreaterThan(50);
     const offenders: string[] = [];
+    const excused = new Set<string>();
     for (const file of files) {
       const src = await readFile(file, 'utf8');
-      for (const re of FORBIDDEN_PATTERNS) {
-        if (re.test(src)) {
-          offenders.push(`${file}: matches ${re}`);
-          break;
-        }
+      const matches = FORBIDDEN_PATTERNS.filter((re) => re.test(src));
+      if (matches.length === 0) continue;
+      const rel = relative(root, file).split(sep).join('/');
+      // One bulk write is excused, not the file: a second is a new decision.
+      if (rel in ALLOWED && matches.length === 1 && countMatches(src, matches[0]!) === 1) {
+        excused.add(rel);
+      } else {
+        offenders.push(`${file}: matches ${matches.join(', ')}`);
       }
     }
     expect(offenders).toEqual([]);
+    // An exception whose write is gone must leave the list with it.
+    expect(Object.keys(ALLOWED).filter((rel) => !excused.has(rel))).toEqual([]);
   }, 15_000);
 });
