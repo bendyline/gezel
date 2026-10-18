@@ -13,6 +13,7 @@ import {
   MULTILINGUAL_E5_SMALL_1,
   MULTILINGUAL_E5_SMALL_2,
   knowledgeEmbeddingProfile,
+  knowledgeProfileQueryModelBytes,
 } from './registry.js';
 
 describe('embedding profile registry', () => {
@@ -122,6 +123,17 @@ describe('embedding profile registry', () => {
     );
     expect(knowledgeEmbeddingProfile('gezel-bge-small-en-v1.5@1')).toBeNull();
     expect(knowledgeEmbeddingProfile('nope@1')).toBeNull();
+  });
+
+  it('knows what every registered profile downloads for a query', () => {
+    for (const profile of KNOWLEDGE_EMBEDDING_PROFILES) {
+      expect(knowledgeProfileQueryModelBytes(profile.id)).toBeGreaterThan(0);
+    }
+    // Same repo, revision and files: one download serves both revisions.
+    expect(knowledgeProfileQueryModelBytes(MULTILINGUAL_E5_SMALL_2.id)).toBe(
+      knowledgeProfileQueryModelBytes(MULTILINGUAL_E5_SMALL_1.id),
+    );
+    expect(knowledgeProfileQueryModelBytes('unknown@1')).toBeNull();
   });
 
   it('the knowledge chunking profile matches the spec', () => {

@@ -40,7 +40,7 @@ import { DocumentSpatialIndex } from '../reader/spatial-index.js';
 import { KNOWLEDGE_TOOLCHAIN } from '../toolchain.js';
 import { type DuckdbCli, assertDuckdbCli, runDuckdbScript } from './duckdb.js';
 
-/** 4: document-locations companion, including the explicit legacy Qualla adapter. */
+/** 4: document-locations companion. */
 export const PARQUET_EXPORT_VERSION = 4;
 const DEFAULT_ROW_GROUP_SIZE = 32_768;
 /** `read_ndjson` refuses objects above this; a document body can approach MAX_KNOWLEDGE_DOCUMENT_BYTES. */
@@ -135,9 +135,9 @@ export async function exportCatalogParquet(
         }),
       );
 
-      const spatial = new DocumentSpatialIndex(router.db, router.schemaVersion === 3);
+      const spatial = new DocumentSpatialIndex(router.db);
       const locations = spatial.rows();
-      if (spatial.hasTable || locations.length) {
+      if (spatial.hasTable) {
         const path = join(staging, 'document-locations.ndjson');
         const out = ndjsonWriter(path);
         for (const { documentId, location } of locations)

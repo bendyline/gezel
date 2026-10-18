@@ -345,6 +345,13 @@ export const KnowledgeAvailableCatalogSchema = z.object({
   installing: z.boolean(),
   /** A resumable partial download of the pinned archive exists. */
   incompleteDownload: z.boolean(),
+  /**
+   * Bytes of search model an install also downloads, beyond `archiveBytes`.
+   * Absent when there is none to fetch: the model is already on disk, the
+   * catalog searches with the app's own embedder, or this build does not
+   * know the model's size.
+   */
+  searchModelDownloadBytes: z.number().int().positive().optional(),
 });
 export type KnowledgeAvailableCatalog = z.infer<typeof KnowledgeAvailableCatalogSchema>;
 
@@ -353,6 +360,17 @@ export type KnowledgeAvailableCatalog = z.infer<typeof KnowledgeAvailableCatalog
 export const KnowledgeInstallPhaseSchema = z.enum(['download', 'extract', 'embedder']);
 export type KnowledgeInstallPhase = z.infer<typeof KnowledgeInstallPhaseSchema>;
 
+/**
+ * The query model an `embedder` phase is fetching. Catalogs that share a
+ * profile share one download, so a client shows one row per `profileId`
+ * rather than one per catalog.
+ */
+export const KnowledgeSearchModelSchema = z.object({
+  profileId: z.string(),
+  repo: z.string(),
+});
+export type KnowledgeSearchModel = z.infer<typeof KnowledgeSearchModelSchema>;
+
 /** Events an install job streams (`GET /jobs/:id/events`, `POST /catalogs/:id/install`). */
 export const KnowledgeInstallEventSchema = z.discriminatedUnion('type', [
   z.object({
@@ -360,6 +378,8 @@ export const KnowledgeInstallEventSchema = z.discriminatedUnion('type', [
     phase: KnowledgeInstallPhaseSchema,
     bytesDone: z.number().nonnegative(),
     bytesTotal: z.number().nonnegative(),
+    /** Set on `embedder` progress. */
+    searchModel: KnowledgeSearchModelSchema.optional(),
   }),
   z.object({ type: z.literal('verifying') }),
   z.object({
@@ -404,6 +424,8 @@ export const KnowledgeActiveInstallSchema = z.object({
   phase: z.enum(['download', 'verifying', 'extract', 'embedder', 'retrying']),
   bytesDone: z.number().nonnegative(),
   bytesTotal: z.number().nonnegative(),
+  /** Set during the `embedder` phase. */
+  searchModel: KnowledgeSearchModelSchema.optional(),
 });
 export type KnowledgeActiveInstall = z.infer<typeof KnowledgeActiveInstallSchema>;
 
@@ -491,8 +513,22 @@ export type KnowledgeDocumentSummary = z.infer<typeof KnowledgeDocumentSummarySc
 export const KnowledgeDocumentPageSchema = z.object({
   documents: z.array(KnowledgeDocumentSummarySchema),
   total: z.number().int().nonnegative(),
+  /** Position of the page's first document in the listing (a page opened `around` one starts here). */
+  offset: z.number().int().nonnegative().optional(),
 });
 export type KnowledgeDocumentPage = z.infer<typeof KnowledgeDocumentPageSchema>;
+
+/**
+ * One slug initial of a listing, for an A–Z index: where its first document
+ * sits and how many share it. Covers only the alphabetical part — documents
+ * with an ordinal are listed first, in their curated order.
+ */
+export const KnowledgeDocumentInitialSchema = z.object({
+  initial: z.string(),
+  offset: z.number().int().nonnegative(),
+  count: z.number().int().nonnegative(),
+});
+export type KnowledgeDocumentInitial = z.infer<typeof KnowledgeDocumentInitialSchema>;
 
 export const KnowledgeDocumentReadSchema = KnowledgeDocumentSummarySchema.extend({
   markdown: z.string(),

@@ -7218,13 +7218,14 @@ export class ChatManager extends LocalEngineRuntime {
         unsubscribeMlxWarmup = this.mlxRuntimeStatus.subscribe((status) => {
           if (status.phase === 'provisioning') {
             sawProvisioning = true;
+            // The runtime's own message names Python packages and pins
+            // ("Installing mlx-vlm==0.7.1 …"); the pill, the chat status
+            // line and the CLI all print this detail verbatim.
             this.events.publish(warmupScope, {
               type: 'engine_phase',
               provider: 'mlx',
               phase: 'starting',
-              detail: `MLX runtime warming up — ${
-                status.message ?? 'one-time setup can take a few minutes'
-              }`,
+              detail: 'Warming up…',
             });
           } else if (sawProvisioning && status.phase === 'ready') {
             this.events.publish(warmupScope, {

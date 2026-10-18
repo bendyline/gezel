@@ -310,12 +310,87 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The column itself never scrolls: the header and the letter index stay put
+   and only .knowledge-list-scroll moves. */
 .knowledge-list {
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid var(--border);
   background: var(--surface);
+}
+
+.knowledge-list-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Rows prepended above the viewport are compensated by hand (the listing
+   restores the scroll offset), so the browser's own anchoring stays off or
+   the two corrections would stack. */
+.knowledge-list-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-anchor: none;
+}
+
+/* A–Z jump index: plain letters, not keys — it is a ruler down the list's
+   edge, not a choice. Letters share the height they are given and stop
+   growing at a comfortable step, so a tall window does not spread them out. */
+.knowledge-letter-index {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: 1.4rem;
+  padding: 0 0 1rem 0.3rem;
+}
+
+.knowledge-letter {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 1.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.knowledge-letter:hover:not(:disabled) {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.knowledge-letter:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.knowledge-letter[aria-current="true"] {
+  color: var(--accent-text);
+}
+
+.knowledge-letter:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+@media (any-pointer: coarse) {
+  .knowledge-letter-index {
+    width: 1.9rem;
+  }
 }
 
 .knowledge-list-header {
@@ -403,8 +478,12 @@
 }
 
 .knowledge-list-more {
+  display: block;
   margin: 0.25rem 1rem 1rem;
-  align-self: flex-start;
+}
+
+.knowledge-list-more--before {
+  margin: 0 1rem 0.5rem;
 }
 
 .knowledge-reader {

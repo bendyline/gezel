@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { type Server, createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { GezelConfig, HistoryEvent } from '@bendyline/gezel';
 import { BundledSource, CatalogService } from '@bendyline/gezel-catalog';
 import { createInProcessCatalogHost } from '@bendyline/gezel-inference/internal/knowledge/catalog-host';
@@ -17,7 +17,13 @@ import type { KnowledgeInstallEvent } from '@bendyline/gezel-inference/internal/
 import { KnowledgeManager } from '@bendyline/gezel-inference/internal/knowledge/manager';
 import { sharedKnowledgeVersionDir } from '@bendyline/gezel-inference/internal/machine-engine/knowledge-assets';
 import { SHARED_ASSETS_ENV } from '@bendyline/gezel-inference/internal/models/storage-roots';
-import { extractGezkVerified } from '@bendyline/gezel-knowledge';
+import {
+  MULTILINGUAL_E5_SMALL_2 as E5,
+  extractGezkVerified,
+  knowledgeProfileQueryModelBytes,
+  pinnedLoadFiles,
+  transformersCachePath,
+} from '@bendyline/gezel-knowledge';
 import { knowledgeCatalogsDir } from '@bendyline/gezel/paths';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { HistoryManager } from '../history/manager.js';
@@ -485,4 +491,86 @@ describe('KnowledgeManager — shared placement through the machine broker', () 
     });
     expect(calls).toEqual(['test-notes@2.0.0']);
   }, 60_000);
+});
+
+describe('KnowledgeManager — search model download size', () => {
+  it("adds the profile's model to a catalog's download until the model is cached", async () => {
+    const root = join(dir, 'search-model');
+    const gilde = join(root, 'gilde-data');
+    const cacheDir = join(root, 'hf-cache');
+    const writeEntry = async (id: string, profile: { id: string; modelRepo: string }) => {
+      const itemDir = join(gilde, 'knowledge-catalogs', id.slice(0, 2), id);
+      await mkdir(join(itemDir, 'versions', '1.0.0'), { recursive: true });
+      await writeFile(
+        join(itemDir, 'manifest.json'),
+        JSON.stringify({
+          schemaVersion: 1,
+          kind: 'knowledge-catalog',
+          id,
+          name: id,
+          description: 'Fixture.',
+          maintainer: { name: 'Gezel Tests' },
+          publisherId: 'gezel-tests',
+          language: 'en',
+        }),
+      );
+      await writeFile(
+        join(itemDir, 'versions', '1.0.0', 'manifest.json'),
+        JSON.stringify({
+          schemaVersion: 1,
+          version: '1.0.0',
+          releasedAt: '2026-10-01T00:00:00.000Z',
+          formatVersion: '0.7',
+          huggingface: { repo: REPO, revision: REVISION, path: `releases/${id}.gezk` },
+          sha256: 'b'.repeat(64),
+          archiveBytes: 1000,
+          uncompressedBytes: 2000,
+          documents: 1,
+          chunks: 1,
+          embeddingProfile: profile,
+          topics: [{ id: 'all', name: 'All' }],
+        }),
+      );
+    };
+    await writeEntry('e5-notes', { id: 'multilingual-e5-small@2', modelRepo: E5.model.repo });
+    await writeEntry('bge-notes', {
+      id: 'bge-small-en-v1.5@1',
+      modelRepo: 'Xenova/bge-small-en-v1.5',
+    });
+
+    const priorCache = process.env.GEZEL_HF_CACHE_DIR;
+    const priorModel = process.env.GEZEL_EMBED_MODEL;
+    process.env.GEZEL_HF_CACHE_DIR = cacheDir;
+    // The production default; the suite runs MiniLM.
+    process.env.GEZEL_EMBED_MODEL = 'Xenova/bge-small-en-v1.5';
+    const sizeManager = new KnowledgeManager({
+      home: join(root, 'home'),
+      host: await createInProcessCatalogHost(),
+      catalog: new CatalogService([new BundledSource(gilde)]),
+      readConfig: async () => ({}) as GezelConfig,
+    });
+    try {
+      const sizes = async () =>
+        Object.fromEntries(
+          (await sizeManager.available()).map((c) => [c.id, c.searchModelDownloadBytes]),
+        );
+      // bge is the daemon's own embedder: an install never downloads it.
+      expect(await sizes()).toEqual({
+        'bge-notes': undefined,
+        'e5-notes': knowledgeProfileQueryModelBytes(E5.id),
+      });
+
+      for (const file of pinnedLoadFiles(E5)) {
+        const path = transformersCachePath(cacheDir, E5.model.repo, E5.model.revision, file.path);
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, 'cached');
+      }
+      expect(await sizes()).toEqual({ 'bge-notes': undefined, 'e5-notes': undefined });
+    } finally {
+      if (priorCache === undefined) delete process.env.GEZEL_HF_CACHE_DIR;
+      else process.env.GEZEL_HF_CACHE_DIR = priorCache;
+      if (priorModel === undefined) delete process.env.GEZEL_EMBED_MODEL;
+      else process.env.GEZEL_EMBED_MODEL = priorModel;
+    }
+  });
 });

@@ -29,6 +29,7 @@ import type {
   KnowledgeAvailableCatalog,
   KnowledgeCatalogRef,
   KnowledgeCatalogStatus,
+  KnowledgeDocumentInitial as KnowledgeDocumentInitialWire,
   KnowledgeDocumentRead as KnowledgeDocumentReadWire,
   KnowledgeDocumentSummary as KnowledgeDocumentSummaryWire,
   KnowledgeInstallEvent,
@@ -1247,6 +1248,7 @@ export interface KnowledgeInstallJobSnapshot {
 
 export type KnowledgeTopicNode = KnowledgeTopicNodeWire;
 export type KnowledgeDocumentSummary = KnowledgeDocumentSummaryWire;
+export type KnowledgeDocumentInitial = KnowledgeDocumentInitialWire;
 export type KnowledgeDocumentRead = KnowledgeDocumentReadWire;
 export type KnowledgePassageRead = KnowledgePassageReadWire;
 export type KnowledgeAssetInfo = KnowledgeAssetInfoWire;
@@ -1949,19 +1951,46 @@ export class GezelClient {
     return this.request('GET', `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/topics`);
   }
 
+  /**
+   * A page of a catalog's document listing. `around` names a document to
+   * open the page on (it lands near the middle; `offset` is then ignored),
+   * and the response's `offset` says where the page starts.
+   */
   knowledgeCatalogDocuments(
     catalogId: string,
-    opts?: { topicId?: string; offset?: number; limit?: number; descendants?: boolean },
-  ): Promise<{ documents: KnowledgeDocumentSummary[]; total: number }> {
+    opts?: {
+      topicId?: string;
+      offset?: number;
+      limit?: number;
+      descendants?: boolean;
+      around?: string;
+    },
+  ): Promise<{ documents: KnowledgeDocumentSummary[]; total: number; offset?: number }> {
     const params = new URLSearchParams();
     if (opts?.topicId) params.set('topic', opts.topicId);
     if (opts?.offset) params.set('offset', String(opts.offset));
     if (opts?.limit) params.set('limit', String(opts.limit));
     if (opts?.descendants === false) params.set('descendants', '0');
+    if (opts?.around) params.set('around', opts.around);
     const query = params.toString();
     return this.request(
       'GET',
       `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/documents${query ? `?${query}` : ''}`,
+    );
+  }
+
+  /** Where each slug initial first appears in the same listing, for an A–Z index. */
+  knowledgeCatalogDocumentInitials(
+    catalogId: string,
+    opts?: { topicId?: string; descendants?: boolean },
+  ): Promise<{ initials: KnowledgeDocumentInitial[] }> {
+    const params = new URLSearchParams();
+    if (opts?.topicId) params.set('topic', opts.topicId);
+    if (opts?.descendants === false) params.set('descendants', '0');
+    const query = params.toString();
+    return this.request(
+      'GET',
+      `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/documents/initials${query ? `?${query}` : ''}`,
     );
   }
 
