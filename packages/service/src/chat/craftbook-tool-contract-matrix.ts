@@ -458,6 +458,7 @@ export async function buildCraftbookToolContractMatrix(): Promise<CraftbookToolC
         resolveProfile({ manifest: model, tier, providerName: provider }),
       );
       const rolesAsTools = profileHasBehavior(profile, 'tools.gezels-as-roles');
+      const workRouting = profileHasBehavior(profile, 'tools.work-routing');
 
       for (const entry of entries) {
         const role = entry.step.suggestedRole ?? 'Generalist';
@@ -542,6 +543,7 @@ export async function buildCraftbookToolContractMatrix(): Promise<CraftbookToolC
               toolsetsGroupOverride: [],
               projectMode: 'crew',
               ...(rolesAsTools ? { rolesAsTools: true } : {}),
+              ...(workRouting ? { workRouting: true } : {}),
               githubLinked,
               isGitRepo,
               securityPolicy:

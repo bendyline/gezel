@@ -362,11 +362,23 @@ export interface ClaimVerdict {
  * Returns `fabricated: true` when a claim's pattern matches AND none
  * of its required tools fired successfully this turn.
  */
+/**
+ * A successful `start_work` is the launch it performed: every option it
+ * accepts starts a craftbook, a task or a project. Guidance (answer, ask)
+ * never goes through it, so it can never justify a "started" claim.
+ */
+const START_WORK_EQUIVALENTS = ['invoke_craftbook', 'create_task', 'start_project'];
+
+const WORK_ROUTING_NUDGE =
+  'You told the user work was started, but no `start_work` call succeeded this turn. ' +
+  'Call `start_work` with the option that fits (`suggest_work` lists them), and report it only after it succeeds.';
+
 export function detectFabricatedToolClaim(args: {
   text: string;
   firedToolNames: ReadonlyArray<string>;
 }): ClaimVerdict {
   const fired = new Set(args.firedToolNames);
+  if (fired.has('start_work')) for (const name of START_WORK_EQUIVALENTS) fired.add(name);
   for (const rule of CLAIM_RULES) {
     if (!rule.pattern.test(args.text)) continue;
     const justified = rule.requiredTools.some((t) => fired.has(t));
@@ -395,6 +407,17 @@ export const FabricationDetectClaimWithoutTool: Behavior = {
       firedToolNames,
     });
     if (!claim.fabricated || !claim.nudge) return null;
+    // Under tools.work-routing the launch tools the catalog names are not on
+    // the roster; point at the one that is.
+    if (
+      ctx.availableToolNames.includes('start_work') &&
+      claim.requiredTools.some((tool) => START_WORK_EQUIVALENTS.includes(tool))
+    ) {
+      return {
+        reason: `claimed "${claim.claim}" without calling [start_work]`,
+        promptForNextTurn: WORK_ROUTING_NUDGE,
+      };
+    }
     const suggestedCraftbook = firedToolNames.includes('suggest_craftbook');
     const invokedCraftbook = firedToolNames.includes('invoke_craftbook');
     const exactFormatRequest =

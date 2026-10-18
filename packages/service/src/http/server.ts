@@ -137,6 +137,7 @@ import { usageRoutes } from './routes/usage.js';
 import { v1AppsRoutes } from './routes/v1-apps.js';
 import { v1GezelsRoutes } from './routes/v1-gezels.js';
 import { v1IdentityRoutes } from './routes/v1-identity.js';
+import { workOptionRoutes } from './routes/work-options.js';
 
 import { v1ModelsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-models';
 import { v1ModelsEnsureRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-models-ensure';
@@ -529,6 +530,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/projects', projectGezelRoutes(ctx));
   // Suggested night work toggles at /api/projects/:id/suggested-work/*
   app.route('/api/projects', suggestedWorkRoutes(ctx));
+  // The ranked routing options behind suggest_work at /api/projects/:id/work-options
+  app.route('/api/projects', workOptionRoutes(ctx));
   // Report-embedded action requests at /api/projects/:id/report-actions/*
   app.route('/api/projects', reportActionRoutes(ctx));
   app.route('/api/projects', diffpackRoutes(ctx));

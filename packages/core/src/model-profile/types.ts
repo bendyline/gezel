@@ -19,6 +19,7 @@ import type { z } from 'zod';
 import type { McpToolWrapper } from '../local-loop/mcp-wrapper-types.js';
 import type { ChatMessageToolCall, ProviderName } from '../schemas/gezel.js';
 import type { BehaviorId, ModelFamily, ModelStyle } from '../schemas/model-profile.js';
+import type { SuggestWorkResult } from '../schemas/work-options.js';
 import type { ModelTier } from './local-model-tier.js';
 
 // ─ Resolved profile (the runtime view) ────────────────────────────────
@@ -149,6 +150,11 @@ export interface TurnCtx extends ModelCtx {
    * enough to be worth the tokens — usually absent.
    */
   libraryRecall?: ReadonlyArray<{ path: string; snippet: string; score: number }>;
+  /**
+   * `suggest_work`'s ranking for this turn's message, computed before the
+   * prelude hooks run, and only when `prompt.work-options-prelude` is on.
+   */
+  workOptions?: SuggestWorkResult;
 }
 
 /**

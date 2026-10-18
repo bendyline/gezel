@@ -98,6 +98,8 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   list_suggested_work: 'List suggested work',
   enable_suggested_work: 'Turn on suggested work',
   disable_suggested_work: 'Turn off suggested work',
+  suggest_work: 'Find the right way to do this',
+  start_work: 'Start the work',
 
   // Tasks
   list_tasks: 'List tasks',

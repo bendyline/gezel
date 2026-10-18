@@ -365,7 +365,8 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
     for (const entry of payload) {
       if (!entry || typeof entry !== 'object') continue;
       const slot = (entry as Record<string, unknown>).id;
-      const cachedTokens = (entry as Record<string, unknown>).n_cache_tokens;
+      // The slot's resident tokens (prompt plus generated); there is no `n_cache_tokens`.
+      const cachedTokens = (entry as Record<string, unknown>).n_prompt_tokens;
       if (typeof slot !== 'number' || typeof cachedTokens !== 'number' || cachedTokens <= 0) {
         continue;
       }

@@ -126,6 +126,11 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'enable_suggested_work',
   'disable_suggested_work',
 
+  // Work routing (always registered; surfaced per session only when the
+  // `tools.work-routing` behavior is active — see role-tool-filter.ts).
+  'suggest_work',
+  'start_work',
+
   // Tasks
   'list_tasks',
   'get_task',

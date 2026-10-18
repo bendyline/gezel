@@ -1085,7 +1085,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           </label>
           <input
             type="text"
-            placeholder="e.g. http://127.0.0.1:8080  (leave blank to use the supervised engine)"
+            placeholder="e.g. http://127.0.0.1:9931  (leave blank to use the supervised engine)"
             aria-label="External engine URL"
             value={baseUrlDraft}
             onChange={(e) => setBaseUrlDraft(e.target.value)}

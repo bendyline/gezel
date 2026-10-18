@@ -262,6 +262,9 @@ const WORK_CREATING_TOOLS = new Set([
   'start_job',
   'create_task',
   'invoke_craftbook',
+  // Every start_work option starts something; answering and asking are
+  // suggest_work verdicts, never start_work calls.
+  'start_work',
 ]);
 
 const REPO_URL = 'https://github.com/bendyline/gezel';

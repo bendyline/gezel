@@ -34,6 +34,7 @@ import {
   autoCompactedNotice,
   createAwakeTimeout,
   createLogger,
+  isProjectStartingCall,
   leaksUntaggedReasoning,
   turnCancelledMessage,
 } from '@bendyline/gezel';
@@ -3196,7 +3197,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             output =
               "You already posted a question card to the user earlier in this turn. The second `ask_user_question` call was suppressed so the user only sees one card. END YOUR TURN NOW — the user's answer to the first question will arrive as the next user message; this turn produces no further visible content.";
           } else if (
-            (call.function.name === 'start_project' || call.function.name === 'start_job') &&
+            isProjectStartingCall(call.function.name, args) &&
             startedProjectOrJobThisTurn
           ) {
             // Success-led phrasing — wild-caught on gemma4-26b/MLX,
@@ -3305,10 +3306,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // Successful start_project / start_job → arm the
             // per-turn macro guard so subsequent variants get
             // intercepted above before reaching the bridge.
-            if (
-              (call.function.name === 'start_project' || call.function.name === 'start_job') &&
-              !output.startsWith('ERROR:')
-            ) {
+            if (isProjectStartingCall(call.function.name, args) && !output.startsWith('ERROR:')) {
               startedProjectOrJobThisTurn = { tool: call.function.name, firstResult: output };
             }
           } else {

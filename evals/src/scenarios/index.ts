@@ -69,6 +69,7 @@ import { toolRoutingFormatScenarios } from './tool-routing-format.ts';
 import { toolRoutingImageScenario } from './tool-routing-image.ts';
 import { toolRoutingRetrievalScenario } from './tool-routing-retrieval.ts';
 import { wikipediaResearchScenario } from './wikipedia-research-brief.ts';
+import { workRoutingScenarios } from './work-routing.ts';
 
 const CRAFTBOOK_SCENARIOS = Object.fromEntries(
   runnableGenericCraftbookSpecs().map((spec) => [spec.scenarioId, craftbookScenarioFromSpec(spec)]),
@@ -94,6 +95,8 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   ...Object.fromEntries(toolRoutingFormatScenarios().map((s) => [s.id, s])),
   ...Object.fromEntries(meesterEndToEndScenarios().map((s) => [s.id, s])),
   ...Object.fromEntries(firstProjectScenarios().map((s) => [s.id, s])),
+  // Route probes for the suggest_work / start_work A/B (suite work-routing).
+  ...Object.fromEntries(workRoutingScenarios().map((s) => [s.id, s])),
   // Browser primitive probe: no craftbook or real Chromium. A small worker
   // must use the hermetic @playwright/mcp replacement, with successful MCP
   // calls and the real History rail both required by the gate.

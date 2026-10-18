@@ -21,6 +21,7 @@ import { AwakeBudget, createAwakeTimeout } from '../suspend-clock.js';
 import { LLAMA_CPP_TUNING_MAP, applyTuning } from '../tuning-apply.js';
 import type { ResolvedTuning } from '../tuning-resolve.js';
 import { turnCancelledMessage } from '../turn-cancel.js';
+import { isProjectStartingCall } from '../work-routing/project-macro.js';
 import { prepareSalvagedCodeBlocks } from './code-block-salvage.js';
 import { condensePresentedToolOutput } from './condense-presented-output.js';
 import {
@@ -3381,7 +3382,11 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             if (!Array.isArray(slots)) return null;
             let maxTokens = -1;
             for (const s of slots) {
-              const n = (s as { n_cache_tokens?: unknown }).n_cache_tokens;
+              // A slot's resident tokens, prompt plus everything decoded so
+              // far. llama-server has no `n_cache_tokens`; reading that name
+              // left this probe blind, so a buffered call that outlasted the
+              // window was aborted as a wedge.
+              const n = (s as { n_prompt_tokens?: unknown }).n_prompt_tokens;
               if (typeof n === 'number' && n > maxTokens) maxTokens = n;
             }
             return maxTokens >= 0 ? maxTokens : null;
@@ -5388,7 +5393,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             }
             output = `ERROR: \`${call.function.name}\` was not executed because the model emitted malformed JSON arguments. Emit one new compact call with valid JSON and every required field. Do not claim the tool succeeded.`;
           } else if (
-            (call.function.name === 'start_project' || call.function.name === 'start_job') &&
+            isProjectStartingCall(call.function.name, args) &&
             startedProjectOrJobThisTurn
           ) {
             output = `You already called \`${startedProjectOrJobThisTurn.tool}\` earlier in this turn — the kickoff is in flight. Do NOT call another project-start tool to brainstorm names or scopes; each call creates a real project, voorman, and kickoff task. END YOUR TURN NOW — tell the user one sentence about the project that's spinning up. The voorman picks the work up from here.`;
@@ -5465,10 +5470,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             if (call.function.name === 'ask_user_question' && !output.startsWith('ERROR:')) {
               askedQuestionThisTurn = true;
             }
-            if (
-              (call.function.name === 'start_project' || call.function.name === 'start_job') &&
-              !output.startsWith('ERROR:')
-            ) {
+            if (isProjectStartingCall(call.function.name, args) && !output.startsWith('ERROR:')) {
               startedProjectOrJobThisTurn = { tool: call.function.name, firstResult: output };
             }
           } else {

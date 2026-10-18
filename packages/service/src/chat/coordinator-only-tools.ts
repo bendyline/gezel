@@ -59,6 +59,8 @@ const NAMED_COORDINATOR_TOOL_ROUTES: Readonly<Record<string, readonly Coordinato
   list_projects: [{ method: 'GET', path: '/api/projects' }],
   start_project: [CREATE_PROJECT],
   start_job: [CREATE_PROJECT],
+  suggest_work: [{ method: 'POST', path: '/api/projects/:project/work-options' }],
+  start_work: [CREATE_PROJECT, CREATE_TASK],
   start_project_from_type: [CREATE_PROJECT],
   fetch_repo: [CREATE_PROJECT],
   fetch_diff: [CREATE_PROJECT],

@@ -412,6 +412,8 @@ import type {
   StorageJob,
   StorageSummary,
   SuggestCraftbooksResponse,
+  SuggestWorkRequest,
+  SuggestWorkResult,
   SuggestedWorkItem,
   SuggestedWorkResponse,
   SystemBootstrapStatus,
@@ -7662,6 +7664,19 @@ export class GezelClient {
     topK?: number;
   }): Promise<SuggestCraftbooksResponse> {
     return this.request('POST', '/api/craftbooks/suggest', body);
+  }
+
+  /**
+   * Every kind of next step for one request in one project — a craftbook, a
+   * typed or new project, recurring work, or a verdict to answer or ask —
+   * ranked by policy. The service side of the coordinator's `suggest_work`.
+   */
+  suggestWork(projectId: string, body: SuggestWorkRequest): Promise<SuggestWorkResult> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/work-options`,
+      body,
+    );
   }
 
   /* ── Craftbook documents (whole-book read/write, JSON or markdown) ── */

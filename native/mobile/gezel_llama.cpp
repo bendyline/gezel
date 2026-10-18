@@ -458,9 +458,11 @@ int32_t decode_prompt(gezel_llama_engine & engine, const std::vector<llama_token
     reuse = std::min(reuse, tokens.size() - 1);
     // A sliding window keeps only its last positions; if the window ending at
     // `reuse` was already evicted, what remains cannot continue the prefix.
+    // The token at `reuse` attends to positions above `reuse - window`, so a
+    // state starting one past that still holds the whole window (#30580).
     const auto window = llama_model_n_swa(engine.model);
     if (window > 0 && reuse > 0 &&
-        llama_memory_seq_pos_min(memory, 0) > std::max<llama_pos>(0, static_cast<llama_pos>(reuse) - window))
+        llama_memory_seq_pos_min(memory, 0) > std::max<llama_pos>(0, static_cast<llama_pos>(reuse) - window + 1))
         reuse = 0;
     if (reuse == 0 || !llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(reuse), -1)) {
         llama_memory_clear(memory, true);
