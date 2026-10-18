@@ -584,8 +584,13 @@ test('deps:install refuses a pnpm major other than the packageManager pin before
     code = await runSerializedPnpmInstall({
       repoRoot: root,
       dependencyLockProbeFn: () => [],
+      // Name the pnpm outright: with PATH empty, Windows has no pnpm.cmd to
+      // resolve one from and the resolver throws before the version check.
       pnpmMismatchFn: (repoRoot) =>
-        pinnedPnpmMismatch(repoRoot, { env: { PATH: '' }, versionOfFn: () => '12.6.0' }),
+        pinnedPnpmMismatch(repoRoot, {
+          env: { PATH: '', GEZEL_PNPM_CLI: join(repoRoot, 'pnpm') },
+          versionOfFn: () => '12.6.0',
+        }),
       spawnPnpmFn: () => {
         throw new Error('pnpm fetch must not start under a mismatched pnpm major');
       },

@@ -510,6 +510,9 @@ try {
   await openProject();
   await page.getByRole('tab', { name: 'Chat', exact: true }).first().click();
   const largeTextDraft = page.locator('.chat-composer [contenteditable="true"]');
+  // The saved draft loads after the tab opens and remounts the editor; a node
+  // caught before that detaches mid-scroll.
+  await largeTextDraft.getByText('Review', { exact: false }).waitFor();
   await largeTextDraft.focus();
   // Reachable means a scroll brings the draft into view once layout settles.
   // Settled, it ends 17 px above the edge; a single sample taken mid-relayout
