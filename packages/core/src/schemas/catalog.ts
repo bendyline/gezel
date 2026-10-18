@@ -2667,6 +2667,58 @@ export const KnowledgeCatalogItemManifestSchema = z.object({
 });
 export type KnowledgeCatalogItemManifest = z.infer<typeof KnowledgeCatalogItemManifestSchema>;
 
+/** Separates an article's title from the other phrases that name it. */
+export const KNOWLEDGE_KEYWORD_SEPARATOR = ' | ';
+
+const KEYWORD_PHRASE = String.raw`[^|\s](?:[^|]*[^|\s])?`;
+const KnowledgeKeywordPhraseSchema = z
+  .string()
+  .max(200)
+  .regex(new RegExp(`^${KEYWORD_PHRASE}$`), 'a trimmed phrase without "|"');
+
+/**
+ * `keywords.json` beside a knowledge catalog's identity manifest: what a
+ * person might type that the catalog covers, so Gezel can suggest a catalog
+ * that is not installed. Generated from the catalog's own article titles and
+ * aliases, plus hand-written terms (gilde `authoring/knowledge-keywords/`).
+ * Phrases match on word boundaries and ignore case (core `PhraseIndex`),
+ * except the ones listed in `matchCase`.
+ */
+export const KnowledgeCatalogKeywordsSchema = z.object({
+  schemaVersion: z.literal(1),
+  /** Equals the catalog's `id`. */
+  catalogId: KnowledgeIdSchema,
+  /** The catalog release the articles were read from; absent when every phrase is hand-written. */
+  sourceVersion: z.string().regex(SemverRegex).optional(),
+  /** Hand-written phrases about the catalog as a whole: "Pacific Northwest", "ASP.NET Core". */
+  terms: z.array(KnowledgeKeywordPhraseSchema).default([]),
+  /**
+   * One line per article: its title, then the other phrases that name it,
+   * joined by {@link KNOWLEDGE_KEYWORD_SEPARATOR} —
+   * "Spokane, Washington | Spokane | The Lilac City".
+   */
+  articles: z
+    .array(
+      z
+        .string()
+        .max(1000)
+        .regex(
+          new RegExp(`^${KEYWORD_PHRASE}(?: \\| ${KEYWORD_PHRASE})*$`),
+          'phrases joined by " | "',
+        ),
+    )
+    .default([]),
+  /** Phrases from `terms` or `articles` that match only with this capitalization: "Bend". */
+  matchCase: z.array(KnowledgeKeywordPhraseSchema).default([]),
+});
+export type KnowledgeCatalogKeywords = z.infer<typeof KnowledgeCatalogKeywordsSchema>;
+
+/** An `articles` line as the article's title and every phrase that names it, title first. */
+export function knowledgeKeywordArticle(line: string): { title: string; phrases: string[] } {
+  const phrases = line.split(KNOWLEDGE_KEYWORD_SEPARATOR);
+  return { title: phrases[0] ?? line, phrases };
+}
+
 // ─ Identity / version unions ────────────────────────────────────────
 
 // The unions and the summary/detail shapes below carry explicit types so the

@@ -18,6 +18,7 @@ export * from './night-shift.js';
 export * from './first-use.js';
 export * from './first-projects.js';
 export * from './interests/index.js';
+export * from './phrase-index.js';
 export * from './scheduled-run.js';
 export * from './tool-cards.js';
 export * from './project-properties.js';

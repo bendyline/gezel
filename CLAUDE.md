@@ -78,6 +78,8 @@ Do not bake "the service is in-process" assumptions into new code — go through
 ~/.gezel/
 ├── config.json              provider creds, default meester, default model
 ├── runtime/                 pid, port, auth-token (cleared on restart)
+│   └── codex-cli/{projectId}/{sessionId}/  per-session CODEX_HOME (5–9 MB each); idle ones are
+│                            pruned by providers/codex-cli/runtime-sweep.ts (14 days, newest 1,000)
 ├── .transactions/           private durable journals for crash-safe multi-file operations
 ├── service/                 extracted gezel-service bundle (packaged mode)
 ├── logs/                    service-YYYY-MM-DD.log — 7-day rolling, 10 MB cap

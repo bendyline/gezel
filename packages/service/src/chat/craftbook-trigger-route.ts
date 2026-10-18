@@ -1,6 +1,7 @@
 import {
   type CatalogItemSummary,
   type CraftbookToolsetNeed,
+  PhraseIndex,
   type TurnIntentPlan,
   craftbookInputParams,
   craftbookParamDefaults,
@@ -18,7 +19,8 @@ import { deckTopicFromRequest, looksLikeWorkRequest } from './turn-intent-plan.j
  * matching for years; this is the first thing that does it.
  *
  * Two precision rules. A trigger matches only on word boundaries, so
- * "changelog" cannot fire from "change logging". And a book is proposed only
+ * "changelog" cannot fire from "change logging" — core's `PhraseIndex`
+ * owns that rule for every phrase-matched offer. And a book is proposed only
  * when the composer could actually start it from the text: its toolsets are
  * installed, it declares no file input, and every required parameter is
  * either the main content parameter (filled from the message) or has a
@@ -38,35 +40,19 @@ export interface TriggerMatch {
 
 const MIN_TRIGGER_LENGTH = 6;
 
-function normalize(text: string): string {
-  return text.toLowerCase().replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /** The longest declared trigger the text contains, across every candidate. */
 export function matchCraftbookTrigger(
   text: string,
   candidates: readonly TriggerCandidate[],
 ): TriggerMatch | null {
-  const haystack = normalize(text);
-  if (!haystack) return null;
-  let best: TriggerMatch | null = null;
-  for (const candidate of candidates) {
-    for (const raw of candidate.triggers) {
-      const trigger = normalize(raw);
-      if (trigger.length < MIN_TRIGGER_LENGTH) continue;
-      if (best && trigger.length <= best.trigger.length) continue;
-      const pattern = new RegExp(
-        `(?:^|[^\\p{L}\\p{N}])${escapeRegExp(trigger)}(?:$|[^\\p{L}\\p{N}])`,
-        'u',
-      );
-      if (pattern.test(haystack)) best = { candidate, trigger: raw };
-    }
-  }
-  return best;
+  const triggers = new PhraseIndex(
+    candidates.flatMap((candidate) =>
+      candidate.triggers.map((phrase) => ({ phrase, value: candidate })),
+    ),
+    { minLength: MIN_TRIGGER_LENGTH },
+  );
+  const hit = triggers.longest(text);
+  return hit ? { candidate: hit.value, trigger: hit.phrase } : null;
 }
 
 /** Whether a message alone can launch this book — no picker, no setup step. */

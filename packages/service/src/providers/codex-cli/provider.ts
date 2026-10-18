@@ -17,6 +17,7 @@ import type {
 } from '@bendyline/gezel-inference/internal/providers/types';
 import { type CodexBinary, resolveCodexBinary } from './binary.js';
 import type { CodexPermissionMode } from './invoker.js';
+import { RUNTIME_SWEEP_INTERVAL_MS, sweepCodexHomes } from './runtime-sweep.js';
 import { CodexCliSession, type CodexSessionDeps } from './session.js';
 
 const DEFAULT_MODEL = 'gpt-6.1-sol';
@@ -174,6 +175,7 @@ export class CodexCliProvider implements LLMProvider {
   private readonly runtimeDir: string;
   private readonly manageRuntimeFiles: boolean;
   private readonly extraConfigOverrides?: Record<string, string>;
+  private lastRuntimeSweepAt = 0;
 
   constructor(opts: CodexCliProviderOptions) {
     if (opts.binaryPath !== undefined) this.binaryPathOverride = opts.binaryPath;
@@ -216,12 +218,13 @@ export class CodexCliProvider implements LLMProvider {
     }
     await this.initialize();
     if (!this.resolved) throw new Error('[codex-cli] binary not resolved');
+    this.scheduleRuntimeSweep();
     // Like the Anthropic CLI provider, ChatManager always populates
     // `codexCliContext` for normal session builds; one-shot completions
     // (icon/about generation, summarization) call `createSession` without
     // it. Synthesize a transient context so those still work — runtime
-    // files land under a `oneshot/` bucket and get cleaned up by the
-    // surrounding runtime-dir cleanup.
+    // files land under a `oneshot/` bucket, which the runtime sweep
+    // empties like every other project's homes.
     const ctx: NonNullable<SessionOpts['codexCliContext']> = opts.codexCliContext ?? {
       sessionId: `oneshot-${Math.random().toString(36).slice(2, 10)}`,
       gezelId: 'oneshot',
@@ -264,6 +267,30 @@ export class CodexCliProvider implements LLMProvider {
       ...(opts.codexCliThreadId ? { initialResumeId: opts.codexCliThreadId } : {}),
     };
     return new CodexCliSession(deps);
+  }
+
+  /**
+   * Every session leaves a Codex home behind, so prune idle ones in the
+   * background: once on the first session after boot, then at most every
+   * RUNTIME_SWEEP_INTERVAL_MS for daemons that run for days.
+   */
+  private scheduleRuntimeSweep(): void {
+    if (!this.manageRuntimeFiles) return;
+    const now = Date.now();
+    if (now - this.lastRuntimeSweepAt < RUNTIME_SWEEP_INTERVAL_MS) return;
+    this.lastRuntimeSweepAt = now;
+    void sweepCodexHomes({ runtimeDir: this.runtimeDir }).then(
+      (result) => {
+        if (result.removed > 0) {
+          log.info(`[codex-cli] removed ${result.removed} of ${result.scanned} idle session homes`);
+        }
+      },
+      (err) => {
+        log.warn(
+          `[codex-cli] session home sweep failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      },
+    );
   }
 
   async resumeSession(sessionId: string, opts: SessionOpts): Promise<LLMSession> {
