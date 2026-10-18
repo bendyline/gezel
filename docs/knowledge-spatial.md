@@ -42,7 +42,7 @@ fresh query. Scope is also rechecked before returning discovery results.
 
 ```typescript
 await client.nearbyKnowledge({ spatial, limit: 50 });
-await client.searchKnowledge({ query: 'maritime history', spatial, catalogs: ['qualla-region-pacific-northwest'] });
+await client.searchKnowledge({ query: 'maritime history', spatial, catalogs: ['regional-pacific-northwest'] });
 ```
 
 `POST /api/knowledge/search` accepts the same optional `spatial` radius.
@@ -95,18 +95,19 @@ gezel knowledge search catalog.gezk 'maritime history' --latitude 47.6062 --long
 The Python reference exposes `nearby_documents(radius, offset=0, limit=50)`
 and optional `spatial=radius` on its document, passage and semantic searches.
 
-## Existing Qualla catalogs and next builds
+## Regional catalogs and next builds
 
-The explicit `qualla-regional-meta@1` adapter reads the completed 0.6 regional
-archives' `meta.coordinates.{lat,lng}`, `meta.region` and
-`meta.quallaArticleIds`. It validates coordinates and supplies a subject
-point. It cannot recover additional locations lost by the historical
-first-coordinate writer. Arbitrary metadata in other catalogs stays opaque.
+The published `regional-*` catalogs in gilde are gezk 0.7 and carry their
+points in `document_locations`. Archives without that table (0.6 and older)
+have no locations; their opaque `meta` is never read as coordinates.
 
-Across regional copies, Qualla source IDs (`qualla-wikipedia-<page-id>` or
-`qualla-wikivoyage-<page-id>`) in `qualla-region-*` catalogs deduplicate within
-one publisher. Other catalog documents keep their publisher/catalog identity.
-A discovery result uses the nearest copy and a citation to that exact catalog.
+Regional catalogs overlap: an article about a border city ships in every
+region it borders (Pacific Northwest and Canada & Alaska share 683 of the
+former's 1,106 articles). Source-article IDs (`wikipedia-<page-id>` or
+`wikivoyage-<page-id>`) therefore deduplicate across catalogs within one
+publisher, whatever the catalog is called. Other document IDs keep their
+publisher/catalog identity. A discovery result uses the nearest copy and a
+citation to that exact catalog.
 
 Qualla spool build version 4 retains every linked article location per region,
 with stable article-based IDs and coordinate provenance. Its local
@@ -120,8 +121,7 @@ is requested. Export reuse also requires the current export schema version.
 Parquet export version 4 adds `document-locations.parquet`, joined to documents
 by `document_id`, without copying embeddings for each point. It includes
 `location_id`, double-precision coordinates, role and nullable provenance
-JSON. Checksummed export reports list it; older Qualla archives can also
-export the adapted location rows.
+JSON. Checksummed export reports list it.
 
 ## Verification
 

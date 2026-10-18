@@ -671,7 +671,7 @@ describe('ChatManager — send + persistence', () => {
         expect.objectContaining({
           type: 'engine_phase',
           phase: 'starting',
-          detail: expect.stringContaining('MLX runtime warming up'),
+          detail: 'Warming up…',
         }),
       );
       expect(received).toContainEqual(

@@ -64,6 +64,8 @@ export async function buildTestCatalog(opts: {
   /** List the existing dovetail article under Finishing too. */
   withSharedToc?: boolean;
   withLocations?: boolean;
+  /** Id the two located documents by Wikipedia page id, as published regional catalogs do. */
+  withArticleIds?: boolean;
   /** Add this many more joinery documents titled "Dovetail Variant N". */
   dovetailVariants?: number;
 }): Promise<void> {
@@ -88,10 +90,7 @@ export async function buildTestCatalog(opts: {
     ],
     documents: (async function* () {
       yield {
-        id:
-          opts.withLocations && opts.id?.startsWith('qualla-region-')
-            ? 'qualla-wikipedia-1'
-            : 'dovetails',
+        id: opts.withArticleIds ? 'wikipedia-1' : 'dovetails',
         ...(opts.withLocations
           ? {
               locations: [
@@ -140,10 +139,7 @@ export async function buildTestCatalog(opts: {
         };
       }
       yield {
-        id:
-          opts.withLocations && opts.id?.startsWith('qualla-region-')
-            ? 'qualla-wikipedia-2'
-            : 'shellac',
+        id: opts.withArticleIds ? 'wikipedia-2' : 'shellac',
         ...(opts.withLocations
           ? {
               locations: [

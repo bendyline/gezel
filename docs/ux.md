@@ -1688,6 +1688,20 @@ the shelves is part of using the library, so it should not move the person to
 another area. Installs announce themselves, and the rail picks each one up
 while the dialog is still open.
 
+**A long directory scrolls as one list, with an A–Z index pinned beside it.**
+The Knowledge document list has no "Show more" step to press: pages load as
+either edge comes within reach, so the list can open in the middle and still
+scroll to both ends. It opens on the article being read (returning to the
+view, or to the list on a narrow screen, lands where the person was) and on
+the top of a topic they just picked. An alphabetical listing longer than a
+page gets `.knowledge-letter-index` down its left edge: `#` then A–Z as plain
+`--text-2xs` letters, not keys, since it is a ruler rather than a choice.
+The column's header and the index stay put; only the list moves. A letter
+with nothing under it stays in place, dimmed, so the ruler keeps its shape,
+and the letter at the top of the viewport takes `--accent-text`, which is
+the landing cue for a jump. Curated listings (the Handboek's) are not
+alphabetical and get no index.
+
 **A media hit says what matched and opens on it.** A search hit on a photo, a
 clip or a recording reads `Photo`, `Video · 1:30–2:00` or `Sound · 0:00–0:30`
 (`mediaSpanLabel` in core, the one wording for every surface). In the titlebar

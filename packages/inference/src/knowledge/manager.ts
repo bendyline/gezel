@@ -28,6 +28,7 @@ import type {
   KnowledgeInstallRequest,
   KnowledgeInstallSourceKind,
   KnowledgePassageRead,
+  KnowledgeSearchModel,
   KnowledgeSemanticSearchMode,
   KnowledgeUpdateCandidate,
   KnowledgeUri,
@@ -54,6 +55,8 @@ import {
   type ModelDownloadProgress,
   compareCatalogVersions,
   knowledgeEmbeddingProfile,
+  knowledgeProfileQueryModelBytes,
+  missingPinnedFiles,
   readGezkManifest,
 } from '@bendyline/gezel-knowledge';
 import {
@@ -73,6 +76,7 @@ import {
 import { embedKnowledgeQuery, sharesDaemonEmbedder } from '../memory/embeddings.js';
 import { ChatModelInstallRegistry } from '../models/install-registry.js';
 import { beginPerfWork } from '../perf/responsiveness.js';
+import { HF_CACHE_DIR_ENV, transformersCacheDir } from '../transformers-cache.js';
 import type {
   GlobalSearchHit,
   GlobalSearchResponse,
@@ -94,7 +98,7 @@ import {
   KnowledgeSpatialCursorError,
   encodeNearbyCursor,
   nearbyCursorOffset,
-  regionalDocumentIdentity,
+  spatialDocumentIdentity,
 } from './spatial-query.js';
 import { type KnowledgeVectorFloors, resolveKnowledgeVectorFloors } from './vector-floors.js';
 
@@ -134,6 +138,10 @@ function semanticSearchModeFor(profile: KnowledgeEmbeddingProfile): KnowledgeSem
   const registered = knowledgeEmbeddingProfile(profile.id);
   if (registered && sameVectorSpace(registered, profile)) return 'profile';
   return 'keyword-only';
+}
+
+function searchModelOf(profile: KnowledgeEmbeddingProfile): KnowledgeSearchModel {
+  return { profileId: profile.id, repo: profile.model.repo };
 }
 
 /**
@@ -600,12 +608,20 @@ export class KnowledgeManager {
     const shared = await this.sharedInventoryKeys();
     const activeIds = new Set(this.installs.active().map((a) => a.id));
     const partials = await this.partialDownloadKeys();
+    const modelBytes = new Map<string, number | undefined>();
+    for (const item of gilde.values()) {
+      const profileId = item.embeddingProfile.id;
+      if (!modelBytes.has(profileId)) {
+        modelBytes.set(profileId, await this.searchModelDownloadBytes(profileId));
+      }
+    }
     return [...gilde.values()]
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((item) => {
         const entry = registry.find(
           (c) => c.ref.publisherId === item.publisherId && c.ref.catalogId === item.id,
         );
+        const searchModelDownloadBytes = modelBytes.get(item.embeddingProfile.id);
         return {
           id: item.id,
           publisherId: item.publisherId,
@@ -646,8 +662,24 @@ export class KnowledgeManager {
           ),
           installing: activeIds.has(item.id),
           incompleteDownload: partials.has(item.sha256.slice(0, 16)),
+          ...(searchModelDownloadBytes ? { searchModelDownloadBytes } : {}),
         };
       });
+  }
+
+  /**
+   * The search model an install of a catalog with this profile would also
+   * download. None when the catalog searches with the daemon's own embedder
+   * (an install never fetches that) or the profile's pinned files are cached.
+   */
+  private async searchModelDownloadBytes(profileId: string): Promise<number | undefined> {
+    const profile = knowledgeEmbeddingProfile(profileId);
+    const bytes = knowledgeProfileQueryModelBytes(profileId);
+    if (!profile || bytes === null || semanticSearchModeFor(profile) !== 'profile')
+      return undefined;
+    const cacheDir = process.env[HF_CACHE_DIR_ENV] ?? transformersCacheDir(this.opts.home);
+    const missing = await missingPinnedFiles(profile, { cacheDir });
+    return missing.length > 0 ? bytes : undefined;
   }
 
   /** Resolve a catalogId (URI authority) to its mounted info, or null. */
@@ -913,7 +945,13 @@ export class KnowledgeManager {
     let warning: string | undefined;
     const mounted = this.mountedByKey.get(key);
     if (mounted?.semanticSearch === 'profile') {
-      yield { type: 'progress', phase: 'embedder', bytesDone: 0, bytesTotal: 0 };
+      yield {
+        type: 'progress',
+        phase: 'embedder',
+        bytesDone: 0,
+        bytesTotal: 0,
+        searchModel: searchModelOf(mounted.embedding),
+      };
       warning = yield* this.prewarmProfile(mounted.embedding);
     }
     yield { ...event, ...(warning ? { warning } : {}) };
@@ -998,7 +1036,12 @@ export class KnowledgeManager {
         ) {
           progress.reported = latest;
           lastReportAt = Date.now();
-          yield { type: 'progress', phase: 'embedder', ...latest };
+          yield {
+            type: 'progress',
+            phase: 'embedder',
+            ...latest,
+            searchModel: searchModelOf(profile),
+          };
           continue;
         }
         if (settled) return settled.warning;
@@ -1070,6 +1113,9 @@ export class KnowledgeManager {
         phase,
         bytesDone: lastEvent?.type === 'progress' ? lastEvent.bytesDone : 0,
         bytesTotal: lastEvent?.type === 'progress' ? lastEvent.bytesTotal : 0,
+        ...(lastEvent?.type === 'progress' && lastEvent.searchModel
+          ? { searchModel: lastEvent.searchModel }
+          : {}),
       };
     });
   }
@@ -1323,6 +1369,21 @@ export class KnowledgeManager {
     return this.opts.host.documentsPage(this.requireMounted(catalogId).key, opts);
   }
 
+  async documentInitials(
+    catalogId: string,
+    opts: { topicId?: string; descendants?: boolean },
+  ): ReturnType<KnowledgeCatalogHost['documentInitials']> {
+    return this.opts.host.documentInitials(this.requireMounted(catalogId).key, opts);
+  }
+
+  async documentPosition(
+    catalogId: string,
+    documentId: string,
+    opts: { topicId?: string; descendants?: boolean },
+  ): ReturnType<KnowledgeCatalogHost['documentPosition']> {
+    return this.opts.host.documentPosition(this.requireMounted(catalogId).key, documentId, opts);
+  }
+
   async getDocument(
     catalogId: string,
     documentId: string,
@@ -1452,7 +1513,7 @@ export class KnowledgeManager {
               documentId: document.id,
             }),
           };
-          const identity = regionalDocumentIdentity(
+          const identity = spatialDocumentIdentity(
             info.ref.publisherId,
             info.ref.catalogId,
             document.id,
@@ -1743,7 +1804,7 @@ export class KnowledgeManager {
       }
       const count = perCatalogCount.get(entry.catalogKey) ?? 0;
       if (capPerCatalog && count >= PER_CATALOG_CAP) continue;
-      const spatialIdentity = regionalDocumentIdentity(
+      const spatialIdentity = spatialDocumentIdentity(
         info.ref.publisherId,
         info.ref.catalogId,
         entry.documentId,

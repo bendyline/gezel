@@ -89,7 +89,7 @@ export async function connectEditor(
 
 Use your own stable application ID when adapting this example. The desktop SDK requires a verification code and omits its callback on silent attempts: the SDK first tries the saved grant, then refuses to register a new one if the callback is absent. A revoked or insufficient grant cannot unexpectedly open a consent dialog during startup. The SDK also owns discovery and the pinned TLS transport to the user's daemon.
 
-DocBlocks stores the token at `userData/ai/gezel-credential.bin` through Electron `safeStorage`, with owner-only file permissions. When encryption is unavailable it retains the token in memory only. There is a platform caveat: DocBlocks selects Electron's `basic` password store on Linux, where this is obscuring the token rather than protecting it with an OS credential vault. The grant authorizes catalog management as well as inference, so use an OS-backed credential store where available.
+DocBlocks stores the token at `userData/ai/gezel-credential.bin` as an owner-only file, not in an OS credential vault such as the macOS Keychain. The grant authorizes catalog management as well as inference, but a process that can read the file as this user can already reach the local Gezel and its own owner-only credentials. An OS vault would add no isolation, and macOS prompts for the keychain password whenever the reading app's code signature changes. A private host started through `connectDesktopEmbedding` likewise keeps no credentials: its embedded inference profile never opens the OS keychain.
 
 Turning AI off closes the connection and cancels work. Disconnecting the standalone Gezel revokes its grant and deletes the saved credential; if AI remains enabled, DocBlocks can then use its private host.
 

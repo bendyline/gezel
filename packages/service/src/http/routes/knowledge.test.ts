@@ -75,6 +75,25 @@ describe('knowledge routes', () => {
 
     const page = await client.knowledgeCatalogDocuments('test-notes', { topicId: 'joinery' });
     expect(page.total).toBe(1);
+    expect(page.offset).toBe(0);
+
+    const { initials } = await client.knowledgeCatalogDocumentInitials('test-notes');
+    expect(initials).toEqual([
+      { initial: 'd', offset: 0, count: 1 },
+      { initial: 's', offset: 1, count: 1 },
+    ]);
+    const around = await client.knowledgeCatalogDocuments('test-notes', {
+      around: 'shellac',
+      limit: 1,
+    });
+    expect(around).toMatchObject({ offset: 1, total: 2 });
+    expect(around.documents.map((d) => d.id)).toEqual(['shellac']);
+    const elsewhere = await client.knowledgeCatalogDocuments('test-notes', {
+      topicId: 'joinery',
+      around: 'shellac',
+    });
+    expect(elsewhere.offset).toBe(0);
+    expect(elsewhere.documents.map((d) => d.id)).toEqual(['dovetails']);
 
     const doc = await client.readKnowledgeDocument('test-notes', 'dovetails');
     expect(doc.markdown).toContain('Tails and pins');

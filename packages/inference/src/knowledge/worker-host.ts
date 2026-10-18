@@ -150,6 +150,12 @@ export function createWorkerCatalogHost(): KnowledgeCatalogHost {
     documentsPage: async (key, opts) =>
       // biome-ignore lint/suspicious/noExplicitAny: structured-clone round trip preserves the shape
       (await call('documentsPage', [key, opts])) as any,
+    documentInitials: async (key, opts) =>
+      (await call('documentInitials', [key, opts])) as Awaited<
+        ReturnType<KnowledgeCatalogHost['documentInitials']>
+      >,
+    documentPosition: async (key, documentId, opts) =>
+      (await call('documentPosition', [key, documentId, opts])) as number | null,
     nearbyDocuments: async (key, radius, opts) =>
       (await call('nearbyDocuments', [key, radius, opts])) as Awaited<
         ReturnType<KnowledgeCatalogHost['nearbyDocuments']>

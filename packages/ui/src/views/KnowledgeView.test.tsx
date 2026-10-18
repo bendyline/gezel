@@ -196,6 +196,63 @@ describe('KnowledgeView', () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
+  it('reopens the list around the document being read', async () => {
+    window.localStorage.setItem('gezel:knowledge:catalog', 'shop-notes');
+    window.localStorage.setItem('gezel:knowledge:document', 'dovetails');
+    render(<KnowledgeView />);
+    await waitFor(() =>
+      expect(api.knowledgeCatalogDocuments).toHaveBeenCalledWith(
+        'shop-notes',
+        expect.objectContaining({ around: 'dovetails' }),
+      ),
+    );
+    expect(await screen.findByRole('button', { name: /Dovetail Joints/ })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+  });
+
+  it('pins an A–Z index beside a long alphabetical listing and jumps to a letter', async () => {
+    const page = (offset: number) =>
+      Array.from({ length: 50 }, (_, i) => ({
+        ...DOC_META,
+        id: `doc-${offset + i}`,
+        title: `Doc ${offset + i}`,
+        slug: `${offset + i < 120 ? 'a' : 'm'}-doc-${offset + i}`,
+      }));
+    vi.mocked(api.knowledgeCatalogDocuments).mockImplementation(async (_catalog, opts) => ({
+      documents: page(opts?.offset ?? 0),
+      total: 300,
+      offset: opts?.offset ?? 0,
+    }));
+    vi.mocked(api.knowledgeCatalogDocumentInitials).mockResolvedValue({
+      initials: [
+        { initial: 'a', offset: 0, count: 120 },
+        { initial: 'm', offset: 120, count: 180 },
+      ],
+    });
+    render(<KnowledgeView />);
+    const index = await screen.findByRole('navigation', { name: 'Jump to letter' });
+    expect(index.closest('.knowledge-list-scroll')).toBeNull();
+    expect(screen.getByRole('button', { name: 'B' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'M' }));
+    expect(await screen.findByText('Doc 120')).toBeInTheDocument();
+    expect(api.knowledgeCatalogDocuments).toHaveBeenLastCalledWith(
+      'shop-notes',
+      expect.objectContaining({ offset: 120 }),
+    );
+    expect(screen.queryByText('Doc 0')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show earlier (120)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show more (130 left)' })).toBeInTheDocument();
+  });
+
+  it('leaves a short or curated listing without an index', async () => {
+    render(<KnowledgeView />);
+    expect(await screen.findByText('Dovetail Joints')).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Jump to letter' })).not.toBeInTheDocument();
+  });
+
   it('shows the install pointer when no catalog is registered', async () => {
     vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({ catalogs: [] });
     render(<KnowledgeView />);
@@ -280,6 +337,20 @@ describe('KnowledgeView', () => {
     fireEvent.click(screen.getByRole('button', { name: '← Documents' }));
     await waitFor(() =>
       expect(screen.getByTestId('knowledge-view')).toHaveClass('knowledge-view--list'),
+    );
+  });
+
+  it('keeps the article open when going back to the list, so its row stays marked', async () => {
+    render(<KnowledgeView />);
+    fireEvent.click(await screen.findByText('Dovetail Joints'));
+    expect(await screen.findByTestId('linear-doc-view')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '← Documents' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('knowledge-view')).toHaveClass('knowledge-view--list'),
+    );
+    expect(screen.getByRole('button', { name: /Dovetail Joints/ })).toHaveAttribute(
+      'aria-current',
+      'true',
     );
   });
 });

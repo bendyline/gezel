@@ -212,6 +212,27 @@ export function knowledgeEmbeddingProfile(id: string): KnowledgeEmbeddingProfile
   return KNOWLEDGE_EMBEDDING_PROFILES.find((p) => p.id === id) ?? null;
 }
 
+/**
+ * Bytes a query load of each profile downloads into an empty cache: the text
+ * graph and its weight sidecars, `tokenizer.json`, `tokenizer_config.json`
+ * and `config.json`, from the Hub's file listing at the pinned revision
+ * (2026-10-17). The revision pins keep them as fixed as the digests. A
+ * catalog's gilde entry carries only its own archive size, and released
+ * gilde versions are immutable, so the model's share of a download lives
+ * here. Media encoders are not counted: a query never loads them.
+ */
+const QUERY_MODEL_DOWNLOAD_BYTES: Readonly<Record<string, number>> = {
+  'embeddinggemma-2-512@1': 346_397_233,
+  'multilingual-e5-small@2': 487_352_364,
+  'multilingual-e5-small@1': 487_352_364,
+  'bge-small-en-v1.5@1': 133_805_935,
+};
+
+/** What a profile's query model costs to download, or null for an unregistered profile. */
+export function knowledgeProfileQueryModelBytes(id: string): number | null {
+  return QUERY_MODEL_DOWNLOAD_BYTES[id] ?? null;
+}
+
 /** The knowledge chunking profile: token-bounded, heading-aware Markdown sections. */
 export const MARKDOWN_CHUNKS_2: KnowledgeChunkingProfile = {
   id: 'markdown-chunks@2',

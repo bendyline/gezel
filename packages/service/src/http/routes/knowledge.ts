@@ -17,7 +17,8 @@
  *   DELETE /api/knowledge/catalogs/:catalogId          remove ref + private bytes
  *   POST   /api/knowledge/search                       browser/global catalog search
  *   GET    /api/knowledge/catalogs/:catalogId/topics   the shipped TOC
- *   GET    /api/knowledge/catalogs/:catalogId/documents?topic=&offset=&limit=&descendants=0
+ *   GET    /api/knowledge/catalogs/:catalogId/documents?topic=&offset=&limit=&descendants=0&around=<docId>
+ *   GET    /api/knowledge/catalogs/:catalogId/documents/initials?topic=&descendants=0   A–Z index
  *   GET    /api/knowledge/catalogs/:catalogId/document?id=<docId>   body + metadata
  *   GET    /api/knowledge/catalogs/:catalogId/passage?id=<docId>&chunk=<uid>   one cited passage
  *   GET    /api/knowledge/catalogs/:catalogId/assets                the declared image assets
@@ -199,16 +200,35 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
   });
 
   app.get('/catalogs/:catalogId/documents', async (c) => {
+    const catalogId = c.req.param('catalogId');
     const topicId = c.req.query('topic');
-    const offset = Number.parseInt(c.req.query('offset') ?? '0', 10) || 0;
-    const limit = Number.parseInt(c.req.query('limit') ?? '50', 10) || 50;
-    const page = await manager().documentsPage(c.req.param('catalogId'), {
+    const scope = {
       ...(topicId ? { topicId } : {}),
-      offset,
-      limit,
+      descendants: c.req.query('descendants') !== '0',
+    };
+    const limit = Math.min(
+      200,
+      Math.max(1, Number.parseInt(c.req.query('limit') ?? '50', 10) || 50),
+    );
+    let offset = Math.max(0, Number.parseInt(c.req.query('offset') ?? '0', 10) || 0);
+    // A client returning to an open document asks for the page around it,
+    // so the list can show that document without paging up to it.
+    const around = c.req.query('around');
+    if (around) {
+      const position = await manager().documentPosition(catalogId, around, scope);
+      if (position !== null) offset = Math.max(0, position - Math.floor(limit / 2));
+    }
+    const page = await manager().documentsPage(catalogId, { ...scope, offset, limit });
+    return c.json({ ...page, offset });
+  });
+
+  app.get('/catalogs/:catalogId/documents/initials', async (c) => {
+    const topicId = c.req.query('topic');
+    const initials = await manager().documentInitials(c.req.param('catalogId'), {
+      ...(topicId ? { topicId } : {}),
       descendants: c.req.query('descendants') !== '0',
     });
-    return c.json(page);
+    return c.json({ initials });
   });
 
   app.get('/catalogs/:catalogId/assets', async (c) => {

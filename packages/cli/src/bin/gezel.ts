@@ -1417,9 +1417,13 @@ knowledge
             : c.sharedOnDevice
               ? 'on this device — install adopts it'
               : 'available';
-      const size = `${(c.archiveBytes / (1024 * 1024)).toFixed(0)} MB`;
+      const megabytes = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+      const modelBytes = c.searchModelDownloadBytes ?? 0;
+      const size = megabytes(c.archiveBytes + modelBytes);
+      const includes =
+        modelBytes > 0 ? ` (includes the ${megabytes(modelBytes)} search model)` : '';
       console.log(
-        `${c.id.padEnd(28)} ${c.version.padEnd(10)} ${c.language.padEnd(4)} ${String(c.documents).padStart(7)} docs ${size.padStart(8)}  ${state}`,
+        `${c.id.padEnd(28)} ${c.version.padEnd(10)} ${c.language.padEnd(4)} ${String(c.documents).padStart(7)} docs ${size.padStart(8)}  ${state}${includes}`,
       );
     }
   });

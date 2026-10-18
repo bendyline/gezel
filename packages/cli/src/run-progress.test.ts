@@ -26,8 +26,7 @@ describe('RunProgress', () => {
     vi.useFakeTimers();
     const lines: string[] = [];
     const progress = new RunProgress((text) => lines.push(text), 2_000);
-    const warmup =
-      'MLX runtime warming up — Installing mlx-vlm + torch wheels (one-time, ~1–5 min)…';
+    const warmup = 'Warming up…';
     const heartbeat = { provider: 'mlx', phase: 'prefill', detail: 'Preparing…' };
     // The environment install, before the engine exists.
     progress.phase({ provider: 'mlx', phase: 'starting', detail: warmup });
@@ -44,7 +43,11 @@ describe('RunProgress', () => {
     progress.phase({ provider: 'mlx', phase: 'prefill', detail: 'Processing prompt' });
     progress.phase({ provider: 'mlx', phase: 'generating' });
     vi.advanceTimersByTime(10_000);
-    expect(lines).toEqual([`${warmup}\n`, 'MLX: Loading weights\n', 'MLX: Processing prompt\n']);
+    expect(lines).toEqual([
+      `MLX: ${warmup}\n`,
+      'MLX: Loading weights\n',
+      'MLX: Processing prompt\n',
+    ]);
   });
 });
 

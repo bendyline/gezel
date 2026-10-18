@@ -13,6 +13,7 @@ import type {
   CatalogAssetInfo,
   CatalogAssetRead,
   CatalogChunkHit,
+  CatalogDocumentInitial,
   CatalogDocumentMeta,
   CatalogHandle,
   CatalogTopic,
@@ -94,6 +95,15 @@ export interface KnowledgeCatalogHost {
     key: string,
     opts: { topicId?: string; offset?: number; limit?: number; descendants?: boolean },
   ): Promise<{ documents: CatalogDocumentMeta[]; total: number }>;
+  documentInitials(
+    key: string,
+    opts: { topicId?: string; descendants?: boolean },
+  ): Promise<CatalogDocumentInitial[]>;
+  documentPosition(
+    key: string,
+    documentId: string,
+    opts: { topicId?: string; descendants?: boolean },
+  ): Promise<number | null>;
   nearbyDocuments(
     key: string,
     radius: KnowledgeRadius,
@@ -285,6 +295,9 @@ export async function createInProcessCatalogHost(): Promise<KnowledgeCatalogHost
     validate: async (rootDir, deep) => validateExtractedCatalog(rootDir, { deep }),
     topics: async (key) => mustGet(handles, key).topics(),
     documentsPage: async (key, opts) => mustGet(handles, key).documentsPage(opts),
+    documentInitials: async (key, opts) => mustGet(handles, key).documentInitials(opts),
+    documentPosition: async (key, documentId, opts) =>
+      mustGet(handles, key).documentPosition(documentId, opts),
     nearbyDocuments: async (key, radius, opts) =>
       mustGet(handles, key).nearbyDocuments(radius, opts),
     getDocument: async (key, documentId) => mustGet(handles, key).getDocument(documentId),

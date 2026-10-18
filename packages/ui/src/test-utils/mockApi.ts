@@ -141,6 +141,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   knowledgeUpdates: { source: 'gilde', checkedAt: '2026-01-01T00:00:00.000Z', updates: [] },
   knowledgeCatalogTopics: { topics: [] },
   knowledgeCatalogDocuments: { documents: [], total: 0 },
+  knowledgeCatalogDocumentInitials: { initials: [] },
   knowledgeCatalogAssets: { assets: [] },
   fetchKnowledgeAsset: new Blob([], { type: 'image/png' }),
   searchKnowledge: { results: [] },
