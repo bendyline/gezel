@@ -8,9 +8,11 @@ import {
   estimateLlamaCppResidentBytes,
   estimateManifestKvBytes,
   estimateMlxResidentBytes,
+  llamaCppBackendExclusion,
   localContextFloorTokens,
   pickRecommendedModel,
 } from '@bendyline/gezel';
+import { currentLlamaCppBackend } from '@bendyline/gezel-inference/internal/providers/llama-cpp/backend-health';
 import { resolveLlamaCppKvCacheType } from '@bendyline/gezel-inference/internal/providers/llama-cpp/kv-cache-type';
 import {
   computeHeadroomFor,
@@ -182,7 +184,9 @@ export async function liveLaunchView(): Promise<LiveLaunchView> {
  */
 export async function detectModelTier(models: readonly ChatModelManifest[]): Promise<TierDecision> {
   const view = await liveLaunchView();
+  const backend = view.platform === 'darwin' ? undefined : currentLlamaCppBackend();
   const candidates = models
+    .filter((m) => !llamaCppBackendExclusion(m.llamaCpp, backend))
     .map((m) => toRecoCandidate(m, view.platform, view.machine))
     .filter((c): c is RecoModelInput => c !== null);
   const pick = pickRecommendedModel(candidates, view.device);

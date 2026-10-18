@@ -714,7 +714,11 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
 
       <section style={{ marginBottom: '2rem' }}>
         <h4>Models</h4>
-        <LlamaCppModelManager key={contextSizing} onModelsChanged={refreshInstalled} />
+        <LlamaCppModelManager
+          key={contextSizing}
+          onModelsChanged={refreshInstalled}
+          backend={health?.llamaCppBackend}
+        />
       </section>
 
       <EngineBudgetStrip provider="llama-cpp" />

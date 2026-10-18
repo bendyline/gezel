@@ -437,6 +437,42 @@ describe('LlamaCppModelManager local model list', () => {
     expect(screen.getByText('retired')).toHaveClass('catalog-item-tag--retired');
   });
 
+  it('hides a model excluded on this backend, and shows it without a download under Show all', async () => {
+    const excluded = catalogModel('nvfp4-model', 'NVFP4 Model', 'general');
+    Object.assign(excluded.manifest.llamaCpp, {
+      excludeBackends: ['metal'],
+      excludeReason: 'Metal runs NVFP4 on the CPU.',
+    });
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [catalogModel('current-model', 'Current Model', 'general'), excluded],
+    } as never);
+
+    render(<LlamaCppModelManager backend="metal" />);
+
+    expect(await screen.findByText('Current Model')).toBeInTheDocument();
+    expect(screen.queryByText('NVFP4 Model')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all models' }));
+
+    expect(await screen.findByText('NVFP4 Model')).toBeInTheDocument();
+    expect(screen.getByText('Not for Apple Metal')).toHaveAttribute(
+      'title',
+      'Metal runs NVFP4 on the CPU.',
+    );
+    expect(screen.getByRole('button', { name: 'Not available here' })).toBeDisabled();
+  });
+
+  it('offers an excluded model normally on a backend it allows', async () => {
+    const excluded = catalogModel('nvfp4-model', 'NVFP4 Model', 'general');
+    Object.assign(excluded.manifest.llamaCpp, { excludeBackends: ['metal'] });
+    vi.mocked(api.listCatalogItems).mockResolvedValue({ items: [excluded] } as never);
+
+    render(<LlamaCppModelManager backend="cuda" />);
+
+    expect(await screen.findByText('NVFP4 Model')).toBeInTheDocument();
+    expect(screen.queryByText(/Not for/)).not.toBeInTheDocument();
+  });
+
   it('places maker and customization credit directly below the model title', async () => {
     vi.mocked(api.listCatalogItems).mockResolvedValue({
       items: [catalogModel('gemma4-31b-q4', 'Gemma 4 (31B)', 'general')],

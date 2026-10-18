@@ -379,7 +379,8 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     }
     const nMax = config.llamaCppSpecDraftNMax ?? perModel?.spec?.nMax;
     if (typeof nMax === 'number') args.push('--spec-draft-n-max', String(nMax));
-    // v0.6.0 supports probabilistic selection only for MTP/simple drafts.
+    // v0.7.0 supports probabilistic selection only for MTP/simple drafts
+    // (DFlash/LiLiCorr ignore it).
     // Leave the upstream greedy default untouched unless explicitly set.
     if (
       (safeSpecType === 'draft-mtp' || safeSpecType === 'draft-simple') &&

@@ -39,6 +39,24 @@ export function noteHostOutOfMemory(
 
 const BACKENDS = ['cuda', 'vulkan', 'metal', 'cpu'] as const;
 
+/**
+ * The backend this process's on-device llama-server runs, for catalog
+ * backend exclusions: the build discovery resolved, else what the probe
+ * found, else the only build macOS ships. Undefined when an external server
+ * is configured through the environment — its backend is not ours to know.
+ */
+export function currentLlamaCppBackend(): (typeof BACKENDS)[number] | undefined {
+  if (process.env.GEZEL_LLAMA_SERVER_URL) return undefined;
+  for (const raw of [
+    process.env.GEZEL_LLAMA_SERVER_BACKEND,
+    process.env.GEZEL_LLAMA_DETECTED_BACKEND,
+  ]) {
+    const backend = BACKENDS.find((b) => b === raw);
+    if (backend) return backend;
+  }
+  return process.platform === 'darwin' ? 'metal' : undefined;
+}
+
 export function llamaBackendHealthView(): LlamaCppBackendHealthResponse {
   const runningRaw = process.env.GEZEL_LLAMA_SERVER_BACKEND;
   const running = BACKENDS.find((backend) => backend === runningRaw);

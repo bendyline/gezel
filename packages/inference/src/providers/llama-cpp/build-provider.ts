@@ -5,6 +5,8 @@ import {
   type GezelConfig,
   createLogger,
   estimateLlamaCppResidentBytes,
+  llamaCppBackendExclusion,
+  llamaCppBackendLabel,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { LlamaBackend, StartupCrashVerdict } from '@bendyline/gezel/native';
@@ -43,7 +45,7 @@ import { makeEngineKey } from '../native/engine-key.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
-import { noteGpuStartup, noteHostOutOfMemory } from './backend-health.js';
+import { currentLlamaCppBackend, noteGpuStartup, noteHostOutOfMemory } from './backend-health.js';
 import { adoptLlamaFallback } from './backend-quarantine.js';
 import { lastArgValue, readLlamaCppBuildMetadata } from './build-metadata.js';
 import {
@@ -397,6 +399,23 @@ export async function buildLlamaCppProvider(opts: {
       noModelYetMessage('Local model', activeLlamaInstall(opts.llamaCppModels)),
       'model-not-ready',
     );
+  }
+  // Install refuses an excluded backend; this catches a model installed
+  // before the exclusion was authored, or copied in by hand.
+  if (modelCatalogInfo && opts.catalog) {
+    const engineBackend = binaryBackend ?? currentLlamaCppBackend();
+    const detail = await opts.catalog.get('chat-model', modelCatalogInfo.id).catch(() => null);
+    const excluded = llamaCppBackendExclusion(
+      detail?.manifest.kind === 'chat-model' ? detail.manifest.llamaCpp : undefined,
+      engineBackend,
+    );
+    if (excluded && engineBackend) {
+      const err = new Error(
+        `Local model: ${modelCatalogInfo.name} cannot run on the ${llamaCppBackendLabel(engineBackend)} llama.cpp engine. ${excluded} Pick another local model in Settings → ${localDeviceSettingsLabel()}.`,
+      );
+      (err as Error & { isActionable: boolean }).isActionable = true;
+      throw err;
+    }
   }
 
   // Per Phase 0 measurements on a cold Mac: Metal library compile is

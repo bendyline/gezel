@@ -45,6 +45,7 @@ export * from './redact.js';
 export * from './ollama-models.js';
 export * from './model-fit.js';
 export * from './llama-cpp-launch.js';
+export * from './llama-cpp-backend-exclusion.js';
 export * from './tuning-apply.js';
 export * from './tuning-resolve.js';
 export * from './model-attribution.js';

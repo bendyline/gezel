@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { llamaCppBackendExclusion, llamaCppBackendLabel } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { currentLlamaCppBackend } from '../providers/llama-cpp/backend-health.js';
 import type { LlamaCppModelManager } from '../providers/llama-cpp/index.js';
 import type { MlxModelManager } from '../providers/mlx/index.js';
 
@@ -105,6 +107,8 @@ export interface CreateEnsureModelOptions {
    * error handling — this orchestrator never awaits it.
    */
   onInstallStart?: (info: { backend: EnsureBackend; catalogId: string }) => void;
+  /** Test seam for catalog backend exclusions — defaults to the process's own. */
+  resolveLlamaBackend?: () => string | undefined;
 }
 
 interface ActiveJob {
@@ -286,6 +290,16 @@ export async function createEnsureModelOrchestrator(
           'no_source_for_backend',
           `chat-model "${catalogId}" has no ${backend} source${alternatives.length > 0 ? ` — try ${alternatives.map((id) => `"${id}"`).join(' or ')}` : ''}`,
         );
+      }
+      if (backend === 'llama-cpp') {
+        const engineBackend = (opts.resolveLlamaBackend ?? currentLlamaCppBackend)();
+        const excluded = llamaCppBackendExclusion(detail.manifest.llamaCpp, engineBackend);
+        if (excluded && engineBackend) {
+          throw new KnownEnsureError(
+            'no_source_for_backend',
+            `chat-model "${catalogId}" is not available on the ${llamaCppBackendLabel(engineBackend)} llama.cpp engine: ${excluded}${detail.manifest.mlx ? ` Try "mlx:${catalogId}".` : ''}`,
+          );
+        }
       }
 
       if (await isInstalled(backend, catalogId)) {

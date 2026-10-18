@@ -1487,7 +1487,18 @@ export const ChatModelLlamaCppSourceSchema = z
      */
     draftModel: z
       .object({
-        /** Filename within the same HF repo. May include a subdirectory. */
+        /**
+         * Optional repository override when the drafter is published apart
+         * from the target GGUF (NVIDIA ships Nemotron 3.5 Bolt's LiLiCorr
+         * drafter in its own repo). Absent inherits the enclosing source repo.
+         */
+        huggingfaceRepo: z
+          .string()
+          .regex(/^[A-Za-z0-9_\-.]+\/[A-Za-z0-9_\-.]+$/)
+          .optional(),
+        /** Immutable drafter-repository revision. Absent inherits the parent revision. */
+        revision: z.string().optional(),
+        /** Filename within the repo. May include a subdirectory. */
         filename: z.string(),
         /** SHA-256 of the draft GGUF, lifted from HF LFS metadata. */
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -1495,6 +1506,16 @@ export const ChatModelLlamaCppSourceSchema = z
         sizeBytes: z.number().int().positive(),
       })
       .optional(),
+    /**
+     * llama-server backends this GGUF must not be offered or run on. A
+     * tensor type a backend has no kernel for falls back to the CPU there:
+     * an NVFP4 file "works" on Metal at a fraction of its speed, which reads
+     * as a broken model. Hidden from the download list, refused at install
+     * and launch. Read through `llamaCppBackendExclusion`.
+     */
+    excludeBackends: z.array(z.enum(['cuda', 'vulkan', 'metal', 'cpu'])).optional(),
+    /** Plain sentence shown with an excluded backend, saying why. */
+    excludeReason: z.string().min(1).optional(),
   })
   .refine(
     (v) => {

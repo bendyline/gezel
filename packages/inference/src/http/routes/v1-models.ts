@@ -4,6 +4,7 @@ import {
   estimateManifestKvBytes,
   externalGezelModelId,
   isRecommendedModel,
+  llamaCppBackendExclusion,
   localContextFloorTokens,
   rateModelsForDevice,
   resolveDistributionProfile,
@@ -11,6 +12,7 @@ import {
 import type { AppModel } from '@bendyline/gezel/app-models';
 import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
+import { currentLlamaCppBackend } from '../../providers/llama-cpp/backend-health.js';
 import { CapacityBroker } from '../../providers/native/capacity-broker.js';
 import type { ProviderName } from '../../providers/types.js';
 import { type MemoryProfile, detectMemoryProfileCached } from '../../system/memory.js';
@@ -92,11 +94,13 @@ function catalogBackend(manifest: ChatModelManifest): CatalogBackend | null {
   // Store hosts have no provisioned Python runtime. Only advertise models
   // backed by bundled native engines until a frozen MLX runtime ships.
   const store = resolveDistributionProfile().pythonProvisioning === 'frozen-only';
-  if (store) return manifest.llamaCpp ? 'llama-cpp' : ds4;
+  const llamaCpp =
+    manifest.llamaCpp && !llamaCppBackendExclusion(manifest.llamaCpp, currentLlamaCppBackend());
+  if (store) return llamaCpp ? 'llama-cpp' : ds4;
   const preferred = resolveOnDeviceProvider(process.platform, process.arch);
   if (preferred === 'mlx' && manifest.mlx && !manifest.mlx.disabledReason) return 'mlx';
-  if (preferred === 'llama-cpp' && manifest.llamaCpp) return 'llama-cpp';
-  if (manifest.llamaCpp) return 'llama-cpp';
+  if (preferred === 'llama-cpp' && llamaCpp) return 'llama-cpp';
+  if (llamaCpp) return 'llama-cpp';
   if (manifest.mlx && !manifest.mlx.disabledReason && process.platform === 'darwin') return 'mlx';
   return ds4;
 }
