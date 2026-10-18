@@ -23,6 +23,8 @@ export const PromptWorkOptionsPrelude: Behavior = {
     if (!ctx.workOptions) return null;
     if (ctx.messageOrigin !== 'direct-user' && ctx.messageOrigin !== 'question-answer') return null;
     if (!ctx.availableToolNames.includes('start_work')) return null;
-    return renderWorkOptionsPrelude(ctx.workOptions);
+    return renderWorkOptionsPrelude(ctx.workOptions, {
+      ordinalIds: ctx.workOptionIds === 'ordinal',
+    });
   },
 };

@@ -32,6 +32,10 @@ import {
  *   pnpm eval:ab-work-routing --model gemma4-e4b-q4,qwen3.5-9b-q4 --count 3
  *   pnpm eval:ab-work-routing --arms baseline,work-routing --scenarios route-trip,route-advice
  *   pnpm eval:ab-work-routing --analyze evals/runs/ab-work-routing-<ts>
+ *   pnpm eval:ab-work-routing --arms work-options-prelude,no-guidance,ordinal-ids,top-one \
+ *     --reference work-options-prelude
+ *   pnpm eval:ab-work-routing --arms baseline,work-options-prelude --embeddings \
+ *     --scenarios first-project-trip,first-project-trip-paraphrase --timeout 40m
  *
  * Arms are behavior flags only — the same daemon, probes and grader:
  *   baseline              today's routing surface
@@ -46,6 +50,19 @@ export const WORK_ROUTING_ARMS = {
   baseline: [],
   'work-routing': ['tools.work-routing'],
   'work-options-prelude': ['tools.work-routing', 'prompt.work-options-prelude'],
+  // Stage-2 ablations of the pre-ranked note; pair them with
+  // `--reference work-options-prelude`.
+  'no-guidance': [
+    'tools.work-routing',
+    'prompt.work-options-prelude',
+    'prompt.work-options-no-guidance',
+  ],
+  'ordinal-ids': [
+    'tools.work-routing',
+    'prompt.work-options-prelude',
+    'prompt.work-options-ordinal',
+  ],
+  'top-one': ['tools.work-routing', 'prompt.work-options-prelude', 'prompt.work-options-top-one'],
 } as const satisfies Record<string, readonly string[]>;
 type ArmId = keyof typeof WORK_ROUTING_ARMS;
 
@@ -56,6 +73,8 @@ const OWN_FLAGS = [
   'suite',
   'scenarios',
   'arms',
+  'reference',
+  'embeddings',
   'count',
   'timeout',
   'runs-dir',
@@ -86,7 +105,7 @@ async function completedTrials(cellDir: string): Promise<number> {
   }
 }
 
-export function parseWorkRoutingArms(raw: unknown): ArmId[] {
+export function parseWorkRoutingArms(raw: unknown, reference: ArmId = BASELINE_ARM): ArmId[] {
   if (typeof raw !== 'string') return Object.keys(WORK_ROUTING_ARMS) as ArmId[];
   const arms = raw
     .split(',')
@@ -99,10 +118,23 @@ export function parseWorkRoutingArms(raw: unknown): ArmId[] {
       );
     }
   }
-  if (!arms.includes(BASELINE_ARM)) {
-    throw new Error('every run needs the baseline arm: the read-out pairs each arm against it');
+  if (!arms.includes(reference)) {
+    throw new Error(
+      `every run needs its reference arm "${reference}": the read-out pairs each arm against it`,
+    );
   }
   return [...new Set(arms)] as ArmId[];
+}
+
+export function parseReferenceArm(raw: unknown): ArmId {
+  if (raw === undefined || raw === true) return BASELINE_ARM;
+  const arm = String(raw).trim();
+  if (!(arm in WORK_ROUTING_ARMS)) {
+    throw new Error(
+      `unknown reference arm "${arm}" — expected one of ${Object.keys(WORK_ROUTING_ARMS).join(', ')}`,
+    );
+  }
+  return arm as ArmId;
 }
 
 async function gitSha(): Promise<string> {
@@ -125,14 +157,15 @@ async function gitSha(): Promise<string> {
 async function writeReport(
   root: string,
   meta: Record<string, unknown>,
-  opts: { rescore?: boolean } = {},
+  opts: { rescore?: boolean; reference?: ArmId } = {},
 ): Promise<void> {
+  const reference = opts.reference ?? BASELINE_ARM;
   const rows = await readRouteRows(root, opts);
   const changed = rows.filter((row) => row.changedByRescore).length;
   const fullMeta = opts.rescore
     ? { ...meta, rescored: `${changed} of ${rows.length} trials changed route or verdict` }
     : meta;
-  const markdown = renderRouteReport(rows, BASELINE_ARM, fullMeta);
+  const markdown = renderRouteReport(rows, reference, fullMeta);
   const stem = opts.rescore ? 'ab-summary.rescored' : 'ab-summary';
   await writeFile(
     join(root, `${stem}.json`),
@@ -140,7 +173,7 @@ async function writeReport(
       {
         meta: fullMeta,
         arms: summarizeAll(rows),
-        comparisons: compareAll(rows, BASELINE_ARM),
+        comparisons: compareAll(rows, reference),
         rows,
       },
       null,
@@ -155,6 +188,7 @@ async function writeReport(
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   assertKnownFlags(args.flags, [...OWN_FLAGS]);
+  const reference = parseReferenceArm(args.flags.reference);
   if (typeof args.flags.analyze === 'string') {
     const root = isAbsolute(args.flags.analyze)
       ? args.flags.analyze
@@ -162,7 +196,7 @@ async function main(): Promise<void> {
     await writeReport(
       root,
       { root, reanalyzedAt: new Date().toISOString() },
-      { rescore: args.flags.rescore === true },
+      { rescore: args.flags.rescore === true, reference },
     );
     return;
   }
@@ -179,13 +213,16 @@ async function main(): Promise<void> {
   const scenarios: EvalScenario[] = scenarioIds.map((id) => {
     const scenario = SCENARIOS[id];
     if (!scenario) throw new Error(`unknown scenario "${id}"`);
-    return scenario;
+    // Every route probe loads embeddings, as production does; --embeddings
+    // gives other scenarios (whole first projects) the same footing, so
+    // suggest_work ranks them by meaning in both arms.
+    return args.flags.embeddings === true ? { ...scenario, requiresEmbeddings: true } : scenario;
   });
   if (args.flags.list) {
     printScenarios(scenarios);
     return;
   }
-  const arms = parseWorkRoutingArms(args.flags.arms);
+  const arms = parseWorkRoutingArms(args.flags.arms, reference);
   const models = String(args.flags.model || DEFAULT_MODELS)
     .split(',')
     .map((s) => s.trim())
@@ -281,15 +318,16 @@ async function main(): Promise<void> {
           await runCell(modelId, scenario, arm, armDir(modelId, arm), arm);
         }
       }
-      // A/B/A: the baseline again on the first probe, so drift between the
-      // first and last cell shows as baseline-vs-baseline, not as an effect.
+      // A/B/A: the reference arm again on the first probe, so drift between
+      // the first and last cell shows as reference-vs-reference, not as an
+      // effect.
       if (args.flags.aba === true && !ac.signal.aborted && scenarios[0]) {
         await runCell(
           modelId,
           scenarios[0],
-          BASELINE_ARM,
-          armDir(modelId, 'baseline-aba'),
-          'baseline (A/B/A)',
+          reference,
+          armDir(modelId, `${reference}-aba`),
+          `${reference} (A/B/A)`,
         );
       }
     }
@@ -298,7 +336,7 @@ async function main(): Promise<void> {
   }
   meta.finishedAt = new Date().toISOString();
   meta.status = ac.signal.aborted ? 'interrupted' : 'complete';
-  await writeReport(root, meta);
+  await writeReport(root, meta, { reference });
 }
 
 const invokedDirectly =

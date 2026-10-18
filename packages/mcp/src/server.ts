@@ -50,6 +50,7 @@ import {
   gezelNotFoundMessage,
   gezelRosterHint,
   isAnswerEnvelope,
+  isOrdinalWorkOptionId,
   matchProjectTypeForBrief,
   normalizeArtifactPath,
   parseWorkOptionId,
@@ -8244,6 +8245,12 @@ async function resolveBareWorkOption(
   const bare = raw.trim().replace(/^[\s[("'`]+|[\s\])"'`.,;:]+$/g, '');
   if (!bare || bare.includes(':')) return null;
   const listed = await rankingForTurn(project, request).catch(() => null);
+  // A list position: the numbered note's ids, or a model reading "1." off
+  // the semantic list.
+  if (isOrdinalWorkOptionId(bare)) {
+    const nth = listed?.options[Number(bare) - 1];
+    return nth ? parseWorkOptionId(nth.id) : null;
+  }
   const fromList = listed?.options.find((o) => o.id.endsWith(`:${bare}`));
   if (fromList) return parseWorkOptionId(fromList.id);
   const types = await listRoutableProjectTypes().catch(() => []);

@@ -11,8 +11,21 @@ import type { SuggestWorkResult, WorkActionOption, WorkGuidance } from '../schem
 
 const START_LINE =
   'Call start_work({ option: "<id>" }) with the id that fits. The request and destination are already bound; you do not need to restate them.';
+const ORDINAL_START_LINE =
+  'Call start_work({ option: "<number>" }) with the number of the one that fits. The request and destination are already bound; you do not need to restate them.';
 
-export function renderSuggestWorkResult(result: SuggestWorkResult): string {
+export interface WorkOptionsRenderOptions {
+  /**
+   * Number the options and ask `start_work` for the number, instead of
+   * naming each option's id (the `prompt.work-options-ordinal` ablation).
+   */
+  ordinalIds?: boolean;
+}
+
+export function renderSuggestWorkResult(
+  result: SuggestWorkResult,
+  opts: WorkOptionsRenderOptions = {},
+): string {
   const [first] = result.options;
   if (first?.kind === 'craftbook' && first.exact) {
     return [
@@ -30,9 +43,9 @@ export function renderSuggestWorkResult(result: SuggestWorkResult): string {
     }
   }
   result.options.forEach((option, index) => {
-    lines.push(`${index + 1}. ${optionLine(option)}`);
+    lines.push(`${index + 1}. ${optionLine(option, opts.ordinalIds === true)}`);
   });
-  if (result.options.length > 0) lines.push(START_LINE);
+  if (result.options.length > 0) lines.push(opts.ordinalIds ? ORDINAL_START_LINE : START_LINE);
   for (const verdict of questionFirst ? result.guidance.slice(1) : result.guidance) {
     lines.push(guidanceLine(verdict, false));
   }
@@ -45,9 +58,12 @@ export function renderSuggestWorkResult(result: SuggestWorkResult): string {
  * `start_work` itself. Null when there is nothing to start — a menu on
  * "what's 17 × 23?" only invites over-routing.
  */
-export function renderWorkOptionsPrelude(result: SuggestWorkResult): string | null {
+export function renderWorkOptionsPrelude(
+  result: SuggestWorkResult,
+  opts: WorkOptionsRenderOptions = {},
+): string | null {
   if (result.options.length === 0 || result.question) return null;
-  return `(System note for this turn: suggest_work already ran for this message.\n${renderSuggestWorkResult(result)})`;
+  return `(System note for this turn: suggest_work already ran for this message.\n${renderSuggestWorkResult(result, opts)})`;
 }
 
 const MAX_DESCRIPTION_CHARS = 140;
@@ -65,10 +81,11 @@ export function shortDescription(text: string): string {
     : `${clause.slice(0, MAX_DESCRIPTION_CHARS - 1).trimEnd()}…`;
 }
 
-function optionLine(option: WorkActionOption): string {
+function optionLine(option: WorkActionOption, ordinal: boolean): string {
   const description = option.description ? ` — ${shortDescription(option.description)}` : '';
   const setup = option.kind === 'craftbook' ? setupNote(option) : '';
-  return `[${option.id}] ${option.name}${description}${setup}`;
+  const id = ordinal ? '' : `[${option.id}] `;
+  return `${id}${option.name}${description}${setup}`;
 }
 
 function setupNote(option: Extract<WorkActionOption, { kind: 'craftbook' }>): string {

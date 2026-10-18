@@ -54,7 +54,23 @@ function welcome(id: string): FirstProject {
   return entry;
 }
 
-function typed(id: string, paraphrase: string): RouteProbe[] {
+/**
+ * Each typed welcome card reworded the way a person would ask, without "Start
+ * a project to…". The route probes send these, and so do the end-to-end
+ * `first-project-<id>-paraphrase` trials.
+ */
+export const TYPED_FIRST_PROJECT_PARAPHRASES: Readonly<Record<string, string>> = {
+  trip: "We're going to Kyoto for a week in April, the two of us. Can you help with a day-by-day trip plan and a packing list?",
+  language: "I'd like to practice my Spanish. I know the basics.",
+  invoice:
+    "I'm a freelance illustrator and two clients owe me: Harbor Books $1,200 for a book cover and Riverside Cafe $450 for a menu, both due at the end of the month. Help me keep track of them and send invoices.",
+  posts: 'Help me plan a week of LinkedIn posts for my pottery studio.',
+  'word-clues': "Let's play a word game: give me clues and I'll guess the words.",
+};
+
+function typed(id: string): RouteProbe[] {
+  const paraphrase = TYPED_FIRST_PROJECT_PARAPHRASES[id];
+  if (!paraphrase) throw new Error(`no paraphrase for first project "${id}"`);
   const entry = welcome(id);
   if (entry.kind !== 'type') throw new Error(`first project "${id}" is not typed`);
   const acceptable: AcceptableRoute[] = [
@@ -80,17 +96,11 @@ function craftbook(id: string): RouteProbe {
 const ANSWER: AcceptableRoute[] = [{ kind: 'answer' }, { kind: 'consult' }];
 
 export const ROUTE_PROBES: readonly RouteProbe[] = [
-  ...typed(
-    'trip',
-    "We're going to Kyoto for a week in April, the two of us. Can you help with a day-by-day trip plan and a packing list?",
-  ),
-  ...typed('language', "I'd like to practice my Spanish. I know the basics."),
-  ...typed(
-    'invoice',
-    "I'm a freelance illustrator and two clients owe me: Harbor Books $1,200 for a book cover and Riverside Cafe $450 for a menu, both due at the end of the month. Help me keep track of them and send invoices.",
-  ),
-  ...typed('posts', 'Help me plan a week of LinkedIn posts for my pottery studio.'),
-  ...typed('word-clues', "Let's play a word game: give me clues and I'll guess the words."),
+  ...typed('trip'),
+  ...typed('language'),
+  ...typed('invoice'),
+  ...typed('posts'),
+  ...typed('word-clues'),
   {
     id: 'meals',
     category: 'typed-paraphrase',

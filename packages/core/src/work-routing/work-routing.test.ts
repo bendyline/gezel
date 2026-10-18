@@ -4,6 +4,7 @@ import { looksLikeQuestionOrAdvice } from './question.js';
 import { type WorkRankInput, rankWorkOptions } from './rank.js';
 import { renderSuggestWorkResult, renderWorkOptionsPrelude, shortDescription } from './render.js';
 import { projectNameFromRequest, routingRequestText } from './request.js';
+import { isOrdinalWorkOptionId, shapeWorkOptions } from './shape.js';
 
 describe('projectNameFromRequest', () => {
   it.each([
@@ -369,6 +370,42 @@ describe('renderWorkOptionsPrelude', () => {
     );
     expect(text ?? '').toMatch(/^\(System note for this turn: suggest_work already ran/);
     expect(text ?? '').toContain('[type:trip-planner]');
+  });
+});
+
+describe('shapeWorkOptions', () => {
+  const ranked = () =>
+    rankWorkOptions({
+      ...DEFAULT_INPUT,
+      projectTypes: [
+        { typeId: 'trip-planner', name: 'Trip planner', description: 'A board.' },
+        { typeId: 'event-planner', name: 'Event planner' },
+      ],
+    });
+
+  it('numbers the options and asks start_work for the number', () => {
+    const text = renderSuggestWorkResult(ranked(), { ordinalIds: true });
+    expect(text.split('\n').slice(0, 3)).toEqual([
+      '1. Trip planner — A board',
+      '2. Event planner',
+      expect.stringContaining('Call start_work({ option: "<number>" })'),
+    ]);
+    expect(isOrdinalWorkOptionId('2')).toBe(true);
+    expect(isOrdinalWorkOptionId('type:trip-planner')).toBe(false);
+  });
+
+  it('drops the guidance lines, or every option after the first', () => {
+    const bare = renderSuggestWorkResult(shapeWorkOptions(ranked(), { noGuidance: true }));
+    expect(bare).not.toContain('answer in chat yourself');
+    expect(bare).toContain('[type:event-planner]');
+
+    const top = shapeWorkOptions(ranked(), { maxOptions: 1 });
+    expect(top.options.map((o) => o.id)).toEqual(['type:trip-planner']);
+    expect(renderSuggestWorkResult(top)).toContain('answer in chat yourself');
+  });
+
+  it('changes nothing when no variant is asked for', () => {
+    expect(shapeWorkOptions(ranked(), {})).toEqual(ranked());
   });
 });
 
