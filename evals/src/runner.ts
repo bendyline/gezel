@@ -1882,6 +1882,10 @@ export function evalDaemonEnvForTrial(opts: {
           // downloading that model before the task starts.
           GEZEL_KNOWLEDGE_PREWARM_TIMEOUT_MS:
             process.env.GEZEL_EVAL_KNOWLEDGE_PREWARM_TIMEOUT_MS ?? '30000',
+          // One embedder download for every trial: in a fresh home each
+          // route probe downloaded bge-small before its first reply (~45 s).
+          GEZEL_HF_CACHE_DIR:
+            process.env.GEZEL_HF_CACHE_DIR ?? join(defaultCacheRoot(), 'engines', 'hf-cache'),
         }
       : {}),
     ...(opts.retrievalTrace ? { GEZEL_RETRIEVAL_TRACE: '1' } : {}),

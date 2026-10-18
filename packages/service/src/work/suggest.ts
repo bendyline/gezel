@@ -17,6 +17,7 @@ import {
   looksLikeProcedureRequest,
   namesDocumentDeliverable,
 } from '@bendyline/gezel/local-loop';
+import { triggerCandidateIsLaunchable } from '../chat/craftbook-trigger-route.js';
 import {
   looksLikeImplementationRequest,
   looksLikeWorkRequest,
@@ -56,6 +57,8 @@ export interface SuggestWorkInput {
   rankCraftbooks?: typeof suggestCraftbooks;
   /** Test seam for ranking project types on meaning. */
   rankTypes?: typeof rankCraftbookSuggestions;
+  /** Test seam for the project's craftbook listing. */
+  listOffer?: typeof listProjectCraftbookOffer;
 }
 
 export const DEFAULT_PROJECT_ID = 'default';
@@ -82,6 +85,12 @@ const CRAFTBOOK_STRONG_LEXICAL = 0.25;
 const VAGUE_MAX_WORDS = 8;
 const VAGUE_TOP_SCORE = 0.45;
 const MAX_CRAFTBOOKS = 3;
+/**
+ * A routing turn waits this long for an embedder that is still loading, then
+ * ranks on words. A cached model loads in about a second; a first download
+ * held the first reply about 45 s (S1, 2026-10-17).
+ */
+const COLD_EMBEDDER_BUDGET_MS = 3_000;
 
 /**
  * A project type the words do not tag can still be the clear fit: "I'd like
@@ -92,6 +101,14 @@ const MAX_CRAFTBOOKS = 3;
  */
 const TYPE_FLOOR_BLENDED = 0.4;
 const TYPE_MIN_LEAD = 0.06;
+/**
+ * A catch-all type ("Chat: a quiet room for talking … asking questions") sits
+ * near every conversational sentence, so it is no rival to a specific type.
+ * Counted as one, it held Language Trainer to a 0.032 lead on "Can you help me
+ * get better at French conversation?"; measured against the next specific
+ * type the lead is 0.084, and no other probe's lead moved (2026-10-17).
+ */
+const CATCH_ALL_TYPE_CATEGORY = 'general';
 
 const RECURRING_WORDING_RE =
   /\b(?:nightly|overnight|night\s+shift|every\s+(?:night|day|week|month|morning)|each\s+(?:night|day|week|month)|weekly|daily|monthly|recurring|on\s+a\s+schedule|turn\s+on|switch\s+on|enable)\b/i;
@@ -109,11 +126,29 @@ export async function suggestWork(
   const inDefault = projectId === DEFAULT_PROJECT_ID;
   const tools = new Set(input.tools ?? []);
   const separateProject = explicitlyRequestsSeparateProject(request);
-  const offer = await listProjectCraftbookOffer(deps.catalog, deps.store, projectId, {
-    ...(deps.git ? { git: deps.git } : {}),
-  }).catch(() => null);
+  const offer = await (input.listOffer ?? listProjectCraftbookOffer)(
+    deps.catalog,
+    deps.store,
+    projectId,
+    {
+      ...(deps.git ? { git: deps.git } : {}),
+    },
+  ).catch(() => null);
   const setupFor = (craftbookId: string): string[] =>
     (offer?.missingToolsets[craftbookId] ?? []).map((need) => need.toolsetId);
+  const paramSchemas = new Map<string, unknown>();
+  for (const item of offer?.items ?? []) {
+    if (item.manifest.kind === 'craftbook-template') {
+      paramSchemas.set(item.manifest.id, item.manifest.paramSchema);
+    }
+  }
+  // start_work fills only a book's main content param from the message, so a
+  // book that needs a picked file or another answer cannot start from chat:
+  // tidy-spreadsheet was offered for a CSV clean-up, start_work failed on
+  // "Choose the spreadsheet", and Gemma asked instead of launching
+  // dataset-clean (2026-10-17).
+  const launchable = (craftbookId: string): boolean =>
+    triggerCandidateIsLaunchable(paramSchemas.get(craftbookId));
 
   const plan = resolveTurnIntentPlan({ text: request, isMeester: true });
   const exactPlan =
@@ -136,7 +171,7 @@ export async function suggestWork(
   const [ranked, projectTypes, recurring] = exact
     ? [{ candidates: [], vague: false }, [], []]
     : await Promise.all([
-        rankedCraftbooks(deps, input, request, setupFor),
+        rankedCraftbooks(deps, input, request, setupFor, launchable),
         inDefault || separateProject
           ? fittingProjectTypes(deps.catalog, request, input.rankTypes ?? rankCraftbookSuggestions)
           : [],
@@ -173,12 +208,21 @@ async function rankedCraftbooks(
   input: SuggestWorkInput,
   request: string,
   setupFor: (craftbookId: string) => string[],
+  launchable: (craftbookId: string) => boolean,
 ): Promise<{ candidates: WorkCraftbookCandidate[]; vague: boolean }> {
   const rank = input.rankCraftbooks ?? suggestCraftbooks;
-  const suggestions = await rank(
+  const ranked = await rank(
     { catalog: deps.catalog, store: deps.store, ...(deps.git ? { git: deps.git } : {}) },
-    { projectId: input.projectId, query: request, topK: MAX_CRAFTBOOKS },
+    {
+      projectId: input.projectId,
+      query: request,
+      topK: MAX_CRAFTBOOKS * 2,
+      coldEmbedderBudgetMs: COLD_EMBEDDER_BUDGET_MS,
+    },
   ).catch(() => []);
+  // Unlaunchable books leave before the trailing cut, so the best book a
+  // message can start is measured against its own peers.
+  const suggestions = ranked.filter((s) => launchable(s.id)).slice(0, MAX_CRAFTBOOKS);
   const best = suggestions[0];
   const top = best?.score ?? 0;
   const candidates = suggestions
@@ -222,7 +266,11 @@ async function fittingProjectTypes(
     .filter((item) => !item.unavailableReason)
     .map(
       (item) =>
-        item.manifest as unknown as BriefRoutableType & { description?: string; version?: string },
+        item.manifest as unknown as BriefRoutableType & {
+          description?: string;
+          version?: string;
+          category?: string;
+        },
     );
   const fillable = (id: string) => {
     const type = types.find((t) => t.id === id);
@@ -246,9 +294,13 @@ async function fittingProjectTypes(
         ...(t.version ? { version: t.version } : {}),
         stepCount: 1,
       })),
-      { topK: 2, minScore: 0 },
+      { topK: 3, minScore: 0, coldEmbedderBudgetMs: COLD_EMBEDDER_BUDGET_MS },
     ).catch(() => []);
-    const [best, next] = ranked;
+    const catchAll = new Set(
+      types.filter((t) => t.category === CATCH_ALL_TYPE_CATEGORY).map((t) => `type:${t.id}`),
+    );
+    const [best, ...rest] = ranked;
+    const next = rest.find((r) => !catchAll.has(r.id));
     if (
       best?.semantic !== undefined &&
       best.score >= TYPE_FLOOR_BLENDED &&

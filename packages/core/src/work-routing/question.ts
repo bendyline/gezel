@@ -14,7 +14,20 @@
  */
 
 const ADVICE_CUE_RE =
-  /\b(?:should\s+(?:i|we)|would\s+you\s+(?:lean|recommend|suggest|pick|choose|go\s+with)|which\s+(?:is|one|would|should|do\s+you)|is\s+it\s+(?:better|worth)|what(?:'s|\s+is)\s+the\s+difference|pros\s+and\s+cons|what\s+do\s+you\s+(?:think|recommend|suggest)|what\s+can\s+you\s+do|who\s+are\s+you|how\s+do\s+(?:i|you|we)|how\s+does|why\s+(?:is|does|do|did)|quick\s+question|no\s+need\s+to\s+(?:start|create|make|build|set\s+up)|just\s+curious)\b/i;
+  /\b(?:should\s+(?:i|we)|would\s+you\s+(?:lean|recommend|suggest|pick|choose|go\s+with)|which\s+(?:is|one|would|should|do\s+you)|is\s+it\s+(?:better|worth)|what(?:'s|\s+is)\s+the\s+difference|pros\s+and\s+cons|what\s+do\s+you\s+(?:think|recommend|suggest)|what\s+can\s+you\s+do|who\s+are\s+you|how\s+do\s+(?:i|you|we)|how\s+does|why\s+(?:is|does|do|did))\b/i;
+
+/** Said outright, this settles it whatever else the sentence asks for. */
+const NO_WORK_CUE_RE =
+  /\b(?:quick\s+question|no\s+need\s+to\s+(?:start|create|make|build|set\s+up)|just\s+curious)\b/i;
+
+/**
+ * Words that make a question-shaped sentence a request for work. "What should
+ * we eat this week? Two of us, no meat, cheap dinners please." asks for a meal
+ * plan, and "should we" alone read it as advice, so Meal Planner was never
+ * offered (S1, 2026-10-17). "Help me understand …" stays a question.
+ */
+const REQUEST_MARKER_RE =
+  /\b(?:please|help\s+(?:me|us)\s+(?:get|learn|practi[cs]e|plan|improve|build|make|organi[sz]e|track|prepare|write|start|run|keep)|i(?:'d|\s+would)\s+like\s+you\s+to)\b/i;
 
 const ARITHMETIC_RE = /^\s*(?:what(?:'s|\s+is)\s+)?[\d\s.,+\-*/×x÷()^%=]+\??\s*$/i;
 
@@ -32,6 +45,8 @@ export function looksLikeQuestionOrAdvice(text: string): boolean {
   const normalized = text.trim();
   if (!normalized) return false;
   if (ARITHMETIC_RE.test(normalized) && /\d/.test(normalized)) return true;
+  if (NO_WORK_CUE_RE.test(normalized)) return true;
+  if (REQUEST_MARKER_RE.test(normalized)) return false;
   if (ADVICE_CUE_RE.test(normalized)) return true;
   return (
     INTERROGATIVE_OPEN_RE.test(normalized) &&

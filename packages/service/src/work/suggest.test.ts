@@ -22,6 +22,13 @@ const TYPES = [
     tags: ['language', 'learning', 'tutor', 'conversation'],
     gezels: [{ templateId: 'tutor', voorman: true }],
   },
+  {
+    id: 'just-chat',
+    name: 'Chat',
+    category: 'general',
+    tags: ['chat', 'casual'],
+    gezels: [{ templateId: 'companion', voorman: true }],
+  },
 ];
 
 function deps(extra: Partial<WorkSuggestionDeps> = {}): WorkSuggestionDeps {
@@ -121,6 +128,41 @@ describe('suggestWork', () => {
     ]);
   });
 
+  it('never offers a book a message cannot start, and measures the rest without it', async () => {
+    const book = (id: string, paramSchema: Record<string, unknown>) => ({
+      manifest: { kind: 'craftbook-template', id, name: id, paramSchema },
+    });
+    const listOffer = (async () => ({
+      items: [
+        book('tidy-spreadsheet', {
+          properties: { source: { title: 'Spreadsheet', input: { kind: 'file' } } },
+          required: ['source'],
+        }),
+        book('needs-audience', {
+          properties: { topic: { type: 'string' }, audience: { type: 'string' } },
+          required: ['topic', 'audience'],
+        }),
+        book('dataset-clean', {
+          properties: { topic: { type: 'string' } },
+          required: ['topic'],
+        }),
+      ],
+      missingToolsets: {},
+      establishedCodebase: false,
+    })) as unknown as NonNullable<SuggestWorkInput['listOffer']>;
+    const result = await suggestWork(deps(), {
+      request: 'Please clean up the raw customer spreadsheets under data/raw/ and dedupe them.',
+      projectId: 'customers',
+      listOffer,
+      rankCraftbooks: books(
+        { id: 'tidy-spreadsheet', score: 0.62, semantic: 0.7, lexical: 0.3 },
+        { id: 'needs-audience', score: 0.6, semantic: 0.68, lexical: 0.2 },
+        { id: 'dataset-clean', score: 0.53, semantic: 0.6, lexical: 0.2 },
+      ),
+    });
+    expect(result.options.map((o) => o.id)).toEqual(['craftbook:dataset-clean', 'task-here']);
+  });
+
   it('offers a type that clearly leads on meaning, though no tag names it', async () => {
     const request = "I'd like to practice my Spanish. I know the basics.";
     const leading = await suggestWork(deps(), {
@@ -144,6 +186,20 @@ describe('suggestWork', () => {
       ),
     });
     expect(close.options.some((o) => o.kind === 'project-type')).toBe(false);
+  });
+
+  it('measures a lead against the next specific type, not a catch-all', async () => {
+    const result = await suggestWork(deps(), {
+      request: "Can you help me get better at French conversation? I'm a beginner.",
+      projectId: 'default',
+      rankCraftbooks: books(),
+      rankTypes: typeScores(
+        { id: 'type:language-trainer', score: 0.427, semantic: 0.579 },
+        { id: 'type:just-chat', score: 0.395, semantic: 0.534 },
+        { id: 'type:trip-planner', score: 0.343, semantic: 0.49 },
+      ),
+    });
+    expect(result.options[0]?.id).toBe('type:language-trainer');
   });
 
   it('asks instead of guessing when a short request fits no book well', async () => {

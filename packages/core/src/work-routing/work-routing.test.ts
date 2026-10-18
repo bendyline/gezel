@@ -52,6 +52,8 @@ describe('looksLikeQuestionOrAdvice', () => {
     'How do I write good meeting minutes?',
     'Should I use tabs or spaces?',
     'Which is better for a beginner, Spanish or Italian?',
+    'Can you help me understand how recursion works?',
+    'Quick question, please: should I use tabs or spaces?',
   ])('reads %j as a question', (text) => {
     expect(looksLikeQuestionOrAdvice(text)).toBe(true);
   });
@@ -67,6 +69,8 @@ describe('looksLikeQuestionOrAdvice', () => {
     'I need a reusable recipe for onboarding a new client every month.',
     'Build me a small website for my bakery',
     'Is it possible to make a deck about Alaska?',
+    'What should we eat this week? Two of us, no meat, cheap dinners please.',
+    "Can you help me get better at French conversation? I'm a beginner.",
   ])('reads %j as a request for work', (text) => {
     expect(looksLikeQuestionOrAdvice(text)).toBe(false);
   });
@@ -264,6 +268,18 @@ describe('rankWorkOptions', () => {
     });
     expect(result.options.map((o) => o.id)).toEqual(['craftbook:client-intake']);
     expect(result.guidance.map((g) => g.kind)).toEqual(['author', 'self']);
+  });
+
+  it('does not offer authoring when a project type is the whole job', () => {
+    const result = rankWorkOptions({
+      ...DEFAULT_INPUT,
+      request: 'I want to post on LinkedIn every day next week about my coffee roastery.',
+      procedure: true,
+      projectTypes: [{ typeId: 'social-feed', name: 'Social Feed' }],
+      craftbooks: [{ craftbookId: 'draft-social-post', name: 'Draft a social post' }],
+    });
+    expect(result.options.map((o) => o.id)).toEqual(['type:social-feed']);
+    expect(result.guidance.map((g) => g.kind)).toEqual(['self']);
   });
 
   it('asks when nothing fits a vague request', () => {

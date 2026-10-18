@@ -153,7 +153,16 @@ export function rankWorkOptions(input: WorkRankInput): SuggestWorkResult {
   if (!question && input.implementation && !input.inDefault && input.specialist) {
     guidance.push({ kind: 'specialist', ...input.specialist });
   }
-  if (!question && input.procedure && !craftbooks.some((c) => c.strong)) {
+  // A type or a new project is the whole job, so a new recipe is not what is
+  // missing: "post on LinkedIn every day" read as a procedure beside Social
+  // Feed and was told to write one.
+  if (
+    !question &&
+    input.procedure &&
+    !typeFits &&
+    !buildFromDefault &&
+    !craftbooks.some((c) => c.strong)
+  ) {
     guidance.push({ kind: 'author' });
   }
   if (!question && options.length === 0 && !input.procedure) {

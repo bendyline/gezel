@@ -199,26 +199,27 @@ export const ROUTE_PROBES: readonly RouteProbe[] = [
     acceptable: [{ kind: 'project-type', target: /^trip-planner$/ }],
     heldOut: true,
   },
+  // Held out through S1; the catch-all type lead, the request markers and the
+  // household and brand readers were then fixed on what these three exposed,
+  // so they count as calibrated from 2026-10-17. Their replacements are the
+  // second held-out set at the end of the list.
   {
     id: 'french-paraphrase',
     category: 'typed-paraphrase',
     prompt: "Can you help me get better at French conversation? I'm a beginner.",
     acceptable: [{ kind: 'project-type', target: /^language-trainer$/ }],
-    heldOut: true,
   },
   {
     id: 'dinners-paraphrase',
     category: 'typed-paraphrase',
     prompt: 'What should we eat this week? Two of us, no meat, cheap dinners please.',
     acceptable: [{ kind: 'project-type', target: /^meal-planner$/ }],
-    heldOut: true,
   },
   {
     id: 'roastery-paraphrase',
     category: 'typed-paraphrase',
     prompt: 'I want to post on LinkedIn every day next week about my coffee roastery.',
     acceptable: [{ kind: 'project-type', target: /^social-feed$/ }],
-    heldOut: true,
   },
   {
     id: 'board-report',
@@ -247,6 +248,68 @@ export const ROUTE_PROBES: readonly RouteProbe[] = [
     category: 'self',
     prompt: 'Is it better to learn Python or JavaScript first?',
     acceptable: ANSWER,
+    heldOut: true,
+  },
+  // Second held-out set, written 2026-10-17 before any of it was ranked.
+  {
+    id: 'barcelona-paraphrase',
+    category: 'typed-paraphrase',
+    prompt:
+      "We're thinking about a long weekend in Barcelona in May. Could you help us figure out what to see each day?",
+    acceptable: [{ kind: 'project-type', target: /^trip-planner$/ }],
+    heldOut: true,
+  },
+  {
+    id: 'japanese-paraphrase',
+    category: 'typed-paraphrase',
+    prompt:
+      "I'm moving to Osaka next year and want to practice speaking Japanese a little every day.",
+    acceptable: [{ kind: 'project-type', target: /^language-trainer$/ }],
+    heldOut: true,
+  },
+  {
+    id: 'family-dinners-paraphrase',
+    category: 'typed-paraphrase',
+    prompt:
+      'Can you sort out our dinners for next week? Family of four, one of the kids is vegetarian.',
+    acceptable: [{ kind: 'project-type', target: /^meal-planner$/ }],
+    heldOut: true,
+  },
+  {
+    id: 'photographer-invoices-paraphrase',
+    category: 'typed-paraphrase',
+    prompt:
+      "I'm a freelance photographer and I keep forgetting to bill people. Help me keep track of my clients and invoices.",
+    acceptable: [{ kind: 'project-type', target: /^freelance-office$/ }],
+    heldOut: true,
+  },
+  {
+    id: 'meeting-minutes',
+    category: 'craftbook',
+    prompt:
+      'Write up minutes from this morning: budget approved, launch moved to March, Sam owns the vendor review.',
+    acceptable: [{ kind: 'craftbook' }],
+    heldOut: true,
+  },
+  {
+    id: 'ira-question',
+    category: 'self',
+    prompt: "What's the difference between a Roth IRA and a traditional IRA?",
+    acceptable: ANSWER,
+    heldOut: true,
+  },
+  {
+    id: 'request-shaped-question',
+    category: 'self',
+    prompt: 'Could you tell me roughly how long it takes to learn to touch type?',
+    acceptable: ANSWER,
+    heldOut: true,
+  },
+  {
+    id: 'capital-quiz-game',
+    category: 'new-project',
+    prompt: "I'd like a little browser game where you guess a country's capital from a map.",
+    acceptable: [{ kind: 'new-project' }, { kind: 'delegate', target: /^(?:developer|builder)$/ }],
     heldOut: true,
   },
 ];
