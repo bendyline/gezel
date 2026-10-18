@@ -240,6 +240,13 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     tools: ['list_craftbooks', 'suggest_craftbook', 'invoke_craftbook'],
   },
   {
+    id: 'work-routing',
+    name: 'Work Routing',
+    description:
+      'One ranked list of every way to handle a request — a craftbook, a typed or new project, a task here, recurring work, or a verdict to answer or ask — and one call that starts the option chosen. Replaces the craftbook launcher and the project macros for a coordinator; gated by the `tools.work-routing` behavior, so no role kit lists it.',
+    tools: ['suggest_work', 'start_work'],
+  },
+  {
     id: 'team-management',
     name: 'Team & Project Management',
     description:

@@ -2148,3 +2148,71 @@ describe('resolveSessionToolSurface routingClamps: callable', () => {
     expect(callable.allowlist!.size).toBeGreaterThan(1);
   });
 });
+
+describe('resolveSessionToolSurface — work routing', () => {
+  const meesterSession = (prompt: string, id: string) =>
+    ({
+      id,
+      gezelId: 'meester',
+      projectId: 'default',
+      providerName: 'llama-cpp',
+      title: prompt,
+      messages: [{ role: 'user', content: prompt, at: '2026-10-16T00:00:00.000Z' }],
+      createdAt: '2026-10-16T00:00:00.000Z',
+      lastActivityAt: '2026-10-16T00:00:00.000Z',
+    }) as ChatSession;
+  const base = {
+    surface: 'bridge' as const,
+    role: 'Meester',
+    mode: 'always' as const,
+    provider: 'llama-cpp' as const,
+    toolsetsGroupOverride: [],
+    githubLinked: false,
+    isGitRepo: false,
+    workRouting: true,
+  };
+
+  it('keeps both tools through the tiny-tier cut', async () => {
+    const prompt = 'Plan a trip to Lisbon next spring for the four of us.';
+    const { allowlist } = await resolveSessionToolSurface({
+      ...base,
+      session: meesterSession(prompt, 'tiny-route'),
+      modelId: 'gemma4-e2b-q4',
+      parameterSize: '2.3B',
+      tier: 'tiny',
+      latestUserMessage: prompt,
+    });
+    expect(allowlist!.has('suggest_work')).toBe(true);
+    expect(allowlist!.has('start_work')).toBe(true);
+    expect(allowlist!.has('start_project')).toBe(false);
+  });
+
+  it('clamps an exact-format request to start_work alone', async () => {
+    const prompt = 'Can you create a PowerPoint about Alaska?';
+    const { allowlist, exactCraftbookConstrained } = await resolveSessionToolSurface({
+      ...base,
+      session: meesterSession(prompt, 'exact-route'),
+      modelId: 'gemma4-e4b-q4',
+      parameterSize: '8B',
+      tier: 'small',
+      latestUserMessage: prompt,
+    });
+    expect(exactCraftbookConstrained).toBe(true);
+    expect([...allowlist!]).toEqual(['start_work']);
+  });
+
+  it('keeps the pair on a build turn the orchestration clamp narrows', async () => {
+    const prompt = 'Build me a small website for my bakery.';
+    const { allowlist, projectOrchestrationConstrained } = await resolveSessionToolSurface({
+      ...base,
+      session: meesterSession(prompt, 'build-route'),
+      modelId: 'gemma4-e4b-q4',
+      parameterSize: '8B',
+      tier: 'small',
+      latestUserMessage: prompt,
+    });
+    expect(projectOrchestrationConstrained).toBe(true);
+    expect(allowlist!.has('start_work')).toBe(true);
+    expect(allowlist!.has('suggest_work')).toBe(true);
+  });
+});

@@ -557,6 +557,7 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
         resolveProfile({ manifest, tier, providerName: provider }),
       );
       const rolesAsTools = profileHasBehavior(profile, 'tools.gezels-as-roles');
+      const workRouting = profileHasBehavior(profile, 'tools.work-routing');
       const trimExecutorContext = profileHasBehavior(profile, 'prompt.executor-context-trim');
       const retrievalFirst = profileHasBehavior(profile, 'prompt.retrieval-first');
 
@@ -606,6 +607,7 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
               projectMode: PROJECT.mode,
               ...(scenario.consultationMode ? { consultationMode: true } : {}),
               ...(rolesAsTools ? { rolesAsTools: true } : {}),
+              ...(workRouting ? { workRouting: true } : {}),
               githubLinked: false,
               isGitRepo: false,
               securityPolicy: scenario.securityPolicy,

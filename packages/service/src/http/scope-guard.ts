@@ -426,7 +426,7 @@ async function isSessionRouteAllowed(
     if (
       rest === '' ||
       rest === '/' ||
-      /^\/(?:working-dir|reveal|clear-errors|apply-project-type|export-project-type|import-project-type)(?:\/|$)/.test(
+      /^\/(?:working-dir|reveal|clear-errors|apply-project-type|export-project-type|import-project-type|work-options)(?:\/|$)/.test(
         rest,
       ) ||
       /^\/(?:gezels|local-gezels|imports)(?:\/|$)/.test(rest) ||

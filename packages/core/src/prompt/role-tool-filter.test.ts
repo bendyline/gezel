@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveSecurityPolicy, securityPolicyForLevel } from '../security/policy.js';
 import { BUILTIN_TOOLSETS, BUILTIN_TOOL_TO_GROUP } from '../tools/builtin-groups.js';
 import {
+  WORK_ROUTING_REPLACED_TOOLS,
   claudeBuiltinsToAllow,
   claudeBuiltinsToDisallow,
   computeToolAllowlist,
@@ -2635,5 +2636,45 @@ describe('role-typed delegation tools (tools.gezels-as-roles)', () => {
     expect(allow!.has('consult_meester')).toBe(true);
     // ...not the downward doer tools.
     expect(allow!.has('delegate_developer')).toBe(false);
+  });
+});
+
+describe('computeToolAllowlist — workRouting', () => {
+  const meester = {
+    role: 'meester',
+    mode: 'always' as const,
+    provider: 'llama-cpp' as const,
+    modelId: 'gemma4-e4b-q4',
+    parameterSize: '8B',
+    webSearchProvider: 'brave' as const,
+  };
+
+  it('swaps the Meester launcher and project macros for suggest_work and start_work', () => {
+    const allow = computeToolAllowlist({ ...meester, workRouting: true })!;
+    expect(allow.has('suggest_work')).toBe(true);
+    expect(allow.has('start_work')).toBe(true);
+    for (const replaced of WORK_ROUTING_REPLACED_TOOLS) expect(allow.has(replaced)).toBe(false);
+    // Retrofitting an existing project and authoring a recipe stay.
+    expect(allow.has('apply_project_type')).toBe(true);
+    expect(allow.has('craftbook_write')).toBe(true);
+    expect(allow.has('ask_user_question')).toBe(true);
+  });
+
+  it('leaves every surface without the work-routing pair when off', () => {
+    const allow = computeToolAllowlist(meester)!;
+    expect(allow.has('suggest_work')).toBe(false);
+    expect(allow.has('start_work')).toBe(false);
+    expect(allow.has('start_project')).toBe(true);
+    expect(allow.has('invoke_craftbook')).toBe(true);
+    // The unfiltered modes enumerate every group; the pair stays out there too.
+    const never = computeToolAllowlist({ ...meester, mode: 'never', webSearchProvider: undefined });
+    expect(never?.has('suggest_work')).toBe(false);
+    expect(never?.has('start_work')).toBe(false);
+  });
+
+  it('does not touch a voorman', () => {
+    const voorman = computeToolAllowlist({ ...meester, role: 'voorman', workRouting: true })!;
+    expect(voorman.has('suggest_work')).toBe(false);
+    expect(voorman.has('invoke_craftbook')).toBe(true);
   });
 });

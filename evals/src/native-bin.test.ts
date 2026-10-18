@@ -7,6 +7,7 @@ import {
   ds4HelpSupportsVision,
   installedAppRoots,
   parseLlamaVersionBanner,
+  pickPinnedEngine,
   pinnedLlamaRevision,
   resolveLlamaBinary,
   resolveSdBinary,
@@ -67,21 +68,69 @@ function stubEngine(opts: { revision?: string; backend?: string; executable?: bo
 }
 
 describe('installedAppRoots', () => {
-  it('points at the packaged Gezel.app native-bin on macOS, nothing elsewhere', () => {
-    const roots = installedAppRoots();
-    if (process.platform === 'darwin') {
-      expect(roots).toHaveLength(2);
-      for (const r of roots) {
-        expect(r).toContain(
-          join('Gezel.app', 'Contents', 'Resources', 'app.asar.unpacked', 'native-bin'),
-        );
-      }
+  it('points at the packaged Gezel.app native-bin on macOS', () => {
+    const roots = installedAppRoots('darwin');
+    expect(roots).toHaveLength(2);
+    for (const r of roots) {
+      expect(r).toContain(
+        join('Gezel.app', 'Contents', 'Resources', 'app.asar.unpacked', 'native-bin'),
+      );
+    }
+    if (process.platform !== 'win32') {
       expect(roots[0]).toBe(
         '/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/native-bin',
       );
-    } else {
-      expect(roots).toEqual([]);
     }
+  });
+
+  it('points at the machine-wide and per-user Windows installs', () => {
+    expect(
+      installedAppRoots('win32', {
+        ProgramFiles: 'C:\\Program Files',
+        LOCALAPPDATA: 'C:\\Users\\ada\\AppData\\Local',
+      }),
+    ).toEqual([
+      'C:\\Program Files\\Gezel\\resources\\app.asar.unpacked\\native-bin',
+      'C:\\Users\\ada\\AppData\\Local\\Programs\\Gezel\\resources\\app.asar.unpacked\\native-bin',
+    ]);
+  });
+
+  it('has no installed-app root on Linux', () => {
+    expect(installedAppRoots('linux', {})).toEqual([]);
+  });
+});
+
+describe('pickPinnedEngine', () => {
+  const engine = (path: string, revision: string | null) => ({
+    path,
+    revision,
+    probe: { ok: true, buildNumber: null, revision },
+  });
+  const pin = 'd81235049384534c167caea52b85a694f6103d14';
+
+  it('passes over a stale build that still launches for one built from the pin', () => {
+    const stale = engine(
+      'repo/native-bin/llama-server',
+      'c1d0e7a004015f23bc0233470b747b596f29b264',
+    );
+    const current = engine('installed/native-bin/llama-server', pin);
+    expect(pickPinnedEngine([stale, current], pin)).toEqual({
+      chosen: current,
+      passedOver: [stale],
+    });
+  });
+
+  it('keeps root order when nothing matches the pin, or there is no pin', () => {
+    const a = engine('a', 'c1d0e7a0');
+    const b = engine('b', null);
+    expect(pickPinnedEngine([a, b], pin)).toEqual({ chosen: a, passedOver: [] });
+    expect(pickPinnedEngine([a, b], null)).toEqual({ chosen: a, passedOver: [] });
+    expect(pickPinnedEngine([], pin)).toBeNull();
+  });
+
+  it('matches a banner prefix against the full pinned sha', () => {
+    const current = engine('a', 'd8123504');
+    expect(pickPinnedEngine([current], pin)?.chosen).toBe(current);
   });
 });
 

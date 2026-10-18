@@ -24,6 +24,7 @@ import {
   estimateTokens,
   findAskCycleOrDepth,
   inferTargetProject,
+  isAnswerEnvelope,
   isOwnerStep,
   leanSession,
   projectTypeTurnRules,
@@ -33,6 +34,7 @@ import {
   resolvePromptFootprint,
   resolveSocialMode,
   roleGloss,
+  routingRequestText,
   selectPersonNotes,
   stateAnswerTool,
   stepDeliverableTarget,
@@ -50,6 +52,7 @@ import type {
   RetrievalDecisionTrace,
   SendToSessionRequest,
   SessionWireTranscript,
+  SuggestWorkResult,
   TurnIntentPlan,
   TurnIntentPreviewRequest,
   TurnMessageOrigin,
@@ -302,6 +305,7 @@ import {
 } from '../search/project-retrieval.js';
 import { retrievalTraceEnabled, traceHistoryDetails } from '../search/retrieval-trace.js';
 import type { SearchService } from '../search/search-service.js';
+import { resolveSuggestedWork } from '../suggested-work/resolve.js';
 import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
 import {
   WRAP_UP_MAX_FILES,
@@ -322,6 +326,7 @@ import {
   resolveMcpDefinition,
 } from '../toolsets/custom-mcp.js';
 import { isTrustedConstrainedToolset } from '../toolsets/trust.js';
+import { suggestWork } from '../work/suggest.js';
 import {
   type BeginExternalConversationInput,
   ExternalConversationRecorder,
@@ -7697,6 +7702,9 @@ export class ChatManager extends LocalEngineRuntime {
       // here without manager.ts changes.
       const messageOrigin = resolveTurnMessageOrigin(opts);
       let turnIntentPlan: TurnIntentPlan | null = null;
+      const workRoutingOn = Boolean(
+        state.profile && profileHasBehavior(state.profile, 'tools.work-routing'),
+      );
       // A person's nudge steers the work already running, and the composer
       // never sends the route opt-out with one, so it gets no route of its own.
       if (messageOrigin === 'direct-user' && opts?.nudge !== true && opts?.turnIntent !== 'off') {
@@ -7755,10 +7763,22 @@ export class ChatManager extends LocalEngineRuntime {
       const libraryRecall = projectRetrieval
         ? []
         : await this.resolveTurnLibraryRecall(state, userText, messageOrigin);
-      const plannedPrelude = turnIntentPlan ? renderTurnIntentPrelude(turnIntentPlan) : null;
+      const plannedPrelude = turnIntentPlan
+        ? renderTurnIntentPrelude(turnIntentPlan, { workRouting: workRoutingOn })
+        : null;
+      const workOptions = plannedPrelude
+        ? undefined
+        : await this.resolveTurnWorkOptions(state, userText, messageOrigin, workRoutingOn);
       const preludeForTurn = plannedPrelude
         ? { behaviorId: 'turn-intent-plan', text: plannedPrelude }
-        : await resolveUserPromptPrelude(this.store, state, userText, messageOrigin, libraryRecall);
+        : await resolveUserPromptPrelude(
+            this.store,
+            state,
+            userText,
+            messageOrigin,
+            libraryRecall,
+            workOptions,
+          );
       if (preludeForTurn) {
         // Prepend onto `promptForTurn`, NOT `userText` — the latter silently
         // discarded anything already spliced in above (image digests today,
@@ -8526,6 +8546,7 @@ export class ChatManager extends LocalEngineRuntime {
             plan: turnIntentPlan,
             assistantContent: assistantMessage.content,
             toolCalls: toolsAcrossContinuations,
+            workRouting: workRoutingOn,
           });
           if (correction) {
             falseCapabilityDenialCorrected = true;
@@ -13209,6 +13230,51 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * `suggest_work`'s ranking for this message, for the
+   * `prompt.work-options-prelude` arm, which puts it in front of the model
+   * so the first call can be `start_work`. Computed only while that behavior
+   * and `tools.work-routing` are both on, and only for the person's own
+   * turns; an answer is ranked together with the request it answers.
+   */
+  private async resolveTurnWorkOptions(
+    state: LiveSessionState,
+    userText: string,
+    messageOrigin: TurnMessageOrigin,
+    workRoutingOn: boolean,
+  ): Promise<SuggestWorkResult | undefined> {
+    if (!workRoutingOn || !state.profile) return undefined;
+    if (!profileHasBehavior(state.profile, 'prompt.work-options-prelude')) return undefined;
+    if (messageOrigin !== 'direct-user' && messageOrigin !== 'question-answer') return undefined;
+    const tools = liveTurnToolNames(state.session);
+    if (!tools.includes('start_work')) return undefined;
+    const previous = [...state.record.messages]
+      .reverse()
+      .find(
+        (m) => m.role === 'user' && !m.hidden && !m.from && !isAnswerEnvelope(m.content),
+      )?.content;
+    try {
+      return await suggestWork(
+        {
+          catalog: this.catalog,
+          store: this.store,
+          listSuggestedWork: (projectId) =>
+            resolveSuggestedWork({ store: this.store, catalog: this.catalog }, projectId),
+        },
+        {
+          request: routingRequestText(userText, previous),
+          projectId: state.record.projectId,
+          tools,
+        },
+      );
+    } catch (err) {
+      log.warn(
+        `session ${state.record.id}: work options failed; continuing without them: ${err instanceof Error ? err.message : err}`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
    * Shared-library documents bearing on THIS message.
    *
    * The turn-1 recall snapshot is frozen for the session (per the KV-cache
@@ -14536,6 +14602,9 @@ export class ChatManager extends LocalEngineRuntime {
     // the generic ask_specialist/ask_gezel dispatchers. Computed once;
     // threaded into both the prompt-block and session allowlists below.
     const rolesAsToolsActive = profileHasBehavior(modelProfile, 'tools.gezels-as-roles');
+    // `tools.work-routing`: the Meester routes through suggest_work /
+    // start_work in place of the craftbook launcher and project macros.
+    const workRoutingActive = profileHasBehavior(modelProfile, 'tools.work-routing');
     // Where the engine confines tool calls at decode time, the coordinator
     // routing clamps narrow what is CALLABLE and leave the rendered roster
     // alone, so the prompt cache survives a build request mid-thread. See
@@ -14980,6 +15049,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(leanSession(project, record) ? { leanProfile: true } : {}),
       ...(appItemFocus ? { appItemFocus: true } : {}),
       ...(rolesAsToolsActive ? { rolesAsTools: true } : {}),
+      ...(workRoutingActive ? { workRouting: true } : {}),
       ...(isProjectVoorman ? { isProjectVoorman: true } : {}),
       ...(globalConfig.webSearch?.provider
         ? { webSearchProvider: globalConfig.webSearch.provider }
@@ -16617,6 +16687,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(appItemFocus ? { appItemFocus: true } : {}),
       ...(record.consultationMode ? { consultationMode: true } : {}),
       ...(rolesAsToolsActive ? { rolesAsTools: true } : {}),
+      ...(workRoutingActive ? { workRouting: true } : {}),
       ...(isProjectVoorman ? { isProjectVoorman: true } : {}),
       ...(globalConfig.webSearch?.provider
         ? { webSearchProvider: globalConfig.webSearch.provider }
@@ -16704,7 +16775,7 @@ export class ChatManager extends LocalEngineRuntime {
     if (
       bridgeSurface.exactCraftbookConstrained &&
       routedAllowlist?.size === 1 &&
-      routedAllowlist.has('invoke_craftbook')
+      (routedAllowlist.has('invoke_craftbook') || routedAllowlist.has('start_work'))
     ) {
       opts.singleToolCallTurn = true;
     }
@@ -17500,8 +17571,9 @@ const READ_ONLY_MCP_TOOLS: ReadonlySet<string> = new Set([
   'read_task_notes',
   'search_history',
   // Procedure discovery/inspection is not execution. A successful
-  // suggestion must still be followed by invoke_craftbook.
+  // suggestion must still be followed by invoke_craftbook (or start_work).
   'suggest_craftbook',
+  'suggest_work',
   'craftbook_read',
 ]);
 

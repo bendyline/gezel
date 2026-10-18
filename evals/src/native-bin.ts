@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -160,19 +160,34 @@ function lookupRoots(): string[] {
  * `--llama-bin` pointing into the app bundle.
  *
  * The packaged app ships binaries under
- * `…/Gezel.app/Contents/Resources/app.asar.unpacked/native-bin/<platform>-<variant>/`,
- * the SAME `<platform>-<variant>` layout as the dev/CI roots, so the existing
- * capability walk applies unchanged. macOS only — Windows/Linux installs use
- * different bundle layouts; honor `GEZEL_LLAMA_SERVER_BIN` there instead.
+ * `…/Gezel.app/Contents/Resources/app.asar.unpacked/native-bin/<platform>-<variant>/`
+ * on macOS and `…\Gezel\resources\app.asar.unpacked\native-bin\<platform>-<variant>\`
+ * on Windows (the machine-wide install and the per-user one) — the SAME
+ * `<platform>-<variant>` layout as the dev/CI roots, so the existing
+ * capability walk applies unchanged. Linux installs use a different layout;
+ * honor `GEZEL_LLAMA_SERVER_BIN` there instead.
  *
  * Note: deliberately not `~/.gezel-dev` — that home stores model *weights*,
  * not the engine binary.
  */
-export function installedAppRoots(): string[] {
-  if (process.platform !== 'darwin') return [];
-  const rel = join('Gezel.app', 'Contents', 'Resources', 'app.asar.unpacked', 'native-bin');
-  const bases = ['/Applications', join(homedir(), 'Applications')];
-  return bases.map((base) => join(base, rel));
+export function installedAppRoots(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  if (platform === 'darwin') {
+    const rel = join('Gezel.app', 'Contents', 'Resources', 'app.asar.unpacked', 'native-bin');
+    const bases = ['/Applications', join(homedir(), 'Applications')];
+    return bases.map((base) => join(base, rel));
+  }
+  if (platform === 'win32') {
+    const rel = win32.join('Gezel', 'resources', 'app.asar.unpacked', 'native-bin');
+    const bases = [
+      env.ProgramFiles ?? 'C:\\Program Files',
+      ...(env.LOCALAPPDATA ? [win32.join(env.LOCALAPPDATA, 'Programs')] : []),
+    ];
+    return bases.map((base) => win32.join(base, rel));
+  }
+  return [];
 }
 
 /**
@@ -224,9 +239,11 @@ export function resolveLlamaBinary(explicitPath?: string): ResolvedBinary {
   }
 
   const roots = [...lookupRoots(), ...installedAppRoots()];
+  const pin = pinnedLlamaRevision();
   const tried: string[] = [];
   const skipped: string[] = [];
   for (const variant of LLAMA_BACKEND_PRECEDENCE) {
+    const launchable: LaunchableEngine[] = [];
     for (const root of roots) {
       for (const exe of exeCandidates('llama-server')) {
         const path = join(root, `${platformKey()}-${variant}`, exe);
@@ -239,10 +256,22 @@ export function resolveLlamaBinary(explicitPath?: string): ResolvedBinary {
           continue;
         }
         const probe = probeBinary(path);
-        if (probe.ok) return finish(path, variant, probe, skipped);
+        if (probe.ok) {
+          launchable.push({ path, revision: describeBuild(path, probe).revision, probe });
+          continue;
+        }
         tried[tried.length - 1] = `${path} (exists but failed to launch — skipped)`;
         skipped.push(`${variant} (${path})`);
       }
+    }
+    const pick = pickPinnedEngine(launchable, pin);
+    if (pick) {
+      for (const stale of pick.passedOver) {
+        skipped.push(
+          `${variant} (${stale.path}; built from ${stale.revision?.slice(0, 8) ?? 'an unknown revision'}, not the pinned ${pin?.slice(0, 8)})`,
+        );
+      }
+      return finish(pick.chosen.path, variant, pick.chosen.probe, skipped);
     }
   }
   // Variant-less fallback, mirroring the supervisor's native-bin.ts: on
@@ -289,7 +318,7 @@ function finish(
   };
   if (skipped.length > 0) {
     resolved.warnings.push(
-      `resolved the ${variant ?? 'variant-less'} engine only after skipping ${skipped.join(', ')} — those binaries exist but could not be used, so this run is on the first launchable backend.`,
+      `resolved the ${variant ?? 'variant-less'} engine only after skipping ${skipped.join(', ')} — those binaries exist but were passed over (unlaunchable here, or built from another revision than the pin), so this run is on the first usable one.`,
     );
   }
   resolved.warnings.push(...pinWarnings(resolved, null));
@@ -300,6 +329,33 @@ interface LaunchProbe {
   ok: boolean;
   buildNumber: string | null;
   revision: string | null;
+}
+
+export interface LaunchableEngine {
+  path: string;
+  revision: string | null;
+  probe: LaunchProbe;
+}
+
+/**
+ * Among one backend variant's launchable builds, in root order, the first
+ * built from the pinned revision; the first one at all when none is. A stale
+ * build still answers `--version`, so launching alone cannot tell it apart:
+ * a September copy of `packages/app/native-bin` (llama.cpp v0.3.0) won the
+ * walk over the installed app's v0.6.0 build, and every trial died at launch
+ * on a flag v0.3.0 does not know (`--kv-unified-per-slot`, 2026-10-16).
+ * `passedOver` is the stale builds ahead of the pick, for the warning.
+ */
+export function pickPinnedEngine(
+  launchable: readonly LaunchableEngine[],
+  pin: string | null,
+): { chosen: LaunchableEngine; passedOver: LaunchableEngine[] } | null {
+  const first = launchable[0];
+  if (!first) return null;
+  if (!pin) return { chosen: first, passedOver: [] };
+  const index = launchable.findIndex((e) => e.revision && revisionsMatch(pin, e.revision));
+  if (index < 0) return { chosen: first, passedOver: [] };
+  return { chosen: launchable[index]!, passedOver: launchable.slice(0, index) };
 }
 
 /**

@@ -792,6 +792,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     'list_gezels',
   ]);
   const projectTaskTools = toolsFrom([
+    'start_work',
     'start_project',
     'update_project',
     'create_task',
@@ -811,8 +812,11 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   // choice. Every build enters through `start_project`; the MCP runtime
   // selects a flat lead or scaffolded crew. This prevents prompt/toolset
   // drift and leaves one unambiguous kickoff action for smaller models.
-  const craftbookRoute =
-    availableToolNameSet.has('suggest_craftbook') && availableToolNameSet.has('invoke_craftbook')
+  const workRouting =
+    availableToolNameSet.has('suggest_work') && availableToolNameSet.has('start_work');
+  const craftbookRoute = workRouting
+    ? 'For a request for work, call `suggest_work` once: it lists the ways to handle it (a craftbook, a project type, a new project, a task here) and says when the message is a question to answer yourself. Then call `start_work` with the id that fits. Do not repeat the ranking.'
+    : availableToolNameSet.has('suggest_craftbook') && availableToolNameSet.has('invoke_craftbook')
       ? 'For named output formats or multi-step production work, call `suggest_craftbook` once, then make `invoke_craftbook` your next tool call when it returns a match or fallback. Do not repeat the suggestion with a rephrased query or switch to a generic kickoff macro.'
       : '';
   // Without this, "try the deck again" reads as production work and starts a
@@ -820,11 +824,13 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   const taskOversightRoute = availableToolNameSet.has('manage_task')
     ? ' To pause, resume, retry, or cancel work that is already running, call `manage_task` on its task — never start a second run.'
     : '';
-  const projectPrimaryRoute = availableToolNameSet.has('start_project')
-    ? '`start_project({ name, about, missionObjectives, taskDescription })`'
-    : availableToolNameSet.has('message_gezel')
-      ? `${availableToolNameSet.has('ensure_gezel') ? '`ensure_gezel` when needed, then ' : ''}\`message_gezel\` with the exact deliverable and acceptance criteria`
-      : 'the available project/task tools listed below';
+  const projectPrimaryRoute = workRouting
+    ? '`suggest_work`, then `start_work` with the option it lists'
+    : availableToolNameSet.has('start_project')
+      ? '`start_project({ name, about, missionObjectives, taskDescription })`'
+      : availableToolNameSet.has('message_gezel')
+        ? `${availableToolNameSet.has('ensure_gezel') ? '`ensure_gezel` when needed, then ' : ''}\`message_gezel\` with the exact deliverable and acceptance criteria`
+        : 'the available project/task tools listed below';
   const flatRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou are a router; specialists do the work. For concrete work, route through ${projectPrimaryRoute}; the runtime selects the appropriate lead or team. ${craftbookRoute}${taskOversightRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly who's on it.${routingTail}`;
   const crewRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou do not write code, run shell commands, edit project files, or execute scripts. Route concrete work through ${projectPrimaryRoute}. ${craftbookRoute}${taskOversightRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly which lead is on it.${routingTail}`;
   const delegationGuardrail =
@@ -840,8 +846,9 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     !itemFocus &&
     (availableToolNameSet.has('suggest_craftbook') ||
       availableToolNameSet.has('invoke_craftbook') ||
+      workRouting ||
       availableToolNameSet.has('convert_document'))
-      ? `\n\n---\n\n## Preserve requested output formats\n\nA named format is an acceptance criterion, not a suggestion. If the user asks for PowerPoint/PPTX, Word/DOCX, XLSX, PDF, EPUB, MP4, GIF, or another binary document or rendered-media file, do not silently substitute markdown, HTML, or chat prose. The matching craftbook route takes precedence over generic project/job kickoff and direct delegation. ${availableToolNameSet.has('suggest_craftbook') ? 'Call `suggest_craftbook` exactly once.' : 'Use the available craftbook surface.'}${availableToolNameSet.has('invoke_craftbook') ? ' If it returns a match or fallback, your NEXT tool call in this same turn must be `invoke_craftbook` with the returned id; do not repeat the lookup with a rephrased query.' : ''} Content-first production should author Markdown, then use DocBlocks \`convert_document\` for the requested target, \`preview_document\` when visual QA matters, and \`save_artifact\` for the durable file. Do not recruit a developer merely to hand-build an HTML or OOXML intermediary. Do not claim a project, task, or deliverable exists until the action tool returns success. If the required production surface is unavailable, explain the blocker instead of claiming completion.`
+      ? `\n\n---\n\n## Preserve requested output formats\n\nA named format is an acceptance criterion, not a suggestion. If the user asks for PowerPoint/PPTX, Word/DOCX, XLSX, PDF, EPUB, MP4, GIF, or another binary document or rendered-media file, do not silently substitute markdown, HTML, or chat prose. The matching craftbook route takes precedence over generic project/job kickoff and direct delegation. ${workRouting ? 'Call `suggest_work` exactly once; when it returns a craftbook for the format, your NEXT tool call in this same turn must be `start_work` with that id.' : availableToolNameSet.has('suggest_craftbook') ? 'Call `suggest_craftbook` exactly once.' : 'Use the available craftbook surface.'}${!workRouting && availableToolNameSet.has('invoke_craftbook') ? ' If it returns a match or fallback, your NEXT tool call in this same turn must be `invoke_craftbook` with the returned id; do not repeat the lookup with a rephrased query.' : ''} Content-first production should author Markdown, then use DocBlocks \`convert_document\` for the requested target, \`preview_document\` when visual QA matters, and \`save_artifact\` for the durable file. Do not recruit a developer merely to hand-build an HTML or OOXML intermediary. Do not claim a project, task, or deliverable exists until the action tool returns success. If the required production surface is unavailable, explain the blocker instead of claiming completion.`
       : '';
 
   let projectContext = '';

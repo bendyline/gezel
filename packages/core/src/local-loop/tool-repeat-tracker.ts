@@ -177,6 +177,17 @@ export class ToolRepeatTracker {
         count,
       };
     }
+    if (toolName === 'suggest_work' && count >= 2) {
+      const optionId = firstWorkOptionId(output);
+      const next = optionId
+        ? `Call \`start_work({ option: ${JSON.stringify(optionId)} })\` now if it fits, or another listed id that does.`
+        : 'Act on the previous result now: answer in chat, or ask the person with ask_user_question.';
+      return {
+        output: `[runtime] suggest_work already ranked this request; the list will not change. ${next} Do not call \`suggest_work\` again.`,
+        shouldAbort: false,
+        count,
+      };
+    }
     if (count >= this.softWarningAt) {
       const target = repeatTargetDescription(toolName, args, count);
       if (RETRIEVAL_TOOL_NAMES.has(toolName)) {
@@ -367,6 +378,11 @@ function recommendedCraftbookId(output: string): string | null {
   return null;
 }
 
+/** The first option id in a rendered suggest_work result (`1. [id]` or `Exact match: [id]`). */
+function firstWorkOptionId(output: string): string | null {
+  return /^(?:1\.|Exact match:)\s+\[([^\]\s]+)\]/m.exec(output)?.[1] ?? null;
+}
+
 function isSourceEditToolLoop(toolName: string, args: unknown): boolean {
   if (toolName !== 'write_file' && toolName !== 'replace_in_file') return false;
   if (!args || typeof args !== 'object' || Array.isArray(args)) return false;
@@ -449,6 +465,7 @@ function filterActionToolSuggestions(
     'fetch_repo',
     'fetch_diff',
     'invoke_craftbook',
+    'start_work',
     'start_project',
     'start_job',
     'ensure_gezel',

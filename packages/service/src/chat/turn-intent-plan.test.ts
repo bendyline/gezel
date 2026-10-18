@@ -161,3 +161,46 @@ describe('deckTopicFromRequest', () => {
     expect(plan.craftbook?.invocation.description).toBe('Create a PowerPoint about pizza');
   });
 });
+
+describe('turn intent planning under work routing', () => {
+  const exact = resolveTurnIntentPlan({
+    text: 'Can you create a PowerPoint about Alaska?',
+    isMeester: true,
+  });
+
+  it('names start_work for an exact route', () => {
+    const prelude = renderTurnIntentPrelude(exact, { workRouting: true });
+    expect(prelude).toContain('`start_work({"option":"craftbook:powerpoint-deck"})`');
+    expect(prelude).not.toContain('invoke_craftbook');
+  });
+
+  it('stands the specialist route down, since suggest_work lists it', () => {
+    const plan = resolveTurnIntentPlan({
+      text: 'Build me a website for my bakery',
+      isMeester: true,
+    });
+    expect(plan.route).toBe('specialist');
+    expect(renderTurnIntentPrelude(plan)).not.toBeNull();
+    expect(renderTurnIntentPrelude(plan, { workRouting: true })).toBeNull();
+  });
+
+  it('accepts start_work as the launch a capability denial skipped', () => {
+    const denial = "I can't create PowerPoint files directly.";
+    expect(
+      falseCapabilityDenialCorrection({
+        plan: exact,
+        assistantContent: denial,
+        toolCalls: [{ name: 'start_work', success: true } as never],
+        workRouting: true,
+      }),
+    ).toBeNull();
+    expect(
+      falseCapabilityDenialCorrection({
+        plan: exact,
+        assistantContent: denial,
+        toolCalls: [],
+        workRouting: true,
+      }),
+    ).toContain('start_work');
+  });
+});

@@ -40,6 +40,7 @@ import { PromptToolCookbookCondensed } from './prompt-tool-cookbook-condensed.js
 import { PromptToolCookbookFull } from './prompt-tool-cookbook-full.js';
 import { PromptVerboseReasoningHintChannel } from './prompt-verbose-reasoning-hint-channel.js';
 import { PromptVerboseReasoningHintThink } from './prompt-verbose-reasoning-hint-think.js';
+import { PromptWorkOptionsPrelude } from './prompt-work-options-prelude.js';
 import { PromptWorkspaceGestalt } from './prompt-workspace-gestalt.js';
 import { ProviderCompactWriteTranscript } from './provider-compact-write-transcript.js';
 import { ProviderFlattenToolTranscript } from './provider-flatten-tool-transcript.js';
@@ -51,6 +52,7 @@ import { SupervisionKeurmeester } from './supervision-keurmeester.js';
 import { ToolsGezelsAsRoles } from './tools-gezels-as-roles.js';
 import { ToolsMlxGrammar } from './tools-mlx-grammar.js';
 import { ToolsMlxTemplateFix } from './tools-mlx-template-fix.js';
+import { ToolsWorkRouting } from './tools-work-routing.js';
 import { TurnAutoAcknowledgeToolErrors } from './turn-auto-acknowledge-tool-errors.js';
 import { TurnContinuationBudget } from './turn-continuation-budget.js';
 import { TurnOllamaNumPredictBumped } from './turn-ollama-num-predict-bumped.js';
@@ -67,6 +69,7 @@ export const ALL_BEHAVIORS: ReadonlyArray<Behavior<unknown>> = [
   FabricationDetectClaimWithoutTool as Behavior<unknown>,
   PromptMeesterBuildPrelude as Behavior<unknown>,
   PromptMeesterCraftbookPrelude as Behavior<unknown>,
+  PromptWorkOptionsPrelude as Behavior<unknown>,
   PromptLibraryRecallPrelude as Behavior<unknown>,
   PromptDocumentsSummaries as Behavior<unknown>,
   PromptExecutorContextTrim as Behavior<unknown>,
@@ -119,6 +122,7 @@ export const ALL_BEHAVIORS: ReadonlyArray<Behavior<unknown>> = [
   ProviderMergeSystemMessages as Behavior<unknown>,
   SupervisionKeurmeester as Behavior<unknown>,
   ToolsGezelsAsRoles as Behavior<unknown>,
+  ToolsWorkRouting as Behavior<unknown>,
   ToolsMlxTemplateFix as Behavior<unknown>,
   ValidateInlineJsParses as Behavior<unknown>,
 ];
