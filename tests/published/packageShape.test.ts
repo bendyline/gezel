@@ -55,7 +55,7 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // reopens it. (It tripped at 3.36 MB when `./local-loop` became an entry:
   // unsplit, every entry bundled
   // its own copy of the shared code. tsup now splits it into chunks.)
-  '@bendyline/gezel': 2_000_000, //                    1.97 MB
+  '@bendyline/gezel': 2_000_000, //                    1.96 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
   '@bendyline/gezel-script-runtime': 50_000,

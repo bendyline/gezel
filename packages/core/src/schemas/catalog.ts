@@ -2669,7 +2669,24 @@ export type KnowledgeCatalogItemManifest = z.infer<typeof KnowledgeCatalogItemMa
 
 // ─ Identity / version unions ────────────────────────────────────────
 
-export const CatalogItemIdentitySchema = z.discriminatedUnion('kind', [
+// The unions and the summary/detail shapes below carry explicit types so the
+// published declarations reference each member schema instead of writing all
+// nine manifests out again per schema. That repetition is what pushes
+// `@bendyline/gezel` past its packed-size budget (tests/published).
+export const CatalogItemIdentitySchema: z.ZodDiscriminatedUnion<
+  [
+    typeof ToolsetIdentitySchema,
+    typeof GezelTemplateIdentitySchema,
+    typeof CraftbookTemplateIdentitySchema,
+    typeof ProjectTypeIdentitySchema,
+    typeof ConnectorTypeIdentitySchema,
+    typeof ChatModelIdentitySchema,
+    typeof ImageModelIdentitySchema,
+    typeof VideoModelIdentitySchema,
+    typeof KnowledgeCatalogIdentitySchema,
+  ],
+  'kind'
+> = z.discriminatedUnion('kind', [
   ToolsetIdentitySchema,
   GezelTemplateIdentitySchema,
   CraftbookTemplateIdentitySchema,
@@ -2684,7 +2701,20 @@ export type CatalogItemIdentity = z.infer<typeof CatalogItemIdentitySchema>;
 
 // ─ Top-level resolved union + helpers ───────────────────────────────
 
-export const CatalogItemManifestSchema = z.discriminatedUnion('kind', [
+export const CatalogItemManifestSchema: z.ZodDiscriminatedUnion<
+  [
+    typeof ToolsetManifestSchema,
+    typeof GezelTemplateManifestSchema,
+    typeof CraftbookTemplateManifestSchema,
+    typeof ProjectTypeManifestSchema,
+    typeof ConnectorTypeManifestSchema,
+    typeof ChatModelManifestSchema,
+    typeof ImageModelManifestSchema,
+    typeof VideoModelManifestSchema,
+    typeof KnowledgeCatalogItemManifestSchema,
+  ],
+  'kind'
+> = z.discriminatedUnion('kind', [
   ToolsetManifestSchema,
   GezelTemplateManifestSchema,
   CraftbookTemplateManifestSchema,
@@ -2717,7 +2747,14 @@ export type CatalogKind = z.infer<typeof CatalogKindSchema>;
  * the auth-gated `/api/catalog/.../file/...` endpoint can't carry the
  * bearer token; built-in toolsets embed their SVG directly here.
  */
-export const CatalogItemSummarySchema = z.object({
+export const CatalogItemSummarySchema: z.ZodObject<{
+  sourceId: z.ZodString;
+  kind: typeof CatalogKindSchema;
+  manifest: typeof CatalogItemManifestSchema;
+  logoUrl: z.ZodOptional<z.ZodString>;
+  iconSvg: z.ZodOptional<z.ZodString>;
+  unavailableReason: z.ZodOptional<z.ZodString>;
+}> = z.object({
   sourceId: z.string(),
   kind: CatalogKindSchema,
   manifest: CatalogItemManifestSchema,
@@ -2734,12 +2771,23 @@ export const CatalogItemSummarySchema = z.object({
 });
 export type CatalogItemSummary = z.infer<typeof CatalogItemSummarySchema>;
 
-export const ListCatalogItemsResponseSchema = z.object({
+export const ListCatalogItemsResponseSchema: z.ZodObject<{
+  items: z.ZodArray<typeof CatalogItemSummarySchema>;
+}> = z.object({
   items: z.array(CatalogItemSummarySchema),
 });
 export type ListCatalogItemsResponse = z.infer<typeof ListCatalogItemsResponseSchema>;
 
-export const CatalogItemDetailSchema = CatalogItemSummarySchema.extend({
+export const CatalogItemDetailSchema: z.ZodObject<{
+  sourceId: z.ZodString;
+  kind: typeof CatalogKindSchema;
+  manifest: typeof CatalogItemManifestSchema;
+  logoUrl: z.ZodOptional<z.ZodString>;
+  iconSvg: z.ZodOptional<z.ZodString>;
+  unavailableReason: z.ZodOptional<z.ZodString>;
+  readme: z.ZodOptional<z.ZodString>;
+  about: z.ZodOptional<z.ZodString>;
+}> = CatalogItemSummarySchema.extend({
   /** Rendered README markdown, if present alongside the manifest. */
   readme: z.string().optional(),
   /** For gezel templates: the loaded about.md content. */

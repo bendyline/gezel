@@ -60,13 +60,14 @@ describe('opencodeBridgePortForHome', () => {
     }
   });
 
+  // Sized past vitest's 5s default for the same reason as the Pi sweep below.
   it('never collides with the Codex bridge for the same home', () => {
     for (let index = 0; index < 5_000; index += 1) {
       const home = resolve('test-homes', `user-${index}`, '.gezel');
 
       expect(opencodeBridgePortForHome(home)).not.toBe(codexBridgePortForHome(home));
     }
-  });
+  }, 30_000);
 
   it('selects different ports for different user homes', () => {
     const alice = opencodeBridgePortForHome(resolve('test-homes', 'alice', '.gezel'));
