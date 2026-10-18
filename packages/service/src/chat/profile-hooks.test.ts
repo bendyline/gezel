@@ -1,7 +1,7 @@
 import { type ChatSession, type SuggestWorkResult, rankWorkOptions } from '@bendyline/gezel';
-import { lookupBehavior } from '@bendyline/gezel/local-loop';
 import type { ResolvedModelProfile } from '@bendyline/gezel-inference/internal/model-profile/types';
 import type { LLMSession } from '@bendyline/gezel-inference/internal/providers/types';
+import { lookupBehavior } from '@bendyline/gezel/local-loop';
 import { describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { resolveUserPromptPrelude } from './profile-hooks.js';
@@ -23,7 +23,9 @@ function state(behaviorIds: string[]) {
       model: 'gemma4-e4b-q4',
       providerName: 'llama-cpp',
     } as unknown as ChatSession,
-    session: { getRegisteredToolNames: () => ['start_work', 'suggest_work'] } as unknown as LLMSession,
+    session: {
+      getRegisteredToolNames: () => ['start_work', 'suggest_work'],
+    } as unknown as LLMSession,
     profile,
   };
 }

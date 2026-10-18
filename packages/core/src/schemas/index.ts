@@ -50,6 +50,7 @@ export * from './media-search.js';
 export * from './image-intel.js';
 export * from './village-file.js';
 export * from './catalog.js';
+export * from './gezmodel.js';
 export * from './model-fitness.js';
 export * from './model-profile.js';
 export * from './model-tuning.js';

@@ -5,10 +5,10 @@ import {
   buildFailedToolRecoveryNudge,
   isNoopConfirmationResponse,
   isSubstantiveExistingWorkspaceFile,
-  isValidationRepairPrompt,
   messageExpressesModifyIntent,
   unresolvedFailedToolCalls,
 } from './manager.js';
+import { isValidationRepairPrompt } from './validation-repair.js';
 
 describe('buildContinuationNudge', () => {
   it('turns an incomplete write_file prefix into a concrete complete-call nudge', () => {
