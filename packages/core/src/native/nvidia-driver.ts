@@ -25,7 +25,7 @@
  */
 
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { posix } from 'node:path';
 import { LINUX_CUDA_DRIVER_PATHS } from './llama-backend.js';
 
 export type NvidiaCudaBlockerKind = 'module-not-loaded' | 'restart-required' | 'driver-too-old';
@@ -61,7 +61,7 @@ export function parseNvidiaModuleVersion(text: string): string | null {
 
 /** `580.173.02` from the file `libcuda.so.1` resolves to (`libcuda.so.580.173.02`). */
 export function nvidiaLibraryVersion(resolvedLibcuda: string): string | null {
-  return /^libcuda\.so\.(\d+\.\d+(?:\.\d+)*)$/.exec(basename(resolvedLibcuda))?.[1] ?? null;
+  return /^libcuda\.so\.(\d+\.\d+(?:\.\d+)*)$/.exec(posix.basename(resolvedLibcuda))?.[1] ?? null;
 }
 
 export function minimumNvidiaDriverForCuda(cudaToolkit: string): string | null {
@@ -152,7 +152,7 @@ export function linuxCudaBuildBlocker(
   const resolved = tryRead(() => realpath(libcuda));
   const build = tryRead(
     () =>
-      JSON.parse(readFile(join(dirname(binaryPath), 'gezel-llama-build.json'))) as {
+      JSON.parse(readFile(posix.join(posix.dirname(binaryPath), 'gezel-llama-build.json'))) as {
         cudaToolkit?: unknown;
       },
   );

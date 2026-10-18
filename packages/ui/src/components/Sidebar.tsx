@@ -332,13 +332,15 @@ export function Sidebar({
   const [engineHealth, setEngineHealth] = useState<HealthResponse | null>(null);
   // Same reason, from the process that runs the engines (the machine engine
   // in packaged installs): a GPU the engine is not using. Fetched once, like
-  // health; an older engine owner answers 404 and reports nothing.
+  // health; an older engine owner answers 404 and reports nothing. A portable
+  // host has no engine owner to ask (it answers 501), so it is not asked.
   const [backendHealth, setBackendHealth] = useState<LlamaCppBackendHealthResponse | null>(null);
   useEffect(() => {
     api
       .health()
       .then(setEngineHealth)
       .catch(() => {});
+    if (!runtimeCapabilities().daemonSettings) return;
     api
       .getLlamaCppBackendHealth()
       .then(setBackendHealth)

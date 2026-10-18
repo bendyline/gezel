@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { EmbeddingsShuttingDownError } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { embedOnlyFile } from './enrich.js';
-import type { FileRecord, IndexStore } from './index-store.js';
+import type { FileRecord } from './index-store-types.js';
+import type { IndexStore } from './index-store.js';
 
 let dir: string;
 
