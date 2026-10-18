@@ -300,7 +300,7 @@ describe('LlamaCppSettings', () => {
     await openAdvanced();
 
     const user = userEvent.setup();
-    const urlInput = screen.getByPlaceholderText(/127\.0\.0\.1:8080/) as HTMLInputElement;
+    const urlInput = screen.getByPlaceholderText(/127\.0\.0\.1:9931/) as HTMLInputElement;
     await user.type(urlInput, '  http://10.0.0.5:8080  ');
 
     const enabledSave = screen

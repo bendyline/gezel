@@ -154,9 +154,9 @@ describe('LlamaCppCacheAdapter — reportUsage', () => {
       fetchImpl: (async () =>
         new Response(
           JSON.stringify([
-            { id: 0, n_cache_tokens: 1234 },
-            { id: 1, n_cache_tokens: 5678 },
-            { id: 2, n_cache_tokens: 0 }, // empty slot — skipped
+            { id: 0, n_prompt_tokens: 1234 },
+            { id: 1, n_prompt_tokens: 5678 },
+            { id: 2, n_prompt_tokens: 0 }, // empty slot — skipped
           ]),
           { status: 200 },
         )) as unknown as typeof fetch,
@@ -181,7 +181,7 @@ describe('LlamaCppCacheAdapter — reportUsage', () => {
       resolveBaseUrl: async () => 'http://127.0.0.1:0',
       slotCount: 2,
       fetchImpl: (async () =>
-        new Response(JSON.stringify([{ id: 0, n_cache_tokens: 1000 }]), {
+        new Response(JSON.stringify([{ id: 0, n_prompt_tokens: 1000 }]), {
           status: 200,
         })) as unknown as typeof fetch,
     });

@@ -147,11 +147,10 @@ static void parse_tests(const std::string & templates) {
         inputs.messages = {user};
         inputs.tools = common_chat_tools_parse_oaicompat(json::parse(TOOLS));
         inputs.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        auto params = common_chat_templates_apply(templates_ptr.get(), inputs);
-        common_chat_parser_params parser(params);
-        parser.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        if (!params.parser.empty()) parser.parser.load(params.parser);
-        const auto msg = common_chat_parse(s.output, false, parser);
+        // The session renders the template and owns its parser, as llama-server's does;
+        // without a vocab it reads plain text, as upstream's test-chat does.
+        common_chat_session session(templates_ptr.get(), nullptr, inputs);
+        const auto msg = session.finish(common_chat_input(s.output));
         CHECK(msg.tool_calls.size() == 1);
         CHECK(msg.tool_calls[0].name == "read_file");
         CHECK(msg.tool_calls[0].arguments.find("notes.md") != std::string::npos);

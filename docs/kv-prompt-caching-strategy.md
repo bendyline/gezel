@@ -142,7 +142,7 @@ via `--parallel N`. The adapter (`providers/llama-cpp/cache-adapter.ts`) does th
   warmed system-prompt prefix (`cache-adapter.ts:28-53`, `saveSlotForSession` `:424`,
   `tryRestoreForSession` `:461`).
 
-`reportUsage()` scrapes `GET /slots` for each slot's `n_cache_tokens` and maps slots back to
+`reportUsage()` scrapes `GET /slots` for each slot's `n_prompt_tokens` (its resident tokens) and maps slots back to
 sessions via the adapter's own reverse map (`cache-adapter.ts:241`).
 
 **Launch flags** are built in `chat/manager.ts:11192-11264` (not in the provider package). The
@@ -268,7 +268,7 @@ effect through the full server: 23.2 -> 31.8 tok/s at ~11k, 12.1 -> 22.0 at
 | In-engine cap | KV is per-slot context size | `--cache-budget-mb`, LRU to 80% |
 | Disk format | per-slot `.bin` (incl. multimodal 501 latch) | safetensors per `(fingerprint, cache_id)` |
 | KV quant | `--cache-type-k/v q8_0` (default on) | `--kv-bits` opt-in, **default off** |
-| Usage poll | `GET /slots` → `n_cache_tokens` | `GET /v1/cache/stats` |
+| Usage poll | `GET /slots` → `n_prompt_tokens` | `GET /v1/cache/stats` |
 | Dedicated warm endpoint | none (uses disk prefix files) | `POST /v1/cache/warm` |
 
 Both adapters use the same byte estimate, **`ESTIMATED_BYTES_PER_TOKEN = 100 * 1024`** (100
@@ -849,7 +849,7 @@ KV state survives process death so a returning user doesn't pay cold prefill.
 - **Stats** per provider: `totalBytes`, `budgetBytes`, `warmSessionCount`, `hits`, `misses`,
   `recentHitRate` (over the last 50 turns), and per-session `{tokenCount, bytes, lastUsedAt,
   evictionPriority}`. These back the **EngineStatusPill** popover and the queue meter.
-- Engine-truth hit signals surface in logs: `llama-server` `/slots` `n_cache_tokens`, and the MLX
+- Engine-truth hit signals surface in logs: `llama-server` `/slots` `n_prompt_tokens`, and the MLX
   fork's `[cache] hit cache_id=… prior_tokens=N` / `disk-hit` / `prefix-hit` / `miss` / `saved`
   / `warmed` lines (the `hit`/`warmed` lines are parsed into engine-pill phases).
 

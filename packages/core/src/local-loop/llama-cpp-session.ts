@@ -3382,7 +3382,11 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             if (!Array.isArray(slots)) return null;
             let maxTokens = -1;
             for (const s of slots) {
-              const n = (s as { n_cache_tokens?: unknown }).n_cache_tokens;
+              // A slot's resident tokens, prompt plus everything decoded so
+              // far. llama-server has no `n_cache_tokens`; reading that name
+              // left this probe blind, so a buffered call that outlasted the
+              // window was aborted as a wedge.
+              const n = (s as { n_prompt_tokens?: unknown }).n_prompt_tokens;
               if (typeof n === 'number' && n > maxTokens) maxTokens = n;
             }
             return maxTokens >= 0 ? maxTokens : null;
