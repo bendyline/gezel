@@ -148,9 +148,11 @@ the app, including those inside `service-bundle.tar.gz`, needs a newer macOS.
 - **CUDA toolkit** — the CUDA runtime libraries travel in the `-cuda`
   bundles. Only the NVIDIA *driver* (`libcuda.so.1` / `nvcuda.dll`) must
   be present, and it is never redistributable. It must be new enough for
-  the bundled runtime's major version: R525+ for the CUDA 12.x bundles
+  the bundled runtime's major version: R525+ for the CUDA 12.8 bundles
   (`linux-x64-cuda`, `win32-x64-cuda`) and R580+ for the CUDA 13.0
-  `linux-arm64-cuda` bundle. Every DGX OS image ships R580.
+  `linux-arm64-cuda` bundle. Every DGX OS image ships R580. One exception:
+  Pascal cards (GTX 10-series) get no native code in the 12.8 bundles and
+  run compute_60 PTX that the driver compiles, which needs R570+.
 
 Each of those is enforced by a guard in `build-native.yml` so it cannot
 silently come back.

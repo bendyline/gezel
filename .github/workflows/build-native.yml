@@ -436,12 +436,12 @@ jobs:
             needs_vulkan: true
           # win32 CUDA pins windows-2022 (VS 2022 / MSVC 14.4x), NOT
           # windows-latest. windows-latest moved to Visual Studio 2026
-          # (MSVC 14.51 / _MSC_VER 1951), whose toolchain crashes CUDA
+          # (MSVC 14.51 / _MSC_VER 1951), whose toolchain crashed CUDA
           # 12.4's front-end (`nvcc error: 'cudafe++' died with status
-          # 0xC0000005`, even with -allow-unsupported-compiler). VS 2022 is
-          # the CUDA-12.4-compatible host — the same toolchain class that
-          # built this leg green through native-v0.1.11. cpu/vulkan/cpu-only
-          # win32 legs don't touch nvcc and stay on windows-latest.
+          # 0xC0000005`, even with -allow-unsupported-compiler). CUDA 12.8
+          # supports VS 2022 hosts, so the move to 12.8 keeps that runner
+          # rather than also changing compilers. cpu/vulkan/cpu-only win32
+          # legs don't touch nvcc and stay on windows-latest.
           - engine: llama-cpp
             platform: win32-x64
             variant: cuda
@@ -450,11 +450,16 @@ jobs:
             artifact: gezel-llama-server.exe
             needs_cuda: true
             needs_vulkan: false
-            # Same Pascal-era floor as Linux x64. Native SASS covers Volta
-            # through Hopper; compute_60 and compute_90 PTX keep other Pascal+
-            # devices on CUDA. Native RTX 50 / Blackwell support still requires
-            # moving this Windows toolchain from CUDA 12.4 to CUDA 12.8+.
-            llama_cuda_arch: '60-virtual;70-real;75-real;80-real;86-real;89-real;90'
+            # Same toolkit and GPU coverage as the Linux x64 leg (see its
+            # note): native SASS from Volta through Blackwell, with 120
+            # rewritten to 120a by ggml on CUDA 12.8+, and compute_60 PTX for
+            # Pascal and anything newer than 120. 12.8 is also the first
+            # toolkit ggml compresses kernels on (GGML_CUDA_COMPRESSION_MODE),
+            # which is why the 12.4 ggml-cuda.dll was 840 MB against Linux's
+            # 196 MB. Under minor-version compatibility the driver floor for
+            # SASS stays R525+; PTX-only cards (Pascal) need a driver that
+            # knows 12.8's PTX, R570+.
+            llama_cuda_arch: '60-virtual;70-real;75-real;80-real;86-real;89-real;90-real;100-real;120'
           # win32-arm64: CPU only, and deliberately NOT built with
           # GGML_CPU_ALL_VARIANTS. ggml's ARM variant table covers Linux,
           # Android and Apple and raises
@@ -804,7 +809,7 @@ jobs:
         if: steps.preflight.outputs.pinned == 'true' && matrix.needs_cuda && matrix.platform == 'win32-x64'
         uses: Jimver/cuda-toolkit@3d45d157f327c09c04b50ee6ccdea2d9d017ec76 # v0.2.35
         with:
-          cuda: '12.4.1'
+          cuda: '12.8.1'
           method: 'network'
           # `cuobjdump` is listed for the same reason as the Linux apt line
           # above: the architecture-payload audit needs it and "nvcc" alone
@@ -1414,9 +1419,10 @@ jobs:
       # For the record, since an earlier version of this comment had it
       # backwards: the cuBLAS/cudart peers are NOT NVIDIA-signed. They arrive
       # from developer.download.nvidia.com with no certificate table at all
-      # (checked against NVIDIA's own sha256 manifest for 12.4.1; the copies
-      # in native-v0.1.18 are byte-identical to theirs). Nothing signs them
-      # now, which is the intent.
+      # (checked against NVIDIA's own sha256 manifests for 12.4.1, whose
+      # copies in native-v0.1.18 and v0.1.50 are byte-identical to theirs,
+      # and for 12.8.1, whose cudart/cublas/cublasLt are equally unsigned).
+      # Nothing signs them now, which is the intent.
       #
       # macOS is the deliberate exception and cannot follow this policy:
       # Apple's notary service rejects any executable in the bundle that is

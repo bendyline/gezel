@@ -46,7 +46,7 @@ const THIRD_PARTY_PATTERNS = [
   // NVIDIA CUDA redistributables. Distributable under the CUDA EULA's
   // Attachment A; they arrive from developer.download.nvidia.com with no
   // Authenticode signature at all (verified against NVIDIA's own sha256
-  // manifest for 12.4.1).
+  // manifests for 12.4.1 and 12.8.1).
   {
     pattern: '(?:^|/)(?:native-bin|native/build)/win32-x64(?:-[^/]+)?/cudart64_\\d+\\.dll$',
     source: 'NVIDIA CUDA Toolkit',
