@@ -20,10 +20,12 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   ENGINE_FOR_BINARY,
+  FIRST_NATIVE_RELEASE,
   NATIVE_PAYLOAD,
   allPlatformKeys,
   expectedBinaries,
   platformKeysForEngine,
+  platformKeysInRelease,
 } from './native-payload.mjs';
 
 const workflowPath = fileURLToPath(
@@ -174,18 +176,26 @@ test('sd.cpp CUDA legs build against the llama CUDA leg they share a key with', 
       .map((entry) => [entry.platform, entry]),
   );
   const sdCuda = matrix.filter((entry) => entry.engine === 'sd-cpp' && entry.variant === 'cuda');
-  assert.deepEqual(sdCuda.map((entry) => entry.platform).sort(), ['linux-arm64', 'linux-x64']);
+  assert.deepEqual(sdCuda.map((entry) => entry.platform).sort(), [
+    'linux-arm64',
+    'linux-x64',
+    'win32-arm64',
+  ]);
   for (const entry of sdCuda) {
     const llama = llamaCuda.get(entry.platform);
     assert.ok(
       llama,
       `no llama-cpp CUDA leg on ${entry.platform} stages the libraries sd-server links`,
     );
-    assert.equal(
-      entry.cuda_pkg,
-      llama.cuda_pkg,
-      `${entry.platform} sd-server must build against the toolkit whose libcudart/libcublas llama stages`,
-    );
+    // `cuda_pkg` selects the Linux apt toolkit, `cuda_version` the pinned
+    // Windows ARM64 archives.
+    for (const field of ['cuda_pkg', 'cuda_version', 'runner']) {
+      assert.equal(
+        entry[field],
+        llama[field],
+        `${entry.platform} sd-server must build against the toolkit whose CUDA runtime llama stages (${field})`,
+      );
+    }
     assert.ok(entry.sd_cuda_arch, `${entry.platform} sd CUDA leg must pin sd_cuda_arch`);
     assert.equal(
       entry.sd_cuda_arch,
@@ -202,6 +212,85 @@ test('sd.cpp CUDA legs build against the llama CUDA leg they share a key with', 
     'an uncapped -j runs the hosted runners out of memory under nvcc',
   );
   assert.match(workflow, /^ {6}SD_CUDA_ARCH: \$\{\{ matrix\.sd_cuda_arch \|\| '' \}\}$/m);
+
+  const sdWindows =
+    windowsWrapperPaths.find(([path]) => path.includes('sd-cpp/build.ps1'))?.[1] ?? '';
+  assert.match(sdWindows, /-DCMAKE_CUDA_ARCHITECTURES=\$sdCudaArch/);
+  assert.match(
+    sdWindows,
+    /\$env:SD_BACKEND_TAG -eq '1'/,
+    'the Windows CUDA sd-server must land in the -cuda key, not over the portable build',
+  );
+});
+
+test('Windows-on-ARM CUDA targets RTX Spark with a pinned toolkit', () => {
+  const legs = parseMatrix().filter(
+    (entry) => entry.platform === 'win32-arm64' && entry.variant === 'cuda',
+  );
+  assert.deepEqual(legs.map((entry) => entry.engine).sort(), ['llama-cpp', 'sd-cpp']);
+  for (const entry of legs) {
+    assert.equal(
+      entry.runner,
+      'windows-11-arm',
+      `${entry.engine} must build where its ARM64 checks run`,
+    );
+    assert.equal(entry.cuda_version, '13.4.1', `${entry.engine} toolkit`);
+    // N1X is GB10 silicon: the same target as the linux-arm64 CUDA legs.
+    assert.equal(entry.llama_cuda_arch ?? entry.sd_cuda_arch, '121a-real', entry.engine);
+  }
+
+  const start = workflow.indexOf('      - name: Install CUDA Toolkit (Windows ARM64)');
+  const end = workflow.indexOf('      # ── Linux CPU baseline build deps', start);
+  assert.notEqual(start, -1, 'could not find the Windows ARM64 CUDA install step');
+  assert.notEqual(end, -1, 'could not find the end of the Windows ARM64 CUDA install step');
+  const step = workflow.slice(start, end);
+  const pins = [...step.matchAll(/'([a-z_]+\/windows-arm64\/[\w.-]+\.zip)'\s*=\s*'([0-9a-f]+)'/g)];
+  assert.deepEqual(pins.map(([, path]) => path.split('/')[0]).sort(), [
+    'cccl',
+    'cuda_crt',
+    'cuda_cudart',
+    'cuda_cuobjdump',
+    'cuda_nvcc',
+    'libcublas',
+    'libnvvm',
+  ]);
+  for (const [, path, digest] of pins) {
+    assert.match(digest, /^[0-9a-f]{64}$/, `${path} is not pinned to a sha256`);
+  }
+  assert.match(step, /Get-FileHash -Algorithm SHA256/);
+  assert.match(step, /https:\/\/developer\.download\.nvidia\.com\/compute\/cuda\/redist/);
+
+  const llama =
+    windowsWrapperPaths.find(([path]) => path.includes('llama-cpp/build.ps1'))?.[1] ?? '';
+  assert.match(llama, /'-DGGML_CPU=OFF'/, 'ggml-cuda.dll must come from a CPU-less MSVC configure');
+  assert.match(llama, /--target ggml-cuda/);
+  assert.match(llama, /arm64-windows-cuda\.cmake/);
+});
+
+test('releases published before a key existed are not asked for it', () => {
+  for (const [key, version] of Object.entries(FIRST_NATIVE_RELEASE)) {
+    assert.ok(NATIVE_PAYLOAD[key], `FIRST_NATIVE_RELEASE names ${key}, which nothing ships`);
+    const [major, minor, patch] = version.split('.').map(Number);
+    const before = `${major}.${minor}.${patch - 1}`;
+    assert.ok(!platformKeysInRelease(before).includes(key), `${before} predates ${key}`);
+    assert.ok(platformKeysInRelease(version).includes(key), `${version} first ships ${key}`);
+    assert.ok(platformKeysInRelease(`${major}.${minor + 1}.0`).includes(key));
+  }
+  const unchanged = allPlatformKeys().filter((key) => !FIRST_NATIVE_RELEASE[key]);
+  assert.deepEqual(platformKeysInRelease('0.0.1'), unchanged);
+  assert.deepEqual(platformKeysInRelease('native-v99.0.0'), allPlatformKeys());
+  assert.throws(() => platformKeysInRelease('latest'), /not a native release version/);
+
+  // Every check against an already-published release passes it, or the
+  // first new key fails every desktop release until the next native one.
+  for (const name of ['release-electron.yml', 'release-msix.yml', 'release-mas.yml']) {
+    const contents = readFileSync(
+      fileURLToPath(new URL(`../.github/workflows/${name}`, import.meta.url)),
+      'utf8',
+    );
+    assert.match(contents, /check-native-payload\.mjs --list-keys --release "\$version"/, name);
+    assert.doesNotMatch(contents, /check-native-payload\.mjs --list-keys\)/, name);
+  }
 });
 
 test('native-payload.mjs covers exactly the platform keys the matrix builds', () => {

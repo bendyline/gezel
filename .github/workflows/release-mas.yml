@@ -115,7 +115,7 @@ jobs:
             case "$key" in
               darwin-*) expected+=("gezel-native-${version}-${key}.tar.gz") ;;
             esac
-          done < <(node scripts/check-native-payload.mjs --list-keys)
+          done < <(node scripts/check-native-payload.mjs --list-keys --release "$version")
           expected+=('SHA256SUMS' 'NATIVE_FILE_MANIFESTS.json')
           missing=0
           for name in "${expected[@]}"; do

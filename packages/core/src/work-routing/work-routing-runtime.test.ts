@@ -138,9 +138,9 @@ describe('the question note', () => {
       undefined,
     );
     expect(out).toContain(
-      'Answer it yourself in chat; do not start work or pass it to another gezel.',
+      'then answer in chat yourself; do not start new work or pass it to another gezel.',
     );
-    expect(out).toContain('consult_researcher, search');
+    expect(out).not.toContain('consult_');
     expect(
       PromptWorkOptionsPrelude.userPromptPrelude!(turnCtx({ workOptions: question }), undefined),
     ).toBeNull();

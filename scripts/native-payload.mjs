@@ -33,10 +33,17 @@
  *     installer exists). Windows-on-ARM could in principle run the x64 SDK's
  *     `glslc` under emulation to cross-compile shaders, which Linux arm64
  *     cannot; that is a spike, not a plan.
- *   - no `win32-arm64-cuda` / `win32-arm64` ds4 — NVIDIA ships no CUDA for
- *     Windows-on-ARM, and ds4 is GPU-only. The Adreno GPU path is OpenCL
- *     (upstream `docs/build.md` §"Windows Arm64"); the Hexagon NPU needs its
- *     op libraries inside a driver-signed `.cat`, so it is not shippable.
+ *   - no `win32-arm64` ds4 — ds4 is GPU-only and its Makefile build has no
+ *     Windows path. The Adreno GPU path is OpenCL (upstream `docs/build.md`
+ *     §"Windows Arm64"); the Hexagon NPU needs its op libraries inside a
+ *     driver-signed `.cat`, so it is not shippable.
+ *   - `win32-arm64-cuda` is for RTX Spark (NVIDIA N1X, the GB10 silicon of
+ *     DGX Spark under Windows), which CUDA 13.4 first supports. It carries
+ *     llama-server and sd-server with one copy of the arm64 NVIDIA
+ *     redistributables, the same sharing as the Linux `-cuda` keys. The
+ *     runtime does not select it yet: `llama-backend.ts` still answers CPU on
+ *     Windows-on-ARM until the build is validated on a device. It first
+ *     ships in the release named in FIRST_NATIVE_RELEASE below.
  *   - `gezel-device-health` is Windows + Linux only (macOS uses IOKit in-process)
  *   - `gezel-service-host` is Windows only (macOS/Linux use launchd/systemd)
  *   - no `duckdb` — the DuckDB CLI is vendored unmodified from the DuckDB
@@ -90,6 +97,7 @@ export const NATIVE_PAYLOAD = Object.freeze({
     'uv',
   ],
   'win32-arm64-cpu': ['gezel-llama-server'],
+  'win32-arm64-cuda': ['gezel-llama-server', 'gezel-sd-server'],
   'darwin-arm64': [
     'gezel-sd-server',
     'gezel-ds4-server',
@@ -135,6 +143,45 @@ export const ENGINE_FOR_BINARY = Object.freeze({
 /** Every platform key a native release publishes an archive for. */
 export function allPlatformKeys() {
   return Object.keys(NATIVE_PAYLOAD);
+}
+
+/**
+ * Keys added after native releases already existed, with the first release
+ * that publishes each one.
+ *
+ * The build side always builds every key. But the desktop, MSIX and Mac App
+ * Store preflights check an already-published release for an archive per key,
+ * and so does the SBOM test against the pinned file manifest. Without this,
+ * adding a key fails every desktop release until another native release is cut
+ * and pinned. Once the pinned release reaches the version here, the entry is
+ * inert and can be deleted.
+ */
+export const FIRST_NATIVE_RELEASE = Object.freeze({
+  'win32-arm64-cuda': '0.1.52',
+});
+
+function parseNativeVersion(version) {
+  const match = /^(?:native-v|v)?(\d+)\.(\d+)\.(\d+)$/.exec(`${version}`.trim());
+  if (!match) throw new Error(`not a native release version: ${JSON.stringify(version)}`);
+  return match.slice(1).map(Number);
+}
+
+function compareNativeVersions(a, b) {
+  const left = parseNativeVersion(a);
+  const right = parseNativeVersion(b);
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] - right[index];
+  }
+  return 0;
+}
+
+/** Platform keys the native release `version` (e.g. `0.1.51`) publishes. */
+export function platformKeysInRelease(version) {
+  parseNativeVersion(version);
+  return allPlatformKeys().filter(
+    (key) =>
+      !FIRST_NATIVE_RELEASE[key] || compareNativeVersions(version, FIRST_NATIVE_RELEASE[key]) >= 0,
+  );
 }
 
 /**

@@ -135,6 +135,8 @@ jobs:
           # Derived from scripts/native-payload.mjs, the same table
           # build-native.yml packs against — so a variant added to the
           # native pipeline can't be silently omitted from the installer.
+          # --release drops keys added after this pinned release was built
+          # (FIRST_NATIVE_RELEASE), which it never carried.
           expected=()
           while read -r key; do
             [[ -n "$key" ]] || continue
@@ -142,7 +144,7 @@ jobs:
               win32-*) expected+=("gezel-native-${version}-${key}.zip") ;;
               *)       expected+=("gezel-native-${version}-${key}.tar.gz") ;;
             esac
-          done < <(node scripts/check-native-payload.mjs --list-keys)
+          done < <(node scripts/check-native-payload.mjs --list-keys --release "$version")
           expected+=('SHA256SUMS' 'NATIVE_FILE_MANIFESTS.json')
           missing=0
           for name in "${expected[@]}"; do

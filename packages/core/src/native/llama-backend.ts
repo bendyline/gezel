@@ -538,13 +538,14 @@ function probeOrCached(input: DetectInput): {
   } else if (plat === 'win32' && ar === 'x64') {
     result = detectLinuxOrWin('win32', probeFile, probeCmd, probeReadFile, probeReadDir);
   } else if (plat === 'win32' && ar === 'arm64') {
-    // Windows-on-ARM ships a CPU build and nothing else, so there is no
-    // probe to run: NVIDIA publishes no CUDA for WoA, and LunarG no ARM64
-    // Vulkan SDK (so we cannot compile the shaders, whatever the user's
-    // driver offers). Answering straight away also keeps the probe from
-    // reporting a backend no archive exists for — `native-payload.mjs`
-    // declares only `win32-arm64-cpu`. Adreno via OpenCL would be a new
-    // variant and a new branch here.
+    // Windows-on-ARM answers CPU without probing. The native pipeline now
+    // also builds `win32-arm64-cuda` for RTX Spark (CUDA 13.4 is the first
+    // toolkit for WoA), but no one has run that payload on a device yet, and
+    // native releases before the one named in native-payload.mjs's
+    // FIRST_NATIVE_RELEASE carry no such archive. Probing for an NVIDIA GPU
+    // here, as the win32 x64 branch does, is the step that turns it on. There
+    // is no Vulkan build for this platform, and Adreno via OpenCL would be a
+    // new variant and a new branch here.
     result = { backend: 'cpu', reason: 'Windows on ARM — CPU build is the only one shipped' };
   } else {
     result = { backend: 'cpu', reason: `unsupported platform ${plat}/${ar} — CPU only` };

@@ -15,7 +15,7 @@ import type { Behavior } from '../types.js';
 export const PromptWorkOptionsQuestionNote: Behavior = {
   id: 'prompt.work-options-question-note',
   description:
-    'On a turn the work ranking reads as a question, a one-line note: answer it yourself in chat, do not start work or pass it to another gezel. Requires prompt.work-options-prelude.',
+    'On a turn the work ranking reads as a question, a one-line note: look up what you need, answer in chat yourself, and do not start new work or pass it to another gezel. Requires prompt.work-options-prelude.',
 
   userPromptPrelude(ctx) {
     if (!ctx.workOptions?.question) return null;

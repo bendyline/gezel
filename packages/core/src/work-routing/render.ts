@@ -72,15 +72,16 @@ export function renderWorkOptionsPrelude(
  * there, and Qwen 3.5 9B then handed questions to a researcher with
  * `message_gezel` instead of answering: 6 of 28 with the routing tools, 4 of
  * 29 without (2026-10-18). Null for anything that is not a question.
+ *
+ * It names no tools, and it says to look things up first. A list of helpers
+ * ("consult_builder, consult_designer, consult_developer, search") crowded
+ * out `list_tasks`; with no list, "answer it yourself in chat" read as
+ * "answer without looking", and Gemma 4 E4B told the person no deck existed
+ * while one was running — 0 of 5, against 5 of 5 without the note.
  */
 export function renderQuestionNote(result: SuggestWorkResult): string | null {
   if (!result.question) return null;
-  const self = result.guidance.find((g) => g.kind === 'self');
-  const tools =
-    self?.kind === 'self' && self.tools.length > 0
-      ? ` If you need facts first, use ${self.tools.join(', ')}, then answer here.`
-      : '';
-  return `(System note for this turn: this reads as a question. Answer it yourself in chat; do not start work or pass it to another gezel.${tools})`;
+  return '(System note for this turn: this reads as a question. Look up what you need with your own tools, then answer in chat yourself; do not start new work or pass it to another gezel.)';
 }
 
 const MAX_DESCRIPTION_CHARS = 140;

@@ -34,7 +34,8 @@ native/
 │       ├── README.md
 │       └── build.ps1
 ├── cmake/
-│   └── arm64-windows-llvm.cmake  # shared clang toolchain for the win32-arm64 legs
+│   ├── arm64-windows-llvm.cmake  # shared clang toolchain for the win32-arm64 legs
+│   └── arm64-windows-cuda.cmake  # CUDA side of the win32-arm64-cuda legs (nvcc + cl.exe)
 ├── scripts/
 │   ├── fetch-upstream.sh       # filtered fetch + pin one engine's upstream repo
 │   └── bundle.sh               # assemble per-platform binaries into packages/app/native-bin/
@@ -80,7 +81,25 @@ and `<variant>` is `metal` (macOS), or `cpu` / `vulkan` / `cuda`
 aarch64 SDK for Linux or Windows). Intel Mac (`darwin-x64`) is not built:
 on-device first-run routes those users to Copilot/OpenAI.
 
-`win32-arm64` is CPU-only and differs from every other key in two ways
+`win32-arm64-cuda` is for RTX Spark (NVIDIA N1X, the GB10 silicon of DGX
+Spark under Windows), which CUDA 13.4 first supports. CI assembles CUDA
+13.4.1 from NVIDIA's pinned windows-arm64 redistributable archives and builds
+natively on `windows-11-arm`. nvcc's only host compiler on Windows is
+`cl.exe`, so the CUDA half goes through
+[`native/cmake/arm64-windows-cuda.cmake`](cmake/arm64-windows-cuda.cmake)
+while C and C++ stay on clang and the baseline below:
+
+- **llama-cpp** is a split build, upstream's own recipe: the same clang CPU
+  payload as `win32-arm64-cpu`, plus `ggml-cuda.dll` from a second, MSVC
+  configure, loaded through `GGML_BACKEND_DL`.
+- **sd-cpp** links its CUDA code into one clang-built executable. Its ggml
+  keys the host flags it hands nvcc on the C++ compiler, so `build.ps1`
+  rekeys two lines on `WIN32` for that build.
+
+The runtime does not select this key yet: `llama-backend.ts` answers CPU on
+Windows-on-ARM until the payload is validated on a device.
+
+The `win32-arm64` CPU payload differs from every other key in two ways
 worth knowing before you touch it:
 
 - **It must be built with clang, not MSVC.** ggml's ARM branch opens with

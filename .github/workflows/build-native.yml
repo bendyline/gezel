@@ -330,6 +330,24 @@ jobs:
             sd_backend: cpu
             needs_cuda: false
             needs_vulkan: false
+          # RTX Spark (NVIDIA N1X) — CUDA sd-server for Windows-on-ARM, in the
+          # `win32-arm64-cuda` key beside llama-server, whose leg stages the
+          # arm64 NVIDIA DLLs this binary imports. C/C++ stay on clang and the
+          # baseline above; nvcc compiles the CUDA code with cl.exe as host,
+          # because sd.cpp links it into one executable (see build.ps1). Same
+          # toolkit and architecture as the llama leg, which
+          # native-payload.test.mjs holds in step.
+          - engine: sd-cpp
+            platform: win32-arm64
+            variant: cuda
+            runner: windows-11-arm
+            script: build.ps1
+            artifact: gezel-sd-server.exe
+            sd_backend: cuda
+            needs_cuda: true
+            needs_vulkan: false
+            sd_cuda_arch: '121a-real'
+            cuda_version: '13.4.1'
 
           # ── llama-cpp (multi-variant on Linux+Windows, single
           #    on macOS — Phase 0 spike validated all 7 combos)
@@ -460,7 +478,7 @@ jobs:
             # SASS stays R525+; PTX-only cards (Pascal) need a driver that
             # knows 12.8's PTX, R570+.
             llama_cuda_arch: '60-virtual;70-real;75-real;80-real;86-real;89-real;90-real;100-real;120'
-          # win32-arm64: CPU only, and deliberately NOT built with
+          # win32-arm64 CPU: deliberately NOT built with
           # GGML_CPU_ALL_VARIANTS. ggml's ARM variant table covers Linux,
           # Android and Apple and raises
           # `FATAL_ERROR "Unsupported ARM target OS: Windows"` otherwise, so
@@ -481,6 +499,24 @@ jobs:
             artifact: gezel-llama-server.exe
             needs_cuda: false
             needs_vulkan: false
+          # win32-arm64 CUDA: RTX Spark (NVIDIA N1X), the GB10 silicon of DGX
+          # Spark under Windows, first supported by CUDA 13.4. A split build,
+          # as upstream's own win-cuda-arm64 release: build.ps1 builds the CPU
+          # payload exactly as the leg above (clang, the same baseline, which
+          # the ARM64 baseline step re-proves) and then ggml-cuda.dll with MSVC
+          # + nvcc, loaded through GGML_BACKEND_DL. sm_121 only, like the
+          # linux-arm64 leg, since it is the same GPU; the cuobjdump audit
+          # proves it landed. The runtime does not select this key yet.
+          - engine: llama-cpp
+            platform: win32-arm64
+            variant: cuda
+            runner: windows-11-arm
+            script: build.ps1
+            artifact: gezel-llama-server.exe
+            needs_cuda: true
+            needs_vulkan: false
+            llama_cuda_arch: '121a-real'
+            cuda_version: '13.4.1'
 
           # ── ds4 (DwarfStar / DeepSeek-V4) — Metal on darwin-arm64,
           #    CUDA on Linux. GPU-only (no CPU / Vulkan / ROCm / Windows /
@@ -663,7 +699,7 @@ jobs:
       DS4_CUDA_ARCH: ${{ matrix.ds4_cuda_arch || '' }}
       # llama-cpp CUDA build reads this for -DCMAKE_CUDA_ARCHITECTURES. x64
       # legs keep a Pascal PTX floor plus native targets for newer generations;
-      # Linux ARM64 deliberately targets GB10 only.
+      # both ARM64 legs deliberately target GB10 / N1X (sm_121) only.
       # CUDA release legs always carry an explicit architecture list. `native`
       # is intentionally unsupported in CI because GPU-less runners cannot
       # resolve it and nvcc otherwise falls back to a legacy target.
@@ -815,6 +851,60 @@ jobs:
           # above: the architecture-payload audit needs it and "nvcc" alone
           # does not pull it in.
           sub-packages: '["nvcc","cuobjdump","cudart","cublas","cublas_dev","visual_studio_integration"]'
+
+      # ── CUDA Toolkit (Windows ARM64) ──────────────────────────
+      # RTX Spark legs. Jimver's action installs x64 toolkits only, so this
+      # assembles CUDA 13.4.1 from NVIDIA's per-component redistributable
+      # archives, as upstream llama.cpp does: the windows-arm64 builds of the
+      # compiler (nvcc, crt, nvvm, CCCL) so it runs natively on windows-11-arm,
+      # the arm64 cudart and cuBLAS the payload ships, and cuobjdump for the
+      # architecture audit. Every archive is pinned to the sha256 NVIDIA
+      # publishes in redistrib_13.4.1.json. The archives carry the EULA as
+      # LICENSE; it is copied to EULA.txt, where the license staging step looks
+      # for the toolkit's own copy.
+      - name: Install CUDA Toolkit (Windows ARM64)
+        if: steps.preflight.outputs.pinned == 'true' && matrix.needs_cuda && matrix.platform == 'win32-arm64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ('${{ matrix.cuda_version }}' -ne '13.4.1') {
+            throw "the archive pins below are CUDA 13.4.1; this leg asks for '${{ matrix.cuda_version }}'"
+          }
+          $base = 'https://developer.download.nvidia.com/compute/cuda/redist'
+          $archives = [ordered]@{
+            'cuda_nvcc/windows-arm64/cuda_nvcc-windows-arm64-13.4.59-archive.zip'           = '4d26510f9d5b644e784a02b13423f9c8b79f8b15613ea0bb325bad42ed3443c4'
+            'cuda_crt/windows-arm64/cuda_crt-windows-arm64-13.4.59-archive.zip'             = 'a84f570d06497cf14187ddf9a2d656d752aaf66b2025c11eb93af01a8a1ce5ff'
+            'libnvvm/windows-arm64/libnvvm-windows-arm64-13.4.59-archive.zip'               = '2d051ea3fffddf67458fe66004e7045015409709c57f8cdcdade88d479b62e47'
+            'cccl/windows-arm64/cccl-windows-arm64-13.3.4.2.1-archive.zip'                  = 'e8a7c96268ae6c52a7b8b07d96e1f84ab8eae5619c3b989024ce712dda5c2cc2'
+            'cuda_cudart/windows-arm64/cuda_cudart-windows-arm64-13.4.49-archive.zip'       = 'd48085b557db615f1095d4a6f96d4d1fcc8ba0c4fd16ad40f30f953b6ae422cf'
+            'libcublas/windows-arm64/libcublas-windows-arm64-13.7.0.27-archive.zip'         = '932794dcd1e67e152ab2aeaf32ee8141ded807c6ea6d8f85692c40b02fdd09d7'
+            'cuda_cuobjdump/windows-arm64/cuda_cuobjdump-windows-arm64-13.4.49-archive.zip' = '2df6140a0cde3c33a71c8b065e0adbbee21c2b3f6d5cbc2f5128ab0493654a4c'
+          }
+          $root = Join-Path $env:RUNNER_TEMP 'cuda-13.4'
+          $downloads = Join-Path $env:RUNNER_TEMP 'cuda-redist'
+          New-Item -ItemType Directory -Force -Path $root, $downloads | Out-Null
+          foreach ($archive in $archives.GetEnumerator()) {
+            $zip = Join-Path $downloads (Split-Path -Leaf $archive.Key)
+            Invoke-WebRequest -Uri "$base/$($archive.Key)" -OutFile $zip -UseBasicParsing
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+            if ($actual -ne $archive.Value) {
+              throw "sha256 mismatch for $($archive.Key): expected $($archive.Value), got $actual"
+            }
+            Expand-Archive -LiteralPath $zip -DestinationPath $downloads -Force
+            $unpacked = Join-Path $downloads ([System.IO.Path]::GetFileNameWithoutExtension($zip))
+            robocopy $unpacked $root /E /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "robocopy failed merging $unpacked (exit $LASTEXITCODE)" }
+            Write-Host "[cuda] $(Split-Path -Leaf $archive.Key) verified and merged"
+          }
+          Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $root 'EULA.txt') -Force
+          foreach ($required in @('bin\nvcc.exe', 'bin\cuobjdump.exe', 'nvvm\bin\cicc.exe', 'lib\arm64\cudart.lib', 'lib\arm64\cublas.lib', 'bin\arm64')) {
+            if (-not (Test-Path (Join-Path $root $required))) { throw "CUDA install is missing $required" }
+          }
+          & (Join-Path $root 'bin\nvcc.exe') --version
+          if ($LASTEXITCODE -ne 0) { throw "nvcc --version failed (exit $LASTEXITCODE)" }
+          Get-ChildItem (Join-Path $root 'bin\arm64') -Filter '*.dll' | ForEach-Object { Write-Host "[cuda] runtime $($_.Name)" }
+          echo "CUDA_PATH=$root" >> $env:GITHUB_ENV
+          echo "$root\bin" >> $env:GITHUB_PATH
 
       # ── Linux CPU baseline build deps ─────────────────────────
       # Fires for every linux-* CPU-only build (x86_64 and arm64
@@ -1091,9 +1181,10 @@ jobs:
             --expected '${{ matrix.llama_cuda_arch }}'
 
       # sd-cpp links ggml-cuda statically, so the device code lives in the
-      # executable itself rather than in a libggml-cuda peer.
+      # executable itself rather than in a libggml-cuda peer. Linux and
+      # Windows-on-ARM alike; cuobjdump reads ELF and PE.
       - name: Verify sd.cpp CUDA architecture payload
-        if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'sd-cpp' && matrix.variant == 'cuda' && startsWith(matrix.platform, 'linux-')
+        if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'sd-cpp' && matrix.variant == 'cuda'
         shell: bash
         run: |
           set -euo pipefail
@@ -1102,7 +1193,7 @@ jobs:
             --expected '${{ matrix.sd_cuda_arch }}'
 
       - name: Verify llama.cpp CUDA architecture payload (Windows)
-        if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'llama-cpp' && matrix.variant == 'cuda' && matrix.platform == 'win32-x64'
+        if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'llama-cpp' && matrix.variant == 'cuda' && startsWith(matrix.platform, 'win32-')
         shell: pwsh
         run: |
           $out = '${{ steps.outdir.outputs.dir }}'
@@ -1132,9 +1223,12 @@ jobs:
         run: |
           set -euo pipefail
           args=(--dir "${{ steps.outdir.outputs.dir }}")
+          # The cuda variants are checked through their clang build: llama's
+          # CPU half (its ggml-cuda.dll comes from a separate MSVC configure)
+          # and sd's whole build, where the baseline check skips nvcc commands.
           case "${{ matrix.engine }}" in
             llama-cpp)
-              build_dir="native/engines/llama-cpp/.upstream/build-win32-arm64-cpu"
+              build_dir="native/engines/llama-cpp/.upstream/build-win32-arm64-${{ matrix.variant }}"
               args+=(
                 --mode clang-baseline
                 --baseline armv8.2-a+dotprod+fp16
@@ -1152,7 +1246,7 @@ jobs:
               )
               ;;
             sd-cpp)
-              build_dir="native/engines/sd-cpp/.upstream/build-win32-arm64-cpu"
+              build_dir="native/engines/sd-cpp/.upstream/build-win32-arm64-${{ matrix.sd_backend }}"
               args+=(
                 --mode clang-baseline
                 --baseline armv8.2-a+dotprod+fp16

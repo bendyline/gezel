@@ -60,3 +60,10 @@ set(gezel_warn_flags "-Wno-format -Wno-unused-variable -Wno-unused-function -Wno
 set(CMAKE_C_FLAGS_INIT "${gezel_arch_flags} ${gezel_warn_flags}")
 set(CMAKE_CXX_FLAGS_INIT "${gezel_arch_flags} ${gezel_warn_flags}")
 set(CMAKE_ASM_FLAGS_INIT "${gezel_arch_flags} ${gezel_warn_flags}")
+
+# sd.cpp's win32-arm64-cuda build compiles its CUDA code into this clang
+# project; the CUDA side lives in its own file, shared with llama-cpp.
+if(GEZEL_ARM64_CUDA)
+  include("${CMAKE_CURRENT_LIST_DIR}/arm64-windows-cuda.cmake")
+  list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES GEZEL_ARM64_CUDA)
+endif()

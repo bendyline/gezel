@@ -61,7 +61,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isNativeDataFile } from './native-file-manifest-lib.mjs';
-import { detectPlatform, platformVariants } from './native-payload.mjs';
+import { detectPlatform, platformKeysInRelease, platformVariants } from './native-payload.mjs';
 
 setDefaultAutoSelectFamilyAttemptTimeout(5000);
 
@@ -202,7 +202,11 @@ async function fetchFromRelease({ token, platform, version, variant }) {
   // Default behavior fetches every variant for this platform so the
   // user can flip the Settings → Advanced → Engine backend dropdown
   // freely without re-running the script. `--variant` narrows to one.
-  const platformKeys = variant ? [pickPlatformKey(platform, variant)] : platformVariants(platform);
+  // A release predating a newer key never carried it, so it is not asked for.
+  const published = new Set(platformKeysInRelease(ver));
+  const platformKeys = variant
+    ? [pickPlatformKey(platform, variant)]
+    : platformVariants(platform).filter((key) => published.has(key));
   requireKeys(platformKeys, platform);
 
   for (const platformKey of platformKeys) {

@@ -88,13 +88,14 @@ jobs:
           # Only the Windows keys matter here, but the whole expected set is
           # derived from the same table build-native.yml packs against so a
           # variant added to the native pipeline cannot be silently omitted.
+          # --release drops keys newer than this pinned release.
           expected=()
           while read -r key; do
             [[ -n "$key" ]] || continue
             case "$key" in
               win32-*) expected+=("gezel-native-${version}-${key}.zip") ;;
             esac
-          done < <(node scripts/check-native-payload.mjs --list-keys)
+          done < <(node scripts/check-native-payload.mjs --list-keys --release "$version")
           expected+=('SHA256SUMS' 'NATIVE_FILE_MANIFESTS.json')
           missing=0
           for name in "${expected[@]}"; do

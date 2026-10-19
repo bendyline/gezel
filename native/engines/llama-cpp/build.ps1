@@ -14,11 +14,68 @@
 # Prereqs:
 #   - Visual Studio Build Tools with "Desktop development with C++".
 #   - CMake 3.24+.
-#   - CUDA backend: CUDA Toolkit 12.x on PATH (nvcc.exe).
+#   - CUDA backend: CUDA Toolkit 12.x on PATH (nvcc.exe). win32-arm64 needs
+#     CUDA 13.4+ with the ARM64 libraries (CUDA_PATH\lib\arm64, bin\arm64)
+#     and the VC.Tools.ARM64 component; see native/cmake/arm64-windows-cuda.cmake.
 #   - Vulkan backend: Vulkan SDK installed, VULKAN_SDK env var set.
 
 param()
 $ErrorActionPreference = 'Stop'
+
+# Import the Visual Studio target environment into this session, the same way
+# sd-cpp/build.ps1 does. Only the win32-arm64 CUDA backend needs it: nvcc's one
+# supported host compiler on Windows is cl.exe, while every other leg here
+# either uses the Visual Studio generator or clang (which finds MSVC itself).
+function Import-VsDevEnv {
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+  if (-not (Test-Path $vswhere)) {
+    throw "vswhere not found at $vswhere. Install Visual Studio Build Tools with the 'Desktop development with C++' workload."
+  }
+  $hostIsArm64 = $env:PROCESSOR_ARCHITECTURE -match '^(ARM64|aarch64)$'
+  if ($isArm64) {
+    $vcComponent = 'Microsoft.VisualStudio.Component.VC.Tools.ARM64'
+    $vcvarsScript = if ($hostIsArm64) { 'vcvarsarm64.bat' } else { 'vcvarsamd64_arm64.bat' }
+    $expectedVsTarget = 'arm64'
+  } else {
+    $vcComponent = 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
+    $vcvarsScript = 'vcvars64.bat'
+    $expectedVsTarget = 'x64'
+  }
+
+  $vsPath = & $vswhere -latest -products * -requires $vcComponent -property installationPath
+  if (-not $vsPath) {
+    throw "No Visual Studio install with the $vcComponent toolset found. Install the matching C++ workload."
+  }
+  $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\$vcvarsScript"
+  if (-not (Test-Path $vcvars)) {
+    throw "$vcvarsScript not found at $vcvars - the VS install looks incomplete."
+  }
+  Write-Host "[build] importing VS $expectedVsTarget dev environment from $vsPath ($vcvarsScript)"
+  $envText = & $env:ComSpec /d /c "`"$vcvars`" >nul 2>&1 && set"
+  if ($LASTEXITCODE -ne 0) { throw "$vcvarsScript failed (exit $LASTEXITCODE)" }
+  $devPath = $null
+  foreach ($line in $envText) {
+    if ($line -match '^([^=]+)=(.*)$') {
+      $name = $matches[1]
+      $value = $matches[2]
+      if ($name -ieq 'Path') {
+        if (-not $devPath -or $value -match '\\VC\\Tools\\(?:MSVC|Llvm)\\') {
+          $devPath = $value
+        }
+        continue
+      }
+      [System.Environment]::SetEnvironmentVariable($name, $value, 'Process')
+    }
+  }
+  if (-not $devPath) { throw "$vcvarsScript did not produce a PATH value" }
+  [System.Environment]::SetEnvironmentVariable('Path', $devPath, 'Process')
+  if (-not $env:VSCMD_ARG_TGT_ARCH -or $env:VSCMD_ARG_TGT_ARCH -ine $expectedVsTarget) {
+    throw "$vcvarsScript selected target '$env:VSCMD_ARG_TGT_ARCH'; expected '$expectedVsTarget'"
+  }
+  if (-not (Get-Command cl -ErrorAction SilentlyContinue)) {
+    throw "cl.exe is still not on PATH after importing the VS dev environment."
+  }
+}
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $here '..\..\..') | Select-Object -ExpandProperty Path
@@ -93,17 +150,20 @@ $isArm64 = $platform -eq 'win32-arm64'
 $backend = if ($env:LLAMA_BACKEND) { $env:LLAMA_BACKEND } else { 'auto' }
 $llamaCudaArch = if ($env:LLAMA_CUDA_ARCH) { $env:LLAMA_CUDA_ARCH } else { '' }
 if ($isArm64) {
-  # CPU is the only shippable backend on Windows-on-ARM. NVIDIA publishes no
-  # CUDA for WoA, and LunarG no ARM64 Vulkan SDK (so there is no glslc to
-  # compile the shaders with). Adreno is reachable through OpenCL, which
-  # needs OpenCL-Headers + OpenCL-ICD-Loader built from source - a separate
-  # variant, not this one. Refuse rather than silently downgrade, so a
-  # mistaken LLAMA_BACKEND in CI is loud.
-  if ($backend -notin @('auto', 'cpu')) {
-    throw "LLAMA_BACKEND=$backend is not available on win32-arm64 (cpu only)"
+  # Windows-on-ARM ships CPU for every device, plus CUDA for RTX Spark
+  # (NVIDIA N1X): CUDA 13.4 is the first toolkit with Windows ARM64 support,
+  # and it is built as a split (section 4b), not in one configure. `auto`
+  # stays CPU, so CUDA is only ever built when asked for. There is no Vulkan
+  # leg here, and Adreno would be OpenCL - a separate variant. Refuse rather
+  # than silently downgrade, so a mistaken LLAMA_BACKEND in CI is loud.
+  if ($backend -eq 'auto') { $backend = 'cpu' }
+  if ($backend -notin @('cpu', 'cuda')) {
+    throw "LLAMA_BACKEND=$backend is not available on win32-arm64 (cpu or cuda)"
   }
-  $backend = 'cpu'
 }
+# On arm64 the configure below is the CPU build either way; for CUDA, section
+# 4b adds ggml-cuda.dll from a second, MSVC configure.
+$splitCuda = $isArm64 -and $backend -eq 'cuda'
 if ($backend -eq 'auto') {
   if (Get-Command nvcc -ErrorAction SilentlyContinue) {
     $backend = 'cuda'
@@ -192,9 +252,11 @@ $cmakeFlags += @(
 )
 switch ($backend) {
   'cuda'   {
-    $cmakeFlags += '-DGGML_CUDA=ON'
-    if ($llamaCudaArch -and $llamaCudaArch -ne 'spark') {
-      $cmakeFlags += "-DCMAKE_CUDA_ARCHITECTURES=$llamaCudaArch"
+    if (-not $splitCuda) {
+      $cmakeFlags += '-DGGML_CUDA=ON'
+      if ($llamaCudaArch -and $llamaCudaArch -ne 'spark') {
+        $cmakeFlags += "-DCMAKE_CUDA_ARCHITECTURES=$llamaCudaArch"
+      }
     }
   }
   'vulkan' { $cmakeFlags += '-DGGML_VULKAN=ON' }
@@ -214,7 +276,7 @@ $buildDir = Join-Path $src "build-$platform-$backend"
 # extras\visual_studio_integration. cpu/vulkan don't enable the CUDA language,
 # so they configure fine without it.
 $toolsetArgs = @()
-if ($backend -eq 'cuda' -and $env:CUDA_PATH) {
+if ($backend -eq 'cuda' -and -not $isArm64 -and $env:CUDA_PATH) {
   $toolsetArgs = @('-T', "cuda=$env:CUDA_PATH")
   Write-Host "[build] CUDA toolset -> $env:CUDA_PATH"
 }
@@ -311,6 +373,49 @@ Get-ChildItem -Path $buildOutDir -Filter '*.dll' -ErrorAction SilentlyContinue |
     Write-Host "[build] bundled $($_.Name)"
   }
 
+# -- 4b. win32-arm64 CUDA: ggml-cuda.dll from a second, MSVC configure --
+# One configure cannot build both halves: ggml rejects MSVC for its ARM CPU
+# code unless GGML_NATIVE tunes it to the build host (which section 2b
+# forbids), and nvcc accepts no host compiler but cl.exe on Windows. This is
+# upstream llama.cpp's own release recipe for its win-cuda-arm64 zip: the
+# clang CPU build above, plus ggml-cuda.dll built here with GGML_CPU=OFF.
+# GGML_BACKEND_DL loads it at runtime, and it imports ggml-base.dll by name,
+# which the CPU build provides from the same pinned, patched source.
+if ($splitCuda) {
+  Import-VsDevEnv
+  $cudaToolchain = Join-Path $repoRoot 'native\cmake\arm64-windows-cuda.cmake'
+  $cudaBuildDir = Join-Path $src "build-$platform-cuda-backend"
+  $cudaFlags = @(
+    '-G', 'Ninja',
+    "-DCMAKE_TOOLCHAIN_FILE=$cudaToolchain",
+    '-DCMAKE_BUILD_TYPE=Release',
+    '-DGGML_BACKEND_DL=ON',
+    '-DGGML_CPU=OFF',
+    '-DGGML_CUDA=ON',
+    '-DGGML_NATIVE=OFF',
+    '-DGGML_OPENMP=OFF',
+    '-DLLAMA_BUILD_IS_DEV=OFF',
+    '-DLLAMA_BUILD_SERVER=OFF',
+    '-DLLAMA_BUILD_TESTS=OFF',
+    '-DLLAMA_BUILD_EXAMPLES=OFF',
+    '-DLLAMA_CURL=OFF',
+    '-DLLAMA_BUILD_UI=OFF',
+    '-DLLAMA_USE_PREBUILT_UI=OFF',
+    '-DLLAMA_OPENSSL=OFF'
+  )
+  # Release legs always pin the architectures; see LLAMA_CUDA_ARCH in
+  # build-native.yml for what an unpinned GPU-less configure ships.
+  if ($llamaCudaArch) { $cudaFlags += "-DCMAKE_CUDA_ARCHITECTURES=$llamaCudaArch" }
+  & cmake -S $src -B $cudaBuildDir @cudaFlags
+  if ($LASTEXITCODE -ne 0) { throw "cmake configure failed (ggml-cuda)" }
+  & cmake --build $cudaBuildDir --target ggml-cuda -j
+  if ($LASTEXITCODE -ne 0) { throw "cmake build failed (ggml-cuda)" }
+  $cudaModule = Get-ChildItem -Path $cudaBuildDir -Recurse -Filter 'ggml-cuda.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $cudaModule) { throw "ggml-cuda.dll not produced under $cudaBuildDir" }
+  Copy-Item $cudaModule.FullName (Join-Path $outDir 'ggml-cuda.dll') -Force
+  Write-Host "[build] bundled ggml-cuda.dll (MSVC + nvcc, loaded through GGML_BACKEND_DL)"
+}
+
 # CPU-dispatch guard, mirroring build.sh section 6b2. Both arches are
 # defending against the same thing - a CPU backend silently compiled for the
 # build host - but they reach it from opposite directions, so the guard is
@@ -361,6 +466,9 @@ if ($backend -eq 'cuda') {
     $nvcc = Get-Command nvcc -ErrorAction SilentlyContinue
     if ($nvcc) { $cudaBin = Split-Path -Parent $nvcc.Source }
   }
+  # NVIDIA's ARM64 redistributables keep their DLLs in bin\arm64; bin itself
+  # holds the compiler, which may be an x64 build when cross-compiling.
+  if ($cudaBin -and $isArm64) { $cudaBin = Join-Path $cudaBin 'arm64' }
   if ($cudaBin -and (Test-Path $cudaBin)) {
     # Names vary across CUDA versions. Wildcard-match and copy what's
     # there; CI should verify the binary loads cleanly.

@@ -181,6 +181,31 @@ describe('third-party allowlist covers prebuilt Windows payloads', () => {
     assert.equal(isThirdPartyBinary('C:\\unrelated\\uv.exe'), false);
   });
 
+  it('exempts the NVIDIA runtime on Windows-on-ARM only in the CUDA key', () => {
+    for (const name of ['cudart64_13.dll', 'cublas64_13.dll', 'cublasLt64_13.dll']) {
+      assert.equal(
+        isThirdPartyBinary(`C:\\repo\\native\\build\\win32-arm64-cuda\\${name}`),
+        true,
+        name,
+      );
+      assert.equal(
+        isThirdPartyBinary(`C:\\repo\\native\\build\\win32-arm64-cpu\\${name}`),
+        false,
+        `${name} outside win32-arm64-cuda`,
+      );
+      assert.equal(
+        isThirdPartyBinary(`C:\\repo\\native\\build\\win32-arm64\\${name}`),
+        false,
+        `${name} in the bare win32-arm64 key`,
+      );
+    }
+    assert.equal(
+      isThirdPartyBinary('C:\\repo\\native\\build\\win32-arm64-cuda\\nvrtc64_130_0.dll'),
+      false,
+      'no arm64 payload ships nvrtc',
+    );
+  });
+
   it('scopes loose runtimes to their exact packaged subtrees', () => {
     assert.equal(
       isThirdPartyBinary('C:\\app\\resources\\app.asar.unpacked\\dist\\node-bundle\\node.exe'),

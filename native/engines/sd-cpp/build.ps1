@@ -1,11 +1,12 @@
 # build.ps1 - Windows build of sd-server from the pinned
 # stable-diffusion.cpp upstream.
 #
-# Emits: native/build/win32-x64/gezel-sd-server.exe
+# Emits: native/build/win32-{x64,arm64}/gezel-sd-server.exe
+#        (or native/build/<platform>-<backend>/ when SD_BACKEND_TAG=1)
 #
 # Backend default is Vulkan - it works on virtually every modern GPU
 # without requiring the CUDA toolkit. Override with $env:SD_BACKEND
-# (values: vulkan, cuda, cpu).
+# (values: vulkan, cuda, cpu). win32-arm64 builds cpu, or cuda for RTX Spark.
 #
 # Toolchain: this script bootstraps the Visual Studio developer environment
 # for the requested target (via vswhere + the matching vcvars*.bat) and builds
@@ -157,13 +158,15 @@ $isArm64 = $platform -eq 'win32-arm64'
 # --- 2. Resolve accelerator ---
 $backend = if ($env:SD_BACKEND) { $env:SD_BACKEND } else { 'vulkan' }
 if ($isArm64) {
-  # CPU only on Windows-on-ARM: no CUDA for WoA, and LunarG publishes no
-  # ARM64 Vulkan SDK, so there is no glslc to compile the shaders with.
-  if ($backend -notin @('vulkan', 'cpu')) {
-    throw "SD_BACKEND=$backend is not available on win32-arm64 (cpu only)"
+  # Windows-on-ARM builds CPU, or CUDA for RTX Spark (NVIDIA N1X; CUDA 13.4 is
+  # the first toolkit with Windows ARM64 support). There is no Vulkan leg, so
+  # the Vulkan default falls back to CPU as it always has.
+  if ($backend -eq 'vulkan') { $backend = 'cpu' }
+  if ($backend -notin @('cpu', 'cuda')) {
+    throw "SD_BACKEND=$backend is not available on win32-arm64 (cpu or cuda)"
   }
-  $backend = 'cpu'
 }
+$arm64Cuda = $isArm64 -and $backend -eq 'cuda'
 $cmakeFlags = @(
   '-DCMAKE_BUILD_TYPE=Release',
   # Drops the unbundled VCOMP140.DLL import ggml's default OPENMP=ON
@@ -196,13 +199,18 @@ if ($isArm64) {
 }
 # NOTE: upstream removed the `SD_BUILD_SERVER` option - the server is
 # now an unconditional `add_subdirectory(server)`. Don't reintroduce it.
+$sdCudaArch = if ($env:SD_CUDA_ARCH) { $env:SD_CUDA_ARCH } else { '' }
 switch ($backend) {
   'vulkan' { $cmakeFlags += '-DSD_VULKAN=ON' }
-  'cuda'   { $cmakeFlags += '-DSD_CUDA=ON' }
+  'cuda'   {
+    $cmakeFlags += '-DSD_CUDA=ON'
+    # Release legs always pin this; see SD_CUDA_ARCH in build-native.yml.
+    if ($sdCudaArch) { $cmakeFlags += "-DCMAKE_CUDA_ARCHITECTURES=$sdCudaArch" }
+  }
   'cpu'    { }
   default  { throw "unknown SD_BACKEND=$backend (valid: vulkan, cuda, cpu)" }
 }
-Write-Host "[build] platform=$platform backend=$backend"
+Write-Host "[build] platform=$platform backend=$backend cuda_architectures=$(if ($sdCudaArch) { $sdCudaArch } else { 'unset' })"
 
 # --- 3. Bring up the MSVC toolchain (cl + ninja + Windows SDK) ---
 Import-VsDevEnv
@@ -222,13 +230,53 @@ if ($isArm64) {
     throw "clang is not on PATH; the win32-arm64 build needs the LLVM toolchain"
   }
   $toolchainArgs = @("-DCMAKE_TOOLCHAIN_FILE=$toolchain", "-DGEZEL_ARM_ARCH=$armArch")
+  # C and C++ stay on clang and the declared baseline; the CUDA half of the
+  # toolchain (shared with llama-cpp) points nvcc at cl.exe and the ARM64
+  # import libraries. sd.cpp links its CUDA code into this one executable.
+  if ($arm64Cuda) { $toolchainArgs += '-DGEZEL_ARM64_CUDA=ON' }
 }
+
+# sd.cpp's ggml-cuda chooses the flags it hands nvcc's host compiler from the
+# C++ compiler (`if (NOT MSVC)`). In the clang arm64 build that would give
+# cl.exe the GCC flag -Wno-pedantic and withhold the /Zc:preprocessor that
+# CUDA 13's CCCL requires under MSVC. nvcc's only host compiler on Windows is
+# cl.exe, so key both conditions on WIN32 as well. Each line must match
+# exactly once, so an upstream change fails here rather than inside nvcc.
+$ggmlDir = Join-Path $src 'ggml'
+$ggmlCudaCmake = 'src/ggml-cuda/CMakeLists.txt'
+$hostFlagRewrites = @(
+  @('if (GGML_ALL_WARNINGS AND NOT MSVC)', 'if (GGML_ALL_WARNINGS AND NOT MSVC AND NOT WIN32)'),
+  @('if (NOT MSVC)', 'if (NOT MSVC AND NOT WIN32)')
+)
+if ($arm64Cuda) {
+  & git -C $ggmlDir checkout -- $ggmlCudaCmake
+  if ($LASTEXITCODE -ne 0) { throw "could not reset $ggmlCudaCmake in the ggml submodule" }
+  $cmakePath = Join-Path $ggmlDir $ggmlCudaCmake
+  $text = [System.IO.File]::ReadAllText($cmakePath)
+  foreach ($rewrite in $hostFlagRewrites) {
+    $count = ([regex]::Matches($text, [regex]::Escape($rewrite[0]))).Count
+    if ($count -ne 1) {
+      throw "expected '$($rewrite[0])' once in $ggmlCudaCmake, found $count - recheck the WIN32 host-flag rewrite against the new pin"
+    }
+    $text = $text.Replace($rewrite[0], $rewrite[1])
+  }
+  [System.IO.File]::WriteAllText($cmakePath, $text, [System.Text.UTF8Encoding]::new($false))
+  Write-Host "[build] ggml-cuda host flags keyed on WIN32 (cl.exe) for the clang arm64 build"
+}
+
 $buildDir = Join-Path $src "build-$platform-$backend"
-Reset-BuildDirIfGeneratorChanged $buildDir 'Ninja'
-& cmake -S $src -B $buildDir -G Ninja @toolchainArgs @cmakeFlags
-if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
-& cmake --build $buildDir --target sd-server -j
-if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
+try {
+  Reset-BuildDirIfGeneratorChanged $buildDir 'Ninja'
+  & cmake -S $src -B $buildDir -G Ninja @toolchainArgs @cmakeFlags
+  if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+  & cmake --build $buildDir --target sd-server -j
+  if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
+} finally {
+  if ($arm64Cuda) {
+    & git -C $ggmlDir checkout -- $ggmlCudaCmake
+    if ($LASTEXITCODE -ne 0) { Write-Warning "could not restore $ggmlCudaCmake in the ggml submodule" }
+  }
+}
 
 # --- 5. Locate + copy the produced binary ---
 $found = Get-ChildItem -Path $buildDir -Recurse -Filter 'sd-server.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -237,7 +285,12 @@ if (-not $found) {
 }
 Write-Host "[build] produced: $($found.FullName)"
 
-$outDir = Join-Path $repoRoot "native\build\$platform"
+# SD_BACKEND_TAG=1 emits to `<platform>-<backend>/`, as build.sh does: the
+# CUDA build joins llama-server in the `-cuda` key, whose llama leg stages the
+# NVIDIA runtime DLLs this binary imports, instead of overwriting the
+# portable build in the bare key.
+$outKey = if ($env:SD_BACKEND_TAG -eq '1') { "$platform-$backend" } else { $platform }
+$outDir = Join-Path $repoRoot "native\build\$outKey"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 # Ship under a gezel- prefix (gezel-sd-server.exe) for process attribution
 # while preserving the stable-diffusion.cpp lineage. Only the installed file

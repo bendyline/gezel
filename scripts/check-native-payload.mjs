@@ -29,6 +29,7 @@ import {
   allPlatformKeys,
   detectPlatform,
   expectedBinaries,
+  platformKeysInRelease,
   platformVariants,
 } from './native-payload.mjs';
 
@@ -36,6 +37,15 @@ const args = process.argv.slice(2);
 const rootIdx = args.indexOf('--root');
 const root = rootIdx === -1 ? null : args[rootIdx + 1];
 const all = args.includes('--all');
+const releaseIdx = args.indexOf('--release');
+const release = releaseIdx === -1 ? null : args[releaseIdx + 1];
+if (releaseIdx !== -1 && !release) {
+  console.error('error: --release requires a native release version, e.g. 0.1.51');
+  process.exit(2);
+}
+// A published release carries only the keys that existed when it was built.
+const publishedKeys = release ? new Set(platformKeysInRelease(release)) : null;
+const inRelease = (key) => !publishedKeys || publishedKeys.has(key);
 
 // Both workflows need the archive names a native release publishes — the
 // draft-release job to gate what it packed, the Electron preflight to gate
@@ -43,15 +53,18 @@ const all = args.includes('--all');
 // derived from the payload table rather than hand-copied into two YAML
 // arrays that drift the next time a variant is added.
 if (args.includes('--list-keys')) {
-  console.log(allPlatformKeys().join('\n'));
+  console.log(allPlatformKeys().filter(inRelease).join('\n'));
   process.exit(0);
 }
 
 if (!root) {
-  console.error('usage: check-native-payload.mjs (--root <dir> [--all] | --list-keys)');
+  console.error(
+    'usage: check-native-payload.mjs (--root <dir> [--all] | --list-keys) [--release <version>]',
+  );
   console.error('  --all         check every published platform key (build side).');
   console.error('                Default: only the host platform keys (consumer side).');
   console.error('  --list-keys   print every published platform key, one per line.');
+  console.error('  --release     only keys that native release publishes (for a published one).');
   process.exit(2);
 }
 
@@ -59,14 +72,14 @@ const rootDir = resolve(root);
 
 let keys;
 if (all) {
-  keys = allPlatformKeys();
+  keys = allPlatformKeys().filter(inRelease);
 } else {
   const platform = detectPlatform();
   if (!platform) {
     console.error(`error: unsupported host platform/arch: ${process.platform}/${process.arch}`);
     process.exit(1);
   }
-  keys = platformVariants(platform);
+  keys = platformVariants(platform).filter(inRelease);
   if (keys.length === 0) {
     console.error(`error: no native payload is published for ${platform}.`);
     process.exit(1);
