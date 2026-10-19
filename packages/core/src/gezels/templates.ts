@@ -21,12 +21,17 @@ export interface GildeTemplateResolution {
  * about-omitted fallback, so "a Developer created without an about gets
  * the shipped Developer template" holds on every creation path.
  *
+ * Fixed-function templates never match a role. They forward one message to
+ * one tool with no model behind them, so the work a role is recruited for
+ * (a craftbook step, a delegation, a brief to read) is work they cannot do:
+ * the image-generator steps of logo-set and nine other books asked for SVG
+ * files, several renders and a brief from artifacts. They are installed by
+ * id, through {@link resolveGezelTemplateById}.
+ *
  * Returns null when no template clears `MATCH_THRESHOLD`, or when the
  * matched template's about failed to load (an empty system prompt is
  * worse than the caller's bespoke/placeholder fallback — wild-caught
  *a recruited worker ran a whole eval trial with about='').
- * Fixed-function templates are exempt from the about requirement: they
- * have no LLM behind them.
  */
 export async function resolveGezelTemplateForRole(
   catalog: {
@@ -40,21 +45,40 @@ export async function resolveGezelTemplateForRole(
   const gildeItems = await catalog.list();
   const gildeCandidates: MatchCandidate[] = gildeItems
     .filter((g) => g.manifest.kind === 'gezel-template')
-    .map((g) => {
-      const m = g.manifest as Extract<typeof g.manifest, { kind: 'gezel-template' }>;
-      return {
-        id: m.id,
-        role: m.role,
-        name: m.name,
-        tags: m.tags,
-        description: m.description,
-      };
-    });
+    .map((g) => g.manifest as Extract<typeof g.manifest, { kind: 'gezel-template' }>)
+    .filter((m) => !m.frontmatter?.fixedFunction)
+    .map((m) => ({
+      id: m.id,
+      role: m.role,
+      name: m.name,
+      tags: m.tags,
+      description: m.description,
+    }));
   const ranked = rankCandidates(query, gildeCandidates);
   const best = ranked[0];
   if (!best || best.score < MATCH_THRESHOLD) return null;
   const detail = await catalog.get(best.id);
-  if (!detail || detail.manifest.kind !== 'gezel-template') return null;
+  return detail ? templateResolution(detail, best.score) : null;
+}
+
+/**
+ * One template by its exact id, fixed-function ones included: the install
+ * path for a gezel the person picked by name, such as the direct image
+ * gezel Settings offers.
+ */
+export async function resolveGezelTemplateById(
+  catalog: { get(id: string): Promise<CatalogItemDetail | null> },
+  templateId: string,
+): Promise<GildeTemplateResolution | null> {
+  const detail = await catalog.get(templateId.trim());
+  return detail ? templateResolution(detail, 1) : null;
+}
+
+function templateResolution(
+  detail: CatalogItemDetail,
+  matchScore: number,
+): GildeTemplateResolution | null {
+  if (detail.manifest.kind !== 'gezel-template') return null;
   const manifest = detail.manifest;
   const parsedFrontmatter = parseTemplateFrontmatter(manifest.frontmatter);
   // The role registry is the source of truth for role → tuning profile:
@@ -67,16 +91,17 @@ export async function resolveGezelTemplateForRole(
       ? { ...(parsedFrontmatter ?? {}), suggestedTuningProfile: registryProfile }
       : parsedFrontmatter;
   const about = detail.about ?? '';
+  // Fixed-function templates have no model behind them, so no about.
   const isFixedFunction = Boolean(frontmatter?.fixedFunction);
   if (about.trim().length === 0 && !isFixedFunction) return null;
   return {
-    templateId: best.id,
+    templateId: manifest.id,
     templateVersion: manifest.version,
     role: manifest.role,
     about,
     frontmatter,
     ...(manifest.nameSuggestions ? { nameSuggestions: manifest.nameSuggestions } : {}),
-    matchScore: best.score,
+    matchScore,
   };
 }
 

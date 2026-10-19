@@ -108,6 +108,7 @@ import { projectContinuationRoutes } from './routes/project-continuation.js';
 import { projectGezelRoutes } from './routes/project-gezels.js';
 import { globalTaskRoutes, projectTaskRoutes } from './routes/project-tasks.js';
 import { projectRoutes } from './routes/projects.js';
+import { promptAssistRoutes } from './routes/prompt-assist.js';
 import { promptDraftRoutes } from './routes/prompt-drafts.js';
 import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
@@ -568,6 +569,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/projects', toolRoutes(ctx));
   // Bounded one-shot model calls for repository workflow drivers.
   app.route('/api/projects', completionRoutes(ctx));
+  app.route('/api/projects', promptAssistRoutes(ctx));
   // Per-project terminal threads live at /api/projects/:id/terminals/*
   app.route('/api/projects', terminalRoutes(ctx));
   // People (face lane): /api/projects/:id/people[...] + the global

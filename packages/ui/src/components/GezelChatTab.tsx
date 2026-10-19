@@ -441,6 +441,9 @@ function GezelChatBody({
             </ExternalConversationPanel>
           ) : (
             <ChatComposer
+              {...(gezel.fixedFunction?.tool === 'generate_image'
+                ? { imageGenerator: { defaults: gezel.fixedFunction.defaults } }
+                : {})}
               gezelId={gezel.id}
               gezelName={gezel.name}
               gezelRoleBasedName={gezel.roleBasedName}
@@ -585,6 +588,9 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
             <ExternalConversationPanel source={focused.source} />
           ) : (
             <ChatComposer
+              {...(gezel.fixedFunction?.tool === 'generate_image'
+                ? { imageGenerator: { defaults: gezel.fixedFunction.defaults } }
+                : {})}
               gezelId={gezel.id}
               gezelName={gezel.name}
               gezelRoleBasedName={gezel.roleBasedName}

@@ -482,6 +482,25 @@ describe('McpBridge', () => {
     );
   });
 
+  it('refuses text written to a raster image path and names a way to make one', async () => {
+    const refused = await bridge.callTool('write_file', {
+      path: 'assets/logo.png',
+      content: 'A minimalist fox logo in orange.',
+    });
+    expect(refused).toContain('assets/logo.png is a raster image');
+    expect(refused).toContain('generate_image({ prompt, saveAs: "assets/logo.png" })');
+    expect(await bridge.callTool('list_dir', { path: 'assets' })).not.toContain('logo.png');
+    expect(
+      await bridge.callTool('write_artifact', { path: 'logo.webp', content: 'not an image' }),
+    ).toContain('logo.webp is a raster image');
+    expect(
+      await bridge.callTool('write_file', {
+        path: 'assets/logo.svg',
+        content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"></svg>\n',
+      }),
+    ).toMatch(/logo\.svg/);
+  });
+
   it('says a listed folder does not exist instead of calling it empty', async () => {
     await bridge.callTool('write_file', { path: 'store/repairs.json', content: '{}\n' });
     expect(await bridge.callTool('list_dir', { path: 'store/repairs' })).toBe(
@@ -1007,7 +1026,7 @@ describe('McpBridge', () => {
     expect(create).toContain('template: builder');
   });
 
-  it('start_job normalizes image_generator to the image-generator template', async () => {
+  it('start_job gives an image job to the Illustrator, never the direct image gezel', async () => {
     const create = await bridge.callTool('start_job', {
       name: 'Sunset Role Alias',
       about:
@@ -1020,7 +1039,12 @@ describe('McpBridge', () => {
     });
 
     expect(create).toContain('Started project "Sunset Role Alias"');
-    expect(create).toContain('template: image-generator');
+    // A catalog that predates the Illustrator keeps the role's own template.
+    const hasIllustrator = await svc.context.catalog
+      .get('gezel-template', 'illustrator')
+      .then((item) => item !== null)
+      .catch(() => false);
+    expect(create).toContain(`template: ${hasIllustrator ? 'illustrator' : 'image-generator'}`);
 
     const projectId = create.match(/\(([a-z0-9-]+)\)/)![1]!;
 

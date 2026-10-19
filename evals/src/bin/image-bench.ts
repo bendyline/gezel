@@ -25,6 +25,9 @@
  *                        request
  *   --seeds <a,b>        default 42
  *   --size <WxH>         override the model's default size
+ *   --aspect <ratio>     render in this aspect ratio (9:16, 16:9, …) at the
+ *                        model's trained area, as the direct image gezel does
+ *   --quality <tier>     draft | standard | high
  *   --steps <n>          override the catalog's recommended steps
  *   --label <name>       arm label for A/B runs (default "default")
  *   --runs-dir <path>    output (default evals/runs/image-bench-<ts>)
@@ -52,7 +55,13 @@ import { appendFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/pro
 import { homedir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 
-import type { MediaModelFit } from '@bendyline/gezel';
+import {
+  type ImageAspectRatio,
+  ImageAspectRatioSchema,
+  type ImageQuality,
+  ImageQualitySchema,
+  type MediaModelFit,
+} from '@bendyline/gezel';
 import { decodeImage } from '@bendyline/gezel-service/media';
 import { acquireEvalDeviceLock } from '../eval-device-lock.ts';
 import { type AlignmentScore, createAlignmentScorer } from '../image-bench/alignment.ts';
@@ -149,6 +158,8 @@ async function runModel(opts: {
   prompts: ImageBenchPrompt[];
   seeds: number[];
   size?: { width: number; height: number };
+  aspectRatio?: ImageAspectRatio;
+  quality?: ImageQuality;
   steps?: number;
   rewrites?: Record<string, string>;
   outDir: string;
@@ -184,7 +195,9 @@ async function runModel(opts: {
   let memory: MemoryPeak;
   try {
     await daemon.client.updateConfig({ imageProvider: 'sd-cpp', firstRunCompleted: true });
-    fit = (await daemon.client.getImageModelFit()).models.find((m) => m.id === model);
+    fit = (
+      await daemon.client.getImageModelFit(opts.quality ? { quality: opts.quality } : {})
+    ).models.find((m) => m.id === model);
     // The baseline excludes the daemon itself: sd-server starts on the first generate.
     await watch.begin();
     for (const prompt of opts.prompts) {
@@ -204,6 +217,8 @@ async function runModel(opts: {
             model,
             seed,
             ...(opts.size ? opts.size : {}),
+            ...(opts.aspectRatio ? { aspectRatio: opts.aspectRatio } : {}),
+            ...(opts.quality ? { quality: opts.quality } : {}),
             ...(opts.steps ? { steps: opts.steps } : {}),
             inline: true,
           });
@@ -372,6 +387,14 @@ async function main(): Promise<void> {
   const sizeFlag =
     typeof args.flags.size === 'string' ? args.flags.size.match(/^(\d+)x(\d+)$/) : null;
   const size = sizeFlag ? { width: Number(sizeFlag[1]), height: Number(sizeFlag[2]) } : undefined;
+  const aspectRatio =
+    args.flags.aspect === undefined
+      ? undefined
+      : ImageAspectRatioSchema.parse(String(args.flags.aspect));
+  const quality =
+    args.flags.quality === undefined
+      ? undefined
+      : ImageQualitySchema.parse(String(args.flags.quality));
   const steps = args.flags.steps ? Number(args.flags.steps) : undefined;
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const outDir = resolve(
@@ -430,6 +453,8 @@ async function main(): Promise<void> {
         prompts,
         seeds,
         ...(size ? { size } : {}),
+        ...(aspectRatio ? { aspectRatio } : {}),
+        ...(quality ? { quality } : {}),
         ...(steps ? { steps } : {}),
         ...(rewrites ? { rewrites } : {}),
         outDir,

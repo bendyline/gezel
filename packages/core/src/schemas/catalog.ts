@@ -2184,6 +2184,9 @@ export const ImageModelAuxiliaryFileSchema = z.object({
 });
 export type ImageModelAuxiliaryFile = z.infer<typeof ImageModelAuxiliaryFileSchema>;
 
+export const ImagePromptStyleSchema = z.enum(['sentences', 'tags']);
+export type ImagePromptStyle = z.infer<typeof ImagePromptStyleSchema>;
+
 export const ImageModelIdentitySchema = IdentityCommonSchema.extend({
   kind: z.literal('image-model'),
   /** Recommended sampler steps; the generate endpoint falls back to this. */
@@ -2212,6 +2215,15 @@ export const ImageModelIdentitySchema = IdentityCommonSchema.extend({
    * See `resolveImg2ImgSupport` in the service's image provider layer.
    */
   supportsImg2Img: z.boolean().optional(),
+  /**
+   * How the model reads a prompt: plain `sentences` (Flux, Krea, MOSS) or
+   * comma-separated booru `tags` (Animagine). Told to the gezel that writes
+   * the prompt, through `generate_image`'s result and the composer's image
+   * shaping. Absent means sentences.
+   */
+  promptStyle: ImagePromptStyleSchema.optional(),
+  /** Whether the model renders short quoted text legibly (signs, posters). */
+  rendersText: z.boolean().optional(),
   /**
    * @deprecated Hand-authored, and no longer read: the daemon prices every
    * media model from its weight files (core `media-memory.ts`). Optional so
@@ -2288,6 +2300,10 @@ export const ImageModelManifestSchema = z.object({
   weightsKind: z.enum(['checkpoint', 'diffusion-model']).default('checkpoint'),
   /** Mirrors {@link ImageModelIdentitySchema.supportsImg2Img}. */
   supportsImg2Img: z.boolean().optional(),
+  /** Mirrors {@link ImageModelIdentitySchema.promptStyle}. */
+  promptStyle: ImagePromptStyleSchema.optional(),
+  /** Mirrors {@link ImageModelIdentitySchema.rendersText}. */
+  rendersText: z.boolean().optional(),
   auxiliaryFiles: z.array(ImageModelAuxiliaryFileSchema).default([]),
   /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
   hardwareTier: ImageModelHardwareTierSchema.optional(),

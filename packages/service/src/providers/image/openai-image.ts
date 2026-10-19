@@ -11,7 +11,12 @@
  * had to snap.
  */
 
-import { createLogger } from '@bendyline/gezel';
+import {
+  type ImageAspectRatio,
+  type ImageQuality,
+  aspectRatioValue,
+  createLogger,
+} from '@bendyline/gezel';
 import type {
   ImageEngineHealth,
   ImageGenerationInput,
@@ -48,6 +53,7 @@ export interface OpenAIImageClient {
       model: string;
       prompt: string;
       size?: string;
+      quality?: 'low' | 'medium' | 'high';
       n?: number;
     }): Promise<{ data?: Array<{ b64_json?: string }> }>;
     /**
@@ -60,6 +66,7 @@ export interface OpenAIImageClient {
       image: Buffer | Buffer[];
       prompt: string;
       size?: string;
+      quality?: 'low' | 'medium' | 'high';
       n?: number;
     }): Promise<{ data?: Array<{ b64_json?: string }> }>;
   };
@@ -113,7 +120,9 @@ export class OpenAIImageProvider implements ImageProvider {
     const model = input.model?.trim() || DEFAULT_MODEL;
     const startedAt = Date.now();
 
-    const sizeChoice = pickSize(input.width, input.height);
+    const asked = input.width || input.height ? input : shapeAsPixels(input.aspectRatio);
+    const sizeChoice = pickSize(asked.width, asked.height);
+    const quality = input.quality ? OPENAI_QUALITY[input.quality] : undefined;
     if (sizeChoice.snappedFrom) {
       log.info(
         `[openai-image] snapped ${sizeChoice.snappedFrom} → ${sizeChoice.size} (gpt-image-2 supports a discrete size set)`,
@@ -127,12 +136,14 @@ export class OpenAIImageProvider implements ImageProvider {
           image: inputImages.length === 1 ? inputImages[0]!.data : inputImages.map((i) => i.data),
           prompt: input.prompt,
           ...(sizeChoice.size ? { size: sizeChoice.size } : {}),
+          ...(quality ? { quality } : {}),
           n: 1,
         })
       : client.images.generate({
           model,
           prompt: input.prompt,
           ...(sizeChoice.size ? { size: sizeChoice.size } : {}),
+          ...(quality ? { quality } : {}),
           n: 1,
         })
     ).catch((err: unknown) => {
@@ -240,6 +251,22 @@ interface SizeChoice {
   size?: SupportedSize;
   /** Original `WxH` if we had to snap; undefined when an exact match. */
   snappedFrom?: string;
+}
+
+const OPENAI_QUALITY: Record<ImageQuality, 'low' | 'medium' | 'high'> = {
+  draft: 'low',
+  standard: 'medium',
+  high: 'high',
+};
+
+/** A named ratio as a megapixel-class size, so `pickSize` snaps it like pixels. */
+function shapeAsPixels(ratio: ImageAspectRatio | undefined): { width?: number; height?: number } {
+  if (!ratio) return {};
+  const value = aspectRatioValue(ratio);
+  return {
+    width: Math.round(1024 * Math.sqrt(value)),
+    height: Math.round(1024 / Math.sqrt(value)),
+  };
 }
 
 export function pickSize(width?: number, height?: number): SizeChoice {

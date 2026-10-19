@@ -15,6 +15,7 @@
  * key never lands in error message URLs on network failure.
  */
 
+import type { ImageQuality } from '@bendyline/gezel';
 import type {
   ImageEngineHealth,
   ImageGenerationInput,
@@ -112,13 +113,12 @@ export class GoogleAiImageProvider implements ImageProvider {
     }
     requestParts.push({ text: input.prompt });
 
+    const imageConfig = googleImageConfig(input);
     const body: Record<string, unknown> = {
       contents: [{ parts: requestParts }],
       generationConfig: {
         responseModalities: ['TEXT', 'IMAGE'],
-        ...(input.width || input.height
-          ? { imageConfig: snapImageConfig(input.width, input.height) }
-          : {}),
+        ...(imageConfig ? { imageConfig } : {}),
       },
     };
 
@@ -244,6 +244,28 @@ export class GoogleAiImageProvider implements ImageProvider {
       clearTimeout(timer);
     }
   }
+}
+
+const QUALITY_IMAGE_SIZE: Record<ImageQuality, string> = {
+  draft: '512',
+  standard: '1K',
+  high: '2K',
+};
+
+/**
+ * The `imageConfig` a request asks for: explicit pixels snapped to the
+ * nearest ratio and size, else the asked ratio and quality tier, which are
+ * Gemini's own values. Nothing asked sends no config, and the model picks.
+ */
+export function googleImageConfig(
+  input: Pick<ImageGenerationInput, 'width' | 'height' | 'aspectRatio' | 'quality'>,
+): { aspectRatio: string; imageSize: string } | undefined {
+  if (input.width || input.height) return snapImageConfig(input.width, input.height);
+  if (!input.aspectRatio && !input.quality) return undefined;
+  return {
+    aspectRatio: input.aspectRatio ?? '1:1',
+    imageSize: QUALITY_IMAGE_SIZE[input.quality ?? 'standard'],
+  };
 }
 
 /**

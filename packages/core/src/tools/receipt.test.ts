@@ -52,6 +52,21 @@ describe('humanizeToolCall — non-nerdy summaries', () => {
     );
   });
 
+  it('leads an image with what was drawn, then its shape', () => {
+    expect(
+      humanizeToolCall('generate_image', {
+        width: 1024,
+        height: 1024,
+        prompt: 'a lighthouse at dusk',
+        aspectRatio: '9:16',
+        quality: 'draft',
+      }),
+    ).toBe('Drew a lighthouse at dusk · 9:16 · draft');
+    expect(humanizeToolCall('generate_image', { prompt: 'a fox', width: 800, height: 600 })).toBe(
+      'Drew a fox · 800×600',
+    );
+  });
+
   it('returns undefined for unknown tools so the caller falls back to the key:value summary', () => {
     expect(humanizeToolCall('some_third_party_tool', { foo: 'bar' })).toBeUndefined();
     // The fallback still works:

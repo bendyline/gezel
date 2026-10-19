@@ -45,6 +45,12 @@ import {
   withCharacterChatCap,
   withCurrentDateTimeLine,
 } from '@bendyline/gezel';
+import {
+  imageSizeSettingsFrom,
+  mergeImageSizeSettings,
+  parseImageSettingsFromText,
+  withoutImageSizeKeys,
+} from '@bendyline/gezel';
 import type {
   FileTurnIntent,
   MapRepoResponse,
@@ -72,6 +78,8 @@ import {
   type GezelDetail,
   type GezelGender,
   type HookSpec,
+  type ImageSettings,
+  type ImageSizeSettings,
   type InstalledToolset,
   KeyedLock,
   type ModelTier,
@@ -450,6 +458,7 @@ import {
   extractGeneratedImageArtifactPath,
   extractGeneratedImageModel,
   extractGeneratedImageSeed,
+  extractGeneratedImageSize,
 } from './image-refinement.js';
 import {
   type PromptSectionSize,
@@ -6931,6 +6940,9 @@ export class ChatManager extends LocalEngineRuntime {
        * the person dismissed the suggested task for this very text.
        */
       turnIntent?: TurnIntentMode;
+      /** Settings for a direct image gezel's render; other gezels ignore them. */
+      imageSettings?: ImageSettings;
+      imageCues?: 'auto' | 'off';
     },
   ): Promise<ChatMessage> {
     if (this.shuttingDown) {
@@ -6987,6 +6999,9 @@ export class ChatManager extends LocalEngineRuntime {
       draftId?: string;
       messageOrigin?: TurnMessageOrigin;
       turnIntent?: TurnIntentMode;
+      /** Settings for a direct image gezel's render; other gezels ignore them. */
+      imageSettings?: ImageSettings;
+      imageCues?: 'auto' | 'off';
     },
   ): Promise<ChatMessage> {
     const inflightTurn: InflightTurn = {
@@ -7106,6 +7121,9 @@ export class ChatManager extends LocalEngineRuntime {
       draftId?: string;
       messageOrigin?: TurnMessageOrigin;
       turnIntent?: TurnIntentMode;
+      /** Settings for a direct image gezel's render; other gezels ignore them. */
+      imageSettings?: ImageSettings;
+      imageCues?: 'auto' | 'off';
     },
   ): Promise<ChatMessage> {
     // Fixed-function gezels skip the LLM entirely — dispatch BEFORE
@@ -9788,6 +9806,8 @@ export class ChatManager extends LocalEngineRuntime {
       hidden?: boolean;
       draftId?: string;
       messageOrigin?: TurnMessageOrigin;
+      imageSettings?: ImageSettings;
+      imageCues?: 'auto' | 'off';
     },
   ): Promise<ChatMessage> {
     const tag = sessionId.slice(0, 8);
@@ -9923,6 +9943,25 @@ export class ChatManager extends LocalEngineRuntime {
         ? await this.resolveFixedFunctionTaskImageArgs(record, userText)
         : null;
     let promptValue = taskImageArgs?.prompt ?? stripGezelMentions(userText);
+    // Settings stated in the message ("9:16", "as a phone wallpaper", "hi-res")
+    // become render settings and leave the prompt: an image model draws the
+    // words it is given, so a phone would appear beside the lighthouse. The
+    // composer shows what it read and sends `imageCues: 'off'` when the
+    // person dismissed it. A task's prompt is its brief, never parsed.
+    let cueSettings: ImageSizeSettings = {};
+    let settingsOnly = false;
+    if (ff.tool === 'generate_image' && !record.taskRef && opts?.imageCues !== 'off') {
+      const cues = parseImageSettingsFromText(promptValue);
+      if (cues.cues.length > 0) {
+        cueSettings = cues.settings;
+        settingsOnly = cues.prompt.length === 0;
+        if (!settingsOnly) promptValue = cues.prompt;
+        log.info(
+          `fixed-function#${tag} read image settings from the message: ${cues.cues.map((c) => c.text).join(', ')}`,
+        );
+      }
+    }
+    let followUpSize: ImageSizeSettings | undefined;
     // Follow-up threading for interactive image sessions. Without an LLM
     // in the loop, "no lettering at the bottom" would otherwise become
     // the ENTIRE prompt of an unrelated fresh generation. When the
@@ -9934,9 +9973,29 @@ export class ChatManager extends LocalEngineRuntime {
     const refinementArgs: Record<string, unknown> = {};
     if (ff.tool === 'generate_image' && !record.taskRef) {
       const prev = record.lastImageGeneration;
-      const plan = classifyImageFollowUp(promptValue, Boolean(prev));
+      // "Make it 9:16" alone redraws the last picture, same seed, new shape.
+      const plan =
+        settingsOnly && prev ? 'reshape' : classifyImageFollowUp(promptValue, Boolean(prev));
       if (prev && plan !== 'fresh') {
-        if (plan === 'variation') {
+        // The shape it was asked for, not its pixels: the tool holds explicit
+        // pixels to the agent cap, which turned a 768x1344 wallpaper's
+        // "another one" into 576x1024.
+        followUpSize = {
+          ...(prev.aspectRatio || prev.quality
+            ? {
+                ...(prev.aspectRatio ? { aspectRatio: prev.aspectRatio } : {}),
+                ...(prev.quality ? { quality: prev.quality } : {}),
+              }
+            : prev.width && prev.height
+              ? { width: prev.width, height: prev.height }
+              : {}),
+          ...(prev.model ? { model: prev.model } : {}),
+        };
+        if (plan === 'reshape') {
+          promptValue = prev.prompt;
+          if (prev.negativePrompt) refinementArgs.negativePrompt = prev.negativePrompt;
+          if (prev.seed !== undefined) refinementArgs.seed = prev.seed;
+        } else if (plan === 'variation') {
           // Same prompt, fresh seed — "another one" wants a sibling, not a copy.
           promptValue = prev.prompt;
           if (prev.negativePrompt) refinementArgs.negativePrompt = prev.negativePrompt;
@@ -9991,12 +10050,29 @@ export class ChatManager extends LocalEngineRuntime {
         }),
       );
     }
-    const callArgs: Record<string, unknown> = {
-      ...(ff.defaults ?? {}),
-      ...refinementArgs,
-      [promptKey]: promptValue,
-      ...(taskImageArgs?.saveAs ? { saveAs: taskImageArgs.saveAs } : {}),
-    };
+    const callArgs: Record<string, unknown> =
+      ff.tool === 'generate_image'
+        ? {
+            ...withoutImageSizeKeys(ff.defaults),
+            ...refinementArgs,
+            // Least to most specific: the gezel's defaults, the picture a
+            // follow-up continues, the strip's picks, then what this message
+            // said. Each shape replaces the pixels below it.
+            ...mergeImageSizeSettings(
+              imageSizeSettingsFrom(ff.defaults),
+              followUpSize,
+              opts?.imageSettings,
+              cueSettings,
+            ),
+            [promptKey]: promptValue,
+            ...(taskImageArgs?.saveAs ? { saveAs: taskImageArgs.saveAs } : {}),
+          }
+        : {
+            ...(ff.defaults ?? {}),
+            ...refinementArgs,
+            [promptKey]: promptValue,
+            ...(taskImageArgs?.saveAs ? { saveAs: taskImageArgs.saveAs } : {}),
+          };
 
     let assistantText: string;
     let success = true;
@@ -10079,12 +10155,17 @@ export class ChatManager extends LocalEngineRuntime {
         : undefined;
     const seed = extractGeneratedImageSeed(rawText);
     const model = extractGeneratedImageModel(rawText);
+    const size = extractGeneratedImageSize(rawText);
+    const asked = imageSizeSettingsFrom(callArgs);
     record.lastImageGeneration = {
       prompt: promptArg,
       ...(negativePrompt ? { negativePrompt } : {}),
       artifactPath,
       ...(seed !== undefined ? { seed } : {}),
       ...(model ? { model } : {}),
+      ...(size ?? {}),
+      ...(asked.aspectRatio ? { aspectRatio: asked.aspectRatio } : {}),
+      ...(asked.quality ? { quality: asked.quality } : {}),
       at: nowIso(),
     };
   }

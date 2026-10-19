@@ -20,7 +20,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createLogger } from '@bendyline/gezel';
+import { createLogger, imageModelDefaultSide } from '@bendyline/gezel';
 import { resolveModelDirectory } from '@bendyline/gezel-inference/internal/models/model-id';
 import {
   MODEL_HASH_READ_BUFFER_BYTES,
@@ -37,6 +37,7 @@ import {
 import type { GpuArbiter } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
 import type { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
 import { downloadWithRetry } from '@bendyline/gezel-inference/internal/utils/download-with-retry';
+import { readImageMeta } from '../../index-store/image-meta.js';
 import { resolveImg2ImgSupport } from './img2img-support.js';
 import type {
   ImageEngineHealth,
@@ -165,37 +166,22 @@ export const MODEL_CFG_DEFAULTS = new Map<string, number>([
   ['animagine-xl-4', 5],
 ]);
 
+/**
+ * Whether the engine runs this model with guidance that reads a negative
+ * prompt. At CFG 1 the unconditional pass that carries it is skipped.
+ * Models absent from the map run at the server's default of 7.
+ */
+export function sdCppHonorsNegativePrompt(modelId: string): boolean {
+  const cfg = MODEL_CFG_DEFAULTS.get(modelId);
+  return cfg === undefined || cfg > 1;
+}
+
 /** Pin samplers validated with the native engine for these models. */
 export const MODEL_SAMPLER_DEFAULTS = new Map<string, string>([
   ['ming-image-0.1-design-bf16', 'Euler'],
   ['moss-image-sft-q4', 'Euler'],
   ['iris-3b-f32', 'Euler'],
 ]);
-
-/**
- * Models that target 1024px when a request names no size: every family trained
- * at about a megapixel. 512px stays the default for SD 1.5, SD-Turbo and
- * SDXL-Turbo, which were trained there. Below its training size a model does
- * not just lose detail: SDXL Base garbles composition and lighting, and SDXL
- * Lightning tiles and repeats its subject (image bench, 2026-10-19).
- */
-const MODEL_1024PX_DEFAULT = new Set<string>([
-  'animagine-xl-4',
-  'flux-2-klein-4b-q4',
-  'krea-2-turbo-q4',
-  'krea-2-turbo-q6',
-  'krea-2-turbo-q8',
-  'sdxl-base-1.0',
-  'sdxl-lightning-4step',
-  'ming-image-0.1-design-bf16',
-  'moss-image-sft-q4',
-  'iris-3b-f32',
-]);
-
-/** The square size, in pixels, a request that names none renders at. */
-export function defaultImageSide(modelId: string | undefined): number {
-  return modelId && MODEL_1024PX_DEFAULT.has(modelId) ? 1024 : 512;
-}
 
 /**
  * Models whose VAE shows visible tile-boundary seams under
@@ -251,7 +237,7 @@ export function sdServerLoadProfile(modelId: string): SdServerLoadProfile {
     // weights convert at load, preserving the quantized encoder.
     return {
       vaeDecode: 'none',
-      defaultSidePx: defaultImageSide(modelId),
+      defaultSidePx: imageModelDefaultSide(modelId),
       bf16TensorPattern: '^model\\.diffusion_model\\.',
       diffusionFlashAttention: true,
       ...stepCache,
@@ -261,7 +247,7 @@ export function sdServerLoadProfile(modelId: string): SdServerLoadProfile {
   // tile-boundary seams with some VAEs — see VAE_TILING_INCOMPATIBLE_MODELS.
   return {
     vaeDecode: VAE_TILING_INCOMPATIBLE_MODELS.has(modelId) ? 'untiled' : 'tiled',
-    defaultSidePx: defaultImageSide(modelId),
+    defaultSidePx: imageModelDefaultSide(modelId),
     diffusionFlashAttention: false,
     ...stepCache,
   };
@@ -313,7 +299,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
 
   private async generateInner(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
     const modelId = input.model ?? (await this.resolveDefaultModelId());
-    const defaultDimension = defaultImageSide(modelId);
+    const defaultDimension = imageModelDefaultSide(modelId);
     const width = input.width ?? defaultDimension;
     const height = input.height ?? defaultDimension;
     const steps = input.steps ?? (await this.defaultSampleSteps(modelId));
@@ -458,6 +444,9 @@ export class StableDiffusionCppProvider implements ImageProvider {
     const b64 = payload.images?.[0];
     if (!b64) throw new Error('sd-server response missing images[0]');
     const png = Buffer.from(b64, 'base64');
+    // The engine rounds a size its network cannot take (SDXL to 64), so the
+    // picture's own header is the size the person got.
+    const rendered = readImageMeta(png);
 
     return {
       png,
@@ -465,8 +454,8 @@ export class StableDiffusionCppProvider implements ImageProvider {
         model: modelId ?? 'unknown',
         seed,
         steps,
-        widthPx: width,
-        heightPx: height,
+        widthPx: rendered?.width || width,
+        heightPx: rendered?.height || height,
         durationMs: Date.now() - started,
         ...(img2imgSkippedReason ? { img2imgSkippedReason } : {}),
       },

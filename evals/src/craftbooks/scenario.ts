@@ -2062,7 +2062,12 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
     // harness installs the images TOOLSET but never provisions the ENGINE,
     // and the trial runs unwinnable-by-design while the failure books as
     // "model" (wild-caught: page-spread, tileset-batch, 2026-07-24 matrix).
-    ...(directWorkerNeedsImageToolset(spec) ? { defaultImageModelId: 'sdxl-lightning-4step' } : {}),
+    // A book with an image-generator step needs the engine even when its
+    // checks accept SVGs: logo-set passed on hand-drawn marks after its only
+    // render failed with "sd-server unreachable" (2026-10-19).
+    ...(directWorkerNeedsImageToolset(spec) || spec.needsImageEngine
+      ? { defaultImageModelId: 'sdxl-lightning-4step' }
+      : {}),
     skipInitialPrompt: !!spec.setup?.worker || spec.mode === 'workflow',
     async setup(ctx) {
       const projectId = await ensureProject(ctx, spec);

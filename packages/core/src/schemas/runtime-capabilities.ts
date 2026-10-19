@@ -79,6 +79,11 @@ export interface RuntimeCapabilities {
   chatAttachments: boolean;
   queuedChat: boolean;
   textTransforms: boolean;
+  /**
+   * The composer's sparkle menu: rewrite or review a draft before it is
+   * sent (`POST /api/projects/:id/prompt-assist`). Omitted means no.
+   */
+  promptAssist?: boolean;
 }
 
 export const DESKTOP_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Object.freeze({
@@ -123,6 +128,7 @@ export const DESKTOP_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   chatAttachments: true,
   queuedChat: true,
   textTransforms: true,
+  promptAssist: true,
 });
 
 export const OFFLINE_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Object.freeze({

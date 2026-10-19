@@ -16,8 +16,13 @@ the model linked in from the eval cache (`~/.gezel-eval-cache`). Each image is a
 `POST /api/image-gen/generate` carrying only the prompt, model and seed, so the
 catalog's recommended steps and the provider's size, CFG, sampler and launch
 flags all apply exactly as they do for a chat request. `--size` and `--steps`
-override them for A/B runs; `--prompt-file` sends rewritten prompt text while
-every score stays against the original request.
+override them for A/B runs. `--aspect` (`9:16`, `16:9`, …) and `--quality`
+(`draft`, `standard`, `high`) render the way the direct image gezel's settings
+do: the route resolves them to the model's own pixels, and the model's memory
+estimate is priced at that tier. Run a model at its edge shapes before trusting
+them: a non-square render at the trained area is where older models duplicate
+their subject. `--prompt-file` sends rewritten prompt text while every score
+stays against the original request.
 
 The suite ([prompts.ts](prompts.ts)) is twelve plain-English prompts, one per
 failure that shows up in use: a photographed object, a face, hands, a

@@ -1,6 +1,15 @@
-import type { GezelDetail } from '@bendyline/gezel';
+import {
+  type GezelDetail,
+  IMAGE_ASPECT_RATIOS,
+  type ImageAspectRatio,
+  type ImageQuality,
+  type InstalledImageModel,
+  imageSizeSettingsFrom,
+} from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
+import { ASPECT_RATIO_NAMES } from './composer-image-settings.js';
 
 interface FixedFunctionAboutPanelProps {
   gezel: GezelDetail;
@@ -43,6 +52,27 @@ export function FixedFunctionAboutPanel({ gezel, onUpdated }: FixedFunctionAbout
     setStatus(null);
   }, [gezel.id]);
 
+  const saveDefaults = useCallback(
+    async (next: Record<string, unknown> | null) => {
+      setBusy(true);
+      try {
+        const updated = await api.updateGezelFixedFunctionDefaults(gezel.id, {
+          defaults: next && Object.keys(next).length > 0 ? next : null,
+        });
+        onUpdated(updated);
+        const saved = updated.fixedFunction?.defaults;
+        setDraft(saved ? JSON.stringify(saved, null, 2) : '');
+        setDirty(false);
+        setStatus('Saved');
+      } catch (err) {
+        setError(`Save failed: ${(err as Error).message}`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [gezel.id, onUpdated],
+  );
+
   const save = useCallback(async () => {
     setError(null);
     setStatus(null);
@@ -59,20 +89,8 @@ export function FixedFunctionAboutPanel({ gezel, onUpdated }: FixedFunctionAbout
         return;
       }
     }
-    setBusy(true);
-    try {
-      const updated = await api.updateGezelFixedFunctionDefaults(gezel.id, {
-        defaults: parsed && Object.keys(parsed).length > 0 ? parsed : null,
-      });
-      onUpdated(updated);
-      setDirty(false);
-      setStatus('Saved');
-    } catch (err) {
-      setError(`Save failed: ${(err as Error).message}`);
-    } finally {
-      setBusy(false);
-    }
-  }, [draft, gezel.id, onUpdated]);
+    await saveDefaults(parsed);
+  }, [draft, saveDefaults]);
 
   if (!ff) {
     // Shouldn't render — the parent gates on `gezel.fixedFunction`.
@@ -95,43 +113,181 @@ export function FixedFunctionAboutPanel({ gezel, onUpdated }: FixedFunctionAbout
         </div>
         {gezel.description && <p className="muted">{gezel.description}</p>}
       </div>
-      <div className="ff-defaults">
-        <label className="ff-defaults-label" htmlFor={`ff-defaults-${gezel.id}`}>
-          Default arguments
-        </label>
-        <p className="muted small ff-defaults-help">
-          Merged into every call as JSON. Your message text on <code>{ff.promptKey}</code> always
-          wins over a collision here. Common keys for <code>{ff.tool}</code>: <code>width</code>,{' '}
-          <code>height</code>, <code>steps</code>, <code>model</code>, <code>negativePrompt</code>.
-          Leave empty to forward only the prompt.
-        </p>
-        <textarea
-          id={`ff-defaults-${gezel.id}`}
-          className="ff-defaults-textarea"
-          value={draft}
-          spellCheck={false}
-          rows={10}
-          placeholder='{\n  "width": 1024,\n  "height": 1024\n}'
-          onChange={(e) => {
-            setDraft(e.target.value);
-            setDirty(true);
+      {ff.tool === 'generate_image' && (
+        <ImageDefaultsKeys
+          defaults={ff.defaults}
+          disabled={busy || dirty}
+          onChange={(next) => {
+            setError(null);
             setStatus(null);
+            void saveDefaults(next);
           }}
-          disabled={busy}
         />
-        <div className="ff-defaults-actions">
-          <button
-            type="button"
-            className="primary"
-            onClick={() => void save()}
-            disabled={busy || !dirty}
-          >
-            {busy ? 'Saving…' : 'Save defaults'}
-          </button>
-          {status && <span className="muted small">{status}</span>}
-          {error && <span className="error small">{error}</span>}
+      )}
+      <ArgumentsJson open={ff.tool !== 'generate_image'}>
+        <div className="ff-defaults">
+          <label className="ff-defaults-label" htmlFor={`ff-defaults-${gezel.id}`}>
+            Default arguments
+          </label>
+          <p className="muted small ff-defaults-help">
+            Merged into every call as JSON. Your message text on <code>{ff.promptKey}</code> always
+            wins over a collision here. Common keys for <code>{ff.tool}</code>: <code>width</code>,{' '}
+            <code>height</code>, <code>steps</code>, <code>model</code>, <code>negativePrompt</code>
+            . Leave empty to forward only the prompt.
+          </p>
+          <textarea
+            id={`ff-defaults-${gezel.id}`}
+            className="ff-defaults-textarea"
+            value={draft}
+            spellCheck={false}
+            rows={10}
+            placeholder='{\n  "width": 1024,\n  "height": 1024\n}'
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setDirty(true);
+              setStatus(null);
+            }}
+            disabled={busy}
+          />
+          <div className="ff-defaults-actions">
+            <button
+              type="button"
+              className="primary"
+              onClick={() => void save()}
+              disabled={busy || !dirty}
+            >
+              {busy ? 'Saving…' : 'Save defaults'}
+            </button>
+            {status && <span className="muted small">{status}</span>}
+            {error && <span className="error small">{error}</span>}
+          </div>
         </div>
+      </ArgumentsJson>
+    </div>
+  );
+}
+
+/** The raw JSON editor: open for most tools, behind a disclosure where typed keys cover the common case. */
+function ArgumentsJson({ open, children }: { open: boolean; children: React.ReactNode }) {
+  if (open) return <>{children}</>;
+  return (
+    <details className="ff-defaults-advanced">
+      <summary>Advanced: default arguments as JSON</summary>
+      {children}
+    </details>
+  );
+}
+
+const QUALITY_KEYS: ReadonlyArray<{ id: ImageQuality; label: string }> = [
+  { id: 'draft', label: 'Draft' },
+  { id: 'standard', label: 'Standard' },
+  { id: 'high', label: 'High' },
+];
+
+/**
+ * The shape, size and model every message to this image gezel starts from.
+ * The composer's image strip changes them per message; these are what a new
+ * thread opens with. A shape replaces any default pixel size.
+ */
+function ImageDefaultsKeys({
+  defaults,
+  disabled,
+  onChange,
+}: {
+  defaults: Record<string, unknown> | undefined;
+  disabled: boolean;
+  onChange: (next: Record<string, unknown>) => void;
+}) {
+  const settings = imageSizeSettingsFrom(defaults);
+  const [models, setModels] = useState<InstalledImageModel[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listInstalledImageModels()
+      .then((res) => {
+        if (!cancelled) setModels(res.models);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const set = (patch: Record<string, unknown>) => {
+    const next: Record<string, unknown> = { ...(defaults ?? {}), ...patch };
+    if ('aspectRatio' in patch || 'quality' in patch) {
+      delete next.width;
+      delete next.height;
+    }
+    for (const [key, value] of Object.entries(next)) if (value === undefined) delete next[key];
+    onChange(next);
+  };
+  const aspect = settings.aspectRatio ?? (settings.width ? undefined : '1:1');
+  const quality = settings.quality ?? 'standard';
+  return (
+    <div className="ff-image-defaults">
+      <span className="ff-defaults-label">New messages start as</span>
+      <div
+        className="gz-tray ff-image-defaults-tray"
+        role="radiogroup"
+        aria-label="Default shape"
+        onKeyDown={onRadioKeyDown}
+      >
+        {IMAGE_ASPECT_RATIOS.map((ratio: ImageAspectRatio) => (
+          <button
+            key={ratio}
+            type="button"
+            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
+            role="radio"
+            aria-checked={ratio === aspect}
+            tabIndex={ratio === (aspect ?? '1:1') ? 0 : -1}
+            disabled={disabled}
+            className={`gz-key${ratio === aspect ? ' gz-key-active' : ''}`}
+            title={ASPECT_RATIO_NAMES[ratio]}
+            onClick={() => set({ aspectRatio: ratio === '1:1' ? undefined : ratio })}
+          >
+            {ratio}
+          </button>
+        ))}
       </div>
+      <div
+        className="gz-tray ff-image-defaults-tray"
+        role="radiogroup"
+        aria-label="Default size"
+        onKeyDown={onRadioKeyDown}
+      >
+        {QUALITY_KEYS.map((key) => (
+          <button
+            key={key.id}
+            type="button"
+            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
+            role="radio"
+            aria-checked={key.id === quality}
+            tabIndex={key.id === quality ? 0 : -1}
+            disabled={disabled}
+            className={`gz-key${key.id === quality ? ' gz-key-active' : ''}`}
+            onClick={() => set({ quality: key.id === 'standard' ? undefined : key.id })}
+          >
+            {key.label}
+          </button>
+        ))}
+      </div>
+      {models.length > 1 && (
+        <label className="ff-image-defaults-model">
+          <span className="muted small">Model</span>
+          <select
+            value={settings.model ?? ''}
+            disabled={disabled}
+            onChange={(e) => set({ model: e.target.value || undefined })}
+          >
+            <option value="">The engine's default</option>
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
     </div>
   );
 }

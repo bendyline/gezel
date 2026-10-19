@@ -1284,6 +1284,30 @@
   font-weight: 600;
 }
 
+.ff-image-defaults {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.75rem;
+}
+
+.ff-image-defaults .ff-defaults-label {
+  flex-basis: 100%;
+}
+
+.ff-image-defaults-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ff-defaults-advanced > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
 .ff-defaults {
   display: flex;
   flex-direction: column;

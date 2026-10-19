@@ -4,7 +4,11 @@ import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
-import { fitImageSizeToRange, resolveRecommendedImageSteps } from './image-gen.js';
+import {
+  renderedModelPromptGuide,
+  requestedImageSize,
+  resolveRecommendedImageSteps,
+} from './image-gen.js';
 
 let svc: RunningService;
 let baseUrl: string;
@@ -258,44 +262,90 @@ describe('resolveRecommendedImageSteps', () => {
   });
 });
 
-describe('fitImageSizeToRange', () => {
-  const ming = { widthRange: { min: 1024, max: 2048 }, heightRange: { min: 1024, max: 2048 } };
-  const sd15 = { widthRange: { min: 256, max: 768 }, heightRange: { min: 256, max: 768 } };
-
-  it('leaves a size inside the range alone', () => {
-    expect(fitImageSizeToRange({ width: 1200, height: 1100 }, ming)).toEqual({
-      width: 1200,
-      height: 1100,
-    });
-    expect(fitImageSizeToRange({}, ming)).toEqual({});
+describe('renderedModelPromptGuide', () => {
+  it("reads a local model's traits from its catalog entry and its engine guidance", () => {
+    expect(
+      renderedModelPromptGuide(
+        'local',
+        {
+          id: 'flux-2-klein-4b-q4',
+          name: 'FLUX.2 Klein',
+          promptStyle: 'sentences',
+          rendersText: true,
+        },
+        'flux-2-klein-4b-q4',
+      ),
+    ).toBe(
+      'FLUX.2 Klein reads plain descriptive sentences; can letter short text: put the exact words in quotes; ignores negative prompts, so leave unwanted things out of the prompt instead.',
+    );
+    expect(
+      renderedModelPromptGuide(
+        'local',
+        { id: 'animagine-xl-4', name: 'Animagine XL 4', promptStyle: 'tags', rendersText: false },
+        'animagine-xl-4',
+      ),
+    ).toMatch(/booru tags.*cannot letter text reliably, so leave words out of the image\.$/);
   });
 
-  it("scales a size below the model's minimum up, keeping the aspect ratio", () => {
-    expect(fitImageSizeToRange({ width: 768, height: 768 }, ming)).toEqual({
+  it('says nothing for a local model the catalog does not list', () => {
+    expect(renderedModelPromptGuide('local', undefined, 'mystery')).toBeUndefined();
+  });
+
+  it('describes a cloud model by its id', () => {
+    expect(renderedModelPromptGuide('cloud', undefined, 'gpt-image-2')).toMatch(
+      /^gpt-image-2 reads plain descriptive sentences/,
+    );
+  });
+});
+
+describe('requestedImageSize', () => {
+  const flux = {
+    id: 'flux-2-klein-4b-q4',
+    widthRange: { min: 512, max: 2048 },
+    heightRange: { min: 512, max: 2048 },
+  };
+  const ming = {
+    id: 'ming-image-0.1-design-bf16',
+    widthRange: { min: 1024, max: 2048 },
+    heightRange: { min: 1024, max: 2048 },
+  };
+
+  it('resolves a shape against the catalog model, inside its range', () => {
+    expect(requestedImageSize({ aspectRatio: '9:16' }, flux, 'local')).toEqual({
+      width: 768,
+      height: 1344,
+    });
+    expect(requestedImageSize({ aspectRatio: '9:16' }, ming, 'local')).toEqual({
+      width: 1024,
+      height: 1792,
+    });
+    expect(requestedImageSize({ width: 768, height: 768 }, ming, 'local')).toEqual({
       width: 1024,
       height: 1024,
     });
-    expect(fitImageSizeToRange({ width: 768, height: 448 }, ming)).toEqual({
-      width: 1760,
-      height: 1024,
-    });
   });
 
-  it('scales a size above the maximum down', () => {
-    expect(fitImageSizeToRange({ width: 1024, height: 1024 }, sd15)).toEqual({
-      width: 768,
-      height: 768,
-    });
+  it('renders the trained square when a catalog model is asked for nothing', () => {
+    expect(requestedImageSize({}, flux, 'local')).toEqual({ width: 1024, height: 1024 });
   });
 
-  it('clamps a lone dimension', () => {
-    expect(fitImageSizeToRange({ width: 512 }, ming)).toEqual({ width: 1024 });
+  it('resolves a shape for a local model the catalog does not list, by its id', () => {
+    expect(
+      requestedImageSize(
+        { model: 'remote:studio/flux-2-klein-4b-q4', aspectRatio: '16:9' },
+        undefined,
+        'local',
+      ),
+    ).toEqual({ width: 1344, height: 768 });
   });
 
-  it('clamps each side when no common scale fits an extreme aspect ratio', () => {
-    expect(fitImageSizeToRange({ width: 3000, height: 300 }, sd15)).toEqual({
-      width: 768,
-      height: 256,
+  it('hands a cloud provider only what was asked', () => {
+    expect(
+      requestedImageSize({ aspectRatio: '9:16', quality: 'high' }, undefined, 'cloud'),
+    ).toEqual({});
+    expect(requestedImageSize({ width: 800, height: 600 }, undefined, 'cloud')).toEqual({
+      width: 800,
+      height: 600,
     });
   });
 });

@@ -80,7 +80,19 @@ describe('formatFixedFunctionResult — generate_image adapter', () => {
       '(e.g. ![alt](artifacts/generated/...png)); just refer to it by name in your reply ' +
       'when needed. To iterate on it, pass { inputImages: [{ artifactPath: "..." }] }.';
     const out = formatFixedFunctionResult('generate_image', raw, { prompt: 'a car' });
-    expect(out).toBe('Generated 512×512 image with sdxl-base-1.0.');
+    expect(out).toBe('Generated 512×512 image with sdxl-base-1.0.\n\nPrompt: a car');
+  });
+
+  it('names the asked shape beside the size', () => {
+    const raw = 'Generated 768×1344 image with flux-2-klein-4b-q4 (seed 7, 4 steps, 7000ms).';
+    expect(
+      formatFixedFunctionResult('generate_image', raw, {
+        prompt: 'a lighthouse at dusk',
+        aspectRatio: '9:16',
+      }),
+    ).toBe(
+      'Generated 768×1344 (9:16) image with flux-2-klein-4b-q4.\n\nPrompt: a lighthouse at dusk',
+    );
   });
 
   it('handles ascii x dimensions', () => {

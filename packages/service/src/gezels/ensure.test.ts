@@ -277,38 +277,60 @@ describe('resolveGildeTemplateForRole', () => {
     expect(res).toBeNull();
   });
 
-  it('fixed-function templates are exempt from the about requirement', async () => {
-    const { resolveGildeTemplateForRole } = await import('./ensure.js');
-    const stub = {
-      list: async () => [
-        {
-          sourceId: 'test',
-          kind: 'gezel-template',
-          manifest: {
-            kind: 'gezel-template',
-            id: 'image-generator',
-            name: 'Image generator',
-            role: 'Image generator',
-            description: 'renders images',
-            tags: ['image-generator'],
-          },
-        },
-      ],
-      get: async () => ({
-        manifest: {
-          kind: 'gezel-template',
-          id: 'image-generator',
-          name: 'Image generator',
-          role: 'Image generator',
-          version: '1.0.0',
-          frontmatter: { fixedFunction: { tool: 'generate_image', promptKey: 'prompt' } },
-        },
-        about: '',
-      }),
-    } as unknown as CatalogService;
-    const res = await resolveGildeTemplateForRole(stub, 'Image generator');
-    expect(res).not.toBeNull();
-    expect(res!.frontmatter?.fixedFunction).toBeTruthy();
+  it('never offers a fixed-function template for a role, but installs one by id', async () => {
+    const { resolveGildeTemplateById, resolveGildeTemplateForRole } = await import('./ensure.js');
+    const stub = imageTemplateCatalog();
+    const byRole = await resolveGildeTemplateForRole(stub, 'image-generator');
+    expect(byRole?.templateId).toBe('illustrator');
+    expect(byRole?.frontmatter?.fixedFunction).toBeUndefined();
+    // Fixed-function templates are exempt from the about requirement: no model reads one.
+    const byId = await resolveGildeTemplateById(stub, 'image-generator');
+    expect(byId?.templateId).toBe('image-generator');
+    expect(byId?.frontmatter?.fixedFunction).toBeTruthy();
+  });
+});
+
+describe('ensureGezel — fixed-function gezels never fill a role', () => {
+  it('recruits the Illustrator for image work although a direct image gezel is on the roster', async () => {
+    await store.createGezel({
+      name: 'Picasso',
+      role: 'Image generator',
+      frontmatter: { fixedFunction: { tool: 'generate_image', promptKey: 'prompt' } },
+    });
+    const res = await ensureGezel({
+      opts: { jobTitle: 'image-generator' },
+      store,
+      catalog: imageTemplateCatalog(),
+      chat: manager,
+      bespokeMode: 'static',
+    });
+    expect(res.action).toBe('created-from-gilde');
+    expect(res.templateId).toBe('illustrator');
+    const again = await ensureGezel({
+      opts: { jobTitle: 'Image Generator' },
+      store,
+      catalog: imageTemplateCatalog(),
+      chat: manager,
+      bespokeMode: 'static',
+    });
+    expect(again).toMatchObject({ action: 'reused', gezelId: res.gezelId });
+  });
+
+  it('still reuses the direct image gezel when asked for it by template id', async () => {
+    const direct = await store.createGezel({
+      name: 'Picasso',
+      role: 'Image generator',
+      templateId: 'image-generator',
+      frontmatter: { fixedFunction: { tool: 'generate_image', promptKey: 'prompt' } },
+    });
+    const res = await ensureGezel({
+      opts: { jobTitle: 'Image generator', templateId: 'image-generator' },
+      store,
+      catalog: imageTemplateCatalog(),
+      chat: manager,
+      bespokeMode: 'static',
+    });
+    expect(res).toMatchObject({ action: 'reused', gezelId: direct.id });
   });
 });
 
@@ -363,3 +385,45 @@ describe('ensureGezel — exact template id', () => {
     expect(res.gezelId).toBe('maya');
   });
 });
+
+function imageTemplateCatalog(): CatalogService {
+  const fixedFunction = { fixedFunction: { tool: 'generate_image', promptKey: 'prompt' } };
+  const templates = [
+    {
+      kind: 'gezel-template',
+      id: 'image-generator',
+      name: 'Image generator',
+      role: 'Image generator',
+      description: 'renders images',
+      tags: ['image', 'fixed-function'],
+      version: '1.0.0',
+      frontmatter: fixedFunction,
+      about: '',
+    },
+    {
+      kind: 'gezel-template',
+      id: 'illustrator',
+      name: 'Illustrator',
+      role: 'Illustrator',
+      description: 'turns a brief into finished images',
+      tags: ['image', 'generator', 'illustration'],
+      version: '1.0.0',
+      frontmatter: { suggestedTuningProfile: 'creative' },
+      about: '## Identity\n\nYou are an Illustrator.',
+    },
+  ];
+  return {
+    list: async () =>
+      templates.map(({ about: _about, ...manifest }) => ({
+        sourceId: 'test',
+        kind: 'gezel-template',
+        manifest,
+      })),
+    get: async (_kind: string, id: string) => {
+      const t = templates.find((x) => x.id === id);
+      if (!t) return null;
+      const { about, ...manifest } = t;
+      return { manifest, about };
+    },
+  } as unknown as CatalogService;
+}

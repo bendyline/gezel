@@ -1359,6 +1359,60 @@ told not to re-derive the route when the plain message goes. This retired the
 read-only sparkle chip in the toolbar, which showed the route and could not be
 acted on.
 
+**A direct image gezel's settings ride above the message the same way.** When
+the composer is addressed to a direct (fixed-function) image gezel, the image
+strip
+([`ComposerImageSettingsBar`](../packages/ui/src/components/ComposerImageSettingsBar.tsx),
+`.chat-composer-image-bar*` in
+[styles/shared-content.css](../packages/ui/src/styles/shared-content.css))
+sits where a task strip would, in the same frame. The image strip holds:
+
+- a compact tray of shape keys, each a ratio label beside a small rectangle
+  drawn in that ratio (1:1, 4:5, 3:2, 16:9, 9:16), with "More" for the rest;
+- a Draft / Standard / High tray;
+- a model picker when more than one model is installed;
+- a one-line readout of what will render (`9:16 · 768×1344 · FLUX.2 Klein`).
+
+Shapes and tiers, never pixel fields: a person thinks "phone wallpaper", and
+the daemon turns it into the model's own trained size. The strip follows four
+rules:
+
+- **Picks persist.** They persist through a send, so a set of wallpapers
+  needs no re-picking, and they ride on the prompt draft.
+- **Settings the message names win.** When the message itself names a
+  setting ("9:16", "as a phone wallpaper", "hi-res"), the strip latches it
+  and turns **dashed** with the eyebrow *From your message*, because the
+  daemon will read the same words. A **Use as typed** key sends the words as
+  part of the prompt instead. Pressing any key also counts as the person's
+  answer.
+- **High never offers a render that won't fit.** It is disabled, with the
+  reason in its title, when the larger size will not fit this machine.
+- **No strip in a task thread.** The direct gezel's About tab sets the same
+  shape, size and model as defaults, with the raw JSON behind an *Advanced*
+  disclosure.
+
+**The sparkle key rewrites the draft, never the thread.** Beside Task and Send
+sits a glyph-only key in the Task key's recipe (`.chat-sparkle-btn`, the
+routing spark as its face) that opens a small menu:
+
+- *Make it clearer*, *Shorten*, and *Fix spelling and grammar*;
+- *Review my message*;
+- *Shape for <model>*, only when the message goes to a direct image gezel whose
+  model reads sentences. Shaping for a tag model (Animagine) lost counts in
+  the image bench, so it is not offered there.
+
+Every action lands in the composer, where the person reads and edits the
+result before pressing Send themselves. Nothing is sent and nothing reaches
+the transcript. The key's face reads *Rewriting…* while it works. After a
+rewrite an **Undo** key in the same recipe puts the words back, until the
+person types again. A review changes nothing on its own. Its two or three
+suggestions appear in the task strip's frame above the To line
+(`ComposerReviewStrip`), with *Rewrite with these* and a dismiss key. A
+failed or unusable answer leaves the draft as it was and says so in the
+composer's error line. An answer identical to the draft is not a failure. It
+shows a muted *Already reads well. Nothing changed.* beside the key until the
+next edit. The prompt text and parsing live in core `prompt-assist.ts`.
+
 **The strip names a sample and offers the person's own file.** A starter that
 launches on a book's bundled sample reads `source: a small shop's monthly sales
 (sample)`, the book's own title for it, never a generic "the sample", and that

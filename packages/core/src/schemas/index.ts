@@ -22,6 +22,7 @@ export * from './hook.js';
 export * from './project.js';
 export * from './project-inference.js';
 export * from './prompt-draft.js';
+export * from './prompt-assist.js';
 export * from './project-local.js';
 export * from './script.js';
 export * from './task.js';

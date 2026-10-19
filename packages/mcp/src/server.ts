@@ -98,6 +98,8 @@ import {
   ExpectedDeliverableSchema,
   GEZEL_VERSION,
   GateSpecSchema,
+  IMAGE_ASPECT_RATIOS,
+  IMAGE_QUALITIES,
   ModelTierSchema,
   type NewCraftbookStep,
   NewCraftbookStepSchema,
@@ -2149,6 +2151,41 @@ async function htmlRuntimeCheckSuffix(path: string): Promise<string> {
   }
 }
 
+const RASTER_IMAGE_PATH_RE = /\.(?:png|jpe?g|webp|gif|bmp|avif)$/i;
+
+/**
+ * Text written to a .png is not an image. A gezel that cannot render one
+ * otherwise writes prose or base64 into `logo.png` and reports the logo done
+ * (the petshop eval), which is why image roles once had no file writes at
+ * all. Refusing the path lets an image role keep `write_file` for the SVGs
+ * and manifests its books ask for. The remedy names only tools on this
+ * session's roster.
+ */
+function rasterImageWriteRefusal(path: string) {
+  if (!RASTER_IMAGE_PATH_RE.test(path)) return null;
+  const remedies = [
+    toolIsAuthorizedForThisSession('generate_image')
+      ? `render it with \`generate_image({ prompt, saveAs: "${path}" })\``
+      : null,
+    toolIsAuthorizedForThisSession('copy_artifact_to_workspace')
+      ? 'copy an existing image with `copy_artifact_to_workspace`'
+      : null,
+  ].filter(Boolean);
+  const how =
+    remedies.length > 0
+      ? ` To make it, ${remedies.join(', or ')}.`
+      : ' No tool on your roster this turn can make one; say so in your reply.';
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: `${path} is a raster image, and text written to it is not an image.${how} When vector art will do, write SVG markup to a .svg path instead.`,
+      },
+    ],
+    isError: true,
+  };
+}
+
 server.tool(
   'write_file',
   GEZEL_TOOL_DESCRIPTIONS.write_file,
@@ -2156,6 +2193,8 @@ server.tool(
   async ({ path, content }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const raster = rasterImageWriteRefusal(path);
+    if (raster) return raster;
     const scoped = await taskScopedWriteRefusal(path, 'workspace');
     if (scoped) return scoped;
     const normalizedContent = normalizeWorkspaceWriteContent(path, content);
@@ -2317,6 +2356,8 @@ server.tool(
   async ({ path, content, create }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const raster = rasterImageWriteRefusal(path);
+    if (raster) return raster;
     const scoped = await taskScopedWriteRefusal(path, 'workspace');
     if (scoped) return scoped;
     try {
@@ -4034,6 +4075,8 @@ server.tool(
   async ({ path, content: rawContent, jsonContent, force }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    const raster = rasterImageWriteRefusal(path);
+    if (raster) return raster;
     const scoped = await taskScopedWriteRefusal(path, 'artifacts');
     if (scoped) return scoped;
     if ((rawContent === undefined) === (jsonContent === undefined)) {
@@ -7178,6 +7221,32 @@ function ensureMacroMinimum(value: string, fallbackSentence: string): string {
   return `${trimmed}\n\n${fallbackSentence}`;
 }
 
+/**
+ * The template a solo lead of each role is made from, where it is not the
+ * role id. An image job needs a gezel that reads the brief and writes the
+ * prompt, not the direct image gezel, which forwards the whole task text to
+ * `generate_image` once. A catalog that predates the Illustrator keeps the
+ * old template.
+ */
+const SPECIALIST_TEMPLATE_IDS: Readonly<Record<string, string>> = {
+  'image-generator': 'illustrator',
+};
+
+async function createSpecialistFromTemplate(
+  role: string,
+  identity: ReturnType<typeof pickUnusedGezelName>,
+) {
+  const preferred = SPECIALIST_TEMPLATE_IDS[role];
+  if (preferred) {
+    try {
+      return { ...(await api.createGezelFromTemplate(preferred, identity)), templateId: preferred };
+    } catch {
+      /* fall through to the role's own template */
+    }
+  }
+  return { ...(await api.createGezelFromTemplate(role, identity)), templateId: role };
+}
+
 function normalizeSpecialistRole(value: string | undefined): string {
   const lower = value?.trim().toLowerCase() ?? '';
   const normalized = lower.replace(/_/g, '-');
@@ -8603,7 +8672,7 @@ async function runFlatProject(
       mode: 'solo',
     });
     const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
-    const builder = await api.createGezelFromTemplate(effectiveSpecialistRole, {
+    const builder = await createSpecialistFromTemplate(effectiveSpecialistRole, {
       name: gezelName,
       gender: gezelGender,
     });
@@ -8662,7 +8731,7 @@ async function runFlatProject(
           ],
           dispatchEntry: true,
         });
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${builder.name} as lead (template: ${effectiveSpecialistRole}). Created task ${task.ref} ("${task.title}") and handed ${builder.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${builder.name} is on it and they can watch the work in the ${brief.name} project.`;
+    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${builder.name} as lead (template: ${builder.templateId}). Created task ${task.ref} ("${task.title}") and handed ${builder.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${builder.name} is on it and they can watch the work in the ${brief.name} project.`;
     recordMacroResult(cacheTool, brief.name, project.id, resultText);
     return {
       content: [
@@ -10425,11 +10494,14 @@ function inferGeneratedImageSaveAs(prompt: string): string | undefined {
   return /\blogo\b/i.test(prompt) ? 'assets/logo.png' : undefined;
 }
 
+/** Image models whose prompt guide this session's model has already been shown. */
+const promptGuidesShown = new Set<string>();
+
 // ── Network + search + archive + git (Phase 2/3) ──
 
 server.tool(
   'generate_image',
-  "Generate or edit an image. When called with just a prompt, produces a fresh image. When `inputImages` is supplied, the prompt acts as an edit/transform on the source(s) — e.g. 'just like this one but yellow', 'add a hat', 'compose these together'. Routes through whichever image engine the user has selected: the local stable-diffusion.cpp sidecar (default; img2img on a single source), Google Nano Banana 2 (multi-image edits / compositing), or OpenAI GPT Image 2 (edit / compositing). Output PNG is written to the project's `artifacts/generated/` folder and can be read back via `read_artifact`. If the prompt is for a logo and `saveAs` is omitted, the workspace copy defaults to `assets/logo.png` so HTML/CSS can reference a stable path. Omit width, height, and steps unless the user explicitly requested an exact size; the agent tool normalizes oversized/high-step requests so local generation remains responsive. **Tip:** to iterate on an image you just generated, pass its `artifactPath` (returned by the previous call) — far cheaper than re-encoding the bytes. Cloud providers may surface a one-time confirmation card to the user before each call (the user can choose Always allow to silence it). On error the tool returns a message directing the user to the Image generation settings.",
+  "Generate or edit an image from a plain-sentence description; set `aspectRatio` for its shape. When called with just a prompt, produces a fresh image. When `inputImages` is supplied, the prompt acts as an edit/transform on the source(s) — e.g. 'just like this one but yellow', 'add a hat', 'compose these together'. Routes through whichever image engine the user has selected: the local stable-diffusion.cpp sidecar (default; img2img on a single source), Google Nano Banana 2 (multi-image edits / compositing), or OpenAI GPT Image 2 (edit / compositing). Output PNG is written to the project's `artifacts/generated/` folder and can be read back via `read_artifact`. If the prompt is for a logo and `saveAs` is omitted, the workspace copy defaults to `assets/logo.png` so HTML/CSS can reference a stable path. For shape and size pass `aspectRatio` ('9:16' for a phone wallpaper or story, '16:9' for a banner or slide, '4:5' for a portrait post) and `quality` ('draft' for a quick look, 'high' for a large print); the service fits both to the model. Use width and height only when the user named exact pixels, and omit steps. Write the prompt as sentences describing subject, setting, light and style; put any words the image must show in quotes. **Tip:** to iterate on an image you just generated, pass its `artifactPath` (returned by the previous call) — far cheaper than re-encoding the bytes. Cloud providers may surface a one-time confirmation card to the user before each call (the user can choose Always allow to silence it). On error the tool returns a message directing the user to the Image generation settings.",
   {
     prompt: z
       .string()
@@ -10441,6 +10513,18 @@ server.tool(
       .optional()
       .describe(
         "For local engine: manifest id of the installed model. For cloud engines: provider model id (e.g. 'gemini-3.1-flash-image-preview' for Google, 'gpt-image-2' for OpenAI). Defaults to the user's selected default.",
+      ),
+    aspectRatio: z
+      .enum(IMAGE_ASPECT_RATIOS)
+      .optional()
+      .describe(
+        "Shape of the image: '1:1' square, '9:16' tall (phone, story), '16:9' wide (banner, slide), '4:5' portrait post. Prefer this over width/height.",
+      ),
+    quality: z
+      .enum(IMAGE_QUALITIES)
+      .optional()
+      .describe(
+        "Size tier against the model's trained size: 'draft' renders small and fast, 'high' large and slow. Default 'standard'.",
       ),
     width: z
       .number()
@@ -10513,6 +10597,8 @@ server.tool(
         ...(imageArgs.model ? { model: imageArgs.model } : {}),
         ...(imageArgs.width ? { width: imageArgs.width } : {}),
         ...(imageArgs.height ? { height: imageArgs.height } : {}),
+        ...(imageArgs.aspectRatio ? { aspectRatio: imageArgs.aspectRatio } : {}),
+        ...(imageArgs.quality ? { quality: imageArgs.quality } : {}),
         ...(imageArgs.steps ? { steps: imageArgs.steps } : {}),
         ...(imageArgs.seed !== undefined ? { seed: imageArgs.seed } : {}),
         ...(imageArgs.inputImages && imageArgs.inputImages.length > 0
@@ -10534,7 +10620,7 @@ server.tool(
         // Playwright `browser_screenshot` tools use.
         inline: true,
       });
-      const { meta, artifactPath, workspacePath, b64Png } = res;
+      const { meta, artifactPath, workspacePath, b64Png, promptGuide } = res;
       // Surface the path + remind the model that the user already sees
       // the image inline (the bridge attaches a thumbnail to this same
       // tool result). Without the explicit "do not embed" line, models
@@ -10576,7 +10662,14 @@ server.tool(
       const skippedLine = meta.img2imgSkippedReason
         ? ` NOTE: the source image was not used — ${meta.img2imgSkippedReason}; the image was generated from the prompt alone.`
         : '';
-      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${normalizedLine}${skippedLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
+      // Once per model per session: the prompt-writing advice is the same
+      // on every render, and repeating it costs context on long image runs.
+      const guideLine =
+        promptGuide && !promptGuidesShown.has(meta.model)
+          ? ` For your next prompt: ${promptGuide}`
+          : '';
+      if (promptGuide) promptGuidesShown.add(meta.model);
+      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${normalizedLine}${skippedLine}${guideLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
       const content: Array<
         { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
       > = [{ type: 'text' as const, text: summary }];

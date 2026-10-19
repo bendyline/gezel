@@ -13,6 +13,7 @@ import { totalmem } from 'node:os';
 import {
   type GezelConfig,
   type ImageModelManifest,
+  type ImageQuality,
   MEDIA_MODEL_WONT_RUN_CODE,
   type MediaCapacity,
   type MediaFitAssessment,
@@ -26,6 +27,8 @@ import {
   assessMediaFit,
   createLogger,
   imageMemoryRequirement,
+  imageModelDefaultSide,
+  resolveImageSize,
   videoMemoryRequirement,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -128,6 +131,8 @@ export function sdServerRequirement(input: {
   weightsKind: 'checkpoint' | 'diffusion-model';
   files: readonly MediaWeightFile[];
   pool: MediaMemoryPool;
+  /** The render size to price; the model's default size when absent. */
+  megapixels?: number;
 }): MediaMemoryRequirement {
   const profile = sdServerLoadProfile(input.modelId);
   return imageMemoryRequirement({
@@ -136,8 +141,24 @@ export function sdServerRequirement(input: {
     vaeDecode: profile.vaeDecode,
     // The rule names the diffusion weights, which are the main file.
     bf16Components: profile.bf16TensorPattern ? [sdCppMainComponent(input.weightsKind)] : [],
-    megapixels: profile.defaultSidePx ** 2 / 1024 ** 2,
+    megapixels: input.megapixels ?? profile.defaultSidePx ** 2 / 1024 ** 2,
   });
+}
+
+/** Megapixels a model renders at a quality tier, inside its range. */
+export function imageRenderMegapixels(
+  manifest: Pick<ImageModelManifest, 'id' | 'widthRange' | 'heightRange'>,
+  quality: ImageQuality,
+): number {
+  const { width, height } = resolveImageSize(
+    { quality },
+    {
+      defaultSidePx: imageModelDefaultSide(manifest.id),
+      widthRange: manifest.widthRange,
+      heightRange: manifest.heightRange,
+    },
+  );
+  return (width * height) / 1024 ** 2;
 }
 
 interface FitPlan {
@@ -177,13 +198,18 @@ function assessVideoManifest(plan: VideoFitPlan, manifest: VideoModelManifest): 
   );
 }
 
-function assessImageManifest(plan: FitPlan, manifest: ImageModelManifest): MediaFitAssessment {
+function assessImageManifest(
+  plan: FitPlan,
+  manifest: ImageModelManifest,
+  quality?: ImageQuality,
+): MediaFitAssessment {
   return assessMediaFit(
     sdServerRequirement({
       modelId: manifest.id,
       weightsKind: manifest.weightsKind,
       files: imageCatalogWeightFiles(manifest),
       pool: plan.pool,
+      ...(quality ? { megapixels: imageRenderMegapixels(manifest, quality) } : {}),
     }),
     plan.capacity,
   );
@@ -209,13 +235,21 @@ export async function videoCatalogFits(ctx: MediaFitContext): Promise<MediaModel
   return response(plan, models);
 }
 
-export async function imageCatalogFits(ctx: MediaFitContext): Promise<MediaModelFitResponse> {
+/**
+ * Every catalog image model's fit. With `quality`, each is priced at the size
+ * it renders at that tier rather than its default, which is how the direct
+ * image gezel's settings know whether High will fit.
+ */
+export async function imageCatalogFits(
+  ctx: MediaFitContext,
+  quality?: ImageQuality,
+): Promise<MediaModelFitResponse> {
   const plan = await imagePlan(ctx);
   const items = await ctx.catalog.list('image-model');
   const models = items
     .map((item) => item.manifest)
     .filter((m): m is ImageModelManifest => m.kind === 'image-model')
-    .map((m) => ({ id: m.id, ...assessImageManifest(plan, m) }));
+    .map((m) => ({ id: m.id, ...assessImageManifest(plan, m, quality) }));
   return response(plan, models);
 }
 

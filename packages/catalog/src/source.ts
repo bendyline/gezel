@@ -1452,6 +1452,8 @@ function mergeIdentityAndVersion(
       ...(identity.supportsImg2Img !== undefined
         ? { supportsImg2Img: identity.supportsImg2Img }
         : {}),
+      ...(identity.promptStyle ? { promptStyle: identity.promptStyle } : {}),
+      ...(identity.rendersText !== undefined ? { rendersText: identity.rendersText } : {}),
       auxiliaryFiles: version.auxiliaryFiles,
       ...(identity.hardwareTier !== undefined ? { hardwareTier: identity.hardwareTier } : {}),
       ...(identity.minRamGB !== undefined ? { minRamGB: identity.minRamGB } : {}),

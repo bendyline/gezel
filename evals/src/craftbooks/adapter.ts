@@ -42,6 +42,7 @@ export function evalSpecFromTestSpec(
         });
   return {
     craftbookId,
+    ...(loaded.hasImageStep ? { needsImageEngine: true } : {}),
     mode,
     scenarioId: override?.scenarioId ?? `craftbook-${craftbookId}`,
     title: spec.title,

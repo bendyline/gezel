@@ -290,6 +290,8 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
             ...(body.nudge ? { nudge: true } : {}),
             ...(body.draftId ? { draftId: body.draftId } : {}),
             ...(body.turnIntent ? { turnIntent: body.turnIntent } : {}),
+            ...(body.imageSettings ? { imageSettings: body.imageSettings } : {}),
+            ...(body.imageCues ? { imageCues: body.imageCues } : {}),
           })
           .catch((err) => {
             const message = err instanceof Error ? err.message : String(err);

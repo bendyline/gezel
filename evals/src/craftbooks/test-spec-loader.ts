@@ -32,6 +32,12 @@ export interface LoadedCraftbookTestSpec {
    */
   hasSpawn: boolean;
   /**
+   * True when a step's `suggestedRole` is `image-generator`. Such a book can
+   * pass on hand-drawn SVGs, so its checks need not name a raster file, but
+   * its image step still needs an image engine to do the work as written.
+   */
+  hasImageStep: boolean;
+  /**
    * Backticked slash-containing tokens from the book's own step prompts —
    * the procedure's boundary examples (e.g. "an earlier `notes/outline.md`").
    * The RUNTIME forgives these as task-supplied metadata when a citation
@@ -59,6 +65,16 @@ function craftbookHasSpawn(versionDir: string): boolean {
     const raw = readFileSync(join(versionDir, CRAFTBOOK_FILENAME), 'utf8');
     const doc = JSON.parse(raw) as { spawn?: unknown };
     return !!doc && typeof doc === 'object' && doc.spawn != null;
+  } catch {
+    return false;
+  }
+}
+
+function craftbookHasImageStep(versionDir: string): boolean {
+  try {
+    const raw = readFileSync(join(versionDir, CRAFTBOOK_FILENAME), 'utf8');
+    const doc = JSON.parse(raw) as { steps?: Array<{ suggestedRole?: unknown }> };
+    return (doc.steps ?? []).some((step) => step.suggestedRole === 'image-generator');
   } catch {
     return false;
   }
@@ -129,6 +145,7 @@ export function loadCraftbookTestSpecsSync(): LoadedCraftbookTestSpec[] {
       version,
       spec: parsed.spec,
       hasSpawn: craftbookHasSpawn(versionDir),
+      hasImageStep: craftbookHasImageStep(versionDir),
       stepPathTokens: craftbookStepPathTokens(versionDir),
     });
   }

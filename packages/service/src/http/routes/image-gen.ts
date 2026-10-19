@@ -1,16 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import {
+  type ImageAspectRatio,
   ImageGenerationRequestSchema,
   type ImageInputSource,
   type ImageModelManifest,
+  type ImageQuality,
   type Question,
   type QuestionIntent,
   createLogger,
+  imageModelDefaultSide,
+  imagePromptGuide,
   nowIso,
+  resolveImageSize,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 
+import { sdCppHonorsNegativePrompt } from '../../providers/image/sd-cpp.js';
 import type { ImageInputBytes, ImageProvider } from '../../providers/image/types.js';
+import { parseRemoteModelId } from '../../providers/remote/model-id.js';
 import type { ServiceContext } from '../context.js';
 import { imageModelRoutes, providerKind } from './image-models.js';
 
@@ -91,6 +98,8 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
           prompt: req.prompt,
           width: req.width,
           height: req.height,
+          aspectRatio: req.aspectRatio,
+          quality: req.quality,
           inputImageCount: resolvedInputs?.length ?? 0,
         });
         if (verdict === 'declined') {
@@ -152,15 +161,15 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         req.steps !== undefined && req.capStepsAtRecommended && recommended
           ? Math.min(req.steps, recommended)
           : (req.steps ?? recommended);
-      const size = manifest
-        ? fitImageSizeToRange({ width: req.width, height: req.height }, manifest)
-        : { width: req.width, height: req.height };
+      const size = requestedImageSize(req, manifest, providerKind(provider.name));
       const out = await provider.generate({
         prompt: req.prompt,
         ...(req.negativePrompt ? { negativePrompt: req.negativePrompt } : {}),
         ...(req.model ? { model: req.model } : {}),
         ...(size.width ? { width: size.width } : {}),
         ...(size.height ? { height: size.height } : {}),
+        ...(req.aspectRatio ? { aspectRatio: req.aspectRatio } : {}),
+        ...(req.quality ? { quality: req.quality } : {}),
         ...(resolvedSteps ? { steps: resolvedSteps } : {}),
         ...(req.seed !== undefined ? { seed: req.seed } : {}),
         ...(resolvedInputs && resolvedInputs.length > 0 ? { inputImages: resolvedInputs } : {}),
@@ -227,12 +236,19 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         workspacePath: string | null;
         meta: typeof out.meta;
         b64Png?: string;
+        promptGuide?: string;
       } = {
         artifactPath: writtenPath,
         workspacePath,
         meta: out.meta,
       };
       if (req.inline) respBody.b64Png = out.png.toString('base64');
+      const promptGuide = renderedModelPromptGuide(
+        providerKind(provider.name),
+        manifest,
+        out.meta.model,
+      );
+      if (promptGuide) respBody.promptGuide = promptGuide;
       return c.json(respBody);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
@@ -282,17 +298,23 @@ async function awaitImageApproval(
     provider: string;
     model: string;
     prompt: string;
-    width?: number;
-    height?: number;
+    width?: number | undefined;
+    height?: number | undefined;
+    aspectRatio?: ImageAspectRatio | undefined;
+    quality?: ImageQuality | undefined;
     inputImageCount: number;
   },
 ): Promise<'allow' | 'always' | 'declined' | 'timeout'> {
+  const size =
+    args.width && args.height
+      ? `${args.width}×${args.height}`
+      : [args.aspectRatio, args.quality].filter(Boolean).join(' · ');
   const intent: QuestionIntent = {
     kind: 'image-generation-approval',
     provider: args.provider,
     model: args.model,
     promptPreview: truncate(args.prompt, 200),
-    ...(args.width && args.height ? { estimatedSize: `${args.width}×${args.height}` } : {}),
+    ...(size ? { estimatedSize: size } : {}),
   };
   const question: Question = {
     id: randomUUID(),
@@ -398,8 +420,11 @@ export async function resolveImageModelManifest(
   // installed model is not that model once a default is configured: a MOSS
   // default would render at Animagine's 28 steps whenever Animagine sorted
   // first.
+  const requested = requestedModel
+    ? (parseRemoteModelId(requestedModel)?.modelId ?? requestedModel)
+    : undefined;
   const modelId =
-    requestedModel ??
+    requested ??
     (provider.resolveDefaultModelId
       ? await provider.resolveDefaultModelId().catch(() => undefined)
       : (await provider.listInstalledModels().catch(() => []))[0]?.id);
@@ -409,46 +434,67 @@ export async function resolveImageModelManifest(
   return detail.manifest;
 }
 
-const IMAGE_SIZE_MULTIPLE = 16;
+/**
+ * How the model that just rendered reads a prompt. A local model's traits
+ * come from its catalog entry, and the engine's guidance scale decides
+ * whether it reads a negative prompt. The cloud APIs read sentences, letter
+ * text, and take no negative prompt at all.
+ */
+export function renderedModelPromptGuide(
+  kind: 'local' | 'cloud',
+  manifest: Pick<ImageModelManifest, 'id' | 'name' | 'promptStyle' | 'rendersText'> | undefined,
+  renderedModel: string,
+): string | undefined {
+  if (kind === 'cloud') {
+    return imagePromptGuide({
+      name: renderedModel,
+      promptStyle: 'sentences',
+      rendersText: true,
+      negativePromptHonored: false,
+    });
+  }
+  if (!manifest) return undefined;
+  return imagePromptGuide({
+    name: manifest.name,
+    promptStyle: manifest.promptStyle,
+    rendersText: manifest.rendersText,
+    negativePromptHonored: sdCppHonorsNegativePrompt(manifest.id),
+  });
+}
 
 /**
- * Bring a requested size inside the model's declared range, keeping its
- * aspect ratio where both sides can fit. Every family the engine runs takes
- * multiples of 16. A size already inside the range is returned unchanged, so
- * only requests the model does not support are touched: Ming's minimum is
- * 1024, and the agent tool's 768 cap once handed it 768x768.
+ * The pixels a local engine renders, resolved here so the machine broker and
+ * a paired server receive the same size the person's settings describe. With
+ * a catalog entry the size always resolves, inside the model's range. A cloud
+ * provider gets only what was asked: it maps `aspectRatio` and `quality` to
+ * its own sizes.
  */
-export function fitImageSizeToRange(
-  size: { width?: number | undefined; height?: number | undefined },
-  range: Pick<ImageModelManifest, 'widthRange' | 'heightRange'>,
+export function requestedImageSize(
+  req: {
+    model?: string | undefined;
+    width?: number | undefined;
+    height?: number | undefined;
+    aspectRatio?: ImageAspectRatio | undefined;
+    quality?: ImageQuality | undefined;
+  },
+  manifest: Pick<ImageModelManifest, 'id' | 'widthRange' | 'heightRange'> | undefined,
+  kind: 'local' | 'cloud',
 ): { width?: number; height?: number } {
-  const { width, height } = size;
-  const wr = range.widthRange;
-  const hr = range.heightRange;
-  const inside = (v: number | undefined, r: typeof wr) =>
-    v === undefined || !r || (v >= r.min && v <= r.max);
-  if (inside(width, wr) && inside(height, hr)) {
-    return { ...(width ? { width } : {}), ...(height ? { height } : {}) };
+  if (manifest) {
+    return resolveImageSize(req, {
+      defaultSidePx: imageModelDefaultSide(manifest.id),
+      widthRange: manifest.widthRange,
+      heightRange: manifest.heightRange,
+    });
   }
-  const clamp = (v: number, r: typeof wr) => {
-    const q = Math.max(
-      IMAGE_SIZE_MULTIPLE,
-      Math.round(v / IMAGE_SIZE_MULTIPLE) * IMAGE_SIZE_MULTIPLE,
-    );
-    return r ? Math.min(r.max, Math.max(r.min, q)) : q;
+  if (kind === 'local' && (req.aspectRatio || req.quality)) {
+    const modelId = req.model ? (parseRemoteModelId(req.model)?.modelId ?? req.model) : undefined;
+    return resolveImageSize(req, { defaultSidePx: imageModelDefaultSide(modelId) });
+  }
+  return {
+    ...(req.width ? { width: req.width } : {}),
+    ...(req.height ? { height: req.height } : {}),
   };
-  if (width === undefined || height === undefined) {
-    return {
-      ...(width !== undefined ? { width: clamp(width, wr) } : {}),
-      ...(height !== undefined ? { height: clamp(height, hr) } : {}),
-    };
-  }
-  let scale = 1;
-  if (wr && width < wr.min) scale = Math.max(scale, wr.min / width);
-  if (hr && height < hr.min) scale = Math.max(scale, hr.min / height);
-  if (wr && width * scale > wr.max) scale = Math.min(scale, wr.max / width);
-  if (hr && height * scale > hr.max) scale = Math.min(scale, hr.max / height);
-  return { width: clamp(width * scale, wr), height: clamp(height * scale, hr) };
 }
 
 function truncate(s: string, n: number): string {

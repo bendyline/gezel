@@ -47,6 +47,9 @@ export interface QueuedSendOptions {
   /** The prompt draft this send was written in, if any. */
   draftId?: string;
   turnIntent?: NonNullable<SendToSessionRequest['turnIntent']>;
+  /** The image strip's picks for a direct image gezel. */
+  imageSettings?: NonNullable<SendToSessionRequest['imageSettings']>;
+  imageCues?: NonNullable<SendToSessionRequest['imageCues']>;
 }
 
 export type QueuedRunOptions<O extends QueuedSendOptions> = Omit<O, 'coalescable'>;

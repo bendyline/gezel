@@ -6,6 +6,7 @@ import {
 import '@bendyline/squisq-editor-react/styles';
 import {
   type GezelSummary,
+  type ImageSettings,
   type Project,
   type SessionSubject,
   type Task,
@@ -37,6 +38,8 @@ import { ChatAttachmentButtons } from './ChatAttachmentButtons.js';
 import { ChatNarrateButton } from './ChatNarrateButton.js';
 import { ChatRecipientPicker } from './ChatRecipientPicker.js';
 import { ComposerImageClipboard } from './ComposerImageClipboard.js';
+import { ComposerImageSettingsBar } from './ComposerImageSettingsBar.js';
+import { ComposerReviewStrip, ComposerSparkleMenu } from './ComposerSparkleMenu.js';
 import { ComposerTaskBar } from './ComposerTaskBar.js';
 import { GezelIcon } from './GezelIcon.js';
 import { createGezelMediaProvider } from './GezelMediaProvider.js';
@@ -63,6 +66,8 @@ import { ComposerToolbarContext } from './composer-toolbar-context.js';
 import { type MentionToken, extractMentionTokens, extractMentions } from './mention-parse.js';
 import { modelSetupAction } from './model-setup-action.js';
 import { COMPACT_LAYOUT_THRESHOLD_PX, useCompactLayout } from './useCompactLayout.js';
+import { useComposerImageSettings } from './useComposerImageSettings.js';
+import { useComposerPromptAssist } from './useComposerPromptAssist.js';
 import { useComposerTaskLaunch } from './useComposerTaskLaunch.js';
 import { usePromptDraft } from './usePromptDraft.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -298,6 +303,12 @@ export interface ChatComposerProps {
    */
   taskLaunch?: ComposerTaskLaunchProps;
   /**
+   * Set when the message goes to a direct image gezel: shows the image strip
+   * (shape, size, model) above the To line and sends its settings with the
+   * message. `defaults` are the gezel's stored `fixedFunction.defaults`.
+   */
+  imageGenerator?: { defaults?: Record<string, unknown> | undefined };
+  /**
    * Leave out the "can start talking once a model is downloaded" notice. For
    * a surface that already says so in its own words (the meester's welcome).
    * Send stays held either way.
@@ -396,6 +407,7 @@ export function ChatComposer({
   draftId: selectedDraftId,
   onDraftIdChange,
   taskLaunch: taskLaunchProps,
+  imageGenerator,
   hideWaitingNotice = false,
 }: ChatComposerProps) {
   const composerRef = useRef<HTMLDivElement>(null);
@@ -613,6 +625,15 @@ export function ChatComposer({
     planText: intentPreviewText,
   });
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  // The image strip, for a direct image gezel's own thread. A task thread's
+  // prompt is its brief, so the strip has nothing to set there.
+  const imageSettings = useComposerImageSettings({
+    enabled: Boolean(imageGenerator) && !taskRef && !craftbookRef,
+    draft,
+    defaults: imageGenerator?.defaults,
+    text: intentPreviewText,
+  });
+  const promptAssistEnabled = runtimeCapabilities().promptAssist === true;
   // A prefill can arrive with its task attached (a welcome first project that
   // runs a craftbook); attach it beside the sentence it came with.
   const attachTaskRef = useRef(taskLaunch.attach);
@@ -992,6 +1013,7 @@ export function ChatComposer({
   // re-fire every render. Refs aren't sufficient on their own (the parent
   // still re-renders) — the useState bail-out via the functional updater
   // prevents a cascade when the mention list hasn't changed.
+  const promptAssistNoteEditRef = useRef<(text: string) => void>(() => {});
   const handleDraftChange = useCallback(
     (source: string) => {
       const prevLen = prevDraftLenRef.current;
@@ -1000,6 +1022,7 @@ export function ChatComposer({
       draftRef.current = source;
       draftUpdateRef.current(source);
       if (sourceChanged) draftEditVersionRef.current += 1;
+      if (sourceChanged) promptAssistNoteEditRef.current(source);
       setDraftNonEmpty(source.trim().length > 0);
       setIntentPreviewText(source);
       setOpenCommandQuery(parseOpenChatQuery(source));
@@ -1045,6 +1068,29 @@ export function ChatComposer({
     setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
     briefEditedRef.current = true;
   }, []);
+  // A rewrite from the sparkle menu, or its undo: the text the person will
+  // send, as if typed, with the editor reseeded to show it.
+  const replaceDraftText = useCallback((text: string) => {
+    draftRef.current = text;
+    draftUpdateRef.current(text);
+    draftEditVersionRef.current += 1;
+    prevDraftLenRef.current = text.length;
+    setDraftNonEmpty(text.trim().length > 0);
+    setIntentPreviewText(text);
+    setOpenCommandQuery(parseOpenChatQuery(text));
+    const next = extractMentionTokens(text);
+    setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
+    setEditorRevision((revision) => revision + 1);
+  }, []);
+  const promptAssist = useComposerPromptAssist({
+    projectId,
+    gezelId,
+    imageModelId: imageSettings.enabled ? imageSettings.model?.id : undefined,
+    getText: () => draftRef.current,
+    replaceText: replaceDraftText,
+    onError: setError,
+  });
+  promptAssistNoteEditRef.current = promptAssist.noteEdit;
   const closeTaskDialog = useCallback(() => {
     setTaskDialogOpen(false);
     if (!briefEditedRef.current) return;
@@ -1411,6 +1457,8 @@ export function ChatComposer({
         passiveCcGezelIds?: string[];
         draftId?: string;
         turnIntent?: 'auto' | 'off';
+        imageSettings?: ImageSettings;
+        imageCues?: 'auto' | 'off';
       } = { message: userText };
       if (runtimeCapabilities().multiRecipientChat && mentionIds.length > 0)
         body.mentions = mentionIds;
@@ -1420,6 +1468,7 @@ export function ChatComposer({
       // The person turned down the task the daemon suggested for this
       // message; a plain send must not have the daemon re-derive it.
       if (taskLaunchEnabled && taskLaunch.suggestionDismissed()) body.turnIntent = 'off';
+      if (imageSettings.enabled) Object.assign(body, imageSettings.sendFields(userText));
       await api.sendToChatSession(activeSessionId, body);
       const acceptedTurn = localTurnRef.current;
       if (acceptedTurn?.id === localTurnId) {
@@ -1512,6 +1561,8 @@ export function ChatComposer({
     taskLaunch,
     taskLaunchEnabled,
     taskLaunchProps,
+    imageSettings.enabled,
+    imageSettings.sendFields,
   ]);
 
   const cancelWedged = useCallback(async () => {
@@ -1807,6 +1858,8 @@ export function ChatComposer({
             : {})}
         />
       )}
+      {imageSettings.enabled && <ComposerImageSettingsBar settings={imageSettings} />}
+      {promptAssistEnabled && <ComposerReviewStrip assist={promptAssist} />}
       <div className="chat-composer-to">
         <span className="chat-composer-to-label muted">To:</span>
         <GezelIcon
@@ -2008,6 +2061,20 @@ export function ChatComposer({
                   disabled={!gezelId || engagementOff || draftSubmissionPending}
                   onAppendTranscript={appendNarratedText}
                   onError={setError}
+                />
+              )}
+              {promptAssistEnabled && openCommandQuery === null && (
+                <ComposerSparkleMenu
+                  assist={promptAssist}
+                  disabled={!draftNonEmpty || engagementOff || draftSubmissionPending}
+                  // Only for models that read sentences. Rewriting into booru
+                  // tags lost the count of a "red apple" (many apples) and
+                  // lowered alignment on Animagine (image bench, 2026-10-19).
+                  imageModelName={
+                    imageSettings.enabled && imageSettings.model?.promptStyle !== 'tags'
+                      ? imageSettings.model?.name
+                      : undefined
+                  }
                 />
               )}
               {taskLaunchEnabled &&

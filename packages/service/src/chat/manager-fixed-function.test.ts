@@ -194,6 +194,90 @@ describe('ChatManager — fixed-function gezels', () => {
     expect(manager.inflightInfo(session.id)).toBeNull();
   }, 30_000);
 
+  it('reads size words out of the message, and "make it 16:9" redraws the same picture', async () => {
+    const gezel = await store.createGezel({
+      name: 'Eduardo',
+      role: 'Image generator',
+      frontmatter: {
+        fixedFunction: {
+          tool: 'generate_image',
+          promptKey: 'prompt',
+          defaults: { width: 1024, height: 1024, steps: 4 },
+        },
+      },
+    });
+    const session = await manager.ensureOrCreateSession({ gezelId: gezel.id });
+
+    const first = await manager.send(session.id, 'a lighthouse at dusk as a phone wallpaper');
+    const args = first.toolCalls?.[0]?.argsFull ?? '';
+    expect(first.toolCalls?.[0]?.success).toBe(true);
+    expect(args).toContain('prompt: a lighthouse at dusk');
+    expect(args).not.toContain('phone wallpaper');
+    expect(args).toContain('aspectRatio: 9:16');
+    // The default's square pixels give way to the shape the person named.
+    expect(args).not.toContain('width: 1024');
+    expect(args).toContain('steps: 4');
+    expect(first.content).toContain('(9:16) image');
+    expect(first.content).toContain('Prompt: a lighthouse at dusk');
+
+    const prev = (await store.getSession(gezel.id, session.id))?.lastImageGeneration;
+    expect(prev).toMatchObject({ prompt: 'a lighthouse at dusk', aspectRatio: '9:16' });
+    expect(prev!.height!).toBeGreaterThan(prev!.width!);
+
+    const reshaped = await manager.send(session.id, 'make it 16:9');
+    const again = reshaped.toolCalls?.[0]?.argsFull ?? '';
+    expect(again).toContain('prompt: a lighthouse at dusk');
+    expect(again).toContain('aspectRatio: 16:9');
+    expect(again).toContain(`seed: ${prev!.seed}`);
+  }, 30_000);
+
+  it('keeps the message as written when the person dismissed what was read from it', async () => {
+    const gezel = await store.createGezel({
+      name: 'Eduardo',
+      role: 'Image generator',
+      frontmatter: { fixedFunction: { tool: 'generate_image', promptKey: 'prompt' } },
+    });
+    const session = await manager.ensureOrCreateSession({ gezelId: gezel.id });
+    const reply = await manager.send(session.id, 'a poster that reads 16:9 cinema', {
+      imageCues: 'off',
+    });
+    const args = reply.toolCalls?.[0]?.argsFull ?? '';
+    expect(args).toContain('prompt: a poster that reads 16:9 cinema');
+    expect(args).not.toContain('aspectRatio');
+  }, 30_000);
+
+  it('applies the strip picks over the gezel defaults, and a follow-up keeps the size', async () => {
+    const gezel = await store.createGezel({
+      name: 'Eduardo',
+      role: 'Image generator',
+      frontmatter: {
+        fixedFunction: {
+          tool: 'generate_image',
+          promptKey: 'prompt',
+          defaults: { width: 1024, height: 1024 },
+        },
+      },
+    });
+    const session = await manager.ensureOrCreateSession({ gezelId: gezel.id });
+    const first = await manager.send(session.id, 'a red tram in the rain', {
+      imageSettings: { aspectRatio: '16:9', quality: 'draft' },
+    });
+    const args = first.toolCalls?.[0]?.argsFull ?? '';
+    expect(args).toContain('aspectRatio: 16:9');
+    expect(args).toContain('quality: draft');
+    expect(args).not.toContain('width: 1024');
+
+    const prev = (await store.getSession(gezel.id, session.id))?.lastImageGeneration;
+    expect(prev).toMatchObject({ aspectRatio: '16:9', quality: 'draft' });
+    mock.script('PROMPT: a red tram in the rain, at night\nAVOID: none');
+    const followUp = await manager.send(session.id, 'make it night');
+    const followArgs = followUp.toolCalls?.[0]?.argsFull ?? '';
+    // The shape it was asked for, not its pixels, which the tool would cap.
+    expect(followArgs).toContain('aspectRatio: 16:9');
+    expect(followArgs).toContain('quality: draft');
+    expect(followArgs).not.toContain('width: 1024');
+  }, 30_000);
+
   it('threads a removal follow-up as a seed-stable revise with a negative prompt', async () => {
     const gezel = await store.createGezel({
       name: 'Eduardo',

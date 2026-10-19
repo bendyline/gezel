@@ -228,6 +228,7 @@ import type {
   HandboekRenderMode,
   HandboekToc,
   HealthResponse,
+  ImageQuality,
   ImportAiAppResult,
   ImportCustomMcpConfigRequest,
   ImportCustomMcpConfigResponse,
@@ -330,6 +331,8 @@ import type {
   ProjectSearchResponse,
   ProjectTypeApplyPlan,
   ProjectTypeStatusResponse,
+  PromptAssistRequest,
+  PromptAssistResponse,
   PromptDraft,
   PromptDraftStatus,
   PromptDraftSummary,
@@ -3543,8 +3546,27 @@ export class GezelClient {
    * Whether this machine can run each catalog image model on the local
    * engine. Same contract as {@link getVideoModelFit}.
    */
-  getImageModelFit(): Promise<MediaModelFitResponse> {
-    return this.request('GET', '/api/image-gen/models/fit');
+  /**
+   * Rewrite or review a draft before it is sent (the composer's sparkle
+   * menu). Returns the rewritten text, or suggestions for `review`.
+   */
+  promptAssist(
+    projectId: string,
+    body: PromptAssistRequest,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<PromptAssistResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-assist`,
+      body,
+      undefined,
+      opts.signal,
+    );
+  }
+
+  getImageModelFit(opts: { quality?: ImageQuality } = {}): Promise<MediaModelFitResponse> {
+    const query = opts.quality ? `?quality=${encodeURIComponent(opts.quality)}` : '';
+    return this.request('GET', `/api/image-gen/models/fit${query}`);
   }
 
   /**

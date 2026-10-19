@@ -704,6 +704,9 @@ function ProjectChatBody({
                         },
                       }
                     : {})}
+                  {...(selectedGezel.fixedFunction?.tool === 'generate_image'
+                    ? { imageGenerator: { defaults: selectedGezel.fixedFunction.defaults } }
+                    : {})}
                   onPivotToMention={(mentionedGezelId) => {
                     // Project-chat pivot: when the user @-mentions another
                     // gezel from inside the active chat, switch the focus

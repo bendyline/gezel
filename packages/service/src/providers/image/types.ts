@@ -1,4 +1,4 @@
-import type { ImageModelAuxiliaryRole } from '@bendyline/gezel';
+import type { ImageAspectRatio, ImageModelAuxiliaryRole, ImageQuality } from '@bendyline/gezel';
 
 export type { ImageModelAuxiliaryRole } from '@bendyline/gezel';
 
@@ -49,6 +49,14 @@ export interface ImageGenerationInput {
   model?: string;
   width?: number;
   height?: number;
+  /**
+   * The shape and size tier the caller asked for. Local engines render the
+   * pixels the route already resolved from these; cloud providers map them
+   * to their own aspect ratios and size tiers, which explicit pixels
+   * override.
+   */
+  aspectRatio?: ImageAspectRatio;
+  quality?: ImageQuality;
   steps?: number;
   seed?: number;
   /**

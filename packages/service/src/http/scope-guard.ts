@@ -376,6 +376,10 @@ async function isSessionRouteAllowed(
     if (rest === '/completions' || rest === '/completions/') {
       return sessionDeny('workflow completions require a first-party client');
     }
+    // The composer's rewrite of a person's own draft; a model has no draft.
+    if (rest === '/prompt-assist' || rest === '/prompt-assist/') {
+      return sessionDeny('prompt assist is for the person writing a message');
+    }
     if (rest === '/timeline' || rest === '/timeline/') {
       return sessionDeny('project timelines contain other sessions');
     }

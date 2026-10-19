@@ -189,6 +189,8 @@ export interface CraftbookEvalSuccessSpec {
 export interface CraftbookEvalSpec {
   /** Bundled craftbook template id, e.g. `html-arcade-game`. */
   craftbookId: string;
+  /** A step is the image-generator's: the trial needs an image engine. */
+  needsImageEngine?: boolean;
 
   /** Explicitly states whether this eval proves an artifact or the workflow. */
   mode: CraftbookEvalMode;

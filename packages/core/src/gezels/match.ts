@@ -31,6 +31,7 @@ export const ROLE_ALIASES: Record<string, string[]> = {
   reviewer: ['qa', 'tester', 'critic'],
   voorman: ['foreman', 'lead', 'manager'],
   meester: ['concierge', 'guildmaster', 'host'],
+  illustrator: ['illustration', 'illustrations'],
 };
 
 /**
@@ -44,6 +45,10 @@ export const ROLE_ALIASES: Record<string, string[]> = {
  * word such as "application" or "engineer" on its own.
  */
 const ROLE_PHRASE_ALIASES: Array<[RegExp, string]> = [
+  // The image role's craftbook name ("image-generator") and the Illustrator
+  // template that holds it. The direct, no-model image gezel shares the
+  // words, but role matching never offers it (`resolveGezelTemplateForRole`).
+  [/\bimage[\s_-]+(?:generator|generation|maker|creator)s?\b/gi, 'illustrator'],
   [/\b(?:application|app|product|software|cyber|information)\s+security\b/gi, 'security'],
   [
     /\bsecurity\s+(?:engineer|specialist|analyst|architect|reviewer|auditor|lead|officer)\b/gi,

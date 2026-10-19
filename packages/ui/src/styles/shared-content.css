@@ -1410,6 +1410,62 @@
   white-space: nowrap;
 }
 
+/* The image strip — shape, size and model for a direct image gezel's next
+   render, in the task strip's frame. Dashed while the shape comes from the
+   message, like a suggested task. Compact keys: it shares the composer's
+   width with the To line. See docs/ux.md. */
+.chat-composer-image-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  margin: 0 0 0.25rem 0.25rem;
+  padding: 0.3rem 0.4rem 0.3rem 0.5rem;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-1));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-radius: var(--radius-md);
+}
+
+.chat-composer-image-bar[data-origin="suggested"] {
+  border-style: dashed;
+}
+
+.chat-composer-image-bar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.chat-composer-image-bar-tray {
+  gap: 0.15rem;
+  padding: 0.15rem;
+}
+
+.chat-composer-image-bar-key {
+  gap: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  font-size: var(--text-xs);
+}
+
+.chat-composer-image-bar-more,
+.chat-composer-image-bar-model {
+  max-inline-size: 12rem;
+  font-size: var(--text-xs);
+}
+
+.chat-composer-image-bar-astyped {
+  margin-inline-start: auto;
+  padding: 0.15rem 0.5rem;
+  font-size: var(--text-xs);
+}
+
+.chat-composer-image-bar-readout {
+  padding-inline-start: 0.1rem;
+}
+
 .chat-composer-task-bar-note {
   align-self: center;
   flex: 0 0 auto;
@@ -2376,6 +2432,45 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .chat-task-btn:hover {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   color: var(--text);
+}
+
+/* The sparkle key: rewrite or review the draft before it goes. A glyph in
+   the Task key's recipe; its busy label replaces the glyph while it works. */
+.chat-sparkle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.65rem;
+}
+
+.chat-sparkle-notice {
+  align-self: center;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}
+
+/* "Review my message" suggestions, in the task strip's frame. */
+.chat-composer-review {
+  align-items: center;
+}
+
+.chat-composer-review-text {
+  flex: 1 1 auto;
+  padding: 0.1rem 0.25rem;
+}
+
+.chat-composer-review-list {
+  margin: 0.15rem 0 0;
+  padding-inline-start: 1.1rem;
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+.chat-composer-review-apply {
+  align-self: center;
+  padding: 0.15rem 0.5rem;
+  font-size: var(--text-xs);
 }
 
 /* The Task key: a word key beside Send that attaches a craftbook to the
