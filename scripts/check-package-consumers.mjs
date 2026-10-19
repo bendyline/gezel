@@ -43,6 +43,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as tar from 'tar';
 import { consumerCheckReportPath, writeConsumerCheckReport } from './consumer-check-report.mjs';
 import { blockingAdvisories, readAuditAllowlist } from './npm-consumer-audit.mjs';
+import { runNpmConsumerInstall } from './npm-consumer-install.mjs';
 import { PUBLISHED_PACKAGE_DIRS, publishedPackageNames } from './published-packages.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -398,12 +399,13 @@ try {
     join(consumer, 'package.json'),
     `${JSON.stringify({ name: 'gezel-packed-consumer', private: true, type: 'module', version: '0.0.0' }, null, 2)}\n`,
   );
-  const install = runPackageManager('npm', ['install', '--no-audit', '--no-fund', ...tarballs], {
-    cwd: consumer,
-  });
+  const install = await runNpmConsumerInstall(() =>
+    runPackageManager('npm', ['install', '--no-audit', '--no-fund', ...tarballs], {
+      cwd: consumer,
+    }),
+  );
   if (install.status !== 0) {
-    fail(`npm install of the tarballs failed\n${install.stdout}\n${install.stderr}`);
-    throw new Error('cannot continue without a successful install');
+    throw new Error(`npm install of the tarballs failed\n${install.stdout}\n${install.stderr}`);
   }
   const installOutput = `${install.stdout}\n${install.stderr}`;
   const installedNodePty = join(consumer, 'node_modules', 'node-pty', 'package.json');
@@ -965,14 +967,17 @@ try {
   // the terminal error is sufficient: install node-pty beside Gezel and then
   // exercise the real terminal path through the same packed daemon.
   step('installing the optional terminal peer explicitly');
-  const ptyInstall = runPackageManager(
-    'npm',
-    ['install', '--no-save', '--no-audit', '--no-fund', 'node-pty@^1.1.0'],
-    { cwd: consumer },
+  const ptyInstall = await runNpmConsumerInstall(() =>
+    runPackageManager(
+      'npm',
+      ['install', '--no-save', '--no-audit', '--no-fund', 'node-pty@^1.1.0'],
+      { cwd: consumer },
+    ),
   );
   if (ptyInstall.status !== 0) {
-    fail(`explicit npm install node-pty failed\n${ptyInstall.stdout}\n${ptyInstall.stderr}`);
-    throw new Error('cannot continue without the explicit terminal peer');
+    throw new Error(
+      `explicit npm install node-pty failed\n${ptyInstall.stdout}\n${ptyInstall.stderr}`,
+    );
   }
   if (!existsSync(installedNodePty)) {
     fail('npm install node-pty succeeded but the package is absent');
@@ -995,7 +1000,7 @@ try {
     writeConsumerCheckReport(reportPath, failures);
   } finally {
     if (keep) console.log(`\nleft the consumer project at ${root}`);
-    else rmSync(root, { recursive: true, force: true });
+    else rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }
 
