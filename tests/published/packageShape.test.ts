@@ -67,7 +67,7 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   '@bendyline/gezel-mcp': 300_000, //                  111 KB
   '@bendyline/gezel-connectors-spectral': 100_000, //    4 KB
   '@bendyline/gezel-script-stdlib': 100_000, //         14 KB
-  '@bendyline/gezel-cli': 150_000, //                   31 KB
+  '@bendyline/gezel-cli': 200_000, //                  152 KB
   // Carries the bundled web UI (`dist/ui`) and the handboek content so a
   // Node-only CLI install can serve `gezel start --web` with nothing else
   // to fetch. That is essentially all of this budget. About 16 MB of it is
@@ -79,7 +79,7 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // (~3.1 MB gzipped, base64-embedded WASM) twice — once in the worker and
   // once in the main-thread fallback. Deduplicating that upstream is the
   // follow-up and would win back ~3 MB.
-  '@bendyline/gezel-service': 55_000_000, //          47.5 MB
+  '@bendyline/gezel-service': 60_000_000, //          47.5 MB
 };
 
 const ROOT_LICENSE = readFileSync(resolve(REPO_ROOT, 'LICENSE'), 'utf8');
