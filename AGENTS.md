@@ -519,6 +519,8 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/bin/`, `~/.gezel/service/`, `~/.gezel/runtime/` — supervisor-owned (extracted runtimes, bundle, daemon handshake state)
   - `~/.gezel/.transactions/` — private durable operation journals and isolated staging state, owned by the transaction coordinator that creates each subtree; never expose this through `runtime/`
   - `~/.gezel/logs/` — owned by the logger / log-rotator
+  - `~/.gezel/startup-home.json` — bounded, disposable Home reading cache, written through Store and read by Electron before the daemon starts; never contains credentials or active commands
+  - `~/.gezel/desktop/startup-*.json` — Electron-owned startup navigation and unsent text, scoped by the selected connection; text is cleared only after the live UI saves it as a normal prompt draft
   - `~/.gezel/history.jsonl` and `~/.gezel/projects/{id}/history.jsonl` — append-only, owned by [HistoryManager](packages/service/src/history/manager.ts)
   - `~/.gezel/keurmeester/` — append-only JSONL intervention case records plus generated digest reports, owned by [KeurmeesterManager](packages/service/src/keurmeester/manager.ts)
   - `~/.gezel/gilde/` — opt-in live catalog content cache (`versions/<v>/` holding extracted `@bendyline/gilde` releases + `state.json`), owned by [GildeUpdateManager](packages/service/src/gilde-updates/manager.ts); rebuildable, safe to delete — the bundled pin is the permanent fallback

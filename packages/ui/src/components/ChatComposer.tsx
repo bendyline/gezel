@@ -296,6 +296,8 @@ export interface ChatComposerProps {
   draftId?: string;
   /** The composer created, switched, or finished with a draft. */
   onDraftIdChange?: (draftId: string | undefined) => void;
+  /** The selected draft has reached the editor; used by the startup handoff. */
+  onDraftRestored?: () => void;
   /**
    * Enables the attached task: the Task key beside Send on a fresh thread,
    * the strip above the To line, and the daemon's route suggestions landing
@@ -406,6 +408,7 @@ export function ChatComposer({
   draftScope,
   draftId: selectedDraftId,
   onDraftIdChange,
+  onDraftRestored,
   taskLaunch: taskLaunchProps,
   imageGenerator,
   hideWaitingNotice = false,
@@ -607,6 +610,9 @@ export function ChatComposer({
   draftEnsureRef.current = draft.ensureDraft;
   draftNoteFileRef.current = draft.noteFileAdded;
   draftFreshThreadRef.current = draft.isFreshThread;
+  useEffect(() => {
+    if (selectedDraftId && draft.meta?.id === selectedDraftId) onDraftRestored?.();
+  }, [selectedDraftId, draft.meta?.id, onDraftRestored]);
   // The attached task: what Send starts instead of a chat turn. Off inside a
   // task thread or a craftbook-editing thread, where a launch makes no sense.
   const capabilities = runtimeCapabilities();

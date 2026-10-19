@@ -32,6 +32,8 @@ const NewTaskDialog = lazy(() =>
  */
 export function MeesterConversation({
   meesterGezelId,
+  startupDraftId,
+  onStartupDraftReady,
   meesterName,
   meesterIcon,
   meesterPoppetje,
@@ -46,6 +48,8 @@ export function MeesterConversation({
   onAttentionChange,
 }: {
   meesterGezelId: string;
+  startupDraftId?: string;
+  onStartupDraftReady?: () => void;
   meesterName: string;
   meesterIcon: string | null;
   meesterPoppetje: PoppetjeStruct | null;
@@ -81,6 +85,13 @@ export function MeesterConversation({
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [selectedGezelId, setSelectedGezelId] = useState(remembered?.gezelId || meesterGezelId);
   const [projectId, setProjectId] = useState(remembered?.projectId || 'default');
+  useEffect(() => {
+    if (!startupDraftId) return;
+    setSelectedGezelId(meesterGezelId);
+    setProjectId('default');
+    setSessionId('');
+    setDraftId(startupDraftId);
+  }, [startupDraftId, meesterGezelId]);
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
 
   // Reset the focused session if the meester changes (rare). The remembered
@@ -282,6 +293,7 @@ export function MeesterConversation({
               draftScope="meester"
               draftId={draftId || undefined}
               onDraftIdChange={(next) => setDraftId(next ?? '')}
+              onDraftRestored={draftId === startupDraftId ? onStartupDraftReady : undefined}
               // The attached task launches in the composer's current project
               // (Default runs real work). `projects` is only read when the
               // dialog's project picker shows, which the lock suppresses.

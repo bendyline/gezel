@@ -99,6 +99,7 @@ const SELECTION_STORAGE_KEY = 'gezel:nav:selection';
 
 /** Restore the last selection from localStorage; `null` = Meester home. */
 function readStoredSelection(): RecentTab | null {
+  if (window.__GEZEL__?.startupHome?.active) return null;
   try {
     const raw = window.localStorage.getItem(SELECTION_STORAGE_KEY);
     if (!raw) return null;

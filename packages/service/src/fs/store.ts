@@ -234,6 +234,7 @@ import {
   parseProjectHistory,
   rebuildProjectFromHistory,
 } from './project-meta-recovery.js';
+import { StartupHomeCache } from './startup-home.js';
 import { TaskFilesStore } from './task-files-store.js';
 import {
   type WalkDirResult,
@@ -400,7 +401,26 @@ export class Store {
     return this.config.readConfig();
   }
   writeConfig(config: Partial<Record<keyof GezelConfig, unknown>>): Promise<GezelConfig> {
-    return this.config.writeConfig(config);
+    return this.config.writeConfig(config).then(async (saved) => {
+      if (['meesterGezelId', 'themePref', 'sidebarSide'].some((key) => key in config)) {
+        await this.refreshStartupHome().catch(() => {});
+      }
+      return saved;
+    });
+  }
+
+  private readonly startupHome: StartupHomeCache;
+
+  async refreshStartupHome(): Promise<void> {
+    if (this.engineOnly) return;
+    await this.startupHome.refresh(this);
+  }
+
+  async cacheStartupNightReview(
+    review: import('@bendyline/gezel').NightShiftReviewResponse,
+  ): Promise<void> {
+    if (this.engineOnly) return;
+    await this.startupHome.cacheNightReview(this, review);
   }
 
   private readonly home: string;
@@ -457,6 +477,7 @@ export class Store {
       opts.serviceRole === 'machine-engine' ? [] : (opts.bundledToolsets ?? []);
     this.config = new ConfigStore(opts.home);
     this.home = opts.home;
+    this.startupHome = new StartupHomeCache(opts.home);
     this.history = opts.history;
     this.external = opts.external;
     this.engineOnly = opts.serviceRole === 'machine-engine';
@@ -4251,6 +4272,7 @@ export class Store {
   async writeMeesterStatus(report: MeesterStatusReport): Promise<void> {
     await mkdir(meesterStatusDir(this.home), { recursive: true });
     await writeFileAtomic(meesterStatusFile(this.home), `${JSON.stringify(report, null, 2)}\n`);
+    if (!this.engineOnly) await this.startupHome.cacheStatus(report).catch(() => {});
   }
 
   async readMeesterStatusState(): Promise<MeesterStatusState> {
@@ -5737,6 +5759,7 @@ export class Store {
     // new one is at the target path, never an in-between zeroed file.
     await writeFileAtomic(path, `${JSON.stringify(session, null, 2)}\n`);
     this.notifySessionChange({ type: 'write', gezelId: session.gezelId, sessionId: session.id });
+    if (!this.engineOnly) await this.startupHome.cacheSession(session).catch(() => {});
   }
 
   /** Per-session lock serializing {@link mutateSession}'s read-modify-writes. */

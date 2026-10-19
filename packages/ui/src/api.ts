@@ -77,6 +77,7 @@ export type ModelBundleImportProgress = {
 declare global {
   interface Window {
     __GEZEL__?: {
+      startupHome?: import('./startup/types.js').StartupHomeBridge;
       token: string;
       /** Runtime operations, not viewport-dependent product variants. */
       capabilities?: Readonly<RuntimeCapabilities>;

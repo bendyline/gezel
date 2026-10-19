@@ -158,6 +158,7 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
       ctx.nightShift.currentWindow(),
       new Date(),
     );
+    void ctx.store.cacheStartupNightReview(review).catch(() => {});
     return c.json(review);
   });
 

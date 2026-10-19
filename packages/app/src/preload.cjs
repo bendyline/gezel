@@ -21,6 +21,12 @@ const baseUrl = conn?.baseUrl ?? readArg('--gezel-url=') ?? '';
 const fallbackReason = conn?.fallbackReason ?? null;
 const fallbackCode = conn?.fallbackCode ?? null;
 const mode = conn?.mode ?? null;
+let startupHome = null;
+try {
+  startupHome = ipcRenderer.sendSync('gezel:startup-home:read');
+} catch {
+  // Older hosts and standalone test windows have no startup surface.
+}
 
 // Register at preload evaluation time so an OS open-file handoff sent as soon
 // as the page finishes loading cannot race React's later effect registration.
@@ -54,6 +60,13 @@ ipcRenderer.on('gezel:show-uninstall', () => {
 });
 
 contextBridge.exposeInMainWorld('__GEZEL__', {
+  startupHome: startupHome
+    ? {
+        ...startupHome,
+        save: (state) => ipcRenderer.sendSync('gezel:startup-home:save', state),
+        finish: (draft) => ipcRenderer.sendSync('gezel:startup-home:finish', draft),
+      }
+    : undefined,
   token,
   baseUrl,
   platform: process.platform,

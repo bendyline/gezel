@@ -98,6 +98,7 @@ export async function postNightShiftReviewCard(
     settledAt,
   );
   if (review.windowKey !== windowKey) return;
+  await store.cacheStartupNightReview(review).catch(() => {});
   const outcome = nightShift.windowOutcome(windowKey);
   // A paused review is resumed at the next window (releasePausedReview in
   // meester/night-shift-oversight.ts); the morning card tells the person it

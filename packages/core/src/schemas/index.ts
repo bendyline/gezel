@@ -94,3 +94,4 @@ export * from './activity.js';
 
 export * from './app-models.js';
 export * from './page-imports.js';
+export * from './startup-home.js';

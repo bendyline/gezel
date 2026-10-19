@@ -1,9 +1,33 @@
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { harperWasmPlugin } from './scripts/vite-harper-wasm.js';
 
 export default defineConfig({
-  plugins: [react(), harperWasmPlugin()],
+  plugins: [
+    react(),
+    harperWasmPlugin(),
+    {
+      name: 'local-startup-dev-assets',
+      configureServer(server) {
+        server.middlewares.use((request, response, next) => {
+          const file = request.url?.split('?')[0];
+          if (file !== '/startup/startup.js' && file !== '/startup/startup.css') return next();
+          void readFile(resolve('dist', file.slice(1))).then(
+            (content) => {
+              response.setHeader(
+                'Content-Type',
+                file.endsWith('.js') ? 'text/javascript' : 'text/css',
+              );
+              response.end(content);
+            },
+            () => next(),
+          );
+        });
+      },
+    },
+  ],
   // With `pnpm link:squisq` active, the squisq packages resolve to the
   // sibling checkout — whose own workspace carries react 18 for its dev
   // tooling. Without dedupe, their bare `import "react"` resolves THERE,

@@ -74,6 +74,7 @@ import { installRendererPermissionPolicy } from './renderer-permissions.js';
 import { RendererMemoryLog, RendererRecovery } from './renderer-recovery.js';
 import { splashStage } from './splash-stage.js';
 import { getStartAtLogin, launchedAtLogin, setStartAtLogin } from './start-at-login.js';
+import { StartupHomeHost } from './startup-home.js';
 import { type StoreBuildInfo, detectStoreBuild } from './store-build.js';
 import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, autostartDefinition, connectOrStart } from './supervisor/index.js';
@@ -119,6 +120,7 @@ const MAX_TRACKED_PREVIEW_DOCUMENTS = 512;
 const PREVIEW_EXTERNAL_SERVICES_HEADER = 'x-gezel-preview-external-services';
 /** True while the window is showing splash.html rather than the daemon UI. */
 let splashShowing = false;
+const startupHome = new StartupHomeHost();
 // The system tray (locus for notifications, status, and the engagement-mode
 // toggle). Created/destroyed in response to the `showSystemTray` preference;
 // null when disabled. See ./tray.ts.
@@ -207,6 +209,7 @@ let updateState: UpdateState | null = null;
 let macUpdatePkgPath: string | null = null;
 const quitCoordinator = new QuitCoordinator({
   shutdown: async () => {
+    await startupHome.flush().catch(() => {});
     if (connection) await connection.shutdown();
   },
   quitAgain: () => app.quit(),
@@ -494,6 +497,10 @@ function iconPath(): string | undefined {
 }
 
 function splashPath(): string | undefined {
+  const localHome = resolveBundledUi();
+  if (localHome && existsSync(join(localHome, 'startup', 'index.html'))) {
+    return join(localHome, 'startup', 'index.html');
+  }
   const p = resolve(__dirname, '..', 'assets', 'splash.html');
   return existsSync(p) ? p : undefined;
 }
@@ -848,8 +855,7 @@ async function createWindow(): Promise<void> {
     mainWindow = null;
   });
 
-  // Show the branded splash immediately so the user sees the Gezel logo
-  // during the gap between window creation and the UI's first paint. Fails
+  // Open the local Home before the service starts. Fails
   // silently if the asset is missing — the sage backgroundColor is an
   // acceptable fallback.
   const splash = splashPath();
@@ -887,9 +893,8 @@ async function navigateToApp(): Promise<void> {
 /**
  * Write a stage line onto the splash while the daemon starts.
  *
- * Injected rather than shipped as an inline `<script>` in splash.html: the
- * renderer CSP forbids inline script, and keeping the asset script-free means
- * the splash cannot execute anything of its own. No-ops once the real UI has
+ * Injected instead of an inline script: the renderer CSP forbids inline
+ * scripts. No-ops once the real UI has
  * loaded, so a late supervisor log can't scribble on the app.
  */
 function setSplashStatus(message: string): void {
@@ -1137,6 +1142,33 @@ async function showConnectionError(
 // simple and avoids a first-render flicker.
 ipcMain.on('gezel:current-connection', (event) => {
   event.returnValue = rendererConnectionSnapshot(connection);
+});
+
+function isStartupFrame(event: Electron.IpcMainEvent): boolean {
+  if (
+    !mainWindow ||
+    event.sender !== mainWindow.webContents ||
+    event.senderFrame !== event.sender.mainFrame
+  )
+    return false;
+  const file = splashPath();
+  return isAllowedTopLevelNavigation(
+    event.senderFrame.url,
+    connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null,
+    file ? pathToFileURL(file).href : null,
+  );
+}
+ipcMain.on('gezel:startup-home:read', (event) => {
+  event.returnValue = isStartupFrame(event)
+    ? { active: startupHome.active, snapshot: startupHome.snapshot, state: startupHome.state }
+    : null;
+});
+ipcMain.on('gezel:startup-home:save', (event, state: unknown) => {
+  event.returnValue = isStartupFrame(event) && startupHome.save(state);
+});
+ipcMain.on('gezel:startup-home:finish', (event, draft: unknown) => {
+  event.returnValue =
+    isStartupFrame(event) && typeof draft === 'string' && startupHome.finish(draft);
 });
 
 // Update IPC. `gezel:update-state` is pushed on every transition; this pull
@@ -2915,6 +2947,7 @@ app.whenReady().then(async () => {
   // the same value.
   const launch = resolveLaunch();
   process.env.GEZEL_HOME = launch.home;
+  await startupHome.load(launch.home);
   console.log(`[app] gezel home: ${launch.home}`);
 
   // Dev launches default to the encrypted file secret store instead of the OS
@@ -2974,6 +3007,14 @@ app.whenReady().then(async () => {
   await createWindow();
   const startedHidden = launchHidden;
   launchHidden = false;
+
+  if (!app.isPackaged && process.env.GEZEL_E2E === '1') {
+    const delay = Math.min(
+      15_000,
+      Math.max(0, Number(process.env.GEZEL_E2E_STARTUP_DELAY_MS) || 0),
+    );
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+  }
 
   try {
     connection = await connectOrStart({

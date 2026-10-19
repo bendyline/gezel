@@ -627,6 +627,24 @@ What lives where:
 
 ## Patterns
 
+### Opening the workshop
+
+Electron opens a small local Home reader before waiting for the daemon. It uses
+the normal sage titlebar and real native window controls, the saved theme and
+sidebar side, and a bounded reading copy of the Meester's status, the last user
+message, and recent Night shift reports. Saved reports carry their dates; live
+activity and report actions wait for the service. A short selection of Handboek
+articles ships with this reader and works on a first launch too.
+
+The startup entry has no React, editor, model, or document-player dependency.
+Keep its script within the build's 48 KB limit. Product snapshots are prepared
+off the startup path, and no project or session scan belongs in Electron boot.
+The same reader covers the live app's first paint. It keeps the current article
+and scroll position while the surrounding frame becomes live; Show latest or
+Open in Handboek takes the reader to the full surface. Save startup typing as a
+normal prompt draft before releasing the local copy. A failed handoff leaves
+that copy editable and offers a retry. Honor reduced motion and keyboard tabs.
+
 ### The welcome
 
 The first thing a new person meets is the meester, not a setup page. Home

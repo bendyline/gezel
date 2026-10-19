@@ -2772,6 +2772,15 @@ export async function startProductService(
   const cancelBootWork: Array<() => void> = [];
   cancelBootWork.push(
     deferBootWork(
+      10_000,
+      () => {
+        void store.refreshStartupHome().catch(() => {});
+      },
+      () => stopping,
+    ),
+  );
+  cancelBootWork.push(
+    deferBootWork(
       60_000,
       () => {
         chat.runIdleSummarizationSweep().catch(() => {

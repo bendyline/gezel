@@ -80,6 +80,7 @@ function deps(scenario: Scenario = {}): NightShiftReviewCardDeps {
   const ran = scenario.ran ?? false;
   return {
     store: {
+      cacheStartupNightReview: async () => {},
       listProjectQuestions: async () => questions,
       readConfig: async () => scenario.config ?? {},
       listProjects: async () => scenario.projects ?? [],
