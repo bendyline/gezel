@@ -4,7 +4,7 @@ import {
   createLogger,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
-import { buildNightShiftReview } from '../../tasks/night-review.js';
+import { buildNightShiftReview, latestNightShiftTaskReport } from '../../tasks/night-review.js';
 import { buildNightShiftTally, nightShiftTallyPeriod } from '../../tasks/night-tally.js';
 import type { ServiceContext } from '../context.js';
 
@@ -82,6 +82,7 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
     const active: NightShiftTaskBrief[] = [];
     const upcoming: NightShiftTaskBrief[] = [];
     for (const t of tasks) {
+      if (!running.has(t.ref) && !queued.has(t.ref)) continue;
       let projectName = projectNames.get(t.projectId);
       if (projectName === undefined) {
         const project = await ctx.store.getProject(t.projectId).catch(() => null);
@@ -89,12 +90,14 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
         projectNames.set(t.projectId, projectName);
       }
       const stepName = t.craftbook.steps.find((s) => s.id === t.activeStepId)?.name;
+      const latestReport = await latestNightShiftTaskReport(ctx.store, t);
       const brief: NightShiftTaskBrief = {
         ref: t.ref,
         title: t.title,
         projectName,
         ...(stepName ? { stepName } : {}),
         ...(quotaHeld.has(t.ref) ? { quotaHeld: true } : {}),
+        ...(latestReport ? { latestReport } : {}),
       };
       if (running.has(t.ref)) active.push(brief);
       else if (queued.has(t.ref)) upcoming.push(brief);

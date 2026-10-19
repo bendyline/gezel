@@ -1,4 +1,5 @@
 import type { PageApiBootstrap } from '../schemas/page-bridge.js';
+import { pageComponentsSource } from './page-components.js';
 
 /**
  * Output Pane API v1 — the `window.gezel` shim injected into served
@@ -82,7 +83,7 @@ const MEDIA_TYPES: Record<string, string> = {
 
 /** The shim's JavaScript, for hosts that embed scripts by URL rather than inline. */
 export function pageApiShimSource(bootstrap: PageApiBootstrap): string {
-  return `(function(){
+  return `${pageComponentsSource()}\n(function(){
 if (window.gezel) return;
 var B=${JSON.stringify(bootstrap)};
 var D=${JSON.stringify(DEFAULTS)};
@@ -91,6 +92,20 @@ var S=B.serve||null;
 var mode=S?'serve':(embedded?'embedded':'browser');
 var seq=0;var sid=Math.random().toString(36).slice(2,8);
 var pending={};var inflight=0;var queue=[];
+var uploads={};
+function importCall(kind,fields,signal){
+  if(!embedded||S||!B.imports)return Promise.reject(err('unavailable','Add files is available in the Gezel desktop app.'));
+  if(Object.keys(uploads).length>=2)return Promise.reject(err('rate-limited','Too many imports.'));
+  return new Promise(function(resolve,reject){
+    var id=mintId(), timer;
+    function finish(error,value){if(!uploads[id])return;delete uploads[id];clearTimeout(timer);if(signal)signal.removeEventListener('abort',cancel);if(error)reject(error);else resolve(value);}
+    function cancel(){post({__gezelPage:1,kind:'import-cancel',id:id});finish(err('unavailable','Import cancelled.'));}
+    uploads[id]=finish;
+    timer=setTimeout(function(){post({__gezelPage:1,kind:'import-cancel',id:id});finish(err('timeout','Import timed out.'));},310000);
+    if(signal){signal.addEventListener('abort',cancel,{once:true});if(signal.aborted){cancel();return;}}
+    post(Object.assign({__gezelPage:1,kind:kind,id:id},fields));
+  });
+}
 var watches={};var themeSubs=[];
 var theme={mode:(matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'};
 var limits={maxInflight:D.maxInflight,maxReadBytes:2*1024*1024};
@@ -193,6 +208,7 @@ addEventListener('message',function(event){
   if(event.source!==window.parent)return;
   var d=event.data;
   if(!d||d.__gezelPage!==1||typeof d.kind!=='string')return;
+  if(d.kind==='import-result'){if(uploads[d.id])uploads[d.id](d.ok?null:err(d.errorCode||'unavailable',d.error),d.result);return;}
   if(d.kind==='init'){
     if(d.theme&&d.theme.mode)setTheme(d.theme.mode);
     if(d.limits&&typeof d.limits.maxInflight==='number')limits.maxInflight=d.limits.maxInflight;
@@ -304,6 +320,10 @@ function swapTree(root){
   if(!root||!root.querySelectorAll)return;
   var found=root.querySelectorAll('[src*="gezel-data="],[poster*="gezel-data="],[href*="gezel-data="],[style*="gezel-data="]');
   for(var i=0;i<found.length;i++)swapMedia(found[i]);
+  // Shared file cards keep their media in shadow roots. Snapshot hosts must
+  // replace relayed placeholders there as well as in the page's own DOM.
+  var hosts=root.querySelectorAll('*');
+  for(var j=0;j<hosts.length;j++)if(hosts[j].shadowRoot)swapTree(hosts[j].shadowRoot);
 }
 function observeMedia(){
   if(mediaObserver||typeof MutationObserver!=='function'||typeof document==='undefined')return;
@@ -439,6 +459,10 @@ if(S&&typeof matchMedia==='function'){
   try{matchMedia('(prefers-color-scheme: dark)').addEventListener('change',function(e){setTheme(e.matches?'dark':'light');});}catch(_){}
 }
 Object.defineProperty(window,'gezel',{value:api,writable:false,configurable:false});
+window.installGezelComponents(api,{
+  targets:function(){return importCall('import-targets',{});},
+  file:function(file,target,signal){return importCall('import-file',{target:target,name:file.name,file:file},signal);}
+});
 if(embedded)post({__gezelPage:1,kind:'hello'});
 })();`;
 }

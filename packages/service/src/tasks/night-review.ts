@@ -3,6 +3,7 @@ import {
   type NightShiftCompletedTask,
   type NightShiftReport,
   type NightShiftReviewResponse,
+  type NightShiftTaskBrief,
   type NightShiftWindow,
   type Question,
   type Task,
@@ -233,6 +234,31 @@ function declaredArtifacts(task: Task): string[] {
     out.push(aw.file);
   }
   return out;
+}
+
+/** Resolve this task's own report, even when the last run predates last night's window. */
+export async function latestNightShiftTaskReport(
+  store: Pick<Store, 'statProjectArtifactPath' | 'listProjectArtifacts'>,
+  task: Task,
+): Promise<NightShiftTaskBrief['latestReport']> {
+  const paths = new Set(declaredArtifacts(task).reverse());
+  if (isNightShiftOversightTask(task)) {
+    // Starting a new review dates the previous report aside before its replacement exists.
+    const files = await store.listProjectArtifacts(task.projectId).catch(() => []);
+    for (const file of files) {
+      if (!file.isDirectory && isNightShiftReportArchive(task.projectId, file.path)) {
+        paths.add(file.path);
+      }
+    }
+  }
+  let latest: { path: string; modifiedAt: number } | undefined;
+  for (const path of paths) {
+    const stat = await store.statProjectArtifactPath(task.projectId, path).catch(() => null);
+    if (stat?.kind !== 'file') continue;
+    const modifiedAt = Date.parse(stat.mtime ?? '') || 0;
+    if (!latest || modifiedAt > latest.modifiedAt) latest = { path, modifiedAt };
+  }
+  return latest ? { projectId: task.projectId, path: latest.path } : undefined;
 }
 
 /** Markdown — the only shape a night report is ever read in. */

@@ -117,7 +117,7 @@ import {
   seedCharacter,
   serializeGezelMarkdown,
 } from '@bendyline/gezel';
-import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { copyFileAtomic, writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
 import {
   assertNoTemplatePlaceholderPath,
@@ -5445,6 +5445,28 @@ export class Store {
    * journal (which is text-shaped) but still emits a history event so
    * postmortems can see what was written and when.
    */
+  /** Publish a host-owned staged upload. Never accepts a page-supplied source path. */
+  async importProjectWorkspaceFile(
+    id: string,
+    filePath: string,
+    stagedPath: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: true, path: filePath });
+    if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
+    const full = await resolveInside(gate.workspaceDir, filePath, { allowRoot: false });
+    await mkdir(dirname(full), { recursive: true });
+    signal?.throwIfAborted();
+    await copyFileAtomic(stagedPath, full, { noReplace: true, signal });
+    await this.history?.log({
+      kind: 'workspace.write',
+      projectId: id,
+      summary: `Imported ${filePath}`,
+      details: { path: filePath, binary: true, origin: 'page' },
+    });
+    await this.touchProject(id);
+  }
+
   async writeProjectWorkspaceBinary(
     id: string,
     filePath: string,

@@ -94,6 +94,7 @@ import { ollamaCompatRoutes } from './routes/ollama-compat.js';
 import { ollamaRoutes } from './routes/ollama.js';
 import { opencodeSetupRoutes } from './routes/opencode-setup.js';
 import { pageCheckRoutes } from './routes/page-check.js';
+import { pageImportRoutes } from './routes/page-imports.js';
 import { pageInvokeRoutes } from './routes/page-invoke.js';
 import { pageReadRoutes } from './routes/page-read.js';
 import { pageTableRoutes } from './routes/page-tables.js';
@@ -525,6 +526,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // The read half of the same bridge at /api/projects/:id/page-read.
   app.route('/api/projects', pageReadRoutes(ctx));
   app.route('/api/projects', pageTableRoutes(ctx));
+  app.route('/api/projects', pageImportRoutes(ctx));
   app.route('/api/projects', referencePreviewRoutes(ctx));
   app.route('/api/projects', retrievalPreviewRoutes(ctx));
   app.route('/api/projects', projectRoutes(ctx));

@@ -36,6 +36,8 @@ describe('Output Pane page API contract', () => {
         }),
       },
       data: {
+        importTargets: async () => [],
+        importFiles: async () => [],
         open: async () => {},
         read: async (path, opts) => ({ path, source: opts?.source ?? 'workspace' }),
         list: async () => [
@@ -48,6 +50,15 @@ describe('Output Pane page API contract', () => {
         url: (path) => `/api/page/read/${path}`,
       },
       ui: {
+        components: {
+          version: 1,
+          fileCard: () => {
+            throw new Error('DOM unavailable in this type fixture');
+          },
+          fileAdder: () => {
+            throw new Error('DOM unavailable in this type fixture');
+          },
+        },
         theme: darkTheme,
         onTheme: (cb) => {
           cb(darkTheme);

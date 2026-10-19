@@ -66,6 +66,7 @@ export * from './app-subject.js';
 export * from './project-types/brief-route.js';
 export * from './project-types/script-tool-args.js';
 export * from './project-types/page-api-shim.js';
+export * from './project-types/page-components.js';
 export * from './json-schema/validate.js';
 export * from './roles/index.js';
 export * from './deliverable.js';

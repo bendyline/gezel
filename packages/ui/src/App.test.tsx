@@ -7,6 +7,7 @@ import {
   OUTPUT_PANE_MAXIMIZED_EVENT,
   OUTPUT_PANE_RESTORE_EVENT,
 } from './components/output-pane-maximize.js';
+import { consumeOpenFile } from './components/pending-open-file.js';
 import { createMockApi } from './test-utils/mockApi.js';
 
 vi.mock('./api.js', () => ({
@@ -521,11 +522,93 @@ describe('Night Shift header status', () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: false, source: null });
+    vi.mocked(api.getNightShiftReview).mockResolvedValue({
+      windowKey: '2026-06-20',
+      windowStart: '2026-06-20T22:00:00Z',
+      windowEnd: '2026-06-21T06:00:00Z',
+      tasksCompleted: [],
+      reports: [],
+      diffpacks: [],
+    });
     vi.mocked(api.getNightShiftTasks).mockResolvedValue({
       background: [],
       active: [],
       upcoming: [],
     });
+  });
+
+  it.each(['active', 'upcoming'] as const)(
+    'opens the exact latest report from an %s task row and closes the menu',
+    async (group) => {
+      const user = userEvent.setup();
+      const latestReport = { projectId: 'p1', path: 'reports/review-2026-06-20.md' };
+      vi.mocked(api.getNightShiftTasks).mockResolvedValue({
+        background: [],
+        active: [],
+        upcoming: [],
+        [group]: [{ ref: 'p1/7', title: 'Nightly review', projectName: 'Molen', latestReport }],
+      });
+      render(<App />);
+      await user.click(
+        await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
+      );
+      const row = await screen.findByRole('menuitem', { name: /Nightly review/ });
+      row.focus();
+      await user.keyboard('{Enter}');
+
+      expect(consumeOpenFile('p1')).toEqual({ ...latestReport, source: 'artifacts' });
+      expect(await screen.findByText('project:p1')).toBeVisible();
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    },
+  );
+
+  it('opens task details when a queued task has no report yet', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getNightShiftTasks).mockResolvedValue({
+      background: [],
+      active: [],
+      upcoming: [{ ref: 'p1/8', title: 'Nightly fixes', projectName: 'Molen' }],
+    });
+    render(<App />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
+    );
+    await user.click(await screen.findByRole('menuitem', { name: /Nightly fixes/ }));
+
+    expect(JSON.parse(window.localStorage.getItem('gezel:nav:selection') ?? '{}')).toMatchObject({
+      kind: 'task',
+      ref: 'p1/8',
+    });
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('opens a completed report itself instead of just its project', async () => {
+    const user = userEvent.setup();
+    const report = { projectId: 'p2', path: 'reports/night.md' };
+    vi.mocked(api.getNightShiftReview).mockResolvedValue({
+      windowKey: '2026-06-20',
+      windowStart: '2026-06-20T22:00:00Z',
+      windowEnd: '2026-06-21T06:00:00Z',
+      tasksCompleted: [],
+      diffpacks: [],
+      reports: [
+        {
+          ...report,
+          projectName: 'Workshop',
+          title: 'Night report',
+          actionCounts: { total: 0, suggested: 0, fired: 0, applied: 0, dismissed: 0 },
+        },
+      ],
+    });
+    render(<App />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
+    );
+    await user.click(await screen.findByRole('menuitem', { name: /Night report/ }));
+
+    expect(consumeOpenFile('p2')).toEqual({ ...report, source: 'artifacts' });
+    expect(await screen.findByText('project:p2')).toBeVisible();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
   it('replaces the mode glyph with moving Night Shift while preserving the mode selection', async () => {

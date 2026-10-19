@@ -27,6 +27,7 @@ import { KNOWLEDGE_EMBEDDING_PROFILE_IDS, KnowledgeIdSchema } from './knowledge.
 import { BehaviorEntrySchema, ModelStyleSchema } from './model-profile.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { ObservationTableManifestSchema } from './observations.js';
+import { PageImportTargetSchema } from './page-imports.js';
 import { PreviewSourceSchema } from './preview.js';
 import { ProjectTabVisibilitySchema } from './project.js';
 import { ScriptOutputPredicateSchema } from './script.js';
@@ -1044,6 +1045,8 @@ export const ProjectTypePreviewReadSchema = z.object({
 export type ProjectTypePreviewRead = z.infer<typeof ProjectTypePreviewReadSchema>;
 
 export const ProjectTypePagesSchema = z.object({
+  /** Explicit upload destinations. Never bypass the project's workspace write policy. */
+  imports: z.array(PageImportTargetSchema).max(16).optional(),
   /** Entry HTML relative to the version's `pages/` folder, e.g. `dashboard/index.html`. */
   entry: z.string(),
   /**

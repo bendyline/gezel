@@ -60,6 +60,7 @@
       "native/runtime/**/build/**",
       "native/helpers/service-host/.build/**",
       ".codex-tmp/**",
+      ".tmp/**",
       ".tmp-qualla-batch/**",
       "tmp/**",
       "temp/**",

@@ -1,5 +1,10 @@
 # Gezel — Design Guidelines
 
+Building a project-type page? Use the
+[Gezel app page style guide](handboek/technical/gezel-app-page-style-guide.md)
+for the exact injected typography contract and page-owned CSS. This document
+describes the wider brand, not a stylesheet that the page inherits.
+
 A distillation of the design language used in the Gezel desktop app, written so
 it can be applied to the marketing site, decks, social cards, and any other
 surface carrying the brand.

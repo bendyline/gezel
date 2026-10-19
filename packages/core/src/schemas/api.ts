@@ -6219,6 +6219,8 @@ export const NightShiftTaskBriefSchema = z.object({
   stepName: z.string().optional(),
   /** True when this task's next handoff is held by the cloud quota reserve. */
   quotaHeld: z.boolean().optional(),
+  /** Latest existing report belonging to this task, including an archived nightly review. */
+  latestReport: z.object({ projectId: z.string(), path: z.string() }).optional(),
 });
 export type NightShiftTaskBrief = z.infer<typeof NightShiftTaskBriefSchema>;
 

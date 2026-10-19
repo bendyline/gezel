@@ -139,7 +139,6 @@ describe('TaskManager — project lifecycle (stable ⇄ active)', () => {
   });
 });
 
-
 it('closing a child uses its live parent without traversing completed project history', async () => {
   const parent = await seedTask('Long-running collection');
   for (const method of ['status', 'step']) {
@@ -155,7 +154,9 @@ it('closing a child uses its live parent without traversing completed project hi
       else await tasks.completeStep('website', child.num, child.activeStepId!);
       expect(history).not.toHaveBeenCalled();
       expect(await statusOf('website')).not.toBe('stable');
-    } finally { history.mockRestore(); }
+    } finally {
+      history.mockRestore();
+    }
   }
 });
 
@@ -167,7 +168,9 @@ it('a settled or foreign parent does not hide the end of project work', async ()
   expect(await statusOf('website')).toBe('stable');
   await store.createProject({ name: 'Elsewhere' });
   const foreign = await tasks.create('elsewhere', {
-    title: 'Other project work', assignee: { kind: 'user' }, steps: [{ name: 'Work' }],
+    title: 'Other project work',
+    assignee: { kind: 'user' },
+    steps: [{ name: 'Work' }],
   });
   await store.updateProject('website', { status: 'active' });
   await tasks.maybeStabilizeProject('website', foreign.ref);

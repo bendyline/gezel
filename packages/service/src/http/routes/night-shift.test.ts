@@ -1,4 +1,4 @@
-import type { Task } from '@bendyline/gezel';
+import type { NightShiftTasksResponse, Task } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
 import type { ServiceContext } from '../context.js';
 import { nightShiftRoutes } from './night-shift.js';
@@ -30,6 +30,36 @@ function task(ref: string, title: string): Task {
 }
 
 describe('night-shift task status', () => {
+  it('links each queued task to its own existing report, never another task in the project', async () => {
+    const pending = [task('p1/1', 'Security review'), task('p1/2', 'Docs review')];
+    pending[0]!.craftbook.steps[0]!.advanceWhen = { file: 'reports/security.md', artifact: true };
+    pending[1]!.craftbook.steps[0]!.advanceWhen = { file: 'reports/docs.md', artifact: true };
+    const ctx = {
+      nightShift: {
+        isActive: () => false,
+        listPendingTasks: async () => pending,
+        quotaHeldTaskRefs: () => new Set<string>(),
+      },
+      chat: { activeTaskRefs: () => new Set<string>() },
+      taskRunner: {
+        workSnapshot: () => ({ queuedTaskRefs: pending.map((t) => t.ref), dispatchedTaskRefs: [] }),
+      },
+      store: {
+        getProject: async () => ({ id: 'p1', name: 'Project One' }),
+        statProjectArtifactPath: async (_projectId: string, path: string) =>
+          path === 'reports/security.md'
+            ? { kind: 'file', mtime: '2026-06-21T02:00:00.000Z' }
+            : { kind: 'missing' },
+      },
+    } as unknown as ServiceContext;
+
+    const response = await nightShiftRoutes(ctx).request('/tasks');
+    expect(response.status).toBe(200);
+    const { upcoming } = (await response.json()) as NightShiftTasksResponse;
+    expect(upcoming[0]?.latestReport).toEqual({ projectId: 'p1', path: 'reports/security.md' });
+    expect(upcoming[1]).not.toHaveProperty('latestReport');
+  });
+
   it('reports only real runner work and includes live indexing', async () => {
     const ctx = {
       nightShift: {

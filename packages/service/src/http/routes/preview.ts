@@ -422,6 +422,7 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
         // page still gets identity + reads, matching v0's degradation.
         const pageTools = await resolvePageTools(ctx.catalog, project).catch(() => null);
         const pageApi: PageApiBootstrap = {
+          imports: true,
           api: 1,
           projectId,
           source: 'type',

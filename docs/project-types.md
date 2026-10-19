@@ -1,5 +1,10 @@
 # Custom project types
 
+**Building an app?** Start with [Building Gezel apps](building-gezel-apps.md),
+which links the public authoring guide, page APIs, style guide, and tested
+examples. This document is the composition and runtime reference; proposals
+and historical rollout notes are not additional authoring requirements.
+
 A **project type** outfits a project for a particular kind of work: it bundles a gezel
 role template, craftbooks, sandboxed scripts and script-backed tools, suggested toolsets,
 seed data, scheduled work, and an Output page (dashboard) into one installable,
@@ -18,9 +23,9 @@ App** names the complete customer-facing experience and its `.gezapp` package. A
 **connected app** remains the separate external-process surface (`/v1/apps`,
 `@bendyline/gezel-app-sdk`).
 
-This document is the spec. It records the manifest shape, instantiation semantics, the
+This document is the reference. It records the manifest shape, instantiation semantics, the
 copy-vs-reference rule, the security posture for sharing, and the `.gezapp` package
-format. Implementation lands in phases (see the end of this doc).
+format. The rollout history and remaining exclusions are recorded at the end.
 
 ## Relationship to what exists today
 
@@ -133,7 +138,7 @@ Version manifest (composition payload):
       "turn": { "say": "moveThought" } },              // a successful call ends the turn; `say` is the reply
     { "name": "get_board", "…": "…", "state": true },   // a person's message is answered from its output
   ],
-  "pages": { "entry": "dashboard/index.html",         // pinned Output page (new primitive)
+  "pages": { "entry": "dashboard/index.html", "api": 1, // pinned Output page
              "reads": [ { "source": "workspace", "path": "…" } ],
              "tools": ["user_move"] },                 // page-ONLY invokable subset of tools[]
   "schedules": [{ "cron": "0 18 * * *", "craftbook": "daily-lesson", "consent": "ask" }],
@@ -224,8 +229,10 @@ creation from the gallery, or applying a type to an existing project):
   drift is detectable.
 - Content that stays **type-owned** is **referenced** from the installed type version:
   pages, tool declarations, detection profile. Fixes ship by installing a new version.
-- Upgrades reuse the gezel-template refresh pattern (provenance `id` + `version`):
-  reinstall unmodified copies, flag modified ones for the user to reconcile.
+- Provenance supports upgrades, but preservation is not uniform across all
+  copied content: seed and craftbook drift checks exist, while script upgrades
+  can overwrite a local edit. There is no general three-way reconciliation or
+  app-data migration framework. See the public authoring guide's lifecycle gaps.
 
 ## New primitives
 
@@ -610,9 +617,10 @@ install fails while a required dependency is unavailable. Import does not execut
 content. Version 1 packages explicitly declare `signature.status: "unsigned"`; their
 hashes provide integrity, not publisher authenticity.
 
-The companion feature is the **exporter**: "package this project as a custom project
-type" — a Meester-assisted lift of a project's accumulated craftbooks, scripts, pages,
-and gezel into a multi-item bundle. Users grow a project organically, then share it.
+The current **exporter** packages the applied type's catalog definition and its
+referenced items. It does not automatically capture a project's edited scripts,
+new craftbooks, or redesigned page. Turning those local customizations into a
+reviewed new app version remains a separate authoring step.
 
 ### Source folders (the authoring format)
 
@@ -744,3 +752,12 @@ plus both gezapp manifests, rendered live from core Zod). The CLI surface is
   `clue-store`; two clue-givers with preset characters (the Woordsmid and the
   Puzzelaar, from their templates' `frontmatter.character`) alternate, each turn one
   `give_clue` call the script checks against the board.
+### File import destinations
+
+`pages.imports` declares named workspace destinations such as
+`{ "id": "library", "source": "workspace", "path": ".", "accept": [".png", ".mp4"] }`.
+Pages pass the id to `gezel.data.importFiles` or the shared file adder; they cannot
+choose another destination at call time. Optional `maxFileBytes` can lower the
+host's 256 MiB ceiling. This grant does not bypass workspace write policy or
+imply a `pages.reads` scope. See [shared file components and imports](handboek/technical/gezel-page-apis.md#file-cards-and-adding-files)
+for live-host support, standalone demos, cleanup and tests.

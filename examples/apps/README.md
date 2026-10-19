@@ -20,3 +20,8 @@ gezel app apply my-app        # inside the folder that becomes the project
 ```
 
 The full guide is the Handboek article [Building AI Apps inside Gezel](../../docs/handboek/technical/building-ai-apps-inside-gezel.md); the format reference is [docs/project-types.md](../../docs/project-types.md).
+
+For a page, also read [Using the Gezel page APIs](../../docs/handboek/technical/gezel-page-apis.md)
+and the [app page style guide](../../docs/handboek/technical/gezel-app-page-style-guide.md).
+Older samples illustrate composition and state; use the current style/API guides
+for shared typography, host modes, and standalone-demo requirements.

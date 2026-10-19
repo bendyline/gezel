@@ -1,5 +1,37 @@
 # Output Pane API (`window.gezel`)
 
+## Shared file UI and scoped imports
+
+`gezel.ui.components.fileCard(mount, options)` and `fileAdder(mount, options)`
+mount framework-independent custom elements with shared fonts, theme handling
+and shadow-root styles. Handles support `update` / `destroy`; file adders also
+support `refresh` to recheck permissions. See the
+[component examples and standalone setup](handboek/technical/gezel-page-apis.md#file-cards-and-adding-files)
+and [styling contract](handboek/technical/gezel-app-page-style-guide.md#shared-file-components).
+
+`data.importTargets()` returns declared `pages.imports` destinations and current
+writability. `data.importFiles(files, { target, signal?, onProgress? })` copies
+browser Files into one named workspace destination and returns per-file
+success/failure results with actual saved paths. This is separate from
+`pages.reads`; arbitrary path writes, overwrites, and external-folder consent
+bypasses are unavailable. Unsupported hosts reject explicitly; standalone demos
+use the same components with an in-memory adapter.
+
+Desktop transport: `import-targets`, `import-file` (structured-cloned Blob),
+`import-cancel`, and `import-result` v1 bridge messages. The parent binds the
+current project and authenticates `GET/POST /api/projects/:id/page-imports`.
+POST uses `?target=<id>&name=<child-name>` and a raw byte body. Neither the daemon
+token nor host source paths reach the page. Uploads are streamed, bounded,
+reauthorized at commit and atomically published through the Store. The endpoint
+requires first-party auth and is absent from app-serve visitor and phone runtime
+surfaces. Limits and result types are detailed in the authoring guide above.
+
+For the authoring path, start with [Building Gezel apps](building-gezel-apps.md)
+and [Using the Gezel page APIs](handboek/technical/gezel-page-apis.md). The
+[app page style guide](handboek/technical/gezel-app-page-style-guide.md) separates
+injected typography from the styles each page owns. This document is the method
+and transport reference.
+
 The supported JavaScript surface for interactive project-type pages — the
 HTML dashboards pinned into a project's Output pane (`manifest.pages`).
 Version 1. The daemon injects the API into every served type page; pages
@@ -24,6 +56,7 @@ script runs:
 gezel.page      // { api: 1, projectId, source: 'type', entry, typeName, params, mode }
 gezel.tools     // { list(), invoke(tool, input?) }
 gezel.data      // { read(path, opts?), list(path, opts?), watch(path, cb, opts?), url(path, opts?), open(path, opts?) }
+gezel.tables    // { list(), describe(name), query(sql, opts?) }
 gezel.ui        // { theme: { mode: 'light'|'dark' }, onTheme(cb) }
 gezel.refresh() // ask the host to re-mint + reload this page
 ```
@@ -41,7 +74,7 @@ Typed definitions ship as `@bendyline/gezel-sdk/page`. Feature-detect with
 | `demo` | Raw file, no server | page-supplied handlers | page-supplied handlers |
 
 `demo` is not produced by the injected shim — a raw double-clicked file has
-no server. Gilde ships a canonical ~40-line stub (`authoring/page-demo-stub.js`)
+no server. Gilde ships a canonical stub (`authoring/page-demo-stub.js`)
 that pages paste verbatim; it defines `window.gezel` only when the real one
 is absent, wiring `tools.invoke`/`data.read` to page-supplied demo handlers.
 Pages keep their demo *logic*; all transport switching dies.

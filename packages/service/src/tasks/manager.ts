@@ -470,7 +470,10 @@ export class TaskManager {
       // finding it by walking newest-first history can take minutes.
       if (knownParentRef) {
         const parent = await this.getByRef(knownParentRef);
-        if (parent?.projectId === projectId && ['active', 'draft'].includes(taskEffectiveStatus(parent)))
+        if (
+          parent?.projectId === projectId &&
+          ['active', 'draft'].includes(taskEffectiveStatus(parent))
+        )
           return;
       }
       // Task completion is frequent in bulk workflows. Stop at the first

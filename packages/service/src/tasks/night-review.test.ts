@@ -12,6 +12,7 @@ import { ReportActionManager } from '../report-actions/report-action-manager.js'
 import { TaskManager } from './manager.js';
 import {
   buildNightShiftReview,
+  latestNightShiftTaskReport,
   nightShiftReportAttachmentPath,
   normalizeNightShiftReportAttachment,
 } from './night-review.js';
@@ -52,6 +53,36 @@ afterEach(async () => {
 });
 
 describe('buildNightShiftReview', () => {
+  it('opens the most recent oversight report after it has been dated aside for the next run', async () => {
+    await store.ensureDefaultProject();
+    const task = await tasks.create('default', {
+      title: 'Night-shift oversight: project review',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Review', advanceWhen: { file: 'night-shift-report.md', artifact: true } }],
+    });
+    const older = 'night-shift-report-2026-06-18.md';
+    const latest = 'night-shift-report-2026-06-20.md';
+    for (const [path, at] of [
+      [older, '2026-06-19T02:00:00Z'],
+      [latest, IN_WINDOW],
+    ] as const) {
+      await store.writeProjectArtifact('default', path, '# Nightly report');
+      await utimes(join(home, 'projects/default/artifacts', path), new Date(at), new Date(at));
+    }
+    await store.writeProjectArtifact('default', 'unrelated-report.md', '# Unrelated, newer report');
+
+    expect(await latestNightShiftTaskReport(store, task)).toEqual({
+      projectId: 'default',
+      path: latest,
+    });
+
+    await store.writeProjectArtifact('default', 'night-shift-report.md', '# Current report');
+    expect(await latestNightShiftTaskReport(store, task)).toEqual({
+      projectId: 'default',
+      path: 'night-shift-report.md',
+    });
+  });
+
   it('qualifies a Default-project report as a project artifact attachment', () => {
     expect(
       nightShiftReportAttachmentPath({

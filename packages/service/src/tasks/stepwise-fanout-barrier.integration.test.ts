@@ -122,7 +122,6 @@ describe('create-time fanout under stepwise mode', () => {
   }, 60_000);
 });
 
-
 it('ordinary batch children settle without scanning siblings or redispatching their owner', async () => {
   const { store, tasks } = svc.context;
   const project = await store.createProject({ name: 'Media batch throughput' });

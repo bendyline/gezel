@@ -5860,6 +5860,36 @@ export class GezelClient {
     return res.json() as Promise<{ ok: true; path: string }>;
   }
 
+  listProjectPageImportTargets(projectId: string): Promise<PageImportAvailability[]> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(projectId)}/page-imports`);
+  }
+
+  async importProjectPageFile(
+    projectId: string,
+    target: string,
+    name: string,
+    file: Blob,
+    signal?: AbortSignal,
+  ): Promise<PageImportedFile> {
+    const query = new URLSearchParams({ target, name });
+    const res = await this.fetchImpl(
+      `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/page-imports?${query}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'content-type': 'application/octet-stream',
+        },
+        body: file,
+        signal,
+      },
+    );
+    const result = (await res.json()) as PageImportedFile & { error?: string };
+    if (!res.ok)
+      throw Object.assign(new Error(result.error ?? 'Import failed.'), { status: res.status });
+    return result;
+  }
+
   copyArtifactToWorkspace(
     id: string,
     body: CopyArtifactToWorkspaceRequest,
@@ -8212,3 +8242,4 @@ function toolsetsQueryString(scope: ToolsetsScope): string {
     return `scope=project&project=${encodeURIComponent(scope.projectId)}`;
   return `scope=gezel&gezel=${encodeURIComponent(scope.gezelId)}`;
 }
+import type { PageImportAvailability, PageImportedFile } from '@bendyline/gezel';

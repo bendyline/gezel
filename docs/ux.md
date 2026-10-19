@@ -1,5 +1,10 @@
 # Gezel UX
 
+For HTML pages shipped by project types, also read the
+[app page style guide](handboek/technical/gezel-app-page-style-guide.md). It
+documents the injected font defaults and the CSS each sandboxed page must own;
+the shell's variables and classes do not automatically cross into those pages.
+
 This document captures the UX philosophy of Gezel — what the app should feel
 like, how that translates into concrete patterns, and how new surfaces should
 be built so they land inside the same world as the rest. It complements

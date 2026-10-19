@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 /**
  * `@bendyline/gezel-sdk/page` — the Output Pane API v1 typing contract for
  * `window.gezel`, the object every served project-type page codes against.
@@ -5,7 +6,8 @@
  * The runtime object is injected server-side by the daemon
  * (`packages/service/src/http/routes/page-api-shim.ts` splices the shim
  * into every `text/html` response served from the `type` preview source),
- * so pages never bundle an implementation — this module exists so gilde
+ * so hosted pages need no bundled implementation (standalone demos copy the
+ * canonical component asset) — this module exists so gilde
  * page authors and the host UI relay share one contract. The postMessage
  * envelope behind it is validated by the zod schemas in
  * `@bendyline/gezel` (`packages/core/src/schemas/page-bridge.ts`); the
@@ -178,11 +180,25 @@ export interface GezelPageWatchOptions {
 }
 
 /**
- * Read-only access to the project's files, scoped to what the page's
+ * Read access to the project's files, scoped to what the page's
  * manifest declared readable. Out-of-scope paths reject with code
- * `'not-allowed'`; writes happen through {@link GezelPageToolsApi} only.
+ * `'not-allowed'`. Uploads use separately declared import destinations;
+ * other writes happen through {@link GezelPageToolsApi}.
  */
 export interface GezelPageDataApi {
+  /** Explicit manifest destinations and current workspace write availability. */
+  importTargets(): Promise<GezelImportTarget[]>;
+  /** Copies selected files, keeping both on name conflicts. Results include partial failures.
+   * Embedded desktop only; demo adapters keep files in memory. Maximum 100 files/batch,
+   * 256 MiB/file (destinations can lower this). Cancellation does not undo completed files. */
+  importFiles(
+    files: Iterable<File>,
+    opts: {
+      target: string;
+      signal?: AbortSignal;
+      onProgress?: (progress: { completed: number; total: number; name: string }) => void;
+    },
+  ): Promise<GezelImportResult[]>;
   /**
    * Open a declared file in Gezel's existing file viewer (CSV table,
    * spreadsheet, document, etc.). Checks the manifest's read scope and
@@ -273,6 +289,7 @@ export interface GezelPageTheme {
 
 /** Host UI state the page can mirror. */
 export interface GezelPageUiApi {
+  components: GezelPageComponents;
   /** The current theme. Live — reflects the host's latest pushed value. */
   theme: GezelPageTheme;
   /**
@@ -281,6 +298,54 @@ export interface GezelPageUiApi {
    * @returns An unsubscribe function.
    */
   onTheme(cb: (t: GezelPageTheme) => void): () => void;
+}
+
+export interface GezelPageFile {
+  source?: GezelPageReadSource;
+  path: string;
+  name?: string;
+  size?: number;
+  mtime?: number;
+}
+export interface GezelImportTarget {
+  id: string;
+  source: 'workspace';
+  path: string;
+  accept?: string[];
+  maxFileBytes?: number;
+  writable: boolean;
+  reason?: string;
+}
+export type GezelImportResult =
+  | { ok: true; name: string; file: GezelPageFile }
+  | { ok: false; name: string; error: string };
+export interface GezelFileCardOptions {
+  file: GezelPageFile;
+  variant?: 'tile' | 'row';
+  thumbnail?: string | false;
+  onActivate?: (file: GezelPageFile) => void | Promise<void>;
+}
+export interface GezelFileAdderOptions {
+  target: string;
+  onAdded?: (files: GezelPageFile[]) => void | Promise<void>;
+}
+export interface GezelPageComponent<T> {
+  element: HTMLElement;
+  update(options: Partial<T>): void;
+  destroy(): void;
+}
+export interface GezelPageComponents {
+  version: 1;
+  fileCard(
+    target: string | HTMLElement,
+    options: GezelFileCardOptions,
+  ): GezelPageComponent<GezelFileCardOptions>;
+  fileAdder(
+    target: string | HTMLElement,
+    options: GezelFileAdderOptions,
+  ): GezelPageComponent<GezelFileAdderOptions> & { refresh(): Promise<void> };
+  /** Present only in standalone demo mode; releases imported object URLs on reset. */
+  demo?: { files(): GezelPageFile[]; reset(): void };
 }
 
 /**

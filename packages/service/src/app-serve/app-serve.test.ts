@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AppServeSiteStatus, AppServeStartResponse, ScriptRun } from '@bendyline/gezel';
@@ -241,6 +241,55 @@ describe('visitor flow', () => {
 
     const data = await visitor('/data/workspace/not/declared.json');
     expect(data.status).toBe(403);
+  });
+
+  it('streams large media and HEAD only after visitor and file-scope authorization', async () => {
+    const get = svc.context.catalog.get.bind(svc.context.catalog);
+    const scoped = vi.spyOn(svc.context.catalog, 'get').mockImplementation(async (...args) => {
+      const item = await get(...args);
+      if (item?.manifest.kind !== 'project-type') return item;
+      return {
+        ...item,
+        manifest: {
+          ...item.manifest,
+          pages: {
+            ...item.manifest.pages!,
+            reads: [{ source: 'workspace' as const, path: 'clip.webm', subtree: false }],
+          },
+        },
+      };
+    });
+    try {
+      const root = await svc.context.store.projectWorkspaceDir(projectId);
+      const bytes = Buffer.alloc(3 * 1024 * 1024, 42);
+      await writeFile(join(root, 'clip.webm'), bytes);
+      expect((await visitor('/data/workspace/clip.webm', { noCookie: true })).status).toBe(401);
+      const media = await visitor('/data/workspace/clip.webm', {
+        headers: { range: 'bytes=10-29' },
+      });
+      expect(media.status).toBe(206);
+      expect(media.headers.get('content-range')).toBe(`bytes 10-29/${bytes.length}`);
+      expect(Buffer.from(await media.arrayBuffer())).toEqual(bytes.subarray(10, 30));
+      const head = await visitor('/data/workspace/clip.webm', { method: 'HEAD' });
+      expect(head.status).toBe(200);
+      expect(head.headers.get('content-length')).toBe(String(bytes.length));
+      expect(await head.text()).toBe('');
+      expect(
+        (await visitor('/data/workspace/clip.webm', { method: 'HEAD', noCookie: true })).status,
+      ).toBe(401);
+      expect(
+        (await visitor('/data/workspace/private.webm', { headers: { range: 'bytes=0-9' } })).status,
+      ).toBe(403);
+      expect((await visitor('/data/workspace/private.webm', { method: 'HEAD' })).status).toBe(403);
+      const read = await visitor('/app/api/read', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ op: 'read', source: 'workspace', path: 'clip.webm' }),
+      });
+      expect(read.status).toBe(413);
+    } finally {
+      scoped.mockRestore();
+    }
   });
 
   it('rejects unknown routes via the allowlist', async () => {

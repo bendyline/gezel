@@ -44,6 +44,7 @@ import { projectRecipientKey, writeChatThreadSelection } from './components/chat
 import { ENGAGEMENT_MODES } from './components/engagement-modes.js';
 import { FirstRunProvider } from './components/first-run-context.js';
 import { HeaderDensityContext, useHeaderDensityMeasurement } from './components/header-density.js';
+import { navigateToTab, openProjectFileActions, runNavActions } from './components/nav-actions.js';
 import { NIGHT_SHIFT_MOON_PATH, NightShiftMoonGlyph } from './components/night-shift-glyph.js';
 import {
   OUTPUT_PANE_MAXIMIZED_EVENT,
@@ -1237,14 +1238,15 @@ function TaskSpeedMenu({
               <div className="app-nightshift-group">
                 <div className="app-nightshift-task-heading">{reviewHeading}</div>
                 {review.reports.map((r) => (
-                  <button
+                  <DropdownMenu.Item
                     key={`${r.projectId}:${r.path}`}
-                    type="button"
                     className="app-nightshift-task app-nightshift-report"
-                    onClick={() =>
-                      window.dispatchEvent(
-                        new CustomEvent('gezel:open-tab', {
-                          detail: { kind: 'project', id: r.projectId },
+                    onSelect={() =>
+                      runNavActions(
+                        openProjectFileActions({
+                          projectId: r.projectId,
+                          path: r.path,
+                          source: 'artifacts',
                         }),
                       )
                     }
@@ -1259,27 +1261,20 @@ function TaskSpeedMenu({
                           : ''}
                       </span>
                     </span>
-                  </button>
+                  </DropdownMenu.Item>
                 ))}
                 {review.tasksCompleted.slice(0, 5).map((t) => (
-                  <button
+                  <DropdownMenu.Item
                     key={t.ref}
-                    type="button"
                     className="app-nightshift-task app-nightshift-report"
-                    onClick={() =>
-                      window.dispatchEvent(
-                        new CustomEvent('gezel:open-tab', {
-                          detail: { kind: 'task', ref: t.ref },
-                        }),
-                      )
-                    }
+                    onSelect={() => navigateToTab({ kind: 'task', ref: t.ref })}
                   >
                     <span className="app-nightshift-task-dot is-done" aria-hidden="true" />
                     <span className="app-nightshift-task-text">
                       <span className="app-nightshift-task-title">{t.title}</span>
                       <span className="app-nightshift-task-meta">{t.projectName}</span>
                     </span>
-                  </button>
+                  </DropdownMenu.Item>
                 ))}
               </div>
             )}
@@ -1311,7 +1306,22 @@ function NightShiftTaskRow({
 }) {
   const base = task.stepName ? `${task.projectName} · ${task.stepName}` : task.projectName;
   const meta = task.quotaHeld ? `${base} · waiting for quota` : base;
-  return <NightShiftWorkRow title={task.title} meta={meta} active={active} />;
+  const report = task.latestReport;
+  return (
+    <DropdownMenu.Item
+      className="app-nightshift-report"
+      title={report ? 'Open latest report' : 'View task details'}
+      onSelect={() => {
+        if (report) {
+          runNavActions(openProjectFileActions({ ...report, source: 'artifacts' }));
+        } else {
+          navigateToTab({ kind: 'task', ref: task.ref });
+        }
+      }}
+    >
+      <NightShiftWorkRow title={task.title} meta={meta} active={active} />
+    </DropdownMenu.Item>
+  );
 }
 
 interface NightShiftSummary {

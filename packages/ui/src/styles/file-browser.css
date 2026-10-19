@@ -963,7 +963,8 @@ button.danger {
   cursor: pointer;
 }
 
-.app-nightshift-report:hover .app-nightshift-task-title {
+.app-nightshift-report:hover .app-nightshift-task-title,
+.app-nightshift-report[data-highlighted] .app-nightshift-task-title {
   color: var(--accent-text);
 }
 

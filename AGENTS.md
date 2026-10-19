@@ -8,6 +8,30 @@ This document is for anyone (human or AI) extending gezel. It captures the menta
 
 For UX philosophy and the visual direction the app is heading — read [docs/ux.md](docs/ux.md) before touching UI.
 
+## Building Gezel apps
+
+For requests to build a custom app, dashboard, project experience, crew, or
+craftbook-backed workflow, start with [Building Gezel apps](docs/building-gezel-apps.md).
+Read its public [authoring guide](docs/handboek/technical/building-ai-apps-inside-gezel.md),
+[page API guide](docs/handboek/technical/gezel-page-apis.md), and
+[page style guide](docs/handboek/technical/gezel-app-page-style-guide.md) before implementing.
+
+A Gezel app is composed by a project type; its page, roles, craftbooks, scripts,
+and project defaults are optional parts chosen for the user flow. Public catalog
+content belongs in sibling `gilde`; private apps use a `gezapp.json` + `items/`
+source folder. Extend the shared runtime only when a reusable capability is missing.
+Pages use `window.gezel` ([API reference](docs/output-pane-api.md)), inherit the
+host's fonts, and own their remaining CSS. Do not copy font assets or build a
+private filesystem/query bridge. Specify data ownership and permissions first,
+validate against the current schemas, and test a real host flow as well as the demo.
+Report the catalog release/install step separately from source-code completion.
+Reuse `gezel.ui.components.fileCard` / `fileAdder` for file interfaces; declare
+`pages.imports` for scoped uploads and keep `pages.reads` explicit. Never bypass
+workspace write policy. Ship the canonical component asset for standalone demos,
+reset in-memory imports, and test the live relay as well as demo controls.
+These linked guides are the maintained authoring contract; proposals in the
+[platform review](docs/gezel-app-platform-review.md) are not available APIs.
+
 ## The soul of gezel
 
 Three ideas are load-bearing:
