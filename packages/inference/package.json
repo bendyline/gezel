@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-inference",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Gezel's on-device inference runtime: native engines, local model management, embeddings, knowledge search, and OpenAI-compatible routes.",
   "license": "MIT",
   "keywords": [
