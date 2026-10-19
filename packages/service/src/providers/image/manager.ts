@@ -123,6 +123,7 @@ export class ImageProviderManager {
           baseUrl: remote.baseUrl,
           token: remote.token,
           fetch,
+          defaultModelId: async () => (await this.store.readConfig()).defaultImageModel?.['sd-cpp'],
         }),
       };
       this.remoteCache.set(remote.remoteId, cached);

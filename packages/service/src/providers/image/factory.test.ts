@@ -187,6 +187,12 @@ describe('buildSdServerArgs — aux role mapping', () => {
     expect(ckpt).not.toContain('--diffusion-model');
   });
 
+  it('turns on EasyCache step reuse for MOSS only', () => {
+    const moss = buildSdServerArgs({ ...modelWithAux([]), id: 'moss-image-sft-q4' }, 1234);
+    expect(moss.join(' ')).toContain('--cache-mode easycache');
+    expect(buildSdServerArgs(modelWithAux([]), 1234)).not.toContain('--cache-mode');
+  });
+
   it('emits --vae / --clip_l / --t5xxl for FLUX.1-style aux files (regression)', () => {
     const args = buildSdServerArgs(
       modelWithAux([
@@ -269,7 +275,7 @@ describe('buildSdServerArgs — aux role mapping', () => {
       8765,
     );
     expect(args[args.indexOf('--llm') + 1]).toBe('/tmp/iris/qwen3-vl.gguf');
-    expect(args[args.indexOf('--steps') + 1]).toBe('100');
+    expect(args[args.indexOf('--steps') + 1]).toBe('50');
     expect(args).toContain('--diffusion-fa');
     expect(args[args.indexOf('--tensor-type-rules') + 1]).toBe('^model\\.diffusion_model\\.=bf16');
     expect(args).not.toContain('--type');

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
-import { resolveRecommendedImageSteps } from './image-gen.js';
+import { fitImageSizeToRange, resolveRecommendedImageSteps } from './image-gen.js';
 
 let svc: RunningService;
 let baseUrl: string;
@@ -103,6 +103,28 @@ describe('POST /api/image-gen/generate', () => {
     expect(bytes.equals(artifactBytes)).toBe(true);
   });
 
+  it("holds an agent's steps at the model's recommendation and fits the size to its range", async () => {
+    const capped = await api('POST', '/api/image-gen/generate', {
+      prompt: 'a tiny compass',
+      model: 'sd-turbo',
+      steps: 50,
+      capStepsAtRecommended: true,
+      width: 128,
+      height: 128,
+    });
+    expect(capped.status).toBe(200);
+    const meta = ((await capped.json()) as { meta: { steps: number; widthPx: number } }).meta;
+    expect(meta.steps).toBe(4);
+    expect(meta.widthPx).toBe(256);
+
+    const uncapped = await api('POST', '/api/image-gen/generate', {
+      prompt: 'a tiny compass',
+      model: 'sd-turbo',
+      steps: 8,
+    });
+    expect(((await uncapped.json()) as { meta: { steps: number } }).meta.steps).toBe(8);
+  });
+
   it('rejects an empty prompt with 400', async () => {
     const res = await api('POST', '/api/image-gen/generate', { prompt: '' });
     expect(res.status).toBe(400);
@@ -185,6 +207,36 @@ describe('resolveRecommendedImageSteps', () => {
     expect(steps).toBe(4);
   });
 
+  it("uses the provider's configured default, not the first installed model", async () => {
+    const steps = await resolveRecommendedImageSteps(
+      {
+        catalog: {
+          get: async (_kind: string, id: string) => ({
+            manifest: {
+              kind: 'image-model',
+              id,
+              recommendedSteps: id === 'moss-image-sft-q4' ? 50 : 28,
+            },
+          }),
+        },
+      } as never,
+      {
+        listInstalledModels: async () => [
+          {
+            id: 'animagine-xl-4',
+            name: 'Animagine XL 4.0',
+            approxSizeBytes: 1,
+            installedAt: new Date().toISOString(),
+          },
+        ],
+        resolveDefaultModelId: async () => 'moss-image-sft-q4',
+      },
+      undefined,
+    );
+
+    expect(steps).toBe(50);
+  });
+
   it('uses the explicitly requested model without listing installed models', async () => {
     const steps = await resolveRecommendedImageSteps(
       {
@@ -203,6 +255,48 @@ describe('resolveRecommendedImageSteps', () => {
     );
 
     expect(steps).toBe(30);
+  });
+});
+
+describe('fitImageSizeToRange', () => {
+  const ming = { widthRange: { min: 1024, max: 2048 }, heightRange: { min: 1024, max: 2048 } };
+  const sd15 = { widthRange: { min: 256, max: 768 }, heightRange: { min: 256, max: 768 } };
+
+  it('leaves a size inside the range alone', () => {
+    expect(fitImageSizeToRange({ width: 1200, height: 1100 }, ming)).toEqual({
+      width: 1200,
+      height: 1100,
+    });
+    expect(fitImageSizeToRange({}, ming)).toEqual({});
+  });
+
+  it("scales a size below the model's minimum up, keeping the aspect ratio", () => {
+    expect(fitImageSizeToRange({ width: 768, height: 768 }, ming)).toEqual({
+      width: 1024,
+      height: 1024,
+    });
+    expect(fitImageSizeToRange({ width: 768, height: 448 }, ming)).toEqual({
+      width: 1760,
+      height: 1024,
+    });
+  });
+
+  it('scales a size above the maximum down', () => {
+    expect(fitImageSizeToRange({ width: 1024, height: 1024 }, sd15)).toEqual({
+      width: 768,
+      height: 768,
+    });
+  });
+
+  it('clamps a lone dimension', () => {
+    expect(fitImageSizeToRange({ width: 512 }, ming)).toEqual({ width: 1024 });
+  });
+
+  it('clamps each side when no common scale fits an extreme aspect ratio', () => {
+    expect(fitImageSizeToRange({ width: 3000, height: 300 }, sd15)).toEqual({
+      width: 768,
+      height: 256,
+    });
   });
 });
 

@@ -136,6 +136,7 @@ export function sdServerRequirement(input: {
     vaeDecode: profile.vaeDecode,
     // The rule names the diffusion weights, which are the main file.
     bf16Components: profile.bf16TensorPattern ? [sdCppMainComponent(input.weightsKind)] : [],
+    megapixels: profile.defaultSidePx ** 2 / 1024 ** 2,
   });
 }
 

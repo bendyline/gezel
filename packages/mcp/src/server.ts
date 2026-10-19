@@ -10520,6 +10520,7 @@ server.tool(
           : {}),
         ...(imageArgs.strength !== undefined ? { strength: imageArgs.strength } : {}),
         ...(saveAs ? { saveAs } : {}),
+        capStepsAtRecommended: true,
         projectId,
         // Pin agent + session so the cloud-image cost-confirmation
         // gate can synthesize a question scoped to the right

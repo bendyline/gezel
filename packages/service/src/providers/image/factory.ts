@@ -350,6 +350,7 @@ export function buildSdServerArgs(model: ResolvedInstalledModel, port: number): 
     args.push('--tensor-type-rules', `${profile.bf16TensorPattern}=bf16`);
   }
   if (profile.vaeDecode === 'tiled') args.push('--vae-tiling');
+  if (profile.stepCache) args.push('--cache-mode', profile.stepCache);
   args.push('--listen-ip', '127.0.0.1', '--listen-port', String(port));
   return args;
 }

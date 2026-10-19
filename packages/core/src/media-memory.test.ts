@@ -152,6 +152,22 @@ describe('imageMemoryRequirement', () => {
     expect(untiled.bytes - tiled.bytes).toBe(IMAGE_UNTILED_VAE_BYTES);
   });
 
+  it('charges working memory by output size, and caps the share of a large model', () => {
+    const working = (weightsGiB: number, megapixels?: number) =>
+      imageMemoryRequirement({
+        files: [{ component: 'diffusion_model', sizeBytes: weightsGiB * GiB, format: 'gguf' }],
+        pool: 'unified',
+        vaeDecode: 'tiled',
+        ...(megapixels !== undefined ? { megapixels } : {}),
+      }).bytes /
+        GiB -
+      weightsGiB;
+    expect(working(5)).toBeCloseTo(3.5, 5);
+    expect(working(5, 0.25)).toBeCloseTo(2.375, 5);
+    // Ming-sized: the share stops at its cap instead of growing to 4.6 GiB.
+    expect(working(46)).toBeCloseTo(4.5, 5);
+  });
+
   it('converts only the named component to bf16', () => {
     const req = imageMemoryRequirement({
       files: [

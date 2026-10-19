@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   ImageGenerationRequestSchema,
   type ImageInputSource,
+  type ImageModelManifest,
   type Question,
   type QuestionIntent,
   createLogger,
@@ -145,14 +146,21 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
     }
 
     try {
+      const manifest = await resolveImageModelManifest(ctx, provider, req.model);
+      const recommended = manifest?.recommendedSteps;
       const resolvedSteps =
-        req.steps ?? (await resolveRecommendedImageSteps(ctx, provider, req.model));
+        req.steps !== undefined && req.capStepsAtRecommended && recommended
+          ? Math.min(req.steps, recommended)
+          : (req.steps ?? recommended);
+      const size = manifest
+        ? fitImageSizeToRange({ width: req.width, height: req.height }, manifest)
+        : { width: req.width, height: req.height };
       const out = await provider.generate({
         prompt: req.prompt,
         ...(req.negativePrompt ? { negativePrompt: req.negativePrompt } : {}),
         ...(req.model ? { model: req.model } : {}),
-        ...(req.width ? { width: req.width } : {}),
-        ...(req.height ? { height: req.height } : {}),
+        ...(size.width ? { width: size.width } : {}),
+        ...(size.height ? { height: size.height } : {}),
         ...(resolvedSteps ? { steps: resolvedSteps } : {}),
         ...(req.seed !== undefined ? { seed: req.seed } : {}),
         ...(resolvedInputs && resolvedInputs.length > 0 ? { inputImages: resolvedInputs } : {}),
@@ -374,14 +382,73 @@ function providerLabel(provider: string): string {
 
 export async function resolveRecommendedImageSteps(
   ctx: Pick<ServiceContext, 'catalog'>,
-  provider: Pick<ImageProvider, 'listInstalledModels'>,
+  provider: Pick<ImageProvider, 'listInstalledModels' | 'resolveDefaultModelId'>,
   requestedModel: string | undefined,
 ): Promise<number | undefined> {
-  const modelId = requestedModel ?? (await provider.listInstalledModels().catch(() => []))[0]?.id;
+  return (await resolveImageModelManifest(ctx, provider, requestedModel))?.recommendedSteps;
+}
+
+/** The catalog entry of the model this request will run, when the catalog lists it. */
+export async function resolveImageModelManifest(
+  ctx: Pick<ServiceContext, 'catalog'>,
+  provider: Pick<ImageProvider, 'listInstalledModels' | 'resolveDefaultModelId'>,
+  requestedModel: string | undefined,
+): Promise<ImageModelManifest | undefined> {
+  // The steps must be the ones of the model the provider will run. The first
+  // installed model is not that model once a default is configured: a MOSS
+  // default would render at Animagine's 28 steps whenever Animagine sorted
+  // first.
+  const modelId =
+    requestedModel ??
+    (provider.resolveDefaultModelId
+      ? await provider.resolveDefaultModelId().catch(() => undefined)
+      : (await provider.listInstalledModels().catch(() => []))[0]?.id);
   if (!modelId) return undefined;
   const detail = await ctx.catalog.get('image-model', modelId).catch(() => null);
   if (!detail || detail.manifest.kind !== 'image-model') return undefined;
-  return detail.manifest.recommendedSteps;
+  return detail.manifest;
+}
+
+const IMAGE_SIZE_MULTIPLE = 16;
+
+/**
+ * Bring a requested size inside the model's declared range, keeping its
+ * aspect ratio where both sides can fit. Every family the engine runs takes
+ * multiples of 16. A size already inside the range is returned unchanged, so
+ * only requests the model does not support are touched: Ming's minimum is
+ * 1024, and the agent tool's 768 cap once handed it 768x768.
+ */
+export function fitImageSizeToRange(
+  size: { width?: number | undefined; height?: number | undefined },
+  range: Pick<ImageModelManifest, 'widthRange' | 'heightRange'>,
+): { width?: number; height?: number } {
+  const { width, height } = size;
+  const wr = range.widthRange;
+  const hr = range.heightRange;
+  const inside = (v: number | undefined, r: typeof wr) =>
+    v === undefined || !r || (v >= r.min && v <= r.max);
+  if (inside(width, wr) && inside(height, hr)) {
+    return { ...(width ? { width } : {}), ...(height ? { height } : {}) };
+  }
+  const clamp = (v: number, r: typeof wr) => {
+    const q = Math.max(
+      IMAGE_SIZE_MULTIPLE,
+      Math.round(v / IMAGE_SIZE_MULTIPLE) * IMAGE_SIZE_MULTIPLE,
+    );
+    return r ? Math.min(r.max, Math.max(r.min, q)) : q;
+  };
+  if (width === undefined || height === undefined) {
+    return {
+      ...(width !== undefined ? { width: clamp(width, wr) } : {}),
+      ...(height !== undefined ? { height: clamp(height, hr) } : {}),
+    };
+  }
+  let scale = 1;
+  if (wr && width < wr.min) scale = Math.max(scale, wr.min / width);
+  if (hr && height < hr.min) scale = Math.max(scale, hr.min / height);
+  if (wr && width * scale > wr.max) scale = Math.min(scale, wr.max / width);
+  if (hr && height * scale > hr.max) scale = Math.min(scale, hr.max / height);
+  return { width: clamp(width * scale, wr), height: clamp(height * scale, hr) };
 }
 
 function truncate(s: string, n: number): string {

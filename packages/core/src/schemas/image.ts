@@ -95,6 +95,13 @@ export const ImageGenerationRequestSchema = z.object({
    * caller is asking for a specific name.
    */
   saveAs: z.string().optional(),
+  /**
+   * Hold `steps` at or below the model's recommended count. The agent tool
+   * sets this: steps above the recommendation buy a 4-step turbo model
+   * nothing but a longer wait, while a fixed cap below it ruins a model that
+   * needs 30 to 100 steps.
+   */
+  capStepsAtRecommended: z.boolean().optional(),
 });
 export type ImageGenerationRequest = z.infer<typeof ImageGenerationRequestSchema>;
 

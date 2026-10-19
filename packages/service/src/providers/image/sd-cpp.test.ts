@@ -69,7 +69,7 @@ describe('StableDiffusionCppProvider.generate', () => {
   it.each([
     { model: 'ming-image-0.1-design-bf16', steps: 12, cfg: 1 },
     { model: 'moss-image-sft-q4', steps: 50, cfg: 3 },
-    { model: 'iris-3b-f32', steps: 100, cfg: 3 },
+    { model: 'iris-3b-f32', steps: 50, cfg: 3 },
   ])('uses $model sampling defaults and preserves PNG bytes', async ({ model, steps, cfg }) => {
     const png = Buffer.concat([PNG_SIGNATURE, Buffer.from('rgba-payload')]);
     const requests: Record<string, unknown>[] = [];
@@ -99,6 +99,46 @@ describe('StableDiffusionCppProvider.generate', () => {
       width: 768,
       height: 1024,
     });
+  });
+
+  it.each([
+    { model: 'sdxl-base-1.0', side: 1024 },
+    { model: 'sdxl-lightning-4step', side: 1024 },
+    { model: 'flux-2-klein-4b-q4', side: 1024 },
+    { model: 'krea-2-turbo-q4', side: 1024 },
+    { model: 'animagine-xl-4', side: 1024 },
+    { model: 'sdxl-turbo', side: 512 },
+    { model: 'sd-turbo', side: 512 },
+    { model: 'sd-1.5', side: 512 },
+  ])(
+    'renders $model at its training size, $side px, when no size is asked',
+    async ({ model, side }) => {
+      const requests: Record<string, unknown>[] = [];
+      const provider = new StableDiffusionCppProvider({
+        baseUrl: 'http://fake:9081',
+        modelsRoot,
+        fetchImpl: async (_url, init) => {
+          requests.push(JSON.parse(String(init?.body)));
+          return Response.json({ images: [PNG_SIGNATURE.toString('base64')] });
+        },
+      });
+      await provider.generate({ prompt: 'a lighthouse', model });
+      expect(requests[0]).toMatchObject({ width: side, height: side });
+    },
+  );
+
+  it('renders Animagine at its model-card guidance, CFG 5', async () => {
+    const requests: Record<string, unknown>[] = [];
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: async (_url, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return Response.json({ images: [PNG_SIGNATURE.toString('base64')] });
+      },
+    });
+    await provider.generate({ prompt: '1girl, silver hair', model: 'animagine-xl-4' });
+    expect(requests[0]).toMatchObject({ cfg_scale: 5, width: 1024, height: 1024 });
   });
 
   it('routes input images to img2img for a model that supports it', async () => {
@@ -836,6 +876,19 @@ describe('parseSamplingProgress', () => {
       totalSteps: 20,
       secondsPerStep: 18.04,
     });
+  });
+
+  it('reads the iterations-per-second form fast steps print', () => {
+    expect(parseSamplingProgress('[sd-server]   |====>        | 2/25 - 8.00it/s\x1b[K')).toEqual({
+      step: 2,
+      totalSteps: 25,
+      secondsPerStep: 0.125,
+    });
+  });
+
+  it('ignores the weight-loading bar', () => {
+    expect(parseSamplingProgress('  |#######        | 195/298 - 4.32GB/s')).toBeNull();
+    expect(parseSamplingProgress('  |##             | 8/196 - 2.93MB/s')).toBeNull();
   });
 
   it('returns null for unrelated log noise', () => {

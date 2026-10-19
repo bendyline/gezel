@@ -297,14 +297,27 @@ export function videoMemoryRequirement(input: VideoMemoryInput): MediaMemoryRequ
 // ─ Image (stable-diffusion.cpp sd-server) ───────────────────────────
 
 /**
- * Working memory over the weights: the diffusion compute buffer plus a tiled
- * VAE decode. Not yet measured per model (docs/media-model-memory.md); sized
- * from sd.cpp's own buffer reports, which run 1-3 GB at 1024px.
+ * Working memory over the weights, measured for every catalog model at its
+ * default size on a DGX Spark (image bench, 2026-10-19;
+ * docs/media-model-memory.md). It follows the output size far more than the
+ * model: about 2 GiB at 512px and 3 GiB at 1024px for most models, nearly all
+ * of it the CUDA context, cuBLAS workspace and process rather than the
+ * engine's own compute buffers, which stay under a gigabyte. A share of the
+ * weights covers the larger graphs of larger models, capped so a 46 GiB model
+ * is not charged 4.6 GiB for it: uncapped, Ming was priced 5.7 GiB over its
+ * measured peak.
  */
 export const IMAGE_WORKING_FRACTION = 0.1;
+export const IMAGE_WORKING_FRACTION_CAP_BYTES = 1.5 * GIB;
 export const IMAGE_WORKING_FIXED_BYTES = 1.5 * GIB;
-/** An untiled VAE decode at 1024px: the single buffer `--vae-tiling` exists to split. */
-export const IMAGE_UNTILED_VAE_BYTES = 6 * GIB;
+/** Per megapixel of output (1024x1024). */
+export const IMAGE_WORKING_PER_MEGAPIXEL_BYTES = 1.5 * GIB;
+/**
+ * An untiled VAE decode, per megapixel: the buffer `--vae-tiling` exists to
+ * split. SDXL's VAE measured 4 GiB over its tiled decode at 1024px; Krea 2's
+ * Qwen-Image VAE less.
+ */
+export const IMAGE_UNTILED_VAE_BYTES = 4 * GIB;
 
 /**
  * stable-diffusion.cpp keeps float32, float16 and bfloat16 weights as
@@ -327,14 +340,21 @@ export interface ImageMemoryInput {
   vaeDecode: 'tiled' | 'untiled' | 'none';
   /** Components the launch converts to bfloat16 (`--tensor-type-rules`). */
   bf16Components?: readonly string[];
+  /** Output size the price is for, in megapixels of 1024x1024. Default 1. */
+  megapixels?: number;
 }
 
 export function imageMemoryRequirement(input: ImageMemoryInput): MediaMemoryRequirement {
-  const untiled = input.vaeDecode === 'untiled' ? IMAGE_UNTILED_VAE_BYTES : 0;
+  const megapixels = input.megapixels ?? 1;
+  const untiled = input.vaeDecode === 'untiled' ? IMAGE_UNTILED_VAE_BYTES * megapixels : 0;
   return requirementFrom(
     summarizeWeights(input.files, imageFloatLoadBytes(input.bf16Components)),
     input.pool,
-    (weightBytes) => weightBytes * IMAGE_WORKING_FRACTION + IMAGE_WORKING_FIXED_BYTES + untiled,
+    (weightBytes) =>
+      Math.min(weightBytes * IMAGE_WORKING_FRACTION, IMAGE_WORKING_FRACTION_CAP_BYTES) +
+      IMAGE_WORKING_FIXED_BYTES +
+      IMAGE_WORKING_PER_MEGAPIXEL_BYTES * megapixels +
+      untiled,
     false,
   );
 }

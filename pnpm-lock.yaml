@@ -30,6 +30,7 @@ overrides:
   sharp: workspace:0.35.3
   tar: 7.5.21
   ws: 8.21.1
+  '@bendyline/gilde': link:../gilde
 
 patchedDependencies:
   app-builder-lib@26.15.3: 5357766ccf0569ff700b84ec2a83fb4cc98d719c26d79969d913fb0321b0da05
@@ -237,6 +238,9 @@ importers:
       '@bendyline/gezel':
         specifier: workspace:*
         version: link:../core
+      '@bendyline/gilde':
+        specifier: link:../../../gilde
+        version: link:../../../gilde
       tar:
         specifier: 7.5.21
         version: 7.5.21
@@ -247,9 +251,6 @@ importers:
       '@bendyline/gezel-knowledge':
         specifier: workspace:*
         version: link:../knowledge
-      '@bendyline/gilde':
-        specifier: 0.2.3
-        version: 0.2.3
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
@@ -791,8 +792,8 @@ importers:
         specifier: workspace:*
         version: link:../sdk
       '@bendyline/gilde':
-        specifier: 0.2.3
-        version: 0.2.3
+        specifier: link:../../../gilde
+        version: link:../../../gilde
       '@bendyline/squisq':
         specifier: 2.12.3
         version: 2.12.3(supports-color@8.1.1)
@@ -1197,9 +1198,6 @@ packages:
   '@bendyline/docblocks@2.7.3':
     resolution: {integrity: sha512-SuANiLctTcodrxZ9lgdxu+kfM5wK/0pWKwupUz014yfZr5SR1hvb+ElCNazKJ/VTsPTAEmaVMZv6Sb0y3jJTKg==}
     engines: {node: ^24.18.0 || >=26.0.0}
-
-  '@bendyline/gilde@0.2.3':
-    resolution: {integrity: sha512-AEAL9kywTrXn8BCndO7YJ6BCQ14j6UHhayaapo3spB6RNANgl+kpbMMS1PLxWLXtGhQqxq5V2+2O2SfbVUDhEQ==}
 
   '@bendyline/squisq-calc@2.11.2':
     resolution: {integrity: sha512-5F73g6ZyO5/QtOgv4JTw2cycBGr26mVU11ajXf4+Ynz9uGh/mxdBfY3yXLKceUUUqRYiIfDd+X28FqkQXge3Ag==}
@@ -8653,8 +8651,6 @@ snapshots:
       zod: 3.25.76
     transitivePeerDependencies:
       - supports-color
-
-  '@bendyline/gilde@0.2.3': {}
 
   '@bendyline/squisq-calc@2.11.2(@ironcalc/wasm@0.8.4)':
     optionalDependencies:

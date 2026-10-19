@@ -173,6 +173,13 @@ export interface ImageProvider {
   generate(input: ImageGenerationInput): Promise<ImageGenerationOutput>;
   listInstalledModels(): Promise<InstalledImageModelInfo[]>;
   /**
+   * The model a generate that names none will use. Callers that look up
+   * per-model defaults (the route's recommended steps) must ask this rather
+   * than guess, or the defaults of one model are applied to another.
+   * Providers without a local default omit it.
+   */
+  resolveDefaultModelId?(): Promise<string | undefined>;
+  /**
    * Stream the install of one catalog model. When `signal` is supplied
    * and aborts mid-download, providers should leave any `.partial` file
    * in place so a follow-up pull resumes via Range requests — disconnect
