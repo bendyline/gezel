@@ -41,6 +41,7 @@ import { PromptToolCookbookFull } from './prompt-tool-cookbook-full.js';
 import { PromptVerboseReasoningHintChannel } from './prompt-verbose-reasoning-hint-channel.js';
 import { PromptVerboseReasoningHintThink } from './prompt-verbose-reasoning-hint-think.js';
 import { PromptWorkOptionsPrelude } from './prompt-work-options-prelude.js';
+import { PromptWorkOptionsQuestionNote } from './prompt-work-options-question-note.js';
 import {
   PromptWorkOptionsNoGuidance,
   PromptWorkOptionsOrdinal,
@@ -75,6 +76,7 @@ export const ALL_BEHAVIORS: ReadonlyArray<Behavior<unknown>> = [
   PromptMeesterBuildPrelude as Behavior<unknown>,
   PromptMeesterCraftbookPrelude as Behavior<unknown>,
   PromptWorkOptionsPrelude as Behavior<unknown>,
+  PromptWorkOptionsQuestionNote as Behavior<unknown>,
   PromptWorkOptionsNoGuidance as Behavior<unknown>,
   PromptWorkOptionsOrdinal as Behavior<unknown>,
   PromptWorkOptionsTopOne as Behavior<unknown>,

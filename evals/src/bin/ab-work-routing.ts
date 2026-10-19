@@ -41,6 +41,7 @@ import {
  *   baseline              today's routing surface
  *   work-routing          tools.work-routing (suggest_work → start_work)
  *   work-options-prelude  + prompt.work-options-prelude (the list arrives with the message)
+ *   question-note         + prompt.work-options-question-note (questions get "answer it yourself")
  *
  * Layout: `<root>/<model>/<arm>/<scenario>/<trial>/`; the read-out lands in
  * `ab-summary.md` / `ab-summary.json` beside them.
@@ -50,6 +51,12 @@ export const WORK_ROUTING_ARMS = {
   baseline: [],
   'work-routing': ['tools.work-routing'],
   'work-options-prelude': ['tools.work-routing', 'prompt.work-options-prelude'],
+  // The prelude plus a one-line "answer it yourself" note on question turns.
+  'question-note': [
+    'tools.work-routing',
+    'prompt.work-options-prelude',
+    'prompt.work-options-question-note',
+  ],
   // Stage-2 ablations of the pre-ranked note; pair them with
   // `--reference work-options-prelude`.
   'no-guidance': [

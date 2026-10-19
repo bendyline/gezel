@@ -66,6 +66,23 @@ export function renderWorkOptionsPrelude(
   return `(System note for this turn: suggest_work already ran for this message.\n${renderSuggestWorkResult(result, opts)})`;
 }
 
+/**
+ * The one-line note for a turn that reads as a question (the
+ * `prompt.work-options-question-note` arm). The options prelude stays silent
+ * there, and Qwen 3.5 9B then handed questions to a researcher with
+ * `message_gezel` instead of answering: 6 of 28 with the routing tools, 4 of
+ * 29 without (2026-10-18). Null for anything that is not a question.
+ */
+export function renderQuestionNote(result: SuggestWorkResult): string | null {
+  if (!result.question) return null;
+  const self = result.guidance.find((g) => g.kind === 'self');
+  const tools =
+    self?.kind === 'self' && self.tools.length > 0
+      ? ` If you need facts first, use ${self.tools.join(', ')}, then answer here.`
+      : '';
+  return `(System note for this turn: this reads as a question. Answer it yourself in chat; do not start work or pass it to another gezel.${tools})`;
+}
+
 const MAX_DESCRIPTION_CHARS = 140;
 
 /**
