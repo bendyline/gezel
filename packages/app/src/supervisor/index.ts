@@ -70,7 +70,7 @@ import {
   type UtilityServiceStartOptions,
   defaultUtilityEntryPath,
   prewarmUtilityService,
-  serviceHostFromEnv,
+  resolveServiceHost,
   startUtilityHostedService,
 } from './utility-host.js';
 
@@ -1182,7 +1182,8 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
   // forced embed (dev, --gezel-home) or a store build. Elsewhere embedded is
   // a fallback, and a speculative child would usually be killed unused.
   const serviceModuleUrl =
-    serviceHostFromEnv() === 'utility' && (opts.forceEmbedded || opts.storeProfile)
+    resolveServiceHost({ packaged: opts.packaged }) === 'utility' &&
+    (opts.forceEmbedded || opts.storeProfile)
       ? prewarmServiceModuleUrl(opts)
       : undefined;
   if (serviceModuleUrl !== undefined) {
@@ -2970,7 +2971,7 @@ async function startEmbeddedRaw(
       process.env.GEZEL_DISABLE_MACHINE_ENGINE !== '1' &&
       (opts.packaged || process.env.GEZEL_USE_MACHINE_ENGINE === '1'),
   };
-  if ((hosting.host ?? serviceHostFromEnv()) === 'utility') {
+  if ((hosting.host ?? resolveServiceHost({ packaged: opts.packaged })) === 'utility') {
     const prewarmed = utilityPrewarm;
     utilityPrewarm = null;
     const hosted = await startUtilityHostedService({

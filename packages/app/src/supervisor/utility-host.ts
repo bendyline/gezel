@@ -101,9 +101,25 @@ export interface PrewarmedUtilityService {
 
 export type ServiceHost = 'in-process' | 'utility';
 
-/** `GEZEL_SERVICE_HOST=utility` opts into the utility-process host; anything else keeps the in-process service. */
-export function serviceHostFromEnv(env: NodeJS.ProcessEnv = process.env): ServiceHost {
-  return env.GEZEL_SERVICE_HOST === 'utility' ? 'utility' : 'in-process';
+/**
+ * Where an embedded service runs. `GEZEL_SERVICE_HOST` (`utility` or
+ * `in-process`) decides when set. Otherwise a development launch uses the
+ * utility process, so it gets daily use, and packaged builds stay in-process
+ * until the store lanes have validated the helper under their sandboxes. The
+ * Electron E2E suite also stays in-process: it should exercise what ships.
+ */
+export function resolveServiceHost(opts: {
+  packaged: boolean;
+  env?: NodeJS.ProcessEnv;
+  /** Utility processes exist only under Electron; plain Node (tests) stays in-process. */
+  electron?: boolean;
+}): ServiceHost {
+  const env = opts.env ?? process.env;
+  if (env.GEZEL_SERVICE_HOST === 'utility' || env.GEZEL_SERVICE_HOST === 'in-process') {
+    return env.GEZEL_SERVICE_HOST;
+  }
+  const electron = opts.electron ?? Boolean(process.versions.electron);
+  return electron && !opts.packaged && env.GEZEL_E2E !== '1' ? 'utility' : 'in-process';
 }
 
 /**

@@ -9,7 +9,7 @@ import {
   type UtilityParentMessage,
   defaultUtilityEntryPath,
   prewarmUtilityService,
-  serviceHostFromEnv,
+  resolveServiceHost,
   startUtilityHostedService,
 } from './utility-host.js';
 
@@ -71,11 +71,50 @@ const base = {
   env: { GEZEL_HOME: '/home/.gezel', ELECTRON_RUN_AS_NODE: '1' },
 };
 
-describe('serviceHostFromEnv', () => {
-  it('opts in only on the exact value', () => {
-    expect(serviceHostFromEnv({ GEZEL_SERVICE_HOST: 'utility' })).toBe('utility');
-    expect(serviceHostFromEnv({ GEZEL_SERVICE_HOST: '1' })).toBe('in-process');
-    expect(serviceHostFromEnv({})).toBe('in-process');
+describe('resolveServiceHost', () => {
+  it('uses the utility process for a development launch by default', () => {
+    expect(resolveServiceHost({ packaged: false, env: {}, electron: true })).toBe('utility');
+  });
+
+  it('keeps packaged builds, the E2E suite, and plain Node in-process by default', () => {
+    expect(resolveServiceHost({ packaged: true, env: {}, electron: true })).toBe('in-process');
+    expect(resolveServiceHost({ packaged: false, env: { GEZEL_E2E: '1' }, electron: true })).toBe(
+      'in-process',
+    );
+    expect(resolveServiceHost({ packaged: false, env: {}, electron: false })).toBe('in-process');
+  });
+
+  it('lets GEZEL_SERVICE_HOST decide either way', () => {
+    expect(
+      resolveServiceHost({
+        packaged: false,
+        env: { GEZEL_SERVICE_HOST: 'in-process' },
+        electron: true,
+      }),
+    ).toBe('in-process');
+    expect(
+      resolveServiceHost({
+        packaged: true,
+        env: { GEZEL_SERVICE_HOST: 'utility' },
+        electron: true,
+      }),
+    ).toBe('utility');
+    expect(
+      resolveServiceHost({
+        packaged: false,
+        env: { GEZEL_E2E: '1', GEZEL_SERVICE_HOST: 'utility' },
+        electron: true,
+      }),
+    ).toBe('utility');
+  });
+
+  it('ignores a value it does not know', () => {
+    expect(
+      resolveServiceHost({ packaged: true, env: { GEZEL_SERVICE_HOST: '1' }, electron: true }),
+    ).toBe('in-process');
+    expect(
+      resolveServiceHost({ packaged: false, env: { GEZEL_SERVICE_HOST: '1' }, electron: true }),
+    ).toBe('utility');
   });
 });
 
