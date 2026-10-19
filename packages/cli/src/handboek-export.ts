@@ -32,6 +32,7 @@ import {
 } from './handboek-site-catalog.js';
 import { BASELINE_CSS } from './handboek-site-css.js';
 import { SCORECARD_FILTER_JS } from './handboek-site-scorecard.js';
+import { writePageDemo, writePageDemoAssets } from './page-demo-export.js';
 
 /**
  * Render the Handboek as a static HTML site — the same documentation
@@ -159,6 +160,8 @@ export async function runHandboekExport(
   const site = await buildSiteCatalog(catalog);
   const sitePages = new Map<string, SiteCatalogPage>(site.pages.map((p) => [p.entry.id, p]));
   const demos = new Map(site.demos.map((d) => [`project-type/${d.projectTypeId}`, d]));
+  const demoAssetsDirectory = join(out, '_gezel-demo');
+  const demoAssets = site.demos.length ? await writePageDemoAssets(demoAssetsDirectory) : [];
   const areas = toc.areas
     .map((a) => ({
       ...a,
@@ -230,11 +233,15 @@ export async function runHandboekExport(
     await mkdir(dir, { recursive: true });
     if (art) await writeFile(join(dir, CRAFTBOOK_ART_FILE), art);
     if (demo) {
-      for (const file of demo.files) {
-        const target = join(dir, 'demo', ...file.path.split('/'));
-        await mkdir(join(target, '..'), { recursive: true });
-        await writeFile(target, file.bytes);
-      }
+      await writePageDemo(
+        join(dir, 'demo'),
+        demo.files,
+        { imports: demo.imports },
+        {
+          directory: demoAssetsDirectory,
+          assets: demoAssets,
+        },
+      );
     }
 
     const headline = resolveOgHeadline(entry, headlines);

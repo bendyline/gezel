@@ -1743,6 +1743,15 @@ appCmd
   });
 
 appCmd
+  .command('demo <folder>')
+  .description('Export an offline page demo with shared components and fonts (no daemon needed)')
+  .requiredOption('-o, --out <directory>', 'new output directory for the generated demo')
+  .action(async (folder: string, opts: { out: string }) => {
+    const { runAppDemo } = await loadAppAuthorCommand();
+    await runAppDemo(folder, opts);
+  });
+
+appCmd
   .command('schemas')
   .description('The JSON Schemas an AI App author codes against, rendered from this build')
   .option('--out <dir>', 'write the schema files into a directory')

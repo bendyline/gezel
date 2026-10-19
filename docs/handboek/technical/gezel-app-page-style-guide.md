@@ -32,13 +32,13 @@ The host supplies typography and an opt-in component kit, not a complete CSS fra
 
 ## Shared file components
 
-Prefer `gezel.ui.components.fileCard` for a file tile/row and `fileAdder` for uploads. The [page API guide](gezel-page-apis.md#file-cards-and-adding-files) covers mounting, lifecycle, permission declarations and standalone demo setup. Both ship their own shadow-root styles, native buttons, focus outlines, status messages and light/dark colors. They inherit the host's `--font-ui`; standalone demos use system fonts. A page's broad `button` or `img` rules do not change component internals.
+Prefer `gezel.ui.components.fileCard` for a file tile/row and `fileAdder` for uploads. The [page API guide](gezel-page-apis.md#file-cards-and-adding-files) covers mounting, lifecycle, permission declarations and standalone demo setup. Both ship their own shadow-root styles, native buttons, focus outlines, status messages and light/dark colors. They inherit the host's `--font-ui`; published and exported demos receive the same fonts. A page's broad `button` or `img` rules do not change component internals.
 
 Pages own the containing grid/list, spacing and breakpoints. Choose `variant: 'tile'` or `'row'`; use `update` when changing layouts. Keep filenames as the primary label and preserve keyboard access. The adder states where files go and what was saved, so do not hide that destination or status.
 
 Optional CSS custom properties on the mount element are `--gezel-component-text`, `--gezel-component-surface`, `--gezel-component-border`, `--gezel-component-muted`, and `--gezel-component-accent`. Set both light and dark values if overriding them, and maintain contrast and a visible focus outline. No copied fonts, CSS framework, external icon service or per-app component fork is needed.
 
-Ordinary workspace/artifact HTML keeps its own styles. A standalone catalog demo also has no typography injection; use local system fallbacks there without bundling a second font set:
+Ordinary workspace/artifact HTML keeps its own styles. The demo publisher/exporter supplies the same typography and components. Keep system fallbacks for degraded rendering without bundling a second font set into app source:
 
 ```css
 body {
@@ -110,7 +110,7 @@ button, input, select, textarea {
 a { font-family: var(--font-ui, system-ui, sans-serif); color: var(--page-accent); }
 ```
 
-After the real API or canonical demo stub has initialized `gezel`, apply and subscribe to its theme:
+After the real API or shared demo bootstrap has initialized `gezel`, apply and subscribe to its theme:
 
 ```js
 const applyTheme = ({ mode }) => { document.documentElement.dataset.theme = mode; };
@@ -138,6 +138,6 @@ Show distinct loading, empty, permission-denied, unavailable, partial-result, an
 
 Use `textContent` for filenames and data labels. Read files through `gezel.data`, use `data.url()` for media, and use declared tools for writes. Debounce refreshes, limit rendered cards, unsubscribe watches, stop players on close, and ignore stale asynchronous results after a selection changes.
 
-Standalone samples must be clearly labeled and deterministic. Keep their mutations in memory and provide Reset demo. Never substitute sample data after a live permission or query failure. The [page API guide](gezel-page-apis.md) describes the host modes and the canonical Gilde demo stub.
+Standalone samples must be clearly labeled and deterministic. Keep their mutations in memory and provide Reset demo. Never substitute sample data after a live permission or query failure. The [page API guide](gezel-page-apis.md) describes the host modes and the shared demo bootstrap.
 
 Before delivery, inspect light and dark mode, keyboard focus, long labels, an empty folder, a failed operation, narrow layouts, and the real host flow. Structural validation cannot establish that a page is usable.

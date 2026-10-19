@@ -2,9 +2,11 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { GezelClient } from '@bendyline/gezel-client';
 import { type Page, expect, test } from '@playwright/test';
 import { scaffoldGezappSource } from '../../cli/src/app-scaffold.js';
+import { writePageDemo, writePageDemoAssets } from '../../cli/src/page-demo-export.js';
 import { buildPageApiShim } from '../../core/src/project-types/page-api-shim.js';
 import { projectPageTypographyStyle } from '../../service/src/project-type/page-typography.js';
 
@@ -83,15 +85,25 @@ function readReply(records: Records) {
   return { content: JSON.stringify(records), encoding: 'utf8' };
 }
 
-test('raw-file demo adds, resets, escapes names, and needs no network or fonts', async ({
+test('exported offline demo adds, resets, escapes names, and inherits bundled fonts without network', async ({
   page,
 }) => {
   const requests: string[] = [];
   page.on('request', (request) => requests.push(request.url()));
-  await page.route('**/*', (route) => route.abort());
+  await page.route(/^https?:/, (route) => route.abort());
   const name = 'Notes & <script>throw new Error("injected")</script>';
-  // A raw file has no injected host; setContent exercises the same no-server path.
-  await page.setContent(generatedPage(name));
+  const dir = test.info().outputPath('offline');
+  const shared = {
+    directory: join(dir, '_gezel-demo'),
+    assets: await writePageDemoAssets(join(dir, '_gezel-demo')),
+  };
+  await writePageDemo(
+    dir,
+    [{ path: 'index.html', bytes: Buffer.from(generatedPage(name)) }],
+    {},
+    shared,
+  );
+  await page.goto(pathToFileURL(join(dir, 'index.html')).href);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(name);
   await expect(page.getByLabel('Demo')).toBeVisible();
   await expect(page.locator('#records li')).toHaveCount(2);
@@ -106,7 +118,10 @@ test('raw-file demo adds, resets, escapes names, and needs no network or fonts',
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  expect(requests).toEqual([]);
+  expect(requests.every((url) => url.startsWith('file:') || url.startsWith('data:'))).toBe(true);
+  expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toContain(
+    'Hanken Grotesk',
+  );
 });
 
 test('inherits real host fonts, follows theme changes, and cleans up subscriptions', async ({

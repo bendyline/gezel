@@ -62,7 +62,7 @@ Use the existing file rendition instead of rebuilding a spreadsheet or CSV edito
 For a simple live list, wire a change signal to a fresh read, and treat filenames as text:
 
 ```js
-// Live-host example; initialize the demo stub first if this page also runs raw.
+// Use the injected host or initialize sample handlers through the demo bootstrap.
 const list = document.querySelector('#files');
 const status = document.querySelector('#status');
 let revision = 0;
@@ -95,12 +95,12 @@ Do not treat the watch callback's `{path, etag}` as the file's contents. Avoid o
 | Desktop Output pane (`embedded`) | Scoped access | Declared actions | `data.open()` | When the query engine and index are available |
 | Authenticated mini-site (`serve`) | Scoped access | Declared actions | Unavailable | When the query engine and index are available |
 | Capability preview tab (`browser`) | Capability-scoped fallback | Unavailable | Unavailable | Unavailable |
-| Raw standalone page (`demo`) | Authored samples | In-memory demo handlers | Explain the live action | Authored sample summaries, if provided |
+| Published or exported standalone demo (`demo`) | Authored samples | In-memory demo handlers | Explain the live action | Authored sample summaries, if provided |
 | Phone's embedded snapshot | Scoped bridge with bounded media relay | Supported portable actions | Host-dependent; handle unavailable | Unavailable in the portable runtime |
 
 Feature-detect optional additions such as `gezel.tables` and `gezel.data.open`, then handle their errors. Mode alone is not a promise that every engine or codec is installed. Avoid offering an action that cannot work in the current mode.
 
-For Gilde's standalone demos, embed [the canonical demo stub](https://github.com/bendyline/gilde/blob/main/authoring/page-demo-stub.js) verbatim before your own code and call `makeDemoGezel(...)`. It returns the real API unchanged when present. Otherwise it installs the demo transport; your app supplies deterministic sample handlers and a visible sample banner with Reset demo. The stub does not invent table data or a working host file viewer. Follow [Gilde's page-authoring contract](https://github.com/bendyline/gilde/blob/main/docs/page-authoring.md). A failed live call must remain a live error, not switch the page into demo mode.
+For standalone demos, the website publisher, local preview server, or offline exporter injects a shared bootstrap before app scripts. App source contains its UI and sample handlers, not a copied SDK, component runtime, or font set. Initialize with `const api = window.gezel || window.makeDemoGezel({ page, tools, data, existingPaths });`. In a real host the existing API wins; in a demo, the bootstrap installs the sample transport and `api.ui.components`. Import targets come from the manifest's `pages.imports`. Keep deterministic samples, a visible banner and Reset demo. A failed live call must remain a live error, not switch into demo mode.
 
 Pages have no daemon credentials, Node filesystem, unrestricted SQL connection, or arbitrary-path write API. Imports are a narrow exception for explicitly declared destinations. Stay on this shared surface.
 
@@ -155,14 +155,15 @@ After `onAdded`, refresh the app's listing. Ordinary workspace indexing follows 
 
 ### Standalone component demos
 
-Keep the canonical demo stub, visible demo banner and Reset demo control. Copy [Gilde's canonical component runtime](https://github.com/bendyline/gilde/blob/main/authoring/page-components.js) alongside your page and load it before your app script. Gezel injects this same runtime when hosted. Initialize it after `makeDemoGezel`:
+The demo host supplies the components and shared fonts before app code. Keep the visible banner and Reset demo control. For Gilde, use `npm run demos` or `npm run export-page-demo -- <id> --out <new-directory>`. For private source folders, run `gezel app demo . --out ../my-app-demo` and open its generated entry under `pages/`; the output works offline without a daemon. The website uses shared, content-hashed assets; each offline export contains its own generated asset set. Do not double-click the unprocessed source page or add platform files to its `pages/` tree.
 
 ```js
-const api = makeDemoGezel({ page: { typeName: 'My library' } });
-const components = api.ui.components || installGezelComponents(api, {
-  demoTargets: [{ id: 'library', source: 'workspace', path: '.', accept: ['.png'] }],
+const api = window.gezel || window.makeDemoGezel({
+  page: { typeName: 'My library' },
   existingPaths: samples.map(file => file.path),
+  // data and tools: app-owned sample handlers, when needed
 });
+const components = api.ui.components;
 // Merge these into your representative sample listing after onAdded:
 const added = components.demo?.files() ?? [];
 // In your Reset demo handler, clear imported descriptors and release object URLs:

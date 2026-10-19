@@ -7,8 +7,14 @@ successful imports. Follow the [component and import contract](handboek/technica
 including its in-memory standalone demo adapter and cleanup lifecycle.
 
 The host runtime is `packages/core/src/project-types/page-components.ts`.
-After changing it, run `pnpm pages:sync-components` to refresh Gilde's canonical
-offline asset and the two reference apps; do not hand-edit those copies.
+After changing it or the demo adapter, run `pnpm pages:sync-components` to refresh
+Gilde's shared preview assets under `authoring/`. No app source carries a runtime
+copy. The Handboek exporter writes one content-hashed bootstrap and typography
+asset set for all website demos. `gezel app demo <source> --out <new-directory>`
+exports a private app with the same assets for offline use; open the generated
+entry under `pages/`. Gilde's `npm run demos` injects them during local
+preview; `npm run export-page-demo -- <id> --out <new-directory>` creates an
+offline catalog demo.
 Run `pnpm test:e2e:page-components` for hosted/component tests; set `GILDE_DIR`
 to the content checkout to also test Media Library and Data Analysis demos.
 New manifest fields require `pnpm gilde:export-schemas` and Gilde validation.
@@ -66,7 +72,7 @@ not evidence that file access, writes, or queries work. Use the completion
 checklist and reusable LLM brief in the public authoring guide.
 
 The CLI scaffold has contract tests for source validation, packaging, page/model
-tool audiences, and the canonical Gilde demo stub. Run `pnpm test:e2e:scaffold`
+tool audiences, and generated demo bootstrap delivery. Run `pnpm test:e2e:scaffold`
 from this repository to check the generated page against the real page shim,
 shared typography, and a temporary service installation, including both page
 and keeper actions. It uses the existing built service and installed Playwright

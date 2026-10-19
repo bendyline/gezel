@@ -121,8 +121,8 @@ The keeper uses \`add_record\` to update the seeded \`data.json\` through
 ${
   opts?.withPage
     ? `
-Open \`${typeDir}/versions/1.0.0/pages/dashboard/index.html\` directly to try
-the standalone demo. Sample records stay in memory; **Reset demo** restores them.
+Run \`gezel app demo . --out ../${id}-demo\`, then open its
+\`pages/dashboard/index.html\` to try the standalone demo. Sample records stay in memory; **Reset demo** restores them.
 Inside Gezel the same page uses real project data and the page-only
 \`page_add_record\` alias. Names in \`pages.tools\` are excluded from the gezel's
 tool roster, so keep its \`add_record\` alias separate. Both call \`records-store\`.
@@ -130,8 +130,8 @@ The browser preview is read-only; embedded and shared-site modes can run actions
 when the host permits them. A host error never switches the page to demo data.
 
 Fonts come from Gezel's injected \`--font-body\`, \`--font-ui\`, and
-\`--font-heading\` variables; raw-file demos use system fallbacks. Do not bundle
-font files. The page owns its layout/colors, follows host theme updates, and
+\`--font-heading\` variables. The demo exporter supplies the same fonts and components.
+Keep platform assets out of the authored page. The page owns its layout/colors, follows host theme updates, and
 unsubscribes from theme/file watches on teardown. Use explicit button/keyboard
 handlers: the embedded sandbox blocks native form submissions.
 `

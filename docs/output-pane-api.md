@@ -71,13 +71,15 @@ Typed definitions ship as `@bendyline/gezel-sdk/page`. Feature-detect with
 | `embedded` | The Output pane iframe | relayed through the host | relayed through the host |
 | `browser` | "Open in browser" tab | reject `code: 'unavailable'` | same-origin capability fetch fallback |
 | `serve` | An app-serve mini-site (`gezel app serve`) | same-origin fetch against the head API | same-origin fetch; `watch` polls | 
-| `demo` | Raw file, no server | page-supplied handlers | page-supplied handlers |
+| `demo` | Published preview or exported offline page | page-supplied handlers | page-supplied handlers |
 
-`demo` is not produced by the injected shim — a raw double-clicked file has
-no server. Gilde ships a canonical stub (`authoring/page-demo-stub.js`)
-that pages paste verbatim; it defines `window.gezel` only when the real one
-is absent, wiring `tools.invoke`/`data.read` to page-supplied demo handlers.
-Pages keep their demo *logic*; all transport switching dies.
+`demo` comes from the shared demo bootstrap, injected by the website publisher,
+Gilde preview server, or `gezel app demo` offline exporter. App scripts use
+`window.gezel || window.makeDemoGezel({ page, tools, data, existingPaths })`.
+The bootstrap supplies the canonical components, font stylesheet and sample
+transport; import destinations come from `pages.imports`. App source contains
+its own sample handlers and Reset control, with no platform asset copies.
+Existing hosts are preserved, including when a live call fails.
 
 ## Reading data
 

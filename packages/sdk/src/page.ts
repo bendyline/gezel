@@ -6,8 +6,8 @@
  * The runtime object is injected server-side by the daemon
  * (`packages/service/src/http/routes/page-api-shim.ts` splices the shim
  * into every `text/html` response served from the `type` preview source),
- * so hosted pages need no bundled implementation (standalone demos copy the
- * canonical component asset) — this module exists so gilde
+ * so hosted pages need no bundled implementation (the demo publisher/exporter supplies the same
+ * components and fonts) — this module exists so gilde
  * page authors and the host UI relay share one contract. The postMessage
  * envelope behind it is validated by the zod schemas in
  * `@bendyline/gezel` (`packages/core/src/schemas/page-bridge.ts`); the
@@ -26,8 +26,8 @@
  *    and `data.*` travel as same-origin fetches against the head API under
  *    the visitor's cookie; `data.watch` polls; `refresh()` reloads. The
  *    page still never sees a credential.
- *  - `demo` — a raw file opened outside gezel entirely. The real shim is
- *    never present there; gilde ships a paste-in stub that defines
+ *  - `demo` — a published preview or exported offline page. The shared demo
+ *    bootstrap defines
  *    `window.gezel` only when the real one is absent.
  *
  * Guard accordingly: `if (window.gezel) { ... }`.

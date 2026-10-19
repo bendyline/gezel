@@ -1,11 +1,20 @@
+import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type Page, expect, test } from '@playwright/test';
 import { PAGE_DEMO_STUB } from '../../cli/src/app-scaffold-demo.js';
+import {
+  pageDemoAssets,
+  writePageDemo,
+  writePageDemoAssets,
+} from '../../cli/src/page-demo-export.js';
 import { buildPageApiShim } from '../../core/src/project-types/page-api-shim.js';
 import { pageComponentsSource } from '../../core/src/project-types/page-components.js';
+import { pageDemoBootstrapSource } from '../../core/src/project-types/page-demo.js';
 
 const target = {
   id: 'library',
@@ -16,6 +25,30 @@ const target = {
   writable: true,
 };
 const mounts = '<main><div id="adder"></div><div id="cards"></div></main>';
+test('demo bootstrap is idempotent and never replaces a live host', async ({ page }) => {
+  await page.setContent('<main></main>');
+  await page.evaluate(() => {
+    Reflect.set(window, 'gezel', { page: { mode: 'embedded' }, marker: true });
+  });
+  await page.addScriptTag({ content: pageDemoBootstrapSource() });
+  expect(await page.evaluate(() => Reflect.get(window, 'gezel'))).toEqual({
+    page: { mode: 'embedded' },
+    marker: true,
+  });
+  expect(await page.evaluate(() => Reflect.has(window, 'makeDemoGezel'))).toBe(false);
+  await page.evaluate(() => {
+    Reflect.deleteProperty(window, 'gezel');
+  });
+  await page.addScriptTag({ content: pageDemoBootstrapSource() });
+  await page.addScriptTag({ content: pageDemoBootstrapSource() });
+  expect(
+    await page.evaluate(() => {
+      const make = Reflect.get(window, 'makeDemoGezel');
+      const api = make({ page: { typeName: 'Demo' } });
+      return { same: api === make({}), mode: api.page.mode, components: api.ui.components.version };
+    }),
+  ).toEqual({ same: true, mode: 'demo', components: 1 });
+});
 const mountScript = `const api=window.gezel;
 api.ui.components.fileAdder('#adder',{target:'library',onAdded:files=>files.forEach(file=>api.ui.components.fileCard('#cards',{file}))});`;
 async function hosted(page: Page, writable = true) {
@@ -202,36 +235,116 @@ test('shared standalone components support drop, duplicate names, safe text, the
 // Content lives in Gilde. Opt in against the checkout being changed, then the
 // same checks can follow a catalog pin without a mandatory sibling checkout.
 const gilde = process.env.GILDE_DIR;
+let preview: ChildProcess | undefined;
+let previewUrl: string;
+test.beforeAll(async () => {
+  if (!gilde) return;
+  expect(
+    (await readFile(resolve(gilde, 'authoring/page-demo-bootstrap.js'), 'utf8')).replace(
+      /\r\n/g,
+      '\n',
+    ),
+  ).toBe(pageDemoBootstrapSource());
+  expect(
+    (await readFile(resolve(gilde, 'authoring/page-demo-typography.css'), 'utf8')).replace(
+      /\r\n/g,
+      '\n',
+    ),
+  ).toBe(pageDemoAssets()[1]!.bytes.toString().replace(/\r\n/g, '\n'));
+  preview = spawn(process.execPath, [resolve(gilde, 'tools/serve-page-demos.mjs'), '--port', '0'], {
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  await new Promise<void>((ready, reject) => {
+    const timer = setTimeout(() => reject(new Error('Demo server did not start')), 15000);
+    preview!.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    preview!.once('exit', (code) => {
+      clearTimeout(timer);
+      reject(new Error(`Demo server exited: ${code}`));
+    });
+    preview!.stdout!.on('data', (chunk) => {
+      const url = String(chunk).match(/http:\/\/127\.0\.0\.1:\d+/)?.[0];
+      if (url) {
+        previewUrl = url;
+        clearTimeout(timer);
+        ready();
+      }
+    });
+  });
+});
+test.afterAll(() => {
+  preview?.kill();
+});
 for (const [id, targetId, count, selector] of [
   ['me/media-library', 'library', 7, '#gallery'],
   ['da/data-analysis', 'data', 5, '#datasets'],
 ] as const) {
-  test(`${id} uses the canonical components and resets added demo files`, async ({ page }) => {
+  test(`${id} works inside the website's opaque demo iframe`, async ({ page }) => {
     test.skip(!gilde, 'Set GILDE_DIR to exercise catalog migrations.');
-    const dir = resolve(gilde!, `data/project-types/${id}/versions/1.0.0/pages`);
-    expect(existsSync(resolve(dir, 'page-components.js'))).toBe(true);
-    expect(await readFile(resolve(dir, 'page-components.js'), 'utf8')).toBe(
-      `${pageComponentsSource()}\n`,
+    await page.setContent(
+      `<iframe title="Demo" sandbox="allow-forms allow-modals allow-scripts" src="${previewUrl}/demos/${id.split('/')[1]}/index.html"></iframe>`,
     );
-    const errors: string[] = [];
-    page.on('pageerror', (e) => errors.push(e.message));
-    await page.goto(pathToFileURL(resolve(dir, 'index.html')).href);
-    await expect(page.locator(`${selector} gezel-file-card`)).toHaveCount(count);
-    await page.screenshot({ path: test.info().outputPath('demo.png'), fullPage: true });
-    await expect(page.locator('[data-gezel-demo-banner]')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Add files', exact: true })).toBeEnabled();
-    await page.locator('input[type=file]').setInputFiles({
-      name: targetId === 'data' ? 'added.csv' : 'added.png',
-      mimeType: targetId === 'data' ? 'text/csv' : 'image/png',
-      buffer: Buffer.from('sample'),
-    });
-    await expect(page.locator(`${selector} gezel-file-card`)).toHaveCount(count + 1);
-    await page.getByRole('button', { name: 'Reset demo', exact: true }).click();
-    await expect(page.locator(`${selector} gezel-file-card`)).toHaveCount(count);
-    await page.setViewportSize({ width: 320, height: 800 });
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-      true,
-    );
-    expect(errors).toEqual([]);
+    const demo = page.frameLocator('iframe');
+    await expect(demo.locator(`${selector} gezel-file-card`)).toHaveCount(count);
+    await expect(demo.getByRole('button', { name: 'Add files', exact: true })).toBeEnabled();
+    expect(
+      await demo.locator('body').evaluate(async () => {
+        await document.fonts.ready;
+        return document.fonts.check('16px "Hanken Grotesk"');
+      }),
+    ).toBe(true);
   });
+  for (const mode of ['offline', 'preview'] as const) {
+    test(`${id} ${mode} uses injected components and resets added demo files`, async ({ page }) => {
+      test.skip(!gilde, 'Set GILDE_DIR to exercise catalog migrations.');
+      const dir = resolve(gilde!, `data/project-types/${id}/versions/1.0.0/pages`);
+      expect(existsSync(resolve(dir, 'page-components.js'))).toBe(false);
+      const files: Array<{ path: string; bytes: Buffer }> = [];
+      async function collect(folder: string, prefix = '') {
+        for (const entry of await readdir(folder, { withFileTypes: true })) {
+          const path = prefix + entry.name;
+          if (entry.isDirectory()) await collect(join(folder, entry.name), `${path}/`);
+          else files.push({ path, bytes: await readFile(join(folder, entry.name)) });
+        }
+      }
+      await collect(dir);
+      const manifest = JSON.parse(await readFile(resolve(dir, '../manifest.json'), 'utf8'));
+      const output = test.info().outputPath('export');
+      const shared = {
+        directory: join(output, '_gezel-demo'),
+        assets: await writePageDemoAssets(join(output, '_gezel-demo')),
+      };
+      await writePageDemo(output, files, { imports: manifest.pages.imports }, shared);
+      const errors: string[] = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.goto(
+        mode === 'offline'
+          ? pathToFileURL(resolve(output, 'index.html')).href
+          : `${previewUrl}/demos/${id.split('/')[1]}/index.html`,
+      );
+      expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toContain(
+        'Hanken Grotesk',
+      );
+      await expect(page.locator(`${selector} gezel-file-card`)).toHaveCount(count);
+      await page.screenshot({ path: test.info().outputPath('demo.png'), fullPage: true });
+      await expect(page.locator('[data-gezel-demo-banner]')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Add files', exact: true })).toBeEnabled();
+      await page.locator('input[type=file]').setInputFiles({
+        name: targetId === 'data' ? 'added.csv' : 'added.png',
+        mimeType: targetId === 'data' ? 'text/csv' : 'image/png',
+        buffer: Buffer.from('sample'),
+      });
+      await expect(page.locator(`${selector} gezel-file-card`)).toHaveCount(count + 1);
+      await page.getByRole('button', { name: 'Reset demo', exact: true }).click();
+      await expect(page.locator(`${selector} gezel-file-card`)).toHaveCount(count);
+      await page.setViewportSize({ width: 320, height: 800 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      expect(errors).toEqual([]);
+    });
+  }
 }

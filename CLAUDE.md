@@ -27,8 +27,9 @@ validate against the current schemas, and test a real host flow as well as the d
 Report the catalog release/install step separately from source-code completion.
 Reuse `gezel.ui.components.fileCard` / `fileAdder` for file interfaces; declare
 `pages.imports` for scoped uploads and keep `pages.reads` explicit. Never bypass
-workspace write policy. Ship the canonical component asset for standalone demos,
-reset in-memory imports, and test the live relay as well as demo controls.
+workspace write policy. Let the demo publisher/exporter inject the shared bootstrap and fonts; never
+copy platform assets into app source. Reset in-memory imports, and test the
+live relay as well as generated demo controls.
 These linked guides are the maintained authoring contract; proposals in the
 [platform review](docs/gezel-app-platform-review.md) are not available APIs.
 

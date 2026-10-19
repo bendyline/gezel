@@ -229,3 +229,6 @@ export * from './workspace-edit-error.js';
 export * from './task-execution.js';
 export * from './run-when.js';
 export * from './tools/step-kit.js';
+
+export * from './project-types/page-demo.js';
+export * from './project-types/page-demo-stub.js';

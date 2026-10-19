@@ -1,5 +1,3 @@
-import { PAGE_DEMO_STUB } from './app-scaffold-demo.js';
-
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (character) => {
     const entities: Record<string, string> = {
@@ -13,7 +11,7 @@ function escapeHtml(text: string): string {
   });
 }
 
-/** Self-contained so an installed CLI and a raw-file demo need no build step. */
+/** Authored UI only. The host or demo exporter supplies platform assets. */
 export function dashboardHtml(name: string): string {
   return `<!doctype html>
 <html lang="en">
@@ -101,18 +99,15 @@ export function dashboardHtml(name: string): string {
   <p id="action-error" role="alert" hidden></p>
 </main>
 <script>
-${PAGE_DEMO_STUB}</script>
-<script>${pageComponentsSource()}</script>
-<script>
 (() => {
   'use strict';
-  // The canonical stub never replaces an injected host, including on errors.
+  // The demo initializer never replaces an injected host, including on errors.
   const samples = () => ({ records: [
     { title: 'Plan the next small step', at: '2026-01-01T12:00:00.000Z' },
     { title: 'Keep a useful discovery', at: '2026-01-02T12:00:00.000Z' },
   ] });
   let demoData = samples();
-  const api = window.makeDemoGezel({
+  const api = window.gezel || window.makeDemoGezel({
     page: { entry: 'dashboard/index.html', typeName: document.title },
     data: { 'data.json': () => structuredClone(demoData) },
     tools: {
@@ -127,7 +122,6 @@ ${PAGE_DEMO_STUB}</script>
     },
   });
   const demoMode = api.page.mode === 'demo';
-  window.installGezelComponents(api, { demoTargets: [] });
   const readOnly = api.page.mode === 'browser';
   const list = document.querySelector('#records');
   const status = document.querySelector('#status');
@@ -246,4 +240,3 @@ ${PAGE_DEMO_STUB}</script>
 </html>
 `;
 }
-import { pageComponentsSource } from '@bendyline/gezel';

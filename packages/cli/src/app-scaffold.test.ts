@@ -35,7 +35,7 @@ describe('app scaffold platform contracts', () => {
     ).toContain('add_record tool');
   });
 
-  it('bundles the canonical Gilde demo stub without needing it at CLI runtime', async () => {
+  it('keeps platform assets out of app source; the demo host owns the canonical adapter', async () => {
     // Gilde ships authoring/ in its published package, beside data/. No sibling checkout needed.
     const canonical = await readFile(
       join(gildeDataDir(), '../authoring/page-demo-stub.js'),
@@ -44,8 +44,9 @@ describe('app scaffold platform contracts', () => {
     expect(PAGE_DEMO_STUB).toBe(canonical.replace(/\r\n/g, '\n'));
     const files = scaffoldGezappSource('field-notes', { withPage: true });
     const html = files.find(([path]) => path.endsWith('/pages/dashboard/index.html'))![1];
-    expect(html).toContain(`<script>\n${PAGE_DEMO_STUB}</script>`);
-    expect(html).toContain(pageComponentsSource());
+    expect(html).not.toContain(PAGE_DEMO_STUB);
+    expect(html).not.toContain(pageComponentsSource());
+    expect(html).toContain('window.gezel || window.makeDemoGezel(');
     expect(html).toContain('name="gezel-demo" content="standalone"');
     expect(files.some(([path]) => /\.(woff2?|ttf|otf)$/.test(path))).toBe(false);
   });
