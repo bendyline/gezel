@@ -141,6 +141,17 @@ async function installCatalogToolset(
     if (!project) return { ok: false, status: 404, error: 'project not found' };
   }
 
+  if (
+    ctx.store.isBundledToolset(id) &&
+    (!body.sourceId || body.sourceId === 'bundled') &&
+    !body.version
+  ) {
+    const installed = (await ctx.store.listInstalledToolsets({ kind: 'system' })).find(
+      (entry) => entry.toolsetId === id,
+    );
+    if (installed) return { ok: true, installed };
+  }
+
   const detail = await ctx.catalog.get('toolset', id, body.sourceId, body.version);
   if (!detail) {
     return {
@@ -671,6 +682,9 @@ export function catalogRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const scope = scopeFromQuery(c.req.query());
     if ('error' in scope) return c.json({ error: scope.error }, 400);
+    if (scope.kind === 'system' && ctx.store.isBundledToolset(id)) {
+      return c.json({ error: 'This toolset is included with Gezel and cannot be removed.' }, 400);
+    }
     const roster = await ctx.store.listInstalledToolsets(scope);
     const next = roster.filter((t) => t.toolsetId !== id);
     if (next.length === roster.length) {

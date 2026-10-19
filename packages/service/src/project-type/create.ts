@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { cp, mkdir, readFile, readdir, rename, rm, rmdir, stat } from 'node:fs/promises';
-import { basename, dirname, join, normalize } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize } from 'node:path';
 import {
   type CreateTypedProjectRequest,
   type CreateTypedProjectResponse,
@@ -357,6 +357,19 @@ export async function createTypedProject(
   const { store, catalog, hooks } = deps;
   try {
     await preflightProjectType({ catalog }, input.projectType);
+    if (input.workingDir) {
+      if (!isAbsolute(input.workingDir)) throw new Error('Choose an absolute folder path.');
+      const info = await stat(input.workingDir);
+      if (!info.isDirectory()) throw new Error('Choose an existing folder for this project.');
+      const type = await catalog.get(
+        'project-type',
+        input.projectType.typeId,
+        undefined,
+        input.projectType.version,
+      );
+      if (type?.manifest.kind !== 'project-type' || type.manifest.workspaceSeed.length > 0)
+        throw new Error('This project type needs a new workspace for its starter files.');
+    }
   } catch (err) {
     throw new TypedProjectCreateError(
       'PROJECT_TYPE_INVALID',
@@ -420,6 +433,13 @@ export async function createTypedProject(
         },
         { projectId, ...input.projectType },
       );
+      // Materialize everything privately first. Linking a read-only folder must
+      // never write starter files or a script workspace into the user's media.
+      if (input.workingDir) {
+        if (applied.workspaceSeeded.some((path) => !path.startsWith('artifacts/')))
+          throw new Error('This project type needs a new workspace for its starter files.');
+        await stageStore.updateProjectWorkingDir(projectId, input.workingDir);
+      }
       // A reused gezel already lives on the install; only new hires publish.
       const hired = applied.gezelsCreated.filter((gezel) => !gezel.reused);
       const stagedProject = await stageStore.getProject(projectId);

@@ -54,6 +54,7 @@ export function createOfflineHtmlPreview(
     const project = `https://gezel.local/api/projects/${encodeURIComponent(request.projectId)}`;
     const headers = { Authorization: `Bearer ${token}` };
     let prelude: string | undefined;
+    let typography: string | undefined;
     if (request.source === 'type') {
       // A project type's page reads its project through the parent, so it
       // carries the same window.gezel the desktop serves it with.
@@ -73,6 +74,7 @@ export function createOfflineHtmlPreview(
           'This page has not been updated to run on a phone yet. Its project still works in chat.',
         );
       prelude = pageApiShimSource(body.bootstrap);
+      typography = (await import('virtual:gezel-page-typography')).default;
     }
     const area = request.source === 'type' ? 'type' : request.source;
     return buildOfflineHtmlPreview(
@@ -109,6 +111,7 @@ export function createOfflineHtmlPreview(
       publish,
       compileModules,
       prelude,
+      typography,
     );
   };
 }
@@ -121,6 +124,8 @@ export async function buildOfflineHtmlPreview(
   compileModules?: () => PreviewModuleCompiler,
   /** Host script that runs after the log shim and before any page script. */
   prelude?: string,
+  /** Host typography defaults, before authored styles; only for project pages. */
+  typography?: string,
 ): Promise<OfflineHtmlPreview> {
   const entry = previewEntryPath(entryPath);
   const bytes = new Map<string, Uint8Array>();
@@ -395,7 +400,8 @@ const send=(kind,detail)=>parent.postMessage({__gezelPreviewLog:true,kind,detail
   const hostScript = prelude
     ? `<script src="${account(dataUrl(prelude, 'text/javascript'))}"></script>`
     : '';
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${OFFLINE_PREVIEW_CSP}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="${log}"></script>${hostScript}</head><body>${template.innerHTML}${events}</body></html>`;
+  const hostStyles = typography ? `<style data-gezel-typography>${typography}</style>` : '';
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${OFFLINE_PREVIEW_CSP}"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="${log}"></script>${hostScript}${hostStyles}</head><body>${template.innerHTML}${events}</body></html>`;
   if (new TextEncoder().encode(html).byteLength > 8 * 1024 * 1024)
     throw new Error('This preview exceeds 8 MiB after embedding its assets');
   return await publish(html);

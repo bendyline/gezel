@@ -4554,6 +4554,7 @@ export const CreateTypedProjectRequestSchema = CreateProjectRequestSchema.pick({
   description: true,
   mode: true,
   icon: true,
+  workingDir: true,
 }).extend({
   projectType: ApplyProjectTypeRequestSchema,
 });

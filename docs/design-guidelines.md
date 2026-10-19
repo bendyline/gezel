@@ -294,15 +294,16 @@ are **never** bound to gender or craft.
 
 ### Workshop Marks — catalog artwork
 
-Thumbnails and category art are quiet square still-lifes drawn from a circa
-**1905–1915 bindery and small-letterpress** material language: laid rag paper,
-woven bookcloth, lightly printed charcoal ink, dull oxidized brass. Parchment
-and charcoal base, one muted category accent, one dominant artifact, at most one
-or two supporting tools.
+Craftbook and project-type marks are **one bold cut-paper subject** that names
+the job: a sieve for a data-quality audit, merging rails for a pull request
+review, a piggy bank for a household budget. Cream papers with charcoal details
+and dull brass, nothing under the subject, and the same clear margin on every
+mark. The app paints the colored paper behind it from the item's category, so a
+shelf reads as one family and the subject tells its books apart.
 
-The historical cue stays in **material and construction, not decoration**. No
-sepia wash, no distressing, no wax seals, no ornate flourishes, no steampunk, no
-medieval props, no nostalgic clutter.
+Craft lives in **construction, not period**: layered paper, soft shadows
+between layers. No sepia wash, no distressing, no aged paper, no magnifier
+standing in for "a craftbook", no nostalgic clutter.
 
 ### The Village — a codebase as a settlement
 

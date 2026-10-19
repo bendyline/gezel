@@ -83,6 +83,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.113.0",
     "@atproto/api": "0.20.38",
+    "@bendyline/docblocks-cli": "2.7.3",
     "@bendyline/gezel": "workspace:*",
     "@bendyline/gezel-catalog": "workspace:*",
     "@bendyline/gezel-client": "workspace:*",

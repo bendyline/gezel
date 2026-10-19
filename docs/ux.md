@@ -810,15 +810,10 @@ the first sentence, up to a colon, then up to the last comma that fits),
 clamped to two lines, and every tray row is as tall as the tallest. The
 whole description belongs to the launch sheet, not the key.
 
-Each Make something key is a **paper card**: it takes the paper its artwork is
-drawn on, in both themes, so the 64px mark bleeds into the card instead of
-sitting on it as a pasted square. `sampleArtworkPaper`
-([artwork-paper.ts](../packages/ui/src/components/artwork-paper.ts)) reads the
-dominant tone along the artwork's border once it loads; until then, or when the
-border has no single light ground, the card uses `--gezel-paper-mark`. The name
-and description are set in warm ink, the artwork's edge is feathered so a prop
-that runs off it fades out, and hover changes only the border, because a
-background change would expose the artwork's edge.
+Each Make something key is a **paper card** of `--gezel-paper-mark` in both
+themes, holding the book's 64px mark as a `--radius-md` tile on its category
+ground (see Workshop Marks below). The name and description are set in warm
+ink, and hover changes only the border.
 
 The starters live inside the intro tab. The folder step waits until the
 welcome is over: on a later visit it keeps its own bounded area above the
@@ -1651,22 +1646,31 @@ in insert mode — the instruction becomes required and the result is added
 at the cursor. This is the pattern for any future "AI proposes, user
 disposes" text surface: preview + explicit commit, never in-place mutation.
 
-**Catalog artwork: Workshop Marks.** Craftbook thumbnails are quiet square
-still-lifes drawn from a circa-1905–1915 bindery and small-letterpress material
-language: laid rag paper, woven bookcloth, lightly printed charcoal ink, and
-dull oxidized brass. They use the Gezel parchment/charcoal palette with one
-muted category accent, one dominant job-specific artifact, and at most one or
-two supporting tools. The historical cue stays in material and construction,
-not decoration: no sepia wash, distress, wax seals, ornate flourishes,
-steampunk, medieval props, or nostalgic clutter. Source art is 512×512 WebP
-and must remain recognizable in the 44px gallery crop. Catalog image renderers
-must replace missing or failed assets with the surface's category glyph or
-initial; never expose the browser's native broken-image placeholder.
+**Catalog artwork: Workshop Marks.** A craftbook's or project type's mark is
+one bold cut-paper subject that names the job: a sieve for a data-quality
+audit, a card-catalog drawer for a data dictionary, merging rails for a pull
+request review. It is built mainly from cream papers with charcoal details and
+dull brass where the object is metal, with nothing under it: no book, card,
+clipboard or magnifier. Gilde ships it as a transparent 512×512 WebP with the
+subject trimmed and scaled so its longer side is 88% of the tile, which leaves
+the same clear margin on every mark. The app paints the ground: `CatalogArtwork`
+takes a `ground` from `catalogGroundFor` (core
+[catalog-ground.ts](../packages/core/src/catalog-ground.ts)), which maps the
+item's category to one of nine `--gezel-ground-<tone>` papers. Every code
+shelf has its own tone, other shelves share a tone with a distant code shelf,
+and dark mode deepens each tone. A shelf in the rail therefore shows one
+ground, and the subject alone tells its books apart, so subjects are chosen
+per shelf so no two neighbors share an object. The ground goes on the image
+element, so the caller's size, radius and clipping still apply, and an older
+opaque mark simply covers it. Marks must stay recognizable in the 44px gallery
+crop. Catalog image renderers must replace missing or failed assets with the
+surface's category glyph or initial; never expose the browser's native
+broken-image placeholder.
 
 **Knowledge catalog artwork: Reference Marks.** Knowledge catalogs get the
-Workshop Marks' sibling: the same bindery material language, palette, period
-restraint, and constraints, built as a single paper-crafted emblem of the
-subject (a loaf and pitcher for Food & Drink, a ringed planet for Astronomy).
+Workshop Marks' sibling: the same cut-paper construction, built as a single
+paper-crafted emblem of the subject (a loaf and pitcher for Food & Drink, a
+ringed planet for Astronomy), on the marks' own parchment ground.
 The subject alone fills about 80% of the tile, with nothing under or behind
 it. These marks are drawn at 24 and 56 px, and an earlier version that stood
 the subject on a cloth-bound book left the subject unreadable at that size. The
@@ -1950,15 +1954,14 @@ the compact four-state `Plan / Edit / Reviewed / Full` control: this is an
 ambient project posture, so changing it belongs here rather than in the chat
 composer or a modal.
 
-**A project's settings fold into one menu; only an exception shows.** The
-project status bar does not show the project's status ("Stable") or its
-write grant ("Can edit") as standing selects: a person who has not asked
-about either should not have to read them. Both live in the bar's **…** menu
-(`ProjectControlsOverflow`), with their explanations as tooltips, and the
-write grant is a plain toggle there ("Stop workspace edits" / "Allow
-workspace edits"). The one exception stays inline: a read-only project keeps
-its writes control in the bar, because "gezels cannot edit here" is the
-state that explains why nothing changed.
+**A project's settings fold into one compact status key.** The project
+status bar shows the current lifecycle label followed by its colored light
+("Active", "Stable", "Read-only", or "Inactive") on a 1.5rem-high key.
+The key opens `ProjectControlsOverflow` upward, keeping status choices and
+the write grant together, with their explanations as tooltips. The write
+grant stays a plain toggle there ("Stop workspace edits" / "Allow workspace
+edits"). A read-only project also keeps its writes control inline, because
+"gezels cannot edit here" is the state that explains why nothing changed.
 
 **Save state is ambient, so it lives in the status bar.** An editor's
 saved/unsaved indicator goes in the shell's status bar

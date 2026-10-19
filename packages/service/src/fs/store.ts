@@ -309,6 +309,8 @@ export function boekwachterIssueFingerprint(path: string, issue: FileReviewIssue
 
 export interface StoreOptions {
   home: string;
+  /** Product-shipped runtimes, overlaid on system toolsets without persisting paths. */
+  bundledToolsets?: readonly InstalledToolset[];
   /**
    * Whether `home` is private to one OS user. On Unix these homes are created
    * and repaired as 0700 so ordinary 0644 state files remain unreachable to
@@ -448,7 +450,11 @@ export class Store {
    *  enter this stream. */
   private readonly gezelListeners = new Set<(ev: GezelChangeEvent) => void>();
 
+  private readonly bundledToolsets: readonly InstalledToolset[];
+
   constructor(opts: StoreOptions) {
+    this.bundledToolsets =
+      opts.serviceRole === 'machine-engine' ? [] : (opts.bundledToolsets ?? []);
     this.config = new ConfigStore(opts.home);
     this.home = opts.home;
     this.history = opts.history;
@@ -7070,7 +7076,18 @@ export class Store {
 
   // ── Installed toolsets ──
 
+  isBundledToolset(id: string): boolean {
+    return this.bundledToolsets.some((entry) => entry.toolsetId === id);
+  }
+
   async listInstalledToolsets(scope: ToolsetsScope): Promise<InstalledToolset[]> {
+    const stored = await this.listStoredToolsets(scope);
+    if (scope.kind !== 'system') return stored;
+    const bundledIds = new Set(this.bundledToolsets.map((entry) => entry.toolsetId));
+    return [...stored.filter((entry) => !bundledIds.has(entry.toolsetId)), ...this.bundledToolsets];
+  }
+
+  private async listStoredToolsets(scope: ToolsetsScope): Promise<InstalledToolset[]> {
     const primary = this.toolsetsFile(scope);
     try {
       const raw = await readFile(primary, 'utf8');
@@ -7100,9 +7117,14 @@ export class Store {
   }
 
   async writeInstalledToolsets(scope: ToolsetsScope, toolsets: InstalledToolset[]): Promise<void> {
+    // Shipped paths belong to this process's installation, never to user state.
+    const stored =
+      scope.kind === 'system'
+        ? toolsets.filter((entry) => !this.isBundledToolset(entry.toolsetId))
+        : toolsets;
     const file = this.toolsetsFile(scope);
     await mkdir(dirname(file), { recursive: true });
-    await writeFileAtomic(file, `${JSON.stringify(toolsets, null, 2)}\n`);
+    await writeFileAtomic(file, `${JSON.stringify(stored, null, 2)}\n`);
   }
 
   /** Directory a toolset install pipeline can extract into for this scope. */

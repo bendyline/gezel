@@ -6,6 +6,7 @@ import {
   RETIRED_MODEL_TAG,
   RETIRED_MODEL_TOOLTIP,
   type ToolsetCategory,
+  catalogGroundFor,
   isRetiredModel,
   modelAttribution,
 } from '@bendyline/gezel';
@@ -65,6 +66,7 @@ function CatalogItemLogo({ item }: { item: CatalogItemSummary }) {
     <CatalogArtwork
       iconSvg={item.iconSvg}
       logoUrl={item.logoUrl}
+      ground={catalogGroundFor(item.manifest)}
       svgClassName="catalog-item-logo catalog-item-logo-svg"
       imageClassName="catalog-item-logo"
       fallback={

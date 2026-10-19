@@ -36,6 +36,7 @@ describe('Output Pane page API contract', () => {
         }),
       },
       data: {
+        open: async () => {},
         read: async (path, opts) => ({ path, source: opts?.source ?? 'workspace' }),
         list: async () => [
           { name: 'cards.json', kind: 'file', size: 42, mtime: 1_786_579_200_000 },
@@ -54,6 +55,20 @@ describe('Output Pane page API contract', () => {
         },
       },
       refresh,
+      tables: {
+        list: async () => [],
+        describe: async () => {
+          throw new Error('no table');
+        },
+        query: async () => ({
+          op: 'query',
+          rows: [],
+          columns: [],
+          limit: 100,
+          truncated: false,
+          tablesInScope: [],
+        }),
+      },
     };
 
     expect(pageApi.page).toMatchObject({ api: 1, mode: 'embedded', source: 'type' });

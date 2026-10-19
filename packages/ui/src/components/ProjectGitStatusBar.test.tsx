@@ -1,3 +1,8 @@
+/**
+ * Project footer interaction coverage using a mocked API. These tests exercise
+ * lifecycle and access controls; the browser projects spec checks their size,
+ * persistence, and appearance with the real service.
+ */
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -503,7 +508,7 @@ describe('ProjectGitStatusBar', () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole('button', { name: 'More project controls' }));
+    await userEvent.click(screen.getByRole('button', { name: /^Project status:/ }));
     const overflow = screen.getByRole('group', { name: 'Project controls overflow' });
     expect(within(overflow).getByRole('button', { name: 'Read-only' })).toHaveAttribute(
       'aria-pressed',
@@ -513,14 +518,49 @@ describe('ProjectGitStatusBar', () => {
     await userEvent.click(within(overflow).getByRole('button', { name: 'Active' }));
     expect(onStatusChange).toHaveBeenCalledWith('active');
 
-    await userEvent.click(screen.getByRole('button', { name: 'More project controls' }));
+    await userEvent.click(screen.getByRole('button', { name: /^Project status:/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Allow workspace edits' }));
     expect(onManagedWorkspaceWritesChange).toHaveBeenCalledWith(true);
   });
 
-  // A board opened from a finished card sat over "Stable" and "Can edit"
-  // dropdowns its owner never needed (2026-10-11).
-  it('keeps project status and the default edit access in the overflow menu', async () => {
+  it.each([
+    ['active', 'Active'],
+    ['stable', 'Stable'],
+    ['readonly', 'Read-only'],
+    ['inactive', 'Inactive'],
+  ] as const)('shows the %s status before opening the menu', (status, label) => {
+    render(<ProjectGitStatusBar projectId="pj-1" status={status} onStatusChange={vi.fn()} />);
+    expect(
+      screen.getByRole('button', { name: `Project status: ${label}. Open project controls` }),
+    ).toHaveTextContent(label);
+  });
+
+  it('updates the trigger when project status changes and keeps archived status locked', async () => {
+    const onStatusChange = vi.fn();
+    const { rerender } = render(
+      <ProjectGitStatusBar projectId="pj-1" status="active" onStatusChange={onStatusChange} />,
+    );
+    rerender(
+      <ProjectGitStatusBar
+        projectId="pj-1"
+        status="inactive"
+        statusLocked
+        onStatusChange={onStatusChange}
+      />,
+    );
+    const trigger = screen.getByRole('button', {
+      name: 'Project status: Inactive. Open project controls',
+    });
+    expect(trigger).toHaveTextContent('Inactive');
+    await userEvent.click(trigger);
+    const overflow = screen.getByRole('group', { name: 'Project controls overflow' });
+    for (const option of within(overflow).getAllByRole('button')) {
+      expect(option).toBeDisabled();
+    }
+    expect(onStatusChange).not.toHaveBeenCalled();
+  });
+
+  it('shows status on the menu trigger and keeps default edit access inside', async () => {
     const onStatusChange = vi.fn();
     const onManagedWorkspaceWritesChange = vi.fn();
     render(
@@ -537,7 +577,7 @@ describe('ProjectGitStatusBar', () => {
       screen.queryByRole('combobox', { name: 'Built-in tool workspace access for this project' }),
     ).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'More project controls' }));
+    await userEvent.click(screen.getByRole('button', { name: /^Project status:/ }));
     const overflow = screen.getByRole('group', { name: 'Project controls overflow' });
     expect(within(overflow).getByRole('button', { name: 'Stable' })).toHaveAttribute(
       'aria-pressed',
@@ -559,7 +599,7 @@ describe('ProjectGitStatusBar', () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole('button', { name: 'More project controls' }));
+    await userEvent.click(screen.getByRole('button', { name: /^Project status:/ }));
     const overflow = screen.getByRole('group', { name: 'Project controls overflow' });
     expect(within(overflow).getByText('Built-in tools')).toBeInTheDocument();
     expect(within(overflow).getByText('Codex access')).toBeInTheDocument();

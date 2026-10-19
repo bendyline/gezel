@@ -291,7 +291,53 @@ preference, so the page follows the operating system rather than the gezel
 setting. That is the honest ceiling of this mechanism, and the reason pages are
 asked to honour the ordinary media query rather than a gezel-specific hook.
 
+### Shared typography
+
+Gezel supplies project pages with its own local fonts: Hanken Grotesk for body
+text and controls, and PT Serif for headings. No font files, `@font-face` rules,
+imports, or API calls are needed in a page bundle. The host inserts the shared
+stylesheet before the page's CSS in desktop previews, app-serve, and offline
+mobile previews. Ordinary workspace/artifact HTML keeps its own typography.
+
+The CSS roles are `--font-body`, `--font-ui`, and `--font-heading` (with
+`--font-display` retained as the heading stack). Body text, form controls, and
+`h1`–`h6` use those roles automatically. A page can style another element with
+`font-family: var(--font-heading, Georgia, serif)` or override a role on `:root`.
+The host rules have low specificity, so authored CSS takes precedence. Raw
+standalone demos have no host; use system-font fallbacks in `var()` for those.
+Fonts and their licenses ship once with Gezel, not in every project type.
+
 ### The Output Pane API (`window.gezel`) — v1
+
+The **Media Library** type in Gilde connects an existing folder to a gallery of
+images, video, and audio. Its catalog-owned page uses `gezel.data.list/watch`
+to discover nested files, `gezel.data.url` for previews and playback, and
+`gezel.data.open` for the original file in Gezel's viewer. Search, folder and
+media-kind filters, sorting, and grid/list views work without importing files.
+The scan has the same 100-folder / 10,000-file bounds described below; playback
+depends on the browser's installed codecs. Unsupported formats remain listed.
+
+On desktop, catalog types without `workspaceSeed` can optionally choose an
+existing folder at creation. `POST /api/projects/typed` accepts `workingDir`;
+creation validates the folder, stages the type in isolation, then connects the
+folder without seeding or writing into it. Types with workspace starter files
+must use a new internal workspace. Portable hosts reject external folder paths.
+
+The **Data Analysis** type in Gilde uses this API for a live inventory of the
+project workspace. Its `pages/index.html`, JavaScript, and CSS
+are served from the type; adoption does not put dashboard files or sample data
+in the user's folder. The page lists datasets and reports recursively, watches
+the folders it visited, and opens files with `gezel.data.open()` in the existing
+file viewer. Hidden, dependency, and document-companion folders are omitted;
+scans beyond 100 folders or 10,000 files report a partial listing. No dataset
+contents are loaded merely to build the inventory.
+
+The same page uses `gezel.tables.list/describe/query` for indexed data: table
+selection, record counts, missing-value counts, numeric ranges and averages,
+column types, and grouped charts. These read-only queries inherit `pages.reads`
+from the original source file, without granting the page access to unrelated
+artifacts. Summaries describe the indexed snapshot; unindexed files remain in
+the inventory, and hosts without DuckDB keep file browsing available.
 
 New pages should be authored against the injected, versioned page API
 documented in [docs/output-pane-api.md](output-pane-api.md): the daemon

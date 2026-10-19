@@ -22,12 +22,10 @@
   border-radius: var(--radius-lg);
   background: var(--tray-bg);
 }
-/* Each key is the paper its artwork is drawn on (sampled per book, the
-   mark's house paper until the image loads), in both themes, so the mark
-   bleeds into the card instead of sitting on it as a square. Hover never
-   changes the background, which would expose the artwork's edge. */
+/* Each key is a card of the marks' house paper in both themes, holding the
+   book's mark as a tile on its category ground. */
 .home-make-card {
-  --paper: var(--home-make-paper, var(--gezel-paper-mark));
+  --paper: var(--gezel-paper-mark);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -51,24 +49,19 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
-/* The mark's own paper margin is invisible on the matched card, so the art
-   is pulled out by about that margin to line its subject up with the text. */
 .home-make-art {
   height: 64px;
   width: 64px;
-  margin: -0.3rem 0 0 -0.3rem;
   display: flex;
   align-items: center;
   justify-content: center;
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 .home-make-art img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  /* Feathered edge: a prop that runs off the artwork fades into the card. */
-  mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent),
-    linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
-  mask-composite: intersect;
+  object-fit: cover;
 }
 .home-make-name {
   font-weight: 600;

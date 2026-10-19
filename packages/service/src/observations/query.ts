@@ -279,7 +279,6 @@ export async function runQuery(
   project: ProjectLike,
   opts: RunQueryOptions,
 ): Promise<QueryResult> {
-  const storageDir = deps.store.projectArtifactsDir(project.id);
   const all = await listProjectTables(deps.store, project);
   if (all.length === 0) {
     throw new NoTablesError(
@@ -297,6 +296,23 @@ export async function runQuery(
     );
   }
 
+  return runQueryOnTables(deps, project.id, scope, opts);
+}
+
+/** Execute an already-authorized table snapshot without rediscovering names.
+ * Page callers must filter refs before reaching this function. An empty scope
+ * always means no access; it must never fall back to the project's full corpus. */
+export async function runQueryOnTables(
+  deps: ObservationQueryDeps,
+  projectId: string,
+  scope: readonly ObservationTableRef[],
+  opts: Pick<RunQueryOptions, 'sql' | 'limit' | 'timeoutMs'> & {
+    memoryLimit?: string;
+    threads?: number;
+  },
+): Promise<QueryResult> {
+  if (scope.length === 0) throw new NoTablesError('No readable tables are available.');
+  const storageDir = deps.store.projectArtifactsDir(projectId);
   const limit = Math.max(1, Math.min(opts.limit ?? DEFAULT_ROW_LIMIT, MAX_ROW_LIMIT));
   const allowedDirectories = [
     ...new Set(
@@ -309,6 +325,8 @@ export async function runQuery(
   const statement = await assertReadOnlyStatement(opts.sql, deps.duck, {
     allowedDirectories,
     timeoutMs: opts.timeoutMs ?? DEFAULT_DUCK_TIMEOUT_MS,
+    memoryLimit: opts.memoryLimit,
+    threads: opts.threads,
   });
 
   const views = await Promise.all(scope.map((t) => buildTableView(storageDir, t)));
@@ -319,6 +337,8 @@ export async function runQuery(
   const rows = await deps.duck.runTrusted<Record<string, unknown>>(script, {
     allowedDirectories,
     timeoutMs: opts.timeoutMs ?? DEFAULT_DUCK_TIMEOUT_MS,
+    memoryLimit: opts.memoryLimit,
+    threads: opts.threads,
   });
 
   const truncated = rows.length > limit;

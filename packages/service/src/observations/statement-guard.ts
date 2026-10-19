@@ -89,8 +89,8 @@ const EXPLAINED_REJECTIONS: Record<string, string> = {
 
 export class SqlRejectedError extends Error {
   readonly code = 'sql-rejected' as const;
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'SqlRejectedError';
   }
 }
@@ -220,6 +220,7 @@ export async function parserCheck(
     // The validator itself failing is not a licence to run unvalidated SQL.
     throw new SqlRejectedError(
       `the query could not be validated, so it was not run: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
 

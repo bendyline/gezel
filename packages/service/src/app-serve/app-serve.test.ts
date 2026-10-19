@@ -169,12 +169,32 @@ describe('visitor flow', () => {
     const html = await res.text();
     expect(html).toContain('"serve":{"apiBase":"/app/api"');
     expect(html).toContain('window.gezel');
+    expect(html).toContain('<style data-gezel-typography>');
+    expect(html).toContain('data:font/woff2;base64,');
     expect(html).not.toContain(site.siteKey);
     expect(html).not.toContain(token);
     const csp = res.headers.get('content-security-policy') ?? '';
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).not.toContain('sandbox');
     expect(res.headers.get('x-gezel-app-serve')).toBe('1');
+  });
+
+  it('serves table discovery only to authenticated visitors within the page reads', async () => {
+    const call = (body: unknown, noCookie = false) =>
+      visitor('/app/api/tables', {
+        method: 'POST',
+        noCookie,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    expect((await call({ op: 'list' }, true)).status).toBe(401);
+    const list = await call({ op: 'list' });
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual({ op: 'list', tables: [] });
+    expect((await call({ op: 'query', sql: 'SELECT 1', tables: ['private_table'] })).status).toBe(
+      403,
+    );
+    expect((await call({ op: 'list', projectId: 'another' })).status).toBe(400);
   });
 
   it('enforces the page-tool allowlist exactly like the first-party route', async () => {

@@ -1,5 +1,5 @@
 import type { PromptDraftTaskLaunch } from '@bendyline/gezel';
-import { planDisplayName } from '@bendyline/gezel';
+import { catalogGroundFor, planDisplayName } from '@bendyline/gezel';
 import { useRef } from 'react';
 import { ProjectGlyph } from '../views/projects/new-project-meta.js';
 import { craftbookGlyph } from '../views/tasks/new-task-meta.js';
@@ -99,6 +99,7 @@ export function ComposerTaskBar({
             <CatalogArtwork
               {...(art?.item.iconSvg ? { iconSvg: art.item.iconSvg } : {})}
               {...(art?.item.logoUrl ? { logoUrl: art.item.logoUrl } : {})}
+              ground={catalogGroundFor(manifest)}
               svgClassName="chat-composer-task-bar-art-svg"
               fallback={<ProjectGlyph glyph={craftbookGlyph(manifest)} size={16} />}
             />

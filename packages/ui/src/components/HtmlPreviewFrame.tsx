@@ -1,8 +1,10 @@
-import type {
-  InvokePageToolResponse,
-  PageReadRequest,
-  PreviewLogEntry,
-  ScriptRun,
+import {
+  type InvokePageToolResponse,
+  type PageReadRequest,
+  PageTableRequestSchema,
+  type PreviewLogEntry,
+  type ScriptRun,
+  normalizePagePath,
 } from '@bendyline/gezel';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -440,6 +442,7 @@ export function HtmlPreviewFrame({
         });
     };
 
+    const inflightTables = new Set<string>();
     function handleV1Message(raw: Record<string, unknown>): void {
       const kind = raw.kind;
       if (kind === 'hello') {
@@ -457,6 +460,92 @@ export function HtmlPreviewFrame({
       }
       const id = raw.id;
       if (typeof id !== 'string' || id.length === 0 || id.length > 64) return;
+      if (kind === 'table') {
+        const requestingWindow = iframeRef.current?.contentWindow;
+        const reply = (payload: Record<string, unknown>) => {
+          if (!disposed && requestingWindow === iframeRef.current?.contentWindow)
+            postToFrame({ kind: 'table-result', id, ...payload });
+        };
+        if (source !== 'type') {
+          reply({
+            ok: false,
+            errorCode: 'not-allowed',
+            error: 'Only project pages may query tables.',
+          });
+          return;
+        }
+        const parsed = PageTableRequestSchema.safeParse(raw.request);
+        if (!parsed.success) {
+          reply({ ok: false, errorCode: 'invalid-input', error: 'Invalid table request.' });
+          return;
+        }
+        if (inflightTables.size >= 2 || inflightTables.has(id)) {
+          reply({ ok: false, errorCode: 'rate-limited', error: 'Too many table requests.' });
+          return;
+        }
+        inflightTables.add(id);
+        void api
+          .invokeProjectPageTables(projectId, parsed.data)
+          .then((result) => reply({ ok: true, result }))
+          .catch((err) =>
+            reply({
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+              errorCode: pageErrorCode((err as { status?: number }).status),
+            }),
+          )
+          .finally(() => inflightTables.delete(id));
+        return;
+      }
+      if (kind === 'open') {
+        const reply = (ok: boolean, error?: string, errorCode?: string) =>
+          postToFrame({ kind: 'open-result', id, ok, error, errorCode });
+        if (source !== 'type') {
+          reply(false, 'Only project type pages may open files', 'not-allowed');
+          return;
+        }
+        const src = raw.source;
+        const target = typeof raw.path === 'string' ? normalizePagePath(raw.path) : null;
+        if ((src !== 'workspace' && src !== 'artifacts') || !target) {
+          reply(false, 'Invalid file path or source', 'invalid-input');
+          return;
+        }
+        if (inflightReads.current.size >= MAX_INFLIGHT_READS) {
+          reply(false, 'Too many concurrent reads', 'rate-limited');
+          return;
+        }
+        inflightReads.current.add(id);
+        const requestingWindow = iframeRef.current?.contentWindow;
+        // Reuse the server's manifest scope and symlink checks without
+        // reading file bytes (a workbook can exceed the page read limit).
+        void api
+          .invokeProjectPageRead(projectId, { op: 'stat', source: src, path: target })
+          .then((res) => {
+            if (disposed || iframeRef.current?.contentWindow !== requestingWindow) return;
+            if (res.exists === false || res.size === undefined) {
+              reply(false, 'File not found or path is a folder', 'not-allowed');
+              return;
+            }
+            reply(true);
+            window.dispatchEvent(
+              new CustomEvent('gezel:open-file', {
+                detail: { projectId, source: src, path: target },
+              }),
+            );
+          })
+          .catch((err) => {
+            if (!disposed)
+              reply(
+                false,
+                err instanceof Error ? err.message : String(err),
+                pageErrorCode((err as { status?: number }).status),
+              );
+          })
+          .finally(() => {
+            inflightReads.current.delete(id);
+          });
+        return;
+      }
       if (kind === 'invoke') {
         if (typeof raw.tool !== 'string') return;
         const input =

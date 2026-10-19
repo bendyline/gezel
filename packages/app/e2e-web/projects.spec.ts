@@ -36,6 +36,56 @@ test.describe('projects IDE', () => {
     await expect(currentProject.locator('.app-sidebar-item-label')).toHaveText('Default');
   });
 
+  test('compact status key shows and updates project status', async ({ page, world }, testInfo) => {
+    test.skip(!world, 'requires the seeded world');
+    await gotoHome(page);
+    await openProject(page, world!.projectId);
+    const trigger = page.getByRole('button', { name: /^Project status:/ });
+    await expect(trigger).toBeVisible();
+
+    for (const label of ['Stable', 'Read-only', 'Inactive', 'Active']) {
+      await trigger.click();
+      const menu = page.getByRole('group', { name: 'Project controls overflow' });
+      const option = menu.getByRole('button', { name: label, exact: true });
+      const lightColor = await option
+        .locator('.project-status-select-dot')
+        .evaluate((dot) => getComputedStyle(dot).backgroundColor);
+      await option.click();
+      await expect(menu).not.toBeVisible();
+      await expect(trigger).toHaveText(label);
+      await expect(trigger.locator('.project-status-select-dot')).toHaveCSS(
+        'background-color',
+        lightColor,
+      );
+    }
+
+    await page.reload();
+    await openProject(page, world!.projectId);
+    await expect(trigger).toHaveText('Active');
+    for (const width of [1280, 680]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect(trigger).toBeInViewport();
+      const bounds = await trigger.boundingBox();
+      expect(bounds!.height).toBeLessThanOrEqual(24);
+      for (const theme of ['light', 'dark'] as const) {
+        await setTheme(page, theme);
+        await page.screenshot({
+          path: testInfo.outputPath(`project-status-${width}-${theme}.png`),
+        });
+      }
+    }
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    const menu = page.getByRole('group', { name: 'Project controls overflow' });
+    await expect(menu.getByRole('button', { name: 'Active', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await page.screenshot({ path: testInfo.outputPath('project-status-menu-dark.png') });
+    await page.keyboard.press('Escape');
+    await expect(trigger).toBeFocused();
+  });
+
   test('tab tour', async ({ page, world }) => {
     test.skip(!world, 'requires the seeded world');
     await gotoHome(page);

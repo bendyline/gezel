@@ -521,6 +521,7 @@ export function CommandsPanel({
             <Popover.Content side="left" align="start">
               <CraftbookToolsetSetup
                 missing={missing}
+                paramSchema={m.paramSchema}
                 onAllInstalled={() => {
                   setSetupTarget(null);
                   void loadCraftbooks();

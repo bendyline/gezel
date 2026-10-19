@@ -76,6 +76,7 @@ export * from './scorecard/index.js';
 export * from './device-safety.js';
 export * from './toolset-trust.js';
 export * from './craftbook-categories.js';
+export * from './catalog-ground.js';
 export * from './craftbook-collapse.js';
 export * from './craftbook-doc.js';
 export * from './skills/index.js';

@@ -11,8 +11,10 @@ import {
 import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { compilePreviewModule } from '@bendyline/gezel-script-runtime/preview-module';
 import { Hono } from 'hono';
+import { projectPageTypographyStyle } from '../../project-type/page-typography.js';
 import { resolvePageTools } from '../../project-type/script-tools.js';
 import type { ServiceContext } from '../context.js';
+import { isMediaType, mediaFileResponse } from '../media-response.js';
 import { mimeTypeForPath } from '../mime.js';
 import type { PreviewCapabilityStore } from '../preview-capability.js';
 import { buildPageApiShim } from './page-api-shim.js';
@@ -319,7 +321,7 @@ export function preparePreviewHtml(
   // then the page API (so `window.gezel` exists before any page script).
   const shims =
     PREVIEW_LOG_SHIM +
-    (opts.pageApi ? buildPageApiShim(opts.pageApi) : '') +
+    (opts.pageApi ? projectPageTypographyStyle() + buildPageApiShim(opts.pageApi) : '') +
     PREVIEW_SCROLLBAR_SHIM;
   if (headMatch) {
     const at = (headMatch.index ?? 0) + headMatch[0].length;
@@ -472,6 +474,14 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
         return c.body(code, 200, previewHeaders('text/javascript; charset=utf-8'));
       }
       const mime = mimeTypeForPath(filePath);
+      if (isMediaType(mime))
+        return mediaFileResponse({
+          path: full,
+          size: s.size,
+          mtimeMs: s.mtimeMs,
+          request: c.req.raw,
+          headers: previewHeaders(mime),
+        });
       if (mime.startsWith('text/html')) {
         const html = preparePreviewHtml((await readFile(full)).toString('utf8'));
         const allowExternalNetwork = await previewAllowsExternalNetwork(ctx);

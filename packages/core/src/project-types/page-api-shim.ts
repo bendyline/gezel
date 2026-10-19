@@ -142,6 +142,8 @@ function serveSend(m){
   if(m.kind==='invoke'){
     url=S.apiBase+'/invoke';payload={tool:m.tool};
     if(m.input)payload.input=m.input;
+  }else if(m.kind==='table'){
+    url=S.apiBase+'/tables';payload=m.request;
   }else{
     url=S.apiBase+'/read';payload={op:m.op,source:m.source,path:m.path};
     if(m.as)payload.as=m.as;
@@ -208,6 +210,20 @@ addEventListener('message',function(event){
     settle(d.id,function(job){
       if(d.ok)job.resolve({output:d.output,runId:d.runId,reaction:d.reaction});
       else job.reject(err(d.errorCode||'script-error',d.error||'tool invoke failed',d.runId));
+    });
+    return;
+  }
+  if(d.kind==='open-result'){
+    settle(d.id,function(job){
+      if(d.ok)job.resolve();
+      else job.reject(err(d.errorCode||'unavailable',d.error||'open failed'));
+    });
+    return;
+  }
+  if(d.kind==='table-result'){
+    settle(d.id,function(job){
+      if(d.ok)job.resolve(d.result);
+      else job.reject(err(d.errorCode||'unavailable',d.error||'table request failed'));
     });
     return;
   }
@@ -333,6 +349,9 @@ function readOp(op,path,opts){
   return browserRead(op,source,String(path),opts.as);
 }
 
+function tableOp(request){
+  return enqueue('table request',{__gezelPage:1,kind:'table',id:mintId(),request:request},D.invokeTimeoutMs);
+}
 var api={
   page:{api:1,projectId:B.projectId,source:'type',entry:B.entry,typeName:B.typeName,params:B.params,mode:mode},
   tools:{
@@ -345,6 +364,10 @@ var api={
     },
   },
   data:{
+    open:function(path,opts){
+      if(!embedded||S)return Promise.reject(err('unavailable','gezel: file viewers require the Gezel app'));
+      return enqueue('open',{__gezelPage:1,kind:'open',id:mintId(),source:(opts&&opts.source)||'workspace',path:String(path)},D.readTimeoutMs);
+    },
     read:function(path,opts){
       var as=defaultAs(path,(opts||{}).as);
       return readOp('read',path,Object.assign({},opts,{as:as})).then(function(d){return decodeRead(d,as,path);});
@@ -390,6 +413,16 @@ var api={
       if(u)return u;
       if(embedded)return relayedUrl(source,String(path));
       throw err('unavailable','gezel: no capability in document URL');
+    },
+  },
+  tables:{
+    list:function(){return tableOp({op:'list'}).then(function(result){return result.tables;});},
+    describe:function(table){return tableOp({op:'describe',table:String(table)});},
+    query:function(sql,opts){
+      var request={op:'query',sql:String(sql)};
+      if(opts&&opts.tables!==undefined)request.tables=opts.tables;
+      if(opts&&opts.limit!==undefined)request.limit=opts.limit;
+      return tableOp(request);
     },
   },
   ui:{

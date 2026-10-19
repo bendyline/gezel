@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CatalogService } from '@bendyline/gezel-catalog';
@@ -72,6 +72,70 @@ const request = {
 } as const;
 
 describe('createTypedProject', () => {
+  it('connects a seedless type to an existing folder without changing its contents', async () => {
+    const folder = join(externalRoot, 'photos');
+    await mkdir(folder);
+    await writeFile(join(folder, 'original.txt'), 'keep me');
+    const { project } = await createTypedProject(
+      { store, catalog },
+      {
+        name: 'My collection',
+        workingDir: folder,
+        projectType: { typeId: 'design-scheme' },
+      },
+    );
+    expect(project.workingDir).toBe(folder);
+    expect((await store.getProject(project.id))?.workingDir).toBe(folder);
+    expect(await readdir(folder)).toEqual(['original.txt']);
+    expect(await readFile(join(folder, 'original.txt'), 'utf8')).toBe('keep me');
+  });
+
+  it('leaves the selected folder intact when creation rolls back', async () => {
+    const folder = join(externalRoot, 'photos');
+    await mkdir(folder);
+    await writeFile(join(folder, 'original.txt'), 'keep me');
+    await expect(
+      createTypedProject(
+        {
+          store,
+          catalog,
+          hooks: {
+            beforeCommit: () => Promise.reject(new Error('injected before commit')),
+          },
+        },
+        { name: 'My collection', workingDir: folder, projectType: { typeId: 'design-scheme' } },
+      ),
+    ).rejects.toThrow('injected before commit');
+    expect(await readdir(folder)).toEqual(['original.txt']);
+    expect(await readFile(join(folder, 'original.txt'), 'utf8')).toBe('keep me');
+    expect(await store.listProjects()).toEqual([]);
+    expect(await listTypedProjectStagingRoots(home)).toEqual([]);
+  });
+
+  it('rejects missing folders and workspace-seeding types before publishing', async () => {
+    await expect(
+      createTypedProject(
+        { store, catalog },
+        {
+          name: 'Missing folder',
+          workingDir: join(externalRoot, 'missing'),
+          projectType: { typeId: 'design-scheme' },
+        },
+      ),
+    ).rejects.toMatchObject({ code: 'PROJECT_TYPE_INVALID', status: 400 });
+    await expect(
+      createTypedProject(
+        { store, catalog },
+        {
+          name: 'Game',
+          workingDir: externalRoot,
+          projectType: { typeId: 'checkers' },
+        },
+      ),
+    ).rejects.toThrow('needs a new workspace');
+    expect(await store.listProjects()).toEqual([]);
+  });
+
   it('names a new hire around the gezels the install already has', async () => {
     const existing = await store.createGezel({ name: 'Bohuslav', role: 'Gardener' });
     namePicks.queue.push('Bohuslav', 'Asel');

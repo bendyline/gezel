@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PageTableRequestSchema, PageTableResponseSchema } from './page-tables.js';
 
 /**
  * Output Pane API v1 — the versioned postMessage envelope between a served
@@ -61,6 +62,14 @@ export const PageWatchMessageSchema = z.object({
   path: z.string().min(1),
 });
 
+export const PageOpenMessageSchema = z.object({
+  ...envelopeBase,
+  kind: z.literal('open'),
+  id: z.string().min(1).max(64),
+  source: PageReadSourceSchema,
+  path: z.string().min(1),
+});
+
 export const PageUnwatchMessageSchema = z.object({
   ...envelopeBase,
   kind: z.literal('unwatch'),
@@ -72,10 +81,19 @@ export const PageRefreshMessageSchema = z.object({
   kind: z.literal('refresh'),
 });
 
+export const PageTableMessageSchema = z.object({
+  ...envelopeBase,
+  kind: z.literal('table'),
+  id: z.string().min(1).max(64),
+  request: PageTableRequestSchema,
+});
+
 export const PageToParentMessageSchema = z.discriminatedUnion('kind', [
   PageHelloMessageSchema,
   PageInvokeMessageSchema,
   PageReadMessageSchema,
+  PageTableMessageSchema,
+  PageOpenMessageSchema,
   PageWatchMessageSchema,
   PageUnwatchMessageSchema,
   PageRefreshMessageSchema,
@@ -159,16 +177,37 @@ export const ParentChangeMessageSchema = z.object({
   etag: z.string(),
 });
 
+export const ParentOpenResultMessageSchema = z.object({
+  ...envelopeBase,
+  kind: z.literal('open-result'),
+  id: z.string(),
+  ok: z.boolean(),
+  error: z.string().optional(),
+  errorCode: PageBridgeErrorCodeSchema.optional(),
+});
+
 export const ParentThemeMessageSchema = z.object({
   ...envelopeBase,
   kind: z.literal('theme'),
   theme: z.object({ mode: z.enum(['light', 'dark']) }),
 });
 
+export const ParentTableResultMessageSchema = z.object({
+  ...envelopeBase,
+  kind: z.literal('table-result'),
+  id: z.string(),
+  ok: z.boolean(),
+  result: PageTableResponseSchema.optional(),
+  error: z.string().optional(),
+  errorCode: PageBridgeErrorCodeSchema.optional(),
+});
+
 export const ParentToPageMessageSchema = z.discriminatedUnion('kind', [
   ParentInitMessageSchema,
   ParentResultMessageSchema,
   ParentReadResultMessageSchema,
+  ParentTableResultMessageSchema,
+  ParentOpenResultMessageSchema,
   ParentChangeMessageSchema,
   ParentThemeMessageSchema,
 ]);

@@ -1,3 +1,5 @@
+@import "../assets/fonts/typography-tokens.css";
+
 :root {
   color-scheme: light dark;
 
@@ -17,10 +19,6 @@
      'OpenMoji Color' is scoped to emoji codepoints via unicode-range in
      fonts.css so it fills emoji glyphs in either stack without affecting
      text. System emoji fonts stay as fallbacks if OpenMoji fails to load. */
-  --font-ui: "Hanken Grotesk", "OpenMoji Color", "Apple Color Emoji", "Segoe UI Emoji",
-    "Noto Color Emoji", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-display: "PT Serif", "OpenMoji Color", "Apple Color Emoji", "Segoe UI Emoji",
-    "Noto Color Emoji", Georgia, "Times New Roman", serif;
   font-family: var(--font-ui);
 
   /* Type scale. A small, deliberate set of sizes so chrome (settings,
@@ -52,6 +50,17 @@
   /* The rag paper Workshop Marks are drawn on. Theme-stable on purpose: a
      surface that hosts the artwork sits on this ground in both themes. */
   --gezel-paper-mark: #e6d5bc;
+  /* Colored paper painted behind a craftbook's or project type's transparent
+     cut-paper mark, one tone per category (catalogGroundFor in core). */
+  --gezel-ground-indigo: #4f5d7e;
+  --gezel-ground-slate: #6f8aa0;
+  --gezel-ground-teal: #5f8a86;
+  --gezel-ground-sage: #8a9a76;
+  --gezel-ground-forest: #4f6249;
+  --gezel-ground-ochre: #c49a45;
+  --gezel-ground-terracotta: #b0724c;
+  --gezel-ground-rose: #c08a86;
+  --gezel-ground-plum: #7d6378;
   /* True black, for surfaces that must meet the phone's own system bars. */
   --gezel-paper-night: #000;
   --gezel-ink: #1c1c1c;
@@ -240,6 +249,15 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    --gezel-ground-indigo: #3e4961;
+    --gezel-ground-slate: #576b7b;
+    --gezel-ground-teal: #4b6b67;
+    --gezel-ground-sage: #6b775b;
+    --gezel-ground-forest: #3e4c39;
+    --gezel-ground-ochre: #977736;
+    --gezel-ground-terracotta: #88593b;
+    --gezel-ground-rose: #946b67;
+    --gezel-ground-plum: #614d5d;
     --gezel-paper-canvas: #141517;
     --gezel-paper-workshop: #1f1c18;
     --gezel-paper-panel: #1c1d20;
@@ -313,6 +331,15 @@
 
 [data-theme="dark"] {
   color-scheme: dark;
+  --gezel-ground-indigo: #3e4961;
+  --gezel-ground-slate: #576b7b;
+  --gezel-ground-teal: #4b6b67;
+  --gezel-ground-sage: #6b775b;
+  --gezel-ground-forest: #3e4c39;
+  --gezel-ground-ochre: #977736;
+  --gezel-ground-terracotta: #88593b;
+  --gezel-ground-rose: #946b67;
+  --gezel-ground-plum: #614d5d;
   --gezel-paper-canvas: #141517;
   --gezel-paper-workshop: #1f1c18;
   --gezel-paper-panel: #1c1d20;

@@ -345,12 +345,13 @@ export function catalogProjectTypeGlyph(item: CatalogItemSummary): ProjectGlyphI
  * configuration section shows. `general` is the plain project; `github` reveals
  * the repo field; `email` stamps the `email` project type (the mailbox is linked
  * from the project's Mail tab after creation). Future kinds (calendar, group
- * messaging, data analysis) are shown disabled until their rails land.
+ * messaging) are shown disabled until their rails land. Data Analysis is a
+ * catalog project type.
  */
 export type ProjectKindId = 'general' | 'email' | 'github' | 'folder';
 
 export interface ProjectKindMeta {
-  id: ProjectKindId | 'calendar' | 'messaging' | 'data';
+  id: ProjectKindId | 'calendar' | 'messaging';
   label: string;
   description: string;
   soon?: boolean;
@@ -415,15 +416,6 @@ export const PROJECT_KINDS: ProjectKindMeta[] = [
     soon: true,
     category: 'communication',
     glyph: 'bubbles',
-    give: [],
-  },
-  {
-    id: 'data',
-    label: 'Data analysis',
-    description: 'Explore and report on a dataset.',
-    soon: true,
-    category: 'data',
-    glyph: 'chart',
     give: [],
   },
 ];

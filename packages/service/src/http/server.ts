@@ -96,6 +96,7 @@ import { opencodeSetupRoutes } from './routes/opencode-setup.js';
 import { pageCheckRoutes } from './routes/page-check.js';
 import { pageInvokeRoutes } from './routes/page-invoke.js';
 import { pageReadRoutes } from './routes/page-read.js';
+import { pageTableRoutes } from './routes/page-tables.js';
 import { peopleWipeRoutes, projectPeopleRoutes } from './routes/people.js';
 import { permissionRoutes } from './routes/permissions.js';
 import { piSetupRoutes } from './routes/pi-setup.js';
@@ -523,6 +524,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/projects', pageInvokeRoutes(ctx));
   // The read half of the same bridge at /api/projects/:id/page-read.
   app.route('/api/projects', pageReadRoutes(ctx));
+  app.route('/api/projects', pageTableRoutes(ctx));
   app.route('/api/projects', referencePreviewRoutes(ctx));
   app.route('/api/projects', retrievalPreviewRoutes(ctx));
   app.route('/api/projects', projectRoutes(ctx));

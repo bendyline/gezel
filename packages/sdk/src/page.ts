@@ -184,6 +184,13 @@ export interface GezelPageWatchOptions {
  */
 export interface GezelPageDataApi {
   /**
+   * Open a declared file in Gezel's existing file viewer (CSV table,
+   * spreadsheet, document, etc.). Checks the manifest's read scope and
+   * file existence before navigating. Embedded mode only; rejects with
+   * 'unavailable' in standalone browser and serve modes.
+   */
+  open(path: string, opts?: GezelPageSourceOptions): Promise<void>;
+  /**
    * Read one file. Resolves to a string for `'text'`, a parsed value for
    * `'json'`, or a `Uint8Array` for `'bytes'` (see
    * {@link GezelPageReadOptions.as} for the default). Rejects with a
@@ -211,6 +218,52 @@ export interface GezelPageDataApi {
    * URL carries no capability.
    */
   url(path: string, opts?: GezelPageSourceOptions): string;
+}
+
+/** A queryable table backed by a file/directory in the page's declared reads. */
+export interface GezelPageTable {
+  /** Stable SQL identifier issued by the host. Do not derive this from a filename. */
+  name: string;
+  title: string;
+  source: GezelPageReadSource;
+  /** Original workspace file, or the connector's artifact table directory. */
+  path: string;
+  rows: number;
+  columnCount: number;
+  updatedAt?: string;
+  schemaInferred: boolean;
+}
+export interface GezelPageTableSchema {
+  op: 'describe';
+  table: GezelPageTable;
+  columns: Array<{
+    name: string;
+    type: 'BOOLEAN' | 'BIGINT' | 'DOUBLE' | 'VARCHAR' | 'DATE' | 'TIMESTAMP' | 'JSON';
+    role: 'time' | 'dimension' | 'measure' | 'identifier' | 'attribute';
+    description?: string;
+    unit?: string;
+    cardinalityHint?: string;
+    examples?: string[];
+  }>;
+  description?: string;
+  grain?: string;
+}
+export interface GezelPageTableQuery {
+  op: 'query';
+  rows: Record<string, unknown>[];
+  columns: string[];
+  truncated: boolean;
+  limit: number;
+  tablesInScope: string[];
+}
+/** Read-only DuckDB access in embedded/serve mode on hosts with a query engine.
+ * Permissions are checked again on every call; no table names grant authority. */
+export interface GezelPageTablesApi {
+  list(): Promise<GezelPageTable[]>;
+  describe(table: string): Promise<GezelPageTableSchema>;
+  /** One read-only statement. Default limit 100, max 1000 rows and 1 MiB.
+   * `tables` can narrow the readable scope, never expand it. */
+  query(sql: string, opts?: { tables?: string[]; limit?: number }): Promise<GezelPageTableQuery>;
 }
 
 /** The host UI theme as seen by the page. */
@@ -242,6 +295,7 @@ export interface GezelPageApi {
   tools: GezelPageToolsApi;
   /** Read and watch project files within the page's declared scope. */
   data: GezelPageDataApi;
+  tables: GezelPageTablesApi;
   /** Mirror host UI state (theme). */
   ui: GezelPageUiApi;
   /** Ask the host to re-serve the page (embedded); reloads the tab in browser mode. */

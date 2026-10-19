@@ -1,0 +1,10 @@
+/* Low specificity and injected before authored CSS: pages can override any role. */
+:where(:root) {
+  font-family: var(--font-body);
+}
+:where(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--font-heading);
+}
+:where(button, input, select, textarea, option, optgroup) {
+  font-family: var(--font-ui);
+}

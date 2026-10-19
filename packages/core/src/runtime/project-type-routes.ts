@@ -131,6 +131,8 @@ export async function handlePortableProjectTypeRoute(
 
   if (id === 'typed' && !action && method === 'POST') {
     const body = parseTypedProjectRequest(await request.json());
+    if (body.workingDir)
+      return json({ error: 'This device does not support external project folders.' }, 400);
     return json(
       await host.serial(async () => {
         host.assertNoConflict();
@@ -200,6 +202,12 @@ export async function handlePortableProjectTypeRoute(
     });
   }
 
+  if (action === 'page-tables' && method === 'POST' && !child) {
+    return json(
+      { error: 'The data query engine is not available on this device.', errorCode: 'unavailable' },
+      503,
+    );
+  }
   if (action === 'page-read' && method === 'POST' && !child) {
     const body = PageReadRequestSchema.parse(await request.json());
     const project = await host.store.getProject(id);

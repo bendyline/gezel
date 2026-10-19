@@ -193,6 +193,7 @@ export function ToolsetsEditor({ scope: incomingScope, subject, hint }: Toolsets
     [kind, id],
   );
   const [installed, setInstalled] = useState<InstalledToolset[]>([]);
+  const [included, setIncluded] = useState<InstalledToolset[]>([]);
   const [roleDefault, setRoleDefault] = useState<RoleDefault | null>(null);
   const [catalog, setCatalog] = useState<CatalogItemSummary[]>([]);
   const [showPicker, setShowPicker] = useState(false);
@@ -208,10 +209,16 @@ export function ToolsetsEditor({ scope: incomingScope, subject, hint }: Toolsets
 
   const refresh = useCallback(async () => {
     try {
-      const [roster, items] = await Promise.all([
+      const [system, roster, items] = await Promise.all([
+        api.listInstalledToolsets({ kind: 'system' }),
         api.listInstalledToolsets(scope),
         api.listCatalogItems('toolset'),
       ]);
+      setIncluded(
+        (system.toolsets ?? []).filter(
+          (entry) => entry.toolsetId === 'docblocks' && entry.sourceId === 'bundled',
+        ),
+      );
       setInstalled(roster.toolsets ?? []);
       setRoleDefault(roster.roleDefault ?? null);
       setDiscoveryWarnings((roster.discoveryWarnings ?? []).map((warning) => warning.message));
@@ -509,8 +516,18 @@ export function ToolsetsEditor({ scope: incomingScope, subject, hint }: Toolsets
           Project MCP config: {warning}
         </p>
       ))}
-      {(installed.length > 0 || inheritedTiles.length > 0) && (
+      {(included.length > 0 || installed.length > 0 || inheritedTiles.length > 0) && (
         <div className="toolsets-tile-grid">
+          {included
+            .filter((entry) => !installed.some((item) => item.toolsetId === entry.toolsetId))
+            .map((entry) => (
+              <ToolsetTile
+                key={entry.toolsetId}
+                name="DocBlocks"
+                tone="inherited"
+                caption="Included with Gezel"
+              />
+            ))}
           {installed.map((entry) => (
             <ToolsetTile
               key={entry.toolsetId}
@@ -591,14 +608,21 @@ export function ToolsetsEditor({ scope: incomingScope, subject, hint }: Toolsets
                   action={(item) => {
                     if (item.manifest.kind !== 'toolset') return null;
                     const m = item.manifest;
-                    const already = installed.some((t) => t.toolsetId === m.id);
+                    const shipped = included.some((t) => t.toolsetId === m.id);
+                    const already = shipped || installed.some((t) => t.toolsetId === m.id);
                     return (
                       <button
                         type="button"
                         disabled={already || busy !== null}
                         onClick={() => void install(m.id)}
                       >
-                        {already ? 'Installed' : busy === m.id ? 'Installing…' : 'Install'}
+                        {shipped
+                          ? 'Included with Gezel'
+                          : already
+                            ? 'Installed'
+                            : busy === m.id
+                              ? 'Installing…'
+                              : 'Install'}
                       </button>
                     );
                   }}

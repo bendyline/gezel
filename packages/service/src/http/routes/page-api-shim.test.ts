@@ -27,12 +27,18 @@ interface Harness {
       invoke(tool: string, input?: object): Promise<{ output: unknown }>;
     };
     data: {
+      open(path: string, opts?: object): Promise<void>;
       read(path: string, opts?: object): Promise<unknown>;
       list(path: string, opts?: object): Promise<unknown[]>;
       watch(path: string, cb: (ev: unknown) => void, opts?: object): () => void;
       url(path: string, opts?: object): string;
     };
     ui: { theme: { mode: string }; onTheme(cb: (t: unknown) => void): () => void };
+    tables: {
+      list(): Promise<unknown[]>;
+      describe(table: string): Promise<unknown>;
+      query(sql: string, opts?: object): Promise<unknown>;
+    };
     refresh(): void;
   };
   posted: unknown[];
@@ -114,6 +120,89 @@ function lastPosted<T>(h: Harness, kind: string): T {
 }
 
 describe('buildPageApiShim', () => {
+  it('relays table discovery, schemas and queries and ignores non-parent replies', async () => {
+    const h = boot();
+    const listed = h.gezel.tables.list();
+    const m = lastPosted<{ id: string; request: unknown }>(h, 'table');
+    expect(m.request).toEqual({ op: 'list' });
+    h.deliver(
+      { __gezelPage: 1, kind: 'table-result', id: m.id, ok: true, result: { tables: ['spoof'] } },
+      {},
+    );
+    h.deliver({
+      __gezelPage: 1,
+      kind: 'table-result',
+      id: m.id,
+      ok: true,
+      result: { op: 'list', tables: [{ name: 't_1' }] },
+    });
+    await expect(listed).resolves.toEqual([{ name: 't_1' }]);
+    const described = h.gezel.tables.describe('t_1');
+    const d = lastPosted<{ id: string; request: unknown }>(h, 'table');
+    expect(d.request).toEqual({ op: 'describe', table: 't_1' });
+    h.deliver({
+      __gezelPage: 1,
+      kind: 'table-result',
+      id: d.id,
+      ok: true,
+      result: { columns: [] },
+    });
+    await expect(described).resolves.toEqual({ columns: [] });
+    const queried = h.gezel.tables.query('SELECT 1', { tables: ['t_1'], limit: 5 });
+    const q = lastPosted<{ id: string; request: unknown }>(h, 'table');
+    expect(q.request).toEqual({ op: 'query', sql: 'SELECT 1', tables: ['t_1'], limit: 5 });
+    h.deliver({
+      __gezelPage: 1,
+      kind: 'table-result',
+      id: q.id,
+      ok: false,
+      errorCode: 'not-allowed',
+    });
+    await expect(queried).rejects.toMatchObject({ code: 'not-allowed' });
+    await expect(boot({ embedded: false }).gezel.tables.list()).rejects.toMatchObject({
+      code: 'unavailable',
+    });
+  });
+
+  it('uses the visitor tables endpoint in serve mode', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ op: 'list', tables: [] }) });
+    const h = boot({ embedded: false, serve: true, fetchImpl });
+    await expect(h.gezel.tables.list()).resolves.toEqual([]);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/app/api/tables',
+      expect.objectContaining({ credentials: 'same-origin', body: JSON.stringify({ op: 'list' }) }),
+    );
+  });
+  it('opens a file through the authenticated parent and propagates denied scopes', async () => {
+    const h = boot();
+    const opened = h.gezel.data.open('reports/sales #1.csv', { source: 'artifacts' });
+    const message = lastPosted<{ id: string }>(h, 'open');
+    expect(message).toMatchObject({ source: 'artifacts', path: 'reports/sales #1.csv' });
+    h.deliver({ __gezelPage: 1, kind: 'open-result', id: message.id, ok: true });
+    await expect(opened).resolves.toBeUndefined();
+
+    const denied = h.gezel.data.open('../outside.csv');
+    const next = lastPosted<{ id: string }>(h, 'open');
+    h.deliver({
+      __gezelPage: 1,
+      kind: 'open-result',
+      id: next.id,
+      ok: false,
+      error: 'Path is outside the page scope',
+      errorCode: 'not-allowed',
+    });
+    await expect(denied).rejects.toMatchObject({ code: 'not-allowed' });
+  });
+
+  it('does not try to open host viewers from browser or serve pages', async () => {
+    for (const opts of [{ embedded: false }, { serve: true }]) {
+      const h = boot(opts);
+      await expect(h.gezel.data.open('sales.csv')).rejects.toMatchObject({ code: 'unavailable' });
+      expect(h.posted.some((m) => (m as { kind: string }).kind === 'open')).toBe(false);
+    }
+  });
   beforeEach(() => {
     vi.useRealTimers();
   });

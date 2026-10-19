@@ -2153,9 +2153,9 @@
   font-weight: 700;
 }
 
-/* The ellipsis is always there: it holds the project's status and write
-   grant, which no longer stand in the bar. When the bar's own container is
-   too narrow, the inline exceptions fold into it too. */
+/* The compact status key keeps the lifecycle label and light visible while
+   grouping project settings in one menu. Narrow bars fold inline exceptions
+   into this menu too. */
 .project-controls-overflow {
   display: inline-flex;
   flex: 0 0 auto;
@@ -2165,16 +2165,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
+  gap: 0.4rem;
+  height: 1.5rem;
+  padding: 0 0.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 1.1rem;
+  font-size: var(--text-sm);
   line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
 }
 

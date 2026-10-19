@@ -1,6 +1,7 @@
 import {
   type GezelSummary,
   type Project,
+  catalogGroundFor,
   interestAreasForCraftbook,
   pickWithRange,
   planDisplayName,
@@ -9,18 +10,9 @@ import {
   starterCraftbookIds,
   visibleCatalogItems,
 } from '@bendyline/gezel';
-import {
-  type CSSProperties,
-  Suspense,
-  lazy,
-  useEffect,
-  useMemo,
-  useReducer,
-  useState,
-} from 'react';
+import { Suspense, lazy, useEffect, useMemo, useReducer, useState } from 'react';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
-import { sampleArtworkPaper } from '../../components/artwork-paper.js';
 import { navigateToTab } from '../../components/nav-actions.js';
 import { useInterests } from '../../components/useInterests.js';
 import { useShowWorkInProgressFeatures } from '../../components/useShowWorkInProgressFeatures.js';
@@ -145,9 +137,9 @@ export function MakeSomething({ projectId, projects }: { projectId: string; proj
 }
 
 /**
- * The card takes the paper its artwork is drawn on, so the mark bleeds into
- * it. A starter says in a few words what comes back; a first-project plan
- * keeps the opening clause of its own description, so every key is one size.
+ * A paper card holding the book's mark on its category ground. A starter says
+ * in a few words what comes back; a first-project plan keeps the opening
+ * clause of its own description, so every key is one size.
  */
 function MakeSomethingCard({
   book,
@@ -158,20 +150,14 @@ function MakeSomethingCard({
   starter: boolean;
   onOpen: () => void;
 }) {
-  const [paper, setPaper] = useState<string | null>(null);
   return (
-    <button
-      type="button"
-      className="home-make-card"
-      style={paper ? ({ '--home-make-paper': paper } as CSSProperties) : undefined}
-      onClick={onOpen}
-    >
+    <button type="button" className="home-make-card" onClick={onOpen}>
       <span className="home-make-art" aria-hidden="true">
         <CatalogArtwork
           iconSvg={book.item.iconSvg}
           logoUrl={book.item.logoUrl}
+          ground={catalogGroundFor(book.manifest)}
           fallback={<ProjectGlyph glyph={craftbookGlyph(book.manifest)} size={36} />}
-          onImageLoad={(image) => setPaper(sampleArtworkPaper(image))}
         />
       </span>
       <span className="home-make-name">{planDisplayName(book.manifest)}</span>

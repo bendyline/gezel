@@ -2164,9 +2164,6 @@ body.chat-rail-resizing webview {
 .chat-pill-row-bar-thumb:active {
   cursor: grabbing;
 }
-.chat-pill-row-empty {
-  white-space: nowrap;
-}
 
 .chat-pill {
   display: inline-flex;
@@ -3898,6 +3895,13 @@ button.timeline-session-divider-child::before {
 
 .craftbook-toolset-setup h4 {
   margin: 0;
+}
+
+.craftbook-toolset-setup .commands-panel-item-desc {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
 }
 
 .commands-panel-toast {

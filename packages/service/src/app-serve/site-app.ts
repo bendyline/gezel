@@ -5,6 +5,7 @@ import {
   AppServeChatSendRequestSchema,
   InvokePageToolRequestSchema,
   PageReadRequestSchema,
+  PageTableRequestSchema,
   createLogger,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
@@ -15,6 +16,7 @@ import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
+import { isMediaType, mediaFileResponse } from '../http/media-response.js';
 import { mimeTypeForPath } from '../http/mime.js';
 import {
   PAGE_READ_MAX_BYTES,
@@ -22,8 +24,10 @@ import {
   readPageData,
   resolveScopedPageFile,
 } from '../http/page-io.js';
+import { readPageTables } from '../http/page-tables.js';
 import { previewContentSecurityPolicy } from '../http/routes/preview.js';
 import { preparePreviewHtml } from '../http/routes/preview.js';
+import type { DuckRunner } from '../observations/duck.js';
 import { resolvePageTools, resolveProjectTypeManifest } from '../project-type/script-tools.js';
 import { createTenantLimiter } from '../remotes/tenant-limits.js';
 import type { ScriptRunner } from '../scripts/runner.js';
@@ -50,6 +54,7 @@ const SITE_MAX_CHAT_TURNS = 2;
 const VISITOR_MAX_STREAMS = 2;
 
 export interface AppServeSiteDeps {
+  duck: DuckRunner;
   store: Store;
   catalog: CatalogService;
   chat: ChatManager;
@@ -80,9 +85,13 @@ export interface AppServeSiteRuntime {
  */
 export function isAppServeRoute(method: string, path: string): boolean {
   if (method === 'GET' && (path === '/' || path.startsWith('/pages/'))) return true;
-  if (method === 'GET' && path.startsWith('/data/')) return true;
+  if ((method === 'GET' || method === 'HEAD') && path.startsWith('/data/')) return true;
   if (method === 'GET' && path === '/app/api/site') return true;
-  if (method === 'POST' && (path === '/app/api/invoke' || path === '/app/api/read')) return true;
+  if (
+    method === 'POST' &&
+    (path === '/app/api/invoke' || path === '/app/api/read' || path === '/app/api/tables')
+  )
+    return true;
   if (method === 'POST' && path === '/app/api/chat/send') return true;
   if (method === 'GET' && (path === '/app/api/chat/events' || path === '/app/api/chat/history')) {
     return true;
@@ -350,6 +359,27 @@ export function buildAppServeSiteApp(deps: AppServeSiteDeps, site: AppServeSiteR
     }
   });
 
+  app.post('/app/api/tables', async (c) => {
+    const visitor = visitorOf(c);
+    if (!visitor) return c.json({ error: 'visitor session required' }, 401);
+    if (siteWindowExceeded('invoke')) return c.json({ error: 'rate limited' }, 429);
+    const admission = readLimiter.tryAcquire(visitor.visitorId, 'generation');
+    if (!admission.ok) return c.json({ error: 'rate limited', errorCode: 'rate-limited' }, 429);
+    try {
+      const parsed = PageTableRequestSchema.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success)
+        return c.json({ error: 'Invalid table request.', errorCode: 'invalid-input' }, 400);
+      const result = await readPageTables(deps, {
+        projectId: site.projectId,
+        request: parsed.data,
+      });
+      site.counters.reads += 1;
+      return c.json(result.body, result.status);
+    } finally {
+      admission.release();
+    }
+  });
+
   app.post('/app/api/read', async (c) => {
     const visitor = visitorOf(c);
     if (!visitor) return c.json({ error: 'visitor session required' }, 401);
@@ -407,6 +437,17 @@ export function buildAppServeSiteApp(deps: AppServeSiteDeps, site: AppServeSiteR
         return c.json({ error: 'not found' }, 404);
       }
       if (stats.isDirectory()) return c.json({ error: 'is a directory' }, 400);
+      const mime = mimeTypeForPath(resolved.requested);
+      if (isMediaType(mime)) {
+        site.counters.reads += 1;
+        return mediaFileResponse({
+          path: resolved.full,
+          size: stats.size,
+          mtimeMs: stats.mtimeMs,
+          request: c.req.raw,
+          headers: { 'content-type': mime, 'cache-control': 'no-store' },
+        });
+      }
       if (stats.size > PAGE_READ_MAX_BYTES) {
         return c.json({ error: 'file exceeds read cap' }, 413);
       }

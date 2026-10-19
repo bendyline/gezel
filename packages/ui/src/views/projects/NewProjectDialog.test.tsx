@@ -37,6 +37,51 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+it('passes an optional existing folder when creating a seedless catalog type', async () => {
+  vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock' } as never);
+  vi.mocked(api.listCatalogItems).mockImplementation(
+    async (kind) =>
+      ({
+        items:
+          kind === 'project-type'
+            ? [
+                catalogItem({
+                  kind: 'project-type',
+                  id: 'media-library',
+                  name: 'Media Library',
+                  category: 'creative',
+                  workspaceSeed: [],
+                }),
+              ]
+            : [],
+      }) as never,
+  );
+  vi.mocked(api.createTypedProject).mockResolvedValue({
+    project: { id: 'my-media' },
+    applied: { gezelsCreated: [], warnings: [] },
+  } as never);
+  render(
+    <NewProjectDialog open mode="crew" onClose={() => undefined} onCreated={() => undefined} />,
+  );
+  fireEvent.click(await screen.findByRole('radio', { name: 'Media Library' }));
+  fireEvent.change(screen.getByRole('textbox', { name: /Folder \(optional\)/ }), {
+    target: { value: 'D:\\Pictures' },
+  });
+  fireEvent.change(screen.getByRole('textbox', { name: /^Name/ }), {
+    target: { value: 'My media' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /^Create/ }));
+  await waitFor(() =>
+    expect(api.createTypedProject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'My media',
+        workingDir: 'D:\\Pictures',
+        projectType: expect.objectContaining({ typeId: 'media-library' }),
+      }),
+    ),
+  );
+});
+
 const repos = [
   {
     name: 'first',

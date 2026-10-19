@@ -1,3 +1,4 @@
+import type { CatalogGroundTone } from '@bendyline/gezel';
 import { type ReactNode, useMemo, useState } from 'react';
 import { safeSvgImageUrl } from '../safe-svg-image.js';
 import { useCatalogArtworkUrl } from './catalog-artwork-url.js';
@@ -16,10 +17,16 @@ import { useCatalogArtworkUrl } from './catalog-artwork-url.js';
  * `useCatalogArtworkUrl` swaps for an object URL because `<img>` cannot send
  * an Authorization header. In-memory `data:`/`blob:` URLs pass through;
  * remote URLs fall back instead of causing passive renderer egress.
+ *
+ * `ground` is the category paper (`catalogGroundFor`) painted behind a logo:
+ * craftbook and project-type marks are transparent cut-outs, so the ground
+ * shows through them, while an older opaque mark simply covers it. It sits on
+ * the image itself, so the caller's size, radius and clipping still apply.
  */
 export function CatalogArtwork({
   iconSvg,
   logoUrl,
+  ground,
   svgClassName,
   imageClassName,
   fallback,
@@ -27,6 +34,7 @@ export function CatalogArtwork({
 }: {
   iconSvg?: string;
   logoUrl?: string;
+  ground?: CatalogGroundTone | undefined;
   svgClassName?: string;
   imageClassName?: string;
   fallback: ReactNode;
@@ -37,6 +45,7 @@ export function CatalogArtwork({
   const iconUrl = useMemo(() => safeSvgImageUrl(iconSvg), [iconSvg]);
   const artworkUrl = useCatalogArtworkUrl(iconUrl ?? logoUrl);
   const artworkClassName = iconUrl ? (svgClassName ?? imageClassName) : imageClassName;
+  const groundTone = iconUrl ? undefined : ground;
 
   if (artworkUrl && failedLogoUrl !== artworkUrl) {
     return (
@@ -46,6 +55,8 @@ export function CatalogArtwork({
           className={artworkClassName}
           src={artworkUrl}
           alt=""
+          data-ground={groundTone}
+          style={groundTone ? { backgroundColor: `var(--gezel-ground-${groundTone})` } : undefined}
           hidden={loadedLogoUrl !== artworkUrl}
           onLoad={(event) => {
             setLoadedLogoUrl(artworkUrl);

@@ -94,6 +94,33 @@ async function stampType(): Promise<void> {
 }
 
 describe('preview route — type source', () => {
+  it('streams only declared media reads, including byte ranges and HEAD', async () => {
+    await stampType();
+    const root = await store.projectWorkspaceDir(projectId);
+    const bytes = Buffer.alloc(3 * 1024 * 1024, 42);
+    await writeFile(join(root, 'clip.webm'), bytes);
+    await writeFile(join(root, 'private.webm'), bytes);
+    const minted = capabilities.mint({
+      source: 'type',
+      projectId,
+      entryPath: 'dashboard/index.html',
+      additionalScopes: [{ source: 'workspace', path: 'clip.webm' }],
+    });
+    const prefix = `/preview/${minted.token}/workspace/${projectId}`;
+    const res = await app().request(`${prefix}/clip.webm`, { headers: { range: 'bytes=100-149' } });
+    expect(res.status).toBe(206);
+    expect(res.headers.get('content-range')).toBe(`bytes 100-149/${bytes.length}`);
+    expect(res.headers.get('accept-ranges')).toBe('bytes');
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(bytes.subarray(100, 150));
+    const head = await app().request(`${prefix}/clip.webm`, { method: 'HEAD' });
+    expect(head.status).toBe(200);
+    expect(head.headers.get('content-length')).toBe(String(bytes.length));
+    expect(await head.text()).toBe('');
+    expect(
+      (await app().request(`${prefix}/private.webm`, { headers: { range: 'bytes=0-9' } })).status,
+    ).toBe(403);
+  });
+
   it('serves a page from the applied type and injects the log shim', async () => {
     await stampType();
     const res = await app().request(previewUrl('dashboard/index.html'));

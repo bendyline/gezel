@@ -306,6 +306,8 @@ import type {
   PageCheckResponse,
   PageReadRequest,
   PageReadResponse,
+  PageTableRequest,
+  PageTableResponse,
   PatchPromptDraftRequest,
   PendingImports,
   PerfSnapshot,
@@ -7481,6 +7483,11 @@ export class GezelClient {
    */
   invokeProjectPageRead(projectId: string, body: PageReadRequest): Promise<PageReadResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/page-read`, body);
+  }
+
+  /** Query only tables backed by files readable by this project's page. */
+  invokeProjectPageTables(projectId: string, body: PageTableRequest): Promise<PageTableResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/page-tables`, body);
   }
 
   getProjectScriptRun(projectId: string, runId: string): Promise<ScriptRun> {

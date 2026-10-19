@@ -13,13 +13,17 @@ That legacy wire protocol ("v0") keeps working forever — see
 
 ## The object
 
+Project pages also receive [shared typography](project-types.md#shared-typography)
+automatically: local body/UI and heading fonts, with `--font-body`, `--font-ui`,
+and `--font-heading` CSS roles. No JavaScript or bundled font assets are needed.
+
 Served type pages find a frozen `window.gezel` defined before any page
 script runs:
 
 ```js
 gezel.page      // { api: 1, projectId, source: 'type', entry, typeName, params, mode }
 gezel.tools     // { list(), invoke(tool, input?) }
-gezel.data      // { read(path, opts?), list(path, opts?), watch(path, cb, opts?), url(path, opts?) }
+gezel.data      // { read(path, opts?), list(path, opts?), watch(path, cb, opts?), url(path, opts?), open(path, opts?) }
 gezel.ui        // { theme: { mode: 'light'|'dark' }, onTheme(cb) }
 gezel.refresh() // ask the host to re-mint + reload this page
 ```
@@ -51,6 +55,7 @@ const bytes = await gezel.data.read('media/a.png', { as: 'bytes' });  // Uint8Ar
 const posts = await gezel.data.list('posts');               // [{ name, kind, size, mtime }]
 const stop  = gezel.data.watch('posts', ({ path, etag }) => rerender());
 const src   = gezel.data.url('media/hero.png');             // for <img src>, media elements
+await gezel.data.open('sales.csv');                       // open Gezel's file viewer
 ```
 
 - Every path must be declared in the manifest's `pages.reads` (exact file,
@@ -67,6 +72,59 @@ const src   = gezel.data.url('media/hero.png');             // for <img src>, me
 - `url()` returns a capability-relative URL for media elements. It expires
   with the document's preview lease; a reload re-mints. Use `read`/`watch`
   for data, `url()` only for `<img>`/`<audio>`/`<video>`.
+- `open()` opens a file in the host's existing rendition (CSV table,
+  spreadsheet, document, or other file viewer). It checks `pages.reads`,
+  path containment, and file existence through the server before navigating;
+  it does not read the bytes through the page bridge. It accepts `opts.source`
+  and works only in embedded mode; browser and serve modes reject with
+  `unavailable`. Feature-detect `gezel.data.open` when supporting older hosts.
+
+## Querying tables
+
+```js
+const tables = await gezel.tables.list();
+if (tables.length) {
+  const table = tables[0]; // name, title, source, path, rows, columnCount, updatedAt
+  const { columns } = await gezel.tables.describe(table.name);
+  // Quote identifiers; parameterize/escape values separately when building SQL.
+  const identifier = (name) => '"' + name.replaceAll('"', '""') + '"';
+  const result = await gezel.tables.query(
+    `SELECT count(*) AS records FROM ${identifier(table.name)}`,
+    { tables: [table.name], limit: 100 },
+  );
+  renderSummary(result.rows, columns);
+}
+```
+
+These methods use Gezel's existing DuckDB observation tables. They query the
+indexed snapshot, not the raw file on demand. Today XLSX and large CSV/TSV files
+can produce workspace tables; a file appearing in `data.list()` does not by
+itself mean it has a queryable table. Indexing must have completed successfully.
+Descriptions include typed columns, roles, units, and available documentation.
+
+`pages.reads` is the authority on every call, including calls reusing an old
+table name. Workspace tables require permission to read their original source
+file. Connector tables require an **artifacts subtree** grant covering their
+table directory (for example `data/weather/tables/readings`). Reading just a
+manifest file does not grant access to its rows. Deleted source files and revoked
+grants disappear from discovery. Host-issued SQL names are stable opaque
+identifiers; they are not capabilities and must not be derived from filenames.
+
+`query(sql, { tables?, limit? })` accepts one read-only SELECT statement. `tables`
+narrows the available tables; omitting it selects all currently readable tables.
+The host binds the project, validates SQL with DuckDB's parser, restricts file
+access to the selected table directories, and disables external/network access.
+Default results are 100 rows, at most 1,000 rows and 1 MiB, with a `truncated`
+flag when more rows exist. Validation and query execution each have a 10-second
+budget and a 256 MB engine memory limit. Requests are rate-limited and concurrency is capped at two per project
+and eight across the service. Prefer aggregate queries for charts and summaries.
+The result contains `rows`, `columns`, `limit`, `truncated`, and `tablesInScope`.
+
+Tables work in embedded desktop and authenticated app-serve pages. Standalone
+capability browser tabs and the phone's portable runtime report `unavailable`;
+the desktop also reports this when its DuckDB engine is absent. Feature-detect
+`gezel.tables` for older hosts, handle errors, and keep file browsing usable when
+no tables or query engine are available. Never substitute demo data in a live page.
 
 ## Invoking tools
 
@@ -108,8 +166,8 @@ Everything rides one versioned postMessage envelope, zod-defined in
 `packages/core/src/schemas/page-bridge.ts`:
 
 ```
-page → host: { __gezelPage: 1, kind: 'hello' | 'invoke' | 'read' | 'watch' | 'unwatch' | 'refresh', ... }
-host → page: { __gezelPage: 1, kind: 'init' | 'result' | 'read-result' | 'change' | 'theme', ... }
+page → host: { __gezelPage: 1, kind: 'hello' | 'invoke' | 'read' | 'open' | 'watch' | 'unwatch' | 'refresh', ... }
+host → page: { __gezelPage: 1, kind: 'init' | 'result' | 'read-result' | 'open-result' | 'change' | 'theme', ... }
 ```
 
 - The shim (`pageApiShimSource` / `buildPageApiShim` in
@@ -120,7 +178,9 @@ host → page: { __gezelPage: 1, kind: 'init' | 'result' | 'read-result' | 'chan
 - The host relay lives in the UI's `HtmlPreviewFrame`. Reads relay to
   `POST /api/projects/:id/page-read` (first-party auth; scopes re-derived
   via `resolvePageReads`); invokes relay to the existing
-  `POST /api/projects/:id/page-invoke`.
+  `POST /api/projects/:id/page-invoke`. Table operations relay to
+  `POST /api/projects/:id/page-tables`, with `{ op: 'list' }`,
+  `{ op: 'describe', table }`, or `{ op: 'query', sql, tables?, limit? }`.
 - Identity, not origin, authenticates both directions: the iframe is
   sandboxed without `allow-same-origin` (opaque origin), so the shim
   requires `event.source === window.parent` and the relay requires
@@ -138,10 +198,18 @@ under the visitor's HttpOnly cookie:
   body and result contract as the first-party page-invoke route, enforced by
   the same server-side implementation (`http/page-io.ts`).
 - `data.read/list/stat` → `POST {apiBase}/read` with the read envelope.
+- `tables.list/describe/query` → `POST {apiBase}/tables` with the table envelope,
+  enforced by the same permission checks as the desktop relay.
 - `data.watch` → polls `stat` on the read route (2.5s default), with an
   immediate sweep after each successful invoke.
 - `data.url()` → `{dataBase}/{source}/{path}` — direct media GETs; the
   browser attaches the visitor cookie same-origin.
+
+Desktop preview and app-serve media URLs stream images, video, and audio from
+the authorized file instead of buffering the entire file. Single byte-range
+requests and `HEAD` support playback and seeking; each request still passes
+the normal capability or visitor-cookie and file-scope checks. The 2 MiB
+`data.read` limit stays in place, including the phone relay described below.
 
 HTTP status → error-code mapping matches the desktop relay: 400/413/422 →
 `invalid-input`, 401/403/404 → `not-allowed`, 429 → `rate-limited`,

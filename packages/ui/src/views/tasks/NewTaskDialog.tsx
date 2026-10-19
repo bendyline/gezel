@@ -1,4 +1,5 @@
 import {
+  type CatalogGroundTone,
   type CraftbookToolsetNeed,
   type GezelSummary,
   type NewCraftbookStep,
@@ -8,6 +9,7 @@ import {
   type TaskAssignee,
   type TaskCronOverlap,
   type TaskInputSource,
+  catalogGroundFor,
   composeCraftbookLaunch,
   craftbookInputParams,
   interestAreasForCraftbook,
@@ -39,6 +41,7 @@ import {
   taskLaunchFromDialog,
   uploadStagingIds,
 } from '../../components/composer-task-launch.js';
+import { craftbookDescription } from '../../components/craftbook-description.js';
 import {
   CraftbookInputField,
   type CraftbookInputValue,
@@ -1311,6 +1314,7 @@ export function NewTaskDialog({
                                 glyph={craftbookGlyph(b.manifest)}
                                 {...(b.item.iconSvg ? { iconSvg: b.item.iconSvg } : {})}
                                 {...(b.item.logoUrl ? { logoUrl: b.item.logoUrl } : {})}
+                                ground={catalogGroundFor(b.manifest)}
                                 suggested={isRecommended(b)}
                                 {...(b.item.unavailableReason
                                   ? { disabledReason: b.item.unavailableReason }
@@ -1343,11 +1347,8 @@ export function NewTaskDialog({
                     ))}
                   </div>
                 </div>
-                <div className="gz-npd-pane-footer gz-npd-pick-footer">
+                <div className="gz-npd-pane-footer">
                   {error && <p role="alert">{error}</p>}
-                  <p className="gz-npd-footnote">
-                    Pick one to see what it does — nothing is created until the next screen.
-                  </p>
                   <Dialog.Actions>
                     <button type="button" onClick={onClose}>
                       Cancel
@@ -1372,6 +1373,7 @@ export function NewTaskDialog({
                           {...(selectedBook.item.logoUrl
                             ? { logoUrl: selectedBook.item.logoUrl }
                             : {})}
+                          ground={catalogGroundFor(selectedBook.manifest)}
                           svgClassName="gz-npd-hero-art-svg"
                           fallback={
                             <ProjectGlyph glyph={craftbookGlyph(selectedBook.manifest)} size={26} />
@@ -1445,7 +1447,12 @@ export function NewTaskDialog({
                                   <span className="gz-ntd-step-name">{s.name}</span>
                                 </span>
                                 {s.description && (
-                                  <span className="gz-ntd-step-note">{s.description}</span>
+                                  <span className="gz-ntd-step-note">
+                                    {craftbookDescription(
+                                      s.description,
+                                      selectedBook.manifest.paramSchema,
+                                    )}
+                                  </span>
                                 )}
                               </li>
                             ))}
@@ -1498,6 +1505,7 @@ export function NewTaskDialog({
                           <p className="gz-npd-give-eyebrow">Needs setup</p>
                           <CraftbookToolsetSetup
                             missing={selectedNeeds}
+                            paramSchema={selectedBook.manifest.paramSchema}
                             onAllInstalled={() => void loadCraftbooks()}
                             onCancel={backToPicker}
                           />
@@ -1765,6 +1773,7 @@ function GalleryCard({
   active,
   iconSvg,
   logoUrl,
+  ground,
   glyph,
   suggested = false,
   disabledReason,
@@ -1776,6 +1785,7 @@ function GalleryCard({
   active: boolean;
   iconSvg?: string;
   logoUrl?: string;
+  ground?: CatalogGroundTone | undefined;
   glyph: Parameters<typeof ProjectGlyph>[0]['glyph'];
   suggested?: boolean;
   /** Why this host cannot run the plan; replaces the description, and the card cannot be picked. */
@@ -1799,6 +1809,7 @@ function GalleryCard({
         <CatalogArtwork
           {...(iconSvg ? { iconSvg } : {})}
           {...(logoUrl ? { logoUrl } : {})}
+          ground={ground}
           svgClassName="gz-npd-card-mark-svg"
           fallback={<ProjectGlyph glyph={glyph} size={22} />}
         />

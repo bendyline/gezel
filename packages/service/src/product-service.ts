@@ -259,6 +259,7 @@ import {
 import { isOwnerStep } from './tasks/step-runtime.js';
 import { TerminalEventBus } from './terminal/events.js';
 import { TerminalManager } from './terminal/manager.js';
+import { bundledDocblocksToolset } from './toolsets/bundled-docblocks.js';
 import { WorkspaceIndexManager } from './workspace/index-manager.js';
 import { ensureCommandApprovalQuestions } from './workspace/scripts.js';
 import { WorkspaceWatchManager } from './workspace/watch-manager.js';
@@ -404,7 +405,14 @@ export async function startProductService(
     (rawConfigForExternal.externalFolders as ExternalFolders | undefined) ?? undefined;
   const { HistoryManager } = await import('./history/manager.js');
   const history = new HistoryManager(home);
-  const store = new Store({ home, history, external, serviceRole, privateUserHome });
+  const store = new Store({
+    home,
+    history,
+    external,
+    serviceRole,
+    privateUserHome,
+    bundledToolsets: [bundledDocblocksToolset()],
+  });
   await recoverTypedProjectCreations(store);
   await store.ensureLayout();
   // Settle the runs a dead daemon left `running`, found by in-flight marker
@@ -2320,6 +2328,7 @@ export async function startProductService(
   // App-serve sites — per-site visitor listeners for shared AI App
   // mini-sites. A product feature: the machine-engine role never serves.
   const appServe = createAppServeController({
+    duck,
     store,
     catalog,
     chat,

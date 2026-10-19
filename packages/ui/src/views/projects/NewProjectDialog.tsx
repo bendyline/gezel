@@ -1,9 +1,11 @@
 import {
+  type CatalogGroundTone,
   type CatalogItemSummary,
   type GitHubIdentity,
   type GitHubRepoSummary,
   type ProjectDetail,
   type ProjectTypeCategory,
+  catalogGroundFor,
   connectorCraftbookIds,
   interestAreasForProjectType,
   interestAreasForProjectTypeCategory,
@@ -52,6 +54,7 @@ function TypeCard({
   badge,
   iconSvg,
   logoUrl,
+  ground,
   glyph,
   index,
   onSelect,
@@ -65,6 +68,7 @@ function TypeCard({
   badge?: string;
   iconSvg?: string;
   logoUrl?: string;
+  ground?: CatalogGroundTone | undefined;
   glyph?: ProjectGlyphId;
   index: number;
   onSelect: () => void;
@@ -85,6 +89,7 @@ function TypeCard({
         <CatalogArtwork
           {...(iconSvg ? { iconSvg } : {})}
           {...(logoUrl ? { logoUrl } : {})}
+          ground={ground}
           svgClassName="gz-npd-card-mark-svg"
           fallback={<ProjectGlyph glyph={glyph ?? 'dots'} size={22} />}
         />
@@ -193,6 +198,7 @@ export function NewProjectDialog({
   onCreated: (created: ProjectDetail) => Promise<void> | void;
 }) {
   const showWorkInProgressFeatures = useShowWorkInProgressFeatures();
+  const hostCaps = runtimeCapabilities();
   const [name, setName] = useState('');
   const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
   const [kind, setKind] = useState<ProjectKindId>('general');
@@ -665,6 +671,12 @@ export function NewProjectDialog({
               : undefined;
           const { project, applied } = await api.createTypedProject({
             name: n,
+            ...(folderPath.trim() &&
+            hostCaps.externalFolders &&
+            selectedType.manifest.kind === 'project-type' &&
+            !selectedType.manifest.workspaceSeed?.length
+              ? { workingDir: folderPath.trim() }
+              : {}),
             ...(isSolo ? { mode: 'solo' as const } : {}),
             projectType: {
               typeId: selectedTypeId,
@@ -801,6 +813,7 @@ export function NewProjectDialog({
       imapPass,
       imapSecure,
       folderPath,
+      hostCaps.externalFolders,
       selectedTypeId,
       selectedType,
       typeParams,
@@ -916,14 +929,9 @@ export function NewProjectDialog({
                                     badge: 'Unavailable',
                                   }
                                 : {})}
-                              {...(!(item.manifest.kind === 'project-type' && item.manifest.icon) &&
-                              item.iconSvg
-                                ? { iconSvg: item.iconSvg }
-                                : {})}
-                              {...(!(item.manifest.kind === 'project-type' && item.manifest.icon) &&
-                              item.logoUrl
-                                ? { logoUrl: item.logoUrl }
-                                : {})}
+                              {...(item.iconSvg ? { iconSvg: item.iconSvg } : {})}
+                              {...(item.logoUrl ? { logoUrl: item.logoUrl } : {})}
+                              ground={catalogGroundFor(item.manifest)}
                               onSelect={() => {
                                 if (kind === 'github') cancelRepoPreview();
                                 setSelectedTypeId(item.manifest.id);
@@ -1061,9 +1069,12 @@ export function NewProjectDialog({
                       )}
                       {/* Folder sits above Name: picking the folder is the first move,
                 and it suggests the Name (and drafts About) from what it finds. */}
-                      {kind === 'folder' && (
+                      {(kind === 'folder' ||
+                        (selectedType?.manifest.kind === 'project-type' &&
+                          hostCaps.externalFolders &&
+                          !selectedType.manifest.workspaceSeed?.length)) && (
                         <label>
-                          Folder
+                          {selectedType ? 'Folder (optional)' : 'Folder'}
                           <div className="gz-folder-row">
                             <input
                               value={folderPath}
@@ -1082,8 +1093,11 @@ export function NewProjectDialog({
                             )}
                           </div>
                           <small className="muted">
-                            Read-only: gezellen read this folder and change nothing in it unless you
-                            allow it in the project's settings.
+                            {selectedType
+                              ? 'Choose an existing folder to browse its files in place. Leave blank to use a new project workspace. '
+                              : ''}
+                            Gezellen change nothing in this folder unless you allow it in the
+                            project's settings.
                           </small>
                         </label>
                       )}
