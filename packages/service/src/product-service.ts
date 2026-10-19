@@ -1792,7 +1792,13 @@ export async function startProductService(
     // notifies a spawn host that its crew finished.
     if (task.parentTaskRef) {
       const parsedParent = parseTaskRef(task.parentTaskRef);
-      if (parsedParent) {
+      const parent = parsedParent ? await tasks.getByRef(task.parentTaskRef) : null;
+      const parentStep = parent?.craftbook.steps.find((step) => step.id === parent.activeStepId);
+      // Only spawn hosts can be held by the activation barrier above. Ordinary
+      // CLI-owned batch parents have no barrier to release. Scanning their
+      // entire project history for every completed child held Codex slots for
+      // minutes once a media project accumulated tens of thousands of tasks.
+      if (parsedParent && parent?.spawnsCraftbook && parentStep && !parentStep.spawnFanout) {
         const stillActive = await tasks
           .listChildren(task.parentTaskRef, { status: 'active' })
           .catch(() => []);

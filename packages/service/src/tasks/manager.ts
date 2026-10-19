@@ -460,11 +460,19 @@ export class TaskManager {
    * also calls it to self-heal projects stuck `active` with no active
    * tasks — see `TaskScheduler.maybeNudge`.
    */
-  async maybeStabilizeProject(projectId: string): Promise<void> {
+  async maybeStabilizeProject(projectId: string, knownParentRef?: string): Promise<void> {
     try {
       const project = await this.store.getProject(projectId);
       const status = project?.status ?? 'active';
       if (status !== 'active') return;
+      // A live parent is already proof that this project has unfinished work.
+      // In large CLI batches the collection root is one of the oldest tasks;
+      // finding it by walking newest-first history can take minutes.
+      if (knownParentRef) {
+        const parent = await this.getByRef(knownParentRef);
+        if (parent?.projectId === projectId && ['active', 'draft'].includes(taskEffectiveStatus(parent)))
+          return;
+      }
       // Task completion is frequent in bulk workflows. Stop at the first
       // live task instead of retaining the project's entire completed history.
       // A draft is pending work and blocks stabilization just like an active task.
@@ -1676,7 +1684,7 @@ export class TaskManager {
     // Drive the project lifecycle: closing/completing may bring the
     // project to rest; reopening/pausing is live work that wakes it.
     if (status === 'complete' || status === 'canceled') {
-      await this.maybeStabilizeProject(projectId);
+      await this.maybeStabilizeProject(projectId, task.parentTaskRef);
     } else {
       await this.reactivateProject(projectId);
     }
@@ -2744,7 +2752,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     // Terminal step closed the task → the project may have come to rest;
     // advancing to a new step is live work → keep/make it active.
     if (terminating) {
-      await this.maybeStabilizeProject(projectId);
+      await this.maybeStabilizeProject(projectId, task.parentTaskRef);
     } else {
       await this.reactivateProject(projectId);
     }

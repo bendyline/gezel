@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { TaskManager } from './manager.js';
 
@@ -137,4 +137,39 @@ describe('TaskManager — project lifecycle (stable ⇄ active)', () => {
     await tasks.setStatus('website', t.num, 'complete');
     expect(await statusOf('website')).toBe('readonly');
   });
+});
+
+
+it('closing a child uses its live parent without traversing completed project history', async () => {
+  const parent = await seedTask('Long-running collection');
+  for (const method of ['status', 'step']) {
+    const child = await tasks.create('website', {
+      title: `Batch ${method}`,
+      assignee: { kind: 'user' },
+      parentTaskRef: parent.ref,
+      steps: [{ name: 'Review', terminal: true }],
+    });
+    const history = vi.spyOn(store, 'iterateProjectTasks');
+    try {
+      if (method === 'status') await tasks.setStatus('website', child.num, 'complete');
+      else await tasks.completeStep('website', child.num, child.activeStepId!);
+      expect(history).not.toHaveBeenCalled();
+      expect(await statusOf('website')).not.toBe('stable');
+    } finally { history.mockRestore(); }
+  }
+});
+
+it('a settled or foreign parent does not hide the end of project work', async () => {
+  const parent = await seedTask('Finished collection');
+  await tasks.setStatus('website', parent.num, 'complete');
+  await store.updateProject('website', { status: 'active' });
+  await tasks.maybeStabilizeProject('website', parent.ref);
+  expect(await statusOf('website')).toBe('stable');
+  await store.createProject({ name: 'Elsewhere' });
+  const foreign = await tasks.create('elsewhere', {
+    title: 'Other project work', assignee: { kind: 'user' }, steps: [{ name: 'Work' }],
+  });
+  await store.updateProject('website', { status: 'active' });
+  await tasks.maybeStabilizeProject('website', foreign.ref);
+  expect(await statusOf('website')).toBe('stable');
 });
