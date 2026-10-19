@@ -29,6 +29,7 @@ import {
   missingPinnedFiles,
   pinnedLoadFiles,
   prefetchExternalData,
+  removeMismatchedPinnedFiles,
 } from './pinned-files.js';
 import {
   TRANSFORMERS_MODULE,
@@ -278,6 +279,35 @@ function encoderRows(
   });
 }
 
+/**
+ * What onnxruntime and the tokenizer raise for a cached file that was cut off
+ * mid-download. Mirrors `isCorruptTransformersCacheFailure` in
+ * @bendyline/gezel-inference, which this package must not depend on, plus a
+ * truncated tokenizer's JSON.
+ */
+function isCorruptCacheFailure(error: unknown): boolean {
+  const messages: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && current; depth++) {
+    messages.push(current instanceof Error ? current.message : String(current));
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return /(?:protobuf parsing failed|failed to parse protobuf|invalid protobuf|unexpected end of (?:file|data|json input)|failed to load model|load model .* failed|invalid wire type)/i.test(
+    messages.join(' '),
+  );
+}
+
+/** Await a session and its tokenizer together; a session that loaded when its tokenizer did not is disposed, not leaked. */
+async function settleBoth<R extends { dispose?: () => Promise<unknown> }, T>(
+  runner: Promise<R>,
+  tokenizer: Promise<T>,
+): Promise<[R, T]> {
+  const [r, t] = await Promise.allSettled([runner, tokenizer]);
+  if (r.status === 'fulfilled' && t.status === 'fulfilled') return [r.value, t.value];
+  if (r.status === 'fulfilled') await r.value.dispose?.().catch(() => {});
+  throw r.status === 'rejected' ? r.reason : (t as PromiseRejectedResult).reason;
+}
+
 async function loadTransformers(): Promise<TransformersModule> {
   try {
     const specifier: string = TRANSFORMERS_MODULE;
@@ -386,32 +416,53 @@ export async function createProfileEmbedder(
     );
   }
   const externalData = pinnedExternalDataChunks(profile);
-  const [runner, tokenizer] = await Promise.all([
-    multimodal
-      ? (transformers.AutoModel as NonNullable<TransformersModule['AutoModel']>).from_pretrained(
-          profile.model.repo,
-          {
+  const loadSessions = () =>
+    settleBoth<PipelineFn | EncoderModelFn, TokenizerFn>(
+      multimodal
+        ? (transformers.AutoModel as NonNullable<TransformersModule['AutoModel']>).from_pretrained(
+            profile.model.repo,
+            {
+              ...modelOptions,
+              config: { ...config, vision_config: null, audio_config: null },
+              ...(externalData > 0 ? { use_external_data_format: externalData } : {}),
+              ...localOnly,
+              ...sessionOptions,
+              ...progress,
+            },
+          )
+        : transformers.pipeline('feature-extraction', profile.model.repo, {
             ...modelOptions,
-            config: { ...config, vision_config: null, audio_config: null },
             ...(externalData > 0 ? { use_external_data_format: externalData } : {}),
             ...localOnly,
             ...sessionOptions,
             ...progress,
-          },
-        )
-      : transformers.pipeline('feature-extraction', profile.model.repo, {
-          ...modelOptions,
-          ...(externalData > 0 ? { use_external_data_format: externalData } : {}),
-          ...localOnly,
-          ...sessionOptions,
-          ...progress,
-        }),
-    transformers.AutoTokenizer.from_pretrained(profile.model.repo, {
-      revision: modelOptions.revision,
-      ...localOnly,
-      ...progress,
-    }),
-  ]);
+          }),
+      transformers.AutoTokenizer.from_pretrained(profile.model.repo, {
+        revision: modelOptions.revision,
+        ...localOnly,
+        ...progress,
+      }),
+    );
+  let runner: Awaited<ReturnType<typeof loadSessions>>[0];
+  let tokenizer: Awaited<ReturnType<typeof loadSessions>>[1];
+  try {
+    [runner, tokenizer] = await loadSessions();
+  } catch (err) {
+    // A cached file cut off mid-download fails every load the same way. Drop
+    // whichever pinned files no longer match their pins and load once more:
+    // transformers.js downloads them again.
+    const repairDir = cacheDir ?? transformers.env.cacheDir;
+    if (!repairDir || !isCorruptCacheFailure(err)) throw err;
+    const removed = await removeMismatchedPinnedFiles(profile, { cacheDir: repairDir });
+    if (removed.length === 0) throw err;
+    if (opts.localFilesOnly) {
+      throw new EmbedderUnavailableError(
+        `the cached model files for profile ${profile.id} were damaged (${removed.join(', ')}) and have been removed; they download again on the next load that may use the network`,
+      );
+    }
+    if (!opts.transformers) await preparePinnedLoad(profile, { cacheDir: repairDir });
+    [runner, tokenizer] = await loadSessions();
+  }
 
   let verification: VerifiedArtifacts;
   try {

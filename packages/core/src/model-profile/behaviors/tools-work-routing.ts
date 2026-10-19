@@ -19,7 +19,8 @@
  * exactly their triggers, so an A/B of this behavior against the baseline
  * compares tool surfaces rather than "a nudge versus no nudge". It defers to
  * `prompt.work-options-prelude` when that arm has already ranked the turn.
- * OFF by default; A/B it with `GEZEL_FORCE_BEHAVIORS=tools.work-routing`.
+ * On by default for `small` local models (`SCOPED_DEFAULT_BEHAVIORS` in
+ * registry.ts); elsewhere A/B it with `GEZEL_FORCE_BEHAVIORS=tools.work-routing`.
  */
 
 import type { Behavior } from '../types.js';
@@ -55,7 +56,7 @@ function baselinePreludeWouldFire(text: string, projectId: string): boolean {
 export const ToolsWorkRouting: Behavior = {
   id: 'tools.work-routing',
   description:
-    "Replaces a coordinator's craftbook launcher and project macros with suggest_work (every kind of next step, ranked by policy) and start_work (start one option by id), with a per-turn note on the old preludes' triggers. OFF by default.",
+    "Replaces a coordinator's craftbook launcher and project macros with suggest_work (every kind of next step, ranked by policy) and start_work (start one option by id), with a per-turn note on the old preludes' triggers. On by default for small local models.",
 
   userPromptPrelude(ctx) {
     if (!ctx.isMeester || ctx.messageOrigin !== 'direct-user') return null;

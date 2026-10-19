@@ -46,17 +46,22 @@ const THIRD_PARTY_PATTERNS = [
   // NVIDIA CUDA redistributables. Distributable under the CUDA EULA's
   // Attachment A; they arrive from developer.download.nvidia.com with no
   // Authenticode signature at all (verified against NVIDIA's own sha256
-  // manifests for 12.4.1 and 12.8.1).
+  // manifests for 12.4.1 and 12.8.1). The runtime trio also ships in
+  // `win32-arm64-cuda` (RTX Spark, CUDA 13.4.1's windows-arm64 archives) and
+  // nowhere else on Windows-on-ARM.
   {
-    pattern: '(?:^|/)(?:native-bin|native/build)/win32-x64(?:-[^/]+)?/cudart64_\\d+\\.dll$',
+    pattern:
+      '(?:^|/)(?:native-bin|native/build)/win32-(?:x64(?:-[^/]+)?|arm64-cuda)/cudart64_\\d+\\.dll$',
     source: 'NVIDIA CUDA Toolkit',
   },
   {
-    pattern: '(?:^|/)(?:native-bin|native/build)/win32-x64(?:-[^/]+)?/cublas64_\\d+\\.dll$',
+    pattern:
+      '(?:^|/)(?:native-bin|native/build)/win32-(?:x64(?:-[^/]+)?|arm64-cuda)/cublas64_\\d+\\.dll$',
     source: 'NVIDIA CUDA Toolkit',
   },
   {
-    pattern: '(?:^|/)(?:native-bin|native/build)/win32-x64(?:-[^/]+)?/cublasLt64_\\d+\\.dll$',
+    pattern:
+      '(?:^|/)(?:native-bin|native/build)/win32-(?:x64(?:-[^/]+)?|arm64-cuda)/cublasLt64_\\d+\\.dll$',
     source: 'NVIDIA CUDA Toolkit',
   },
   {
@@ -79,9 +84,9 @@ const THIRD_PARTY_PATTERNS = [
   // duckdb.exe is Authenticode-signed by the DuckDB Foundation, so the
   // afterPack sweep must leave it byte-identical to their release.
   //
-  // uv is the ONLY row above or below that widens to win32-arm64. The NVIDIA
-  // rows stay x64-scoped deliberately: CUDA does not exist for Windows-on-ARM,
-  // so an arm64 tree can never legitimately contain those DLLs, and a signing
+  // uv is the only row that widens to every win32-arm64 key. The NVIDIA rows
+  // above reach exactly one arm64 key, `win32-arm64-cuda`, and nvrtc and
+  // nvJitLink stay x64-only because no arm64 payload ships them: a signing
   // exemption must never be broader than the payload it excuses.
   {
     pattern: '(?:^|/)(?:native-bin|native/build)/win32-(?:x64|arm64)(?:-[^/]+)?/uv\\.exe$',

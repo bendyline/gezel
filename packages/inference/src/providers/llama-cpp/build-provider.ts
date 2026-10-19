@@ -1486,6 +1486,12 @@ export async function buildLlamaCppProvider(opts: {
     },
     resolveLaunch: async () => {
       gpuWatch = new GpuStartupWatch(binaryBackend);
+      // Again at every launch, not only at build: llama.cpp from the 0.1.51
+      // release refuses a --slot-save-path that does not exist ("not a
+      // directory") and exits before ready, and an eval preflight lost its
+      // build-time directory during a 50 s capacity wait (2026-10-18). The
+      // person saw "no model is installed yet".
+      await mkdirAsync(slotSavePath, { recursive: true }).catch(() => {});
       const port = cachedPort ?? (await pickFreePort());
       cachedPort = port;
       // Prepend the binary's own directory to PATH so the OS finds the

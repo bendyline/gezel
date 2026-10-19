@@ -61,7 +61,9 @@ describe('ChatManager — coordinator routing clamps on a decode-time grammar', 
 
       expect(ordinary!.opts!.callableToolRestriction).toBeUndefined();
       const restriction = routed!.opts!.callableToolRestriction!;
-      expect(restriction.builtins.has('start_project')).toBe(true);
+      // A small model routes through start_work by default.
+      expect(restriction.builtins.has('start_work')).toBe(true);
+      expect(restriction.builtins.has('start_project')).toBe(false);
       expect(restriction.builtins.has('write_artifact')).toBe(false);
       expect(restriction.thirdParty).toBe(true);
     } finally {

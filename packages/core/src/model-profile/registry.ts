@@ -29,7 +29,7 @@
 import { createLogger } from '../log.js';
 import type { ChatModelManifest } from '../schemas/catalog.js';
 import type { ProviderName } from '../schemas/gezel.js';
-import type { BehaviorEntry, BehaviorId } from '../schemas/model-profile.js';
+import type { BehaviorEntry, BehaviorId, ModelFamily } from '../schemas/model-profile.js';
 import { ALL_BEHAVIORS } from './behaviors/index.js';
 import { TIER_DEFAULT_BEHAVIORS, defaultStyleForProvider } from './defaults.js';
 import type { ModelTier } from './local-model-tier.js';
@@ -93,6 +93,40 @@ const UNIVERSAL_DEFAULT_BEHAVIORS: readonly BehaviorId[] = [
   // turns they route (first non-null wins).
   'prompt.library-recall-prelude',
 ];
+
+/**
+ * Behaviors defaulted ON for one tier (and optionally one family) whatever
+ * the manifest declares: every bundled chat model but one carries its own
+ * `behaviors` array, so a tier default alone would reach almost none of
+ * them. Appended after the universal defaults, the order the A/B measured
+ * (`GEZEL_FORCE_BEHAVIORS` appends last). Opt out per run with
+ * `GEZEL_REMOVE_BEHAVIORS`.
+ */
+const SCOPED_DEFAULT_BEHAVIORS: ReadonlyArray<{
+  id: BehaviorId;
+  tiers: readonly ModelTier[];
+  families?: readonly ModelFamily[];
+}> = [
+  // The Meester's work options ranked before the turn and listed in it, with
+  // suggest_work / start_work in place of its older routing tools. Route
+  // correct +29 / +22 points on Gemma 4 E4B / Qwen 3.5 9B over 41 probes
+  // (p ≤ 0.002) and +30 / +23 points on whole first projects (2026-10-18).
+  // Measured on `small` only.
+  { id: 'tools.work-routing', tiers: ['small'] },
+  { id: 'prompt.work-options-prelude', tiers: ['small'] },
+  // Qwen hands some questions to another gezel instead of answering; the
+  // note took that from 6/30 to 2/30. On Gemma every wording tried cost it
+  // correct status answers or doubled its answer time, so it stays off there.
+  { id: 'prompt.work-options-question-note', tiers: ['small'], families: ['qwen'] },
+];
+
+function scopedDefaultsFor(tier: ModelTier, family: ModelFamily | undefined): BehaviorId[] {
+  return SCOPED_DEFAULT_BEHAVIORS.filter(
+    (entry) =>
+      entry.tiers.includes(tier) &&
+      (!entry.families || (family !== undefined && entry.families.includes(family))),
+  ).map((entry) => entry.id);
+}
 
 /** Every behavior known to this engine. Useful for tooling, registry overviews, tests. */
 export function listBehaviors(): ReadonlyArray<Behavior<unknown>> {
@@ -196,10 +230,12 @@ export function resolveProfile(args: {
   // Append the universal defaults (deduped — a manifest/tier entry for the
   // same id wins, keeping its config). This is how `tools.gezels-as-roles`
   // reaches every model regardless of manifest.
+  const style = manifest?.style ?? defaultStyleForProvider(providerName);
   const presentIds = new Set(sourceEntries.map((e) => (typeof e === 'string' ? e : e.id)));
   const mergedEntries: ReadonlyArray<BehaviorEntry> = [
     ...sourceEntries,
     ...UNIVERSAL_DEFAULT_BEHAVIORS.filter((id) => !presentIds.has(id)),
+    ...scopedDefaultsFor(tier, style.family).filter((id) => !presentIds.has(id)),
   ];
 
   const behaviors = resolveEntries(mergedEntries, catalogId);
@@ -207,7 +243,7 @@ export function resolveProfile(args: {
   return {
     catalogId,
     tier,
-    style: manifest?.style ?? defaultStyleForProvider(providerName),
+    style,
     behaviors,
   };
 }

@@ -6,6 +6,7 @@ import {
 } from '../model-profile/behaviors/fabrication-detect-claim-without-tool.js';
 import { PromptMeesterCraftbookPrelude } from '../model-profile/behaviors/prompt-meester-craftbook-prelude.js';
 import { PromptWorkOptionsPrelude } from '../model-profile/behaviors/prompt-work-options-prelude.js';
+import { PromptWorkOptionsQuestionNote } from '../model-profile/behaviors/prompt-work-options-question-note.js';
 import { ToolsWorkRouting } from '../model-profile/behaviors/tools-work-routing.js';
 import type { TurnCtx } from '../model-profile/types.js';
 import type { ChatMessageToolCall } from '../schemas/gezel.js';
@@ -119,6 +120,45 @@ describe('preludes under work routing', () => {
         undefined,
       ),
     ).toBeNull();
+  });
+});
+
+describe('the question note', () => {
+  const question = rankWorkOptions({
+    request: "What's the difference between a Roth IRA and a traditional IRA?",
+    projectId: 'default',
+    inDefault: true,
+    workRequest: true,
+    selfTools: ['consult_researcher', 'search'],
+  });
+
+  it('tells the coordinator to answer a question itself, and nothing else does', () => {
+    const out = PromptWorkOptionsQuestionNote.userPromptPrelude!(
+      turnCtx({ workOptions: question }),
+      undefined,
+    );
+    expect(out).toContain(
+      'then answer in chat yourself; do not start new work or pass it to another gezel.',
+    );
+    expect(out).not.toContain('consult_');
+    expect(
+      PromptWorkOptionsPrelude.userPromptPrelude!(turnCtx({ workOptions: question }), undefined),
+    ).toBeNull();
+  });
+
+  it('stays silent for work, for nudges, and without the routing tools', () => {
+    const work = rankWorkOptions({
+      request: 'Plan a trip to Lisbon.',
+      projectId: 'default',
+      inDefault: true,
+      workRequest: true,
+      projectTypes: [{ typeId: 'trip-planner', name: 'Trip planner' }],
+    });
+    const note = (overrides: Partial<TurnCtx>) =>
+      PromptWorkOptionsQuestionNote.userPromptPrelude!(turnCtx(overrides), undefined);
+    expect(note({ workOptions: work })).toBeNull();
+    expect(note({ workOptions: question, messageOrigin: 'background-nudge' })).toBeNull();
+    expect(note({ workOptions: question, availableToolNames: ['start_project'] })).toBeNull();
   });
 });
 

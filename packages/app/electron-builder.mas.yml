@@ -28,6 +28,7 @@ extends: ./electron-builder.yml
 files:
   - dist/main.js
   - dist/preload.cjs
+  - dist/utility-service-entry.js
   - dist/extract-service-bundle.js
   - dist/migrate-legacy-shared.js
   - dist/service-bundle/**/*
@@ -60,6 +61,7 @@ files:
 asarUnpack:
   - dist/main.js
   - dist/preload.cjs
+  - dist/utility-service-entry.js
   - package.json
   - dist/extract-service-bundle.js
   - dist/migrate-legacy-shared.js

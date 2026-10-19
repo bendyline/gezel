@@ -16,9 +16,10 @@ import { redactPathSecrets } from './redact-path.js';
 /**
  * Main-thread responsiveness monitor.
  *
- * The daemon runs on one event loop. In embedded mode (`pnpm app`, and the
- * packaged fallback) that loop is Electron's main thread, so a synchronous
- * block here freezes the window itself, and Windows labels it "Not Responding"
+ * The daemon runs on one event loop. With an in-process embedded service (the
+ * packaged fallback, E2E, `GEZEL_SERVICE_HOST=in-process`) that loop is
+ * Electron's main thread, so a synchronous block here freezes the window
+ * itself, and Windows labels it "Not Responding"
  * after 5 s. Before this existed a block under the suspend monitor's 10 s floor
  * left no trace, and a longer one was logged as "host resumed after Ns
  * suspended": sleep that never happened (two of them during one catalog

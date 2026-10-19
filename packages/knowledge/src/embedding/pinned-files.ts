@@ -17,7 +17,7 @@ import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { KnowledgeEmbeddingProfile } from '@bendyline/gezk';
 import { embeddingProfileArtifacts } from '@bendyline/gezk';
-import { mediaEncoderPins, transformersCachePath } from './artifact-verify.js';
+import { fileDigest, mediaEncoderPins, transformersCachePath } from './artifact-verify.js';
 
 export interface PinnedLoadFile {
   path: string;
@@ -126,4 +126,29 @@ export async function prefetchExternalData(
     fetched.push(file.path);
   }
   return fetched;
+}
+
+/**
+ * Remove the cached pinned files whose bytes do not match their pins, and
+ * return their paths. transformers.js streams a download straight into its
+ * cache path, so one that is cut off stays there as a truncated file that
+ * every later load fails to parse, until someone deletes it by hand. Only for
+ * a load that already failed that way: it hashes every pinned file present,
+ * which a healthy load never pays for.
+ */
+export async function removeMismatchedPinnedFiles(
+  profile: KnowledgeEmbeddingProfile,
+  opts: { cacheDir: string; modalities?: readonly MediaModality[]; revision?: string },
+): Promise<string[]> {
+  const revision = opts.revision ?? profile.model.revision;
+  const removed: string[] = [];
+  for (const file of pinnedLoadFiles(profile, opts.modalities)) {
+    if (!file.digest) continue;
+    const path = transformersCachePath(opts.cacheDir, profile.model.repo, revision, file.path);
+    const digest = await fileDigest(path);
+    if (digest === null || digest === file.digest) continue;
+    await rm(path, { force: true });
+    removed.push(file.path);
+  }
+  return removed;
 }

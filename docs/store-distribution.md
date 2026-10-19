@@ -138,6 +138,28 @@ producing the tarball, so the MAS lane ships that. Windows MSIX keeps
 extract-to-home: full trust, a real profile, and sharing with an
 npm-installed daemon that is worth keeping.
 
+### Where the service runs
+
+A store build with no direct-download daemon to adopt runs its own embedded
+service, and today that service runs **in-process**, on Electron's main
+thread. The utility-process host
+([utility-host.ts](../packages/app/src/supervisor/utility-host.ts)) is the
+intended default for store builds: the service gets its own process and heap
+without a separate Node binary, a stall no longer freezes the window, and a
+crash restarts the service instead of closing the app. Development launches
+already use it. Two things gate the switch for a store build:
+
+- **Mac App Store** — the helper app that runs a utility process must carry
+  the inherited sandbox entitlements, and the service it hosts must still be
+  able to start `llama-server` and the MCP children from inside the sandbox.
+- **Microsoft Store** — the same service, started as a utility process under
+  MSIX's full-trust container, on a clean Windows VM.
+
+Until both pass, `resolveServiceHost` keeps packaged builds in-process.
+`GEZEL_SERVICE_HOST=utility` forces the utility host on a store build for
+testing. The entry it forks, `dist/utility-service-entry.js`, is in the MAS
+config's `files` and `asarUnpack` lists already.
+
 ## Building
 
 Both lanes are `workflow_dispatch` only and produce **draft artifacts** that a
@@ -178,6 +200,9 @@ loud rather than plausible defaults.
   hard build error, not a warning.
 
 ## Not done yet
+
+- **The utility-process host as the store default.** See
+  [Where the service runs](#where-the-service-runs).
 
 - **Frozen Python / MLX.** MAS v1 ships llama.cpp Metal as the only chat
   engine. MLX today is uv → venv → pip-installed wheels, all runtime downloads.

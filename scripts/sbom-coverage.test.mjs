@@ -23,7 +23,12 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { verifyNoticeInventory } from './check-notice.mjs';
-import { ENGINE_FOR_BINARY, NATIVE_PAYLOAD, allPlatformKeys } from './native-payload.mjs';
+import {
+  ENGINE_FOR_BINARY,
+  NATIVE_PAYLOAD,
+  allPlatformKeys,
+  platformKeysInRelease,
+} from './native-payload.mjs';
 import {
   isRemovedPnpmRuntimePackage,
   loadPnpmRuntimeInventory,
@@ -722,9 +727,11 @@ test('every native payload file carries the digest the installer verifier checks
     engineRefs: new Map(engineIds.map((id) => [id, `engine:${id}`])),
     cudaRuntimeRef: 'cuda',
   });
+  // The pinned release carries every key that existed when it was built,
+  // and nothing added since (FIRST_NATIVE_RELEASE).
   assert.deepEqual(
     components.map((component) => property(component, 'gezel:platforms')).sort(),
-    allPlatformKeys().sort(),
+    platformKeysInRelease(manifest.release).sort(),
   );
   for (const component of components) {
     const key = property(component, 'gezel:platforms');

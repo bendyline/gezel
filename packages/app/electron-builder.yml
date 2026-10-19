@@ -63,6 +63,7 @@ fileAssociations:
 files:
   - dist/main.js
   - dist/preload.cjs
+  - dist/utility-service-entry.js
   - dist/extract-service-bundle.js
   - dist/migrate-legacy-shared.js
   - dist/neutralize-reparse-points.js
@@ -154,6 +155,7 @@ asarUnpack:
   # electron-builder fixes the underlying bug.
   - dist/main.js
   - dist/preload.cjs
+  - dist/utility-service-entry.js
   - package.json
   - dist/extract-service-bundle.js
   - dist/migrate-legacy-shared.js

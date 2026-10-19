@@ -6147,9 +6147,12 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
 
       const create = localMock.calls.find((c) => c.kind === 'create');
       const allow = create!.opts!.toolAllowlist!;
-      // Full meester surface survives — the kickoff macro AND the tools the old
+      // Full meester surface survives — the routing pair (on by default for
+      // small models, in place of start_project) AND the tools the old
       // 13-cap evicted (read_task_notes, write_artifact) are all present.
-      expect(allow.has('start_project')).toBe(true);
+      expect(allow.has('start_work')).toBe(true);
+      expect(allow.has('suggest_work')).toBe(true);
+      expect(allow.has('start_project')).toBe(false);
       expect(allow.has('start_job')).toBe(false);
       expect(allow.has('message_gezel')).toBe(true);
       expect(allow.has('ask_user_question')).toBe(true);
@@ -6162,7 +6165,8 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       const toolsBlockStart = sys.indexOf('## Tools available this turn');
       expect(toolsBlockStart).toBeGreaterThanOrEqual(0);
       const toolsBlock = sys.slice(toolsBlockStart);
-      expect(toolsBlock).toContain('`start_project`');
+      expect(toolsBlock).toContain('`start_work`');
+      expect(toolsBlock).not.toContain('`start_project`');
       expect(toolsBlock).not.toContain('`start_job`');
       expect(toolsBlock).toContain('`message_gezel`');
       expect(toolsBlock).toContain('`ask_user_question`');
