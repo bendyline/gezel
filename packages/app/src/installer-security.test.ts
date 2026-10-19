@@ -28,7 +28,6 @@ function commandLine(containing: string): string {
 describe('Windows machine-service installer security', () => {
   it('keeps private state closed while exposing runtime and read-only assets', () => {
     expect(hook).toContain('/setowner "*S-1-5-32-544"');
-    expect(hook).toContain('!insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}"');
     expect(hook).toContain('!insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}"');
 
     const rootAcl = commandLine('"${GEZEL_DATA_DIR}" /inheritance:r');
@@ -241,37 +240,26 @@ describe('Windows machine-service installer security', () => {
     expect(ownership).toContain('/setowner "*S-1-5-32-544"');
     expect(ownership).toContain('takeown.exe" /F "${PATH}" /A');
     expect(ownership).toContain('Goto ${FAILURE_LABEL}');
-    for (const container of [
-      '"${GEZEL_DATA_DIR}"',
-      '"${GEZEL_DATA_DIR}\\runtime"',
-      '"${GEZEL_DATA_DIR}\\assets"',
-    ]) {
-      expect(hook).toContain(`!insertmacro TakeTrustedOwnership ${container}`);
-    }
+    expect(hook).toContain('!insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}\\runtime"');
   });
 
-  it('cleans up pre-existing descendants without letting one file abort the install', () => {
+  it('repairs descendants through handles and refuses an incomplete repair', () => {
     const sweep = hook.slice(
       position('!macro SanitizeDescendants'),
       hook.indexOf('!macroend', position('!macro SanitizeDescendants')),
     );
-    // /C so icacls does not stop at the first entry it cannot open, and no
-    // Goto: the fallback for a partial sweep is the per-user daemon, which
-    // has no service isolation at all — strictly worse than this service
-    // with a stale child ACE.
-    expect(sweep).toContain('/setowner "*S-1-5-32-544" /T /C /L /Q');
-    expect(sweep).toContain('/reset /T /C /L /Q');
-    expect(sweep).not.toContain('Goto');
-    expect(sweep).not.toContain('MessageBox');
+    expect(sweep).toContain('-File "${GEZEL_ACL_REPAIR}" -Root "${PATH}"');
+    expect(sweep).toContain('${IfNot} ${FileExists} "${GEZEL_ACL_REPAIR}"');
+    expect(sweep).toContain('${If} $0 != 0');
+    expect(sweep).toContain('Goto ${FAILURE_LABEL}');
+    expect(sweep).not.toContain('icacls.exe');
+    expect(sweep).not.toContain('takeown.exe');
 
-    // /reset resets the named object too, so the sweep has to precede the
-    // container DACL or it would undo it.
+    // Repair establishes a private tree; publication widens its inheritance
+    // only after the entire handle-based walk succeeds.
     for (const container of ['"${GEZEL_DATA_DIR}"', '"${GEZEL_DATA_DIR}\\assets"']) {
       expect(hook.indexOf(`!insertmacro SanitizeDescendants ${container}`)).toBeLessThan(
         position(`${container} /inheritance:r`),
-      );
-      expect(hook.indexOf(`!insertmacro TakeTrustedOwnership ${container}`)).toBeLessThan(
-        hook.indexOf(`!insertmacro SanitizeDescendants ${container}`),
       );
     }
   });
@@ -712,36 +700,12 @@ describe('Windows machine-service installer security', () => {
     );
   });
 
-  // The data root and the world-writable shared product tree first had no
-  // descendant guard, so a planted child junction made SanitizeDescendants'
-  // elevated /setowner /T and /reset /T act on its target outside ProgramData.
-  // The fix then refused ANY reparse point there, which broke every upgrade:
-  // uv's Python minor-version link and pnpm toolset trees are legitimate
-  // junctions, and the refusal ran after the old GezelService had been
-  // removed, so the shared engine silently disappeared under auto-update.
-  // Each sweep now has a target-aware guard directly before it: the private
-  // data root may delete unsafe links, the world-writable shared tree may only
-  // verify (an elevated delete where Users can write is an arbitrary-delete).
-  it('guards each sweep with a target-aware descendant pass, immediately before it', () => {
-    const guardFor: Record<string, string> = {
-      '"${GEZEL_DATA_DIR}"': '!insertmacro NeutralizeReparseDescendants "${GEZEL_DATA_DIR}"',
-      '"${GEZEL_SHARED_DIR}"': '!insertmacro AssertReparseDescendantsClean "${GEZEL_SHARED_DIR}"',
-    };
-    for (const [path, guardMacro] of Object.entries(guardFor)) {
-      const sweep = position(`!insertmacro SanitizeDescendants ${path} `);
-      const guard = hook.lastIndexOf(guardMacro, sweep);
-      expect(guard, `${path} sweep must be guarded by ${guardMacro}`).toBeGreaterThan(
-        hook.lastIndexOf(`!insertmacro TakeTrustedOwnership ${path} `, sweep),
-      );
-      // Nothing may run between the guard and the sweep it protects.
-      expect(
-        hook.slice(guard, sweep).split(/\r?\n/),
-        `${path} guard must directly precede its sweep`,
-      ).toHaveLength(2);
-      // The old all-or-nothing reject guard is gone from both link-bearing trees.
-      expect(hook).not.toContain(`!insertmacro RejectReparseDescendants ${path} `);
-    }
-    // The data-root sweep may delete; the shared sweep must only check.
+  it('closes the private tree before link cleanup and preserves shared links', () => {
+    expect(position('!insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}"')).toBeLessThan(
+      position('!insertmacro NeutralizeReparseDescendants "${GEZEL_DATA_DIR}"'),
+    );
+    expect(hook).not.toContain('!insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}" ');
+    expect(hook).not.toContain('!insertmacro RejectReparseDescendants "${GEZEL_SHARED_DIR}" ');
     expect(hook).toContain(
       '!insertmacro NeutralizeReparseDescendants "${GEZEL_DATA_DIR}" "Gezel machine-service data" SkipNssm "${GEZEL_SHARED_DIR}"',
     );
@@ -797,29 +761,17 @@ describe('Windows machine-service installer security', () => {
     expect(checkMacro).not.toMatch(/\b(?:RMDir|Delete)\b/);
   });
 
-  it('precedes every recursive sweep with a same-path descendant reparse guard', () => {
-    // The recursive /T sweep follows a descendant junction to its target under
-    // elevation, so no call site may run it on a path it has not first proven
-    // free of links that lead elsewhere. This pins the invariant for every
-    // current and future site.
-    const sweeps = [...hook.matchAll(/!insertmacro SanitizeDescendants ("[^"]*")/g)];
+  it('never restores path-based recursive ACL repair, including on uninstall', () => {
+    const commands = hook.split(/\r?\n/).filter((line) => line.includes('nsExec::'));
+    for (const command of commands) {
+      if (command.includes('icacls.exe') || command.includes('takeown.exe')) {
+        expect(command).not.toMatch(/\s\/(?:T|R)\b/i);
+      }
+    }
+    const sweeps = [...hook.matchAll(/!insertmacro SanitizeDescendants[^\r\n]+/g)];
     expect(sweeps.length, 'expected SanitizeDescendants call sites').toBeGreaterThanOrEqual(4);
     for (const sweep of sweeps) {
-      const path = sweep[1];
-      const sweepAt = sweep.index ?? -1;
-      const guardAt = Math.max(
-        hook.lastIndexOf(`!insertmacro RejectReparseDescendants ${path} `, sweepAt),
-        hook.lastIndexOf(`!insertmacro NeutralizeReparseDescendants ${path} `, sweepAt),
-        hook.lastIndexOf(`!insertmacro AssertReparseDescendantsClean ${path} `, sweepAt),
-      );
-      expect(
-        guardAt,
-        `SanitizeDescendants ${path} must be preceded by a descendant guard on ${path}`,
-      ).toBeGreaterThanOrEqual(0);
-      expect(
-        hook.slice(guardAt, sweepAt),
-        `the guard for ${path} must sit in the same macro as its sweep`,
-      ).not.toContain('!macroend');
+      expect(sweep[0]).toMatch(/ (?:SkipNssm|SkipUninstallRuntimeCleanup)$/);
     }
   });
 

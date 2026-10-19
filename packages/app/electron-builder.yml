@@ -285,6 +285,13 @@ win:
   extraFiles:
     - from: native-bin/win32-x64/gezel-service-host.exe
       to: gezel-service-host.exe
+    # Installer security code ships with this app release, independent of the
+    # native-engine pin. The signed installer protects both source and launcher.
+    - from: installer/windows
+      to: resources/installer-security
+      filter:
+        - ResetTreeAcl.cs
+        - reset-tree-acl.ps1
 
 nsis:
   # Per-machine install (Program Files), elevates UAC at install time.

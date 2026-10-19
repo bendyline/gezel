@@ -44,6 +44,7 @@
 !define GEZEL_EXTRACT_CLI "$INSTDIR\resources\app.asar.unpacked\dist\extract-service-bundle.js"
 !define GEZEL_MIGRATE_SHARED_CLI "$INSTDIR\resources\app.asar.unpacked\dist\migrate-legacy-shared.js"
 !define GEZEL_REPARSE_CLI "$INSTDIR\resources\app.asar.unpacked\dist\neutralize-reparse-points.js"
+!define GEZEL_ACL_REPAIR "$INSTDIR\resources\installer-security\reset-tree-acl.ps1"
 !define GEZEL_BUNDLE_TARBALL "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.tar.gz"
 !define GEZEL_BUNDLE_META "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.meta.json"
 ; The first-party service host is GezelService's ImagePath.  It spawns
@@ -328,53 +329,25 @@ FunctionEnd
   ${EndIf}
 !macroend
 
-; Strip ownership and explicit ACEs from whatever a pre-created data
-; directory already contained, so a planted child cannot keep granting its
-; author access once the container is closed.
-;
-; Deliberately best-effort, and deliberately run before the container DACL is
-; applied (/reset resets the named object too, so it would undo it).
-; Recursive icacls fails as a whole for reasons that are ordinary inside a
-; preserved GEZEL_HOME: without /C it stops at the first object it cannot
-; open, and it cannot open a path over MAX_PATH at all — uv virtualenvs,
-; cloned repos and sandbox node_modules all produce those, and a model file
-; mapped by a leftover engine process produces the first.
-;
-; Aborting the machine-service install over one such file is not the safe
-; outcome.  It drops the user onto the per-user daemon, which has no service
-; isolation, no restricted SID and no private home — strictly weaker than
-; this service with one stale child ACE.  The controls that actually bound
-; the blast radius are the container's owner and DACL, and both of those
-; still fail closed.
-;
-; The recursive /setowner and /reset below follow a descendant junction to
-; its target under elevation (the /L flag protects only the link object, not
-; traversal through it), so a planted child junction turns this sweep into an
-; arbitrary-location owner/DACL rewrite.  Every call site MUST therefore
-; precede this, with nothing in between, by a descendant guard on the same
-; PATH that leaves no link leading outside it:
-;   - NeutralizeReparseDescendants in the private data root, where legitimate
-;     links live (uv, pnpm) and the installer may delete the unsafe ones;
-;   - AssertReparseDescendantsClean on the world-writable shared product tree,
-;     which it only verifies, never deletes inside;
-;   - RejectReparseDescendants on the service tree and the asset store, where
-;     no link should ever appear.
-; The guard is deliberately external: it fails the machine-service install
-; closed when an unsafe link survives, while this macro stays best-effort so a
-; single MAX_PATH file never aborts the install.
-!macro SanitizeDescendants PATH SUBJECT
-  ; /Q keeps a per-file success line out of the log, but a big preserved home
-  ; still takes a while with real-time scanning on, so say what is happening.
-  DetailPrint "Reviewing existing permissions under ${PATH}..."
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${PATH}" /setowner "*S-1-5-32-544" /T /C /L /Q'
-  Pop $0
-  ${If} $0 != 0
-    DetailPrint "WARNING: some ${SUBJECT} entries kept a previous owner (icacls exit $0)."
+; A preflight cannot authorize a later recursive icacls: another local account
+; can swap a directory for a junction between those processes. The helper
+; enumerates through directory handles, opens each child without following
+; links, and changes only that handle's security descriptor. It first closes
+; the tree to Administrators/SYSTEM; the intended boundary ACLs are published
+; below only after the entire repair succeeds. Busy/uninspectable/hard-linked
+; entries fail closed instead of leaving an attacker-owned child behind.
+!macro SanitizeDescendants PATH SUBJECT FAILURE_LABEL
+  ${IfNot} ${FileExists} "${GEZEL_ACL_REPAIR}"
+    DetailPrint "ERROR: the handle-based ACL repair tool is missing."
+    Goto ${FAILURE_LABEL}
   ${EndIf}
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${PATH}" /reset /T /C /L /Q'
+  DetailPrint "Reviewing existing permissions under ${PATH}..."
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${GEZEL_ACL_REPAIR}" -Root "${PATH}"'
   Pop $0
   ${If} $0 != 0
-    DetailPrint "WARNING: some ${SUBJECT} entries kept explicit permissions (icacls exit $0)."
+    DetailPrint "ERROR: could not safely repair ${SUBJECT} permissions (exit $0)."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not safely secure ${PATH}. The shared model engine will remain unavailable; close programs using this folder and inspect the installer details before retrying." /SD IDOK
+    Goto ${FAILURE_LABEL}
   ${EndIf}
 !macroend
 
@@ -499,8 +472,9 @@ FunctionEnd
   ${EndIf}
 !macroend
 
-; Make a tree safe for SanitizeDescendants without refusing the links that
-; belong in it.  uv links cpython-3.12-<triple> to the patch-version directory
+; Enforce the private tree's link policy after handle-based ACL repair,
+; without refusing the links that belong in it. uv links cpython-3.12-<triple>
+; to the patch-version directory
 ; beside it, and the video venv's pyvenv.cfg `home` goes through that link;
 ; pnpm trees under system-toolsets\ and in shared project workspaces are
 ; junction farms.  RejectReparseDescendants refused all of them, and because
@@ -517,19 +491,15 @@ FunctionEnd
 ; would otherwise authenticate to that host); packages/app/src/reparse-sweep.ts
 ; has the rules.
 ;
-; PROTECT names a subtree the removing pass must not delete inside, because an
-; unprivileged principal can still write it at sweep time (the shared product
-; tree grants Users Modify): a parent component could be swapped for a junction
-; between the check and the unlink, turning an elevated delete into an
-; arbitrary-file delete.  An unsafe link found there is refused, not removed,
-; and the refusal fails the install closed.  Deletion therefore only runs in
-; the private area of PATH (SYSTEM/Administrators/service SID, service stopped).
+; PROTECT names shared product content whose links are never deleted by the
+; installer, even during the temporary private ACL repair. An unsafe link
+; there is refused, not removed. Deletion runs only in the private area of
+; PATH after handle-based ACL repair has closed it, with the service stopped.
 ;
 ; Fails closed twice.  The removing pass exits non-zero if an unsafe link
-; survives, is refused under PROTECT, or a directory cannot be read (an
-; unreadable directory can hide a junction that the sweep's own /reset then
-; exposes).  A read-only pass then runs immediately before the sweep, so a link
-; planted after the first one still blocks it.
+; survives, is refused under PROTECT, or a directory cannot be read. A second
+; read-only pass verifies the cleanup result; it is not a race-proof boundary
+; and must never replace handle-based ACL repair.
 !macro NeutralizeReparseDescendants PATH DESCRIPTION FAILURE_LABEL PROTECT
   ${IfNot} ${FileExists} "${GEZEL_REPARSE_CLI}"
     DetailPrint "ERROR: neutralize-reparse-points.js is missing; ${DESCRIPTION} cannot be swept safely."
@@ -550,10 +520,9 @@ FunctionEnd
   ${EndIf}
 !macroend
 
-; Read-only variant for a world-writable tree the installer must never delete
-; inside.  The migrated shared product tree grants Users Modify on projects\
-; and gezels\, so the installer only VERIFIES it is safe to sweep: a link that
-; stays inside (a project workspace's own pnpm junctions) is fine, and any link
+; Read-only link policy for the shared product tree. Its projects\ and gezels\
+; are user-writable during normal operation, so the installer never deletes
+; their links. A link that stays inside (a workspace's pnpm junctions) is fine; any link
 ; that leads outside, cannot be resolved, or closes a cycle fails the install
 ; closed with its path in the log — exactly what the old reject-only guard did,
 ; but target-aware.  The data-root pass above has already refused to delete
@@ -685,28 +654,11 @@ FunctionEnd
   ; attacker owner who can rewrite its DACL after installation.
   CreateDirectory "${GEZEL_DATA_DIR}"
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}" "Gezel data directory" SkipNssm
-  ; The container is the boundary, so its owner is the one ownership step
-  ; that fails closed.  /L operates on links themselves rather than
-  ; traversing their targets.
-  !insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}" "its machine-service data directory" SkipNssm
-  ; Exact-path checks on the container are not enough before a recursive sweep.
-  ; A standard user can pre-create children under ProgramData, so a planted
-  ; descendant junction would make the elevated /setowner /T and /reset /T in
-  ; SanitizeDescendants act on its target, outside ProgramData, even though the
-  ; data root itself is a normal directory. Remove every link that leads out of
-  ; the data root before any recursive icacls. Links that stay inside are the
-  ; broker's own (uv's Python minor-version link, pnpm toolset trees) and are
-  ; kept; refusing them here dropped the shared engine on every upgrade. This
-  ; pass covers the service tree and the asset store too; their own guards
-  ; below stay strict, so a link that stays inside them still refuses.
-  ;
-  ; The one place the removing pass must NOT delete is the world-writable
-  ; shared product tree (Users get Modify on its projects\ and gezels\), where
-  ; a parent could be swapped for a junction between the check and the unlink.
-  ; An unsafe link found there is refused and fails the install closed; the
-  ; private area is where deletion actually runs, and the service is stopped.
+  ; Close and repair the tree before any path-based link cleanup. Ownership
+  ; and ACL changes operate on the same no-follow handles that were checked,
+  ; so a pre-created root or a concurrent descendant swap cannot redirect them.
+  !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}" "existing machine-service data" SkipNssm
   !insertmacro NeutralizeReparseDescendants "${GEZEL_DATA_DIR}" "Gezel machine-service data" SkipNssm "${GEZEL_SHARED_DIR}"
-  !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}" "existing machine-service data"
 
   ; Private root: SYSTEM + Administrators only until the per-service SID exists.
   ; Remove inherited/broad Users, Authenticated Users, Everyone, and generic
@@ -752,18 +704,11 @@ FunctionEnd
   ; The marker sits at the root under the private parent's traverse-only ACE,
   ; so users can read but cannot replace it. Product scope directories receive
   ; inherited Modify access and are operated on only by per-user daemons.
-  !insertmacro TakeTrustedOwnership "${GEZEL_SHARED_DIR}" "its machine-shared product directory" SkipNssm
-  ; Check-only here, because this tree is world-writable (Users get Modify on
-  ; projects/ and gezels/ below): the elevated installer must never delete
-  ; inside it, or a user swapping a parent for a junction between the check and
-  ; the unlink would make it an arbitrary-file delete. A link that stays inside
-  ; (a project workspace's own pnpm junctions) is kept; any link that leads out
-  ; of this tree — including one into the private data root, whose target the
-  ; sweep would otherwise reset to inherited permissions — fails the install
-  ; closed with its path in the log. The migration just above refuses symlinked
-  ; entries, so this is the recheck of what it moved.
+  ; Shared product links are checked, never deleted. The ACL helper is safe
+  ; independently of this policy check; the check does not authorize a later
+  ; path-based traversal. Links inside a workspace (pnpm) remain supported.
   !insertmacro AssertReparseDescendantsClean "${GEZEL_SHARED_DIR}" "Gezel machine-shared product" SkipNssm
-  !insertmacro SanitizeDescendants "${GEZEL_SHARED_DIR}" "machine-shared product"
+  !insertmacro SanitizeDescendants "${GEZEL_SHARED_DIR}" "machine-shared product" SkipNssm
   nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SHARED_DIR}" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /L'
   Pop $0
   ${If} $0 != 0
@@ -818,8 +763,7 @@ FunctionEnd
   ; Public immutable asset boundary. Users may traverse and read/execute
   ; published models, but cannot create, replace, or delete them. The service
   ; SID receives write access only after it exists below.
-  !insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}\assets" "its shared model store" SkipNssm
-  !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\assets" "published model"
+  !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\assets" "published model" SkipNssm
   nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /L'
   Pop $0
   ${If} $0 != 0
@@ -1179,8 +1123,7 @@ FunctionEnd
     !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets" "Gezel public asset directory" SkipUninstallRuntimeCleanup
     !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets\models" "Gezel shared model directory" SkipUninstallRuntimeCleanup
     !insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}\assets" "Gezel shared asset store" SkipUninstallRuntimeCleanup
-    !insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}\assets" "its preserved shared model store" SkipUninstallRuntimeCleanup
-    !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\assets" "preserved shared model"
+    !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\assets" "preserved shared model" SkipUninstallRuntimeCleanup
     nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /L'
     Pop $0
     ${If} $0 != 0

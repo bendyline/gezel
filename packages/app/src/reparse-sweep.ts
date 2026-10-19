@@ -1,10 +1,10 @@
 /**
  * Target-aware reparse-point sweep for the Windows installer.
  *
- * The installer's SanitizeDescendants (installer/nsis-hooks.nsh) runs
- * `icacls /setowner /T` and `icacls /reset /T` under elevation, and both follow
- * a descendant junction into its target. A link planted below a swept root
- * would turn that sweep into an owner/DACL rewrite of whatever it points at.
+ * This enforces link policy on a private, already-repaired tree. It is NOT a
+ * security boundary for subsequent path-based mutations: a concurrent writer
+ * can replace a directory after any preflight. The installer's ACL repair uses
+ * pinned no-follow handles instead (installer/windows/ResetTreeAcl.cs).
  *
  * Refusing every link is not the answer either. uv links
  * `cpython-3.12-<triple>` to the patch-version directory beside it, and the
