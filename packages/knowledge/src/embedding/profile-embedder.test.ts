@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { KnowledgeEmbeddingProfile } from '@bendyline/gezk';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { MULTILINGUAL_E5_SMALL_1 } from '../profiles/registry.js';
 import {
   EmbedderArtifactError,
@@ -433,5 +433,113 @@ describe('multimodal encoder profiles', () => {
     ]);
     await embedder.dispose();
     expect(disposed).toBe(1);
+  });
+});
+
+describe('createProfileEmbedder with a cached file cut off mid-download', () => {
+  let dir: string;
+  const repo = MULTILINGUAL_E5_SMALL_1.model.repo;
+  const revision = MULTILINGUAL_E5_SMALL_1.model.revision;
+  const graphPath = () => transformersCachePath(dir, repo, revision, 'onnx/model.onnx');
+  const PARSE_FAILURE = 'Load model from /cache/onnx/model.onnx failed:Protobuf parsing failed.';
+  const profile = () =>
+    profileWith({
+      onnxFile: 'onnx/model.onnx',
+      onnxDigest: sha(ONNX_BYTES),
+      tokenizerFile: 'tokenizer.json',
+      tokenizerDigest: sha(TOKENIZER_BYTES),
+    });
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'gezel-profile-repair-'));
+    for (const [file, bytes] of [
+      ['onnx/model.onnx', ONNX_BYTES.subarray(0, 8)],
+      ['tokenizer.json', TOKENIZER_BYTES],
+    ] as const) {
+      const path = transformersCachePath(dir, repo, revision, file);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, bytes);
+    }
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  /** A runtime whose graph load fails with `error` until the graph's bytes are whole. */
+  function runtimeThatParses(error = PARSE_FAILURE) {
+    const runtime = fakeTransformers();
+    const loads: string[] = [];
+    const pipeline = runtime.module.pipeline;
+    runtime.module.pipeline = async (task, model, options) => {
+      const bytes = await readFile(graphPath()).catch(() => null);
+      if (bytes === null) {
+        // What transformers.js does with a missing file: download it.
+        await mkdir(dirname(graphPath()), { recursive: true });
+        await writeFile(graphPath(), ONNX_BYTES);
+        loads.push('downloaded');
+      } else if (!bytes.equals(ONNX_BYTES)) {
+        loads.push('failed');
+        throw new Error(error);
+      }
+      return pipeline(task, model, options);
+    };
+    return { runtime, loads };
+  }
+
+  it('replaces the damaged graph and loads again', async () => {
+    const { runtime, loads } = runtimeThatParses();
+    const embedder = await createProfileEmbedder(profile(), {
+      cacheDir: dir,
+      transformers: runtime.module,
+    });
+    expect(loads).toEqual(['failed', 'downloaded']);
+    expect(await readFile(graphPath())).toEqual(ONNX_BYTES);
+    expect(embedder.verification.status).toBe('verified');
+    await embedder.dispose();
+  });
+
+  it('leaves the cache alone when a load fails for another reason', async () => {
+    const { runtime } = runtimeThatParses('onnxruntime: out of memory');
+    await expect(
+      createProfileEmbedder(profile(), { cacheDir: dir, transformers: runtime.module }),
+    ).rejects.toThrow(/out of memory/);
+    expect(await readFile(graphPath())).toEqual(ONNX_BYTES.subarray(0, 8));
+  });
+
+  it('passes a parse failure through when every pinned file matches its pin', async () => {
+    await writeFile(graphPath(), ONNX_BYTES);
+    const runtime = fakeTransformers();
+    runtime.module.pipeline = async () => {
+      throw new Error(PARSE_FAILURE);
+    };
+    await expect(
+      createProfileEmbedder(profile(), { cacheDir: dir, transformers: runtime.module }),
+    ).rejects.toThrow(/Protobuf parsing failed/);
+    expect(await readFile(graphPath())).toEqual(ONNX_BYTES);
+  });
+
+  it('removes the damaged graph on a local-only load and says it downloads again', async () => {
+    const { runtime, loads } = runtimeThatParses();
+    await expect(
+      createProfileEmbedder(profile(), {
+        cacheDir: dir,
+        transformers: runtime.module,
+        localFilesOnly: true,
+      }),
+    ).rejects.toThrow(/onnx\/model\.onnx\) and have been removed/);
+    expect(loads).toEqual(['failed']);
+    await expect(readFile(graphPath())).rejects.toThrow();
+  });
+
+  it('disposes a session that loaded when its tokenizer did not', async () => {
+    await writeFile(graphPath(), ONNX_BYTES);
+    const runtime = fakeTransformers();
+    runtime.module.AutoTokenizer.from_pretrained = async () => {
+      throw new Error('tokenizer: network unreachable');
+    };
+    await expect(
+      createProfileEmbedder(profile(), { cacheDir: dir, transformers: runtime.module }),
+    ).rejects.toThrow(/network unreachable/);
+    expect(runtime.disposed).toBe(1);
   });
 });

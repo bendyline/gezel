@@ -84,7 +84,8 @@ export function transformersCachePath(
 const digestMemo = new Map<string, string>();
 const DIGEST_MEMO_MAX = 32;
 
-async function fileDigest(path: string): Promise<string | null> {
+/** `sha256:<hex>` of a file, or null when it is absent. Memoized by path, size and mtime. */
+export async function fileDigest(path: string): Promise<string | null> {
   let size: number;
   let mtimeMs: number;
   try {

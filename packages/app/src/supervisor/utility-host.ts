@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { redirectAsarToUnpacked } from './extract-bundle.js';
 
 /** Options forwarded to `startService` in the child. Must stay structured-clonable. */
 export interface UtilityServiceStartOptions {
@@ -54,7 +55,10 @@ export interface UtilityHostedService {
   bootMs: number;
   /** Set when a prewarmed process was used: its import time, or null if the start had to wait for it. */
   prewarm: { importMs: number | null } | null;
+  /** Ask the service to shut down, killing it if it does not exit in time. */
   stop: () => Promise<void>;
+  /** End the process now: for a service that crashed or stopped answering. */
+  kill: () => Promise<void>;
 }
 
 export interface StartUtilityHostedServiceOptions {
@@ -64,8 +68,10 @@ export interface StartUtilityHostedServiceOptions {
   serviceModuleUrl: string | null;
   startOptions: UtilityServiceStartOptions;
   env: NodeJS.ProcessEnv;
-  /** The service asked for a restart, or its process died after it was ready. */
+  /** The service asked for a restart (a settings change); the user decides when. */
   onRestartRequested?: (reason: string) => void;
+  /** The ready service's process died without being asked to stop. */
+  onUnexpectedExit?: (reason: string) => void;
   onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   fork?: UtilityFork;
   /** A child that already imported the service; used when it loaded the same module. */
@@ -73,6 +79,10 @@ export interface StartUtilityHostedServiceOptions {
   /** Generous: a cold packaged boot imports a large tree before it can answer. */
   readyTimeoutMs?: number;
   stopTimeoutMs?: number;
+  /** How long a kill waits on SIGTERM before SIGKILL. */
+  killGraceMs?: number;
+  /** Test seam for the SIGKILL escalation. */
+  forceKill?: (pid: number) => void;
 }
 
 /**
@@ -89,14 +99,22 @@ export interface PrewarmedUtilityService {
   dispose(): void;
 }
 
+export type ServiceHost = 'in-process' | 'utility';
+
 /** `GEZEL_SERVICE_HOST=utility` opts into the utility-process host; anything else keeps the in-process service. */
-export function serviceHostFromEnv(env: NodeJS.ProcessEnv = process.env): 'in-process' | 'utility' {
+export function serviceHostFromEnv(env: NodeJS.ProcessEnv = process.env): ServiceHost {
   return env.GEZEL_SERVICE_HOST === 'utility' ? 'utility' : 'in-process';
 }
 
-/** The entry sits beside main.js in dist/, whichever module asks. */
+/**
+ * The entry sits beside main.js in dist/, whichever module asks. Packaged, that
+ * is inside app.asar; the entry ships unpacked (electron-builder.yml), so point
+ * at the real file rather than lean on the forked process's asar support.
+ */
 export function defaultUtilityEntryPath(fromUrl: string): string {
-  return join(fileURLToPath(new URL('.', fromUrl)), 'utility-service-entry.js');
+  return redirectAsarToUnpacked(
+    join(fileURLToPath(new URL('.', fromUrl)), 'utility-service-entry.js'),
+  );
 }
 
 type ElectronModule = typeof import('electron');
@@ -204,8 +222,8 @@ export async function startUtilityHostedService(
         } else if (!stopRequested) {
           // Without this the app would keep a window pointed at a dead port:
           // the in-process service could never die alone, so nothing else
-          // watches for it.
-          opts.onRestartRequested?.(`service process exited unexpectedly (code ${code})`);
+          // watches for it. Not a restart request: those wait for the user.
+          opts.onUnexpectedExit?.(`service process exited unexpectedly (code ${code})`);
         }
       });
 
@@ -231,11 +249,33 @@ export async function startUtilityHostedService(
         void gone.then(() => clearTimeout(timer));
       }),
     ]);
-    if (timedOut) {
-      child.kill();
+    if (timedOut) await kill();
+  };
+
+  async function kill(): Promise<void> {
+    if (exited) return;
+    stopRequested = true;
+    const gone = new Promise<void>((resolve) => exitWaiters.push(resolve));
+    child.kill();
+    // Electron's kill is SIGTERM, which a stopped or wedged process may never
+    // act on; waiting on its exit alone left a restart hanging forever.
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    const exitedInTime = await Promise.race([
+      gone.then(() => true),
+      new Promise<boolean>((resolve) => {
+        grace = setTimeout(() => resolve(false), opts.killGraceMs ?? 2_000);
+      }),
+    ]);
+    clearTimeout(grace);
+    if (!exitedInTime && child.pid !== undefined) {
+      try {
+        (opts.forceKill ?? ((pid) => process.kill(pid, 'SIGKILL')))(child.pid);
+      } catch {
+        /* already gone */
+      }
       await gone;
     }
-  };
+  }
 
   const scheme = connection.cert ? 'https' : 'http';
   return {
@@ -246,5 +286,6 @@ export async function startUtilityHostedService(
     bootMs: connection.bootMs,
     prewarm: warm ? { importMs: warm.importMs } : null,
     stop,
+    kill,
   };
 }

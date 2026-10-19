@@ -11,6 +11,7 @@ import {
   missingPinnedFiles,
   pinnedLoadFiles,
   prefetchExternalData,
+  removeMismatchedPinnedFiles,
 } from './pinned-files.js';
 import { EmbedderUnavailableError, preparePinnedLoad } from './profile-embedder.js';
 
@@ -107,5 +108,20 @@ describe('preparing a load against the sidecar hang', () => {
     );
     const onnxDir = dirname(cached('onnx/model_quantized.onnx_data'));
     expect(await readdir(onnxDir).catch(() => [])).toEqual([]);
+  });
+});
+
+describe('repairing a cache that holds a download cut off midway', () => {
+  it('removes only the pinned files whose bytes differ from their pins', async () => {
+    const graph = pinnedLoadFiles(PROFILE)[0]!.path;
+    await put(graph, 'the first fifth of a graph');
+    await put('onnx/model_quantized.onnx_data', WEIGHTS);
+
+    expect(await removeMismatchedPinnedFiles(PROFILE, { cacheDir })).toEqual([graph]);
+
+    await expect(readFile(cached(graph))).rejects.toThrow();
+    expect(await readFile(cached('onnx/model_quantized.onnx_data'))).toEqual(WEIGHTS);
+    // Absent files are not mismatches.
+    expect(await removeMismatchedPinnedFiles(PROFILE, { cacheDir })).toEqual([]);
   });
 });

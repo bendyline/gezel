@@ -66,6 +66,7 @@ import {
 } from './system-service.js';
 import {
   type PrewarmedUtilityService,
+  type ServiceHost,
   type UtilityServiceStartOptions,
   defaultUtilityEntryPath,
   prewarmUtilityService,
@@ -230,6 +231,9 @@ export class SupervisedService extends EventEmitter {
   private _failure: ServiceConnectionFailure | null = null;
   private child?: ChildProcess;
   private embeddedStop?: () => Promise<void>;
+  /** Present only while the embedded service runs in a utility process. */
+  private embeddedKill?: () => Promise<void>;
+  private embeddedHost: ServiceHost = 'in-process';
   /** Restores the original stdout/stderr writers after an embedded tee. */
   private embeddedLogTeeRestore?: () => void;
   private healthTimer?: NodeJS.Timeout;
@@ -336,10 +340,17 @@ export class SupervisedService extends EventEmitter {
     };
   }
 
-  attachEmbedded(stop: () => Promise<void>): void {
+  attachEmbedded(
+    stop: () => Promise<void>,
+    hosting: { host?: ServiceHost; kill?: () => Promise<void> } = {},
+  ): void {
     this.detachResources();
     this.embeddedStop = stop;
-    // Embedded = same process. If it dies, Electron dies. No health poll.
+    this.embeddedKill = hosting.kill;
+    this.embeddedHost = hosting.host ?? 'in-process';
+    // In this process: if it dies, Electron dies, so there is nothing to poll.
+    // In a utility process it can die or hang on its own, like a spawned child.
+    if (this.embeddedHost === 'utility') this.startHealthWatch();
     //
     // Unlike a spawned child (whose stdio `wirePipes` feeds into the
     // LogRotator), an in-process service logs straight to this process's
@@ -516,19 +527,27 @@ export class SupervisedService extends EventEmitter {
     this.emit('restart');
   }
 
-  private async restartEmbedded(): Promise<void> {
+  /**
+   * `force` kills a utility-hosted service instead of asking it to stop: after
+   * a crash or a hang there is nothing left to answer a graceful stop, which
+   * would otherwise cost its full timeout.
+   */
+  private async restartEmbedded(opts: { force?: boolean } = {}): Promise<void> {
     this.beginDestructiveRestart();
     this.stopHealthWatch();
-    if (this.embeddedStop) {
+    const stop = opts.force && this.embeddedKill ? this.embeddedKill : this.embeddedStop;
+    if (stop) {
       try {
-        await this.embeddedStop();
+        await stop();
       } catch (error) {
         await this.handleStopFailure('embedded service', error);
         throw error;
       }
     }
     this.detachResources();
-    const embedded = await startEmbeddedRaw(this.opts, this.requestRestartFromService);
+    const embedded = await startEmbeddedRaw(this.opts, this.requestRestartFromService, {
+      onProcessExit: this.handleServiceProcessExit,
+    });
     await this.installEmbeddedCandidate(embedded);
   }
 
@@ -664,12 +683,7 @@ export class SupervisedService extends EventEmitter {
   }
 
   private async installEmbeddedCandidate(
-    embedded: {
-      baseUrl: string;
-      token: string;
-      cert: string | null;
-      stop: () => Promise<void>;
-    },
+    embedded: EmbeddedService,
     emitRestart = true,
   ): Promise<void> {
     try {
@@ -688,13 +702,24 @@ export class SupervisedService extends EventEmitter {
     this._baseUrl = embedded.baseUrl;
     this._token = embedded.token;
     this._cert = embedded.cert;
-    this.attachEmbedded(embedded.stop);
+    this.attachEmbedded(embedded.stop, embedded);
     this.markReady();
     if (emitRestart) this.emit('restart');
   }
 
   /** Bound callback we hand to the embedded service so it can ask for
    *  a restart. Re-emits as the public `restart-requested` event. */
+  /**
+   * A utility-hosted service died on its own. Treated like a crashed spawned
+   * daemon (restart within the budget, then fall back), never as a restart
+   * request: those wait for the user, and nothing would ever answer one.
+   */
+  handleServiceProcessExit = (reason: string): void => {
+    if (this.shuttingDown) return;
+    this.opts.logger?.warn?.(`[supervisor] ${reason}`);
+    void this.handleCrash(reason);
+  };
+
   private requestRestartFromService = (reason: string): void => {
     this.opts.logger?.info?.(`[supervisor] service requested restart: ${reason}`);
     this.emit('restart-requested', reason);
@@ -743,6 +768,8 @@ export class SupervisedService extends EventEmitter {
     this.stopHealthWatch();
     this.child = undefined;
     this.embeddedStop = undefined;
+    this.embeddedKill = undefined;
+    this.embeddedHost = 'in-process';
     if (this.embeddedLogTeeRestore) {
       this.embeddedLogTeeRestore();
       this.embeddedLogTeeRestore = undefined;
@@ -923,7 +950,8 @@ export class SupervisedService extends EventEmitter {
       `[supervisor] restarting gezeld (attempt ${this.restartAttempts.length}/${RESTART_BUDGET_COUNT}; reason: ${reason})`,
     );
     try {
-      await this.restartSpawn();
+      if (this.child) await this.restartSpawn();
+      else await this.restartEmbedded({ force: true });
     } catch (err) {
       this.opts.logger?.error?.(`[supervisor] restart failed: ${(err as Error).message}`);
       // Pre-stop preparation failure leaves the old watcher/connection intact;
@@ -1001,6 +1029,9 @@ export class SupervisedService extends EventEmitter {
     this.beginDestructiveRestart();
     this.stopHealthWatch();
     try {
+      // A utility-hosted service that exhausted its restart budget falls back
+      // to the one host that cannot crash on its own.
+      const fromUtility = this.embeddedHost === 'utility';
       if (this.child) {
         try {
           await gracefullyStop(this.child, this.durableChildLogger());
@@ -1009,8 +1040,14 @@ export class SupervisedService extends EventEmitter {
           throw error;
         }
         this.detachResources();
+      } else if (fromUtility) {
+        await (this.embeddedKill ?? this.embeddedStop)?.();
+        this.detachResources();
       }
-      const embedded = await startEmbeddedRaw(this.opts, this.requestRestartFromService);
+      const embedded = await startEmbeddedRaw(this.opts, this.requestRestartFromService, {
+        ...(fromUtility ? { host: 'in-process' as const } : {}),
+        onProcessExit: this.handleServiceProcessExit,
+      });
       this._fallbackReason = reason;
       await this.installEmbeddedCandidate(embedded, false);
       this._mode = 'embedded';
@@ -2494,13 +2531,17 @@ async function buildEmbedded(
   // captures `svc` after construction; until then, restart requests
   // are dropped (boot-time requests aren't a meaningful case anyway).
   let svc: SupervisedService | null = null;
-  const embedded = await startEmbeddedRaw(opts, (reason) => {
-    svc?.emit('restart-requested', reason);
-  });
+  const embedded = await startEmbeddedRaw(
+    opts,
+    (reason) => {
+      svc?.emit('restart-requested', reason);
+    },
+    { onProcessExit: (reason) => svc?.handleServiceProcessExit(reason) },
+  );
   svc = new SupervisedService('embedded', embedded.baseUrl, embedded.token, embedded.cert, opts, {
     fallbackReason,
   });
-  svc.attachEmbedded(embedded.stop);
+  svc.attachEmbedded(embedded.stop, embedded);
   return svc;
 }
 
@@ -2854,15 +2895,26 @@ function isLostSpawnRace(error: unknown): boolean {
   );
 }
 
-async function startEmbeddedRaw(
-  opts: ConnectOptions,
-  onRestartRequested?: (reason: string) => void,
-): Promise<{
+/** An embedded service, in this process or in a utility process (`kill` only for the latter). */
+interface EmbeddedService {
   baseUrl: string;
   token: string;
   cert: string | null;
   stop: () => Promise<void>;
-}> {
+  host: ServiceHost;
+  kill?: () => Promise<void>;
+}
+
+async function startEmbeddedRaw(
+  opts: ConnectOptions,
+  onRestartRequested?: (reason: string) => void,
+  hosting: {
+    /** Overrides `GEZEL_SERVICE_HOST`: the last-resort fallback is always in-process. */
+    host?: ServiceHost;
+    /** A utility-hosted service's process died on its own. */
+    onProcessExit?: (reason: string) => void;
+  } = {},
+): Promise<EmbeddedService> {
   // Load the service from the user-extracted service tree when a packaged
   // tarball ships, falling back to the bare specifier in dev (workspace
   // symlink). This deliberately avoids resolving `@bendyline/gezel-service`
@@ -2918,7 +2970,7 @@ async function startEmbeddedRaw(
       process.env.GEZEL_DISABLE_MACHINE_ENGINE !== '1' &&
       (opts.packaged || process.env.GEZEL_USE_MACHINE_ENGINE === '1'),
   };
-  if (serviceHostFromEnv() === 'utility') {
+  if ((hosting.host ?? serviceHostFromEnv()) === 'utility') {
     const prewarmed = utilityPrewarm;
     utilityPrewarm = null;
     const hosted = await startUtilityHostedService({
@@ -2928,6 +2980,7 @@ async function startEmbeddedRaw(
       env: process.env,
       prewarmed,
       ...(onRestartRequested ? { onRestartRequested } : {}),
+      ...(hosting.onProcessExit ? { onUnexpectedExit: hosting.onProcessExit } : {}),
       // Through this process's streams, so the embedded log tee still
       // mirrors the service's output into the rotator.
       onOutput: (chunk, stream) => {
@@ -2942,7 +2995,14 @@ async function startEmbeddedRaw(
     opts.logger?.info?.(
       `[supervisor] utility-hosted service bound on ${hosted.baseUrl} (pid ${hosted.pid}, booted in ${hosted.bootMs}ms, ${warmth})`,
     );
-    return { baseUrl: hosted.baseUrl, token: hosted.token, cert: hosted.cert, stop: hosted.stop };
+    return {
+      baseUrl: hosted.baseUrl,
+      token: hosted.token,
+      cert: hosted.cert,
+      stop: hosted.stop,
+      kill: hosted.kill,
+      host: 'utility',
+    };
   }
   const mod = (
     serviceModuleUrl ? await import(serviceModuleUrl) : await import('@bendyline/gezel-service')
@@ -2960,6 +3020,7 @@ async function startEmbeddedRaw(
     token: running.clientToken ?? running.context.token,
     cert: running.cert?.certPem ?? null,
     stop: () => running.stop(),
+    host: 'in-process',
   };
 }
 

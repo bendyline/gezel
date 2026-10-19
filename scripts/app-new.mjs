@@ -168,6 +168,11 @@ async function main() {
   );
   if (buildCode !== 0) return buildCode;
 
+  spawnSync(process.execPath, [join(scriptsDir, 'ensure-native-binaries.mjs')], {
+    env,
+    stdio: 'inherit',
+  });
+
   return run(() =>
     spawnPnpm(['--filter', '@bendyline/gezel-app', 'exec', 'electron', '.', '--no-sandbox'], {
       cwd: repoRoot,

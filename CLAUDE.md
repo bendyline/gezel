@@ -787,7 +787,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
 - `pnpm test` — Vitest across every gezel package. ~3m45s on an 18-core workstation, ~12 min on CI. The service suite is ~90% of that on its own; scope to one package (`pnpm --filter @bendyline/gezel-ui run test`) while iterating.
 - `pnpm test:ci` — same suites, one package at a time. What CI runs: the 4-vCPU runner cannot absorb several package worker pools at once, and the contention starves fixed test timeouts. Use locally only to reproduce a CI-only timing failure.
 - `pnpm test:e2e` — Playwright Electron suite. ~25s.
-- `pnpm app` — build then launch the Electron shell (embedded mode by default).
+- `pnpm app` — build, then launch the Electron shell (embedded mode by default). Between the two, [ensure-native-binaries.mjs](scripts/ensure-native-binaries.mjs) checks `packages/app/native-bin/` against the pinned native release with the supervisor's own verifier and fetches the pinned version when it does not match, so a native bump reaches dev launches without a manual `fetch:native`. It never blocks the launch; `GEZEL_NATIVE_FETCH_SKIP=1` opts out. `app:clean` and `app:new` run it too.
 - `pnpm app:new` — the same, against a brand-new home (`~/.gezel-new`, wiped every run) to walk first-run flows as a new install sees them; `-- --keep` relaunches into it without wiping, `-- --home=<path>` moves it. Models download fresh unless `GEZEL_READONLY_MODEL_HOMES=$HOME/.gezel-dev` is set. ([scripts/app-new.mjs](scripts/app-new.mjs))
 - `pnpm dev` — watch-mode build across every gezel package.
 

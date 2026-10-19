@@ -1,10 +1,13 @@
 import { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import {
   type UtilityChild,
   type UtilityChildMessage,
   type UtilityParentMessage,
+  defaultUtilityEntryPath,
   prewarmUtilityService,
   serviceHostFromEnv,
   startUtilityHostedService,
@@ -147,28 +150,76 @@ describe('startUtilityHostedService', () => {
     expect(onRestartRequested).toHaveBeenCalledWith('config reset');
   });
 
-  it('asks for a restart when the ready service dies on its own', async () => {
+  it('reports a ready service that dies on its own as a crash, not a restart request', async () => {
+    // A restart request waits for the user; a crash must be acted on at once.
     const onRestartRequested = vi.fn();
+    const onUnexpectedExit = vi.fn();
     const child = wellBehaved();
-    await startUtilityHostedService({ ...base, fork: forkOf(child), onRestartRequested });
+    await startUtilityHostedService({
+      ...base,
+      fork: forkOf(child),
+      onRestartRequested,
+      onUnexpectedExit,
+    });
     child.emit('exit', 134);
-    expect(onRestartRequested).toHaveBeenCalledWith(
-      'service process exited unexpectedly (code 134)',
-    );
+    expect(onUnexpectedExit).toHaveBeenCalledWith('service process exited unexpectedly (code 134)');
+    expect(onRestartRequested).not.toHaveBeenCalled();
+  });
+
+  it('kills at once, without reporting its own kill as a crash', async () => {
+    const onUnexpectedExit = vi.fn();
+    const child = new FakeChild((c, m) => {
+      if (m.type === 'start') c.reply(READY);
+    });
+    const hosted = await startUtilityHostedService({
+      ...base,
+      fork: forkOf(child),
+      onUnexpectedExit,
+    });
+    await hosted.kill();
+    expect(child.killed).toBe(true);
+    expect(child.sent.some((m) => m.type === 'stop')).toBe(false);
+    expect(onUnexpectedExit).not.toHaveBeenCalled();
+    await hosted.kill();
   });
 
   it('stops gracefully without reporting the exit as a crash', async () => {
     const onRestartRequested = vi.fn();
+    const onUnexpectedExit = vi.fn();
     const child = wellBehaved();
     const hosted = await startUtilityHostedService({
       ...base,
       fork: forkOf(child),
       onRestartRequested,
+      onUnexpectedExit,
     });
     await hosted.stop();
     expect(child.sent.at(-1)).toEqual({ type: 'stop' });
     expect(child.killed).toBe(false);
     expect(onRestartRequested).not.toHaveBeenCalled();
+    expect(onUnexpectedExit).not.toHaveBeenCalled();
+  });
+
+  it('escalates to SIGKILL when the process does not act on SIGTERM', async () => {
+    // A stopped (SIGSTOP) or wedged process: Electron's kill changes nothing.
+    const child = new FakeChild((c, m) => {
+      if (m.type === 'start') c.reply(READY);
+    });
+    child.kill = () => {
+      child.killed = true;
+      return true;
+    };
+    const forceKill = vi.fn(() => {
+      queueMicrotask(() => child.emit('exit', 9));
+    });
+    const hosted = await startUtilityHostedService({
+      ...base,
+      fork: forkOf(child),
+      killGraceMs: 10,
+      forceKill,
+    });
+    await hosted.kill();
+    expect(forceKill).toHaveBeenCalledWith(4242);
   });
 
   it('kills a child that ignores stop', async () => {
@@ -273,5 +324,36 @@ describe('prewarmUtilityService', () => {
     await startUtilityHostedService({ ...base, env: prepared, fork, prewarmed });
     prewarmed.dispose();
     expect(used.killed).toBe(false);
+  });
+});
+
+describe('packaging the utility entry', () => {
+  it('points at the unpacked entry when the app runs from app.asar', () => {
+    expect(
+      defaultUtilityEntryPath(
+        'file:///Applications/Gezel.app/Contents/Resources/app.asar/dist/main.js',
+      ),
+    ).toBe(
+      '/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/utility-service-entry.js',
+    );
+    expect(defaultUtilityEntryPath('file:///repo/packages/app/dist/main.js')).toBe(
+      '/repo/packages/app/dist/utility-service-entry.js',
+    );
+  });
+
+  // The builder configs list shipped files explicitly, and the MAS config
+  // replaces the base lists rather than extending them. A build without the
+  // entry has nothing for utilityProcess.fork to load, and nothing in dev
+  // would notice.
+  it.each(['electron-builder.yml', 'electron-builder.mas.yml'])('%s ships it unpacked', (name) => {
+    const config = readFileSync(fileURLToPath(new URL(`../../${name}`, import.meta.url)), 'utf8');
+    const files = config.slice(
+      config.indexOf('\nfiles:\n'),
+      config.indexOf('\n\n', config.indexOf('\nfiles:\n') + 1),
+    );
+    const asarStart = config.indexOf('\nasarUnpack:\n');
+    const asarUnpack = config.slice(asarStart, config.indexOf('\n\n', asarStart + 1));
+    expect(files).toContain('- dist/utility-service-entry.js');
+    expect(asarUnpack).toContain('- dist/utility-service-entry.js');
   });
 });
