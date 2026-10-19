@@ -7,6 +7,9 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ChatModelManifest } from '../schemas/catalog.js';
+import type { ModelFamily } from '../schemas/model-profile.js';
+import { defaultStyleForProvider } from './defaults.js';
+import type { ModelTier } from './local-model-tier.js';
 import { resolveProfile } from './registry.js';
 import type { Behavior } from './types.js';
 
@@ -119,5 +122,40 @@ describe('resolveProfile — skeleton path (no behaviors registered yet)', () =>
       'prompt.meester-craftbook-prelude',
       'prompt.library-recall-prelude',
     ]);
+  });
+});
+
+describe('resolveProfile — scoped defaults', () => {
+  const ids = (tier: ModelTier, family: ModelFamily, behaviors?: string[]) =>
+    resolveProfile({
+      manifest: manifest({
+        style: { ...defaultStyleForProvider('llama-cpp'), family },
+        ...(behaviors ? { behaviors } : {}),
+      }),
+      tier,
+      providerName: 'llama-cpp',
+    }).behaviors.map((e) => e.id);
+
+  it('turns the work-routing pair on for small models, whatever the manifest declares', () => {
+    const gemma = ids('small', 'gemma', ['prompt.tool-cookbook-condensed']);
+    expect(gemma).toContain('tools.work-routing');
+    expect(gemma).toContain('prompt.work-options-prelude');
+    expect(gemma).not.toContain('prompt.work-options-question-note');
+    expect(gemma.indexOf('prompt.library-recall-prelude')).toBeLessThan(
+      gemma.indexOf('tools.work-routing'),
+    );
+  });
+
+  it('adds the question note for small Qwen models only', () => {
+    expect(ids('small', 'qwen', ['prompt.tool-cookbook-condensed'])).toContain(
+      'prompt.work-options-question-note',
+    );
+  });
+
+  it('leaves every other tier alone', () => {
+    for (const tier of ['tiny', 'medium', 'large', 'cloud'] as const) {
+      expect(ids(tier, 'qwen')).not.toContain('tools.work-routing');
+      expect(ids(tier, 'qwen')).not.toContain('prompt.work-options-question-note');
+    }
   });
 });

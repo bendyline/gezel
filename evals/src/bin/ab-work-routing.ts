@@ -43,6 +43,11 @@ import {
  *   work-options-prelude  + prompt.work-options-prelude (the list arrives with the message)
  *   question-note         + prompt.work-options-question-note (questions get "answer it yourself")
  *
+ * Each arm is the exact set of work-routing behaviors it runs with: the
+ * driver forces those and removes every other one, because small local
+ * models now carry the routing pair by default and a "baseline" that only
+ * forced nothing would run the treatment.
+ *
  * Layout: `<root>/<model>/<arm>/<scenario>/<trial>/`; the read-out lands in
  * `ab-summary.md` / `ab-summary.json` beside them.
  */
@@ -131,6 +136,21 @@ export function parseWorkRoutingArms(raw: unknown, reference: ArmId = BASELINE_A
     );
   }
   return [...new Set(arms)] as ArmId[];
+}
+
+/** Every behavior an arm turns on or off; anything an arm leaves out is removed. */
+const WORK_ROUTING_BEHAVIORS = [...new Set(Object.values(WORK_ROUTING_ARMS).flat())];
+
+export function armBehaviorOverrides(arm: ArmId): {
+  forceBehaviors?: string[];
+  removeBehaviors?: string[];
+} {
+  const on: readonly string[] = WORK_ROUTING_ARMS[arm];
+  const off = WORK_ROUTING_BEHAVIORS.filter((id) => !on.includes(id));
+  return {
+    ...(on.length > 0 ? { forceBehaviors: [...on] } : {}),
+    ...(off.length > 0 ? { removeBehaviors: off } : {}),
+  };
 }
 
 export function parseReferenceArm(raw: unknown): ArmId {
@@ -290,7 +310,7 @@ async function main(): Promise<void> {
     signal: ac.signal,
     runsDir: dir,
     repairPolicy: 'runtime',
-    ...(WORK_ROUTING_ARMS[arm].length > 0 ? { forceBehaviors: [...WORK_ROUTING_ARMS[arm]] } : {}),
+    ...armBehaviorOverrides(arm),
   });
 
   // --resume tops each cell up to --count from the trials already on disk, so

@@ -131,6 +131,7 @@ export const MODEL_SAMPLE_STEP_DEFAULTS = new Map<string, number>([
   ['krea-2-turbo-q6', 8],
   ['krea-2-turbo-q8', 8],
   ['ming-image-0.1-design-bf16', 12],
+  ['moss-image-sft-q4', 50],
   ['iris-3b-f32', 100],
 ]);
 
@@ -156,13 +157,22 @@ export const MODEL_CFG_DEFAULTS = new Map<string, number>([
   ['sdxl-turbo', 1],
   ['sdxl-lightning-4step', 1],
   ['ming-image-0.1-design-bf16', 1],
+  ['moss-image-sft-q4', 3],
   ['iris-3b-f32', 3],
 ]);
 
 /** Pin samplers validated with the native engine for these models. */
 export const MODEL_SAMPLER_DEFAULTS = new Map<string, string>([
   ['ming-image-0.1-design-bf16', 'Euler'],
+  ['moss-image-sft-q4', 'Euler'],
   ['iris-3b-f32', 'Euler'],
+]);
+
+/** Models that target 1024px when a request names no size; 512px is the legacy SD default. */
+const MODEL_1024PX_DEFAULT = new Set<string>([
+  'ming-image-0.1-design-bf16',
+  'moss-image-sft-q4',
+  'iris-3b-f32',
 ]);
 
 /**
@@ -260,9 +270,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
 
   private async generateInner(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
     const modelId = input.model ?? (await this.currentDefaultModelId());
-    // Ming and Iris target 1024px; 512px is the legacy SD default.
-    const defaultDimension =
-      modelId === 'ming-image-0.1-design-bf16' || modelId === 'iris-3b-f32' ? 1024 : 512;
+    const defaultDimension = modelId && MODEL_1024PX_DEFAULT.has(modelId) ? 1024 : 512;
     const width = input.width ?? defaultDimension;
     const height = input.height ?? defaultDimension;
     const steps = input.steps ?? (await this.defaultSampleSteps(modelId));

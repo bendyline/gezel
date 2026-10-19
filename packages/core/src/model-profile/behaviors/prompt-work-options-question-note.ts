@@ -6,7 +6,8 @@
  * researcher with `message_gezel` instead of answering.
  *
  * Requires `prompt.work-options-prelude`, which computes the ranking this
- * reads. OFF by default; A/B with `GEZEL_FORCE_BEHAVIORS`.
+ * reads. On by default for `small` Qwen models (`SCOPED_DEFAULT_BEHAVIORS`
+ * in registry.ts); elsewhere A/B with `GEZEL_FORCE_BEHAVIORS`.
  */
 
 import { renderQuestionNote } from '../../work-routing/render.js';

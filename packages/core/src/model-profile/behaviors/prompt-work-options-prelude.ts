@@ -9,6 +9,9 @@
  *
  * Silent for questions and for lists with nothing to start: a menu on
  * "what's 17 × 23?" is an invitation to over-route.
+ *
+ * On by default for `small` local models (`SCOPED_DEFAULT_BEHAVIORS` in
+ * registry.ts).
  */
 
 import { renderWorkOptionsPrelude } from '../../work-routing/render.js';

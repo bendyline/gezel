@@ -68,6 +68,7 @@ describe('StableDiffusionCppProvider.generate', () => {
 
   it.each([
     { model: 'ming-image-0.1-design-bf16', steps: 12, cfg: 1 },
+    { model: 'moss-image-sft-q4', steps: 50, cfg: 3 },
     { model: 'iris-3b-f32', steps: 100, cfg: 3 },
   ])('uses $model sampling defaults and preserves PNG bytes', async ({ model, steps, cfg }) => {
     const png = Buffer.concat([PNG_SIGNATURE, Buffer.from('rgba-payload')]);
