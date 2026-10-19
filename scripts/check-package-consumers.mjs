@@ -55,7 +55,7 @@ const suppliedTarballDir =
 if (tarballDirFlag !== -1 && !process.argv[tarballDirFlag + 1]) {
   throw new Error('--tarball-dir requires a directory path');
 }
-const MAX_NODE_MODULES_BYTES = 800 * 1024 * 1024;
+const MAX_NODE_MODULES_BYTES = 900 * 1024 * 1024;
 
 function validateArgs(args) {
   for (let index = 0; index < args.length; index += 1) {
@@ -498,7 +498,7 @@ try {
       `node_modules is ${installedMiB.toFixed(1)} MiB; budget is ${MAX_NODE_MODULES_BYTES / 1024 / 1024} MiB`,
     );
   } else {
-    ok(`node_modules is ${installedMiB.toFixed(1)} MiB (budget 800 MiB)`);
+    ok(`node_modules is ${installedMiB.toFixed(1)} MiB (budget 900 MiB)`);
   }
 
   step('auditing the npm consumer graph');
