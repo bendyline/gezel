@@ -621,12 +621,18 @@ export async function buildDs4Provider(opts: {
     },
   });
 
+  // Sessions budget prompts, `max_tokens`, and compaction against this window,
+  // so it must be the `--ctx` ds4 actually launches with. Left unset, it fell
+  // back to the 64K llama default: GLM 5.3 (launched at 32K) overflowed with
+  // `context_length_exceeded` long before compaction triggered, and DeepSeek
+  // (launched at 128K) compacted at a third of its window.
   const ds4Inner = new LlamaCppProvider({
     supervisor,
     logFile: ds4LogFile,
     disableThinkingRequestShape: 'deepseek',
     classifyLine: classifyDs4Line,
     visionEnabled: vision.enabled,
+    numCtx,
     ...baseProviderOpts,
   });
   ds4ProviderHolder.current = ds4Inner;

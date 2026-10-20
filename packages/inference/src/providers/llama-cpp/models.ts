@@ -1118,9 +1118,13 @@ export class LlamaCppModelManager {
     await writeFile(join(itemDir, 'manifest.json'), JSON.stringify(installed, null, 2), 'utf8');
     await makeSharedModelReadable(itemDir);
 
-    const warning = summary.chatTemplateMissing
-      ? 'Model has no embedded chat template (tokenizer.chat_template is missing). llama-server will fall back to a generic template that may not match this model — replies may be incoherent. Consider a different quant of the same model.'
-      : undefined;
+    // ds4-server renders each family's prompt itself and never reads
+    // tokenizer.chat_template; DeepSeek V4.1 ships no Jinja template at all,
+    // and its first install warned that replies "may be incoherent".
+    const warning =
+      summary.chatTemplateMissing && this.engine === 'llama-cpp'
+        ? 'Model has no embedded chat template (tokenizer.chat_template is missing). llama-server will fall back to a generic template that may not match this model — replies may be incoherent. Consider a different quant of the same model.'
+        : undefined;
     try {
       this.onInstalled?.({ engine: this.engine, id: catalogId });
     } catch {

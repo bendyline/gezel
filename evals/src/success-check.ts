@@ -438,12 +438,15 @@ export interface SubjectVocab {
   pattern: RegExp;
   /** Short label used in feedback prose (e.g. 'tank-combat'). */
   label: string;
+  /** The word a repair must add when the subject is missing (e.g. 'tank'). */
+  word: string;
 }
 
 export const TANK_SUBJECT_VOCAB: SubjectVocab = {
   signal: 'tank-vocab',
   pattern: /\btank\w*\b/,
   label: 'tank-combat',
+  word: 'tank',
 };
 
 /** Generic arcade-game subject gate: any real arcade game (and the
@@ -452,6 +455,7 @@ export const ARCADE_SUBJECT_VOCAB: SubjectVocab = {
   signal: 'arcade-vocab',
   pattern: /\b(game|arcade|score|player)\b/,
   label: 'arcade',
+  word: 'game',
 };
 
 /**
@@ -482,8 +486,12 @@ export function tankCombatContentSniff(
   const lower = html.toLowerCase();
   const signals: string[] = [];
 
-  // (a) The literal subject — required.
-  if (vocab.pattern.test(lower)) signals.push(vocab.signal);
+  // (a) The literal subject — required. Identifiers count as words once
+  // camelCase is split: a canvas game that draws with `drawTankBody` and
+  // `playerTank` is about tanks, and the lowercased `drawtankbody` hid it
+  // from `\btank` (2026-10-20, tankcombat on GLM 5.3).
+  const words = html.replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2').toLowerCase();
+  if (vocab.pattern.test(lower) || vocab.pattern.test(words)) signals.push(vocab.signal);
 
   // (b) Canvas / SVG rendering surface.
   if (/<canvas\b/.test(lower) || /<svg\b/.test(lower)) signals.push('render-surface');
@@ -581,7 +589,12 @@ export function tankCombatContentSniff(
   const featureListReason = compactButFunctional
     ? `Your ${vocab.label} game is functional but minimal (HTML is ${html.length} bytes; inline JS is ${jq.jsBytes ?? 'large enough'} bytes). Add at least 2 of these features: (1) collision detection between projectiles and enemies/player, plus a hit/health/death state; (2) enemy AI that pursues / dodges / fires back rather than standing still; (3) particle/explosion effects on hit (canvas circles fading over time count); (4) HUD with score and remaining lives or ammo; (5) game-over screen with a Restart button. Each adds substantive code naturally — do NOT pad with comments.`
     : undefined;
-  const chosenReason = featureListReason ?? (!ok ? jq.failReason : undefined);
+  // A bare signal name ("tank-vocab") left GLM 5.3 guessing through four
+  // repairs; say what the page is missing in words a model can act on.
+  const subjectReason = signals.includes(vocab.signal)
+    ? undefined
+    : `Nothing in the page says it is a ${vocab.label} game: the word "${vocab.word}" appears nowhere — not in a title, heading, on-screen label, or name in the code. Add it where a player reads it, such as the <title> and a heading or HUD label.`;
+  const chosenReason = featureListReason ?? (!ok ? (jq.failReason ?? subjectReason) : undefined);
   return {
     ok,
     signals,

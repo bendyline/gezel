@@ -430,7 +430,7 @@ import {
   turnWaitsForEngineSwap,
 } from './engine-swap-wait.js';
 import type { ChatEventBus, PublishScope } from './events.js';
-import { EvidenceLedger } from './evidence-ledger.js';
+import { EvidenceLedger, personGivenText } from './evidence-ledger.js';
 import {
   deriveRepairClampNudge,
   formatExpectedDeliverableAnnotation,
@@ -7772,12 +7772,8 @@ export class ChatManager extends LocalEngineRuntime {
         }
       }
       // A factual-mode turn starts here: what the person has said counts as
-      // evidence, and refusal counts reset. Nudges continue the turn they
-      // belong to rather than starting one. Today's date counts too: the
-      // turn's own clock line tells the model, and "past the current date
-      // (2026-10-07)" was refused as an invented number. So do the writer's
-      // own name and the project's: a report signed "Rafiq" was refused for
-      // naming a person no source mentions (2026-10-10 coverage run).
+      // evidence (see personGivenText), and refusal counts reset. Nudges
+      // continue the turn they belong to rather than starting one.
       const evidenceLedger = this.evidenceLedgers.get(sessionId);
       if (
         evidenceLedger &&
@@ -7790,16 +7786,16 @@ export class ChatManager extends LocalEngineRuntime {
           this.store.getProject(state.record.projectId).catch(() => null),
         ]);
         evidenceLedger.beginTurn(
-          [
-            ...state.record.messages.filter((m) => m.role === 'user').map((m) => m.content),
-            userText,
-            renderCurrentDateTimeLine(),
-            todayIso(),
-            self?.name ?? '',
-            project?.name ?? '',
-            // The person's own selected text: rewriting it is not inventing it.
-            subjectStateLine ?? '',
-          ].join('\n'),
+          personGivenText({
+            messages: [
+              ...state.record.messages.filter((m) => m.role === 'user').map((m) => m.content),
+              userText,
+            ],
+            clockLines: [renderCurrentDateTimeLine(), todayIso()],
+            gezelName: self?.name,
+            project,
+            subjectStateLine,
+          }),
         );
       }
       const projectRetrieval = await this.resolveTurnProjectRetrieval(

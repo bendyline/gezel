@@ -1,6 +1,11 @@
 import type { ChatMessage } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { EvidenceLedger, MAX_WRITE_REFUSALS, removeCitationMarkers } from './evidence-ledger.js';
+import {
+  EvidenceLedger,
+  MAX_WRITE_REFUSALS,
+  personGivenText,
+  removeCitationMarkers,
+} from './evidence-ledger.js';
 
 const article =
   'George Washington was born on February 22, 1732, in Westmoreland County, Virginia. His father Augustine Washington died in 1743. He married Martha Dandridge Custis on January 6, 1759.';
@@ -183,6 +188,41 @@ describe('EvidenceLedger', () => {
       expect(refused.error).toContain('`memo-product.md`');
       expect(refused.error).toContain('`search`');
     }
+  });
+
+  // incident-postmortem on GLM 5.3, 2026-10-20: the project about said
+  // "500-rate spike", every session read it, and restating it was refused.
+  it("takes the project's about and mission as the person's own words", () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn(
+      personGivenText({
+        messages: ['Write the postmortem.'],
+        clockLines: ['2026-10-20'],
+        gezelName: 'Jordan',
+        project: {
+          name: 'Checkout incident',
+          about: 'checkout-api saw a 500-rate spike after a timeout change.',
+          missionObjectives: '1. Read all 5 evidence files.',
+        },
+      }),
+    );
+    ledger.setLookupTools(['read_file', 'write_file']);
+    ledger.labelToolResult('read_file', { path: 'evidence/oncall-chat.txt' }, 'errors are all 504');
+    const write = {
+      path: 'postmortem.md',
+      content: 'Checkout saw a 500-rate spike after the timeout change.',
+    };
+    expect(ledger.checkProseFileWrite('write_file', write)).toBeNull();
+
+    const briefless = new EvidenceLedger();
+    briefless.beginTurn(personGivenText({ messages: ['Write the postmortem.'], clockLines: [] }));
+    briefless.setLookupTools(['read_file', 'write_file']);
+    briefless.labelToolResult(
+      'read_file',
+      { path: 'evidence/oncall-chat.txt' },
+      'errors are all 504',
+    );
+    expect(briefless.checkProseFileWrite('write_file', write)?.kind).toBe('reject');
   });
 
   it('names the source files the conversation mentions when nothing was read yet', () => {

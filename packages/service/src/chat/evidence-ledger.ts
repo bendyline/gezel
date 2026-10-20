@@ -78,6 +78,34 @@ export function removeCitationMarkers(text: string): string {
     .join('\n');
 }
 
+/**
+ * What counts as the person's own words for a factual turn: restating them
+ * needs no citation. Today's date counts, because the turn's own clock line
+ * tells the model ("past the current date (2026-10-07)" was refused as an
+ * invented number). So do the writer's own name and the project's (a report
+ * signed "Rafiq" was refused, 2026-10-10), and the project's about and
+ * mission, which every session reads as its standing brief (a postmortem
+ * restating the about's "500-rate spike" was refused, 2026-10-20).
+ */
+export function personGivenText(parts: {
+  messages: readonly string[];
+  clockLines: readonly string[];
+  gezelName?: string | undefined;
+  project?: { name?: string; about?: string; missionObjectives?: string } | null | undefined;
+  /** The person's own selected text: rewriting it is not inventing it. */
+  subjectStateLine?: string | null | undefined;
+}): string {
+  return [
+    ...parts.messages,
+    ...parts.clockLines,
+    parts.gezelName ?? '',
+    parts.project?.name ?? '',
+    parts.project?.about ?? '',
+    parts.project?.missionObjectives ?? '',
+    parts.subjectStateLine ?? '',
+  ].join('\n');
+}
+
 const str = (v: unknown): string | undefined =>
   typeof v === 'string' && v.trim() ? v.trim() : undefined;
 

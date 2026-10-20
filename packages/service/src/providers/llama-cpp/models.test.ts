@@ -493,6 +493,49 @@ describe('LlamaCppModelManager.install', () => {
     expect(done && 'warning' in done ? done.warning : undefined).toMatch(/chat template/i);
   });
 
+  it('does not warn about a missing chat_template for ds4, which renders prompts itself', async () => {
+    const blob = buildGguf({ arch: 'deepseek41', contextLength: 8192 });
+    const expected = sha256Hex(blob);
+    const catalog = fakeCatalog(
+      new Map<string, ChatModelManifest>([
+        [
+          'ds4-no-template',
+          {
+            schemaVersion: 1,
+            kind: 'chat-model',
+            id: 'ds4-no-template',
+            name: 'ds4 No Template',
+            description: 'fixture',
+            tags: [],
+            maintainer: { name: 'Test' },
+            version: '1.0.0',
+            releasedAt: '2026-04-22T00:00:00Z',
+            availableVersions: ['1.0.0'],
+            parameterSize: '552B',
+            approxSizeBytes: blob.byteLength,
+            supportsTools: true,
+            ds4: {
+              huggingfaceRepo: 'x/y',
+              filename: 'test.gguf',
+              sha256: expected,
+              approxSizeBytes: blob.byteLength,
+            },
+          } as ChatModelManifest,
+        ],
+      ]),
+    );
+    const mgr = new LlamaCppModelManager({
+      home,
+      catalog,
+      fetchImpl: streamingFetch(blob),
+      engine: 'ds4',
+    });
+    const events = await drain(mgr.install('ds4-no-template'));
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done && 'warning' in done ? done.warning : undefined).toBeUndefined();
+  });
+
   it('onInstalled fires once on done (even when the hook throws) and never on error', async () => {
     const blob = buildGguf({ arch: 'qwen2', contextLength: 4096, chatTemplate: 'x' });
     const expected = sha256Hex(blob);

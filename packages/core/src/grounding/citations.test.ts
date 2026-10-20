@@ -345,6 +345,85 @@ describe('groundText', () => {
     );
   });
 
+  // incident-postmortem on GLM 5.3, 2026-10-20: all four sentences restate
+  // the evidence and were refused, which cost the trial its deliverable.
+  it('reads hyphenated compounds, approximate numbers, and whole shares as a writer means them', () => {
+    const ev = [
+      {
+        n: 1,
+        text: 'timestamp_utc,request_rate_per_s\n14:25:00,1240\n14:33:00,1179\n14:40:00,1271',
+      },
+      {
+        n: 2,
+        text: '[14:37:22] bertha.vargas: errors are all 504 from /charge endpoint — PaymentGateway client timing out\n[14:45:50] bertha.vargas: hotfix pushed; CI green',
+      },
+      { n: 3, text: 'Jean-Luc Picard approved the change.' },
+    ];
+    const status = (text: string) => groundText(text, ev).sentences[0]?.status;
+    expect(extractClaims('Traffic held ~1,270 rps, 100% of it on /charge.')).toEqual([
+      { kind: 'number', value: '1270', approx: true },
+      { kind: 'number', value: '100', percent: true },
+    ]);
+    expect(status('Request rate remained ~1,180–1,270 rps throughout.')).toBe('unattributed');
+    expect(status('Request rate peaked at 1,270 rps.')).toBe('uncited');
+    expect(status('100% of observed errors were 504 responses.')).toBe('unattributed');
+    expect(status('Measure PaymentGateway-side outcomes for the window.')).toBe('unattributed');
+    expect(status('The revert was CI-green before the deploy.')).toBe('non-factual');
+    expect(status('Jean-Luc Picard approved it [3].')).toBe('supported');
+    expect(status('The change was approved by Jean-Paul.')).toBe('uncited');
+  });
+
+  // incident-postmortem on GLM 5.3, 2026-10-20: refused as "38 next to
+  // Grafana", because the log named Grafana at 14:35 and the root cause at 14:38.
+  it('checks a time of day whole, and never as an attribute of a nearby name', () => {
+    const ev = [
+      {
+        n: 1,
+        text: `[14:34:10] pagerduty: checkout-api error rate above 5%\n[14:35:30] bertha.vargas: looking at /grafana/checkout — error_rate is 13%\n${'[14:36:00] bertha.vargas: pods restarting, still checking\n'.repeat(4)}[14:38:05] bertha.vargas: PR #3094 bumped the PaymentGateway timeout — that is the cause\n[09:05:00] mira.chen: morning standup notes`,
+      },
+    ];
+    const status = (text: string) => groundText(text, ev).sentences[0]?.status;
+    expect(extractClaims('Paged at 14:34, root cause by 14:38:05.')).toEqual([
+      { kind: 'number', value: '14:34', clock: true },
+      { kind: 'number', value: '14:38:05', clock: true },
+    ]);
+    expect(
+      status(
+        'From the page (14:34) to the root cause (14:38) took four minutes, using Grafana and the PR diff.',
+      ),
+    ).toBe('unattributed');
+    expect(status('Standup notes were posted at 9:05.')).toBe('unattributed');
+    expect(status('The revert landed at 14:52.')).toBe('uncited');
+  });
+
+  // incident-postmortem on GLM 5.3 at 64K, 2026-10-20: every sentence here
+  // restates read_file output, and each was refused.
+  it('reads quotes across read_file line gutters, ignores file:line pointers, and treats · as a separator', () => {
+    const ev = [
+      {
+        n: 1,
+        text: ' 1→# Checkout Incident\n 2→\n 3→Incident commander: Mira Chen\n 4→Severity: SEV2\n12→  ID 8147. Pull request #3094 — "raise PaymentGateway client timeout\n13→  from 800ms to 8000ms".\n38→PR #3094 had been merged 6 hours earlier but only rolled out in this\n39→deploy. The PR description framed the change as a fix for occasional\n40→800ms timeouts seen against PaymentGateway; the reviewer (Phil Okeke\n41→self-merged after reviewer Anita Sayed signed off) did not catch it.',
+      },
+    ];
+    const status = (text: string) => groundText(text, ev).sentences[0]?.status;
+    expect(
+      status(
+        'PR #3094 ("raise PaymentGateway client timeout from 800ms to 8000ms") rolled out here.',
+      ),
+    ).toBe('unattributed');
+    expect(
+      status('It was framed as a fix for "occasional 800ms timeouts" (timeline.md:36–42).'),
+    ).toBe('unattributed');
+    expect(
+      status('Phil Okeke self-merged the PR after Anita Sayed signed off (timeline.md:36–42).'),
+    ).toBe('unattributed');
+    expect(
+      status('**Severity:** SEV2 · **Incident commander:** Mira Chen · **Status:** closed'),
+    ).toBe('unattributed');
+    // Gutters are not evidence: a line number is no longer a sourced number.
+    expect(status('The pipeline ran 13 stages.')).toBe('uncited');
+  });
+
   it('matches thousands separators and spelled small numbers', () => {
     const ev = [{ n: 1, text: 'The estate covered 1,426 acres and two mills.' }];
     expect(
