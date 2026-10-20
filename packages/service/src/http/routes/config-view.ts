@@ -172,6 +172,8 @@ export const CONFIG_RESPONSE_OMITTED: Readonly<Record<string, string>> = {
   service: 'remote daemon URL and bearer token — the token must not be echoed',
   externalFolders: 'owned by /api/folders (moves go through the move worker)',
   sharedProjectId: 'internal id of the shared-library project, resolved by the Store',
+  harnessTools:
+    'served by /api/harness-tools, which also revokes the harness tokens a change affects',
   executionDensity: 'legacy field migrated to generalistMode by Store.ensureLayout',
   firstUseIndexingReleasedAt: 'latch written by the first-use indexing hold',
   recognitionProvider: 'served by the /api/recognition routes',

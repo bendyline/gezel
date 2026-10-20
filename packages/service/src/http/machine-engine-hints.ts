@@ -18,7 +18,7 @@ const HINT_MESSAGE =
   'This is the Gezel machine engine (a compute broker), not the product /v1 API. ' +
   'The per-user Gezel daemon serves /v1 on a per-launch port published in ' +
   '~/.gezel/runtime/port (HTTPS; pin the cert from runtime/cert.pem). If Ollama ' +
-  'emulation is enabled in Settings → Connected Apps, http://127.0.0.1:11434 also works.';
+  'emulation is enabled in Settings → Integrations, http://127.0.0.1:11434 also works.';
 
 const HINTED_PATHS = [
   '/v1/responses',

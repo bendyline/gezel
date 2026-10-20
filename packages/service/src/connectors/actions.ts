@@ -33,6 +33,15 @@ import { connectorCorpusStorage } from './storage.js';
 
 const log = createLogger('connectors');
 
+/**
+ * Consent scopes whose commit reaches nobody but the account owner — a draft
+ * saved into their own mailbox. Night-shift deferral exists so nothing is sent
+ * to other people unattended; holding these until morning would only mean an
+ * overnight "draft my replies" run leaves the Drafts folder empty when the
+ * person sits down to review it.
+ */
+const NON_TRANSMITTING_SCOPES: ReadonlySet<string> = new Set(['mailbox-draft']);
+
 export class ActionDraftNotFoundError extends Error {
   constructor(draftId: string) {
     super(`no connector action draft with id ${draftId}`);
@@ -70,6 +79,8 @@ export interface ConnectorActionManagerOptions {
   isNightShiftActive?: () => boolean;
   /** Shared with ConnectorManager so commits can't race syncs. */
   locks?: KeyedLock;
+  /** HTTP transport for the committing adapter; tests inject the simulator. */
+  fetch?: typeof fetch;
 }
 
 export class ConnectorActionManager {
@@ -193,7 +204,10 @@ export class ConnectorActionManager {
       if (!verdict.ok) throw new Error(`commit denied: ${verdict.reason}`);
       const committedInput = verdict.input !== undefined ? verdict.input : input;
 
-      if (this.opts.isNightShiftActive?.()) {
+      if (
+        this.opts.isNightShiftActive?.() &&
+        !NON_TRANSMITTING_SCOPES.has(declared.consentScope ?? '')
+      ) {
         const { abs, rel } = await this.paths(
           project,
           found.bindingId,
@@ -214,6 +228,7 @@ export class ConnectorActionManager {
         store: this.opts.store,
         ...(this.opts.scriptRunner ? { scriptRunner: this.opts.scriptRunner } : {}),
         projectId: project.id,
+        ...(this.opts.fetch ? { fetch: this.opts.fetch } : {}),
       });
       try {
         await adapter.ensureAuth();

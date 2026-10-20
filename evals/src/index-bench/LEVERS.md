@@ -229,3 +229,24 @@ bounded cost (~2× vec rows, no LLM, no wall-clock). Back-compat for existing
 user indexes was a non-issue — all installs are local/pre-release, so the
 next enrichment cycle just re-shapes chunks. Both quality levers (query-
 instruction, windowing) are now default-on for the bge stack.
+
+### summary prompt: purpose before mechanism — PROMOTED (2026-10-20)
+The old prompt ("what it does and its most important functions/classes")
+let qwen3.8-27b-q4 describe `calc/src/dependencyGraph.ts` as interval trees
+and Tarjan's algorithm, so no query about formulas or cells reached it (harness
+experiment). The new `buildSummaryPrompt` asks first what the file is for, in
+the words someone looking for it would use, then for its key functions.
+Measured without a full bench run: 92 squisq files (every golden and harness
+target plus 70 seeded distractors), both prompts through the same
+llama-server and the model's instruct sampling (temperature 0.7, thinking
+off), two replicates, 22 queries (12 goldens + 10 harness short queries),
+ranked within the subset by the daemon's FTS query shape and its bge-small
+embedder over the summaries alone:
+| prompt | kw R@1 | kw R@5 | kw MRR | vec R@1 | vec R@5 | vec MRR | words |
+|---|---|---|---|---|---|---|---|
+| old | 0.39 | 0.66 | 0.54 | 0.57 | 0.80 | 0.69 | 66 |
+| **new** | **0.45** | **0.77** | **0.60** | **0.61** | **0.86** | **0.72** | **57** |
+Ahead on every pooled metric and 14% shorter, but modest: per query and arm,
+12 better, 9 worse, 23 tied, and single summaries swing a lot at 0.7. Existing
+indexes keep their summaries (content-addressed); new and changed files get the
+new wording. Not yet run: the full Phase-A bench on this lever.

@@ -121,7 +121,7 @@ export interface WorkerTurnHooks {
    * Private chain-of-thought. Routed to the session's reasoning channel,
    * NOT `emitDelta` — the trace must stay out of the committed reply
    * body, the abort-salvage buffer, and the OpenAI-/Ollama-compat
-   * forwarders that serve Connected Apps from these same sessions.
+   * forwarders that serve connected apps from these same sessions.
    */
   emitReasoningDelta(text: string): void;
   emitHeartbeat(label?: string): void;

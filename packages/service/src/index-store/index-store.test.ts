@@ -279,6 +279,64 @@ describe('IndexStore', () => {
     store.close();
   });
 
+  it('lets a summary lift the chunks of the file it describes', async () => {
+    const store = await openStore();
+    if (!store.ftsAvailable) return store.close();
+    // Several files whose chunks match the query's words better than the
+    // target's chunk does; only the target's summary says what the file is.
+    for (let i = 0; i < 4; i++) {
+      store.putChunks(`src/noise${i}.ts`, `n${i}`, [
+        {
+          kind: 'section',
+          lineStart: 1,
+          lineEnd: 5,
+          text: 'cells recalculate dependents formulas recalculate cells',
+        },
+      ]);
+    }
+    store.putChunks('src/dependencyGraph.ts', 'target', [
+      {
+        kind: 'section',
+        lineStart: 40,
+        lineEnd: 80,
+        text: 'class DependencyIndex interval tree cells',
+      },
+    ]);
+    store.upsertFile({
+      path: 'src/dependencyGraph.ts',
+      hash: 'target',
+      size: 1,
+      mtimeMs: 1,
+      lang: 'typescript',
+      kind: 'code',
+      modality: 'text',
+      trivial: false,
+      indexedAt: new Date(0).toISOString(),
+      loc: 80,
+    });
+    store.upsertSummary({
+      contentHash: 'target',
+      filePath: 'src/dependencyGraph.ts',
+      summaryMd:
+        'Tracks which formulas depend on which cells so edited cells recalculate their dependents.',
+      model: 'test',
+    });
+    const hits = store.searchCodeHybrid(
+      null,
+      'which formulas recalculate when cells are edited',
+      10,
+    );
+    // The keyword arm ranks the target's chunk last; its summary lifts that
+    // chunk to the top instead of adding a separate line-1 entry.
+    expect(hits[0]?.path).toBe('src/dependencyGraph.ts');
+    expect(hits[0]?.lineStart).toBe(40);
+    expect(hits.filter((h) => h.path === 'src/dependencyGraph.ts')).toHaveLength(1);
+    // Scores stay below 1 and keep the order: a tie at 1 sorted by path downstream.
+    expect(hits.every((h) => h.score < 1)).toBe(true);
+    expect(hits[0]!.score).toBeGreaterThan(hits[1]!.score);
+    store.close();
+  });
+
   it('keeps the arm that produced each hybrid hit', async () => {
     const store = await openStore();
     store.putChunks('docs/pastry.md', 'h1', [

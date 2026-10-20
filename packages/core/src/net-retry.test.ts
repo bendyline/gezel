@@ -30,6 +30,22 @@ describe('isTransientNetworkError', () => {
     expect(isTransientNetworkError(err)).toBe(false);
   });
 
+  it('matches errno codes as whole uppercase words, not inside class names', () => {
+    class YouTubeNotFoundError extends Error {
+      constructor() {
+        super('YouTube has no channel for @nobody');
+        this.name = 'YouTubeNotFoundError';
+      }
+    }
+    expect(isTransientNetworkError(new YouTubeNotFoundError())).toBe(false);
+    expect(isTransientNetworkError(new Error('the bridge teagain stopped'))).toBe(false);
+    expect(isTransientNetworkError(new Error('getaddrinfo ENOTFOUND api.example.test'))).toBe(true);
+    expect(
+      isTransientNetworkError(new TypeError('fetch failed', { cause: { code: 'UND_ERR_SOCKET' } })),
+    ).toBe(true);
+    expect(isTransientNetworkError(new Error('read EAI_AGAIN'))).toBe(true);
+  });
+
   it('does not retry ordinary programming errors', () => {
     expect(isTransientNetworkError(new TypeError('x.map is not a function'))).toBe(false);
   });

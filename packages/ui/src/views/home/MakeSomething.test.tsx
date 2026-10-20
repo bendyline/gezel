@@ -13,8 +13,22 @@ vi.mock('../tasks/NewTaskDialog.js', () => ({
     quickLaunch: boolean;
   }) => <output>{JSON.stringify(props)}</output>,
 }));
+vi.mock('../projects/NewProjectDialog.js', () => ({
+  NewProjectDialog: (props: {
+    initialTypeId?: string;
+    onCreated: (project: { id: string; name: string }) => void;
+  }) => (
+    <output>
+      {JSON.stringify(props)}
+      <button type="button" onClick={() => props.onCreated({ id: 'spanish', name: 'Spanish' })}>
+        Create
+      </button>
+    </output>
+  ),
+}));
 const { api } = await import('../../api.js');
 const { MakeSomething } = await import('./MakeSomething.js');
+const { peekPendingSettingsSection } = await import('../../settings-nav.js');
 const projects = [
   { id: 'default', name: 'Default' },
   { id: 'garden', name: 'Garden' },
@@ -33,7 +47,26 @@ const item = (id: string) =>
     },
   }) as unknown as CatalogItemSummary;
 
+const projectType = (id: string, extra: Record<string, unknown> = {}) =>
+  ({
+    sourceId: 'bundled',
+    kind: 'project-type',
+    manifest: {
+      id,
+      kind: 'project-type',
+      name: id,
+      description: 'Practice every day: drills, stories and a streak. It adapts.',
+      tags: [],
+      craftbooks: [],
+      schedules: [],
+    },
+    ...extra,
+  }) as unknown as CatalogItemSummary;
+
 beforeEach(() => {
+  vi.mocked(api.listCatalogItems)
+    .mockReset()
+    .mockResolvedValue({ items: [] } as never);
   vi.mocked(api.listProjectCraftbooks)
     .mockReset()
     .mockResolvedValue({
@@ -58,6 +91,73 @@ it('opens a starter directly in the project quick launch, and See all opens the 
   expect(screen.queryByRole('button', { name: /Slide deck/ })).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'See all' }));
   expect(screen.getByRole('status')).toHaveTextContent('"quickLaunch":false');
+});
+
+it('offers project types beneath the plans and opens one straight on its form', async () => {
+  vi.mocked(api.listCatalogItems).mockImplementation(
+    async (kind) =>
+      ({
+        items:
+          kind === 'project-type'
+            ? [
+                projectType('language-trainer'),
+                projectType('email'),
+                projectType('phone-only', { unavailableReason: 'Needs the desktop.' }),
+              ]
+            : [],
+      }) as never,
+  );
+  const opened: unknown[] = [];
+  const onOpenTab = (event: Event) => opened.push((event as CustomEvent).detail);
+  window.addEventListener('gezel:open-tab', onOpenTab);
+  try {
+    render(<MakeSomething projectId="garden" projects={projects} />);
+    const user = userEvent.setup();
+    expect(await screen.findByRole('heading', { name: 'Start a project' })).toBeInTheDocument();
+    const key = screen.getByRole('button', { name: /language-trainer/ });
+    expect(key).toHaveTextContent('Practice every day');
+    expect(key).not.toHaveTextContent('streak');
+    expect(screen.queryByRole('button', { name: /^email/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /phone-only/ })).not.toBeInTheDocument();
+
+    await user.click(key);
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('"initialTypeId":"language-trainer"'),
+    );
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+    expect(opened).toContainEqual({ kind: 'project', id: 'spanish' });
+  } finally {
+    window.removeEventListener('gezel:open-tab', onOpenTab);
+  }
+});
+
+it('opens the whole project type gallery from its own See all', async () => {
+  vi.mocked(api.listCatalogItems).mockImplementation(
+    async (kind) =>
+      ({ items: kind === 'project-type' ? [projectType('language-trainer')] : [] }) as never,
+  );
+  render(<MakeSomething projectId="garden" projects={projects} />);
+  await userEvent
+    .setup()
+    .click(await screen.findByRole('button', { name: 'See all project types' }));
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('"open":true'));
+  expect(screen.getByRole('status')).not.toHaveTextContent('initialTypeId');
+});
+
+it('opens Settings on Integrations from the integration link', async () => {
+  const navigations: unknown[] = [];
+  const onNavigate = (event: Event) => navigations.push((event as CustomEvent).detail);
+  window.addEventListener('gezel:navigate', onNavigate);
+  try {
+    render(<MakeSomething projectId="garden" projects={projects} />);
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Integrate Gezel into other apps…' }));
+    expect(peekPendingSettingsSection()).toBe('connectedApps');
+    expect(navigations).toContainEqual({ view: 'settings', section: 'connectedApps' });
+  } finally {
+    window.removeEventListener('gezel:navigate', onNavigate);
+  }
 });
 
 it('honors an empty server starter set instead of reintroducing fallback ids', async () => {

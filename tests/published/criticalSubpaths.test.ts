@@ -80,6 +80,13 @@ const RUNTIME_RESOLVED: ReadonlyArray<{
     usedBy: 'src/chat/manager.ts — without it, chat sessions silently run with no tools',
   },
   {
+    specifier: '@bendyline/gezel-mcp/dist/harness.js',
+    from: 'service',
+    mode: 'require',
+    usedBy:
+      'src/harness-tools/launcher.ts — the entry the launcher gives Claude Code, Codex, Cursor, Claude Desktop and VS Code',
+  },
+  {
     specifier: '@bendyline/gezel-connectors-spectral/run-action',
     from: 'service',
     mode: 'require',

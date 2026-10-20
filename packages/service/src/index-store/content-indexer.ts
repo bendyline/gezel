@@ -14,10 +14,12 @@ import {
   isConvertibleDoc,
   shadowDocFilesPaths,
 } from './docs.js';
+import { refreshFileEdges } from './edges/refresh.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { sha256, sha256File } from './hash.js';
 import { exifFromHeifItem, readHeifHeader, readImageStaticMeta } from './image-meta.js';
 import { IndexStore } from './index-store.js';
+import { extractMarkdownLinks } from './markdown-links.js';
 import {
   extractCodeSymbols,
   extractImportEdges,
@@ -57,8 +59,17 @@ export const CLOUD_ONLY_META_KEY = 'cloud_only';
  * v4: exec-regex precision (sink.command-exec no longer matches arbitrary
  *     `.exec(` receivers) + dynamic-import edges only from constant string
  *     specifiers — flushes the stale findings and template-literal imports.
+ * v5: import flags (re-export, type-only, dynamic), Rust `mod x;` edges, and
+ *     C system includes keep their angle brackets.
  */
-const EXTRACTOR_VERSION = 4;
+const EXTRACTOR_VERSION = 5;
+/**
+ * Bump when markdown link extraction changes. Its own redo, because a
+ * markdown re-read under EXTRACTOR_VERSION would rebuild the document's
+ * chunks; this one only re-reads links.
+ * 1: links and images become `imports` rows (resolved as `link` edges).
+ */
+const LINK_EXTRACTOR_VERSION = 1;
 /**
  * Bump when the image tier stores new metadata, so photos indexed before it
  * are re-read once (resumably, like EXTRACTOR_VERSION). A re-read of unchanged
@@ -133,6 +144,12 @@ export async function indexWorkspaceContent(
   const indexedAt = nowIso();
   const codeRedoSince = redoSince(store, 'extractor_version', EXTRACTOR_VERSION, indexedAt);
   const imageRedoSince = redoSince(store, 'image_meta_version', IMAGE_META_VERSION, indexedAt);
+  const linkRedoSince = redoSince(
+    store,
+    'link_extractor_version',
+    LINK_EXTRACTOR_VERSION,
+    indexedAt,
+  );
 
   const maxFiles = opts.maxFiles ?? MAX_FILES;
   const { files: walkedFiles, capped } = await discoverWorkspaceFiles(workspaceDir, {
@@ -511,6 +528,14 @@ export async function indexWorkspaceContent(
 
     // Content unchanged despite mtime touch — just refresh the stat row.
     if (!forceThis && existing && existing.hash === hash) {
+      if (
+        cls.kind === 'markdown' &&
+        !trivial &&
+        linkRedoSince !== null &&
+        existing.indexedAt < linkRedoSince
+      ) {
+        store.putImports(file.path, hash, extractMarkdownLinks(parseFrontmatter(content).body));
+      }
       store.upsertFile({
         path: file.path,
         hash,
@@ -564,6 +589,8 @@ export async function indexWorkspaceContent(
       store.putSymbols(file.path, hash, syms);
       stats.symbols += syms.length;
       store.putChunks(file.path, hash, chunkMarkdown(body));
+      // What it links to: the documents' share of the dependency graph.
+      store.putImports(file.path, hash, extractMarkdownLinks(body));
     } else if (cls.modality === 'text') {
       // Plain text, config, data, and small unknown-text files previously had
       // no keyword-searchable body until an asynchronous enrichment pass made
@@ -605,6 +632,10 @@ export async function indexWorkspaceContent(
 
   await repairWipedAiShadowsOnce(store, artifactsDir);
 
+  // Resolve the import rows into the stored graph. A capped walk still
+  // resolves what it saw, flagged partial.
+  await refreshFileEdges(store, workspaceDir, { partial: capped });
+
   // Stamp only after a complete walk: rows past a cap may hold old-version
   // extractions. Files this redo already covered are skipped meanwhile.
   if (codeRedoSince !== null && !capped) {
@@ -612,6 +643,9 @@ export async function indexWorkspaceContent(
   }
   if (imageRedoSince !== null && !capped) {
     finishRedo(store, 'image_meta_version', IMAGE_META_VERSION);
+  }
+  if (linkRedoSince !== null && !capped) {
+    finishRedo(store, 'link_extractor_version', LINK_EXTRACTOR_VERSION);
   }
 
   return stats;

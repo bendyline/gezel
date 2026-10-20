@@ -93,6 +93,98 @@ describe('FittedTabsList', () => {
     expect(faces()).toEqual(['icon', 'icon', 'both', 'icon']);
   });
 
+  describe('a tab that carries a menu', () => {
+    function MenuHarness({ onSelect = () => {} }: { onSelect?: (value: string) => void }) {
+      const [value, setValue] = useState('chat');
+      const [view, setView] = useState('village');
+      const items: FittedTab[] = [
+        ITEMS[0]!,
+        {
+          value: 'map',
+          label: view === 'village' ? 'Village view' : 'Diagram view',
+          icon: 'village',
+          menu: {
+            label: 'Choose a view',
+            value: view,
+            items: [
+              { value: 'village', label: 'Village', hint: 'Your files as a town' },
+              { value: 'diagram', label: 'Diagram', hint: 'What imports what' },
+            ],
+            onSelect: (next) => {
+              setView(next);
+              onSelect(next);
+            },
+          },
+        },
+      ];
+      return (
+        <Tabs.Root value={value} onValueChange={setValue}>
+          <FittedTabsList ariaLabel="Sections" items={items} value={value} />
+        </Tabs.Root>
+      );
+    }
+
+    it('opens on the current choice only once the tab is current', async () => {
+      rowWidth = 320;
+      render(<MenuHarness />);
+      const tab = screen.getByRole('tab', { name: 'Village view' });
+      expect(tab).toHaveAttribute('aria-haspopup', 'menu');
+
+      await userEvent.click(tab);
+      expect(tab).toHaveAttribute('data-state', 'active');
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+      await userEvent.click(tab);
+      expect(await screen.findByRole('menu', { name: 'Choose a view' })).toBeInTheDocument();
+      expect(tab).toHaveAttribute('aria-expanded', 'true');
+      expect(tab).toHaveAttribute('data-state', 'active');
+    });
+
+    it('switches the choice from the menu and renames the tab', async () => {
+      rowWidth = 320;
+      const onSelect = vi.fn();
+      render(<MenuHarness onSelect={onSelect} />);
+      const tab = screen.getByRole('tab', { name: 'Village view' });
+      await userEvent.click(tab);
+      await userEvent.click(tab);
+      await userEvent.click(await screen.findByRole('menuitemradio', { name: /Diagram/ }));
+
+      expect(onSelect).toHaveBeenCalledWith('diagram');
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Diagram view' })).toHaveAttribute(
+        'data-state',
+        'active',
+      );
+    });
+
+    it('opens from the keyboard and gives focus back to the tab', async () => {
+      rowWidth = 320;
+      render(<MenuHarness />);
+      const tab = screen.getByRole('tab', { name: 'Village view' });
+      await userEvent.click(tab);
+      tab.focus();
+
+      await userEvent.keyboard('{ArrowDown}');
+      expect(await screen.findByRole('menu')).toBeInTheDocument();
+      await userEvent.keyboard('{Escape}');
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(tab).toHaveFocus();
+
+      await userEvent.keyboard('{Enter}');
+      expect(await screen.findByRole('menu')).toBeInTheDocument();
+    });
+
+    it('measures the chevron in the faces that draw it', () => {
+      rowWidth = 320;
+      const { container } = render(<MenuHarness />);
+      const probes = container.querySelectorAll('[data-probe-index="1"]');
+      const withChevron = [...probes]
+        .filter((probe) => probe.querySelector('.fitted-tab-chevron'))
+        .map((probe) => probe.getAttribute('data-face'));
+      expect(withChevron).toEqual(['label', 'both']);
+    });
+  });
+
   it('keeps every accessible name, and one copy of each label, when iconified', () => {
     rowWidth = 150;
     render(<Harness />);

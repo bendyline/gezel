@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { JournalContext } from '../workspace/journal.js';
+import { isOwnerCaller } from './auth.js';
 
 /** Session credentials decide the writer; request attribution is only trusted for user clients. */
 export function mutationActor(c: Context, claimed?: JournalContext): JournalContext {
@@ -11,6 +12,7 @@ export function mutationActor(c: Context, claimed?: JournalContext): JournalCont
     }
     return { gezelId: auth.gezelId, sessionId: auth.appId.slice('session:'.length) };
   }
+  if (!isOwnerCaller(c)) return {};
   const gezelId = claimed?.gezelId || c.req.query('gezelId');
   const sessionId = claimed?.sessionId || c.req.query('sessionId');
   return { ...(gezelId ? { gezelId } : {}), ...(sessionId ? { sessionId } : {}) };

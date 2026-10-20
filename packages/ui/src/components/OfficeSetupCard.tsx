@@ -91,7 +91,7 @@ function FirstOpenDialog({
 }
 
 /**
- * Settings → Connected Apps: add a Gezel button to Word, Excel and
+ * Settings → Integrations: add a Gezel button to Word, Excel and
  * PowerPoint. The desktop app does the per-user steps (trust Gezel's local
  * certificate, register the add-in with each app); the daemon owns the
  * certificate, the connection, and the add-in files. Outside the desktop app

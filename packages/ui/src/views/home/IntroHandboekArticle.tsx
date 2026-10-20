@@ -1,17 +1,18 @@
 import { parseKnowledgeUri } from '@bendyline/gezel';
 import type { KnowledgeDocumentRead } from '@bendyline/gezel-client';
-import { DocPlayer, LinearDocView, MediaContext } from '@bendyline/squisq-react';
+import { DocPlayer, MediaContext } from '@bendyline/squisq-react';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
-import { GEZEL_LIGHT_SURFACE, gezelChatThemeForMode } from '../../components/chat-theme.js';
+import { gezelChatThemeForMode } from '../../components/chat-theme.js';
 import { navigateToTab } from '../../components/nav-actions.js';
 import { queueOpenKnowledge } from '../../components/pending-open-knowledge.js';
-import { onRadioKeyDown } from '../../primitives/radio-keyboard.js';
 import { useEffectiveTheme } from '../../theme.js';
 import { inlineBundledAssets } from '../handboek/HandboekMediaProvider.js';
 import { createKnowledgeMediaProvider } from '../knowledge/KnowledgeMediaProvider.js';
+import { IntroArticleControls } from './IntroArticleControls.js';
+import { IntroArticleDocument } from './IntroArticleDocument.js';
 
 const ARTICLE_ID = 'welcome';
 
@@ -59,7 +60,6 @@ export function IntroHandboekArticle({
   // gezellig theme's own pages are dark); in dark mode let the theme's
   // warm-tinted dark background come through — same rule as chat bubbles.
   const effectiveTheme = useEffectiveTheme();
-  const surface = effectiveTheme === 'light' ? GEZEL_LIGHT_SURFACE : undefined;
 
   useEffect(() => {
     let alive = true;
@@ -163,60 +163,12 @@ export function IntroHandboekArticle({
   }
 
   const controls = (
-    <div className="home-intro-article-controls">
-      {stacked || playerOnly ? (
-        <button
-          type="button"
-          className="gz-link-button"
-          onClick={() => openHandboek(ARTICLE_ID)}
-          title="Read this article in the Handboek"
-        >
-          Open in Handboek →
-        </button>
-      ) : (
-        // biome-ignore lint/a11y/useSemanticElements: a tray of keys, not a form; <fieldset> would bring a legend and form-group styling.
-        <div className="gz-tray handboek-mode-tray" role="group" aria-label="Handboek article">
-          <div
-            className="home-intro-modes"
-            role="radiogroup"
-            aria-label="View as"
-            onKeyDown={onRadioKeyDown}
-          >
-            <button
-              type="button"
-              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
-              role="radio"
-              aria-checked={mode === 'doc'}
-              tabIndex={mode === 'doc' ? 0 : -1}
-              className={mode === 'doc' ? 'gz-key gz-key-active' : 'gz-key'}
-              onClick={() => setMode('doc')}
-            >
-              Read
-            </button>
-            <button
-              type="button"
-              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
-              role="radio"
-              aria-checked={mode === 'video'}
-              tabIndex={mode === 'video' ? 0 : -1}
-              className={mode === 'video' ? 'gz-key gz-key-active' : 'gz-key'}
-              onClick={() => setMode('video')}
-            >
-              Watch
-            </button>
-          </div>
-          <span className="home-intro-tray-divider" aria-hidden="true" />
-          <button
-            type="button"
-            className="gz-key"
-            onClick={() => openHandboek(ARTICLE_ID)}
-            title="Read this article in the Handboek"
-          >
-            Open in Handboek <span aria-hidden="true">→</span>
-          </button>
-        </div>
-      )}
-    </div>
+    <IntroArticleControls
+      mode={mode}
+      onModeChange={setMode}
+      onOpen={() => openHandboek(ARTICLE_ID)}
+      compact={stacked || playerOnly}
+    />
   );
 
   return (
@@ -245,29 +197,11 @@ export function IntroHandboekArticle({
           </div>
         )}
         {(stacked || (!playerOnly && mode === 'doc')) && (
-          <div className="home-intro-page">
-            <div className="home-intro-doc" onClickCapture={onDocClickCapture}>
-              {/* No synthesized cover, same call HandboekView makes.
-                  LinearDocView's default turns `doc.startBlock` into a
-                  full-bleed hero: a page-tall band whose backdrop is the
-                  article's leading figure and whose title/subtitle restate
-                  the first section verbatim a scroll above the real thing.
-                  Without it the article opens on its own heading with the
-                  brand mark at editorial size beside the prose. Video mode
-                  keeps its cover — a title slide is the right opening
-                  frame there. */}
-              <LinearDocView
-                doc={doc}
-                className="gezel-article-view"
-                theme={gezelChatThemeForMode(effectiveTheme)}
-                surface={surface}
-                thinMargins
-                imageDisplayMode="inline"
-                showCover={false}
-                linkSchemes={['knowledge']}
-              />
-            </div>
-          </div>
+          <IntroArticleDocument
+            doc={doc}
+            mode={effectiveTheme}
+            onClickCapture={onDocClickCapture}
+          />
         )}
       </MediaContext.Provider>
       {playerOnly && controls}

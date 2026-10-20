@@ -716,6 +716,21 @@ async function isSessionRouteAllowed(
     return SESSION_ALLOW;
   }
 
+  // `describe_image` and `read_image_metadata` are in the image kits, but the
+  // recognition router binds its project through `?project=` (defaulting to
+  // Default), so both read routes were refused with "not part of the session
+  // MCP API" on every call. Bind the query to the token; the model, cache and
+  // health routes stay first-party. Location in `/metadata` is gated at the
+  // route by `callerMaySeeLocation`.
+  if (
+    method === 'POST' &&
+    (path === '/api/recognition/describe' || path === '/api/recognition/metadata')
+  ) {
+    return (c.req.query('project') ?? 'default') === auth.projectId
+      ? SESSION_ALLOW
+      : sessionDeny('image recognition must target the session project');
+  }
+
   // Media/render tools are model-facing, but their project binding is in the
   // body rather than the URL. Only generation calls are admitted; model/admin
   // listing, pull, deletion, and engine-status routes stay first-party.

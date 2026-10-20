@@ -1,8 +1,10 @@
 import {
   type CatalogItemSummary,
+  type InterestAreaId,
   PROJECT_CATEGORY_ICONS,
   type ProjectIconId,
   type ProjectTypeCategory,
+  interestAreasForProjectType,
   projectTypeIcon,
 } from '@bendyline/gezel';
 import type { JSX } from 'react';
@@ -439,4 +441,13 @@ export function categorizeCatalogType(item: CatalogItemSummary): ProjectTypeCate
   if (/code|web-app|api|cli|library|site/.test(haystack)) return 'code';
   if (/mail|email|calendar|chat|messag/.test(haystack)) return 'communication';
   return 'other';
+}
+
+/** The interest areas a catalog project type serves, for ordering only. */
+export function catalogProjectTypeAreas(item: CatalogItemSummary): readonly InterestAreaId[] {
+  if (item.manifest.kind !== 'project-type') return [];
+  return interestAreasForProjectType({
+    ...(item.manifest.interests ? { interests: item.manifest.interests } : {}),
+    category: categorizeCatalogType(item),
+  });
 }

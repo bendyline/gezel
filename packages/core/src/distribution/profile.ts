@@ -57,7 +57,7 @@ export interface ResolvedDistributionPolicy {
   allowNpmInstalls: boolean;
   /**
    * Whether the unauthenticated Ollama-emulation listener may bind. The
-   * authenticated `/v1` Connected Apps surface is unaffected.
+   * authenticated `/v1` surface for connected apps is unaffected.
    */
   allowOllamaEmulation: boolean;
   /** The one place refusal copy is written, for every surface that shows it. */

@@ -6,6 +6,8 @@ export default defineConfig({
     index: 'src/index.ts',
     'lint-contracts': 'src/lint-contracts.ts',
     server: 'src/server.ts',
+    harness: 'src/harness-main.ts',
+    bin: 'src/bin.ts',
   },
   format: ['esm'],
   dts: true,

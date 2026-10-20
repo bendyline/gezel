@@ -10,6 +10,7 @@ export * from './codex.js';
 export * from './codex-setup.js';
 export * from './entity-id.js';
 export * from './local-harness.js';
+export * from './harness-tools.js';
 export * from './opencode-setup.js';
 export * from './pi-setup.js';
 export * from './vscode-setup.js';

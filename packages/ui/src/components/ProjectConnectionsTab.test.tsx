@@ -135,6 +135,52 @@ describe('ProjectConnectionsTab connector picker', () => {
     });
   });
 
+  it('asks for no token when the connector type declares no secret', async () => {
+    vi.mocked(api.listConnectorTypes).mockResolvedValue({
+      items: [
+        connectorItem('rss-feed', 'RSS feeds', {
+          secretShape: undefined,
+          completeness: 'window',
+          configSchema: {
+            type: 'object',
+            properties: { feeds: { type: 'array', title: 'Feed URLs', items: { type: 'string' } } },
+            required: ['feeds'],
+          },
+        }),
+      ],
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    await user.click(await screen.findByRole('radio', { name: 'RSS feeds' }));
+    expect(screen.getByLabelText('Feed URLs')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/API key \/ token/)).not.toBeInTheDocument();
+  });
+
+  it('runs a first sync right after adding a connector', async () => {
+    vi.mocked(api.bindConnector).mockResolvedValue({
+      ok: true,
+      binding: { id: 'github-issues:abc', type: 'github-issues' },
+    } as never);
+    vi.mocked(api.syncConnector).mockReset();
+    vi.mocked(api.syncConnector).mockResolvedValue({
+      ok: true,
+      result: { written: 7, quarantined: 0 },
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    await user.click(await screen.findByRole('radio', { name: 'GitHub Issues' }));
+    await user.type(screen.getByLabelText('Repository'), 'bendyline/gezel');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => {
+      expect(api.syncConnector).toHaveBeenCalledWith('project-alpha', 'github-issues:abc');
+    });
+    expect(await screen.findByText('Synced 7 new record(s).')).toBeInTheDocument();
+  });
+
   it('preserves JSON-schema boolean defaults and numeric config values', async () => {
     vi.mocked(api.listConnectorTypes).mockResolvedValue({
       items: [

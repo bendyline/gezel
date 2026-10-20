@@ -84,9 +84,11 @@ describe('x-posts golden normalization', () => {
         title: 'Shipping the X connector today!',
         date: '2026-08-10T09:30:12.000Z',
         platform: 'x',
+        direction: 'inbound',
         author: 'gezeldev',
         tweet_id: '1954312345678901234',
         permalink: 'https://x.com/gezeldev/status/1954312345678901234',
+        url: 'https://x.com/gezeldev/status/1954312345678901234',
         in_reply_to: '1954000000000000001',
         likes: '42',
         reposts: '7',
@@ -99,6 +101,7 @@ describe('x-posts golden normalization', () => {
         metrics_updated_at: '2026-08-12T06:00:00.000Z',
       },
       bodyMarkdown: 'Shipping the X connector today!\nDetails: https://gezel.example/launch',
+      volatileKeys: ['metrics_updated_at'],
       scanOrigin: 'x-posts',
       quarantineNamespace: 'x-posts',
       quarantineLabel: 'X post by @gezeldev',
@@ -110,9 +113,11 @@ describe('x-posts golden normalization', () => {
       'title',
       'date',
       'platform',
+      'direction',
       'author',
       'tweet_id',
       'permalink',
+      'url',
       'in_reply_to',
       'likes',
       'reposts',
@@ -124,6 +129,23 @@ describe('x-posts golden normalization', () => {
       'has_media',
       'metrics_updated_at',
     ]);
+  });
+
+  it('keys an edited tweet on its original id, linking the live version', () => {
+    const record = tweetToRecord(
+      {
+        ...FULL_TWEET,
+        id: '1954312999999999999',
+        edit_history_tweet_ids: ['1954312345678901234', '1954312999999999999'],
+        text: 'Shipping the X connector today (edited)',
+        entities: {},
+      },
+      { username: 'gezeldev', metricsUpdatedAt: '2026-08-12T06:00:00.000Z' },
+    );
+    expect(record.recordId).toBe('1954312345678901234');
+    expect(record.frontmatter.tweet_id).toBe('1954312999999999999');
+    expect(record.frontmatter.original_tweet_id).toBe('1954312345678901234');
+    expect(record.frontmatter.url).toBe('https://x.com/gezeldev/status/1954312999999999999');
   });
 
   it('normalizes a bare tweet: zero counts, no media, no reply, no lang', () => {
@@ -155,9 +177,11 @@ describe('x-posts golden normalization', () => {
         title: 'mention from alice',
         date: '2026-08-11T14:05:00.000Z',
         platform: 'x',
+        direction: 'inbound',
         author: 'alice',
         tweet_id: '1954500000000000003',
         permalink: 'https://x.com/alice/status/1954500000000000003',
+        url: 'https://x.com/alice/status/1954500000000000003',
         lang: 'en',
       },
       bodyMarkdown: 'Have you seen what @gezeldev is building? https://example.com/post/connectors',
@@ -185,7 +209,9 @@ describe('x-posts golden normalization', () => {
         title: 'Account stats 2026-08-12',
         date: '2026-08-12',
         platform: 'x',
+        direction: 'inbound',
         author: 'gezeldev',
+        url: 'https://x.com/gezeldev',
         followers: '1234',
         following: '321',
         posts_count: '567',

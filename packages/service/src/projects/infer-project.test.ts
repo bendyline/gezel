@@ -234,6 +234,56 @@ describe('inferProjectForPath', () => {
       expect(res.created).toBe(true);
     });
   });
+
+  describe('server-side options (an outside app working in a folder)', () => {
+    it('reuses the project that contains the folder instead of nesting a new one', async () => {
+      await mkdir(join(userHome, 'code', 'mono', 'packages', 'web'), { recursive: true });
+      const outer = await inferProjectForPath(deps, {
+        path: join(userHome, 'code', 'mono'),
+        kind: 'folder',
+      });
+      const inner = join(userHome, 'code', 'mono', 'packages', 'web');
+      const plain = await inferProjectForPath(deps, { path: inner, kind: 'folder', create: false });
+      expect(plain.project).toBeNull();
+      const res = await inferProjectForPath(
+        deps,
+        { path: inner, kind: 'folder' },
+        { containing: true },
+      );
+      expect(res.matchedBy).toBe('existing');
+      expect(res.project?.id).toBe(outer.project?.id);
+    });
+
+    it('never re-points an unbound project of the same name when told not to adopt', async () => {
+      await mkdir(join(userHome, 'code', 'gadget'), { recursive: true });
+      const orphan = await store.createProject({ name: 'gadget' });
+      const res = await inferProjectForPath(
+        deps,
+        { path: join(userHome, 'code', 'gadget'), kind: 'folder' },
+        { adoptOrphan: false },
+      );
+      expect(res.created).toBe(true);
+      expect(res.project?.id).not.toBe(orphan.id);
+      expect((await store.getProject(orphan.id))?.workingDir).toBeUndefined();
+    });
+
+    it('asks for a project with no lead', async () => {
+      await mkdir(join(userHome, 'code', 'solo'), { recursive: true });
+      const bodies: Array<{ lead?: string }> = [];
+      await inferProjectForPath(
+        {
+          ...deps,
+          createProject: (body) => {
+            bodies.push(body);
+            return store.createProject(body);
+          },
+        },
+        { path: join(userHome, 'code', 'solo'), kind: 'folder' },
+        { lead: 'none' },
+      );
+      expect(bodies[0]?.lead).toBe('none');
+    });
+  });
 });
 
 describe('listWellKnownFolders', () => {

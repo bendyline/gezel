@@ -28,7 +28,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "gezel-mcp": "./dist/server.js"
+    "gezel-mcp": "./dist/bin.js"
   },
   "exports": {
     ".": {
@@ -40,6 +40,7 @@
       "import": "./dist/lint-contracts.js"
     },
     "./dist/server.js": "./dist/server.js",
+    "./dist/harness.js": "./dist/harness.js",
     "./package.json": "./package.json"
   },
   "files": ["dist", "!dist/**/*.map"],

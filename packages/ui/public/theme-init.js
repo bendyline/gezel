@@ -27,9 +27,10 @@
 if (window.__GEZEL__?.startupHome?.active) {
   const style = document.createElement('link');
   style.rel = 'stylesheet';
-  style.href = '/startup/startup.css';
+  style.href = '/startup/screen.css';
   document.head.append(style);
   const script = document.createElement('script');
+  script.type = 'module';
   script.src = '/startup/startup.js';
   script.async = false;
   document.head.append(script);

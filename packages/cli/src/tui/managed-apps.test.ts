@@ -22,7 +22,7 @@ describe('managed app command targets', () => {
 });
 
 describe('connectManagedApp', () => {
-  it('enables Connected Apps and publishes the first VS Code profile safely', async () => {
+  it('turns on app connections and publishes the first VS Code profile safely', async () => {
     const off = vscodeStatus({ endpointsEnabled: false });
     const ready = vscodeStatus();
     const configured = vscodeStatus({
@@ -45,7 +45,7 @@ describe('connectManagedApp', () => {
     });
     expect(client.configureVSCode).toHaveBeenCalledWith({ profileId: 'code:default' });
     expect(result.message).toContain('connected VS Code (Default)');
-    expect(result.message).toContain('Connected Apps serving was enabled');
+    expect(result.message).toContain('Turned on “Allow apps to connect”');
     expect(result.message).not.toContain('secret-token');
   });
 

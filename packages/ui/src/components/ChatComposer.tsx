@@ -33,6 +33,7 @@ import { SubmitArrow } from '../primitives/index.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
+import { AreaIcon } from './AreaIcon.js';
 import { AutosaveStatus } from './AutosaveStatus.js';
 import { ChatAttachmentButtons } from './ChatAttachmentButtons.js';
 import { ChatNarrateButton } from './ChatNarrateButton.js';
@@ -2089,14 +2090,18 @@ export function ChatComposer({
                 openCommandQuery === null && (
                   <button
                     type="button"
-                    className="chat-task-btn"
+                    className="squisq-toolbar-button chat-composer-tool-btn chat-task-btn"
                     data-testid="chat-task"
                     onClick={() => setTaskDialogOpen(true)}
                     disabled={engagementOff || waitingForModel || draftSubmissionPending}
                     aria-label={taskLaunch.attached ? 'Change the attached task' : 'Attach a task'}
-                    title="Attach a plan to this message"
+                    title={
+                      taskLaunch.attached
+                        ? 'Change the attached task'
+                        : 'Attach a task to this message'
+                    }
                   >
-                    Task
+                    <AreaIcon area="tasks" size={16} />
                   </button>
                 )}
               {openCommandQuery !== null ? (

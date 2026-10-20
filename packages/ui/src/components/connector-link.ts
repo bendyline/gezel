@@ -18,7 +18,7 @@ export async function connectOAuth(
   config: Record<string, unknown>,
   displayName?: string,
   opts?: { redirectPort?: number },
-): Promise<void> {
+): Promise<{ id: string } | undefined> {
   const shell = window.__GEZEL__;
   if (!shell?.mailOAuthListen || !shell.mailOAuthAwait) {
     throw new Error('Connecting this source needs the Gezel desktop app.');
@@ -34,5 +34,9 @@ export async function connectOAuth(
   });
   const result = await shell.mailOAuthAwait(requestId, authUrl);
   if ('error' in result) throw new Error(result.error);
-  await api.completeConnectorOAuth(projectId, { state: result.state || state, code: result.code });
+  const completed = await api.completeConnectorOAuth(projectId, {
+    state: result.state || state,
+    code: result.code,
+  });
+  return completed?.binding;
 }

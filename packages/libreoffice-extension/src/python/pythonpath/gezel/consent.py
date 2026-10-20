@@ -110,7 +110,7 @@ def ensure_token(http, store, on_code, cancel=None, timeout=300.0, clock=time.mo
             raise ConsentError(
                 "already-connected",
                 "Gezel already has a LibreOffice connection this computer no longer holds. "
-                "In Gezel, open Settings, then Connected Apps, remove LibreOffice, and connect again.",
+                "In Gezel, open Settings, then Integrations, remove LibreOffice, and connect again.",
             ) from err
         raise ConsentError("refused", str(err)) from err
     if registered.get("status") == "approved" and registered.get("token"):

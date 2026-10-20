@@ -61,6 +61,14 @@ export interface ChangeBatch<Cur> {
    * exclusive with `partial`; never set on incremental batches.
    */
   enumeratedAll?: boolean;
+  /**
+   * `recordId`s the source reports deleted since the cursor — incremental
+   * tombstones (a cancelled event, a trashed file, a removed feed item). The
+   * engine removes them from this scope's corpus whatever the type's
+   * completeness: the source said they are gone. A record that is both
+   * removed and re-fetched in the same batch is kept.
+   */
+  removed?: string[];
   /** Source asked us to back off (rate limited) — resume next tick. */
   rateLimited?: boolean;
 }
@@ -103,6 +111,13 @@ export interface NormalizedRecord {
    * into the corpus before the adapter removes its staging directory.
    */
   attachments?: NormalizedAttachment[];
+  /**
+   * Frontmatter keys left out of the content hash (`metrics_updated_at`).
+   * They are still written, but a pass where only they changed is not a
+   * change: without this, stamping each refreshed post with the pass time
+   * rewrote every record in the engagement window on every pass.
+   */
+  volatileKeys?: string[];
   /** Mutable per-record flags → the `_flags.json` sidecar. */
   flags?: string[];
   /** Read/seen state for the sidecar (mail: `\Seen` present). */
@@ -186,6 +201,20 @@ export type ConnectorRecord =
    */
   | { kind: 'observations'; batches: ObservationBatch[] };
 
+/**
+ * Thrown by `fetchRecord` when the record vanished between the list call and
+ * the fetch (a message deleted mid-pass, a file trashed, a 404 on a ref the
+ * list just returned). The engine counts it as skipped rather than as a
+ * failure: retrying cannot bring it back, and holding the scope's cursor for
+ * it would re-fetch the whole batch every pass.
+ */
+export class RecordGoneError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RecordGoneError';
+  }
+}
+
 /** Narrowing helper — an adapter that emits rows rather than documents. */
 export function isObservationRecord(
   rec: NormalizedRecord | ConnectorRecord,
@@ -202,6 +231,14 @@ export function isObservationRecord(
 export interface ConnectorAdapter<Rec = NormalizedRecord, Cur = unknown> {
   /** Connector-type id, e.g. `mail-gmail`, `linear-issues`. */
   readonly typeId: string;
+  /**
+   * True when a record's directory can change between passes — an event
+   * rescheduled into another month bucket, a file moved between folders. The
+   * engine then removes the copy left at the old path once the record lands
+   * at its new one. Off by default because the check walks the scope once per
+   * round that wrote something new.
+   */
+  readonly recordsMayMove?: boolean;
   /** Establish/refresh the connection + auth. Throws on hard auth failure. */
   ensureAuth(): Promise<void>;
   /** Partitions to sync (mail folders, calendars). `['']` for single-scope. */
@@ -245,6 +282,13 @@ export interface AdapterDeps {
   scriptRunner?: import('../scripts/runner.js').ScriptRunner;
   /** The binding's project id (drivers need it to run scripts / scope work). */
   projectId?: string;
+  /**
+   * HTTP transport for native adapters and their OAuth refreshes. Absent in
+   * production (global fetch); tests and the provider simulator
+   * (`connectors/testing/`) inject a fake world here so a whole
+   * bind → sync → commit path runs with no network.
+   */
+  fetch?: typeof fetch;
 }
 
 /**

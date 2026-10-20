@@ -473,6 +473,76 @@ describe('consolidated MCP tools', () => {
     });
   });
 
+  it('save_email_draft stages a save-draft action and commits it into the mailbox in one call', async () => {
+    const calls: string[] = [];
+    handler = (url, method, body) => {
+      calls.push(`${method} ${url.pathname}`);
+      if (url.pathname === '/api/projects/project-a/connectors' && method === 'GET') {
+        return { bindings: [{ id: 'gmail-main', type: 'mail-gmail' }] };
+      }
+      if (
+        url.pathname === '/api/projects/project-a/connectors/gmail-main/actions' &&
+        method === 'POST'
+      ) {
+        expect(body).toEqual({
+          action: 'save-draft',
+          input: {
+            to: ['priya@example.com'],
+            subject: 'Re: Q3',
+            body: 'Updated the slide.',
+            inReplyTo: '<q3@example.com>',
+          },
+        });
+        return { draftId: 'd-9', relPath: 'data/gmail/_actions/_drafts/d-9.md' };
+      }
+      if (
+        url.pathname === '/api/projects/project-a/connectors/actions/d-9/commit' &&
+        method === 'POST'
+      ) {
+        return { status: 'committed', result: { draftId: 'r-123' } };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await client.callTool({
+      name: 'save_email_draft',
+      arguments: {
+        to: ['priya@example.com'],
+        subject: 'Re: Q3',
+        body: 'Updated the slide.',
+        inReplyTo: '<q3@example.com>',
+      },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({ status: 'saved-to-mailbox', draftId: 'd-9' });
+    expect(JSON.stringify(result.content)).toContain('Nothing was sent');
+    expect(calls).toEqual([
+      'GET /api/projects/project-a/connectors',
+      'POST /api/projects/project-a/connectors/gmail-main/actions',
+      'POST /api/projects/project-a/connectors/actions/d-9/commit',
+    ]);
+  });
+
+  it('save_email_draft explains a connection that predates mailbox drafts', async () => {
+    handler = (url, method) => {
+      if (url.pathname === '/api/projects/project-a/connectors' && method === 'GET') {
+        return { bindings: [{ id: 'gmail-main', type: 'mail-gmail' }] };
+      }
+      return {
+        __status: 400,
+        body: {
+          error: "connector 'mail-gmail' declares no action 'save-draft' (available: send)",
+        },
+      };
+    };
+    const result = await client.callTool({
+      name: 'save_email_draft',
+      arguments: { to: ['a@example.com'], subject: 'Hi', body: 'Body' },
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toMatch(/does not support mailbox drafts yet/);
+  });
+
   it('keeps night-shift email deferral as a structured successful safety outcome', async () => {
     handler = (url, method) => {
       expect(url.pathname).toBe('/api/projects/project-a/connectors/actions/draft-1/commit');

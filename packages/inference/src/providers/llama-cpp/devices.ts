@@ -17,7 +17,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { totalmem } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -49,6 +49,8 @@ export interface LlamaDeviceProbe {
    * means the cached devices describe a machine that no longer exists.
    */
   systemRamBytes?: number;
+  /** {@link llamaBinaryFingerprint} of the build that answered. */
+  binary?: string;
 }
 
 export interface NvidiaRuntimeDevice {
@@ -171,10 +173,34 @@ function cachePath(home: string): string {
 }
 
 /**
+ * An empty listing is re-asked after this long. A CPU build always answers
+ * "(none)", but so can a GPU build whose driver was mid-update, and a cached
+ * "no GPU" sizes every model against system RAM.
+ */
+const EMPTY_DEVICES_RETRY_MS = 60 * 60 * 1000;
+
+/**
+ * Which build a cached listing came from: its path (the backend) and its
+ * size and mtime (the release, since a native update rewrites the files).
+ * A listing taken from the CPU build, or from the build an update replaced,
+ * said "no GPU" about a 32 GB Radeon and was served for the rest of the day
+ * (2026-10-19).
+ */
+export function llamaBinaryFingerprint(binaryPath: string): string {
+  try {
+    const { size, mtimeMs } = statSync(binaryPath);
+    return `${binaryPath}|${size}|${Math.floor(mtimeMs)}`;
+  } catch {
+    return binaryPath;
+  }
+}
+
+/**
  * Probe device memory by running `<binaryPath> --list-devices`, caching
  * the result. Reads the cache when present (VRAM capacity is stable per
- * machine) and the OS still reports the RAM it was probed with; pass
- * `force` to re-probe. Any failure (spawn error, no
+ * machine), the OS still reports the RAM it was probed with, and the same
+ * build answered it; an empty listing is re-asked hourly. Pass `force` to
+ * re-probe. Any failure (spawn error, no
  * cache, unparseable output) resolves to an empty device list — the
  * planner then simply does nothing and the engine's own `--fit`/`-ngl
  * auto` takes over. `nowIso` and `systemRamBytes` are injectable for
@@ -191,12 +217,23 @@ export async function probeLlamaDevices(opts: {
   const now = opts.nowIso ?? (() => new Date().toISOString());
   const systemRamBytes = opts.systemRamBytes ?? totalmem();
   const path = cachePath(home);
+  const binary = llamaBinaryFingerprint(binaryPath);
 
   if (!force && existsSync(path)) {
     try {
       const cached = JSON.parse(readFileSync(path, 'utf8')) as LlamaDeviceProbe;
-      // A cache without the RAM figure predates the check and re-probes once.
-      if (Array.isArray(cached.devices) && cached.systemRamBytes === systemRamBytes) {
+      // A cache without the RAM figure or the binary predates that check and
+      // re-probes once.
+      const emptyExpired =
+        Array.isArray(cached.devices) &&
+        cached.devices.length === 0 &&
+        !(Date.parse(now()) - Date.parse(cached.probedAt) < EMPTY_DEVICES_RETRY_MS);
+      if (
+        Array.isArray(cached.devices) &&
+        cached.systemRamBytes === systemRamBytes &&
+        cached.binary === binary &&
+        !emptyExpired
+      ) {
         return { ...cached, cached: true };
       }
     } catch {
@@ -226,7 +263,13 @@ export async function probeLlamaDevices(opts: {
     return { devices, probedAt: now(), cached: false };
   }
 
-  const probe: LlamaDeviceProbe = { devices, probedAt: now(), cached: false, systemRamBytes };
+  const probe: LlamaDeviceProbe = {
+    devices,
+    probedAt: now(),
+    cached: false,
+    systemRamBytes,
+    binary,
+  };
   try {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(probe, null, 2), 'utf8');

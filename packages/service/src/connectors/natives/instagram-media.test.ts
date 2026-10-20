@@ -106,7 +106,7 @@ function harness(): { runtime: InstagramRuntime; state: HarnessState } {
         if (state.refreshError) throw state.refreshError;
         return { ...state.refreshResponse };
       }
-      if (u.pathname === '/v23.0/me/media') {
+      if (u.pathname === '/v25.0/me/media') {
         if (state.listError) throw state.listError;
         const sorted = [...state.media].sort(
           (a, b) => Date.parse(String(b.timestamp)) - Date.parse(String(a.timestamp)),
@@ -122,11 +122,11 @@ function harness(): { runtime: InstagramRuntime; state: HarnessState } {
         }
         return { data: slice, ...(next ? { paging: { next } } : {}) };
       }
-      if (u.pathname === '/v23.0/me') {
+      if (u.pathname === '/v25.0/me') {
         if (state.listError) throw state.listError;
         return { ...state.profile };
       }
-      if (/^\/v23\.0\/[^/]+$/.test(u.pathname) && u.searchParams.get('fields') === 'permalink') {
+      if (/^\/v25\.0\/[^/]+$/.test(u.pathname) && u.searchParams.get('fields') === 'permalink') {
         if (state.permalinkError) throw state.permalinkError;
         return { permalink: state.permalink, id: u.pathname.split('/').at(-1) };
       }
@@ -136,11 +136,11 @@ function harness(): { runtime: InstagramRuntime; state: HarnessState } {
       state.requests.push(url);
       state.forms.push({ url, form: { ...form } });
       const u = new URL(url);
-      if (u.pathname === '/v23.0/me/media') {
+      if (u.pathname === '/v25.0/me/media') {
         if (state.publishError) throw state.publishError;
         return { ...state.containerResult };
       }
-      if (u.pathname === '/v23.0/me/media_publish') {
+      if (u.pathname === '/v25.0/me/media_publish') {
         return { ...state.publishResult };
       }
       throw new Error(`unexpected POST: ${url}`);
@@ -183,6 +183,8 @@ const T2 = '2026-08-12T09:00:00+0000';
 const T3 = '2026-08-12T10:00:00+0000';
 const T4 = '2026-08-12T11:00:00+0000';
 const T5 = '2026-08-12T11:30:00+0000';
+/** The deletion watch a cursor carries: [media id, ms], newest first. */
+const watch = (...items: [string, string][]) => items.map(([id, ts]) => [id, Date.parse(ts)]);
 
 describe('InstagramMediaAdapter auth', () => {
   it('fails ensureAuth actionably when no credential or no access token is stored', async () => {
@@ -236,7 +238,19 @@ describe('InstagramMediaAdapter auth', () => {
     state.refreshError = new InstagramApiError(400, 190, 'Access token has expired');
     const { deps } = makeDeps(cred({ expiresAt: '2026-08-13T00:00:00.000Z' }));
     const adapter = new InstagramMediaAdapter(binding(), deps, runtime);
-    await expect(adapter.ensureAuth()).rejects.toThrow(/Instagram token refresh failed/);
+    await expect(adapter.ensureAuth()).rejects.toThrow(/expired or was revoked.*Re-link/);
+
+    // Any other refresh failure keeps the transport detail.
+    state.refreshError = new InstagramApiError(500, 1, 'An unknown error has occurred.');
+    await expect(adapter.ensureAuth()).rejects.toThrow(/Instagram token refresh failed.*re-link/);
+  });
+
+  it('a token that already lapsed asks for a re-link without a request', async () => {
+    const { runtime, state } = harness();
+    const { deps } = makeDeps(cred({ expiresAt: '2026-08-01T00:00:00.000Z' }));
+    const adapter = new InstagramMediaAdapter(binding(), deps, runtime);
+    await expect(adapter.ensureAuth()).rejects.toThrow(/cannot be renewed.*Re-link/);
+    expect(state.requests).toEqual([]);
   });
 });
 
@@ -257,6 +271,7 @@ describe('InstagramMediaAdapter media scope', () => {
     expect(first.cursor).toEqual({
       sinceTs: T5,
       metricsRefreshedAt: '2026-08-12T12:00:00.000Z',
+      recent: watch(['m5', T5], ['m4', T4], ['m3', T3]),
     });
     const mediaRequests = state.requests.filter((u) => u.includes('/me/media'));
     expect(mediaRequests).toHaveLength(2);
@@ -278,6 +293,7 @@ describe('InstagramMediaAdapter media scope', () => {
     expect(second.cursor).toEqual({
       sinceTs: T5,
       metricsRefreshedAt: '2026-08-12T12:00:00.000Z',
+      recent: watch(['m5', T5], ['m4', T4], ['m3', T3], ['m2', T2], ['m1', T1]),
     });
     expect(state.requests.filter((u) => u.includes('/me/media'))).toHaveLength(1);
   });
@@ -307,7 +323,20 @@ describe('InstagramMediaAdapter media scope', () => {
     expect(third.cursor).toEqual({
       sinceTs: T5,
       metricsRefreshedAt: '2026-08-13T01:00:00.000Z',
+      recent: watch(['m5', T5], ['m4', T4], ['m3', T3], ['m2', T2], ['m1', T1]),
     });
+    expect(third.removed).toBeUndefined();
+
+    // A day later m3 is gone: the next re-walk tombstones it and its readings.
+    state.media = state.media.filter((m) => m.id !== 'm3');
+    state.now = new Date('2026-08-14T01:00:00.000Z');
+    const fourth = await adapter.listChangesSince('media', third.cursor);
+    expect(fourth.removed).toEqual([
+      'm3',
+      'metrics:m3:2026-08-12',
+      'metrics:m3:2026-08-13',
+      'metrics:m3:2026-08-14',
+    ]);
   });
 
   it('stamps metrics_updated_at from the pass and maps the raw media item on fetch', async () => {
@@ -321,7 +350,7 @@ describe('InstagramMediaAdapter media scope', () => {
     expect(record.frontmatter.metrics_updated_at).toBe('2026-08-12T12:00:00.000Z');
   });
 
-  it('maps Meta throttle shapes (429, and body codes 4/17/32) to rateLimited, rethrowing others', async () => {
+  it('maps Meta throttle shapes (429, and body codes 4/17/32/613/80002) to rateLimited, rethrowing others', async () => {
     const { adapter, state } = await readyAdapter();
     const cursor = { sinceTs: T4, metricsRefreshedAt: '2026-08-12T11:00:00.000Z' };
 
@@ -330,6 +359,12 @@ describe('InstagramMediaAdapter media scope', () => {
       new InstagramApiError(400, 4, 'Application request limit reached'),
       new InstagramApiError(403, 17, 'User request limit reached'),
       new InstagramApiError(400, 32, 'Page request limit reached'),
+      new InstagramApiError(400, 613, 'Calls to this api have exceeded the rate limit.'),
+      new InstagramApiError(
+        400,
+        80002,
+        'There have been too many calls to this Instagram account.',
+      ),
     ]) {
       state.listError = err;
       const limited = await adapter.listChangesSince('media', cursor);
@@ -338,6 +373,9 @@ describe('InstagramMediaAdapter media scope', () => {
 
     state.listError = new InstagramApiError(400, 100, 'Unsupported get request');
     await expect(adapter.listChangesSince('media', cursor)).rejects.toThrow(/instagram api 400/);
+
+    state.listError = new InstagramApiError(400, 190, 'Error validating access token');
+    await expect(adapter.listChangesSince('media', cursor)).rejects.toThrow(/Re-link the account/);
   });
 });
 
@@ -395,7 +433,7 @@ describe('InstagramMediaAdapter publish action', () => {
     });
     expect(state.forms).toEqual([
       {
-        url: 'https://graph.instagram.com/v23.0/me/media',
+        url: 'https://graph.instagram.com/v25.0/me/media',
         form: {
           image_url: 'https://cdn.example.com/shot.jpg',
           caption: 'New workshop shot',
@@ -403,12 +441,12 @@ describe('InstagramMediaAdapter publish action', () => {
         },
       },
       {
-        url: 'https://graph.instagram.com/v23.0/me/media_publish',
+        url: 'https://graph.instagram.com/v25.0/me/media_publish',
         form: { creation_id: 'CREATION-1', access_token: 'ig-tok-1' },
       },
     ]);
     const receipt = state.requests.find((u) => u.includes('fields=permalink'));
-    expect(receipt).toContain('/v23.0/17900000000000009');
+    expect(receipt).toContain('/v25.0/17900000000000009');
   });
 
   it('treats the draft text as the caption when no explicit caption is given', async () => {

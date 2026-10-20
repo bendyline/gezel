@@ -1297,6 +1297,9 @@ export const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
   'draft_email',
   'queue_email',
   'send_email',
+  // Writes into the person's own mailbox: nothing reaches another person,
+  // but it is still a write to an external account.
+  'save_email_draft',
   // Social post draft/publish are the same class of outbound agency.
   'draft_post',
   'queue_post',

@@ -177,7 +177,7 @@ async function connectVSCode(client: GezelClient): Promise<ManagedAppCommandResu
     app: 'vscode',
     message: [
       `connected VS Code${profile ? ` (${profile.label})` : ''} to Gezel at ${status.bridge.baseUrl}.`,
-      enabled ? 'Connected Apps serving was enabled.' : '',
+      enabled ? 'Turned on “Allow apps to connect” in Settings → Integrations.' : '',
       'If VS Code is open, run “Developer: Reload Window” once to load the provider.',
     ]
       .filter(Boolean)
@@ -289,7 +289,7 @@ function preferredModel(status: HarnessStatus): LocalHarnessModelOption {
 function assertSafeToConfigure(status: HarnessStatus, label: string): void {
   if (status.state === 'conflict') {
     throw new ManagedAppCommandError(
-      `${label} setup has a conflict${status.message ? `: ${status.message}` : '.'} Nothing was overwritten; use Settings → Connected Apps to review and repair it.`,
+      `${label} setup has a conflict${status.message ? `: ${status.message}` : '.'} Nothing was overwritten; use Settings → Integrations to review and repair it.`,
     );
   }
   if (status.state === 'unavailable' || !status.canConfigure) {
@@ -313,7 +313,7 @@ function integrationSuccessMessage(
     `connected ${label} to Gezel at ${status.bridge.baseUrl}${
       selected ? `; default ${selected.label}` : ''
     }.`,
-    enabled ? 'Connected Apps serving was enabled.' : '',
+    enabled ? 'Turned on “Allow apps to connect” in Settings → Integrations.' : '',
     extra,
     `Start it with: ${status.launchCommand}`,
   ]

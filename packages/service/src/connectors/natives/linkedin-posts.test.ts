@@ -7,6 +7,7 @@ import {
   LinkedInApiError,
   LinkedInPostsAdapter,
   type LinkedInRuntime,
+  escapeLittleText,
   linkedInPermalink,
 } from './linkedin-posts.js';
 
@@ -205,8 +206,9 @@ describe('LinkedInPostsAdapter posts scope (empty by design)', () => {
   it('maps a rate-limited userinfo to rateLimited (cursor kept) and 401 to the reconnect error', async () => {
     const { adapter, state } = await readyAdapter();
     state.userinfoError = new LinkedInApiError(429, 'throttled');
+    // The cursor comes back exactly as it was handed in.
     const limited = await adapter.listChangesSince('posts', undefined);
-    expect(limited).toEqual({ records: [], cursor: {}, rateLimited: true });
+    expect(limited).toEqual({ records: [], cursor: undefined, rateLimited: true });
 
     state.userinfoError = new LinkedInApiError(401, 'revoked');
     await expect(adapter.listChangesSince('posts', undefined)).rejects.toThrow(
@@ -234,7 +236,7 @@ describe('LinkedInPostsAdapter publish action', () => {
     expect(state.postCalls[0]!.url).toBe('https://api.linkedin.com/rest/posts');
     expect(state.postCalls[0]!.accessToken).toBe('tok-1');
     expect(state.postCalls[0]!.headers).toEqual({
-      'LinkedIn-Version': '202508',
+      'LinkedIn-Version': '202610',
       'X-Restli-Protocol-Version': '2.0.0',
     });
     expect(state.postCalls[0]!.body).toEqual({
@@ -306,6 +308,40 @@ describe('LinkedInPostsAdapter publish action', () => {
     );
     await expect(adapter.runAction('delete', { id: 'x' })).rejects.toThrow(
       /declares no action 'delete'/,
+    );
+  });
+});
+
+describe('escapeLittleText', () => {
+  it('escapes every reserved character but keeps hashtags that start a word', () => {
+    const reserved = String.raw`Launch (beta) [v2] {soon} <now> a|b *bold* _it_ ~x~ @me \ #ship`;
+    expect(escapeLittleText(reserved)).toBe(
+      String.raw`Launch \(beta\) \[v2\] \{soon\} \<now\> a\|b \*bold\* \_it\_ \~x\~ \@me \\ #ship`,
+    );
+    expect(escapeLittleText('C# and F# and # alone and #2026')).toBe(
+      String.raw`C\# and F\# and \# alone and #2026`,
+    );
+    expect(escapeLittleText('plain text stays plain.')).toBe('plain text stays plain.');
+  });
+
+  it('is what the publish payload carries', async () => {
+    const { adapter, state } = await readyAdapter({ allowPublish: true });
+    await adapter.runAction('publish', { text: 'Hello (world)' });
+    expect((state.postCalls[0]!.body as { commentary: string }).commentary).toBe(
+      String.raw`Hello \(world\)`,
+    );
+  });
+});
+
+describe('LinkedInPostsAdapter retired API version', () => {
+  it('names the fix when LinkedIn answers 426 NONEXISTENT_VERSION', async () => {
+    const { adapter, state } = await readyAdapter({ allowPublish: true });
+    state.postError = new LinkedInApiError(
+      426,
+      '{"status":426,"code":"NONEXISTENT_VERSION","message":"Requested version 202610 is not active"}',
+    );
+    await expect(adapter.runAction('publish', { text: 'hi' })).rejects.toThrow(
+      /retired the API version.*update Gezel/,
     );
   });
 });

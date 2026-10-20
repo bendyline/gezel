@@ -7,6 +7,7 @@ import { api } from '../../api.js';
 import { gezelChatTheme } from '../../components/chat-theme.js';
 import { makeReportActionFenceRenderers } from '../../components/report-actions/ReportActionFence.js';
 import { formatAbsoluteTime } from '../../relative-time.js';
+import { NightReviewSummary } from './NightReviewSummary.js';
 import { timeAgo } from './utils.js';
 
 /**
@@ -91,16 +92,12 @@ export function NightReviewPanel({ review }: { review: NightShiftReviewResponse 
 
   return (
     <div className="home-workshop-status-report" data-testid="night-review-panel">
-      <p className="home-workshop-night-summary">
-        {review.tasksCompleted.length} task{review.tasksCompleted.length === 1 ? '' : 's'} finished
-        overnight, {review.reports.length} report{review.reports.length === 1 ? '' : 's'} written
-        {proposals.length > 0
-          ? `, ${proposals.length} change proposal${proposals.length === 1 ? '' : 's'} waiting`
-          : ''}
-        {actionTotal > 0
-          ? ` — ${actionTotal} suggested action${actionTotal === 1 ? '' : 's'} to review.`
-          : '.'}
-      </p>
+      <NightReviewSummary
+        completed={review.tasksCompleted.length}
+        reports={review.reports.length}
+        proposals={proposals.length}
+        actions={actionTotal}
+      />
       {/* Proposals lead the panel: they are the part of the night that is
           waiting on a decision rather than on being read. */}
       {proposals.length > 0 && (

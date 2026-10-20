@@ -11,7 +11,8 @@ const log = createLogger('index');
 
 const MAX_HOTSPOTS = 8;
 const MAX_LOAD_BEARING = 5;
-const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'] as const;
+/** Boekwachter review severities (`FileReviewIssueSeveritySchema`), worst first — not the security scale. */
+const SEVERITY_ORDER = ['major', 'minor', 'info'] as const;
 
 export interface CodebaseReportDeps {
   store: {
@@ -25,7 +26,8 @@ export interface CodebaseReportDeps {
     writeProjectArtifact(id: string, path: string, content: string): Promise<unknown>;
   };
   contentIndex: {
-    fileMap(projectId: string): Promise<FileMapResponse>;
+    /** Read-only: a background report must never found a village. */
+    fileMapSnapshot(projectId: string): Promise<FileMapResponse>;
     listFileIssues(
       projectId: string,
       req: { maxResults?: number },
@@ -67,7 +69,7 @@ export async function writeNightlyCodebaseReport(
   if ((await deps.store.readProjectArtifact(projectId, path).catch(() => null)) !== null) {
     return null;
   }
-  const map = await deps.contentIndex.fileMap(projectId);
+  const map = await deps.contentIndex.fileMapSnapshot(projectId);
   if (!map.indexed) return null;
   const files = rankable(map.blocks);
   if (files.length === 0) return null;

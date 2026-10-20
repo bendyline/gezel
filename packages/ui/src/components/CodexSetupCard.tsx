@@ -53,7 +53,7 @@ export function CodexSetupCard({
   return (
     <HarnessSetupShell
       headingId="codex-setup-heading"
-      title="Use Gezel in Codex"
+      title="Gezel's models in Codex"
       status={status}
       remoteMode={card.remoteMode}
       localDesktopMode={card.localDesktopMode}

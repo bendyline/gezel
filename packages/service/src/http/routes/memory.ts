@@ -1,4 +1,4 @@
-import { MemorySearchRequestSchema } from '@bendyline/gezel';
+import { MemorySearchRequestSchema, parseHarnessAppId } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import {
   type MemoryScope,
@@ -56,12 +56,17 @@ export function memoryRoutes(ctx: ServiceContext): Hono {
     };
     if (!isMemoryScope(body.scope)) return c.json({ error: 'invalid scope' }, 400);
     const kind = isMemoryKind(body.kind) ? body.kind : 'fact';
+    // An outside AI app's save is stamped with the app by the daemon, never by
+    // the request: project memory reaches every gezel's prompt in that project,
+    // so where it came from has to be legible.
+    const harnessApp = parseHarnessAppId(c.get('auth')?.appId ?? '');
+    const source = harnessApp ? { app: harnessApp.client } : requestSource(body.source);
     const outcome = await ctx.memory.save(
       body.scope,
       scopeId(body.scope, body.id),
       body.text,
       kind,
-      requestSource(body.source),
+      source,
     );
     return c.json({ ok: true, ...outcome });
   });

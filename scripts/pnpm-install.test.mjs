@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -13,10 +13,12 @@ import { dependencyLeasePath, withDependencyReadLease } from './dependency-lease
 import {
   danglingVirtualStoreLinks,
   dependencyStatus,
+  missingPublicHoistedLinks,
   parsePnpmInstallArgs,
   pinnedPnpmMismatch,
   pnpmInstallLockPath,
   reportDependencyStatus,
+  restorePublicHoistedLinks,
   runPnpmFetchChild,
   runPnpmInstallChild,
   runPreparedFrozenInstall,
@@ -633,6 +635,106 @@ test('deps:install relinks every importer after a lockfile change instead of fil
 
   assert.equal(code, 0);
   assert.deepEqual(childArgs, UNFILTERED_INSTALL);
+});
+
+/**
+ * A workspace whose `.modules.yaml` records one public and one private hoist,
+ * with neither link on disk: what an install interrupted between pnpm's
+ * temporary link and its rename leaves behind.
+ */
+async function strandedPublicHoist(root, { storeDir = 'onnxruntime-node@1.30.0' } = {}) {
+  await readyWorkspace(root);
+  await writeFile(
+    join(root, 'node_modules', '.pnpm-workspace-state-v1.json'),
+    JSON.stringify({
+      lastValidatedTimestamp: Date.now() + 10_000,
+      projects: { [root]: { name: 'fixture', version: '1.0.0' } },
+    }),
+  );
+  await writeFile(
+    join(root, 'node_modules', '.modules.yaml'),
+    JSON.stringify({
+      layoutVersion: 5,
+      hoistedDependencies: {
+        'onnxruntime-node@1.30.0': { 'onnxruntime-node': 'public' },
+        'ms@2.1.3': { ms: 'private' },
+      },
+    }),
+  );
+  const target = join(root, 'node_modules', '.pnpm', storeDir, 'node_modules', 'onnxruntime-node');
+  await mkdir(target, { recursive: true });
+  await writeFile(
+    join(target, 'package.json'),
+    JSON.stringify({ name: 'onnxruntime-node', version: '1.30.0' }),
+  );
+  return target;
+}
+
+test('a public hoist missing from the root reads as unsynchronized, a private one does not', async (t) => {
+  const root = await fixture(t);
+  await strandedPublicHoist(root);
+
+  const status = dependencyStatus(root);
+  assert.deepEqual(status.missingHoistedLinks, [
+    { alias: 'onnxruntime-node', depPath: 'onnxruntime-node@1.30.0' },
+  ]);
+  assert.equal(status.usable, true);
+  assert.equal(status.synchronized, false);
+  const lines = [];
+  reportDependencyStatus(root, { write: (line) => lines.push(line) });
+  assert.match(lines.join('\n'), /missing root link onnxruntime-node/);
+  assert.doesNotMatch(lines.join('\n'), /\bms\b/);
+});
+
+test('deps:install puts a missing public hoist back without running pnpm', async (t) => {
+  const root = await fixture(t);
+  const target = await strandedPublicHoist(root);
+  const pnpmCalls = [];
+
+  const code = await runSerializedPnpmInstall({
+    repoRoot: root,
+    dependencyLockProbeFn: () => [],
+    spawnPnpmFn: stubPnpm(async (args) => pnpmCalls.push(args)),
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(pnpmCalls, []);
+  assert.equal(
+    JSON.parse(
+      await readFile(join(root, 'node_modules', 'onnxruntime-node', 'package.json'), 'utf8'),
+    ).version,
+    '1.30.0',
+  );
+  assert.equal(realpathSync(join(root, 'node_modules', 'onnxruntime-node')), realpathSync(target));
+  assert.deepEqual(missingPublicHoistedLinks(root), []);
+});
+
+// The repair that left the onnxruntime links missing: pnpm answered "Already
+// up to date" in 248 ms because its repeat-install shortcut saw an unchanged
+// lockfile.
+test('deps:repair never lets pnpm skip the install as already up to date', async (t) => {
+  const root = await fixture(t);
+  await readyWorkspace(root);
+  let childArgs;
+  const code = await runSerializedPnpmInstall({
+    repoRoot: root,
+    repair: true,
+    dependencyLockProbeFn: () => [],
+    pnpmMismatchFn: () => null,
+    spawnPnpmFn: stubPnpm(async (args) => {
+      childArgs = args;
+    }),
+  });
+  assert.equal(code, 0);
+  assert.equal(childArgs.includes('--config.optimistic-repeat-install=false'), true);
+  assert.equal(childArgs.includes('--config.confirm-modules-purge=false'), true);
+});
+
+test('a public hoist is found by version when its store folder name is hashed', async (t) => {
+  const root = await fixture(t);
+  await strandedPublicHoist(root, { storeDir: 'onnxruntime-node@1.30.0_4b8c1d2e' });
+  assert.deepEqual(restorePublicHoistedLinks(root), []);
+  assert.equal(existsSync(join(root, 'node_modules', 'onnxruntime-node', 'package.json')), true);
 });
 
 test('a virtual-store link whose target was pruned reads as broken behind healthy direct links', async (t) => {

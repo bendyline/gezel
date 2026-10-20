@@ -1,7 +1,5 @@
 import {
   type BoekwachterIssue,
-  type BoekwachterIssueDismissalReason,
-  type BoekwachterIssueStatus,
   type FileReviewIssue,
   type FileReviewResponse,
   type ListFileIssuesResponse,
@@ -10,6 +8,11 @@ import {
 } from '@bendyline/gezel';
 import { useState } from 'react';
 import { MarkdownField } from './MarkdownField.js';
+import {
+  TrackedIssueItem,
+  type UpdateBoekwachterIssue,
+  useIssueActions,
+} from './file-inspector/tracked-issues.js';
 
 const noop = () => undefined;
 
@@ -97,14 +100,7 @@ export interface WorkspaceIndexPaneProps {
   onClose: () => void;
   onSelectLine?: (line: number) => void;
   onFixIssue?: (issue: BoekwachterIssue) => void;
-  onUpdateIssue?: (
-    issue: BoekwachterIssue,
-    patch: {
-      status?: BoekwachterIssueStatus;
-      seen?: boolean;
-      dismissalReason?: BoekwachterIssueDismissalReason;
-    },
-  ) => void | Promise<void>;
+  onUpdateIssue?: UpdateBoekwachterIssue;
   onOpenTask?: (taskRef: string) => void;
 }
 
@@ -123,8 +119,7 @@ export function WorkspaceIndexPane({
   onOpenTask,
 }: WorkspaceIndexPaneProps) {
   const [showClosed, setShowClosed] = useState(false);
-  const [issueAction, setIssueAction] = useState<string | null>(null);
-  const [issueActionError, setIssueActionError] = useState<string | null>(null);
+  const { issueAction, issueActionError, runIssueAction } = useIssueActions(onUpdateIssue);
   const fileName = path ? (path.split('/').pop() ?? path) : null;
   const fileIssueCount = path
     ? (issues?.issues.filter((issue) => issue.path === path).length ?? 0)
@@ -140,22 +135,6 @@ export function WorkspaceIndexPane({
   const coverage = issues
     ? `${issues.reviewedFiles} of ${issues.eligibleFiles} eligible files reviewed`
     : null;
-  const runIssueAction = async (
-    issue: BoekwachterIssue,
-    action: string,
-    patch: Parameters<NonNullable<WorkspaceIndexPaneProps['onUpdateIssue']>>[1],
-  ) => {
-    if (!onUpdateIssue || issueAction) return;
-    setIssueAction(`${issue.ref}:${action}`);
-    setIssueActionError(null);
-    try {
-      await onUpdateIssue(issue, patch);
-    } catch (reason) {
-      setIssueActionError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setIssueAction(null);
-    }
-  };
 
   return (
     <aside className="workspace-index-pane" aria-label="Boekwachter index results">
@@ -249,134 +228,19 @@ export function WorkspaceIndexPane({
               )}
               {visibleTrackedIssues.length > 0 || legacyIssues.length > 0 ? (
                 <ul>
-                  {visibleTrackedIssues.map((issue) => {
-                    const line = issue.line;
-                    const location =
-                      line == null
-                        ? null
-                        : issue.stale
-                          ? `Previously line ${line}`
-                          : `Line ${line}`;
-                    const content = (
-                      <>
-                        <div className="workspace-index-issue-meta">
-                          {!issue.seen && (
-                            <span className="workspace-index-issue-unread" title="Unread issue">
-                              New
-                            </span>
-                          )}
-                          <span className="workspace-index-issue-ref">{issue.ref}</span>
-                          <span>{issue.severity}</span>
-                          <span>{issue.category}</span>
-                          {location && <span>{location}</span>}
-                          {issue.stale && <span>Needs recheck</span>}
-                          {issue.status !== 'open' && <span>{issueStatusLabel(issue.status)}</span>}
-                        </div>
-                        <p>{issue.message}</p>
-                      </>
-                    );
-                    return (
-                      <li key={issue.id} data-status={issue.status}>
-                        {line != null && onSelectLine ? (
-                          <button
-                            type="button"
-                            className="workspace-index-issue-content workspace-index-issue-selectable"
-                            onClick={() => {
-                              onSelectLine(line);
-                              if (!issue.seen) void runIssueAction(issue, 'read', { seen: true });
-                            }}
-                            title={`${issue.stale ? 'Reveal the previous line' : 'Select line'} ${line} in ${fileName ?? 'the source file'}`}
-                          >
-                            {content}
-                          </button>
-                        ) : (
-                          <div className="workspace-index-issue-content">{content}</div>
-                        )}
-                        <div className="workspace-index-issue-actions">
-                          {issue.taskRef && issue.status === 'in_progress' && (
-                            <button
-                              type="button"
-                              className="link-button workspace-index-issue-task"
-                              onClick={() => onOpenTask?.(issue.taskRef!)}
-                            >
-                              Working · {issue.taskRef}
-                            </button>
-                          )}
-                          {/* The toolbar carries the issue's ref so a screen reader can
-                              tell one row's icon keys from the next one's, which lets
-                              the keys themselves keep short action labels. */}
-                          <div
-                            className="gz-tray workspace-index-issue-tray"
-                            role="toolbar"
-                            aria-label={`Actions for ${issue.ref}`}
-                          >
-                            {onUpdateIssue && (
-                              <IssueActionKey
-                                icon={issue.seen ? 'fa-envelope' : 'fa-envelope-open'}
-                                label={issue.seen ? 'Mark unread' : 'Mark read'}
-                                disabled={issueAction !== null}
-                                onClick={() =>
-                                  void runIssueAction(issue, issue.seen ? 'unread' : 'read', {
-                                    seen: !issue.seen,
-                                  })
-                                }
-                              />
-                            )}
-                            {onUpdateIssue && issue.status === 'open' && (
-                              <>
-                                <IssueActionKey
-                                  icon="fa-ban"
-                                  label="Not an issue"
-                                  disabled={issueAction !== null}
-                                  onClick={() =>
-                                    void runIssueAction(issue, 'dismiss', {
-                                      status: 'dismissed',
-                                      seen: true,
-                                      dismissalReason: 'not_an_issue',
-                                    })
-                                  }
-                                />
-                                <IssueActionKey
-                                  icon="fa-check"
-                                  label="Mark resolved"
-                                  disabled={issueAction !== null}
-                                  onClick={() =>
-                                    void runIssueAction(issue, 'resolve', {
-                                      status: 'resolved',
-                                      seen: true,
-                                    })
-                                  }
-                                />
-                              </>
-                            )}
-                            {onUpdateIssue &&
-                              (issue.status === 'resolved' || issue.status === 'dismissed') && (
-                                <IssueActionKey
-                                  icon="fa-rotate-left"
-                                  label="Reopen"
-                                  disabled={issueAction !== null}
-                                  onClick={() =>
-                                    void runIssueAction(issue, 'reopen', {
-                                      status: 'open',
-                                      seen: true,
-                                    })
-                                  }
-                                />
-                              )}
-                            {onFixIssue && issue.status === 'open' && (
-                              <IssueActionKey
-                                icon="fa-wrench"
-                                label="Fix"
-                                title={`Create a tracked task for ${issue.ref}`}
-                                className="workspace-index-issue-fix"
-                                onClick={() => onFixIssue(issue)}
-                              />
-                            )}
-                          </div>
-                        </div>
-                      </li>
-                    );
-                  })}
+                  {visibleTrackedIssues.map((issue) => (
+                    <TrackedIssueItem
+                      key={issue.id}
+                      issue={issue}
+                      fileName={fileName}
+                      busy={issueAction !== null}
+                      onSelectLine={onSelectLine}
+                      onUpdateIssue={onUpdateIssue}
+                      onFixIssue={onFixIssue}
+                      onOpenTask={onOpenTask}
+                      runIssueAction={runIssueAction}
+                    />
+                  ))}
                   {legacyIssues.map((issue, index) => (
                     <LegacyReviewIssue
                       key={`${issue.category}:${issue.message}:${index}`}
@@ -420,54 +284,6 @@ export function WorkspaceIndexPane({
       </div>
     </aside>
   );
-}
-
-/**
- * One key in an issue row's action toolbar. Icon-only, so the label is the
- * accessible name and — unless the action needs a longer explanation — the
- * tooltip too (docs/ux.md → "Controls: keys in trays").
- */
-function IssueActionKey({
-  icon,
-  label,
-  title,
-  className,
-  disabled,
-  onClick,
-}: {
-  icon: string;
-  label: string;
-  title?: string;
-  className?: string;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`gz-key gz-key--icon workspace-index-issue-key${className ? ` ${className}` : ''}`}
-      aria-label={label}
-      title={title ?? label}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {/* biome-ignore lint/a11y/noAriaHiddenOnFocusable: decorative icon, not focusable */}
-      <i className={`fa-solid ${icon}`} aria-hidden="true" />
-    </button>
-  );
-}
-
-function issueStatusLabel(status: BoekwachterIssueStatus): string {
-  switch (status) {
-    case 'in_progress':
-      return 'In progress';
-    case 'resolved':
-      return 'Resolved';
-    case 'dismissed':
-      return 'Not an issue';
-    default:
-      return 'Open';
-  }
 }
 
 function LegacyReviewIssue({

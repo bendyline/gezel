@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   gpuMemoryKindFromName,
   gpuVendorFromName,
+  llamaBinaryFingerprint,
   matchNvidiaRuntimeDevice,
   maxGpuVramBytes,
   parseLlamaDevices,
@@ -186,21 +187,34 @@ describe('gpuMemoryKindFromName', () => {
 describe('probeLlamaDevices cache', () => {
   const GiB = 1024 ** 3;
   const igpu = { id: 'Vulkan0', name: 'AMD Radeon(TM) Graphics', totalMiB: 3072, freeMiB: 3000 };
+  const probedAt = '2026-10-19T13:03:22.545Z';
 
-  async function homeWithCache(systemRamBytes?: number): Promise<string> {
+  // A binary that cannot run makes a fresh probe come back empty, which
+  // tells the two paths apart without spawning anything real.
+  const binaryIn = (home: string) => join(home, 'llama-server');
+
+  async function homeWithCache(
+    systemRamBytes?: number,
+    opts: { devices?: unknown[]; binary?: 'match' | 'none' } = {},
+  ): Promise<string> {
     const home = await mkdtemp(join(tmpdir(), 'gezel-devices-'));
     await mkdir(join(home, 'engines', 'llama-cpp'), { recursive: true });
+    await writeFile(binaryIn(home), 'not an executable');
     await writeFile(
       join(home, 'engines', 'llama-cpp', 'devices.json'),
-      JSON.stringify({ devices: [igpu], probedAt: 'then', cached: false, systemRamBytes }),
+      JSON.stringify({
+        devices: opts.devices ?? [igpu],
+        probedAt,
+        cached: false,
+        systemRamBytes,
+        ...(opts.binary === 'none' ? {} : { binary: llamaBinaryFingerprint(binaryIn(home)) }),
+      }),
     );
     return home;
   }
 
-  // A missing binary makes a fresh probe come back empty, which tells the
-  // two paths apart without spawning anything real.
-  const probe = (home: string, systemRamBytes: number) =>
-    probeLlamaDevices({ binaryPath: join(home, 'missing-llama-server'), home, systemRamBytes });
+  const probe = (home: string, systemRamBytes: number, nowIso = probedAt) =>
+    probeLlamaDevices({ binaryPath: binaryIn(home), home, systemRamBytes, nowIso: () => nowIso });
 
   it('serves the cache while the OS reports the RAM it was probed with', async () => {
     const home = await homeWithCache(13 * GiB);
@@ -224,6 +238,35 @@ describe('probeLlamaDevices cache', () => {
     const home = await homeWithCache();
     try {
       expect((await probe(home, 13 * GiB)).cached).toBe(false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('re-probes a cache written before the binary was recorded', async () => {
+    const home = await homeWithCache(13 * GiB, { binary: 'none' });
+    try {
+      expect((await probe(home, 13 * GiB)).cached).toBe(false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('re-probes when a native update replaced the build that answered', async () => {
+    const home = await homeWithCache(13 * GiB);
+    try {
+      await writeFile(binaryIn(home), 'a newer build, a different size');
+      expect((await probe(home, 13 * GiB)).cached).toBe(false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('serves an empty listing briefly, then asks again', async () => {
+    const home = await homeWithCache(13 * GiB, { devices: [] });
+    try {
+      expect((await probe(home, 13 * GiB, '2026-10-19T13:30:00.000Z')).cached).toBe(true);
+      expect((await probe(home, 13 * GiB, '2026-10-19T14:30:00.000Z')).cached).toBe(false);
     } finally {
       await rm(home, { recursive: true, force: true });
     }

@@ -41,7 +41,10 @@ export class StartupHomeCache {
     const meester = config.meesterGezelId ? await source.getGezel(config.meesterGezelId) : null;
     const status = await source.readMeesterStatus();
     await this.update({
-      meester: meester ? { id: meester.id, name: meester.name.slice(0, 200) } : null,
+      meester: meester
+        ? { id: meester.id, name: meester.name.slice(0, 200), poppetje: meester.poppetje }
+        : null,
+      showPoppetjes: config.showPoppetjes !== false,
       theme: config.themePref ?? 'system',
       sidebar: config.sidebarSide ?? 'right',
       status: readingStatus(status),
@@ -76,6 +79,9 @@ export class StartupHomeCache {
       night: {
         windowEnd: review.windowEnd,
         completed: review.tasksCompleted.length,
+        reportCount: review.reports.length,
+        proposals: review.diffpacks.length,
+        actions: review.reports.reduce((total, report) => total + report.actionCounts.suggested, 0),
         reports,
       },
     });

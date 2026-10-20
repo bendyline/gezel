@@ -8,13 +8,20 @@
   gap: 1rem;
   margin-bottom: 0.5rem;
 }
-.home-make-heading h2 {
+.home-make-heading h2,
+.home-make-heading h3 {
   font-size: var(--text-md);
   margin: 0;
 }
+/* Project types are a second shelf of the same tab, a peer of the plans. */
+.home-make-subheading {
+  margin-top: 1rem;
+}
 .home-make-tray {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  /* auto-fill keeps empty tracks, so a short shelf never stretches its keys
+     wider than the full shelf above it. */
+  grid-template-columns: repeat(auto-fill, minmax(125px, 1fr));
   /* Every row as tall as the tallest, so a key keeps its size on the next row. */
   grid-auto-rows: 1fr;
   gap: 0.5rem;
@@ -22,10 +29,9 @@
   border-radius: var(--radius-lg);
   background: var(--tray-bg);
 }
-/* Each key is a card of the marks' house paper in both themes, holding the
-   book's mark as a tile on its category ground. */
+/* Each key is an ordinary key of the theme. The mark brings its own category
+   ground, so the card stays quiet and lets the tiles carry the color. */
 .home-make-card {
-  --paper: var(--gezel-paper-mark);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -34,13 +40,13 @@
   min-width: 0;
   text-align: left;
   border-radius: var(--radius-md);
-  background: var(--paper);
-  color: var(--gezel-ink-warm);
-  border: 1px solid color-mix(in srgb, var(--paper) 78%, var(--gezel-ink-warm));
+  background: var(--key-bg);
+  color: var(--text);
+  border: 1px solid var(--key-border);
   box-shadow: var(--key-shadow);
-  transition: background-color 160ms ease-out;
 }
 .home-make-card:hover {
+  background: var(--key-bg-hover);
   border-color: var(--accent);
 }
 .home-make-heading button {
@@ -68,12 +74,15 @@
 }
 .home-make-description {
   font-size: var(--text-xs);
-  color: var(--gezel-ink-warm-muted);
+  color: var(--text-muted);
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
+}
+.home-make-footer {
+  margin-top: 0.75rem;
 }
 @media (max-width: 600px) {
   .home-make-tray {

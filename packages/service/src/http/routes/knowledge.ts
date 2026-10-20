@@ -40,7 +40,7 @@
 
 import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
-import type { KnowledgeUpdatesResponse } from '@bendyline/gezel';
+import { type KnowledgeUpdatesResponse, isHarnessHiddenCatalog } from '@bendyline/gezel';
 import {
   KnowledgeAssetPathSchema,
   KnowledgeInstallRequestSchema,
@@ -70,7 +70,16 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
     throw err;
   });
 
-  app.get('/catalogs', async (c) => c.json({ catalogs: await manager().list() }));
+  app.get('/catalogs', async (c) => {
+    const catalogs = await manager().list();
+    // An outside AI app never sees Gezel's own documentation.
+    const harness = c.get('auth')?.scopes.includes('harness') === true;
+    return c.json({
+      catalogs: harness
+        ? catalogs.filter((entry) => !isHarnessHiddenCatalog(entry.ref.catalogId))
+        : catalogs,
+    });
+  });
 
   app.get('/available', async (c) => c.json({ catalogs: await manager().available() }));
 

@@ -389,6 +389,39 @@ export function degradeDenseFfnOffloadDecision(
   return null;
 }
 
+/**
+ * Room an extra engine slot must leave on the card. Other programs' graphics
+ * memory moves while a model runs (a browser, a video, the desktop), and a
+ * two-slot launch planned to within a gigabyte or two died with a Vulkan
+ * out-of-memory when they took more (2026-10-19, a 32 GB card).
+ */
+export const EXTRA_SLOT_GPU_CUSHION_BYTES = 2 * 1024 ** 3;
+
+/**
+ * Fewer slots before system RAM. Keep `slots` only when the model stays
+ * fully on the GPU with {@link EXTRA_SLOT_GPU_CUSHION_BYTES} to spare;
+ * otherwise drop to one slot when that alone keeps it fully on the GPU. A
+ * model that needs system RAM even at one slot keeps its slots and the
+ * planner's split. `plan` prices one slot count against one VRAM pool.
+ */
+export function shedSlotsForGpuResidency(input: {
+  slots: number;
+  vramBytes: number;
+  plan: (slots: number, vramBytes: number) => MoeOffloadDecision;
+}): { slots: number; decision: MoeOffloadDecision; shed: boolean } {
+  const decision = input.plan(input.slots, input.vramBytes);
+  const keep = { slots: input.slots, decision, shed: false };
+  if (input.slots <= 1 || input.vramBytes <= 0) return keep;
+  const roomy = input.plan(
+    input.slots,
+    Math.max(0, input.vramBytes - EXTRA_SLOT_GPU_CUSHION_BYTES),
+  );
+  if (roomy.fullGpuResidency) return keep;
+  const single = input.plan(1, input.vramBytes);
+  if (!single.fullGpuResidency) return keep;
+  return { slots: 1, decision: single, shed: true };
+}
+
 /** Bytes per KV element for llama-server's `--cache-type-k/v` values. */
 const KV_BYTES_PER_ELEMENT: Record<string, number> = {
   f32: 4,

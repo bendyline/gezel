@@ -185,7 +185,9 @@ export class LlamaCppProvider implements LLMProvider {
   /** Request-scoped effort shape for compatible wrappers such as ds4-server. */
   private readonly reasoningEffortRequestShape: ReasoningEffortRequestShape;
   /** Engine batch width; see the `batchMaxConcurrency` constructor opt. */
-  private readonly batchMaxConcurrency: number;
+  private batchMaxConcurrency: number;
+  /** See the `reserveBackgroundSlot` constructor opt. */
+  private readonly reservesBackgroundLane: boolean;
   /**
    * Number of real llama-server request slots (`--parallel`). The provider
    * queue can intentionally be wider than this by one reserved background
@@ -194,7 +196,7 @@ export class LlamaCppProvider implements LLMProvider {
    * boundary: cache slot save/restore plus the streamed engine request must
    * never exceed the slots the native server actually owns.
    */
-  private readonly engineRequestWidth: number;
+  private engineRequestWidth: number;
   private engineRequestsActive = 0;
   private readonly engineRequestWaiters: Array<{
     resolve: () => void;
@@ -512,8 +514,10 @@ export class LlamaCppProvider implements LLMProvider {
     // mid-turn compaction wedges the turn, the same failure the MLX
     // single-slot path hit. See the matching note in the MLX provider.
     const interactiveConcurrency = batchMax;
-    const queueConcurrency =
-      opts.reserveBackgroundSlot === false ? slots : Math.max(slots, interactiveConcurrency + 1);
+    this.reservesBackgroundLane = opts.reserveBackgroundSlot !== false;
+    const queueConcurrency = this.reservesBackgroundLane
+      ? Math.max(slots, interactiveConcurrency + 1)
+      : slots;
     this.queue = new ProviderQueue({
       // llama-server is launched with `--parallel ${slots}` (see
       // `buildLlamaCppProvider` in chat/manager.ts) so the engine has matching
@@ -607,7 +611,7 @@ export class LlamaCppProvider implements LLMProvider {
    */
   private cacheAdapter: import('./cache-adapter.js').LlamaCppCacheAdapter | null = null;
   private slotSavePath?: string;
-  private readonly launchedSlots: number;
+  private launchedSlots: number;
 
   setCacheAdapter(adapter: import('./cache-adapter.js').LlamaCppCacheAdapter): void {
     this.cacheAdapter = adapter;
@@ -639,6 +643,31 @@ export class LlamaCppProvider implements LLMProvider {
    */
   getLaunchedSlots(): number {
     return this.launchedSlots;
+  }
+
+  /**
+   * Follow a supervised engine that is relaunching with fewer `--parallel`
+   * slots because the wider launch ran the GPU out of memory. Runs between
+   * the failed start and the retry, while the request that asked for the
+   * engine still holds its lease. Refused when more requests hold leases
+   * than the narrower engine has slots: two turns on one slot would save and
+   * restore it under each other.
+   */
+  narrowEngineSlots(slots: number): boolean {
+    const next = Math.max(1, Math.floor(slots));
+    if (next >= this.launchedSlots || this.engineRequestsActive > next) return false;
+    this.launchedSlots = next;
+    this.engineRequestWidth = next;
+    this.batchMaxConcurrency = Math.min(this.batchMaxConcurrency, next);
+    this.queue.narrow({
+      concurrency: this.reservesBackgroundLane
+        ? Math.max(next, this.batchMaxConcurrency + 1)
+        : next,
+      interactiveConcurrency: this.batchMaxConcurrency,
+      backgroundConcurrency: backgroundLaneCap(next),
+    });
+    this.cacheAdapter?.setSlotCount(next);
+    return true;
   }
 
   /**

@@ -19,6 +19,7 @@ import type {
   RecognitionPullEvent,
   RecognitionPullSpec,
 } from '../../providers/recognition/types.js';
+import { callerMaySeeLocation } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
 import { subscribeToInstallSse } from './install-sse.js';
 
@@ -115,7 +116,8 @@ export function recognitionRoutes(ctx: ServiceContext): Hono {
     } else {
       return c.json({ error: 'Provide either artifactPath or data.' }, 400);
     }
-    return c.json(readImageStaticMeta(bytes, { includeLocation: req.includeLocation === true }));
+    const includeLocation = req.includeLocation === true && (await callerMaySeeLocation(ctx, c));
+    return c.json(readImageStaticMeta(bytes, { includeLocation }));
   });
 
   app.get('/health', async (c) => {

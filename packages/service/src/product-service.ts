@@ -109,6 +109,7 @@ import { createXpRefresher } from './growth/xp-refresher.js';
 import { stepCreditedGezelId } from './growth/xp.js';
 import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
+import { HarnessToolsManager } from './harness-tools/manager.js';
 import { generateLoopbackCert } from './http/cert.js';
 import type { ServiceContext } from './http/context.js';
 import { bindMainListener } from './http/main-listener.js';
@@ -448,7 +449,7 @@ export async function startProductService(
   // per-launch token so the one-time `?token=` URL the CLI prints never
   // carries the root token. Same lifecycle as root (in-memory only, not
   // persisted). `appId: 'web-ui'` keeps it independently identifiable in
-  // the Connected Apps roster and revocable.
+  // the Integrations roster and revocable.
   const webUiEnabled = opts.webUi ?? process.env.GEZEL_WEB === '1';
   const webUiToken = webUiEnabled ? randomBytes(24).toString('base64url') : null;
   // Per-app bearer tokens (issued via /v1/apps/register) persist to
@@ -2161,6 +2162,17 @@ export async function startProductService(
   // staging dirs), so the sync manager and the action manager share ONE lock —
   // a commit can't race a sync or a concurrent discard on the same project.
   const connectorLocks = new KeyedLock();
+  // GEZEL_CONNECTOR_SIMULATOR=1 answers every native connector's provider
+  // traffic from in-process fakes seeded with a demo inbox and calendars —
+  // the connector counterpart of GEZEL_MOCK_PROVIDER, for E2E and eval runs.
+  // Bind with any placeholder credential; nothing reaches the network.
+  const connectorFetch =
+    process.env.GEZEL_CONNECTOR_SIMULATOR && process.env.GEZEL_CONNECTOR_SIMULATOR !== '0'
+      ? (await import('./connectors/testing/world.js')).createSimulatedWorld().fetch
+      : undefined;
+  if (connectorFetch) {
+    log.warn('[service] GEZEL_CONNECTOR_SIMULATOR is set — connectors sync simulated accounts');
+  }
   const connectors = new ConnectorManager({
     store,
     secrets,
@@ -2168,6 +2180,7 @@ export async function startProductService(
     contentIndex,
     scriptRunner,
     locks: connectorLocks,
+    ...(connectorFetch ? { fetch: connectorFetch } : {}),
   });
   const connectorActions = new ConnectorActionManager({
     store,
@@ -2177,6 +2190,7 @@ export async function startProductService(
     scriptRunner,
     isNightShiftActive: () => nightShift.isActive(),
     locks: connectorLocks,
+    ...(connectorFetch ? { fetch: connectorFetch } : {}),
   });
   const connectorSync = new ConnectorSyncManager({
     store,
@@ -2279,6 +2293,7 @@ export async function startProductService(
     resolveMachineEngineRemoteId,
   });
   const { codexSetup, opencodeSetup, piSetup, vscodeSetup } = localHarnesses;
+  const harnessTools = new HarnessToolsManager({ home, store, tokenStore });
   // Word / Excel / PowerPoint and LibreOffice; see office-host/integrations.ts.
   const officeIntegrations = createOfficeIntegrations(home, opts, firstPartyApps);
 
@@ -2428,6 +2443,7 @@ export async function startProductService(
     remoteTenantLimits,
     ollamaEmulation,
     codexSetup,
+    harnessTools,
     opencodeSetup,
     piSetup,
     vscodeSetup,
@@ -2551,6 +2567,11 @@ export async function startProductService(
   }
   await ollamaEmulation.reconfigure(config.openaiEndpoints).catch((err) => {
     log.warn(`[service] ollama emulation not started: ${err instanceof Error ? err.message : err}`);
+  });
+  await harnessTools.reconcile().catch((err) => {
+    log.warn(
+      `[service] Gezel tools launcher not prepared: ${err instanceof Error ? err.message : err}`,
+    );
   });
   await codexSetup.reconcile().catch((err) => {
     log.warn(

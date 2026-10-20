@@ -3,7 +3,7 @@
 Engineering reference. The decision and its alternatives are in
 [ADR 0016](decisions/0016-office-host.md); folder-to-project mapping is
 [ADR 0015](decisions/0015-project-inference.md); the user-facing story is
-the Handboek's Connected Apps article.
+the Handboek's Integrations article.
 
 ## Pieces
 
@@ -155,7 +155,7 @@ launch.
   `src/office` and the two cards (UI), `test` + `test:py` (extension).
 - `tests/published/bundledAssets.test.ts` guards `dist/office` and
   `dist/libreoffice/gezel.oxt`.
-- End to end with Office: Settings → Connected Apps → set up Word; restart
+- End to end with Office: Settings → Integrations → set up Word; restart
   Word; Home → Add-ins → Gezel (under Developer Add-ins on Windows); the pane
   connects without a code (a code here means the key did not arrive: check
   the page URL for `?enroll=`); ask for a summary of the selection and watch

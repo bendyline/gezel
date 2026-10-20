@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { captureScreenshot } from './helpers/screenshot.js';
@@ -41,10 +42,7 @@ test.beforeAll(async () => {
 
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
-  // The first window is the splash page, which deliberately shares the final
-  // document title. Wait for a UI-only element so a cold embedded-service boot
-  // cannot make the title assertion pass before navigation has completed.
-  await expect(page.locator('.app-header')).toBeVisible({ timeout: UI_LOAD_TIMEOUT_MS });
+  await waitForAppReady(page);
 });
 
 test.afterAll(async () => {

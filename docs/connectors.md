@@ -491,6 +491,31 @@ they do not add a parallel one:
   disk), or encrypt-at-rest with a key from the secrets backend. Flagged for [secrets-security.md](./secrets-security.md)
   to rule on.
 
+## Connector types today
+
+Every type below is a `native` adapter in
+[connectors/natives/](../packages/service/src/connectors/natives/) (mail in
+[mail/](../packages/service/src/mail/)), has a provider fake in
+[connectors/testing/](../packages/service/src/connectors/testing/), and passes the
+conformance suite ([connector-standards.md §8](./connector-standards.md#8-testing-a-connector)).
+Types sharing a family normalize to one record shape, so a craftbook reasoning over "my
+mail" or "my calendar" never needs to know the provider.
+
+| Family | Type ids | Auth | Completeness | Write-back |
+|---|---|---|---|---|
+| Mail | `mail-gmail`, `mail-microsoft365`, `mail-outlook`, `mail-imap` | Google / Microsoft OAuth; IMAP app password | window (`backfillDays`, then every new message) | `save-draft` into the account's own Drafts (`mailbox-draft`); `send` (`recipient-allowlist`) |
+| Calendar | `calendar-google`, `calendar-microsoft` | Google / Microsoft OAuth | window (`pastDays` / `futureDays`) | — |
+| Files | `files-google-drive`, `files-onedrive`, `files-sharepoint` | Google / Microsoft OAuth | mirror of the configured folder or library | — |
+| Feeds | `rss-feed` (RSS 2.0, RSS 1.0/RDF, Atom, JSON Feed) | none | window | — |
+| Video | `youtube-videos` | Google Cloud API key | window | — |
+| Social | `x-posts`, `bluesky-posts`, `instagram-media`, `linkedin-posts` | OAuth; Bluesky app password | window | `publish` (`social-publish`) |
+| Code | `github-pulls`, `github-releases`, `github-wiki`; `github-issues` (script) | optional token | window / mirror | — |
+| Data | `azure-monitor-logs`, `airtable-records` (spectral), `http-json-rows`, `linear-issues` | API keys | observation / window | — |
+
+One Google Cloud OAuth client serves every Google type and one Entra app registration
+every Microsoft type (the manifests name the same `clientIdEnv`), so a person registers
+each provider once.
+
 ## Deliberate exclusions (v1)
 
 - **No write actions in v1.** Read-only corpora first; the outbox generalization is phase 2.

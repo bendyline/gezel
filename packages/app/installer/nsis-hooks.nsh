@@ -1150,7 +1150,7 @@ FunctionEnd
   DetailPrint "GezelService removed. Shared model and legacy data at ${GEZEL_DATA_DIR} preserved."
 
   ; Word/Excel/PowerPoint registration and Gezel's Office certificate
-  ; authority are per user: Settings -> Connected Apps writes a value under
+  ; authority are per user: Settings -> Integrations writes a value under
   ; HKCU\...\WEF\Developer per add-in (data = a manifest under the user's
   ; .gezel\integrations\office\manifests) and puts the CA in the user's own
   ; Root store. This macro also runs on every upgrade, and an update must not

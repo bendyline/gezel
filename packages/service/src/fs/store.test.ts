@@ -467,6 +467,28 @@ describe('projects', () => {
     expect((await store.getProject(created.id))?.outputPaneVisible).toBeUndefined();
   });
 
+  it('keeps the Views tab choice as view state: no history, no activity', async () => {
+    const history = new HistoryManager(home);
+    const wired = new Store({ home, history });
+    const created = await wired.createProject({ name: 'Views' });
+    const before = (await wired.getProject(created.id))!.updatedAt;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const chosen = await wired.updateProject(created.id, { selectedView: 'diagram' });
+    expect(chosen.selectedView).toBe('diagram');
+    expect((await wired.getProject(created.id))?.selectedView).toBe('diagram');
+    expect(chosen.updatedAt).toBe(before);
+    await wired.updateProject(created.id, { outputPaneVisible: true });
+    expect((await wired.getProject(created.id))?.updatedAt).toBe(before);
+
+    const cleared = await wired.updateProject(created.id, { selectedView: null });
+    expect(cleared.selectedView).toBeUndefined();
+    expect(await history.listEvents({ kinds: ['project.updated'] })).toHaveLength(0);
+
+    const renamed = await wired.updateProject(created.id, { name: 'Views, renamed' });
+    expect(renamed.updatedAt).not.toBe(before);
+  });
+
   it('serializes concurrent project patches without dropping unrelated fields', async () => {
     const created = await store.createProject({ name: 'Concurrent Patches' });
 

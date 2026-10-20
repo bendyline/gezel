@@ -28,6 +28,14 @@ export function requestSettingsSection(section: string): void {
   pending = { section, at: Date.now() };
 }
 
+/** Open Settings on `section`, whether or not the Settings view is mounted yet. */
+export function openSettingsSection(section: string): void {
+  requestSettingsSection(section);
+  window.dispatchEvent(
+    new CustomEvent('gezel:navigate', { detail: { view: 'settings', section } }),
+  );
+}
+
 /** Read the pending section without consuming it. */
 export function peekPendingSettingsSection(): string | null {
   if (!pending) return null;

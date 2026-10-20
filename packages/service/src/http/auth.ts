@@ -77,6 +77,24 @@ export function isFirstPartyCaller(c: Context): boolean {
 }
 
 /**
+ * Whether the caller acts with the person's own authority: the first-party
+ * credentials plus the explicitly approved `product`/`cli` grants. Sinks that
+ * relax a rule for the person (attribution they may claim, a photo's location)
+ * must ask this positively. "Not a gezel session" is not the same question, and
+ * every narrower principal added later would inherit the owner's leeway.
+ */
+export function isOwnerCaller(c: Context): boolean {
+  const auth = c.get('auth');
+  return Boolean(
+    auth &&
+      (auth.scopes.includes('root') ||
+        auth.scopes.includes('ui') ||
+        auth.scopes.includes('product') ||
+        auth.scopes.includes('cli')),
+  );
+}
+
+/**
  * Gate a first-party administrative surface. The daemon's process-local
  * `root` token and the per-launch desktop/web credential (`ui`) are the only
  * callers allowed through. Unlike `requireScope('root')`, this does not force
@@ -112,7 +130,9 @@ export function requireInternalApiAccess(): MiddlewareHandler {
       auth.scopes.includes('ui') ||
       auth.scopes.includes('product') ||
       auth.scopes.includes('cli') ||
-      auth.scopes.includes('session')
+      auth.scopes.includes('session') ||
+      // An outside AI app's tools token; `harnessRouteGuard` admits its few routes.
+      auth.scopes.includes('harness')
     ) {
       return next();
     }

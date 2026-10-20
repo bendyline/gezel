@@ -103,7 +103,7 @@ describe('buildCodexBridgeApp', () => {
     expect(chatCompat.status).toBe(404);
   });
 
-  it('applies the Connected Apps master switch before inference', async () => {
+  it('applies the Integrations master switch before inference', async () => {
     const app = buildCodexBridgeApp(context({ enabled: false }));
     const response = await app.request('http://127.0.0.1/v1/responses', {
       method: 'POST',

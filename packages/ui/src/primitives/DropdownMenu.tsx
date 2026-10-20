@@ -6,6 +6,25 @@ import { appCollisionBoundary } from './appCollisionBoundary.js';
 // animation remain one edit away from a global change.
 export const Root = RadixDropdownMenu.Root;
 export const Trigger = RadixDropdownMenu.Trigger;
+
+/**
+ * An inert anchor for a menu something else opens. Radix needs a Trigger to
+ * position against, but composing one onto a control that has its own Radix
+ * state (a tab) overwrites that control's `data-state`. Render this inside
+ * the control and drive `Root`'s `open` yourself: the span takes no pointer
+ * events and no focus, so the control keeps every interaction.
+ */
+export function AnchorTrigger({ className }: { className?: string }) {
+  return (
+    <RadixDropdownMenu.Trigger asChild>
+      <span
+        aria-hidden="true"
+        tabIndex={-1}
+        className={className ? `gz-menu-anchor ${className}` : 'gz-menu-anchor'}
+      />
+    </RadixDropdownMenu.Trigger>
+  );
+}
 export const Portal = RadixDropdownMenu.Portal;
 export function Content(props: ComponentProps<typeof RadixDropdownMenu.Content>) {
   return (

@@ -75,9 +75,10 @@ export function expiresAtFrom(expiresIn: unknown): string {
 async function postToken(
   tokenEndpoint: string,
   body: Record<string, string>,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<OAuthTokens> {
   validateOAuthEndpoints({ authEndpoint: tokenEndpoint, tokenEndpoint, scopes: [] });
-  const res = await fetch(tokenEndpoint, {
+  const res = await fetchImpl(tokenEndpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(body).toString(),
@@ -170,18 +171,24 @@ export interface ExchangeAuthCodeParams {
   code: string;
   codeVerifier: string;
   redirectUri: string;
+  /** Injectable for tests and the provider simulator; defaults to global fetch. */
+  fetchImpl?: typeof fetch;
 }
 
 /** Exchange an authorization code for tokens. */
 export function exchangeAuthCode(params: ExchangeAuthCodeParams): Promise<OAuthTokens> {
-  return postToken(params.endpoints.tokenEndpoint, {
-    client_id: params.clientId,
-    ...(params.clientSecret ? { client_secret: params.clientSecret } : {}),
-    code: params.code,
-    code_verifier: params.codeVerifier,
-    redirect_uri: params.redirectUri,
-    grant_type: 'authorization_code',
-  });
+  return postToken(
+    params.endpoints.tokenEndpoint,
+    {
+      client_id: params.clientId,
+      ...(params.clientSecret ? { client_secret: params.clientSecret } : {}),
+      code: params.code,
+      code_verifier: params.codeVerifier,
+      redirect_uri: params.redirectUri,
+      grant_type: 'authorization_code',
+    },
+    params.fetchImpl,
+  );
 }
 
 export interface RefreshTokenParams {
@@ -189,16 +196,22 @@ export interface RefreshTokenParams {
   clientId: string;
   clientSecret?: string;
   refreshToken: string;
+  /** Injectable for tests and the provider simulator; defaults to global fetch. */
+  fetchImpl?: typeof fetch;
 }
 
 /** Trade a refresh token for a fresh access token. */
 export function refreshToken(params: RefreshTokenParams): Promise<OAuthTokens> {
-  return postToken(params.endpoints.tokenEndpoint, {
-    client_id: params.clientId,
-    ...(params.clientSecret ? { client_secret: params.clientSecret } : {}),
-    refresh_token: params.refreshToken,
-    grant_type: 'refresh_token',
-  });
+  return postToken(
+    params.endpoints.tokenEndpoint,
+    {
+      client_id: params.clientId,
+      ...(params.clientSecret ? { client_secret: params.clientSecret } : {}),
+      refresh_token: params.refreshToken,
+      grant_type: 'refresh_token',
+    },
+    params.fetchImpl,
+  );
 }
 
 /** True when a credential's access token is expired (or within the margin). */

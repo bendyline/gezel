@@ -102,7 +102,7 @@ describe('POST /v1/chat/completions — auth', () => {
     };
     expect(body.error.code).toBe('invalid_api_key');
     expect(body.error.type).toBe('invalid_request_error');
-    expect(body.error.message).toContain('Connected Apps');
+    expect(body.error.message).toContain('Integrations');
   });
 
   it('rejects requests with the wrong scope', async () => {

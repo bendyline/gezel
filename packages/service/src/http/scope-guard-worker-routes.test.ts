@@ -115,3 +115,31 @@ describe('list_tasks for a worker', () => {
     expect((await app.request('/api/projects/proj-b/tasks')).status).toBe(403);
   });
 });
+
+describe('image recognition from a session', () => {
+  // `describe_image` and `read_image_metadata` bind their project through
+  // `?project=`, and neither route was on the session allowlist.
+  for (const route of ['describe', 'metadata']) {
+    it(`admits ${route} for the session project`, async () => {
+      const res = await stack(false).request(
+        `/api/recognition/${route}?project=${PROJECT}`,
+        post({ artifactPath: 'a.png' }),
+      );
+      expect(res.status).toBe(200);
+    });
+
+    it(`refuses ${route} for another project or the implicit Default`, async () => {
+      const app = stack(false);
+      for (const qs of ['?project=proj-b', '']) {
+        const res = await app.request(`/api/recognition/${route}${qs}`, post({ data: 'AA==' }));
+        expect(res.status, qs || '(none)').toBe(403);
+      }
+    });
+  }
+
+  it('keeps the model and cache routes first-party', async () => {
+    const app = stack(true);
+    expect((await app.request('/api/recognition/models')).status).toBe(403);
+    expect((await app.request('/api/recognition/cache/clear', post({}))).status).toBe(403);
+  });
+});

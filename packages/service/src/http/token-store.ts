@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { chmod } from 'node:fs/promises';
+import { type HarnessClientId, harnessAppId } from '@bendyline/gezel';
 import {
   readSecurityJson,
   writeSecurityJson,
@@ -47,6 +48,7 @@ export const KNOWN_SCOPES = [
   'cli',
   'ui',
   'session',
+  'harness',
   'remote-inference',
   'machine-models',
   'machine-knowledge-assets',
@@ -92,7 +94,8 @@ export function isReservedTokenAppId(appId: string): boolean {
     appId === 'desktop-client' ||
     appId === 'machine-engine-client' ||
     appId === 'web-ui' ||
-    appId.startsWith('session:')
+    appId.startsWith('session:') ||
+    appId.startsWith('harness:')
   );
 }
 
@@ -196,10 +199,15 @@ export interface TokenRecord {
    * Distinguishes an ordinary third-party app grant (`'app'`, the default
    * when absent) from a paired *device* grant (`'device'`) issued through the
    * remote-model-execution pairing flow. Drives the "Paired devices" section
-   * in the Connected Apps UI. Purely a UI/label hint — scope checks don't
+   * in the Integrations UI. Purely a UI/label hint — scope checks don't
    * read it.
    */
-  kind?: 'app' | 'device';
+  kind?: 'app' | 'device' | 'harness';
+  /**
+   * For `kind:'harness'` records, the folder the outside app is working in,
+   * when it named one. Shown in Settings → Integrations; never persisted.
+   */
+  folder?: string;
   /**
    * For `kind:'device'` records, the paired client's stable device id (its
    * `deviceId` / pairing `appId`). The `/v1/remote/*` handlers read this off
@@ -234,6 +242,16 @@ export interface IssueSessionTokenInput {
   token?: string;
 }
 
+export interface IssueHarnessTokenInput {
+  client: HarnessClientId;
+  /** The bound project, or null for a harness bound to no project. */
+  projectId: string | null;
+  appName: string;
+  folder?: string;
+  /** Override the generated token. Tests only. */
+  token?: string;
+}
+
 export interface TokenStore {
   /** O(1) bearer-token lookup. Returns `null` for unknown tokens. */
   lookup(token: string): TokenRecord | null;
@@ -256,6 +274,16 @@ export interface TokenStore {
   issueSession(input: IssueSessionTokenInput): TokenRecord;
   /** Drop an ephemeral session token (in-memory only; no disk write). */
   revokeSession(appId: string): void;
+  /**
+   * Mint or return the EPHEMERAL token for an outside app's binding to one
+   * project (`harness:<client>:<projectId|none>`), scope `harness`. Never
+   * persisted, so `tokens.json` never carries a scope an older daemon cannot
+   * read. Get-or-create: every `gezel-mcp` process of that app in that
+   * project shares one token until it is revoked or the daemon restarts.
+   */
+  issueHarness(input: IssueHarnessTokenInput): TokenRecord;
+  /** Drop every harness token `match` accepts. Returns how many were dropped. */
+  revokeHarness(match: (record: TokenRecord) => boolean): number;
   /** Snapshot of all current records. The root token is included. */
   list(): TokenRecord[];
   /**
@@ -512,6 +540,55 @@ export async function createTokenStore(opts: CreateTokenStoreOptions): Promise<T
       byAppId.delete(appId);
       byToken.delete(existing.token);
       ephemeralAppIds.delete(appId);
+    },
+
+    issueHarness(input: IssueHarnessTokenInput): TokenRecord {
+      const appId = harnessAppId(input.client, input.projectId);
+      const prior = byAppId.get(appId);
+      if (prior && !prior.scopes.includes('harness')) {
+        throw new Error(`token-store: harness appId collides with another token: ${appId}`);
+      }
+      if (prior && (!input.token || input.token === prior.token)) {
+        prior.appName = input.appName;
+        if (input.folder) prior.folder = input.folder;
+        return prior;
+      }
+      if (prior) {
+        byToken.delete(prior.token);
+        byAppId.delete(appId);
+      }
+      const token = input.token ?? randomBytes(32).toString('base64url');
+      if (byToken.has(token)) {
+        throw new Error('token-store: token collision (caller-supplied token already in use)');
+      }
+      const now = Date.now();
+      const record: TokenRecord = {
+        appId,
+        appName: input.appName,
+        scopes: ['harness'],
+        token,
+        createdAt: now,
+        lastUsedAt: 0,
+        kind: 'harness',
+        ...(input.projectId ? { projectId: input.projectId } : {}),
+        ...(input.folder ? { folder: input.folder } : {}),
+      };
+      ephemeralAppIds.add(appId);
+      byToken.set(record.token, record);
+      byAppId.set(record.appId, record);
+      return record;
+    },
+
+    revokeHarness(match: (record: TokenRecord) => boolean): number {
+      let dropped = 0;
+      for (const record of Array.from(byAppId.values())) {
+        if (!record.scopes.includes('harness') || !match(record)) continue;
+        byAppId.delete(record.appId);
+        byToken.delete(record.token);
+        ephemeralAppIds.delete(record.appId);
+        dropped++;
+      }
+      return dropped;
     },
 
     list(): TokenRecord[] {

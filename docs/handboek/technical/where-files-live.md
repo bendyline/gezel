@@ -44,7 +44,7 @@ Everything gezel knows lives in one folder — the **gezel home** — as plain f
                       certificate the Office pane is served with (its private
                       keys stay here, readable only by you)
     libreoffice/      the LibreOffice extension's connection token
-    vscode/, codex/…  the other Connected Apps setups
+    vscode/, codex/…  the other Integrations setups
   history.jsonl       the audit log
   logs/               service logs (rolling)
 ```

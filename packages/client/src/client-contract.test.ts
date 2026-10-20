@@ -38,6 +38,24 @@ const cases: ContractCase[] = [
     body: {},
     invoke: (c) => c.toolListTables('p/1'),
   },
+  {
+    name: 'project dependency graph',
+    method: 'GET',
+    path: '/api/projects/p1/index/graph?kind=code&max=200&focus=src%2Fa.ts',
+    invoke: (c) => c.getFileGraph('p1', { kind: 'code', max: 200, focus: 'src/a.ts' }),
+  },
+  {
+    name: 'project dependency graph with defaults',
+    method: 'GET',
+    path: '/api/projects/p1/index/graph',
+    invoke: (c) => c.getFileGraph('p1'),
+  },
+  {
+    name: 'one file insight',
+    method: 'GET',
+    path: '/api/projects/p1/index/file-insight?path=src%2Fa%20b.ts',
+    invoke: (c) => c.getFileInsight('p1', 'src/a b.ts'),
+  },
   { name: 'health', method: 'GET', path: '/api/health', invoke: (c) => c.health() },
   {
     name: 'system diagnostics',

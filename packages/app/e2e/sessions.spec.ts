@@ -11,6 +11,7 @@ import { deriveThreadTitle } from '@bendyline/gezel';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { openGreetingTab } from './helpers/greeting.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
@@ -60,6 +61,7 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
   });
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
+  await waitForAppReady(page);
   // Home is the default view and is where the Meester chat lives — click
   // the brand mark anyway so the test works even if we later default
   // elsewhere.

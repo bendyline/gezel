@@ -230,11 +230,47 @@ const Popover = {
   Close: ({ children }: { children?: ReactNode; asChild?: boolean }) => <>{children}</>,
 };
 
+const MenuRadioCtx = createContext<{ value?: string; onValueChange?: (value: string) => void }>({});
+
+// A controlled Root that is closed hides its Content; uncontrolled menus
+// (no `open` prop) render their items as they always have here.
+const MenuOpenCtx = createContext<boolean | undefined>(undefined);
+
 const DropdownMenu = {
-  Root: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  Root: ({ children, open }: { children?: ReactNode; open?: boolean }) => (
+    <MenuOpenCtx.Provider value={open}>{children}</MenuOpenCtx.Provider>
+  ),
   Trigger: ({ children }: { children?: ReactNode; asChild?: boolean }) => <>{children}</>,
+  AnchorTrigger: () => null,
+  RadioGroup: ({
+    children,
+    value,
+    onValueChange,
+  }: {
+    children?: ReactNode;
+    value?: string;
+    onValueChange?: (value: string) => void;
+  }) => <MenuRadioCtx.Provider value={{ value, onValueChange }}>{children}</MenuRadioCtx.Provider>,
+  RadioItem: ({ children, value }: { children?: ReactNode; value: string }) => {
+    const ctx = useContext(MenuRadioCtx);
+    return (
+      <button
+        type="button"
+        role="menuitemradio"
+        aria-checked={ctx.value === value}
+        onClick={() => ctx.onValueChange?.(value)}
+      >
+        {children}
+      </button>
+    );
+  },
   Portal: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  Content: ({ children }: { children?: ReactNode }) => <div role="menu">{children}</div>,
+  Content: ({ children, ...props }: { children?: ReactNode; 'aria-label'?: string }) =>
+    useContext(MenuOpenCtx) === false ? null : (
+      <div role="menu" aria-label={props['aria-label']}>
+        {children}
+      </div>
+    ),
   Item: ({
     children,
     disabled,

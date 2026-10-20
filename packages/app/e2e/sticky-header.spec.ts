@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { openGreetingTab } from './helpers/greeting.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
@@ -31,6 +32,7 @@ let app: ElectronApplication;
 let page: Page;
 
 async function openMeesterChat() {
+  await waitForAppReady(page);
   const brand = page.getByRole('button', { name: 'Meester home' });
   await expect(brand).toBeVisible({ timeout: 20_000 });
   await brand.click();

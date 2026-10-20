@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import type { FileContextFinding, FileContextResponse, SymbolContext } from '@bendyline/gezel';
 import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
-import { resolveImportEdgesDetailed, resolveSpecifier } from '../filemap/affinity.js';
 import { classifyFile } from './classify.js';
+import { importersOf, specifierResolver } from './edges/readers.js';
 import type { SecurityFindingRow, SymbolHit } from './index-store-types.js';
 import type { IndexStore } from './index-store.js';
 import { toReviewWire } from './review-wire.js';
@@ -84,18 +84,15 @@ export async function buildFileContext(
 
   // Dependency edges — inbound (who imports this file, with bindings) and
   // this file's own outbound rows.
-  const allPaths = index.allFilePaths();
-  const pathSet = new Set(allPaths);
-  const inbound = resolveImportEdgesDetailed(allPaths, index.allImportsWithBindings()).filter(
-    (e) => e.dst === relPath,
-  );
+  const inbound = importersOf(index, relPath);
   inbound.sort((a, b) => a.src.localeCompare(b.src));
 
+  const resolveRaw = specifierResolver(index, relPath);
   const outboundRows = index.importsForFile(relPath);
   const imports = outboundRows
     .map((r) => ({
       specifier: r.raw,
-      resolvedPath: resolveSpecifier(relPath, r.raw, pathSet),
+      resolvedPath: resolveRaw(r.raw),
       names: r.bindings?.filter((b) => b.kind === 'named').map((b) => b.name) ?? [],
       default: r.bindings?.some((b) => b.kind === 'default') ?? false,
       namespace: r.bindings === null || r.bindings.some((b) => b.kind === 'namespace'),
@@ -105,7 +102,7 @@ export async function buildFileContext(
   // local identifier → where it comes from, for per-symbol `uses`.
   const localOrigins = new Map<string, { from: string; inRepo: boolean }>();
   for (const r of outboundRows) {
-    const resolved = resolveSpecifier(relPath, r.raw, pathSet);
+    const resolved = resolveRaw(r.raw);
     for (const b of r.bindings ?? []) {
       if (b.local === '*' || localOrigins.has(b.local)) continue;
       localOrigins.set(b.local, { from: resolved ?? r.raw, inRepo: resolved != null });

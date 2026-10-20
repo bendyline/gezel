@@ -43,7 +43,7 @@ export interface DetectResult {
 
 export interface ConnectInput {
   /**
-   * Stable identifier the user sees in Settings → Connected Apps. Lowercase
+   * Stable identifier the user sees in Settings → Integrations. Lowercase
    * letters / digits / `._-`, 1–64 chars. Pick something unique to your
    * app — e.g. `docblocks`, `acme.notes`.
    */

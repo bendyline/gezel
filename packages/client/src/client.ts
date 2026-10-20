@@ -157,6 +157,9 @@ import type {
   FetchUrlResponse,
   FileContextRequest,
   FileContextResponse,
+  FileGraphRequest,
+  FileGraphResponse,
+  FileInsightResponse,
   FileMapRequest,
   FileMapResponse,
   FileReviewRequest,
@@ -227,6 +230,13 @@ import type {
   HandboekNarrationResponse,
   HandboekRenderMode,
   HandboekToc,
+  HarnessBlock,
+  HarnessClientId,
+  HarnessLaunchSpec,
+  HarnessToolsClientStatus,
+  HarnessToolsConfigUpdate,
+  HarnessToolsSetupRequest,
+  HarnessToolsStatusResponse,
   HealthResponse,
   ImageQuality,
   ImportAiAppResult,
@@ -1474,6 +1484,45 @@ export class GezelClient {
 
   removeCodexSetup(): Promise<CodexSetupStatusResponse> {
     return this.request('DELETE', '/api/codex-setup');
+  }
+
+  // ---------- Gezel's tools in other AI apps ----------
+
+  /** Each app's setup, the person's choices, live connections, and stopped folders. */
+  getHarnessTools(): Promise<HarnessToolsStatusResponse> {
+    return this.request('GET', '/api/harness-tools');
+  }
+
+  updateHarnessToolsConfig(body: HarnessToolsConfigUpdate): Promise<HarnessToolsStatusResponse> {
+    return this.request('PUT', '/api/harness-tools/config', body);
+  }
+
+  /** Add (or repair) Gezel's `gezel` MCP entry in one app. */
+  configureHarnessTools(
+    client: HarnessClientId,
+    body: HarnessToolsSetupRequest = {},
+  ): Promise<HarnessToolsClientStatus> {
+    return this.request('PUT', `/api/harness-tools/clients/${encodeURIComponent(client)}`, body);
+  }
+
+  removeHarnessTools(client: HarnessClientId): Promise<HarnessToolsClientStatus> {
+    return this.request('DELETE', `/api/harness-tools/clients/${encodeURIComponent(client)}`);
+  }
+
+  /** "Stop for this folder": block that app in that project and sign it out. */
+  stopHarnessConnection(appId: string): Promise<HarnessToolsStatusResponse> {
+    return this.request('POST', `/api/harness-tools/connections/${encodeURIComponent(appId)}/stop`);
+  }
+
+  unblockHarness(block: HarnessBlock): Promise<HarnessToolsStatusResponse> {
+    return this.request('POST', '/api/harness-tools/blocked/remove', block);
+  }
+
+  /** The command an app's MCP config runs to reach Gezel's tools. */
+  getHarnessLaunchSpec(client: HarnessClientId, projectId?: string): Promise<HarnessLaunchSpec> {
+    const params = new URLSearchParams({ client });
+    if (projectId) params.set('projectId', projectId);
+    return this.request('GET', `/api/harness-tools/launcher?${params.toString()}`);
   }
 
   // ---------- OpenCode local-model setup ----------
@@ -6312,6 +6361,32 @@ export class GezelClient {
     return res.summary;
   }
 
+  /** The project's dependency graph, for a Views diagram. */
+  getFileGraph(id: string, req: FileGraphRequest = {}): Promise<FileGraphResponse> {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(req)) {
+      if (value !== undefined) query.set(key, String(value));
+    }
+    const qs = query.toString();
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/index/graph${qs ? `?${qs}` : ''}`,
+    );
+  }
+
+  /** Everything the index knows about one file; null when the file is not indexed. */
+  async getFileInsight(id: string, path: string): Promise<FileInsightResponse | null> {
+    try {
+      return await this.request<FileInsightResponse>(
+        'GET',
+        `/api/projects/${encodeURIComponent(id)}/index/file-insight?path=${encodeURIComponent(path)}`,
+      );
+    } catch (error) {
+      if (error instanceof GezelApiError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
   /** Photos taken on this calendar day in earlier years; null before the folder's first scan. */
   async getOnThisDay(id: string): Promise<OnThisDayResponse | null> {
     const res = await this.request<OnThisDayResponse | undefined>(
@@ -7696,7 +7771,7 @@ export class GezelClient {
 
   /**
    * Daemon base URL. Surfaced for code paths that don't go through
-   * the typed client — currently the UI's Connected Apps panel,
+   * the typed client — currently the UI's Integrations panel,
    * which hits `/v1/apps/*` (the public app surface, deliberately
    * NOT wrapped by the internal client). Returned without a trailing
    * slash.

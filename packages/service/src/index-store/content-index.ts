@@ -7,6 +7,9 @@ import type {
   BoekwachterIssueStatus,
   DescribeFolderResponse,
   FileContextResponse,
+  FileGraphRequest,
+  FileGraphResponse,
+  FileInsightResponse,
   FileMapRequest,
   FileMapResponse,
   FileReviewResponse,
@@ -58,10 +61,10 @@ import {
   projectLocalVillageFile,
   projectStorageScope,
 } from '@bendyline/gezel/paths';
-import { resolveImportEdges } from '../filemap/affinity.js';
 import { buildFileMap } from '../filemap/build.js';
 import { VillageFileStore } from '../filemap/village-file.js';
 import type { Store } from '../fs/store.js';
+import { gitIgnoredPaths } from '../git/ignore.js';
 import type { MediaEmbedJob, MediaEmbedOutcome } from '../memory/image-embed-core.js';
 import type {
   FaceDetectOutcome,
@@ -94,11 +97,15 @@ import {
   isConvertibleDoc,
   shadowDocFilesPaths,
 } from './docs.js';
+import { codeDependencyEdges } from './edges/readers.js';
+import { manifestRoots, readProjectConfigs } from './edges/refresh.js';
 import { type EnrichDeps, embedOnlyFile, enrichFile } from './enrich.js';
 import { buildEntitiesFromMetadata } from './entities.js';
 import { ensureFaceModels, installedFaceModels } from './face/catalog.js';
 import { clusterNewFaces, mergeFaceClusters, syncPersonEntities } from './face/clustering.js';
 import { buildFileContext } from './file-context.js';
+import { buildFileGraph } from './file-graph.js';
+import { buildFileInsight } from './file-insight.js';
 import { refreshGitStats } from './git-stats.js';
 import {
   type SearchImagesOpts,
@@ -838,10 +845,7 @@ export class ContentIndex {
       const files = index.allFiles().map((f) => f.path);
       if (!files.includes(req.file)) return empty;
 
-      const edges = resolveImportEdges(
-        files,
-        index.allImports().map((i) => ({ srcPath: i.srcPath, raw: i.raw })),
-      );
+      const edges = codeDependencyEdges(index);
       const fwd = new Map<string, string[]>();
       const rev = new Map<string, string[]>();
       const push = (m: Map<string, string[]>, k: string, v: string) => {
@@ -885,6 +889,24 @@ export class ContentIndex {
    * `indexed: false` model when the index hasn't been built yet.
    */
   async fileMap(projectId: string, req: FileMapRequest = {}): Promise<FileMapResponse> {
+    return this.buildMap(projectId, req, true);
+  }
+
+  /**
+   * The same model with nothing written: no `map_layout` rows, no
+   * `village.json`. For background readers that only want the per-file
+   * signals — the nightly codebase report used `fileMap` and founded a
+   * village in code folders whose owner had never opened one.
+   */
+  async fileMapSnapshot(projectId: string, req: FileMapRequest = {}): Promise<FileMapResponse> {
+    return this.buildMap(projectId, req, false);
+  }
+
+  private async buildMap(
+    projectId: string,
+    req: FileMapRequest,
+    persist: boolean,
+  ): Promise<FileMapResponse> {
     const opened = await this.open(projectId);
     if (!opened) {
       return {
@@ -900,12 +922,23 @@ export class ContentIndex {
       };
     }
     try {
-      return await buildFileMap(opened.index, opened.workspaceDir, {
-        scope: req.scope,
-        persist: true,
-        villageFile: this.cityStoreFor(projectId, opened.workspaceDir, opened.workspaceWritable),
-        userFacing: true,
-      });
+      return await buildFileMap(
+        opened.index,
+        opened.workspaceDir,
+        persist
+          ? {
+              scope: req.scope,
+              persist: true,
+              villageFile: this.cityStoreFor(
+                projectId,
+                opened.workspaceDir,
+                opened.workspaceWritable,
+              ),
+              userFacing: true,
+              ...(req.edgePolicy ? { edgePolicy: req.edgePolicy } : {}),
+            }
+          : { scope: req.scope, persist: false },
+      );
     } finally {
       opened.index.close();
     }
@@ -1997,6 +2030,38 @@ export class ContentIndex {
    * view. Keyed by the file's current content hash, so an edited file shows
    * nothing until it is read again rather than describing what it used to say.
    */
+  /**
+   * The dependency graph for a project view (see `file-graph.ts`). Leaves out
+   * what the workspace's Git ignore rules hide, as the Village does. A pure
+   * read: nothing is written, unlike `fileMap`.
+   */
+  async fileGraph(projectId: string, req: FileGraphRequest = {}): Promise<FileGraphResponse> {
+    const opened = await this.open(projectId);
+    if (!opened) return emptyFileGraph(req);
+    const { index, workspaceDir } = opened;
+    try {
+      const paths = index.allFiles().map((f) => f.path);
+      const [ignoredPaths, configs] = await Promise.all([
+        gitIgnoredPaths(workspaceDir, paths),
+        readProjectConfigs(workspaceDir, paths),
+      ]);
+      return buildFileGraph(index, req, { ignoredPaths, packageRoots: manifestRoots(configs) });
+    } finally {
+      index.close();
+    }
+  }
+
+  /** Everything the index knows about one file, for the shared inspector. */
+  async fileInsight(projectId: string, relPath: string): Promise<FileInsightResponse | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    try {
+      return buildFileInsight(opened.index, relPath);
+    } finally {
+      opened.index.close();
+    }
+  }
+
   async fileSummary(projectId: string, relPath: string): Promise<string | null> {
     const opened = await this.open(projectId);
     if (!opened) return null;
@@ -2764,3 +2829,23 @@ async function embeddableRaster(
 }
 
 const EMBED_RASTER_FORMATS = new Set(['png', 'jpg', 'jpeg']);
+
+/** The graph of a project with no index yet. */
+function emptyFileGraph(req: FileGraphRequest): FileGraphResponse {
+  return {
+    indexed: false,
+    builtAt: nowIso(),
+    kind: req.kind ?? 'code',
+    scope: req.scope ?? 'core',
+    resolved: false,
+    partial: false,
+    nodes: [],
+    edges: [],
+    externals: [],
+    folders: [],
+    packageRoots: [],
+    coverage: {},
+    signature: '',
+    truncated: null,
+  };
+}

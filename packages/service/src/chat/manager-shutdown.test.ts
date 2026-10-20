@@ -126,6 +126,26 @@ describe('ChatManager pooled-engine shutdown', () => {
     );
   });
 
+  it('retries a lazy router build that failed instead of replaying the failure', async () => {
+    const manager = makeManager();
+    const snapshot = { entries: [] };
+    const router = { snapshot: vi.fn(() => snapshot) } as unknown as EngineRouter;
+    const internals = manager as unknown as {
+      llamaCppModels: unknown;
+      buildEngineRouter: () => Promise<EngineRouter | null>;
+    };
+    internals.llamaCppModels = {};
+    const build = vi
+      .fn<() => Promise<EngineRouter | null>>()
+      .mockRejectedValueOnce(new Error("Cannot find module 'engine-router.js'"))
+      .mockResolvedValueOnce(router);
+    internals.buildEngineRouter = build;
+
+    await expect(manager.engineStatus()).rejects.toThrow('engine-router.js');
+    await expect(manager.engineStatus()).resolves.toBe(snapshot);
+    expect(build).toHaveBeenCalledTimes(2);
+  });
+
   it('tracks rejected background work without emitting a detached rejection', async () => {
     const manager = makeManager();
     manager.trackBackground(Promise.reject(new Error('expected background failure')));

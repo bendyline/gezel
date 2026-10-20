@@ -67,4 +67,57 @@ describe('parseRawMessage', () => {
     expect(msg.attachments.length).toBe(1);
     expect(msg.attachments[0]?.filename).toBe('note.txt');
   });
+
+  it('keeps a stable date and id when the Date header is unreadable', async () => {
+    // mailparser substitutes "now" for a Date it cannot parse, which used to
+    // re-date (and, with no Message-ID, re-identify) the message every fetch.
+    const raw = ['From: a@x.com', 'Subject: hi', 'Date: sometime last week', '', 'body'].join(
+      '\r\n',
+    );
+    const withFallback = { ...ctx, fallbackDate: '2026-05-01T08:00:00.000Z' };
+    const a = await parseRawMessage(raw, withFallback);
+    const b = await parseRawMessage(raw, withFallback);
+    expect(a.date).toBe('2026-05-01T08:00:00.000Z');
+    expect(a.messageId).toBe(b.messageId);
+    const noFallback = await parseRawMessage(raw, ctx);
+    expect(noFallback.date).toBe(new Date(0).toISOString());
+  });
+
+  it('threads on the first id of a multi-id In-Reply-To', async () => {
+    const raw = [
+      'From: a@x.com',
+      'Subject: Re: hi',
+      'Message-ID: <c@x.com>',
+      'In-Reply-To: <p1@x.com> <p2@x.com>',
+      '',
+      'body',
+    ].join('\r\n');
+    const msg = await parseRawMessage(raw, ctx);
+    expect(msg.inReplyTo).toBe('<p1@x.com>');
+    expect(msg.threadKey).toBe('<p1@x.com>');
+  });
+
+  it('skips inline parts with no filename (tracking pixels)', async () => {
+    const raw = [
+      'From: a@x.com',
+      'Subject: pixel',
+      'Message-ID: <px@x.com>',
+      'Content-Type: multipart/related; boundary="r1"',
+      '',
+      '--r1',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      '<p>Hi <img src="cid:pixel@x"></p>',
+      '--r1',
+      'Content-Type: image/gif',
+      'Content-ID: <pixel@x>',
+      'Content-Disposition: inline',
+      'Content-Transfer-Encoding: base64',
+      '',
+      'R0lGODlhAQABAAAAACw=',
+      '--r1--',
+    ].join('\r\n');
+    const msg = await parseRawMessage(raw, ctx);
+    expect(msg.attachments).toEqual([]);
+  });
 });

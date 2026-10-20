@@ -784,8 +784,7 @@ html[data-layout="mobile"]
       .chat-send-btn-icon,
       .chat-composer-recipient-trigger,
       .chat-composer-expand-btn,
-      .chat-narrate-btn,
-      .chat-task-btn,
+      .chat-composer-tool-btn,
       .chat-stop-btn,
       .chat-interrupt-btn
     ) {
@@ -799,8 +798,7 @@ html[data-layout="mobile"]
       .chat-send-btn-icon,
       .chat-composer-recipient-trigger,
       .chat-composer-expand-btn,
-      .chat-narrate-btn,
-      .chat-task-btn,
+      .chat-composer-tool-btn,
       .chat-stop-btn,
       .chat-interrupt-btn
     )::after {

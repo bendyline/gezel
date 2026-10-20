@@ -24,6 +24,7 @@ import {
   listProjectTypes,
   normalizeCodexPermissionMode,
   projectManagedWorkspaceWritable,
+  projectViewsTabDefault,
   resolveProjectTypeId,
 } from '@bendyline/gezel';
 import type {
@@ -93,6 +94,7 @@ import {
   projectFileSource,
   useFileMutations,
 } from '../components/file-browser/index.js';
+import { announceBoekwachterIssuesChanged } from '../components/file-inspector/tracked-issues.js';
 import {
   ARTIFACT_VIEW_MODES,
   type FileViewMode,
@@ -130,6 +132,8 @@ import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { peekApiRead } from '../shared-api-reads.js';
 import { useEffectiveTheme } from '../theme.js';
+import { OFFERED_PROJECT_VIEWS, preloadProjectView } from './project-views/registry.js';
+import { useProjectViews } from './project-views/useProjectViews.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
 import { ProjectOutsideInEditor } from './projects/ProjectOutsideInEditor.js';
 import {
@@ -143,7 +147,7 @@ const loadProjectChatModule = () => import('../components/ProjectChat.js');
 const loadProjectConnectionsModule = () => import('../components/ProjectConnectionsTab.js');
 const loadProjectMailModule = () => import('../components/ProjectMailTab.js');
 const loadDiffpackReviewModule = () => import('../components/diffpacks/DiffpackReviewView.js');
-const loadFileMapModule = () => import('./FileMapView.js');
+const loadProjectViewsModule = () => import('./project-views/ProjectViewsPanel.js');
 const loadHistoryModule = () => import('./HistoryView.js');
 const loadProjectGitHubModule = () => import('./ProjectGithubView.js');
 const loadProjectOverviewModule = () => import('./ProjectOverviewView.js');
@@ -164,8 +168,8 @@ const ProjectMailTab = lazy(() =>
 const DiffpackReviewView = lazy(() =>
   loadDiffpackReviewModule().then(({ DiffpackReviewView }) => ({ default: DiffpackReviewView })),
 );
-const FileMapView = lazy(() =>
-  loadFileMapModule().then(({ FileMapView }) => ({ default: FileMapView })),
+const ProjectViewsPanel = lazy(() =>
+  loadProjectViewsModule().then(({ ProjectViewsPanel }) => ({ default: ProjectViewsPanel })),
 );
 const HistoryView = lazy(() =>
   loadHistoryModule().then(({ HistoryView }) => ({ default: HistoryView })),
@@ -258,7 +262,7 @@ function preloadProjectTab(tab: ProjectTab): void {
       loading = loadProjectMailModule();
       break;
     case 'map':
-      loading = loadFileMapModule();
+      loading = loadProjectViewsModule();
       break;
     case 'overview':
       loading = loadProjectOverviewModule();
@@ -290,15 +294,20 @@ const PROJECT_TAB_VISIBILITY_OPTIONS: ReadonlyArray<{
   { key: 'approvals', label: 'Tools' },
   { key: 'workspace', label: 'Workspace' },
   { key: 'artifacts', label: 'Artifacts' },
-  { key: 'map', label: 'Village' },
+  { key: 'map', label: 'Views' },
 ];
 
-/** Missing overrides keep each tab's historical behavior. */
+/**
+ * Missing overrides keep each tab's historical behavior. `map` is the Views
+ * tab (the Village's old key): shown by default whenever a view fits.
+ */
 function projectTabIsVisible(
-  project: Pick<Project, 'tabVisibility' | 'projectTypeId' | 'detectedProjectType'>,
+  project: Pick<Project, 'tabVisibility' | 'projectTypeId' | 'detectedProjectType' | 'properties'>,
   tab: ConfigurableProjectTab,
 ): boolean {
-  if (tab === 'map') return project.tabVisibility?.map ?? isMappableProject(project);
+  if (tab === 'map') {
+    return project.tabVisibility?.map ?? projectViewsTabDefault(project, OFFERED_PROJECT_VIEWS);
+  }
   return project.tabVisibility?.[tab] !== false;
 }
 
@@ -360,22 +369,6 @@ function forgetLegacyOutputVisible(projectId: string): void {
   } catch {
     /* unavailable — nothing to retire */
   }
-}
-
-/**
- * The "Village" tab is for codebases and other file-heavy projects. We gate it
- * on the project's auto-detected type (recomputed each content-index scan from
- * the file mix): shown for code-ish / data types and for as-yet-unclassified
- * projects, hidden for the clearly text/media creative types where a settlement
- * of files isn't useful. It degrades gracefully (empty state) regardless.
- */
-const NON_MAPPABLE_TYPES = new Set(['content-writing', 'media-production', 'design-prototype']);
-function isMappableProject(p: {
-  projectTypeId?: string;
-  detectedProjectType?: { id: string };
-}): boolean {
-  const typeId = resolveProjectTypeId(p);
-  return !typeId || !NON_MAPPABLE_TYPES.has(typeId);
 }
 
 /** Whether the project should surface the Mail tab (email-typed or has a mailbox). */
@@ -472,6 +465,14 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   useEffect(() => {
     if (!showWorkInProgressFeatures && tab === 'mail') setTab('about');
   }, [showWorkInProgressFeatures, tab]);
+  const showViewsTab = useCallback(() => setTab('map'), []);
+  const projectViews = useProjectViews({
+    project: selected,
+    setProject: setSelected,
+    onError: setError,
+    onOpenRequested: showViewsTab,
+  });
+  const queueViewsRequest = projectViews.queueRequest;
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     try {
@@ -493,6 +494,21 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // panel.
   const fileTab: FileTab | null =
     tab === 'workspace' ? 'workspace' : tab === 'artifacts' ? 'artifacts' : null;
+  // A file that arrives from a link elsewhere (a chat reference, the night
+  // shift report, a search hit) is what the person came to read, so its tab
+  // opens with the tree folded away. The ask lasts one visit: leaving the tab
+  // or the project drops it, and the stored tree preference is never touched.
+  const [fileTreeFold, setFileTreeFold] = useState<{ tab: FileTab; requestId: number } | null>(
+    null,
+  );
+  const fileTreeFoldSeq = useRef(0);
+  const foldFileTreeFor = useCallback((source: FileTab) => {
+    fileTreeFoldSeq.current += 1;
+    setFileTreeFold({ tab: source, requestId: fileTreeFoldSeq.current });
+  }, []);
+  useEffect(() => {
+    setFileTreeFold((current) => (current && current.tab !== tab ? null : current));
+  }, [tab]);
   const [workspaceFiles, setWorkspaceFiles] = useState<FileEntry[]>([]);
   const [workspaceHtmlFiles, setWorkspaceHtmlFiles] = useState<string[]>([]);
   const [artifactFiles, setArtifactFiles] = useState<FileEntry[]>([]);
@@ -1189,11 +1205,18 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       setSelected(project);
       setBrowsingProjects(false);
       setOpenFile(null);
+      setFileTreeFold(null);
       setWorkspaceFiles([]);
       setWorkspaceHtmlFiles([]);
       setArtifactFiles([]);
       setWorkspaceIndexPaneOpen(false);
-      setTab(consumeProjectSection(id) ?? 'chat');
+      const section = consumeProjectSection(id);
+      if (section && section !== 'overview') {
+        setTab('map');
+        queueViewsRequest({ projectId: id, view: section.view, path: section.path });
+      } else {
+        setTab(section ?? 'chat');
+      }
       setWorkingDirDraft(project.workingDir ?? '');
       setGitHubUrlDraft(project.github?.url ?? '');
       setGitStatus('');
@@ -1206,7 +1229,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         }),
       );
     },
-    [refreshOutputFiles],
+    [queueViewsRequest, refreshOutputFiles],
   );
 
   // Open a specific file in the (already-selected) project. Takes an explicit
@@ -1290,12 +1313,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       if (!d?.path || !d.source) return;
       if (selected && (!d.projectId || d.projectId === selected.id)) {
         consumeOpenFile(selected.id);
+        foldFileTreeFor(d.source);
         void focusFile(selected.id, d.path, d.source, d.line, d.fromQuestion, d.startMs);
       }
     };
     window.addEventListener('gezel:open-file', onOpenFile);
     return () => window.removeEventListener('gezel:open-file', onOpenFile);
-  }, [selected, focusFile]);
+  }, [selected, focusFile, foldFileTreeFor]);
 
   // Detail-only mode: open the forced project on mount / change, then consume
   // any queued "open this file" intent the search left for this project.
@@ -1304,6 +1328,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     void openProject(forceProjectId).then(() => {
       const intent = consumeOpenFile(forceProjectId);
       if (intent) {
+        foldFileTreeFor(intent.source);
         void focusFile(
           forceProjectId,
           intent.path,
@@ -1314,7 +1339,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         );
       }
     });
-  }, [forceProjectId, openProject, focusFile]);
+  }, [forceProjectId, openProject, focusFile, foldFileTreeFor]);
 
   /**
    * Hook the dialog-driven create flow up to the rest of the page: refresh
@@ -2213,6 +2238,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               message,
             });
             await refreshWorkspaceIssueSurfaces();
+            announceBoekwachterIssuesChanged(selected.id);
             setWorkspaceIssueFixRequest(null);
             setTab('chat');
           }}
@@ -2339,7 +2365,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               <ProjectSectionTabs
                 value={tab}
                 onValueChange={(value) => setTab(value as ProjectTab)}
-                onPreload={(value) => preloadProjectTab(value as ProjectTab)}
+                onPreload={(value) => {
+                  preloadProjectTab(value as ProjectTab);
+                  if (value === 'map' && projectViews.view) preloadProjectView(projectViews.view);
+                }}
                 compact={effectiveCompact}
                 items={(
                   [
@@ -2401,10 +2430,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                       show: showWorkInProgressFeatures && isEmailProject(selected),
                     },
                     {
-                      value: 'map',
-                      label: 'Village',
-                      icon: 'village',
-                      show: projectTabIsVisible(selected, 'map'),
+                      ...projectViews.tabItem,
+                      show: projectTabIsVisible(selected, 'map') && projectViews.view !== null,
                     },
                     { value: 'about', label: 'Settings', icon: 'settings', show: true },
                   ] satisfies Array<ProjectSectionTab & { show: boolean }>
@@ -3054,6 +3081,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     <FileBrowserPane
                       source={fileSource}
                       layoutClassName={`project-files-layout-${fileTab}`}
+                      collapseTreeRequest={
+                        fileTreeFold?.tab === fileTab ? fileTreeFold.requestId : null
+                      }
                       entries={visibleActiveEntries}
                       truncated={
                         (fileTab === 'workspace' ? workspaceTruncated : artifactsTruncated) &&
@@ -3374,9 +3404,20 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     </ProjectPaneBoundary>
                   )}
 
-                  {tab === 'map' && (
+                  {tab === 'map' && projectViews.view && (
                     <ProjectPaneBoundary>
-                      <FileMapView projectId={selected.id} hasGitHub={!!selected.github} />
+                      <ProjectViewsPanel
+                        project={selected}
+                        view={projectViews.view}
+                        available={projectViews.available}
+                        onChooseView={projectViews.chooseView}
+                        selection={projectViews.selection}
+                        onSelectPath={projectViews.selectPath}
+                        compact={effectiveCompact}
+                        // A fix is drafted as a change proposal the user
+                        // applies, so it needs no writability gate here either.
+                        onFixIssue={(path, issue) => setWorkspaceIssueFixRequest({ path, issue })}
+                      />
                     </ProjectPaneBoundary>
                   )}
                   {tab === 'overview' && (

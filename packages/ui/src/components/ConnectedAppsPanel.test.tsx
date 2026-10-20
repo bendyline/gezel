@@ -30,8 +30,31 @@ const getCodexSetupStatus = vi.fn(
   }),
 );
 
+const harnessClient = (client: string, label: string, state: string) => ({
+  client,
+  label,
+  state,
+  reasons: [],
+  canConfigure: true,
+  canRemove: false,
+});
+const getHarnessTools = vi.fn(async () => ({
+  config: { enabled: true, memory: 'save', images: 'local', newFolders: 'add' },
+  clients: [
+    harnessClient('claude-code', 'Claude Code', 'not-configured'),
+    harnessClient('claude-desktop', 'Claude Desktop', 'not-configured'),
+    harnessClient('codex', 'Codex', 'not-configured'),
+    harnessClient('cursor', 'Cursor', 'conflict'),
+    harnessClient('vscode', 'VS Code', 'not-configured'),
+  ],
+  connections: [],
+  blocked: [],
+}));
+
 vi.mock('../api.js', () => ({
   api: {
+    getHarnessTools,
+    listProjects: async () => ({ projects: [] }),
     getBaseUrl: () => 'http://127.0.0.1:3333',
     authHeader: () => ({ Authorization: 'Bearer test-token' }),
     getConfig,
@@ -108,6 +131,20 @@ describe('ConnectedAppsPanel', () => {
               createdAt: Date.now(),
               lastUsedAt: Date.now(),
             },
+            {
+              appId: 'session:chat-1',
+              appName: 'session:chat-1',
+              scopes: ['session'],
+              createdAt: Date.now(),
+              lastUsedAt: Date.now(),
+            },
+            {
+              appId: 'harness:cursor:repo',
+              appName: 'Cursor',
+              scopes: ['harness'],
+              createdAt: Date.now(),
+              lastUsedAt: Date.now(),
+            },
           ],
           grants: [
             {
@@ -135,9 +172,12 @@ describe('ConnectedAppsPanel', () => {
     const tabs = within(await screen.findByRole('tablist', { name: 'Integrations' })).getAllByRole(
       'tab',
     );
-    expect(tabs.map((tab) => tab.textContent)).toEqual([
+    expect(tabs.map((tab) => tab.textContent?.replace(', needs attention', ''))).toEqual([
       'Overview',
+      'Claude Code',
+      'Claude Desktop',
       'Codex',
+      'Cursor',
       'VS Code',
       'OpenCode',
       'pi',
@@ -185,6 +225,12 @@ describe('ConnectedAppsPanel', () => {
     expect(screen.getByRole('tab', { name: 'VS Code' })).not.toHaveAttribute('title');
   });
 
+  it('flags a tab whose Gezel tools setup needs attention', async () => {
+    render(<ConnectedAppsPanel />);
+    expect(await screen.findByRole('tab', { name: 'Cursor, needs attention' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Claude Code' })).toBeInTheDocument();
+  });
+
   it('keeps pending requests above the tabs so every tab shows them', async () => {
     render(<ConnectedAppsPanel />);
     const request = await screen.findByText(/wants command-line control/);
@@ -204,6 +250,8 @@ describe('ConnectedAppsPanel', () => {
     expect(within(desktopRow!).getByText('ui')).toBeInTheDocument();
     expect(within(desktopRow!).getByText('openai')).toBeInTheDocument();
     expect(within(desktopRow!).getByLabelText('Revoke Gezel Desktop')).toBeInTheDocument();
+    expect(within(table).queryByText('session:chat-1')).not.toBeInTheDocument();
+    expect(within(table).queryByText('harness:cursor:repo')).not.toBeInTheDocument();
   });
 
   it('says a Gezel add-in reconnects on its own when revoked, and how to remove it', async () => {

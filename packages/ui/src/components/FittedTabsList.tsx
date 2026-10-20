@@ -1,7 +1,37 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { Tabs, Tooltip } from '../primitives/index.js';
+import {
+  type KeyboardEvent,
+  type MouseEvent,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { DropdownChevron, DropdownMenu, Tabs, Tooltip } from '../primitives/index.js';
 import { SectionIcon, type SectionIconName } from './SectionIcon.js';
 import '../styles/fitted-tabs.css';
+
+export interface FittedTabMenuItem {
+  value: string;
+  label: string;
+  hint?: string;
+  icon?: SectionIconName;
+}
+
+/**
+ * A tab that names its current choice and opens a menu of the others (the
+ * project Views tab). Clicking the tab when it isn't current only selects
+ * it; clicking it, or pressing Enter, Space or Down on it, once it is current
+ * opens the menu.
+ */
+export interface FittedTabMenu {
+  /** Accessible name of the menu ("Choose a view"). */
+  label: string;
+  value: string;
+  items: readonly FittedTabMenuItem[];
+  onSelect: (value: string) => void;
+  /** Warm whatever an item opens before it is chosen. */
+  onPreview?: (value: string) => void;
+}
 
 export interface FittedTab {
   value: string;
@@ -9,6 +39,7 @@ export interface FittedTab {
   icon: SectionIconName;
   disabled?: boolean;
   testId?: string;
+  menu?: FittedTabMenu;
 }
 
 /**
@@ -142,7 +173,7 @@ export function FittedTabsList({
   }, [measure]);
 
   const signatureKey = items
-    .map((item) => `${item.value}\u0000${item.label}\u0000${item.icon}`)
+    .map((item) => `${item.value}\u0000${item.label}\u0000${item.icon}\u0000${item.menu ? 1 : 0}`)
     .join('\u0001');
   // biome-ignore lint/correctness/useExhaustiveDependencies: the probe row is re-rendered from these, so they are what can change the answer.
   useLayoutEffect(() => {
@@ -150,6 +181,11 @@ export function FittedTabsList({
   }, [measure, signatureKey, activeIndex]);
 
   const triggerClass = `fitted-tab${triggerClassName ? ` ${triggerClassName}` : ''}`;
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  // Read on click: whether the tab was already current when the press began,
+  // before Radix's own mousedown handler selected it.
+  const wasCurrentOnPress = useRef(false);
+  const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
 
   return (
     <Tooltip.Provider delayDuration={200}>
@@ -159,21 +195,129 @@ export function FittedTabsList({
         data-fit={fit}
       >
         {items.map((item) => {
-          const face = faceFor(fit, item.value === value);
-          return (
+          const current = item.value === value;
+          const face = faceFor(fit, current);
+          const menu = item.menu;
+          const open = menu !== undefined && openMenu === item.value;
+          const trigger = (
             <Tabs.Trigger
               key={item.value}
+              ref={(node: HTMLButtonElement | null) => {
+                if (node) triggerRefs.current.set(item.value, node);
+                else triggerRefs.current.delete(item.value);
+              }}
               value={item.value}
               disabled={item.disabled}
-              className={triggerClass}
+              className={menu ? `${triggerClass} fitted-tab--menu` : triggerClass}
               data-face={face}
               data-testid={item.testId}
+              aria-haspopup={menu ? 'menu' : undefined}
+              aria-expanded={menu ? open : undefined}
               onPointerEnter={onPreload ? () => onPreload(item.value) : undefined}
               onFocus={onPreload ? () => onPreload(item.value) : undefined}
               onPointerDown={onPreload ? () => onPreload(item.value) : undefined}
+              onMouseDown={
+                menu
+                  ? () => {
+                      wasCurrentOnPress.current = current;
+                    }
+                  : undefined
+              }
+              onClick={
+                menu
+                  ? (event: MouseEvent<HTMLButtonElement>) => {
+                      // `detail` is 0 for a keyboard-made click; the keydown
+                      // below already decided that one.
+                      if (event.detail > 0 && wasCurrentOnPress.current) setOpenMenu(item.value);
+                      wasCurrentOnPress.current = false;
+                    }
+                  : undefined
+              }
+              onKeyDown={
+                menu
+                  ? (event: KeyboardEvent<HTMLButtonElement>) => {
+                      if (!current) return;
+                      if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        setOpenMenu(item.value);
+                      }
+                    }
+                  : undefined
+              }
             >
               <TabFace item={item} face={face} />
+              {menu && <DropdownMenu.AnchorTrigger className="fitted-tab-menu-anchor" />}
             </Tabs.Trigger>
+          );
+          if (!menu) return trigger;
+          return (
+            <DropdownMenu.Root
+              key={item.value}
+              open={open}
+              onOpenChange={(next) => setOpenMenu(next ? item.value : null)}
+            >
+              {trigger}
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="app-nav-menu fitted-tab-menu"
+                  align="start"
+                  sideOffset={4}
+                  // Radix labels the menu by its trigger, which here is the
+                  // empty anchor; the menu's own name says what it chooses.
+                  aria-labelledby={undefined}
+                  aria-label={menu.label}
+                  onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    triggerRefs.current.get(item.value)?.focus();
+                  }}
+                >
+                  <DropdownMenu.RadioGroup value={menu.value} onValueChange={menu.onSelect}>
+                    {menu.items.map((option) => (
+                      <DropdownMenu.RadioItem
+                        key={option.value}
+                        value={option.value}
+                        className="app-nav-menu-item fitted-tab-menu-item"
+                        onPointerEnter={
+                          menu.onPreview ? () => menu.onPreview?.(option.value) : undefined
+                        }
+                        onFocus={menu.onPreview ? () => menu.onPreview?.(option.value) : undefined}
+                      >
+                        <span className="fitted-tab-menu-check" aria-hidden="true">
+                          <DropdownMenu.ItemIndicator>
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 12 12"
+                              fill="none"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="m2.25 6.25 2.25 2.25 5.25-5.25"
+                                stroke="currentColor"
+                                strokeWidth="1.6"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </DropdownMenu.ItemIndicator>
+                        </span>
+                        {option.icon && (
+                          <span className="fitted-tab-menu-icon" aria-hidden="true">
+                            <SectionIcon name={option.icon} size={16} />
+                          </span>
+                        )}
+                        <span className="fitted-tab-menu-text">
+                          <span className="fitted-tab-menu-label">{option.label}</span>
+                          {option.hint && (
+                            <span className="fitted-tab-menu-hint">{option.hint}</span>
+                          )}
+                        </span>
+                      </DropdownMenu.RadioItem>
+                    ))}
+                  </DropdownMenu.RadioGroup>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
           );
         })}
         <div ref={probeRef} className="fitted-tabs-probe" aria-hidden="true">
@@ -196,6 +340,9 @@ export function FittedTabsList({
                         label for text queries or find-in-page to land on. */}
                     {face !== 'icon' && (
                       <span className="fitted-tab-label" data-text={item.label} />
+                    )}
+                    {face !== 'icon' && item.menu && (
+                      <DropdownChevron className="fitted-tab-chevron" />
                     )}
                   </span>
                 </span>
@@ -229,6 +376,9 @@ function TabFace({ item, face }: { item: FittedTab; face: Face }) {
           <span className={face === 'icon' ? 'fitted-tab-label sr-only' : 'fitted-tab-label'}>
             {item.label}
           </span>
+          {/* Decorative: the tab itself opens the menu, and says so through
+              aria-haspopup. Drawn in the same faces the probe measures. */}
+          {face !== 'icon' && item.menu && <DropdownChevron className="fitted-tab-chevron" />}
         </span>
       </Tooltip.Trigger>
       {showHint && <Tooltip.Content side="bottom">{item.label}</Tooltip.Content>}

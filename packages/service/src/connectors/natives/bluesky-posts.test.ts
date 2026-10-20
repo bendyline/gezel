@@ -202,6 +202,11 @@ describe('BlueskyPostsAdapter posts scope', () => {
     expect(first.cursor).toEqual({
       sinceTs: T3,
       metricsRefreshedAt: '2026-08-12T12:00:00.000Z',
+      recent: [
+        ['c', Date.parse(T3)],
+        ['b', Date.parse(T2)],
+        ['a', Date.parse(T1)],
+      ],
     });
 
     // One hour later a new post lands; the metrics refresh (6h) is not due.
@@ -212,7 +217,62 @@ describe('BlueskyPostsAdapter posts scope', () => {
     expect(second.cursor).toEqual({
       sinceTs: T4,
       metricsRefreshedAt: '2026-08-12T12:00:00.000Z',
+      recent: [
+        ['d', Date.parse(T4)],
+        ['c', Date.parse(T3)],
+        ['b', Date.parse(T2)],
+        ['a', Date.parse(T1)],
+      ],
     });
+  });
+
+  it('tombstones a post the engagement re-walk no longer finds, with its readings', async () => {
+    const { adapter, state } = await readyAdapter();
+    state.feed = [feedPost('c', T3), feedPost('b', T2), feedPost('a', T1)];
+    const first = await adapter.listChangesSince('posts', undefined);
+
+    state.feed = state.feed.filter((item) => !JSON.stringify(item).includes('post/b'));
+    state.now = new Date('2026-08-12T19:00:00.000Z');
+    const second = await adapter.listChangesSince('posts', first.cursor);
+    const uriB = `at://${DID}/app.bsky.feed.post/b`;
+    expect(second.removed).toEqual([uriB, `metrics:${uriB}:2026-08-12`]);
+    expect(postIds(second)).toEqual([
+      `at://${DID}/app.bsky.feed.post/c`,
+      `at://${DID}/app.bsky.feed.post/a`,
+    ]);
+  });
+
+  it('continues a walk that outgrew the round from the exact entry it stopped before', async () => {
+    const { adapter, state } = await readyAdapter({ metricsHistory: false });
+    state.feed = [feedPost('a', T1)];
+    const first = await adapter.listChangesSince('posts', undefined);
+
+    state.feed = [feedPost('d', T4), feedPost('c', T3), feedPost('b', T2), ...state.feed];
+    state.now = new Date('2026-08-12T13:00:00.000Z');
+    const round1 = await adapter.listChangesSince('posts', first.cursor, { limit: 2 });
+    expect(postIds(round1)).toEqual([
+      `at://${DID}/app.bsky.feed.post/d`,
+      `at://${DID}/app.bsky.feed.post/c`,
+    ]);
+    expect(round1.partial).toBe(true);
+    // The high-water mark holds until the walk completes.
+    expect((round1.cursor as { sinceTs?: string }).sinceTs).toBe(T1);
+
+    const round2 = await adapter.listChangesSince('posts', round1.cursor, { limit: 2 });
+    expect(postIds(round2)).toEqual([`at://${DID}/app.bsky.feed.post/b`]);
+    expect(round2.partial).toBeUndefined();
+    expect((round2.cursor as { sinceTs?: string; walk?: unknown }).sinceTs).toBe(T4);
+    expect((round2.cursor as { walk?: unknown }).walk).toBeUndefined();
+  });
+
+  it('budgets engagement-history refs to the round so posts are never displaced', async () => {
+    const { adapter, state } = await readyAdapter();
+    state.feed = [feedPost('c', T3), feedPost('b', T2), feedPost('a', T1)];
+    const roomForOne = await adapter.listChangesSince('posts', undefined, { limit: 4 });
+    expect(postIds(roomForOne)).toHaveLength(3);
+    expect(metricRefs(roomForOne).map((r) => r.id)).toEqual([
+      `metrics:at://${DID}/app.bsky.feed.post/c:2026-08-12`,
+    ]);
   });
 
   it('re-walks the metrics window when due, refreshing engagement in place, and restamps', async () => {
@@ -318,8 +378,10 @@ describe('BlueskyPostsAdapter metrics history', () => {
       title: 'Engagement on 2026-08-12: post c',
       date: '2026-08-12T12:00:00.000Z',
       platform: 'bluesky',
+      direction: 'inbound',
       post_id: URI_C,
       permalink: `https://bsky.app/profile/${HANDLE}/post/c`,
+      url: `https://bsky.app/profile/${HANDLE}/post/c`,
       likes: '2',
     });
     // The observation stamp matches the post's metrics_updated_at.

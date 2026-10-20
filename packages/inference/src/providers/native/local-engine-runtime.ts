@@ -297,11 +297,21 @@ export class LocalEngineRuntime {
     if (this.engineRouterCache) return this.engineRouterCache;
     if (!this.llamaCppModels && !this.ds4Models && !this.mlxModels) return null;
     if (this.engineRouterInitPromise) return this.engineRouterInitPromise;
-    this.engineRouterInitPromise = this.buildEngineRouter().then((r) => {
-      this.engineRouterCache = r;
-      return r;
-    });
-    return this.engineRouterInitPromise;
+    const pending = this.buildEngineRouter().then(
+      (r) => {
+        this.engineRouterCache = r;
+        return r;
+      },
+      (err: unknown) => {
+        // A failed build must not be cached. One that ran while a dev rebuild
+        // had emptied dist/ failed every later local turn with "Cannot find
+        // module …engine-router.js" until the app restarted (2026-10-19).
+        if (this.engineRouterInitPromise === pending) this.engineRouterInitPromise = null;
+        throw err;
+      },
+    );
+    this.engineRouterInitPromise = pending;
+    return pending;
   }
 
   protected async buildEngineRouter(): Promise<import('./engine-router.js').EngineRouter | null> {

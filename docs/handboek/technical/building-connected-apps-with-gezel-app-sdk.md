@@ -17,7 +17,7 @@ This differs from `@bendyline/gezel-sdk`, whose scripts run *inside* Gezel's san
 
 If the experience should live inside a Gezel project as a custom crew, dashboard, craftbooks, scripts, and data, see [Building AI Apps inside Gezel](building-ai-apps-inside-gezel.md) instead.
 
-The [Connected apps](../conceptual/connected-apps.md) article explains what the user sees. This article covers the developer side.
+The [Integrations](../conceptual/connected-apps.md) article explains what the user sees. This article covers the developer side.
 
 For a worked editor integration, see [How DocBlocks uses Gezel for text AI](docblocks-text-ai-with-gezel.md), including private inference hosting, streamed drafts, reference knowledge, and opportunities to simplify the SDK boundary.
 
@@ -78,7 +78,7 @@ Call `app.models()` rather than hardcoding a model id. The response is the autho
 
 ## Consent and scopes
 
-Every connection has a stable `appId`, a user-visible name, and one or more scopes. The user can review and revoke it under **Settings → Connected Apps**.
+Every connection has a stable `appId`, a user-visible name, and one or more scopes. The user can review and revoke it under **Settings → Integrations**.
 
 | Scope | Use it for | Approval |
 | --- | --- | --- |

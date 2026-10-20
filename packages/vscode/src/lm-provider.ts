@@ -30,10 +30,10 @@ import type { Logger } from './log.js';
  * raw model with no character. This is what makes the integration feel
  * native rather than "another OpenAI proxy."
  *
- * Tool calling: the underlying `/v1/chat/completions` does not yet
- * forward tool definitions through to the gezel — see Phase 6 deferred
- * work. Capabilities flag `toolCalling: false` until the ephemeral MCP
- * bridge lands.
+ * Tool calling: VS Code's tools are offered to the gezel and run by VS Code
+ * (`toolCalling: true`, caller-executed through `/v1`). Gezel's own tools
+ * reach VS Code the other way, through the MCP server `mcp-provider.ts`
+ * registers.
  */
 interface GezelEntry {
   id: string;

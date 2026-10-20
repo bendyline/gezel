@@ -49,7 +49,7 @@ const NATIVE_AGENT_LOOP_PROVIDERS = new Set(['anthropic-cli', 'codex-cli']);
  * and returns assistant text/tool calls in Responses wire shapes. The route
  * intentionally does not create a Gezel chat session or attach Gezel MCP.
  *
- * In the full service, auth is mounted in `server.ts`: the Connected Apps
+ * In the full service, auth is mounted in `server.ts`: the Integrations
  * master switch, bearer authentication, and the `openai` scope all apply. Codex can therefore use
  * an app-scoped token without ever learning the daemon's root credential.
  */

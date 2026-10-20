@@ -159,7 +159,7 @@ publish their actual address through the user's runtime directory, where the
 next discovery finds them.
 
 Gezel's own desktop app and CLI use `authorizeLocalOwner()`, which connects
-as the user who owns the daemon without a Connected Apps consent request.
+as the user who owns the daemon without an app consent request.
 Third-party integrations must use `authorizeLocal()`; the owner surface is not
 an app-consent bypass. Likewise, `gezelAddIn: true` is reserved for Gezel's own
 add-ins (Office, LibreOffice, VS Code): the daemon refuses it for any other app

@@ -1,10 +1,18 @@
 import { z } from 'zod';
+import { PoppetjeSchema } from '../poppetje/schema.js';
 
 /** A bounded, disposable reading copy. Never carries credentials or live actions. */
 export const StartupHomeSnapshotSchema = z.object({
   version: z.literal(1),
   savedAt: z.string(),
-  meester: z.object({ id: z.string().max(200), name: z.string().max(200) }).nullable(),
+  meester: z
+    .object({
+      id: z.string().max(200),
+      name: z.string().max(200),
+      poppetje: PoppetjeSchema.optional(),
+    })
+    .nullable(),
+  showPoppetjes: z.boolean().optional(),
   theme: z.enum(['system', 'light', 'dark']).default('system'),
   sidebar: z.enum(['left', 'right']).default('right'),
   status: z
@@ -23,6 +31,9 @@ export const StartupHomeSnapshotSchema = z.object({
     .object({
       windowEnd: z.string(),
       completed: z.number().int().nonnegative(),
+      reportCount: z.number().int().nonnegative().optional(),
+      proposals: z.number().int().nonnegative().optional(),
+      actions: z.number().int().nonnegative().optional(),
       reports: z
         .array(
           z.object({
