@@ -32,6 +32,7 @@ import {
   incompleteTranscripts,
   inflightDeferMsForEngine,
   isHarnessInterventionSettling,
+  isMockDocblocksCatalogFile,
   largeModelKvFallback,
   linkUvTreeIntoTrial,
   llamaCppEvalLaunchOverridesForModel,
@@ -3042,5 +3043,18 @@ describe('linkUvTreeIntoTrial', () => {
       log: () => {},
     });
     await expect(readFile(join(root, 'trial-b', 'engines', 'uv', 'x'))).rejects.toThrow();
+  });
+});
+
+// 2026-10-21: the daemon's bundled DocBlocks shadowed the eval mock, so the
+// runner turns the bundled one off for exactly the trials that mock it.
+describe('isMockDocblocksCatalogFile', () => {
+  it('matches the mock DocBlocks catalog entry and nothing else', () => {
+    expect(isMockDocblocksCatalogFile('toolsets/do/docblocks/manifest.json')).toBe(true);
+    expect(isMockDocblocksCatalogFile('toolsets/do/docblocks/versions/1.0.0/manifest.json')).toBe(
+      true,
+    );
+    expect(isMockDocblocksCatalogFile('toolsets/mo/mock-mcp-linear/manifest.json')).toBe(false);
+    expect(isMockDocblocksCatalogFile('toolsets/do/docblocks-extra/manifest.json')).toBe(false);
   });
 });

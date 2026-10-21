@@ -424,6 +424,31 @@ describe('groundText', () => {
     expect(status('The pipeline ran 13 stages.')).toBe('uncited');
   });
 
+  // 2026-10-21 sweep (Qwen 3.8 27B productivity): each sentence restates its
+  // evidence and was refused.
+  it('reads checklists, slash options, questions, weekdays, ISO months and percent rates as written', () => {
+    const ev = [
+      {
+        n: 1,
+        text: '{"control_rate": 0.12, "variant_rate": 0.1325, "relative_lift": 0.1042}\nlaunch_date: 2026-09-01\n{"start": "2026-10-23T09:00", "title": "Focus block"}\nweekly sync on Tuesdays',
+      },
+    ];
+    const status = (text: string) => groundText(text, ev).sentences[0]?.status;
+    expect(status('[ ] Report conversion lift as both absolute and relative.')).toBe('non-factual');
+    expect(status('State the decision (Ship / Do not ship / Inconclusive) up front.')).toBe(
+      'non-factual',
+    );
+    expect(status('Does the Tuesday weekly sync still hold?')).toBe('unattributed');
+    expect(status('The launch moved to September.')).toBe('unattributed');
+    expect(status('The launch moved to November.')).toBe('uncited');
+    expect(status('The focus block lands on Friday.')).toBe('unattributed');
+    expect(status('The focus block lands on Saturday.')).toBe('uncited');
+    expect(status('Conversion rose from 12.00% to 13.25%, a 10.42% relative lift.')).toBe(
+      'unattributed',
+    );
+    expect(status('Conversion rose to 14.00%.')).toBe('uncited');
+  });
+
   it('matches thousands separators and spelled small numbers', () => {
     const ev = [{ n: 1, text: 'The estate covered 1,426 acres and two mills.' }];
     expect(

@@ -2,8 +2,9 @@ import { requireOrderedSections } from '@bendyline/gezel/checks';
 import { postMissingDeliverableFeedback, postSniffFeedback } from '../sniff-feedback.ts';
 import { type SniffResult, foldTypography } from '../success-check.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
-import { provisionScenarioGezel, readProjectToolTrace } from './helpers.ts';
+import { projectTurnInProgress, provisionScenarioGezel, readProjectToolTrace } from './helpers.ts';
 import {
+  provenanceAwaitsCommit,
   provenanceShellOverwritesPath,
   provenanceShellReadPrecedesMutation,
   provenanceToolArgumentText,
@@ -448,8 +449,13 @@ function conflictDiscussionEntries(markdown: string): string[] {
  * boundaries separate competing assertions.
  */
 function assertionClauses(markdown: string): string[] {
+  // A quoted source is one assertion however many sentences it holds:
+  // `memo-engineering.md`: "...takes six weeks. This memo SUPERSEDES... the
+  // launch date is 2026-09-01." split at "weeks." and lost its file
+  // (2026-10-20, DeepSeek V4.1).
   return markdown
     .replace(/\s*\n\s*/g, ' ')
+    .replace(/"[^"]{1,600}"/g, (quote) => quote.replace(/[.!?;](?=\s)/g, '\u2024'))
     .split(/(?:[.!?;]\s+|,\s*(?:but|while|whereas)\s+|\s+(?:but|while|whereas)\s+)/i)
     .map((clause) => clause.trim())
     .filter(Boolean);
@@ -553,6 +559,7 @@ function sourceSupportFailures(markdown: string): string[] {
 export function checkSynthesis(
   rawMarkdown: string,
   toolTrace: readonly SynthesisToolCall[],
+  opts: { turnInProgress?: boolean } = {},
 ): SniffResult {
   const markdown = foldTypography(rawMarkdown);
   const signals: string[] = [];
@@ -622,7 +629,8 @@ export function checkSynthesis(
 
   const provenance = checkSynthesisReadProvenance(toolTrace);
   if (provenance.ok) signals.push('source-reads-grounded');
-  else fail(provenance.detail);
+  else if (!provenanceAwaitsCommit(provenance, opts.turnInProgress === true))
+    fail(provenance.detail);
 
   const citations = citedClaimCount(markdown);
   if (citations >= 6) signals.push('citations');
@@ -752,9 +760,10 @@ export const conflictSynthesisScenario: EvalScenario = {
       logChanged('project', '[scenario] synthesis project not present yet');
       return { done: false };
     }
-    const [markdown, toolTrace] = await Promise.all([
+    const [markdown, toolTrace, turnInProgress] = await Promise.all([
       readWorkspaceText(client, projectId, SYNTHESIS_PATH),
       readProjectToolTrace(client, projectId),
+      projectTurnInProgress(client, projectId),
     ]);
     if (markdown === null) {
       logChanged('sniff', `[scenario] ${SYNTHESIS_PATH} not present yet`);
@@ -774,7 +783,7 @@ export const conflictSynthesisScenario: EvalScenario = {
       );
       return { done: false };
     }
-    const check = checkSynthesis(markdown, toolTrace);
+    const check = checkSynthesis(markdown, toolTrace, { turnInProgress });
     logChanged(
       'sniff',
       `[scenario] conflict-synthesis bytes=${markdown.length} score=${check.score}/${check.scoreMax} signals=${check.signals.join(',') || 'none'}${check.failReason ? ` failReason="${check.failReason.replace(/\s+/g, ' ')}"` : ''}`,

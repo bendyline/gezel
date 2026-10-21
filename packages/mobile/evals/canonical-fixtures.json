@@ -44,7 +44,7 @@
   {
     "id": "conflict-synthesis",
     "sourceFile": "conflict-synthesis",
-    "sourceSha256": "eeae8b1ef702e738886d5319336a66e586fa7c03c7e23a9bdec11eaac72c9afc",
+    "sourceSha256": "65eacb2bd5f27a0b6b0794f6fe83154ba8df6779fcfb569a773e28c3c23a28bf",
     "timeoutMs": 1800000,
     "kind": "specialist",
     "project": {
@@ -274,7 +274,7 @@
   {
     "id": "ops-runbook-anomaly",
     "sourceFile": "ops-runbook",
-    "sourceSha256": "fe01c06ca9a144bffea503e56b7fb42eb1de5d567fd80753d930ca2e8536ec0f",
+    "sourceSha256": "52687c2be1132083d82b47cc39f55a86e18a343966abfd29f2839487f26518b5",
     "timeoutMs": 2100000,
     "kind": "specialist",
     "project": {

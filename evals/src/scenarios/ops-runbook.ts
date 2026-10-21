@@ -1,8 +1,9 @@
 import { postMissingDeliverableFeedback, postSniffFeedback } from '../sniff-feedback.ts';
 import type { SniffResult } from '../success-check.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
-import { provisionScenarioGezel, readProjectToolTrace } from './helpers.ts';
+import { projectTurnInProgress, provisionScenarioGezel, readProjectToolTrace } from './helpers.ts';
 import {
+  provenanceAwaitsCommit,
   provenanceShellOverwritesPath,
   provenanceShellReadPrecedesMutation,
   provenanceToolArgumentText,
@@ -345,6 +346,8 @@ export function checkRunbookExecution(input: {
   haltReport: string | null;
   workspacePaths: string[];
   toolTrace: RunbookToolCall[];
+  /** A turn is still running, so its tool calls are not in the trace yet. */
+  turnInProgress?: boolean;
 }): SniffResult {
   const signals: string[] = [];
   let failReason: string | undefined;
@@ -453,7 +456,8 @@ export function checkRunbookExecution(input: {
 
   const provenance = checkRunbookReadProvenance(input.toolTrace);
   if (provenance.ok) signals.push('source-reads-grounded');
-  else fail(provenance.detail);
+  else if (!provenanceAwaitsCommit(provenance, input.turnInProgress === true))
+    fail(provenance.detail);
 
   const requiredCount = 1 + tokens.length + 1 + 1 + 1;
   return {
@@ -647,11 +651,12 @@ export const opsRunbookScenario: EvalScenario = {
       logChanged('project', '[scenario] maintenance project not present yet');
       return { done: false };
     }
-    const [runlog, haltReport, workspacePaths, toolTrace] = await Promise.all([
+    const [runlog, haltReport, workspacePaths, toolTrace, turnInProgress] = await Promise.all([
       readWorkspaceText(client, projectId, RUNLOG_PATH),
       readWorkspaceText(client, projectId, HALT_REPORT_PATH),
       listWorkspacePaths(client, projectId),
       readProjectToolTrace(client, projectId),
+      projectTurnInProgress(client, projectId),
     ]);
     if (workspacePaths === null) {
       logChanged(
@@ -678,7 +683,13 @@ export const opsRunbookScenario: EvalScenario = {
       );
       return { done: false };
     }
-    const check = checkRunbookExecution({ runlog, haltReport, workspacePaths, toolTrace });
+    const check = checkRunbookExecution({
+      runlog,
+      haltReport,
+      workspacePaths,
+      toolTrace,
+      turnInProgress,
+    });
     const bytes = (runlog?.length ?? 0) + (haltReport?.length ?? 0);
     logChanged(
       'sniff',

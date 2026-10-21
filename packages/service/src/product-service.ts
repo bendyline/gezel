@@ -411,7 +411,12 @@ export async function startProductService(
     external,
     serviceRole,
     privateUserHome,
-    bundledToolsets: [bundledDocblocksToolset()],
+    // The bundled DocBlocks is a system toolset, which a project install of
+    // the same id cannot shadow, so an eval that mocks DocBlocks turns it off.
+    // With it on, every DocBlocks scenario talked to the real CLI and the mock
+    // logged no calls (2026-10-21 sweep).
+    bundledToolsets:
+      process.env.GEZEL_NO_BUNDLED_DOCBLOCKS === '1' ? [] : [bundledDocblocksToolset()],
   });
   await recoverTypedProjectCreations(store);
   await store.ensureLayout();

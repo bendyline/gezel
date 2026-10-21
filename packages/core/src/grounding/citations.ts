@@ -176,10 +176,24 @@ const SMALL_NUMBERS = [
 
 /** Capitalized words that open clauses rather than name anything. */
 const COMMON_CAPITALIZED = new Set(
-  'a an the and but or nor so yet for if when while after before during although though because since until unless as at by from in into of on onto to with without within he she it they we you i his her its their our your my this that these those there here then today tonight yesterday tomorrow later earlier meanwhile however instead still also each every both either neither many most some few all one two three no not yes later once soon now who what where which why how'.split(
+  'a an the and but or nor so yet for if when while after before during although though because since until unless as at by from in into of on onto to with without within he she it they we you i his her its their our your my this that these those there here then today tonight yesterday tomorrow later earlier meanwhile however instead still also each every both either neither many most some few all one two three no not yes later once soon now who what where which why how do does did is are was were be been being am has have had will would can could should shall may might must'.split(
     ' ',
   ),
 );
+/**
+ * A weekday is also stated by an ISO date that falls on it: calendar evidence
+ * carries dates, so "Friday is yours" was refused against `2026-10-23`
+ * entries (2026-10-21, week-plan on Qwen 3.8 27B).
+ */
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+function weekdayOfIsoDate(evidence: string, weekday: number): boolean {
+  for (const m of evidence.matchAll(/(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)/g)) {
+    const date = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    if (!Number.isNaN(date.getTime()) && date.getUTCDay() === weekday) return true;
+  }
+  return false;
+}
 /**
  * Technical acronyms are vocabulary, not names a source must state: "HTTP
  * 504" was refused because the chat log said only "504s" (2026-10-07,
@@ -297,10 +311,13 @@ export function extractClaims(text: string): Claim[] {
   // So does the first word of a list item or quote line: "- **Caveat:** …"
   // and "1. Salivary amylase …" named "Caveat" and "Salivary" until the
   // marker counted as the start of the line (2026-10-06 review).
+  // An option in a slash list ("Ship / Do not ship / Inconclusive") is a
+  // choice offered, not a name, whichever side of the slash it sits on.
   const opensClause = (i: number) =>
     i === 0 ||
-    /[:;—–·|•]\**$/.test(raw[i - 1] ?? '') ||
-    /^(?:[-*+>•·|]|\d{1,3}[.)])$/.test(raw[i - 1] ?? '');
+    raw[i + 1] === '/' ||
+    /[:;—–·|•/\]]\**$/.test(raw[i - 1] ?? '') ||
+    /^(?:[-*+>•·|/]|\d{1,3}[.)])$/.test(raw[i - 1] ?? '');
   // "CO₂", "CO2": a formula, not a name called "CO".
   const isFormula = (i: number) => /\p{Lu}\p{L}*[0-9₀-₉]/u.test(raw[i] ?? '');
   let run: string[] = [];
@@ -418,6 +435,15 @@ function claimFound(claim: Claim, evidence: string): boolean {
   const { kind, value } = claim;
   if (kind === 'quote') return quoteFound(value, evidence);
   if (claimPattern(kind, value).test(evidence)) return true;
+  if (kind === 'name') {
+    const weekday = WEEKDAYS.indexOf(value.toLowerCase());
+    return weekday >= 0 && weekdayOfIsoDate(evidence, weekday);
+  }
+  // "moved to September" restates `2026-09-01`.
+  if (kind === 'month') {
+    const month = String(MONTHS.indexOf(value.toLowerCase()) + 1).padStart(2, '0');
+    return new RegExp(`\\b\\d{4}-${month}\\b`).test(evidence);
+  }
   if (kind !== 'number') return false;
   // "9:05" and "09:05" are the same time.
   if (claim.clock) {
@@ -433,6 +459,15 @@ function claimFound(claim: Claim, evidence: string): boolean {
   // rounded to the places the writer kept.
   const target = Number(value);
   const evidenceNumbers = () => [...evidence.matchAll(EVIDENCE_NUMBER)].map((m) => Number(m[0]));
+  // "12.00% → 13.25%" restates rates of 0.12 and 0.1325: a percentage also
+  // counts when the source states the fraction, to the places the writer kept.
+  // Refused, it became "0.12 → 0.1325" in the readout (2026-10-21, ab-test).
+  if (claim.percent) {
+    const places = value.split('.')[1]?.length ?? 0;
+    const tolerance = 0.5 * 10 ** -places + 1e-9;
+    if (evidenceNumbers().some((n) => n < 1 && Math.abs(n * 100 - target) <= tolerance))
+      return true;
+  }
   if (value.includes('.')) {
     const tolerance = 0.5 * 10 ** -(value.split('.')[1]?.length ?? 0) + 1e-9;
     if (evidenceNumbers().some((n) => Math.abs(n / 1000 - target) <= tolerance)) return true;
