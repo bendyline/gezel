@@ -87,10 +87,11 @@ export class EvalTargets {
   async environment(): Promise<EvalEnvironment> {
     const harness = this.deps.harness();
     const source = harness?.mode === 'source';
-    const satisfied = new Set<EvalRequirement>(['embeddings', 'network']);
+    // DocBlocks ships with the daemon (toolsets/bundled-docblocks.ts);
+    // `GEZEL_EVAL_DOCBLOCKS_DIR` only swaps in a local build of it.
+    const satisfied = new Set<EvalRequirement>(['docblocks', 'embeddings', 'network']);
     if (source || (await this.managedChromium())) satisfied.add('chromium');
     if (source || this.env.GEZEL_EVAL_VITEST_BIN) satisfied.add('vitest');
-    if (this.env.GEZEL_EVAL_DOCBLOCKS_DIR) satisfied.add('docblocks');
     if (source) satisfied.add('external-checkout');
     if ((await this.imageModels()).length > 0) satisfied.add('image-model');
     return {

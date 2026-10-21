@@ -16589,6 +16589,10 @@ export class ChatManager extends LocalEngineRuntime {
         if (!t.runtime.args.includes('--allow-write')) {
           extraArgs.push('--allow-write', artifactsDir);
         }
+        // Previews launch Playwright's headless shell; the system bootstrap
+        // installs DocBlocks' revision here (toolsets/docblocks-browser.ts).
+        const { playwrightBrowsersDir } = await import('@bendyline/gezel/paths');
+        env.PLAYWRIGHT_BROWSERS_PATH = playwrightBrowsersDir(this.home);
       }
 
       // Re-resolve at every spawn: the install directory is user-writable and

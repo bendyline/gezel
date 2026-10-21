@@ -14,7 +14,7 @@ import {
 } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { startAutoAnswerer } from './auto-answer.ts';
-import { seedDocblocksRuntime } from './docblocks-runtime.ts';
+import { seedDocblocksBrowser, seedDocblocksRuntime } from './docblocks-runtime.ts';
 import { type EngineContextRecord, extractEngineContext } from './engine-context.ts';
 import {
   classifyTrial,
@@ -127,11 +127,6 @@ export { completedRepairActionSnapshot } from './repair-actions.ts';
  * incident against current engine builds — same shape as the spec-type
  * override below.
  */
-/** A mock MCP registered in the trial's local catalog under the `docblocks` id. */
-export function isMockDocblocksCatalogFile(path: string): boolean {
-  return /^toolsets\/[^/]+\/docblocks\//.test(path);
-}
-
 function evalLlamaKvCacheOverride(): GezelConfig['llamaCppKvCacheType'] | undefined {
   const raw = process.env.GEZEL_EVAL_LLAMA_KV_CACHE?.trim();
   if (!raw) return undefined;
@@ -944,12 +939,6 @@ export async function runTrial(
         }),
       );
       mergedExtraEnv.GEZEL_SEED_SECRETS_FILE = seedPath;
-      // The daemon bundles the real DocBlocks as a system toolset, which a
-      // project install of the mock cannot shadow: every DocBlocks scenario
-      // reached the real CLI and the mock logged no calls (2026-10-21).
-      if (mockRuntime.mcpToolsetFiles().some((file) => isMockDocblocksCatalogFile(file.path))) {
-        mergedExtraEnv.GEZEL_NO_BUNDLED_DOCBLOCKS = '1';
-      }
       // Fake-MCP toolsets: catalog-valid ids go into the trial home's local
       // catalog and install through the ordinary rail. Runtime-managed scoped
       // ids such as @playwright/mcp are seeded into the fresh system roster so
@@ -1005,6 +994,18 @@ export async function runTrial(
       });
     }
   }
+  await seedDocblocksBrowser({
+    trialHome,
+    cacheRoot,
+    ...(scenario.requiresDocblocks && process.env.GEZEL_EVAL_DOCBLOCKS_DIR
+      ? { docblocksInstallPath: process.env.GEZEL_EVAL_DOCBLOCKS_DIR }
+      : {}),
+    log,
+  }).catch((error) =>
+    log(
+      `[docblocks] preview browser seeding failed: ${error instanceof Error ? error.message : String(error)}`,
+    ),
+  );
   if (fetchUrlMockIds.length > 0) {
     let originEnv: Record<string, string>;
     try {

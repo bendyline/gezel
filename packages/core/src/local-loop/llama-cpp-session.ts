@@ -16,7 +16,12 @@ import {
   unrunnableBuildExit,
 } from '../native/unrunnable-build.js';
 import { leaksUntaggedReasoning } from '../ollama-models.js';
-import type { ProviderQueue } from '../runtime/provider-queue.js';
+import {
+  AbortedWhileQueuedError,
+  type ProviderQueue,
+  type QueueLease,
+  UNQUEUED_LEASE,
+} from '../runtime/provider-queue.js';
 import { AwakeBudget, createAwakeTimeout } from '../suspend-clock.js';
 import { LLAMA_CPP_TUNING_MAP, applyTuning } from '../tuning-apply.js';
 import type { ResolvedTuning } from '../tuning-resolve.js';
@@ -1951,7 +1956,9 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
     // `--parallel` allocator still serializes against the slot pool,
     // so bypassing the FIFO is safe. See MlxSession.sendAndWait for
     // the same rationale.
-    return runOnLiveProvider(this.deps.provider, opts, () => this.sendAndWaitInner(prompt, opts));
+    return runOnLiveProvider(this.deps.provider, opts, (lease) =>
+      this.sendAndWaitInner(prompt, opts, lease),
+    );
   }
   private async maybeCompactMidLoop(opts?: { force?: boolean }): Promise<boolean> {
     return compactLocalTurn(
@@ -2065,7 +2072,42 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
     return computeToolBudgetChars(this.deps.numCtx, this.estimatePromptChars());
   }
 
-  private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
+  /**
+   * Between tool-loop iterations, hand the queue slot to another
+   * conversation that has waited, once this turn has held it for the queue's
+   * quantum. A single-slot engine otherwise ran one tool loop to the end: a
+   * delegated image generator waited 72 minutes behind a developer's turn on
+   * ds4 and never ran (2026-10-20). Waiting to resume is not this turn's
+   * doing, so it spends none of its budget.
+   */
+  private async yieldQueueSlot(
+    lease: QueueLease,
+    budget: AwakeBudget,
+    opts: SendAndWaitOpts | undefined,
+  ): Promise<void> {
+    const resumeBudget = budget.hold();
+    const startedAt = Date.now();
+    try {
+      if (await lease.yieldIfContended()) {
+        log.info(
+          `[llama-cpp] session=${(opts?.queue?.sessionId ?? 'anonymous').slice(0, 8)} handed its queue slot to a waiting conversation; resumed after ${Math.round((Date.now() - startedAt) / 1000)}s`,
+        );
+      }
+    } catch (err) {
+      if (err instanceof AbortedWhileQueuedError || opts?.queue?.signal?.aborted) {
+        throw new Error(turnCancelledMessage());
+      }
+      throw err;
+    } finally {
+      resumeBudget();
+    }
+  }
+
+  private async sendAndWaitInner(
+    prompt: string,
+    opts?: SendAndWaitOpts,
+    lease: QueueLease = UNQUEUED_LEASE,
+  ): Promise<string> {
     const totalTimeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     // Awake-time budget — see the same construction in the MLX provider. A
     // host suspension freezes this process, llama-server, and the socket
@@ -2305,6 +2347,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
       for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
         this.turnPolicy.checkpoint();
         if (budget.expired()) throw turnTimeoutError();
+        if (turn > 0) await this.yieldQueueSlot(lease, budget, opts);
 
         // Check every iteration, including the first. Tool schemas can fill
         // most of a local context window before a single result exists, and

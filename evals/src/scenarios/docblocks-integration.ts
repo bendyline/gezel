@@ -1,3 +1,4 @@
+import { toolCalledHistory, withHistory } from '../craftbooks/bundled-toolsets.ts';
 import { craftbookScenarioFromSpec } from '../craftbooks/scenario.ts';
 import { craftbookEvalSpecMap } from '../craftbooks/specs.ts';
 import type { CraftbookEvalSpec } from '../craftbooks/types.ts';
@@ -28,7 +29,11 @@ const BRIEFS: Record<string, string> = {
     'Create a seven-scene animated operations update from source/brief.md. Use short on-screen bullets and a final next-actions scene. Deliver both MP4 and animated GIF.',
 };
 
-/** Keep simulator scorecards reproducible; run the real production boundary separately. */
+/**
+ * The book's own test.json already runs on the real DocBlocks
+ * (bundled-toolsets.ts); this variant swaps its kickoff for a plain brief and
+ * adds saved-binary gates on every output the book declares.
+ */
 export function realDocblocksSpec(source: CraftbookEvalSpec): CraftbookEvalSpec {
   const outputs = OUTPUTS[source.craftbookId];
   if (!outputs) throw new Error(`No DocBlocks integration contract for ${source.craftbookId}`);
@@ -57,13 +62,10 @@ export function realDocblocksSpec(source: CraftbookEvalSpec): CraftbookEvalSpec 
           minBytes: 800,
         })),
       ],
-      history: [
-        ...(source.success.history ?? []),
-        ...['convert_document', 'preview_document', 'save_artifact'].map((name) => ({
-          kind: 'tool.called',
-          details: { name, success: true },
-        })),
-      ],
+      history: withHistory(
+        source.success.history,
+        toolCalledHistory(['convert_document', 'preview_document', 'save_artifact']),
+      ),
     },
     coverage: {
       status: 'implemented',

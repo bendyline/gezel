@@ -2051,6 +2051,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
     prompt,
     suggestedTrials: 1,
     repairPolicy: spec.repairPolicy,
+    ...(spec.requiresDocblocks ? { requiresDocblocks: true } : {}),
     ...(spec.timeoutMs !== undefined ? { timeoutMs: spec.timeoutMs } : {}),
     ...(spec.progressTimeoutMs !== undefined ? { progressTimeoutMs: spec.progressTimeoutMs } : {}),
     ...(judge ? { judge } : {}),

@@ -1,4 +1,5 @@
 import { evalSpecFromTestSpec } from './adapter.ts';
+import { withRealBundledToolsets } from './bundled-toolsets.ts';
 import { CRAFTBOOK_EVAL_OVERRIDES } from './overrides.ts';
 import { loadCraftbookTestSpecsSync } from './test-spec-loader.ts';
 import type { CraftbookEvalSpec } from './types.ts';
@@ -15,10 +16,14 @@ import type { CraftbookEvalSpec } from './types.ts';
  * gallery / generated-remaining, ~6,300 lines) — see the plan
  * "systematize craftbook evals". To improve a book's eval, edit its
  * test.json next to the craftbook; to record run state, edit
- * `overrides.ts`.
+ * `overrides.ts`. Mocks of toolsets the daemon bundles (DocBlocks) are
+ * replaced by the real tool, graded through History (bundled-toolsets.ts).
  */
 export const CRAFTBOOK_EVAL_SPECS: CraftbookEvalSpec[] = loadCraftbookTestSpecsSync().map(
-  (loaded) => evalSpecFromTestSpec(loaded, CRAFTBOOK_EVAL_OVERRIDES[loaded.craftbookId]),
+  (loaded) =>
+    withRealBundledToolsets(
+      evalSpecFromTestSpec(loaded, CRAFTBOOK_EVAL_OVERRIDES[loaded.craftbookId]),
+    ),
 );
 
 export function craftbookEvalSpecMap(): Map<string, CraftbookEvalSpec> {

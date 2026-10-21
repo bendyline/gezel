@@ -73,6 +73,10 @@ export function briefAsksForBuild(text: string): boolean {
  * Planner, so the brief routed nowhere and a build crew got the week of meals
  * (2026-10-14). "go", "words" and "home" read "let's go to Lisbon", "500
  * words on…" and "at home" as a board game, a word game and a house manual.
+ * "reports", like "documents", names a deliverable rather than a subject:
+ * Data Analysis's tag took every "write a status report" and "a short report
+ * for the board" from Default, and suggest_work then dropped the report
+ * recipes beside the type (2026-10-21).
  */
 const GENERIC_TAGS = new Set([
   'planning',
@@ -84,6 +88,7 @@ const GENERIC_TAGS = new Set([
   'study',
   'training',
   'documents',
+  'reports',
   'development',
   'community',
   'drive',

@@ -51,6 +51,7 @@ import {
   QUEUE_WAIT_NOTICE_REPEAT_MS,
   backgroundLaneCap,
   defaultAmbientQuietMs,
+  defaultQueueYieldQuantumMs,
 } from '../queue.js';
 import type { EnginePhaseEvent } from '../streaming-session.js';
 import { type ToolExecutor, createToolExecutor } from '../tool-executor.js';
@@ -540,6 +541,9 @@ export class LlamaCppProvider implements LLMProvider {
       // a multi-minute chore turn never lands right before their next
       // move. Applies to ds4 too — its provider wraps this class.
       ambientQuietMs: defaultAmbientQuietMs(),
+      // A tool loop hands the slot to a waiting conversation between
+      // iterations once it has held it this long (see `QueueLease`).
+      yieldQuantumMs: defaultQueueYieldQuantumMs(),
     });
   }
 

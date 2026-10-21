@@ -195,6 +195,29 @@ describe('matchProjectTypeForBrief', () => {
     expect(projectTypesMentionedByBrief('Planning a quiet week at home', TYPES)).toEqual([]);
   });
 
+  // Data Analysis alone carries "reports"; a report is a document someone
+  // asks to have written, not what a project is about (2026-10-21).
+  it('never reads a deliverable noun as a type of its own', () => {
+    const types = [
+      ...TYPES,
+      {
+        id: 'data-analysis',
+        name: 'Data Analysis',
+        tags: ['data', 'analysis', 'spreadsheets', 'csv', 'dashboard', 'reports'],
+        gezels: [{ templateId: 'analyst', voorman: true }],
+      },
+    ];
+    expect(
+      projectTypesMentionedByBrief(
+        'Write a status report for my team: we shipped the onboarding flow.',
+        types,
+      ),
+    ).toEqual([]);
+    expect(projectTypeNamedByBrief('Explore the spreadsheets in this folder', types)).toBe(
+      'data-analysis',
+    );
+  });
+
   it('reads a language by name', () => {
     expect(
       matchProjectTypeForBrief('A language tutor so I can practice Japanese', TYPES)?.params,

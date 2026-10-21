@@ -5,6 +5,8 @@ export interface ProvenanceToolCall {
   paths?: string[];
   argsFull?: string;
   argsSummary?: string;
+  /** The tool's response as the session recorded it; bounded for long results. */
+  resultText?: string;
 }
 
 const STRUCTURED_MUTATION_TOOLS = new Set([

@@ -255,6 +255,8 @@ export interface CraftbookEvalSpec {
   tags?: string[];
   /** Live mock services from `test.json` `mocks[]`. */
   mocks?: MockService[];
+  /** Runs against the daemon's bundled DocBlocks rather than a mock. */
+  requiresDocblocks?: boolean;
   /** Version of the test.json the spec was adapted from (shim provenance header). */
   testSpecVersion?: string;
   /** Max trial duration, ms. Unset inherits the runner's 8-hour default. */

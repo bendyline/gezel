@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sharedToolsetsFile } from '@bendyline/gezel/paths';
+import { bundledDocblocksToolset, docblocksBrowserRequirement } from '@bendyline/gezel-service';
+import { playwrightBrowsersDir, sharedToolsetsFile } from '@bendyline/gezel/paths';
 import { afterEach, describe, expect, it } from 'vitest';
-import { seedDocblocksRuntime } from './docblocks-runtime.ts';
+import { seedDocblocksBrowser, seedDocblocksRuntime } from './docblocks-runtime.ts';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -55,5 +56,30 @@ describe('local DocBlocks eval runtime', () => {
       'ENOENT',
     );
     await expect(readFile(sharedToolsetsFile(unbuilt.home))).rejects.toThrow('ENOENT');
+  });
+});
+
+describe('DocBlocks preview browser for a trial', () => {
+  it("links the trial's managed browsers folder to the eval cache's", async () => {
+    const root = await mkdtemp(join(tmpdir(), 'docblocks-browser-test-'));
+    roots.push(root);
+    const trialHome = join(root, 'home');
+    const cacheRoot = join(root, 'cache');
+    await mkdir(trialHome);
+    const requirement = docblocksBrowserRequirement(bundledDocblocksToolset().installPath!)!;
+    const installed = join(cacheRoot, 'playwright-browsers', requirement.folder);
+    await mkdir(installed, { recursive: true });
+    await writeFile(join(installed, 'INSTALLATION_COMPLETE'), '');
+    const lines: string[] = [];
+    const ok = await seedDocblocksBrowser({ trialHome, cacheRoot, log: (m) => lines.push(m) });
+    expect(ok).toBe(true);
+    expect(lines).toEqual([]);
+    expect(await realpath(join(playwrightBrowsersDir(trialHome), requirement.folder))).toBe(
+      await realpath(installed),
+    );
+    // A second trial step on the same home is a no-op, not an EEXIST.
+    expect(await seedDocblocksBrowser({ trialHome, cacheRoot, log: (m) => lines.push(m) })).toBe(
+      true,
+    );
   });
 });

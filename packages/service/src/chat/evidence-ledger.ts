@@ -42,8 +42,32 @@ import type { ToolGroundingHooks } from '../providers/mcp-bridge.js';
 
 const log = createLogger('grounding');
 
-/** Refusals per write tool per turn before a write goes through with a warning. */
-export const MAX_WRITE_REFUSALS = 2;
+/**
+ * Refusals per write target per turn before a write goes through with a
+ * warning. Each refusal costs a whole rewrite, minutes on a local model; after
+ * one the writer has seen every problem, and a second mostly cost time.
+ */
+export const MAX_WRITE_REFUSALS = 1;
+
+/**
+ * Name-only problems refuse a write only when there are this many of them.
+ * Capitalized-word heuristics are the noisiest part of the check ("Report",
+ * "Status", a dashboard called Grafana), so a few become a warning instead.
+ */
+const NAME_ONLY_REFUSAL_THRESHOLD = 3;
+
+/**
+ * Whether a problem sentence is worth a rewrite on its own: a citation to
+ * evidence that does not exist, or an unsupported year, number, month or
+ * quotation, or a year set beside the wrong person. A sentence missing only
+ * names, or a plain number away from a name (a PR number, a count), is noted
+ * rather than refused.
+ */
+export function blocksWrite(sentence: SentenceGrounding): boolean {
+  if (sentence.status === 'bad-citation') return true;
+  if (sentence.checks.some((check) => !check.found && check.kind !== 'name')) return true;
+  return sentence.missing.some((detail) => /^(?:1\d{3}|20\d{2}) next to /.test(detail));
+}
 
 const EXCERPT_CHARS = 600;
 
@@ -579,6 +603,7 @@ export class EvidenceLedger {
       return null;
     }
     const refused = this.refusals.get(refusalKey) ?? 0;
+    const blocking = problems.filter(blocksWrite);
     // At zero evidence, a detailed sentence-by-sentence critique invites a
     // model to redraft from memory. Give the only productive next action on
     // the first rejection. Keep counting these attempts so that once evidence
@@ -591,6 +616,15 @@ export class EvidenceLedger {
       this.refusals.set(refusalKey, Math.min(MAX_WRITE_REFUSALS, refused + 1));
       log.warn(`${tool} blocked: no evidence collected`);
       return { kind: 'reject', error: this.researchFirstRemedy(tool, words.place) };
+    }
+    if (blocking.length === 0 && problems.length < NAME_ONLY_REFUSAL_THRESHOLD) {
+      log.info(
+        `${tool} wrote ${problems.length} sentence(s) with unsourced names; noted, not refused`,
+      );
+      this.refusals.delete(refusalKey);
+      this.unverifiedWrites.push(...problems);
+      this.unverifiedPlaces.add(words.place);
+      return null;
     }
     if (refused < MAX_WRITE_REFUSALS) {
       this.refusals.set(refusalKey, refused + 1);

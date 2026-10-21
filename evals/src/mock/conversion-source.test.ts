@@ -1,10 +1,11 @@
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { MockService } from '@bendyline/gezel';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, describe, expect, it } from 'vitest';
-import { craftbookEvalSpecMap } from '../craftbooks/specs.ts';
+import { loadCraftbookTestSpecsSync } from '../craftbooks/test-spec-loader.ts';
 import { readStoredZip } from '../fixtures/office-documents.ts';
 import {
   type MockConversionRecord,
@@ -12,6 +13,18 @@ import {
   recordMockConversion,
 } from './conversion-source.ts';
 import { type MockServicesRuntime, startMockServices } from './mock-server.ts';
+
+/**
+ * The DocBlocks simulator powerpoint-deck's `test.json` still declares. Eval
+ * specs drop it for the bundled DocBlocks (craftbooks/bundled-toolsets.ts),
+ * so the simulator is exercised from the book's sidecar directly.
+ */
+function deckMockServices(): MockService[] {
+  const loaded = loadCraftbookTestSpecsSync().find(
+    (spec) => spec.craftbookId === 'powerpoint-deck',
+  );
+  return (loaded?.spec.mocks ?? []) as MockService[];
+}
 
 const PROJECT = 'pptx-eval';
 let home: string | undefined;
@@ -158,10 +171,10 @@ describe('conversionSourceForSave', () => {
 
 describe('powerpoint-deck mock, end to end', () => {
   it('saves the deck the conversion was asked to convert, and logs where it came from', async () => {
-    const spec = craftbookEvalSpecMap().get('powerpoint-deck');
-    expect(spec?.mocks?.length, 'powerpoint-deck ships mock services').toBeTruthy();
+    const mocks = deckMockServices();
+    expect(mocks.length, 'powerpoint-deck ships mock services').toBeTruthy();
     home = await mkdtemp(join(tmpdir(), 'gezel-mock-e2e-'));
-    runtime = await startMockServices(spec!.mocks!, { trialHome: home });
+    runtime = await startMockServices(mocks, { trialHome: home });
     runtime!.bindProject(PROJECT);
     await seed(
       'workspace',

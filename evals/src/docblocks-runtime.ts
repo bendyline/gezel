@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { readFile, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { gildeDataDir } from '@bendyline/gezel-catalog';
-import { sharedToolsetsFile } from '@bendyline/gezel/paths';
+import { bundledDocblocksToolset, ensureDocblocksBrowser } from '@bendyline/gezel-service';
+import { playwrightBrowsersDir, sharedToolsetsFile } from '@bendyline/gezel/paths';
 
 export interface DocblocksEvalProvenance {
   installPath: string;
@@ -73,4 +74,37 @@ export async function seedDocblocksRuntime(
   );
   log(`[docblocks] local CLI ${installPath}, package=${pkg.version}, entrySha256=${sha256}`);
   return provenance;
+}
+
+/**
+ * Give a trial home the headless browser DocBlocks previews launch.
+ *
+ * DocBlocks is bundled, so any trial may call `preview_document`, but a trial
+ * home is fresh and skips the system bootstrap that installs its browser.
+ * The home's managed browsers folder links to one folder in the eval cache,
+ * filled once by the installer the product uses. A failed download is
+ * logged and the trial still runs: previews then report themselves
+ * unavailable, as on a machine without the browser.
+ */
+export async function seedDocblocksBrowser(opts: {
+  trialHome: string;
+  cacheRoot: string;
+  /** A local DocBlocks build under test; defaults to the bundled one. */
+  docblocksInstallPath?: string;
+  log: (message: string) => void;
+}): Promise<boolean> {
+  const shared = join(opts.cacheRoot, 'playwright-browsers');
+  await mkdir(shared, { recursive: true });
+  const installPath = opts.docblocksInstallPath ?? bundledDocblocksToolset().installPath;
+  if (!installPath) throw new Error('the bundled DocBlocks has no install path');
+  const result = await ensureDocblocksBrowser({
+    docblocksInstallPath: installPath,
+    browsersDir: shared,
+  });
+  if (result.installed) opts.log(`[docblocks] installed the preview browser into ${shared}`);
+  if (!result.ok) opts.log(`[docblocks] preview browser unavailable: ${result.error}`);
+  await symlink(shared, playwrightBrowsersDir(opts.trialHome), 'junction').catch((error) => {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  });
+  return result.ok;
 }

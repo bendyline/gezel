@@ -14,9 +14,10 @@ import {
   publishStagedNpmInstall,
   recoverInterruptedNpmInstall,
 } from '@bendyline/gezel-catalog';
-import { systemToolsetsInstallDir } from '@bendyline/gezel/paths';
+import { playwrightBrowsersDir, systemToolsetsInstallDir } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
 import { type PnpmResult, runPnpm } from '../packages/pnpm.js';
+import { ensureDocblocksBrowser } from '../toolsets/docblocks-browser.js';
 import { checkInstallTree } from './install-health.js';
 import { SYSTEM_LOCKFILES } from './locks.js';
 import {
@@ -54,6 +55,11 @@ export interface SystemBootstrapOptions {
    * details, and install failures surface full stacks.
    */
   debug?: { isEnabled(): boolean };
+  /**
+   * Install root of the bundled DocBlocks. When set, the headless browser
+   * its previews launch is installed into the managed browsers folder.
+   */
+  docblocksInstallPath?: string;
   /**
    * Override the pinned manifest. Primarily for tests — production
    * callers leave this unset and the shipped `SYSTEM_TOOLSETS` is used.
@@ -333,6 +339,22 @@ async function bootstrap(opts: SystemBootstrapOptions, signal: AbortSignal): Pro
     }
     tracking.chromiumRevision = CHROMIUM_REVISION;
     await writeSystemTracking(home, tracking);
+  }
+
+  // DocBlocks previews are optional — a conversion never needs one — so a
+  // failed browser download is logged, not raised as a bootstrap error.
+  if (opts.docblocksInstallPath) {
+    const res = await ensureDocblocksBrowser({
+      docblocksInstallPath: opts.docblocksInstallPath,
+      browsersDir: playwrightBrowsersDir(home),
+      signal,
+    });
+    if (signal.aborted) return;
+    if (!res.ok) {
+      logger?.warn?.(`[system-toolsets] DocBlocks preview browser not installed: ${res.error}`);
+    } else if (res.installed) {
+      logger?.info?.('[system-toolsets] DocBlocks preview browser installed');
+    }
   }
 
   statusBus.publish({ phase: 'ready' });

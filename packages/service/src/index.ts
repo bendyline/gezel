@@ -27,6 +27,11 @@ export {
 } from '@bendyline/gezel-inference/internal/memory/embeddings';
 export { embedModelId } from '@bendyline/gezel-inference/internal/memory/embed-core';
 export { evaluateGate, gateCheckLabel, taskSuppliedCitationPaths } from './tasks/gate-eval.js';
+export { bundledDocblocksToolset } from './toolsets/bundled-docblocks.js';
+export {
+  docblocksBrowserRequirement,
+  ensureDocblocksBrowser,
+} from './toolsets/docblocks-browser.js';
 export type { GateCheckOutcome, GateCheckResult, GateEvalDeps } from './tasks/gate-eval.js';
 export { parseScriptMeta } from './scripts/meta.js';
 export { ScriptRunner } from './scripts/runner.js';

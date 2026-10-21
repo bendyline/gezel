@@ -128,6 +128,36 @@ const BUILD_REQUEST_RE = requestPattern(BUILD_VERBS, BUILD_NOUNS);
 const PLAN_REQUEST_RE = requestPattern(PLAN_VERBS, OCCASION_NOUNS);
 
 /**
+ * A wish names the thing to build without a build verb: "I'd like a little
+ * browser game where you guess a country's capital" is as much a new build
+ * as "make a game", and with no verb suggest_work offered recipes instead of
+ * a project (route-capital-quiz-game, 2026-10-21). Only software nouns, after
+ * an indefinite article: "I need the page to load faster" is work on a thing
+ * that exists, and "I'd like an app recommendation" is a question.
+ */
+const WISH_NOUNS = [
+  'game',
+  'app',
+  'application',
+  'website',
+  'site',
+  'webapp',
+  'web\\s+app',
+  'dashboard',
+  'landing\\s+page',
+  'portfolio',
+  'bot',
+  'plugin',
+  'extension',
+];
+const WISH_REQUEST_RE = new RegExp(
+  String.raw`\b(?:i(?:'?d|\s+would)\s+(?:like|love)|i\s+(?:want|need)|(?:could|can)\s+i\s+(?:get|have))\s+(?:a|an)\s+(?:[\w'-]+\s+){0,5}?(?:` +
+    WISH_NOUNS.join('|') +
+    String.raw`)\b(?!\s+(?:recommendations?|suggestions?|ideas?)\b)`,
+  'i',
+);
+
+/**
  * Detect a "build something substantive" request in user prose. The
  * regex matches optional polite/intent prefixes ("can we", "let's",
  * "I want to", "help me", …) plus a build verb plus a build noun.
@@ -135,7 +165,7 @@ const PLAN_REQUEST_RE = requestPattern(PLAN_VERBS, OCCASION_NOUNS);
  * task` is excluded by leaving `task` off the noun list.
  */
 export function looksLikeNewBuildRequest(text: string): boolean {
-  return BUILD_REQUEST_RE.test(text) || PLAN_REQUEST_RE.test(text);
+  return BUILD_REQUEST_RE.test(text) || PLAN_REQUEST_RE.test(text) || WISH_REQUEST_RE.test(text);
 }
 
 /**
