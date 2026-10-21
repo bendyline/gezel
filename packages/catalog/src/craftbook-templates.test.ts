@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import {
   CraftbookSchema,
   type StepGateUnion,
+  compareSemver,
   craftbookInputParams,
   normalizeStepGate,
   paramInputSpec,
@@ -113,10 +114,25 @@ describe('bundled craftbook templates', () => {
     expect(gate?.scripts.map((r) => `${r.scope}:${r.name}`)).toEqual([
       'standard:checkHtmlComplete',
     ]);
-    // Evaluate keeps the Layer-2 judgment only; its default forward edge
-    // loops back to Build — safe failure mode is "keep improving".
-    expect(byId.get('evaluate')?.gate).toBeUndefined();
-    expect(byId.get('evaluate')?.next).toBe('build');
+    const evaluate = byId.get('evaluate');
+    if (compareSemver(String(buildLoop.version ?? '0.0.0'), '1.1.2') >= 0) {
+      // Evaluate routes on a written verdict: a completion gate sends a FAIL
+      // back to Build and the default edge goes forward, so a reviewer that
+      // forgets to route can no longer loop the task. The old default edge
+      // back to Build cycled until the clock ran out (craftbook-week-plan,
+      // 2026-10-21).
+      const verdict = evaluate?.gate ? normalizeStepGate(evaluate.gate) : null;
+      expect(evaluate?.next).toBe('finish');
+      expect(evaluate?.advanceWhen).toMatchObject({ artifact: true });
+      expect(verdict?.at).toBe('completion');
+      expect(verdict?.onReject).toBe('build');
+      expect(verdict?.checks.map((c) => c.kind)).toEqual(['contains', 'notContains']);
+    } else {
+      // Before the verdict gate (gilde pins older than build-loop 1.1.2).
+      // Drop this branch once the pin carries the migration.
+      expect(evaluate?.gate).toBeUndefined();
+      expect(evaluate?.next).toBe('build');
+    }
     expect(byId.get('finish')?.terminal).toBe(true);
     expect(byId.get('finish')?.next).toBeUndefined();
   });
