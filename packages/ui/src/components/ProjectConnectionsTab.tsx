@@ -58,7 +58,8 @@ function connectorCredentialLabel(connector: ConnManifest): string {
   const kind = connector.secretShape?.kind;
   if (kind === 'oauth2') return 'OAuth';
   if (kind === 'imap') return 'Mail login';
-  if (!connector.secretShape?.required) return 'Optional token';
+  if (!connector.secretShape) return 'No sign-in';
+  if (!connector.secretShape.required) return 'Optional token';
   return connector.secretShape?.label ?? 'API token';
 }
 
@@ -339,9 +340,10 @@ export function ProjectConnectionsTab({
       return;
     }
     setBusy('add');
+    let added: { id: string } | undefined;
     try {
       if (kind === 'oauth2') {
-        await connectOAuth(
+        added = await connectOAuth(
           project.id,
           selected.id,
           built,
@@ -363,12 +365,13 @@ export function ProjectConnectionsTab({
         } else if (credential.trim()) {
           cred = credential.trim();
         }
-        await api.bindConnector(project.id, {
+        const bound = await api.bindConnector(project.id, {
           type: selected.id,
           ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
           config: built,
           ...(cred !== undefined ? { credential: cred } : {}),
         });
+        added = bound?.binding;
       }
       setNotice('Connector added.');
       closeAdd();
@@ -386,9 +389,14 @@ export function ProjectConnectionsTab({
       // inline rather than leaving the user with a bare error line.
       if (isOAuthNotConfiguredError(message)) setOauthSetupNudge((n) => n + 1);
       setError(message);
+      added = undefined;
     } finally {
       setBusy(null);
     }
+    // The background loop only syncs under the most permissive posture, so a
+    // freshly added connector would otherwise sit empty until someone found
+    // the Sync button. A first sync is what the person just asked for.
+    if (added?.id) await handleSync(added.id);
   }, [
     selected,
     project.id,
@@ -402,6 +410,7 @@ export function ProjectConnectionsTab({
     refresh,
     onProjectChange,
     oauthRequirement,
+    handleSync,
   ]);
 
   /**

@@ -11,6 +11,7 @@ import {
   imageModelDefaultSide,
   imagePromptGuide,
   nowIso,
+  resolveHarnessToolsConfig,
   resolveImageSize,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
@@ -32,6 +33,9 @@ const log = createLogger('image-gen');
  * default; optionally Google AI Studio Nano Banana 2 or OpenAI GPT
  * Image 2 as cloud providers).
  */
+const HARNESS_LOCAL_IMAGES_ONLY =
+  'Gezel makes images for other apps on this computer only, and the selected image engine is a cloud service. Pick an on-device image model in Gezel, or allow any image engine in Settings → Integrations.';
+
 export function imageGenRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
@@ -70,6 +74,21 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
       provider = await ctx.imageProvider.providerForModel(req.model);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+
+    // An outside AI app (a `harness` token) runs only the engines the person
+    // allowed it in Settings → Integrations, never asks for a cloud credit
+    // (it has no chat to ask in; "any image engine" is that consent), and
+    // never writes into the folder it is working in.
+    const harness = c.get('auth')?.scopes.includes('harness') === true;
+    if (harness) {
+      const mode = resolveHarnessToolsConfig(await ctx.store.readConfig()).images;
+      if (mode === 'off') {
+        return c.json({ error: 'Image generation is turned off for other apps.' }, 403);
+      }
+      if (mode === 'local' && providerKind(provider.name) === 'cloud') {
+        return c.json({ error: HARNESS_LOCAL_IMAGES_ONLY }, 403);
+      }
     }
 
     // Resolve any artifact-path entries in `inputImages` to raw bytes
@@ -216,8 +235,10 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
       const workspaceRel = saveAs ?? `assets/generated/image-${out.meta.seed}.png`;
       let workspacePath: string | null = null;
       try {
-        await ctx.store.writeProjectWorkspaceBinary(projectId, workspaceRel, out.png);
-        workspacePath = workspaceRel;
+        if (!harness) {
+          await ctx.store.writeProjectWorkspaceBinary(projectId, workspaceRel, out.png);
+          workspacePath = workspaceRel;
+        }
       } catch (err) {
         // Workspace writes can be denied for legitimate reasons (e.g.
         // an external workingDir the user hasn't approved). Don't fail

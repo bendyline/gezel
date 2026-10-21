@@ -13,12 +13,19 @@ export default defineConfig({
       configureServer(server) {
         server.middlewares.use((request, response, next) => {
           const file = request.url?.split('?')[0];
-          if (file !== '/startup/startup.js' && file !== '/startup/startup.css') return next();
+          if (!file || !/^\/startup\/(?:assets\/)?[a-zA-Z0-9_.-]+\.(js|css|png|woff2)$/.test(file))
+            return next();
           void readFile(resolve('dist', file.slice(1))).then(
             (content) => {
               response.setHeader(
                 'Content-Type',
-                file.endsWith('.js') ? 'text/javascript' : 'text/css',
+                file.endsWith('.js')
+                  ? 'text/javascript'
+                  : file.endsWith('.css')
+                    ? 'text/css'
+                    : file.endsWith('.png')
+                      ? 'image/png'
+                      : 'font/woff2',
               );
               response.end(content);
             },

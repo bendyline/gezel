@@ -17,6 +17,32 @@ export interface LocalGezelOptions {
   home?: string;
   /** How long the opening health check may take. Default 5000 ms. */
   healthTimeoutMs?: number;
+  /**
+   * Decide the bearer each request carries, instead of the service's own
+   * token. For a caller that trades the owner credential for a narrower one
+   * (`gezel-mcp --harness`): it is asked again after the service restarts,
+   * and the owner token never rides a request while it is set.
+   */
+  credential?: LocalGezelCredential;
+}
+
+/** One launch of the service, as a {@link LocalGezelCredential} sees it. */
+export interface LocalGezelLaunch {
+  /** Changes whenever the service restarts; tokens minted for one launch die with it. */
+  key: string;
+  baseUrl: string;
+  /** Send a request with the owner token, over this launch's pinned transport. */
+  ownerFetch(path: string, init?: RequestInit): Promise<Response>;
+}
+
+export interface LocalGezelCredential {
+  /** The bearer for a request to `url` on this launch; null sends none (the health check). */
+  token(launch: LocalGezelLaunch, url: URL): Promise<string | null>;
+  /**
+   * The service refused that bearer (401) on a launch that did not restart.
+   * Resolve true to send the request once more with a fresh {@link token}.
+   */
+  rejected?(launch: LocalGezelLaunch, url: URL): Promise<boolean>;
 }
 
 export interface LocalGezel {
@@ -31,6 +57,8 @@ export interface LocalGezel {
   baseUrl: string;
   /** The token the service issued at that launch; requests always send the current one. */
   token: string;
+  /** The launch this connection reaches now; see {@link LocalGezelOptions.credential}. */
+  launch(): LocalGezelLaunch;
   /** Release the connection's sockets so the process can exit promptly. */
   close(): Promise<void>;
 }
@@ -94,11 +122,26 @@ export async function connectToLocalGezel(opts: LocalGezelOptions = {}): Promise
     return refreshing;
   };
 
-  const send = (url: URL, init: RequestInit | undefined): Promise<Response> => {
-    const target = new URL(url.pathname + url.search, live.runtime.baseUrl);
+  const launchOf = (current: Live): LocalGezelLaunch => ({
+    key: `${current.runtime.pid}:${current.runtime.port}:${current.runtime.token}`,
+    baseUrl: current.runtime.baseUrl,
+    ownerFetch: (path, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set('Authorization', `Bearer ${current.runtime.token}`);
+      return current.fetch(new URL(path, current.runtime.baseUrl), { ...init, headers });
+    },
+  });
+
+  const send = async (url: URL, init: RequestInit | undefined): Promise<Response> => {
+    const current = live;
+    const target = new URL(url.pathname + url.search, current.runtime.baseUrl);
     const headers = new Headers(init?.headers);
-    headers.set('Authorization', `Bearer ${live.runtime.token}`);
-    return live.fetch(target, { ...init, headers });
+    const bearer = opts.credential
+      ? await opts.credential.token(launchOf(current), url)
+      : current.runtime.token;
+    if (bearer) headers.set('Authorization', `Bearer ${bearer}`);
+    else headers.delete('Authorization');
+    return current.fetch(target, { ...init, headers });
   };
 
   const route = (async (input: FetchInput, init?: RequestInit) => {
@@ -115,7 +158,11 @@ export async function connectToLocalGezel(opts: LocalGezelOptions = {}): Promise
       if (!retry || !(err instanceof TypeError) || !(await refresh())) throw err;
       return send(url, init);
     }
-    if (res.status !== 401 || !retry || !(await refresh())) return res;
+    if (res.status !== 401 || !retry) return res;
+    const refreshed =
+      (await refresh()) ||
+      (opts.credential?.rejected ? await opts.credential.rejected(launchOf(live), url) : false);
+    if (!refreshed) return res;
     await res.body?.cancel().catch(() => {});
     return send(url, init);
   }) as typeof fetch;
@@ -133,5 +180,12 @@ export async function connectToLocalGezel(opts: LocalGezelOptions = {}): Promise
     await live.fetch.destroy().catch(() => {});
     throw new LiveDaemonUnhealthyError(first.pid, first.baseUrl, { cause: err });
   }
-  return { client, fetch: routed, baseUrl: first.baseUrl, token: first.token, close };
+  return {
+    client,
+    fetch: routed,
+    baseUrl: first.baseUrl,
+    token: first.token,
+    launch: () => launchOf(live),
+    close,
+  };
 }

@@ -234,6 +234,7 @@ import {
   parseProjectHistory,
   rebuildProjectFromHistory,
 } from './project-meta-recovery.js';
+import { isViewStateOnlyPatch } from './project-view-state.js';
 import { StartupHomeCache } from './startup-home.js';
 import { TaskFilesStore } from './task-files-store.js';
 import {
@@ -3577,6 +3578,8 @@ export class Store {
        * view in noise.
        */
       outputPaneVisible?: boolean | null;
+      /** The Views tab's view; `null` resets it. View state, like the above. */
+      selectedView?: string | null;
       /** Project shape — `solo` (a single-gezel job/game) vs `crew`. */
       mode?: 'crew' | 'solo';
       /** Custom project-lead label (e.g. checkers → "Opponent"); `null` clears it. */
@@ -3682,7 +3685,7 @@ export class Store {
           : undefined);
     const updated: Project = {
       ...meta,
-      updatedAt: nowIso(),
+      updatedAt: isViewStateOnlyPatch(patch) ? meta.updatedAt : nowIso(),
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
       ...(patch.icon === null
@@ -3732,6 +3735,9 @@ export class Store {
         : patch.outputPaneVisible !== undefined
           ? { outputPaneVisible: patch.outputPaneVisible }
           : {}),
+      ...(patch.selectedView !== undefined
+        ? { selectedView: patch.selectedView ?? undefined }
+        : {}),
       ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
       ...(patch.leadLabel === null
         ? { leadLabel: undefined }

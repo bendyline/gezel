@@ -307,7 +307,7 @@ function scenariosForRole(
         latestUserMessage: 'Draft a reply for the connected mailbox.',
         workspaceFiles: [],
         securityPolicy: servicesOn,
-        contextualBuiltinTools: ['draft_email', 'queue_email', 'send_email'],
+        contextualBuiltinTools: ['draft_email', 'queue_email', 'send_email', 'save_email_draft'],
       },
       {
         id: 'social-connector-context',

@@ -40,6 +40,7 @@ function make(opts: {
   indexingEnabled?: boolean;
   freshBoot?: boolean;
   engagementMode?: 'proactive' | 'scheduled' | 'reactive' | 'off';
+  refreshStatic?: (projectId: string) => Promise<unknown>;
 }) {
   const enrich = vi.fn().mockResolvedValue({ files: 1, summarized: 1, embedded: 1 });
   const embedOnly = vi.fn().mockResolvedValue({ files: 0, embedded: 0 });
@@ -74,6 +75,7 @@ function make(opts: {
     idle,
     resolveBoekwachter: async () => BOOK,
     isNightShiftActive: () => opts.night ?? false,
+    ...(opts.refreshStatic ? { refreshStatic: opts.refreshStatic } : {}),
   });
   return { mgr, enrich, embedOnly, embedImages, idle };
 }
@@ -225,6 +227,28 @@ describe('IndexEnrichmentManager idle gating', () => {
     await vi.waitFor(() => expect(embedOnly).toHaveBeenCalledWith('p1', expect.any(Number)));
     await vi.waitFor(() => expect(embedImages).toHaveBeenCalled());
     expect(enrich).not.toHaveBeenCalled();
+  });
+
+  // An "update the index" on a folder nobody had scanned answered embed-only
+  // and embedded nothing: the drain only reads chunks a scan already wrote.
+  it('drainEmbedOnly scans first when asked, and only then', async () => {
+    const order: string[] = [];
+    const refreshStatic = vi.fn(async () => {
+      order.push('scan');
+    });
+    const { mgr, embedOnly } = make({ active: false, refreshStatic });
+    embedOnly.mockImplementation(async () => {
+      order.push('embed');
+      return { files: 0, embedded: 0 };
+    });
+
+    mgr.drainEmbedOnly('p1', { refreshFirst: true });
+    await vi.waitFor(() => expect(embedOnly).toHaveBeenCalled());
+    expect(order.slice(0, 2)).toEqual(['scan', 'embed']);
+
+    await vi.waitFor(() => expect(mgr.drainEmbedOnly('p1').started).toBe(true));
+    await vi.waitFor(() => expect(embedOnly).toHaveBeenCalledTimes(2));
+    expect(refreshStatic).toHaveBeenCalledTimes(1);
   });
 
   it('drainEmbedOnly yields to a live chat turn instead of competing with it', async () => {

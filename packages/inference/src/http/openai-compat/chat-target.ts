@@ -78,7 +78,7 @@ export async function resolvePinnedModelTarget(
  * Pick the gezel that guarantees a persona-backed fallback for public
  * inference requests.
  *
- * The explicit Connected Apps choice wins. When it is unset or stale,
+ * The explicit Integrations choice wins. When it is unset or stale,
  * the install's Meester is the natural front door; the first available
  * gezel is the final recovery path for older or partially migrated
  * homes. A healthy store always has at least a Meester, but returning

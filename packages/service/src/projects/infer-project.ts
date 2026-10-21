@@ -27,6 +27,7 @@ import {
   type WellKnownFoldersResponse,
   compareKey,
   createLogger,
+  deepestContainingProject,
   forbiddenRootReason,
   inferFolderKind,
   inferProjectRoot,
@@ -267,9 +268,25 @@ function outcomeFolder(outcome: InferOutcome): WellKnownFolder | undefined {
   return undefined;
 }
 
+/**
+ * Server-side choices that no HTTP caller of `infer-for-path` may make. A
+ * harness binding (an outside AI app working in a folder) uses all three:
+ * the person did not pick this folder in Gezel, so it must not take over an
+ * existing project, re-point one, or recruit a crew.
+ */
+export interface InferProjectOptions {
+  /** For a folder, reuse the deepest project that contains it, not only one bound to it exactly. */
+  containing?: boolean;
+  /** For a folder, adopt an unbound project of the same name (default true). */
+  adoptOrphan?: boolean;
+  /** Create the project with no lead gezel. */
+  lead?: 'none';
+}
+
 export async function inferProjectForPath(
   deps: InferProjectDeps,
   request: InferProjectForPathRequest,
+  options: InferProjectOptions = {},
 ): Promise<InferProjectForPathResponse> {
   const kind = request.kind ?? 'document';
   const create = request.create !== false;
@@ -293,17 +310,32 @@ export async function inferProjectForPath(
   const view = await machineView(deps);
   const target = await resolveTarget(request.path, kind, view.platform);
   const projects = await deps.store.listProjects();
-  const outcome = await inferProjectRoot(
+  const existing = await existingProjectRefs(projects, view.platform);
+  const inferred = await inferProjectRoot(
     {
       path: target.real,
       kind,
       ctx: view.ctx,
       wellKnown: await existingWellKnownFolders(view),
-      existing: await existingProjectRefs(projects, view.platform),
+      existing,
       policy: deps.policy,
     },
     realFsProbe(),
   );
+  const container =
+    kind === 'folder' && options.containing && inferred.matchedBy !== 'existing'
+      ? deepestContainingProject(target.real, existing, view.platform)
+      : null;
+  const outcome: InferOutcome = container
+    ? {
+        matchedBy: 'existing',
+        projectId: container.id,
+        root: normalizePath(container.workingDir, view.platform),
+        name: container.name,
+        sharedLibrary: container.sharedLibrary,
+        warnings: [],
+      }
+    : inferred;
 
   if (outcome.matchedBy === 'existing') {
     if (create && request.recruitCrew) await recruitExistingCrew(deps, outcome.projectId);
@@ -394,7 +426,7 @@ export async function inferProjectForPath(
     // project of the same name, which recovers a folder renamed while it was
     // open. Document inference never does: it must not bind a user's own
     // project called "Documents" to their Documents folder.
-    if (kind === 'folder') {
+    if (kind === 'folder' && options.adoptOrphan !== false) {
       const orphan = fresh.find(
         (p) =>
           !p.workingDir &&
@@ -421,7 +453,9 @@ export async function inferProjectForPath(
         workingDir: root,
         ...(folder?.kind === 'downloads' ? { indexingEnabled: false } : {}),
         // The crew recruiter below seats the lead that suits the folder.
-        ...(request.recruitCrew && deps.recruitCrew ? { lead: 'none' as const } : {}),
+        ...((request.recruitCrew && deps.recruitCrew) || options.lead === 'none'
+          ? { lead: 'none' as const }
+          : {}),
       });
     }
     project = await deps.store.updateProject(project.id, {

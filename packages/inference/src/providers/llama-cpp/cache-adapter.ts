@@ -181,7 +181,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
    */
   private allocationTail: Promise<void> = Promise.resolve();
   private engineGeneration = 0;
-  private readonly slotCount: number;
+  private slotCount: number;
   private readonly resolveBaseUrl: LlamaCppCacheAdapterOptions['resolveBaseUrl'];
   private readonly resolveAuthToken: () => string | null;
   private readonly fetchImpl: typeof fetch;
@@ -237,6 +237,16 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
     if (!Number.isSafeInteger(budget) || budget < 0 || !Number.isSafeInteger(budget * 1024 * 1024))
       throw new Error('Invalid llama disk cache budget');
     this.diskCacheBudgetBytes = budget * 1024 * 1024;
+  }
+
+  /**
+   * Follow an engine relaunched with a different `--parallel` count. Every
+   * binding goes with it: a session pinned to a slot the new engine lacks
+   * would send an `id_slot` the server rejects.
+   */
+  setSlotCount(slotCount: number): void {
+    this.slotCount = Math.max(1, Math.floor(slotCount));
+    this.resetEngineState();
   }
 
   /** The provider survives engine restarts, but its resident slot contents do not. */

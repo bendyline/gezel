@@ -53,3 +53,74 @@
   flex: none;
   white-space: nowrap;
 }
+
+/* A tab that carries a menu of its choices (the project Views tab). The
+   chevron is decorative and sits in the label faces the probe measures; the
+   anchor is the inert span the menu positions against, laid along the tab's
+   bottom edge so the panel opens under the tab, start-aligned. */
+.fitted-tab--menu {
+  position: relative;
+}
+
+.fitted-tab-chevron {
+  opacity: 0.7;
+  transition: transform 140ms ease-out;
+}
+
+.fitted-tab--menu[aria-expanded="true"] .fitted-tab-chevron {
+  transform: rotate(180deg);
+}
+
+.fitted-tab-menu-anchor {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.fitted-tab-menu {
+  min-width: 15rem;
+  max-width: min(22rem, calc(100vw - 2rem));
+}
+
+.fitted-tab-menu-item {
+  align-items: flex-start;
+}
+
+.fitted-tab-menu-check {
+  display: inline-flex;
+  flex: 0 0 0.8rem;
+  align-items: center;
+  justify-content: center;
+  width: 0.8rem;
+  height: 1lh;
+  color: var(--accent-text);
+}
+
+.fitted-tab-menu-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 1lh;
+  color: var(--text-muted);
+}
+
+.fitted-tab-menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.fitted-tab-menu-hint {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fitted-tab-chevron {
+    transition: none;
+  }
+}

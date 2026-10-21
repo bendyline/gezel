@@ -6,12 +6,9 @@ import {
   type ProjectDetail,
   type ProjectTypeCategory,
   catalogGroundFor,
-  connectorCraftbookIds,
-  interestAreasForProjectType,
   interestAreasForProjectTypeCategory,
   orderByInterests,
   servesInterests,
-  visibleCatalogItems,
 } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
@@ -41,9 +38,11 @@ import {
   ProjectGlyph,
   type ProjectGlyphId,
   type ProjectKindId,
+  catalogProjectTypeAreas,
   catalogProjectTypeGlyph,
   categorizeCatalogType,
 } from './new-project-meta.js';
+import { loadOfferedProjectTypes } from './offered-project-types.js';
 
 function TypeCard({
   label,
@@ -189,11 +188,17 @@ function suggestProjectName(item: CatalogItemSummary, params: Record<string, unk
 export function NewProjectDialog({
   open,
   mode,
+  initialTypeId,
   onClose,
   onCreated,
 }: {
   open: boolean;
   mode: 'crew' | 'solo';
+  /**
+   * Open on this project type's form instead of the gallery (Home's Make
+   * something). An id the catalog no longer offers lands on the gallery.
+   */
+  initialTypeId?: string;
   onClose: () => void;
   onCreated: (created: ProjectDetail) => Promise<void> | void;
 }) {
@@ -209,6 +214,10 @@ export function NewProjectDialog({
   // the type supplies the about/mission, so those fields hide and the type's
   // params form shows instead. See docs/project-types.md.
   const [projectTypes, setProjectTypes] = useState<CatalogItemSummary[]>([]);
+  const [projectTypesLoaded, setProjectTypesLoaded] = useState(false);
+  // A dialog asked to open on a type stays hidden until the catalog answers,
+  // so the gallery never flashes before the type's form.
+  const [initialTypeSettled, setInitialTypeSettled] = useState(!initialTypeId);
   const [selectedTypeId, setSelectedTypeId] = useState<string | null>(null);
   const [typeParams, setTypeParams] = useState<Record<string, unknown>>({});
   const [projectTypeQuery, setProjectTypeQuery] = useState('');
@@ -290,31 +299,29 @@ export function NewProjectDialog({
     setKindChosen(false);
     setError('');
     setBusy(false);
+    setProjectTypesLoaded(false);
+    setInitialTypeSettled(!initialTypeId);
     lastAutofilledUrl.current = null;
-  }, [open]);
+  }, [open, initialTypeId]);
 
   // Load the custom project types offered in the gallery, once per open.
-  // `email` is excluded — it has its own kind (with mailbox linking) above.
   useEffect(() => {
     const caps = runtimeCapabilities();
-    if (!open || !(caps.catalog || caps.projectTypes)) return;
+    if (!open) return;
+    if (!(caps.catalog || caps.projectTypes)) {
+      setProjectTypesLoaded(true);
+      return;
+    }
     let cancelled = false;
-    const projectTypesRequest = api.listCatalogItems('project-type');
-    const connectorBooksRequest = showWorkInProgressFeatures
-      ? Promise.resolve({ items: [] as CatalogItemSummary[] })
-      : api.listCatalogItems('craftbook-template');
-    void Promise.all([projectTypesRequest, connectorBooksRequest])
-      .then(([types, books]) => {
-        if (cancelled) return;
-        const connectorIds = connectorCraftbookIds(books.items);
-        setProjectTypes(
-          visibleCatalogItems(types.items, showWorkInProgressFeatures, connectorIds).filter(
-            (item) => item.manifest.id !== 'email',
-          ),
-        );
+    void loadOfferedProjectTypes(showWorkInProgressFeatures)
+      .then((types) => {
+        if (!cancelled) setProjectTypes(types);
       })
       .catch(() => {
         if (!cancelled) setProjectTypes([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProjectTypesLoaded(true);
       });
     return () => {
       cancelled = true;
@@ -381,6 +388,35 @@ export function NewProjectDialog({
     setStep('pick');
     setError('');
   }, []);
+
+  /** A purpose-built type owns the whole form. Seed its parameter defaults before showing its editor. */
+  const selectType = useCallback(
+    (item: CatalogItemSummary) => {
+      if (kind === 'github') cancelRepoPreview();
+      setSelectedTypeId(item.manifest.id);
+      setKind('general');
+      setKindChosen(false);
+      const schema =
+        item.manifest.kind === 'project-type'
+          ? (item.manifest.params as SquisqAnnotatedSchema | undefined)
+          : undefined;
+      const defaults = seedParamDefaults(schema);
+      setTypeParams(defaults);
+      if (!nameManuallyEdited) setName(suggestProjectName(item, defaults));
+      setError('');
+      setStep('configure');
+    },
+    [kind, nameManuallyEdited, cancelRepoPreview],
+  );
+
+  useEffect(() => {
+    if (!open || initialTypeSettled || !projectTypesLoaded) return;
+    const item = projectTypes.find(
+      (type) => type.manifest.id === initialTypeId && !type.unavailableReason,
+    );
+    if (item) selectType(item);
+    setInitialTypeSettled(true);
+  }, [open, initialTypeSettled, projectTypesLoaded, projectTypes, initialTypeId, selectType]);
 
   const handleRepoChange = useCallback(
     (next: string) => {
@@ -584,13 +620,7 @@ export function NewProjectDialog({
           builtins: filteredProjectKinds.filter((k) => k.category === cat.id),
           types: orderByInterests(
             filteredProjectTypes.filter((t) => categorizeCatalogType(t) === cat.id),
-            (t) =>
-              t.manifest.kind === 'project-type'
-                ? interestAreasForProjectType({
-                    ...(t.manifest.interests ? { interests: t.manifest.interests } : {}),
-                    category: categorizeCatalogType(t),
-                  })
-                : [],
+            catalogProjectTypeAreas,
             interests.areas,
           ),
         }))
@@ -826,7 +856,7 @@ export function NewProjectDialog({
 
   return (
     <Dialog.Root
-      open={open}
+      open={open && initialTypeSettled}
       onOpenChange={(next) => {
         if (!next) onClose();
       }}
@@ -932,24 +962,7 @@ export function NewProjectDialog({
                               {...(item.iconSvg ? { iconSvg: item.iconSvg } : {})}
                               {...(item.logoUrl ? { logoUrl: item.logoUrl } : {})}
                               ground={catalogGroundFor(item.manifest)}
-                              onSelect={() => {
-                                if (kind === 'github') cancelRepoPreview();
-                                setSelectedTypeId(item.manifest.id);
-                                // A purpose-built type owns the whole form. Seed
-                                // its parameter defaults before showing its editor.
-                                setKind('general');
-                                setKindChosen(false);
-                                const schema =
-                                  item.manifest.kind === 'project-type'
-                                    ? (item.manifest.params as SquisqAnnotatedSchema | undefined)
-                                    : undefined;
-                                const defaults = seedParamDefaults(schema);
-                                setTypeParams(defaults);
-                                if (!nameManuallyEdited)
-                                  setName(suggestProjectName(item, defaults));
-                                setError('');
-                                setStep('configure');
-                              }}
+                              onSelect={() => selectType(item)}
                             />
                           ))}
                         </div>

@@ -53,7 +53,7 @@ fi
 # The LibreOffice extension is installed per user (`unopkg add -s`, never
 # `--shared`), so no system-wide copy exists to remove here. It stays in each
 # user's LibreOffice profile until they remove it from Tools > Extensions or
-# from Settings > Connected Apps before uninstalling; without Gezel it only
+# from Settings > Integrations before uninstalling; without Gezel it only
 # reports that Gezel is not running.
 
 # The package payload containing com.bendyline.gezel.desktop and gezel.png has

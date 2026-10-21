@@ -1805,13 +1805,21 @@ ipcMain.handle(
         res.end('not found');
         return;
       }
+      const error = u.searchParams.get('error');
+      const code = u.searchParams.get('code');
+      // Every connector type links through this listener, and the binding is
+      // only created after Gezel exchanges the code — so the page reports what
+      // actually happened here, not "connected".
+      const [heading, detail] = error
+        ? ['Sign-in was not completed', 'Return to Gezel to try again.']
+        : code
+          ? ['Sign-in received', 'You can close this tab and return to Gezel to finish connecting.']
+          : ['Something went wrong', 'The sign-in page returned without an authorization code.'];
       res.statusCode = 200;
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.end(
-        '<!doctype html><meta charset="utf-8"><title>Gezel</title><body style="font-family:system-ui;padding:3rem;text-align:center"><h2>Mailbox connected</h2><p>You can close this tab and return to Gezel.</p></body>',
+        `<!doctype html><meta charset="utf-8"><title>Gezel</title><body style="font-family:system-ui;padding:3rem;text-align:center"><h2>${heading}</h2><p>${detail}</p></body>`,
       );
-      const error = u.searchParams.get('error');
-      const code = u.searchParams.get('code');
       const state = u.searchParams.get('state') ?? '';
       if (error) settle({ error });
       else if (code) settle({ code, state });

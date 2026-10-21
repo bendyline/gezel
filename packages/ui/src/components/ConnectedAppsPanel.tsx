@@ -1,4 +1,4 @@
-import type { LocalHarnessSetupState } from '@bendyline/gezel';
+import type { HarnessClientId, LocalHarnessSetupState } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Select, Tabs } from '../primitives/index.js';
@@ -18,9 +18,12 @@ import {
   isVerificationCodeReady,
 } from './grant-verification.js';
 import { harnessStateLabel } from './harness-setup/useHarnessSetupCard.js';
+import { HarnessToolsOverview } from './harness-tools/HarnessToolsOverview.js';
+import { HarnessToolsSection } from './harness-tools/HarnessToolsSection.js';
+import { useHarnessTools } from './harness-tools/useHarnessTools.js';
 
 /**
- * Settings → Connected Apps tab. Lists every third-party app that's
+ * Settings → Integrations tab. Lists every third-party app that's
  * been granted a per-app token via `/v1/apps/register` and any pending
  * grant requests waiting on user consent.
  *
@@ -105,9 +108,14 @@ type EndpointsStatusScope = 'endpoints' | 'ollama';
 const NO_APP_TOOLS_PROVIDERS = new Set(['copilot', 'anthropic-cli', 'codex-cli']);
 
 type SetupTab = Exclude<ConnectedAppsTab, 'overview' | 'ollama'>;
+/** Tabs whose card sets up Gezel's models (or add-in) in that app, and reports its own state. */
+type ModelSetupTab = 'codex' | 'vscode' | 'opencode' | 'pi' | 'office' | 'libreoffice';
 
 const SETUP_TABS: ReadonlyArray<{ id: SetupTab; label: string }> = [
+  { id: 'claude-code', label: 'Claude Code' },
+  { id: 'claude-desktop', label: 'Claude Desktop' },
   { id: 'codex', label: 'Codex' },
+  { id: 'cursor', label: 'Cursor' },
   { id: 'vscode', label: 'VS Code' },
   { id: 'opencode', label: 'OpenCode' },
   { id: 'pi', label: 'pi' },
@@ -139,12 +147,22 @@ export function ConnectedAppsPanel() {
   const [defaultProvider, setDefaultProvider] = useState<string>('copilot');
   const [meesterGezelId, setMeesterGezelId] = useState<string | undefined>();
   const [tab, setTab] = useState<ConnectedAppsTab>('overview');
-  const [setupStates, setSetupStates] = useState<Partial<Record<SetupTab, LocalHarnessSetupState>>>(
-    {},
-  );
+  const [setupStates, setSetupStates] = useState<
+    Partial<Record<ModelSetupTab, LocalHarnessSetupState>>
+  >({});
+  const harnessTools = useHarnessTools();
+
+  /** The state a tab's dot reports: the worse of its model setup and its tools setup. */
+  const tabAttention = (id: SetupTab): LocalHarnessSetupState | undefined => {
+    const states = [
+      setupStates[id as ModelSetupTab],
+      harnessTools.client(id as HarnessClientId)?.state,
+    ];
+    return states.find((candidate) => candidate && NEEDS_ATTENTION.has(candidate));
+  };
 
   const reportSetupState = useMemo(() => {
-    const report = (id: SetupTab) => (next: LocalHarnessSetupState) =>
+    const report = (id: ModelSetupTab) => (next: LocalHarnessSetupState) =>
       setSetupStates((current) => (current[id] === next ? current : { ...current, [id]: next }));
     return {
       codex: report('codex'),
@@ -153,7 +171,7 @@ export function ConnectedAppsPanel() {
       pi: report('pi'),
       office: report('office'),
       libreoffice: report('libreoffice'),
-    } satisfies Record<SetupTab, (state: LocalHarnessSetupState) => void>;
+    } satisfies Record<ModelSetupTab, (state: LocalHarnessSetupState) => void>;
   }, []);
 
   const refresh = useCallback(async () => {
@@ -307,14 +325,21 @@ export function ConnectedAppsPanel() {
   }, [revokeTarget, refresh]);
 
   const pending = (state?.grants ?? []).filter((g) => g.status === 'pending');
-  const connected = state?.apps ?? [];
+  // Each gezel chat holds a `session:<id>` token for its own tool server. They
+  // come and go with every conversation, and revoking one only breaks a chat
+  // mid-turn, so they are not apps the person connected.
+  // Outside apps using Gezel's tools (`harness:*`) are listed, and stopped, in
+  // their own table under "Gezel's tools in other apps".
+  const connected = (state?.apps ?? []).filter(
+    (app) => !app.appId.startsWith('session:') && !app.appId.startsWith('harness:'),
+  );
 
   return (
     <section className="settings-section">
-      <h2>Connected Apps</h2>
+      <h2>Integrations</h2>
       <p className="muted small">
-        Apps and command-line clients that have asked for access to your Gezel service. Each client
-        is granted only the scopes it requested. Revoke any time.
+        Use Gezel inside your editor, Office, and other apps. Each app gets only the access it asked
+        for, and you can revoke it any time.
       </p>
 
       {error && (
@@ -400,9 +425,8 @@ export function ConnectedAppsPanel() {
             Overview
           </Tabs.Trigger>
           {SETUP_TABS.map(({ id, label }) => {
-            const setupState = setupStates[id];
-            const attention =
-              setupState && NEEDS_ATTENTION.has(setupState) ? harnessStateLabel(setupState) : null;
+            const setupState = tabAttention(id);
+            const attention = setupState ? harnessStateLabel(setupState) : null;
             return (
               <Tabs.Trigger key={id} value={id} title={attention ?? undefined}>
                 <ConnectedAppTabIcon tab={id} />
@@ -521,6 +545,8 @@ export function ConnectedAppsPanel() {
             )}
           </div>
 
+          <HarnessToolsOverview tools={harnessTools} />
+
           <div className="settings-subsection">
             <h3>Connected</h3>
             {connected.length === 0 ? (
@@ -591,6 +617,14 @@ export function ConnectedAppsPanel() {
           </div>
         </Tabs.Content>
 
+        <Tabs.Content value="claude-code" forceMount>
+          <HarnessToolsSection client="claude-code" tools={harnessTools} />
+        </Tabs.Content>
+
+        <Tabs.Content value="claude-desktop" forceMount>
+          <HarnessToolsSection client="claude-desktop" tools={harnessTools} />
+        </Tabs.Content>
+
         <Tabs.Content value="codex" forceMount>
           <CodexSetupCard
             key={`codex-${harnessSetupRefreshKey}`}
@@ -598,6 +632,11 @@ export function ConnectedAppsPanel() {
             onChanged={refresh}
             onStateChange={reportSetupState.codex}
           />
+          <HarnessToolsSection client="codex" tools={harnessTools} />
+        </Tabs.Content>
+
+        <Tabs.Content value="cursor" forceMount>
+          <HarnessToolsSection client="cursor" tools={harnessTools} />
         </Tabs.Content>
 
         <Tabs.Content value="vscode" forceMount>
@@ -607,6 +646,7 @@ export function ConnectedAppsPanel() {
             onChanged={refresh}
             onStateChange={reportSetupState.vscode}
           />
+          <HarnessToolsSection client="vscode" tools={harnessTools} />
         </Tabs.Content>
 
         <Tabs.Content value="opencode" forceMount>

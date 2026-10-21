@@ -90,6 +90,37 @@ export interface ImportEdgeInput {
   /** Named/default/namespace bindings; undefined = not recorded (legacy row or
    *  a language whose imports we don't destructure). */
   bindings?: ImportBinding[];
+  /** {@link IMPORT_FLAG} bits merged across every statement naming `raw`. */
+  flags?: number;
+}
+
+/**
+ * What kind of dependency an import row is, merged across the statements that
+ * name one specifier: a re-export when ANY statement re-exports (a barrel); a
+ * type-only or dynamic edge only when EVERY statement is one, because a single
+ * runtime import makes the dependency real.
+ */
+export const IMPORT_FLAG = {
+  reexport: 1,
+  typeOnly: 2,
+  dynamic: 4,
+} as const;
+
+/**
+ * One resolved file-to-file dependency (`file_edges`): `src` depends on
+ * `dst` through the specifier `raw`. A raw row can resolve to several files
+ * (a Go package, Python's `from . import a, b`).
+ */
+export interface FileEdge {
+  src: string;
+  dst: string;
+  raw: string;
+  /** import: code imports code; include: a C/C++ #include; link: a document links a file. */
+  kind: 'import' | 'include' | 'link';
+  /** Which resolver produced it, so a bad heuristic can be switched off alone. */
+  resolver: string;
+  bindings: ImportBinding[] | null;
+  flags: number;
 }
 
 export type SecuritySeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';

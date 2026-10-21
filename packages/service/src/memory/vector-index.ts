@@ -63,7 +63,7 @@ export interface SearchResult {
 
 /** The `source` column: the project an entry came from and the gezel that wrote it. */
 function sourceColumn(source: MemorySource | undefined): string | null {
-  return source?.project || source?.gezel ? JSON.stringify(source) : null;
+  return source?.project || source?.gezel || source?.app ? JSON.stringify(source) : null;
 }
 
 function readSourceColumn(value: string | null | undefined): MemorySource | undefined {
@@ -73,8 +73,9 @@ function readSourceColumn(value: string | null | undefined): MemorySource | unde
     const source: MemorySource = {
       ...(typeof parsed.project === 'string' ? { project: parsed.project } : {}),
       ...(typeof parsed.gezel === 'string' ? { gezel: parsed.gezel } : {}),
+      ...(typeof parsed.app === 'string' ? { app: parsed.app } : {}),
     };
-    return source.project || source.gezel ? source : undefined;
+    return source.project || source.gezel || source.app ? source : undefined;
   } catch {
     return undefined;
   }

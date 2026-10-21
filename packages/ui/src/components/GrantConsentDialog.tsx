@@ -10,7 +10,7 @@ import {
 /**
  * Global consent prompt for `/v1/apps/register`. Mounted once in App.tsx
  * so it surfaces from anywhere — the user shouldn't need to navigate to
- * Settings → Connected Apps to approve a request.
+ * Settings → Integrations to approve a request.
  *
  * Polls `GET /v1/apps` every 5s. When a pending grant is observed it
  * opens; the user picks Approve or Deny; the dialog closes and the
@@ -195,7 +195,7 @@ export function GrantConsentDialog() {
                 </div>
               )}
               <p className="muted small">
-                You can revoke this any time from Settings → Connected Apps.
+                You can revoke this any time from Settings → Integrations.
               </p>
               {error && (
                 <p className="settings-error" role="alert">

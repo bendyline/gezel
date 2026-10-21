@@ -3,14 +3,14 @@ import type { ServiceContext } from './context.js';
 
 /**
  * Master switch for the public OpenAI-compatible facade, driven by
- * `config.openaiEndpoints.enabled` (Settings → Connected Apps).
+ * `config.openaiEndpoints.enabled` (Settings → Integrations).
  *
  * Mounted BEFORE bearerAuth on `/v1/chat`, `/v1/models`,
  * `/v1/embeddings`, `/v1/gezels`, and `/ollama/v1/*` — when the user flips
  * the switch off, nothing on those inference surfaces answers, valid token
  * or not. `/v1/apps/register` remains reachable for non-OpenAI scopes (CLI,
  * product, remote pairing) and rejects `openai` requests inside its router.
- * The rest of `/v1/apps/*` also stays reachable so the Connected Apps panel
+ * The rest of `/v1/apps/*` also stays reachable so the Integrations panel
  * keeps working while the facade is off. `/v1/remote/*` is deliberately not gated — remote
  * model serving has its own `remoteServing.enabled` switch.
  *
@@ -31,7 +31,7 @@ export function requireOpenAiEndpointsEnabled(ctx: ServiceContext): MiddlewareHa
         {
           error: {
             message:
-              'OpenAI-compatible endpoints are turned off in Gezel. Enable them under Settings → Connected Apps.',
+              'OpenAI-compatible endpoints are turned off in Gezel. Enable them under Settings → Integrations.',
             type: 'invalid_request_error',
             code: 'openai_endpoints_disabled',
           },

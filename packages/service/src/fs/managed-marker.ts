@@ -31,7 +31,14 @@ export function createManagedMarker(input: {
   /** What the file is called in the header sentence, e.g. `'profile'`. */
   noun: string;
 }): ManagedMarker {
-  const managedHeader = `${input.commentPrefix}Managed by Gezel. Use Settings > Connected Apps to change or remove this ${input.noun}.`;
+  const managedHeader = `${input.commentPrefix}Managed by Gezel. Use Settings > Integrations to change or remove this ${input.noun}.`;
+  // Files written before the Settings page was renamed must still read as
+  // ours, or every existing setup would turn into a conflict. The next
+  // refresh rewrites them with the current header.
+  const claimHeaders = [
+    managedHeader,
+    `${input.commentPrefix}Managed by Gezel. Use Settings > Connected Apps to change or remove this ${input.noun}.`,
+  ];
   const ownerHeader = `${input.commentPrefix}Gezel setup owner: `;
   const digestHeader = `${input.commentPrefix}Gezel ${input.noun} digest: `;
 
@@ -41,7 +48,8 @@ export function createManagedMarker(input: {
     },
     isManaged(content, ownerId) {
       const lines = content.split('\n');
-      if (lines[0] !== managedHeader || lines[1] !== `${ownerHeader}${ownerId}`) return false;
+      if (!claimHeaders.includes(lines[0] ?? '') || lines[1] !== `${ownerHeader}${ownerId}`)
+        return false;
       const digest = lines[2]?.startsWith(digestHeader)
         ? lines[2].slice(digestHeader.length)
         : null;
@@ -49,7 +57,7 @@ export function createManagedMarker(input: {
       return digest === sha256(lines.slice(3).join('\n'));
     },
     isClaimed(content) {
-      return content.startsWith(managedHeader);
+      return claimHeaders.some((header) => content.startsWith(header));
     },
   };
 }

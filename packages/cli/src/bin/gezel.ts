@@ -75,6 +75,7 @@ import {
 } from '../engagement-mode.js';
 import { enumOpt, floatOpt, intOpt, resolvePromptText, saveArtifact } from '../generate.js';
 import { resolveKnowledgeInstallSource } from '../knowledge-install.js';
+import { registerMcpCommands } from '../mcp-command.js';
 import {
   availableChatModels,
   formatAvailableChatModels,
@@ -142,6 +143,7 @@ program
 const cliGlobals = (): CliGlobals => program.opts() as CliGlobals;
 
 registerSecretCommands(program, () => connectOwned(cliGlobals()));
+registerMcpCommands(program, () => connectOwned(cliGlobals()));
 registerSecurityCommands(program, () => connectOwned(cliGlobals()));
 
 // Apply --home before any command runs so the daemon spawn env, readRuntime,

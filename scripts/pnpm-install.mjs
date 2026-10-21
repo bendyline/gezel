@@ -1,7 +1,16 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+} from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -337,6 +346,89 @@ export function danglingVirtualStoreLinks(repoRoot) {
   return dangling;
 }
 
+/**
+ * Root links `publicHoistPattern` asked pnpm for that are not on disk. pnpm
+ * writes each link under a temporary name and renames it into place, so an
+ * install interrupted between the two leaves `.onnxruntime-node-JlyBwybW`
+ * beside a missing `onnxruntime-node` while every importer-level check
+ * passes. Embeddings were off until the links were put back by hand
+ * (2026-10-20). Private hoists are not checked: this checkout had four
+ * absent with no known failure, so absence there is not evidence of damage.
+ */
+export function missingPublicHoistedLinks(repoRoot) {
+  let modules;
+  try {
+    modules = JSON.parse(readFileSync(join(repoRoot, 'node_modules', '.modules.yaml'), 'utf8'));
+  } catch {
+    return [];
+  }
+  const missing = [];
+  for (const [depPath, aliases] of Object.entries(modules?.hoistedDependencies ?? {})) {
+    for (const [alias, kind] of Object.entries(aliases ?? {})) {
+      if (kind !== 'public') continue;
+      if (!existsSync(join(repoRoot, 'node_modules', ...alias.split('/')))) {
+        missing.push({ alias, depPath });
+      }
+    }
+  }
+  return missing.sort((a, b) => a.alias.localeCompare(b.alias));
+}
+
+/** pnpm's virtual-store folder name for a dependency path, before any length hashing. */
+function virtualStoreDirName(depPath) {
+  const name = depPath.replace(/[\\/:*?"<>|]/g, '+');
+  return name.includes('(') ? name.replace(/\)$/, '').replace(/\)\(|\(|\)/g, '_') : name;
+}
+
+/** The virtual-store package a public hoist points at, or null when it cannot be found. */
+function publicHoistTarget(repoRoot, { alias, depPath }) {
+  const store = join(repoRoot, 'node_modules', '.pnpm');
+  const direct = join(store, virtualStoreDirName(depPath), 'node_modules', ...alias.split('/'));
+  if (existsSync(join(direct, 'package.json'))) return direct;
+  // A long dependency path is hashed into its folder name; find the one
+  // folder holding this alias at this version instead.
+  const version = depPath.slice(depPath.indexOf('@', 1) + 1).split('(')[0];
+  const matches = [];
+  for (const entry of readDirents(store)) {
+    if (!entry.isDirectory() || entry.name === 'node_modules') continue;
+    const candidate = join(store, entry.name, 'node_modules', ...alias.split('/'));
+    try {
+      const manifest = JSON.parse(readFileSync(join(candidate, 'package.json'), 'utf8'));
+      if (manifest.version === version) matches.push(candidate);
+    } catch {}
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
+/**
+ * Put back the public root links pnpm recorded but did not leave on disk.
+ * pnpm will not do it: a frozen install, with or without its repeat-install
+ * shortcut, and even with the record dropped from `.modules.yaml`, leaves a
+ * missing public hoist missing. Only `--force`, which also installs every
+ * platform's optional packages, or relinking the whole tree brings it back.
+ * Returns the aliases it could not restore.
+ */
+export function restorePublicHoistedLinks(repoRoot, missing = missingPublicHoistedLinks(repoRoot)) {
+  const unrestored = [];
+  for (const hoist of missing) {
+    const target = publicHoistTarget(repoRoot, hoist);
+    if (!target) {
+      unrestored.push(hoist.alias);
+      continue;
+    }
+    const link = join(repoRoot, 'node_modules', ...hoist.alias.split('/'));
+    try {
+      rmSync(link, { force: true });
+      mkdirSync(dirname(link), { recursive: true });
+      if (process.platform === 'win32') symlinkSync(target, link, 'junction');
+      else symlinkSync(relative(dirname(link), target), link);
+    } catch {
+      unrestored.push(hoist.alias);
+    }
+  }
+  return unrestored;
+}
+
 function workspaceDependencyMarkersReady(repoRoot) {
   const binSuffix = process.platform === 'win32' ? '.cmd' : '';
   return (
@@ -359,21 +451,25 @@ export function dependencyStatus(repoRoot) {
   const missingLinks = missingWorkspaceDependencyLinks(repoRoot);
   const staleLinks = staleWorkspaceDependencyLinks(repoRoot);
   const danglingLinks = danglingVirtualStoreLinks(repoRoot);
+  const missingHoistedLinks = missingPublicHoistedLinks(repoRoot);
   const installedIssue = installedLockfileIssue(repoRoot);
   const workspaceIssue = workspaceStructureIssue(repoRoot);
   const usable = markersReady && missingLinks.length === 0;
+  const linksSynchronized =
+    usable &&
+    staleLinks.length === 0 &&
+    danglingLinks.length === 0 &&
+    !installedIssue &&
+    !workspaceIssue;
   return {
     usable,
-    synchronized:
-      usable &&
-      staleLinks.length === 0 &&
-      danglingLinks.length === 0 &&
-      !installedIssue &&
-      !workspaceIssue,
+    synchronized: linksSynchronized && missingHoistedLinks.length === 0,
+    onlyHoistsMissing: linksSynchronized && missingHoistedLinks.length > 0,
     markersReady,
     missingLinks,
     staleLinks,
     danglingLinks,
+    missingHoistedLinks,
     installedLockfileIssue: installedIssue,
     lockfileValidationIssue: lockfileValidationIssue(repoRoot),
     workspaceStructureIssue: workspaceIssue,
@@ -402,6 +498,9 @@ export function reportDependencyStatus(repoRoot, options = {}) {
   }
   if (dangling.length > DANGLING_REPORT_LIMIT) {
     write(`[deps:status] ...and ${dangling.length - DANGLING_REPORT_LIMIT} more broken links`);
+  }
+  for (const { alias } of status.missingHoistedLinks ?? []) {
+    write(`[deps:status] missing root link ${alias}: pnpm hoists it publicly but it is not there`);
   }
   if (status.installedLockfileIssue) {
     write(`[deps:status] synchronization required: ${status.installedLockfileIssue}`);
@@ -738,6 +837,18 @@ export async function runSerializedPnpmInstall(options = {}) {
         console.log('[pnpm-install] dependencies already present');
         return 0;
       }
+      // pnpm cannot put a missing public hoist back (see
+      // restorePublicHoistedLinks), so when that is the only damage, no
+      // install runs at all.
+      if (!repair && status.onlyHoistsMissing) {
+        const unrestored = restorePublicHoistedLinks(repoRoot, status.missingHoistedLinks);
+        if (unrestored.length === 0) {
+          console.log(
+            `[pnpm-install] restored root links: ${status.missingHoistedLinks.map((h) => h.alias).join(', ')}`,
+          );
+          return 0;
+        }
+      }
 
       const pnpmMismatch = (options.pnpmMismatchFn ?? pinnedPnpmMismatch)(repoRoot, {
         env: options.env,
@@ -747,7 +858,13 @@ export async function runSerializedPnpmInstall(options = {}) {
         return 1;
       }
 
-      const installArgs = repair ? args : missingInstallArgs(repoRoot, args, status);
+      // A repair pnpm answers "Already up to date" reconciled nothing: the
+      // repeat-install shortcut compares the lockfile, not the links on disk.
+      const installArgs = repair
+        ? args.includes('--config.optimistic-repeat-install=false')
+          ? args
+          : [...args, '--config.optimistic-repeat-install=false']
+        : missingInstallArgs(repoRoot, args, status);
 
       const lockOwners = (options.dependencyLockProbeFn ?? inspectWindowsDependencyLocks)(repoRoot);
       if (lockOwners.length > 0) {
@@ -766,6 +883,7 @@ export async function runSerializedPnpmInstall(options = {}) {
         setChildPid,
       });
       if (installCode !== 0) return installCode;
+      restorePublicHoistedLinks(repoRoot);
 
       // pnpm reports success per the importers it was asked to touch, so a
       // filtered reconciliation can exit 0 while another importer still holds
@@ -774,7 +892,8 @@ export async function runSerializedPnpmInstall(options = {}) {
       // that claim is verified rather than assumed.
       const unsynchronized = unsynchronizedWorkspaceDependencyLinks(repoRoot);
       const dangling = danglingVirtualStoreLinks(repoRoot);
-      if (unsynchronized.length > 0 || dangling.length > 0) {
+      const missingHoisted = missingPublicHoistedLinks(repoRoot);
+      if (unsynchronized.length > 0 || dangling.length > 0 || missingHoisted.length > 0) {
         console.error(`[pnpm-install] ${command} finished but the tree still differs:`);
         for (const entry of unsynchronized) {
           console.error(
@@ -785,6 +904,9 @@ export async function runSerializedPnpmInstall(options = {}) {
         }
         for (const entry of dangling) {
           console.error(`  ${entry.dependency} for ${entry.packageName}: link target is missing`);
+        }
+        for (const { alias } of missingHoisted) {
+          console.error(`  ${alias}: the root link pnpm hoists publicly is missing`);
         }
         console.error('[pnpm-install] run `pnpm deps:repair` to rebuild the affected packages');
         return 1;

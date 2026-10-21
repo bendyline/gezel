@@ -83,6 +83,8 @@ const PER_SCOPE_TIMEOUT_MS = 600;
 const KNOWLEDGE_QUERY_EMBED_BUDGET_MS = Math.floor(PER_SCOPE_TIMEOUT_MS / 2);
 /** Hits requested from each per-project content source. */
 const PER_SOURCE_RESULTS = 5;
+/** Ranked lists the workspace code arm fuses; it gets that many sources' share of results. */
+const CODE_ARM_SOURCES = 3;
 /** Catalog cap on indexed artifact-corpus records per project. */
 const ARTIFACT_CATALOG_CAP = 2000;
 /** Hits requested from each memory scope. */
@@ -829,9 +831,13 @@ export class SearchService {
         // project content.
         if (isSharedLibraryProject(p)) return out;
         const workspaceIndexing = p.indexingEnabled !== false;
+        // The code arm fuses four ranked lists (vectors, symbols, docs,
+        // summaries). Cut to one source's share, the weakest-weighted
+        // list — the enrichment summaries — never made the cut.
+        const codeResults = perSource * CODE_ARM_SOURCES;
         const codeOpts = vector
-          ? { queryVector: vector, maxResults: perSource }
-          : { mode: 'keyword' as const, maxResults: perSource };
+          ? { queryVector: vector, maxResults: codeResults }
+          : { mode: 'keyword' as const, maxResults: codeResults };
         const [code, docs, artifacts, symbols, areas, mem, media] = await Promise.all([
           workspaceIndexing && wants('workspace')
             ? timed(

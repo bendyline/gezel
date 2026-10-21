@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { openGreetingTab } from './helpers/greeting.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
@@ -45,6 +46,7 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page }> {
   });
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
+  await waitForAppReady(page);
   const brand = page.locator('.app-header-brand');
   await expect(brand).toBeVisible({ timeout: 20_000 });
   await brand.click();

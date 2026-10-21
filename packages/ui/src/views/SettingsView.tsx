@@ -365,7 +365,7 @@ function buildSections(platform: string | undefined): SettingsSection[] {
     { id: 'webSearch', label: 'Web search', group: 'workloads' },
     { id: 'knowledge', label: 'Knowledge', group: 'workloads' },
     { id: 'channels', label: 'Channels' },
-    { id: 'connectedApps', label: 'Connected Apps' },
+    { id: 'connectedApps', label: 'Integrations' },
     { id: 'remoteServers', label: 'Remote Servers' },
     { id: 'toolsets', label: 'Shared Toolsets' },
     { id: 'about', label: 'About' },

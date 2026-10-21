@@ -1,7 +1,7 @@
 # Remote access to the product API and web UI
 
 How to reach a gezel daemon's full product surface (`/api/*`, `/v1/*`
-Connected Apps, the web UI) from another machine: what works today, why the
+Integrations, the web UI) from another machine: what works today, why the
 direct path is blocked on purpose, and the design for first-class remote
 access. **Remote inference between paired devices is a different, shipped
 subsystem** (`packages/service/src/remotes/`, `/v1/remote/*`, LAN listener on

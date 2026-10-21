@@ -631,19 +631,24 @@ What lives where:
 
 Electron opens a small local Home reader before waiting for the daemon. It uses
 the normal sage titlebar and real native window controls, the saved theme and
-sidebar side, and a bounded reading copy of the Meester's status, the last user
-message, and recent Night shift reports. Saved reports carry their dates; live
-activity and report actions wait for the service. A short selection of Handboek
-articles ships with this reader and works on a first launch too.
+sidebar side, and a bounded reading copy of the Meester's status and recent
+Night shift reports. Saved reports carry their dates; live
+activity and report actions wait for the service. The Home Handboek introduction
+ships with this reader and works on a first launch too.
 
-The startup entry has no React, editor, model, or document-player dependency.
-Keep its script within the build's 48 KB limit. Product snapshots are prepared
-off the startup path, and no project or session scan belongs in Electron boot.
-The same reader covers the live app's first paint. It keeps the current article
-and scroll position while the surrounding frame becomes live; Show latest or
-Open in Handboek takes the reader to the full surface. Save startup typing as a
-normal prompt draft before releasing the local copy. A failed handoff leaves
-that copy editable and offers a retry. Honor reduced motion and keyboard tabs.
+The local screen uses the live app's logo, navigation tab, Home typography,
+Meester figure, greeting, and tip components and styles. It deliberately omits
+search, the project/crew lists, and the chat composer. A quiet loading indicator
+occupies the space below the intro sheet. The saved character is the Meester's
+persisted poppetje, not a generated stand-in.
+
+The entry includes React and the small Home components (a 400 KB script budget).
+Squisq and the bundled Handboek introduction are lazy-loaded only when a saved
+status report or a chosen Night shift/Handboek page needs them. No project or
+session scan belongs in Electron boot. Reading content and scroll position stay
+in place during the transition; Show latest or Open in Handboek takes the reader
+to the full surface. Pending drafts from older startup versions still transfer
+before the local copy is released. Honor reduced motion and keyboard tabs.
 
 ### The welcome
 
@@ -827,16 +832,28 @@ output. **See all** opens the full plan gallery, whose **Start here** shelf
 uses the same starter set. Use the existing tray and radius tokens; these
 are square-ish keys, never pills.
 
+Beneath the plans, a **Start a project** shelf offers up to six catalog
+project types in its own tray. A key opens New Project straight on that
+type's form (`initialTypeId`; the dialog stays hidden until the catalog
+answers, so the gallery never flashes first), and the shelf's own **See all**
+opens the whole project type gallery. A type this host cannot run is left
+out, as a plan is. Below both shelves, **Integrate Gezel into other apps…**
+opens Settings → Integrations, on hosts that have daemon settings.
+
 Every key is one size. A first-project plan's catalog description runs to a
 paragraph, so its key shows only the opening clause (`planShortDescription`:
 the first sentence, up to a colon, then up to the last comma that fits),
 clamped to two lines, and every tray row is as tall as the tallest. The
-whole description belongs to the launch sheet, not the key.
+whole description belongs to the launch sheet, not the key. The trays use
+`auto-fill` columns, so the shorter project shelf keeps keys the size of the
+plans above it instead of stretching them.
 
-Each Make something key is a **paper card** of `--gezel-paper-mark` in both
-themes, holding the book's 64px mark as a `--radius-md` tile on its category
-ground (see Workshop Marks below). The name and description are set in warm
-ink, and hover changes only the border.
+Each Make something key is an ordinary **key** of the theme (`--key-bg`,
+`--key-border`, `--key-shadow`), holding the book's 64px mark as a
+`--radius-md` tile on its category ground (see Workshop Marks below). The
+tiles carry the color, so the card stays quiet and never uses a fixed light
+paper in dark mode. The name and description use the theme's text colors, and
+hover lifts the key and colors its border.
 
 The starters live inside the intro tab. The folder step waits until the
 welcome is over: on a later visit it keeps its own bounded area above the
@@ -979,6 +996,16 @@ Ollama, engagement modes, tempo, a task's status), use **keys in a tray** — se
 [Controls: keys in trays](#controls-keys-in-trays). The Home + Settings
 provider switches are this pattern.
 
+**Native `<select>`s share one face.** Every single-choice native select
+takes the recipe in [styles/foundation.css](../packages/ui/src/styles/foundation.css):
+brown with cream text in light mode, a panel-colored field in dark mode, and a
+chevron we draw in a reserved right gutter, so a long value ends in an ellipsis
+before the arrow. Never fall back to the platform's own select: Chromium on
+Windows paints its arrow over a value too long to fit. A surface rule may change
+a select's width or margin, but not its chevron, right padding, or colors; the
+recipe's selector outranks ordinary `.surface select` rules for that reason.
+Re-theme it through the `--select-*` tokens.
+
 **Connected tabs, for a switch that fronts the surface below it.** The
 default tab bar (`gz-tabs-trigger`) marks the current tab with an accent
 underline and is right for a row of peer destinations. When the choice
@@ -1014,8 +1041,46 @@ one concept keeps one picture. To keep every section on a phone, an
 iconified project tab may narrow below 44px wide, down to WCAG's 24px
 minimum. It keeps the 44px height.
 
+**A tab can name its current choice and carry a menu.** The project
+**Views** tab holds several views of one project (Village, and the views that
+join it), so it reads as the view it last showed — "Village view" — with a
+small decorative chevron after the label. Clicking it while another tab is
+current only selects it, so it opens straight onto that view; clicking it
+again, or pressing Enter, Space or Down while it is current, opens a
+`.app-nav-menu` of the views with a check on the current one and a one-line
+hint under each name. The tab stays a plain `Tabs.Trigger`: the menu
+positions against `DropdownMenu.AnchorTrigger`, an inert span inside the tab,
+because composing a Radix menu trigger onto a tab overwrites the tab's
+`data-state`. The chevron is drawn in the label and both faces and in the
+probe row, so the fit measurement includes it; icon faces drop it. With only
+one view on offer the tab is a plain tab and opens no menu. On a phone, where
+the tab shows only its icon, the panel under it names the view in a
+"Showing" picker instead. The choice is saved on the project
+(`selectedView`, like `outputPaneVisible`), never in localStorage; a view id
+this build doesn't know falls back to the project's default rather than being
+rewritten.
+
+**Every view shares one inspector.** Selecting a file in any project view
+opens the same right-hand pane (`FileInspector`) beside it: the name and path
+with an Open key, the file's summary, the facts the view already knows (plus
+chips only that view can say — the Village's town style, a pull request's
+change), the findings tray, the Boekwachter review card with its tracked
+`BW-n` issues, and the file itself. A view adds to the pane through its
+extras, never by forking it. The selection belongs to the Views tab, not the
+view, so switching views keeps the file selected. The split is a fraction
+with a grip (see Resizable splits); on a phone the pane covers the view as a
+sheet with a way back that names the view.
+
+**Integrations go out; Connections come in.** Settings → Integrations is
+where Gezel is put to work inside other apps (editors, Office, command-line
+tools). A project's **Connections** brings outside data, such as a mailbox,
+into that project. Keep the two words to those two directions, and don't
+call the Settings page "apps": that word already means Gezel's own AI Apps.
+The apps that hold a grant are still "connected apps" in a sentence and in the
+**Connected** list on the Overview tab.
+
 **A settings page of several integrations gives each its own tab.**
-Settings → Connected Apps opens on **Overview** (the master switch and the
+Settings → Integrations opens on **Overview** (the master switch and the
 apps already approved), then one tab per integration. Each tab shows that
 integration's setup without a card frame, because the tab is already the
 container (as on the flat provider pages). Anything waiting on the person,
@@ -1032,6 +1097,12 @@ because several marks (OpenCode's block, pi's π) don't name their product on
 their own.
 Copy that points at another tab names it ("on the Overview tab"), never
 "above" or "below".
+An integration that works in both directions keeps one tab and stacks two
+setups on it, each with its own heading and state chip: **Gezel's models in
+Codex** (the app uses Gezel's models) above **Gezel's tools in Codex** (the app
+uses Gezel's tools). The tab's dot reports the worse of the two. Their buttons
+name what they act on ("Set up Gezel's tools…"), so the two setups never offer
+the same label on one tab.
 
 **Split buttons.** Use a split button when one creation action is the clear,
 frequent default and two or three closely-related variants should remain
@@ -1066,8 +1137,18 @@ by window width — a file tree is sized by how long filenames are. Pixel splits
 also get a **collapsed rail**: dragging past the point where the pane stops
 being readable snaps it to a ~2rem strip carrying a chevron and the pane's name
 set in `writing-mode: vertical-rl`, which is also the way back. Collapse is a
-snap, never a sliver — never leave a pane too narrow to read. The Workspace /
+snap, never a sliver — never leave a pane too narrow to read. A collapse
+reached only by dragging is one nobody finds, so the pane's own header also
+carries a collapse key (a left chevron, "Hide … files"). The Workspace /
 Artifacts file tree is the reference.
+
+**A file opened from a link arrives with the tree folded.** A chat reference,
+the night shift report, or a search hit names the one file the person came to
+read, so the Workspace / Artifacts tab opens on the document with the tree on
+its rail. The fold lasts one visit (`collapseTreeRequest` on
+`FileBrowserPane`): it never writes the stored preference, expanding the rail
+answers it, and leaving the tab or the project drops it. Picking a file in the
+tree itself leaves the tree as it is.
 
 **One file browser, everywhere.** Any surface that browses a tree of files —
 the project Workspace, the project Artifacts drawer, the shared Documents
@@ -1298,7 +1379,8 @@ first wherever work is offered, and every item stays reachable:
 - Home's Make something draws its cards from the starters and the
   `first-project` books, the person's areas first, with one place kept for
   another area (`pickWithRange`) so a single pick never makes gezel look like
-  it does one thing.
+  it does one thing. Its project shelf picks catalog project types the same
+  way.
 - Knowledge offers **Suggested for you**: up to two catalogs per area, smallest
   first, each with its size and an **Add** key. Nothing downloads before the
   tap, catalogs about one place (a region's travel guide, one state's case
@@ -1409,9 +1491,18 @@ rules:
   shape, size and model as defaults, with the raw JSON behind an *Advanced*
   disclosure.
 
+**The tools beside Send are flat toolbar keys.** Narrate, the sparkle key,
+its Undo, and Task wear Squisq's toolbar face (`.squisq-toolbar-button` plus
+`.chat-composer-tool-btn`), the same flat key as Insert image and Attach file
+at the row's other end: no border or fill at rest, a wash on hover. Send is
+the only raised key on the row. A held key dims; a key busy with its own work
+(`aria-busy`) keeps its face. Each is a glyph with `title` + `aria-label`,
+except Undo and a busy label, which take the word variant
+(`.chat-composer-tool-btn-word`).
+
 **The sparkle key rewrites the draft, never the thread.** Beside Task and Send
-sits a glyph-only key in the Task key's recipe (`.chat-sparkle-btn`, the
-routing spark as its face) that opens a small menu:
+sits the sparkle key (`.chat-sparkle-btn`, the routing spark as its face) that
+opens a small menu:
 
 - *Make it clearer*, *Shorten*, and *Fix spelling and grammar*;
 - *Review my message*;
@@ -1422,7 +1513,7 @@ routing spark as its face) that opens a small menu:
 Every action lands in the composer, where the person reads and edits the
 result before pressing Send themselves. Nothing is sent and nothing reaches
 the transcript. The key's face reads *Rewriting…* while it works. After a
-rewrite an **Undo** key in the same recipe puts the words back, until the
+rewrite an **Undo** key beside it puts the words back, until the
 person types again. A review changes nothing on its own. Its two or three
 suggestions appear in the task strip's frame above the To line
 (`ComposerReviewStrip`), with *Rewrite with these* and a dismiss key. A
@@ -1445,13 +1536,15 @@ progress and Send waits. A refused pick replaces the readout line with the
 reason. A source the person chose themselves gets no key; they change it in
 the dialog.
 
-**Task is a secondary word key beside Send, offered only on a fresh thread.**
+**Task is a glyph key beside Send, offered only on a fresh thread.**
+Its face is the checklist the Tasks area uses in navigation
+(`AreaIcon area="tasks"`), so a task looks the same wherever it is offered.
 The key attaches a craftbook to the message; it never fires one. Send stays
 the single terracotta glyph, and with a task attached it still means *this
 draft goes now*: the task starts, the message becomes its brief (the words
 land in the thread with a Craftbook-started receipt), and an empty draft is
 allowed because a configured book is a complete request on its own. The key
-takes the Stop/Interrupt secondary recipe (`.chat-task-btn`) and never appears
+(`.chat-task-btn`) never appears
 on a reply to an existing thread, inside a task pane, or mid-turn — a task is
 how a conversation *starts*, not something bolted onto one in progress. Which
 is why the Meester home opens on a fresh thread at launch rather than
@@ -2487,8 +2580,8 @@ stack, application-crop rules, and PNG quality workflow are documented in
 
 ## The Village: a codebase as a settlement
 
-The project **Village** tab (`FileMap` in code) draws a folder tree as a
-settlement from roughly **1890–1925** — never a modern skyline. Its architecture
+The **Village view** of the project Views tab (`FileMap` in code) draws a
+folder tree as a settlement from roughly **1890–1925** — never a modern skyline. Its architecture
 should feel compatible with the guild world: gabled cottages, shopfronts and
 inns, civic halls with cupolas, brick workshops, rail depots, and
 sawtooth-roofed foundries. Avoid glass towers, rooftop HVAC fields, neon, and
@@ -2668,6 +2761,21 @@ it puts a dirty working tree in front of every user on every indexer tick.
 The same reasoning is why the urbanity field's parameters are sticky rather than
 recomputed (see [urbanity.ts](../packages/service/src/filemap/urbanity.ts)).
 
+### Which edges the Village sees
+
+Roads, storeys, landmarks and downtown all follow the import graph, so a
+better resolver would move every village the day it shipped. Instead each
+village records the graph it was founded on (`edgePolicy` in the village
+file). A village that existed before the resolved graph stays on relative
+imports only. A new village is founded on the resolved graph, which sees
+workspace packages, tsconfig paths, and Python, Go, Rust and C dependencies
+([ADR 0024](decisions/0024-resolved-file-edges.md)). When the resolved graph
+would add at least a tenth more roads, the Village header shows a quiet
+**Update the village** key whose tooltip says how many roads it would draw.
+Pressing it is the only way a village changes graph. Buildings stay where they
+stand, while roads, downtown and landmarks follow. The committed file gains the
+one `edgePolicy` field. Document links are never roads.
+
 ### Zoom-tier budget
 
 - **City** stays quiet: flat batched diamonds and landmark beacons. No lots, no
@@ -2727,6 +2835,10 @@ a one-line reminder that these are leads from a background model pass — an
 opinion, not a verdict — and a muted provenance footer naming the model, gezel,
 and date. A file the boekwachter hasn't reached yet gets one muted "not reviewed
 yet" line, no spinner.
+
+The findings tray and the review card are sections of the shared file
+inspector (see "Every view shares one inspector"), so a file opened from any
+view shows them the same way; the Village adds only its own chips.
 
 Past street zoom, miniature symbol buildings may gain compact floating tags.
 These use small-radius plates with short rooftop leaders, prioritize functions

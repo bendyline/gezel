@@ -67,7 +67,9 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   '@bendyline/gezel-mcp': 300_000, //                  111 KB
   '@bendyline/gezel-connectors-spectral': 100_000, //    4 KB
   '@bendyline/gezel-script-stdlib': 100_000, //         14 KB
-  '@bendyline/gezel-cli': 200_000, //                  152 KB
+  // Offline page demos now ship the shared font stylesheet (~217 KB gzip)
+  // and its licenses alongside the commands, rather than fetching fonts.
+  '@bendyline/gezel-cli': 500_000, //                  373 KB
   // Carries the bundled web UI (`dist/ui`) and the handboek content so a
   // Node-only CLI install can serve `gezel start --web` with nothing else
   // to fetch. That is essentially all of this budget. About 16 MB of it is

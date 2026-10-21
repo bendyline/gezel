@@ -72,7 +72,7 @@ import {
   type WikipediaReadResponse,
   WikipediaSearchRequestSchema,
   createLogger,
-  isLocalProvider,
+  isHarnessHiddenCatalog,
   projectManagedWorkspaceWritable,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
@@ -109,12 +109,15 @@ import {
   fetchWikipediaArticle,
 } from '../../providers/search/wikipedia.js';
 import { DEFAULT_ARCHIVE_LIMITS, guardZipArchive } from '../../safety/archive-guard.js';
+import { untouchedStarterFiles } from '../../search/project-retrieval.js';
 import { collectProviderSecretValues } from '../../secrets/registry.js';
 import { dispatchTaskEntry } from '../../tasks/entry-dispatch.js';
 import { isAllowedHermeticEvalFetchUrl } from '../../utils/eval-fetch-url.js';
 import { SsrfError, assertPublicUrl } from '../../utils/ssrf.js';
 import { WorkspaceGrepError, grepWorkspace } from '../../workspace/grep-files.js';
 import { readWorkspaceFiles } from '../../workspace/read-files.js';
+import { isFirstPartyCaller } from '../auth.js';
+import { callerMaySeeLocation as sharedCallerMaySeeLocation } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
 import { classifyUpstreamFetchError, describeError } from '../upstream-fetch-error.js';
 
@@ -888,7 +891,11 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const project = await ctx.store.getProject(id);
     if (!project) return c.json({ error: 'project not found' }, 404);
-    const body = FileMapRequestSchema.parse(await c.req.json());
+    const parsed = FileMapRequestSchema.parse(await c.req.json());
+    // Moving a village onto the richer graph reshapes it, so only the person's
+    // own app may ask; a gezel's request is served without it.
+    const { edgePolicy, ...rest } = parsed;
+    const body = edgePolicy && isFirstPartyCaller(c) ? parsed : rest;
     const map = await ctx.contentIndex.fileMap(id, body);
     // Optional PR overlay: mark which blocks this pull request changes. Best-
     // effort — a GitHub hiccup or unlinked project just returns the base map.
@@ -985,11 +992,15 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       // Craftbooks are an optional execution hint, never a reason for indexed
       // knowledge search to fail. Project-local, user-local, and Gilde books
       // are all gathered by the shared resolver; linked projects' local books
-      // are excluded because they are not invokable from this project.
-      suggestCraftbooks(
-        { catalog: ctx.catalog, store: ctx.store, git: ctx.git },
-        { projectId: id, query: body.query, topK: 5 },
-      ).catch(() => []),
+      // are excluded because they are not invokable from this project. An
+      // outside AI app gets none: each one names `invoke_craftbook`, a tool
+      // that app does not have.
+      c.get('auth')?.scopes.includes('harness')
+        ? Promise.resolve([])
+        : suggestCraftbooks(
+            { catalog: ctx.catalog, store: ctx.store, git: ctx.git },
+            { projectId: id, query: body.query, topK: 5 },
+          ).catch(() => []),
     ]);
     const craftbooks = usefulCraftbooksForSearch(rankedCraftbooks).map((suggestion) => ({
       id: suggestion.id,
@@ -1006,6 +1017,20 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     }));
     const { relevance, ...found } = searchResult;
     const hidden = relevance?.hidden.length ?? 0;
+    // An outside AI app never sees Gezel's own documentation, nor the starter
+    // files Gezel wrote and the person never touched: the library's welcome
+    // document matched nearly every code question in the squisq experiment.
+    if (c.get('auth')?.scopes.includes('harness')) {
+      const starter = await untouchedStarterFiles(ctx.store, id, found.results).catch(
+        () => new Set<string>(),
+      );
+      found.results = found.results.filter(
+        (r) =>
+          !starter.has(r.id) &&
+          !isHarnessHiddenCatalog(r.catalogId) &&
+          !isHarnessHiddenCatalog(r.uri),
+      );
+    }
     return c.json({
       ...found,
       craftbooks,
@@ -1202,16 +1227,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     return c.json(await ctx.contentIndex.findSimilarImages(id, body.path, body.maxResults));
   });
 
-  // A photo's coordinates say where someone lives: the person's own app and
-  // an on-device session see them; a session on a cloud model does not.
-  const callerMaySeeLocation = async (c: Context): Promise<boolean> => {
-    const auth = c.get('auth');
-    if (!auth?.appId.startsWith('session:')) return true;
-    const session = await ctx.chat
-      .getSessionRecord(auth.appId.slice('session:'.length))
-      .catch(() => null);
-    return session?.providerName ? isLocalProvider(session.providerName) : false;
-  };
+  const callerMaySeeLocation = (c: Context): Promise<boolean> => sharedCallerMaySeeLocation(ctx, c);
 
   app.post('/:id/tools/list-photos', async (c) => {
     const id = c.req.param('id');

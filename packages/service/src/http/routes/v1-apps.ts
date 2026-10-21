@@ -130,7 +130,7 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
   const openaiEndpointsDisabledBody = {
     error: {
       message:
-        'OpenAI-compatible endpoints are turned off in Gezel. Enable them under Settings → Connected Apps.',
+        'OpenAI-compatible endpoints are turned off in Gezel. Enable them under Settings → Integrations.',
       type: 'invalid_request_error',
       code: 'openai_endpoints_disabled',
     },
@@ -208,7 +208,7 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
         );
       }
 
-      // The Connected Apps switch disables only the public OpenAI facade.
+      // The Integrations switch disables only the public OpenAI facade.
       // Registration is also the consent waist for CLI/product/device
       // clients, so gating the whole route makes those unrelated clients
       // disappear with the inference switch. Reject only grants that would
@@ -439,7 +439,7 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
   /**
    * A same-user native add-in (the VS Code extension) that could read the
    * daemon's owner credential from this account's `runtime/` trades it for
-   * its own grant: narrower, revocable, and named in Connected Apps. The
+   * its own grant: narrower, revocable, and named in Integrations. The
    * rule is the CLI's: reading that directory already makes the caller the
    * owner, so a code would protect nothing. Only Gezel's own add-ins.
    */
@@ -461,7 +461,7 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
 
   /**
    * UI roster: every app with a live token plus every decided grant.
-   * Drives the Settings → Connected Apps view. Root-only because the
+   * Drives the Settings → Integrations view. Root-only because the
    * response carries appName + scopes for every connected app.
    */
   app.get('/', auth, firstParty, async (c) => {

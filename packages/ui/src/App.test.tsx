@@ -66,7 +66,10 @@ vi.mock('./components/TabErrorBoundary.js', () => ({
 }));
 vi.mock('./components/TitlebarSearch.js', () => ({ TitlebarSearch: () => null }));
 vi.mock('./embedded/EmbeddedChat.js', () => ({ EmbeddedChat: () => null }));
-vi.mock('./settings-nav.js', () => ({ requestSettingsSection: vi.fn() }));
+vi.mock('./settings-nav.js', () => ({
+  openSettingsSection: vi.fn(),
+  requestSettingsSection: vi.fn(),
+}));
 vi.mock('./shared-chat-events.js', () => ({
   streamSharedAllChatEvents: async function* () {},
 }));

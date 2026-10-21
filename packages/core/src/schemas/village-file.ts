@@ -110,6 +110,15 @@ export const VillageDomainStateSchema = z.object({
   anchors: z.array(VillageAnchorSchema).default([]),
   journal: z.array(VillageJournalNodeSchema).default([]),
   downtown: VillageDowntownSchema.optional(),
+  /**
+   * Which import graph this village's roads follow. Absent is 1, the
+   * relative-imports-only graph every village was founded on; 2 is the
+   * resolved graph (workspace packages, tsconfig paths, other languages).
+   * A village moves to 2 only when its person asks, because the change
+   * reshapes its roads and landmarks. A higher number from a newer build is
+   * kept as written.
+   */
+  edgePolicy: z.number().int().positive().optional().catch(undefined),
 });
 export type VillageDomainState = z.infer<typeof VillageDomainStateSchema>;
 

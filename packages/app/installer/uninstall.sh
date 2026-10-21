@@ -414,7 +414,7 @@ remove_all_user_office_addins() {
 }
 
 # The Office add-in's certificate authority lives in the installing user's
-# login Keychain (Settings -> Connected Apps put it there). Only that user's
+# login Keychain (Settings -> Integrations put it there). Only that user's
 # session can change their Keychain, so this covers the account running the
 # uninstall; another account removes its own from Settings before uninstalling.
 remove_target_user_office_certificate() {

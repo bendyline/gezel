@@ -56,6 +56,33 @@ describe('ProviderQueue — basic gating', () => {
   });
 });
 
+describe('ProviderQueue — narrow', () => {
+  it('keeps granted leases and starts nothing past the new caps', async () => {
+    const q = new ProviderQueue({ concurrency: 3, interactiveConcurrency: 2 });
+    const r1 = await q.acquire({ lane: 'interactive' });
+    q.narrow({ concurrency: 2, interactiveConcurrency: 1, backgroundConcurrency: 1 });
+    expect(q.describe()).toMatchObject({
+      concurrency: 2,
+      interactiveConcurrency: 1,
+      backgroundConcurrency: 1,
+    });
+
+    const p2 = q.acquire({ lane: 'interactive' });
+    await flush();
+    expect(q.snapshot()).toMatchObject({ running: 1, queuedInteractive: 1 });
+    r1();
+    const r2 = await p2;
+    r2();
+  });
+
+  it('never widens', () => {
+    const q = new ProviderQueue({ concurrency: 2, interactiveConcurrency: 1 });
+    q.narrow({ concurrency: 4, interactiveConcurrency: 3 });
+    expect(q.concurrency).toBe(2);
+    expect(q.interactiveConcurrency).toBe(1);
+  });
+});
+
 describe('ProviderQueue — priority lanes', () => {
   it('drains interactive before background', async () => {
     const q = new ProviderQueue({ concurrency: 1 });

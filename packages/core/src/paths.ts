@@ -1412,7 +1412,7 @@ export function tokensFile(root: string): string {
 
 /**
  * Persisted `/v1/apps/register` consent requests — both pending grants
- * (waiting for the user to approve/deny in the Connected Apps UI) and
+ * (waiting for the user to approve/deny in the Integrations UI) and
  * decided grants (kept so a polling app can still observe the verdict
  * after a daemon restart). The file is small; no rotation.
  *

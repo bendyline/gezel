@@ -63,7 +63,7 @@ export interface GrantRequest {
   /**
    * `'device'` for grants opened by the remote-model-execution pairing flow
    * (a paired gezel daemon), `'app'`/absent for ordinary third-party apps.
-   * Drives the "Paired devices" section in the Connected Apps UI and tags the
+   * Drives the "Paired devices" section in the Integrations UI and tags the
    * issued token so the `/v1/remote/*` handlers can namespace per origin.
    */
   kind?: 'app' | 'device';

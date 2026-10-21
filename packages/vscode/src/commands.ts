@@ -105,7 +105,7 @@ export function registerCommands(ctx: CommandContext): vscode.Disposable[] {
       if (!conn) {
         await ctx.clearAppTokenSecret();
         void vscode.window.showInformationMessage(
-          'Gezel: the local VS Code token was cleared. If Gezel still lists Visual Studio Code under Connected Apps, revoke it there, then reconnect.',
+          'Gezel: the local VS Code token was cleared. If Gezel still lists Visual Studio Code under Integrations, revoke it there, then reconnect.',
         );
         return;
       }

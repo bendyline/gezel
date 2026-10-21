@@ -737,7 +737,7 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
   /**
    * The warm path, and the one that used to deadlock. Any command that starts
    * a daemon — `gezel start`, or a read-only `gezel agent list` — leaves one
-   * running, and `run` then has to adopt it. It used to open a Connected Apps
+   * running, and `run` then has to adopt it. It used to open an app
    * consent handshake instead and block for the full five-minute approval
    * timeout on a code that can only be typed into the desktop app, which an
    * npm-only install does not have. The cold-path case above cannot see that:

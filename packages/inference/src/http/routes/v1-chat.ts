@@ -406,7 +406,7 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
       // instruct folds, per-gezel overrides for gezel: targets) applies
       // unconditionally — it's "what the model is" — with the caller's
       // per-request knobs overlaid on top. The behavior `profile` is the
-      // supporting layer the Connected Apps switch gates. Caller-owned
+      // supporting layer the Integrations switch gates. Caller-owned
       // inference keeps parsing, grammar, and transcript compatibility but
       // omits interventions which assume Gezel owns the action loop.
       // Best-effort: a resolver failure serves engine defaults rather than

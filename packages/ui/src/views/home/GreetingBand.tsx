@@ -7,6 +7,7 @@ import type {
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useShowPoppetjes } from '../../components/useShowPoppetjes.js';
 import * as Tabs from '../../primitives/Tabs.js';
+import { HomeHeadline, HomeIntroDate } from './HomeIntroHeading.js';
 import { IntroHandboekArticle } from './IntroHandboekArticle.js';
 import { MeesterFigure } from './MeesterFigure.js';
 import { MorningPanel } from './MorningPanel.js';
@@ -65,39 +66,6 @@ function Chips({ chips }: { chips: HomeChip[] }) {
       )}
     </>
   );
-}
-
-/**
- * The meester-written status headline when a fresh report exists (the
- * parent already applied the staleness decay), falling back to the
- * time-of-day greeting. With a CTA the headline itself is the click
- * target — one big affordance, not a separate link.
- */
-function Headline({
-  statusReport,
-  greeting,
-  onCtaClick,
-}: {
-  statusReport: MeesterStatusReport | null;
-  greeting: string;
-  onCtaClick?: () => void;
-}) {
-  if (!statusReport) return <h1 className="home-workshop-headline">{greeting}.</h1>;
-  if (statusReport.cta && onCtaClick) {
-    return (
-      <h1 className="home-workshop-headline">
-        <button
-          type="button"
-          className="home-workshop-headline-cta"
-          onClick={onCtaClick}
-          title={statusReport.cta.label}
-        >
-          {statusReport.headline}
-        </button>
-      </h1>
-    );
-  }
-  return <h1 className="home-workshop-headline">{statusReport.headline}</h1>;
 }
 
 /**
@@ -186,14 +154,6 @@ export function GreetingBand({
       );
     }
   };
-  const weekday = now.toLocaleDateString(undefined, { weekday: 'long' });
-  const partOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-  const time = now.toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-  const dateLabel = `${weekday} ${partOfDay} · ${time}`;
   const panels: { value: HomeGreetingTab; label: string }[] = [
     { value: 'greeting', label: greeting },
   ];
@@ -294,9 +254,15 @@ export function GreetingBand({
                   ref={(host) => {
                     if (host && startupReading.node.parentElement !== host) {
                       host.append(startupReading.node);
-                      startupReading.node.scrollTop = Number(
-                        startupReading.node.dataset.startupScroll || 0,
-                      );
+                      const reader =
+                        startupReading.node.querySelector('.home-intro-doc') ?? startupReading.node;
+                      reader.scrollTop = Number(startupReading.node.dataset.startupScroll || 0);
+                      return () => {
+                        queueMicrotask(() => {
+                          if (!startupReading.node.isConnected)
+                            startupReading.node.dispatchEvent(new Event('startup-reading-dispose'));
+                        });
+                      };
                     }
                   }}
                 />
@@ -320,8 +286,12 @@ export function GreetingBand({
                     </div>
                   ) : (
                     <>
-                      <div className="home-workshop-eyebrow">{dateLabel}</div>
-                      <Headline statusReport={report} greeting={greeting} onCtaClick={handleCta} />
+                      <HomeIntroDate now={now} />
+                      <HomeHeadline
+                        statusReport={report}
+                        greeting={greeting}
+                        onCtaClick={handleCta}
+                      />
                       {report ? (
                         <StatusReportPanel
                           report={report}

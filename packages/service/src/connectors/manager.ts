@@ -13,14 +13,21 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type {
   ConnectorTypeManifest,
   ProjectConnectorBinding,
   ProjectDetail,
 } from '@bendyline/gezel';
-import { KeyedLock, backoffDelayMs, createLogger, retryTransient } from '@bendyline/gezel';
+import {
+  HttpStatusError,
+  KeyedLock,
+  backoffDelayMs,
+  createLogger,
+  isRateLimitStatus,
+  retryTransient,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
@@ -41,6 +48,7 @@ import { validateConnectorConfig } from './config-validate.js';
 import { McpConnectorAdapter } from './drivers/mcp.js';
 import { ScriptConnectorAdapter } from './drivers/script.js';
 import { SpectralConnectorAdapter } from './drivers/spectral.js';
+import { ReconnectRequiredError } from './natives/oauth-session.js';
 import {
   type LongLivedExchange,
   type OAuthEndpoints,
@@ -61,16 +69,19 @@ import {
   type ConnectorBindingRef,
   type ConnectorRecord,
   type NormalizedRecord,
+  RecordGoneError,
   isObservationRecord,
 } from './types.js';
 import {
   type PruneInput,
   type PruneResult,
+  type SweepInput,
   type WriteRecordResult,
   writeRecord as defaultWriteRecord,
   pruneRecords,
   sha8,
   slug,
+  sweepRecords,
 } from './writer.js';
 
 const log = createLogger('connectors');
@@ -204,15 +215,28 @@ export interface SyncBindingOptions<Cur = unknown, Rec = NormalizedRecord> {
   }) => Promise<WriteRecordResult>;
   /** Injectable pruner — defaults to the real `pruneRecords`. */
   prune?: (input: PruneInput) => Promise<PruneResult>;
+  /**
+   * Injectable record sweeper for source tombstones (`ChangeBatch.removed`)
+   * and moved-record cleanup — defaults to the real `sweepRecords`.
+   */
+  sweep?: (input: SweepInput) => Promise<{ removed: number }>;
 }
 
 export interface BindingSyncResult<Cur = unknown> {
   written: number;
   quarantined: number;
   skipped: number;
-  /** Records the source no longer returns, removed by a mirror prune. */
+  /** Records removed from the corpus: a mirror prune or a source tombstone. */
   pruned: number;
   errors: number;
+  /**
+   * Records given up on this pass: each failed in {@link POISON_RECORD_PASSES}
+   * separate passes while the rest of its batch landed, so the scope's
+   * cursor moved past it rather than retrying the whole batch forever.
+   */
+  abandoned?: { scope: string; id: string }[];
+  /** Scopes whose listing failed this pass; the others still synced. */
+  failedScopes?: { scope: string; message: string }[];
   /** Advanced cursor to persist. */
   cursor: Cur | undefined;
   /** Scopes the pass covered (feeds the corpus `_meta.json`). */
@@ -231,6 +255,26 @@ export interface BindingSyncResult<Cur = unknown> {
 export interface ScopedCursor {
   v: 2;
   scopes: Record<string, unknown>;
+  /**
+   * Per scope, how many separate passes each still-failing record ref has
+   * failed in while the rest of its batch landed. Cleared when the scope's
+   * cursor advances. Absent when nothing is failing.
+   */
+  failures?: Record<string, Record<string, number>>;
+}
+
+function asFailureCounts(raw: unknown): ScopedCursor['failures'] | undefined {
+  if (raw === null || typeof raw !== 'object') return undefined;
+  const out: NonNullable<ScopedCursor['failures']> = {};
+  for (const [scope, counts] of Object.entries(raw as Record<string, unknown>)) {
+    if (counts === null || typeof counts !== 'object') continue;
+    const kept: Record<string, number> = {};
+    for (const [id, n] of Object.entries(counts as Record<string, unknown>)) {
+      if (typeof n === 'number' && Number.isFinite(n) && n > 0) kept[id] = n;
+    }
+    if (Object.keys(kept).length > 0) out[scope] = kept;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**
@@ -246,13 +290,46 @@ export function asScopedCursor(raw: unknown): ScopedCursor {
     typeof (raw as ScopedCursor).scopes === 'object' &&
     (raw as ScopedCursor).scopes !== null
   ) {
-    return { v: 2, scopes: { ...(raw as ScopedCursor).scopes } };
+    const failures = asFailureCounts((raw as ScopedCursor).failures);
+    return {
+      v: 2,
+      scopes: { ...(raw as ScopedCursor).scopes },
+      ...(failures ? { failures } : {}),
+    };
   }
   return { v: 2, scopes: {} };
 }
 
 /** Max same-scope continuation rounds per pass when an adapter pages via `partial`. */
 const MAX_PARTIAL_ROUNDS = 4;
+
+/**
+ * Passes a single record may fail in — while others in its batch land —
+ * before the engine stops holding the scope's cursor for it. Without this
+ * limit one message mailparser cannot read, or one event the source always
+ * 500s on, holds the cursor forever and re-fetches the whole batch every
+ * pass. A batch where nothing landed never counts: that is an outage, not
+ * a bad record.
+ */
+export const POISON_RECORD_PASSES = 3;
+
+const normRel = (p: string): string => p.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+
+const SCOPE_DIR_MAX = 48;
+
+/**
+ * The directory a scope's records land in. A scope whose slug fits keeps it
+ * verbatim (existing corpora never move); a longer one is cut and suffixed
+ * with a hash of the full scope, because long scopes tend to share their
+ * first 48 characters — Graph calendar and folder ids carry a per-mailbox
+ * prefix, and every YouTube channel feed URL starts the same way — and plain
+ * truncation filed them all into one folder.
+ */
+export function scopeDirName(scope: string): string {
+  const full = slug(scope, 400);
+  if (full.length <= SCOPE_DIR_MAX) return full;
+  return `${full.slice(0, SCOPE_DIR_MAX - 9).replace(/-+$/, '')}-${sha8(scope)}`;
+}
 
 /**
  * Run one sync pass for a single binding through its adapter. Always calls
@@ -277,6 +354,7 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
     opts.write ??
     (defaultWriteRecord as unknown as NonNullable<SyncBindingOptions<Cur, Rec>['write']>);
   const prune = opts.prune ?? pruneRecords;
+  const sweep = opts.sweep ?? sweepRecords;
   const scoped = opts.scopedCursors ?? true;
   const envelope = scoped ? asScopedCursor(opts.cursor) : null;
   const result: BindingSyncResult<Cur> = {
@@ -298,16 +376,32 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
       ? [...new Set([...listed.filter((s) => requested.includes(s)), ...requested])]
       : listed;
     result.scopes = scopes;
+    const failedScopes: { scope: string; message: string }[] = [];
     outer: for (const scope of scopes) {
       const scopeCorpusDir =
         (opts.scopeAsDir ?? true) && scope !== ''
-          ? `${opts.corpusDir}/${slug(scope)}`
+          ? `${opts.corpusDir}/${scopeDirName(scope)}`
           : opts.corpusDir;
       for (let round = 0; round < MAX_PARTIAL_ROUNDS; round++) {
         const before = scoped ? (envelope!.scopes[scope] as Cur | undefined) : flatCursor;
-        const changes = await adapter.listChangesSince(scope, before, {
-          limit: opts.backfillLimit,
-        });
+        let changes: Awaited<ReturnType<typeof adapter.listChangesSince>>;
+        try {
+          changes = await adapter.listChangesSince(scope, before, {
+            limit: opts.backfillLimit,
+          });
+        } catch (err) {
+          // A throttle is backpressure for the whole binding, and a dead grant
+          // fails every scope alike — both end the pass, not just this scope.
+          if (err instanceof HttpStatusError && isRateLimitStatus(err.status)) throw err;
+          if (err instanceof ReconnectRequiredError) throw err;
+          // One broken feed, calendar, or folder must not stop the others:
+          // this scope keeps its cursor and the rest of the pass continues.
+          const message = err instanceof Error ? err.message : String(err);
+          failedScopes.push({ scope, message });
+          result.errors++;
+          log.warn(`${adapter.typeId} ${scope || '(default)'}: listing failed: ${message}`);
+          continue outer;
+        }
         // Newest-first, bounded by the backfill cap. Overflow past the cap is
         // deliberate windowing (the mail backfill-cap model) but never silent:
         // it is counted skipped and logged.
@@ -325,7 +419,12 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
           );
         }
         let scopeErrors = 0;
+        let landed = 0;
+        const failedRefs: string[] = [];
         const seenHashes = new Set<string>();
+        /** hash8 → relPath of records written fresh at a (possibly new) path. */
+        const newlyPlaced = new Map<string, string>();
+        const failureCounts = scoped ? envelope!.failures?.[scope] : undefined;
         for (const ref of take) {
           try {
             // Transient faults (5xx/408/429, socket drops) get three attempts
@@ -350,17 +449,89 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
             if (w.status === 'written' || w.status === 'refreshed') result.written++;
             else if (w.status === 'quarantined') result.quarantined++;
             else result.skipped++;
+            if (
+              adapter.recordsMayMove &&
+              typeof recordId === 'string' &&
+              w.relPath &&
+              w.status !== 'exists'
+            ) {
+              newlyPlaced.set(sha8(recordId), normRel(w.relPath));
+            }
+            landed++;
+            if (failureCounts) delete failureCounts[ref.id];
+          } catch (err) {
+            if (err instanceof RecordGoneError) {
+              result.skipped++;
+              landed++;
+              log.info(
+                `${adapter.typeId} ${scope || '(default)'}: ${ref.id} is gone upstream; skipped`,
+              );
+              continue;
+            }
+            scopeErrors++;
+            result.errors++;
+            failedRefs.push(ref.id);
+            log.warn(`fetch/write failed (${adapter.typeId} ${scope} id ${ref.id}): ${err}`);
+          }
+        }
+        // Poison records: a ref that keeps failing while its neighbors land
+        // stops holding the cursor after POISON_RECORD_PASSES passes.
+        if (scoped && failedRefs.length > 0 && landed > 0) {
+          const failures = envelope!.failures ?? {};
+          envelope!.failures = failures;
+          const counts = failures[scope] ?? {};
+          failures[scope] = counts;
+          for (const id of failedRefs) {
+            const n = (counts[id] ?? 0) + 1;
+            counts[id] = n;
+            if (n >= POISON_RECORD_PASSES) {
+              scopeErrors--;
+              result.skipped++;
+              result.abandoned = [...(result.abandoned ?? []), { scope, id }];
+              log.warn(
+                `${adapter.typeId} ${scope || '(default)'}: giving up on record ${id} after ` +
+                  `${n} failed passes; the cursor moves past it`,
+              );
+            }
+          }
+        }
+        // Tombstones and moved records, in one walk of the scope. A record the
+        // batch both removed and re-fetched is kept.
+        const removedHashes = new Set(
+          (changes.removed ?? []).map((id) => sha8(id)).filter((h) => !seenHashes.has(h)),
+        );
+        if (removedHashes.size > 0 || newlyPlaced.size > 0) {
+          let tombstoned = 0;
+          try {
+            await sweep({
+              storageDir: opts.storageDir,
+              corpusDir: scopeCorpusDir,
+              remove: (hash8, relPath) => {
+                if (removedHashes.has(hash8)) {
+                  tombstoned++;
+                  return true;
+                }
+                const kept = newlyPlaced.get(hash8);
+                return kept !== undefined && kept !== normRel(relPath);
+              },
+            });
+            result.pruned += tombstoned;
           } catch (err) {
             scopeErrors++;
             result.errors++;
-            log.warn(`fetch/write failed (${adapter.typeId} ${scope} id ${ref.id}): ${err}`);
+            log.warn(`record sweep failed (${adapter.typeId} ${scope}): ${err}`);
           }
         }
         // Advance only on a clean batch; otherwise keep the prior cursor so
         // the batch retries next pass.
         if (scopeErrors === 0) {
-          if (scoped) envelope!.scopes[scope] = changes.cursor;
-          else flatCursor = changes.cursor;
+          if (scoped) {
+            envelope!.scopes[scope] = changes.cursor;
+            if (envelope!.failures) {
+              delete envelope!.failures[scope];
+              if (Object.keys(envelope!.failures).length === 0) delete envelope!.failures;
+            }
+          } else flatCursor = changes.cursor;
         }
         // Mirror prune: only after a clean, single-batch, full enumeration of
         // the scope — anything less and absence from the batch proves nothing.
@@ -390,15 +561,63 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
         if (scopeErrors !== 0 || !changes.partial) break;
       }
     }
+    if (failedScopes.length > 0) {
+      result.failedScopes = failedScopes;
+      // Every scope failing is a failed pass; some failing is a partial one
+      // (`partialFailureNote` names them while the others count as synced).
+      if (failedScopes.length === scopes.length) {
+        const messages = [...new Set(failedScopes.map((f) => f.message))];
+        result.error =
+          scopes.length === 1 || messages.length === 1
+            ? messages[0]!
+            : failedScopes
+                .map((f) => `${f.scope}: ${f.message}`)
+                .join('; ')
+                .slice(0, 600);
+      }
+    }
     result.cursor = scoped ? (envelope as unknown as Cur) : flatCursor;
   } catch (err) {
-    result.error = err instanceof Error ? err.message : String(err);
-    result.errors++;
+    // A throttle outside the list call (refreshing auth, listing scopes —
+    // which has no `rateLimited` channel) is still backpressure: the same
+    // back-off, not a pass error a person has to read.
+    if (err instanceof HttpStatusError && isRateLimitStatus(err.status)) {
+      result.rateLimited = true;
+      log.info(
+        `${adapter.typeId}: throttled outside a list call (HTTP ${err.status}); backing off`,
+      );
+    } else {
+      result.error = err instanceof Error ? err.message : String(err);
+      result.errors++;
+    }
     result.cursor = scoped ? (envelope as unknown as Cur) : flatCursor;
   } finally {
     await adapter.close().catch(() => {});
   }
   return result;
+}
+
+/**
+ * The `lastError` text for a pass that completed but did not land every
+ * record. Undefined for a clean pass.
+ */
+export function partialFailureNote(r: BindingSyncResult): string | undefined {
+  const abandoned = r.abandoned?.length ?? 0;
+  const scopeFailures = r.failedScopes?.length ?? 0;
+  const retrying = r.errors - abandoned - scopeFailures;
+  const parts: string[] = [];
+  for (const f of r.failedScopes ?? []) {
+    parts.push(`${f.scope || 'the source'} could not be synced: ${f.message.slice(0, 200)}`);
+  }
+  if (retrying > 0) {
+    parts.push(`${retrying} record(s) could not be synced and will be retried`);
+  }
+  if (abandoned > 0) {
+    parts.push(
+      `${abandoned} record(s) failed ${POISON_RECORD_PASSES} passes in a row and were skipped`,
+    );
+  }
+  return parts.length > 0 ? `${parts.join('; ')}.` : undefined;
 }
 
 /**
@@ -438,6 +657,11 @@ export interface ConnectorManagerOptions {
   scriptRunner?: import('../scripts/runner.js').ScriptRunner;
   /** Shared with the action manager so commits can't race syncs. */
   locks?: KeyedLock;
+  /**
+   * HTTP transport handed to native adapters and the OAuth code exchange.
+   * Production leaves it unset; tests inject the provider simulator.
+   */
+  fetch?: typeof fetch;
 }
 
 export interface BindConnectorInput {
@@ -515,6 +739,14 @@ interface PendingConnectorOAuth {
 /** Rate-limit backoff ladder: 1m → 5m → 15m → 30m (jittered). */
 const RATE_LIMIT_BACKOFF_MS = [60_000, 300_000, 900_000, 1_800_000] as const;
 
+/**
+ * Hard-failure ladder: 5m → 15m → 30m → 1h (jittered). A revoked grant or a
+ * deleted feed fails identically on every tick, so retrying every 90s only
+ * spends requests (and, for X, money) to rewrite the same lastError. A manual
+ * sync — what a person clicks after re-linking — ignores it.
+ */
+const FAILURE_BACKOFF_MS = [300_000, 900_000, 1_800_000, 3_600_000] as const;
+
 export class ConnectorManager {
   private readonly locks: KeyedLock;
   /** In-flight OAuth link sessions keyed by `state` (10-min TTL). */
@@ -541,6 +773,13 @@ export class ConnectorManager {
     const delay = backoffDelayMs(consecutive - 1, RATE_LIMIT_BACKOFF_MS);
     this.backoff.set(bindingId, { consecutive, nextEligibleAt: Date.now() + delay });
     log.info(`rate limited (${bindingId}); backing off ${Math.round(delay / 1000)}s`);
+  }
+
+  private noteFailure(bindingId: string): void {
+    const consecutive = (this.backoff.get(bindingId)?.consecutive ?? 0) + 1;
+    const delay = backoffDelayMs(consecutive - 1, FAILURE_BACKOFF_MS);
+    this.backoff.set(bindingId, { consecutive, nextEligibleAt: Date.now() + delay });
+    log.info(`sync failed (${bindingId}); next autonomous attempt in ${Math.round(delay / 1000)}s`);
   }
 
   private withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
@@ -731,6 +970,7 @@ export class ConnectorManager {
         code: args.code,
         codeVerifier: pending.verifier,
         redirectUri: pending.redirectUri,
+        ...(this.opts.fetch ? { fetchImpl: this.opts.fetch } : {}),
       });
       let credential: string;
       if (pending.longLivedExchange) {
@@ -741,6 +981,7 @@ export class ConnectorManager {
           exchangeUrl: pending.longLivedExchange.exchangeUrl,
           accessToken: tokens.accessToken,
           ...(pending.clientSecret ? { clientSecret: pending.clientSecret } : {}),
+          ...(this.opts.fetch ? { fetchImpl: this.opts.fetch } : {}),
         });
         credential = JSON.stringify({
           accessToken: longLived.accessToken,
@@ -775,6 +1016,9 @@ export class ConnectorManager {
           clientId: pending.clientId,
           ...(pending.clientSecret ? { clientSecret: pending.clientSecret } : {}),
           ...(pending.config.tenant ? { tenant: pending.config.tenant } : {}),
+          // The endpoint that issued the grant is the one that can refresh
+          // it; adapters prefer it over a type default (Microsoft tenants).
+          tokenUrl: pending.endpoints.tokenEndpoint,
         };
         credential = JSON.stringify(cred);
       }
@@ -999,6 +1243,7 @@ export class ConnectorManager {
         store: this.opts.store,
         ...(this.opts.scriptRunner ? { scriptRunner: this.opts.scriptRunner } : {}),
         projectId: project.id,
+        ...(this.opts.fetch ? { fetch: this.opts.fetch } : {}),
       });
       const corpusDir = await this.ensureCorpusDir(project, binding);
       const { storageDir, quarantineDir, migrated } = await connectorCorpusStorage(
@@ -1070,7 +1315,8 @@ export class ConnectorManager {
         );
       }
       if (r.rateLimited) this.noteRateLimit(binding.id);
-      else if (!r.error) this.backoff.delete(binding.id);
+      else if (r.error) this.noteFailure(binding.id);
+      else this.backoff.delete(binding.id);
       const lastSyncedAt = new Date().toISOString();
       if (r.error) {
         await this.persistBinding(project.id, binding.id, {
@@ -1078,13 +1324,19 @@ export class ConnectorManager {
           lastError: r.error,
         }).catch(() => {});
       } else {
+        // A pass that landed most of its records is still a sync, but the
+        // failures must not vanish behind "Last synced": record failures hold
+        // the scope's cursor, so the person needs to know why it isn't moving.
+        const partialNote = partialFailureNote(r);
         await this.persistBinding(project.id, binding.id, {
           cursor: r.cursor,
           lastSyncedAt,
+          ...(partialNote ? { lastError: partialNote } : {}),
         });
       }
       await this.writeCorpusMeta(storageDir, corpusDir, binding, resolved.manifest, {
         scopes: r.scopes ?? [],
+        ...(r.abandoned?.length ? { abandoned: r.abandoned } : {}),
         ...(r.error ? {} : { lastSyncedAt }),
         ...(observationSummary ? { observations: observationSummary } : {}),
       }).catch(() => {});
@@ -1104,6 +1356,7 @@ export class ConnectorManager {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.warn(`connector sync failed (${binding.id}): ${message}`);
+      this.noteFailure(binding.id);
       await this.persistBinding(project.id, binding.id, {
         cursor: binding.cursor,
         lastError: message,
@@ -1145,10 +1398,33 @@ export class ConnectorManager {
       scopes: string[];
       lastSyncedAt?: string;
       observations?: ObservationWriteSummary;
+      abandoned?: { scope: string; id: string }[];
     },
   ): Promise<void> {
     const abs = await resolveInside(storageDir, `${corpusDir}/_meta.json`);
     await mkdir(dirname(abs), { recursive: true });
+    // Records given up on accumulate across passes: a gezel reading the corpus
+    // should know the mirror has a known hole, not just that last pass had one.
+    let skippedRecords: { scope: string; id: string }[] = [];
+    try {
+      const prior = JSON.parse(await readFile(abs, 'utf8')) as { skippedRecords?: unknown };
+      if (Array.isArray(prior.skippedRecords)) {
+        skippedRecords = prior.skippedRecords.filter(
+          (e): e is { scope: string; id: string } =>
+            !!e &&
+            typeof (e as { scope?: unknown }).scope === 'string' &&
+            typeof (e as { id?: unknown }).id === 'string',
+        );
+      }
+    } catch {
+      /* first pass, or unreadable: start fresh */
+    }
+    for (const entry of pass.abandoned ?? []) {
+      if (!skippedRecords.some((e) => e.scope === entry.scope && e.id === entry.id)) {
+        skippedRecords.push(entry);
+      }
+    }
+    skippedRecords = skippedRecords.slice(-200);
     const meta = {
       binding: binding.id,
       type: binding.type,
@@ -1171,6 +1447,7 @@ export class ConnectorManager {
             rowsLastPass: pass.observations.rowsWritten,
           }
         : {}),
+      ...(skippedRecords.length > 0 ? { skippedRecords } : {}),
       ...(pass.lastSyncedAt ? { lastSyncedAt: pass.lastSyncedAt } : {}),
     };
     await writeFileAtomic(abs, `${JSON.stringify(meta, null, 2)}\n`);

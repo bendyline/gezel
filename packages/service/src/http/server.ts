@@ -34,7 +34,9 @@ import {
 } from './auth.js';
 import type { ServiceContext } from './context.js';
 import { v1Cors } from './cors.js';
+import { harnessRouteGuard } from './harness-route-guard.js';
 import { hostGuard } from './host-guard.js';
+import { classifyMalformedJsonBody } from './json-body.js';
 
 import { enginesRoutes } from '@bendyline/gezel-inference/internal/http/routes/engines';
 import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
@@ -75,6 +77,8 @@ import { gitRoutes } from './routes/git.js';
 import { githubRoutes } from './routes/github.js';
 import { growthRoutes } from './routes/growth.js';
 import { handboekRoutes } from './routes/handboek.js';
+import { harnessConnectRoutes } from './routes/harness-connect.js';
+import { harnessToolsRoutes } from './routes/harness-tools.js';
 import { historyRoutes } from './routes/history.js';
 import { imageGenRoutes } from './routes/image-gen.js';
 import { imagesRoutes } from './routes/images.js';
@@ -287,6 +291,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // surface. Loopback Host literals only; see host-guard.ts for why this
   // doesn't break legitimate cross-origin /v1 apps.
   app.use('*', hostGuard());
+  app.use('*', classifyMalformedJsonBody());
 
   // Gate only the API and event stream. The static UI bundle is public —
   // it's just HTML/JS/CSS, and the token needs to be injected by the UI
@@ -347,6 +352,16 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   });
   app.use('/api/*', scopedSessionRoutes);
   app.use('/events/*', scopedSessionRoutes);
+  // An outside AI app's `harness` token (Gezel's tools in Claude Code, Codex,
+  // …): its own, smaller deny-by-default allowlist. Root/UI/session callers
+  // bypass it.
+  const harnessRouteLog = createLogger('harness-route');
+  const scopedHarnessRoutes = harnessRouteGuard({
+    readConfig: () => ctx.store.readConfig(),
+    log: (m) => harnessRouteLog.warn(m),
+  });
+  app.use('/api/*', scopedHarnessRoutes);
+  app.use('/events/*', scopedHarnessRoutes);
   // Per-session token scope (#10): confine a session-scoped MCP token to
   // `/api/projects/<its project>/*`. Runs after bearerAuth (which populates
   // `c.var.auth`) and before the project routers below. Mode is set by
@@ -632,6 +647,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/app-tools', appToolRoutes(ctx));
   app.route('/api/app-serve', appServeRoutes(ctx));
   app.route('/api/codex-setup', codexSetupRoutes(ctx));
+  app.route('/api/harness-tools', harnessToolsRoutes(ctx));
   app.route('/api/opencode-setup', opencodeSetupRoutes(ctx));
   app.route('/api/pi-setup', piSetupRoutes(ctx));
   app.route('/api/vscode-setup', vscodeSetupRoutes(ctx));
@@ -645,7 +661,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/events/chat', chatEventsRoutes(ctx));
 
   // Master switch for the OpenAI-compatible facade (Settings →
-  // Connected Apps). Registration remains reachable because non-OpenAI
+  // Integrations). Registration remains reachable because non-OpenAI
   // first-party clients (notably the CLI) use the same consent router; the
   // register route itself rejects only requests that include `openai`.
   const openaiEndpointsGate = requireOpenAiEndpointsEnabled(ctx);
@@ -653,6 +669,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // `/v1/apps/*` is the public registration + consent surface. Routes
   // inside declare their own auth (some unauth, some root-only, some
   // per-app); see `routes/v1-apps.ts` for the per-endpoint matrix.
+  // Gezel's tools in other AI apps: the owner credential, read from this
+  // account's `runtime/`, is traded for a project-bound `harness` token.
+  // Registered before the consent router, which owns the rest of `/v1/apps`.
+  app.route('/v1/apps/harness-connect', harnessConnectRoutes(ctx));
   app.route('/v1/apps', v1AppsRoutes(ctx));
   app.use('/v1/knowledge/*', openaiEndpointsGate);
   app.use('/v1/knowledge/*', bearerAuth(ctx.tokenStore));

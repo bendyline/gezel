@@ -219,12 +219,13 @@ sets `c.var.auth = { appId, scopes, projectId?, gezelId?, team? }`.
 | Token | `scopes` | Persisted? | Reach |
 |---|---|---|---|
 | **root** | `['root']` | no; process memory only | full `/api/*` + `/v1/*` |
-| **desktop client** | `['ui','openai']` | no; written to `runtime/auth-token` | first-party product API + local OpenAI facade |
+| **desktop client** | `['ui','openai','knowledge']` | no; written to `runtime/auth-token` | first-party product API + local OpenAI facade + `/v1/knowledge/*` |
 | **web-ui** | `['ui']` | no (ephemeral) | first-party product API; never daemon root |
 | **inference app** (`/v1/apps/register`) | `['openai']` | yes (`tokens.json`, 0600) | only `/v1/*` inference, gated by `requireScope('openai')` |
 | **product app** (`/v1/apps/register`) | `['product']` (+ `openai` when needed) | yes (`tokens.json`, 0600) | ordinary `/api/*` product access; never first-party app-grant administration |
 | **CLI** (`/v1/apps/register`) | `['cli']` | yes (`tokens.json`, 0600) | ordinary `/api/*` product access with CLI-specific consent copy |
 | **session** (a gezel's MCP subprocess) | `['session']` + `projectId`/`gezelId`/`team` | **no** (ephemeral, dies with daemon) | deny-by-default MCP route allowlist + ownership guards |
+| **harness** (an outside AI app's `gezel-mcp --harness`) | `['harness']` + optional `projectId` | **no** (ephemeral; minted by `/v1/apps/harness-connect` for the owner credential) | `harnessRouteGuard`'s short allowlist; never `/events`; see [harness-tools.md](harness-tools.md) |
 
 `TokenRecord` carries optional `projectId`, `gezelId`, and `team` (set only on session
 tokens). `issueSession()` mints an ephemeral, never-persisted, upsert-on-respawn token;

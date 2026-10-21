@@ -1,6 +1,11 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import type { ImportBinding, ImportEdgeInput, SymbolInput } from './index-store-types.js';
+import {
+  IMPORT_FLAG,
+  type ImportBinding,
+  type ImportEdgeInput,
+  type SymbolInput,
+} from './index-store-types.js';
 
 /**
  * Deterministic symbol extraction. Code goes through web-tree-sitter
@@ -263,39 +268,59 @@ export async function extractImportEdges(
 
   // Merge across statements importing the same specifier. null (bindings not
   // recorded) is absorbing: it means "whole module" and named info from a
-  // sibling statement can't refine that.
-  const out = new Map<string, ImportBinding[] | null>();
-  const add = (raw: string, bindings: ImportBinding[] | null): void => {
+  // sibling statement can't refine that. Flags merge per IMPORT_FLAG's rule.
+  const out = new Map<string, { bindings: ImportBinding[] | null; flags: number }>();
+  const add = (raw: string, bindings: ImportBinding[] | null, flags: number): void => {
     const s = raw.trim();
     if (!s) return;
     const prev = out.get(s);
     if (prev === undefined) {
-      out.set(s, bindings ? [...bindings] : null);
+      out.set(s, { bindings: bindings ? [...bindings] : null, flags });
       return;
     }
-    if (prev === null || bindings === null) {
-      out.set(s, null);
+    prev.flags = mergeImportFlags(prev.flags, flags);
+    if (prev.bindings === null || bindings === null) {
+      prev.bindings = null;
       return;
     }
     for (const b of bindings) {
-      if (!prev.some((p) => p.kind === b.kind && p.name === b.name && p.local === b.local)) {
-        prev.push(b);
+      if (
+        !prev.bindings.some((p) => p.kind === b.kind && p.name === b.name && p.local === b.local)
+      ) {
+        prev.bindings.push(b);
       }
     }
   };
   const visit = (node: TsNode): void => {
     for (const child of node.namedChildren) {
-      for (const edge of edgesFor(child)) add(edge.raw, edge.bindings);
+      for (const edge of edgesFor(child)) add(edge.raw, edge.bindings, edge.flags ?? 0);
       visit(child);
     }
   };
   try {
     visit(tree.rootNode);
-    return [...out].map(([raw, bindings]) => ({ raw, ...(bindings ? { bindings } : {}) }));
+    return [...out].map(([raw, { bindings, flags }]) => ({
+      raw,
+      ...(bindings ? { bindings } : {}),
+      ...(flags ? { flags } : {}),
+    }));
   } finally {
     tree.delete?.();
     parser.delete?.();
   }
+}
+
+/** Combine two statements' flags for one specifier (see IMPORT_FLAG). */
+export function mergeImportFlags(a: number, b: number): number {
+  const any = (a | b) & IMPORT_FLAG.reexport;
+  const all = a & b & (IMPORT_FLAG.typeOnly | IMPORT_FLAG.dynamic);
+  return any | all;
+}
+
+/** `import type {…} from` / `export type {…} from` — erased at compile time. */
+function isTypeOnlyStatement(node: TsNode): boolean {
+  const text = node.text;
+  return /^import\s+type\b(?!\s+from\b)/.test(text) || /^export\s+type\s*[{*]/.test(text);
 }
 
 function unquote(text: string): string {
@@ -313,12 +338,22 @@ const NAMESPACE_BINDING: ImportBinding = { name: '*', local: '*', kind: 'namespa
  * the statement demonstrably takes no names (side-effect import). Fully tolerant
  * to grammar drift: a missing child degrades to fewer bindings, never a throw.
  */
-function edgesFor(node: TsNode): Array<{ raw: string; bindings: ImportBinding[] | null }> {
+function edgesFor(
+  node: TsNode,
+): Array<{ raw: string; bindings: ImportBinding[] | null; flags?: number }> {
   switch (node.type) {
     case 'import_statement': {
       // JS/TS: a `source` string field. Python: `import a.b, c as d` dotted names.
       const src = node.childForFieldName('source');
-      if (src) return [{ raw: unquote(src.text), bindings: jsImportClauseBindings(node) }];
+      if (src) {
+        return [
+          {
+            raw: unquote(src.text),
+            bindings: jsImportClauseBindings(node),
+            flags: isTypeOnlyStatement(node) ? IMPORT_FLAG.typeOnly : 0,
+          },
+        ];
+      }
       return node.namedChildren
         .filter((c) => c.type === 'dotted_name' || c.type === 'aliased_import')
         .map((c) => {
@@ -393,7 +428,8 @@ function edgesFor(node: TsNode): Array<{ raw: string; bindings: ImportBinding[] 
       }
       // Bare `export * from 'x'` has neither clause node — whole module.
       if (!sawClause && !bindings.length) bindings.push({ ...NAMESPACE_BINDING });
-      return [{ raw: unquote(src.text), bindings }];
+      const flags = IMPORT_FLAG.reexport | (isTypeOnlyStatement(node) ? IMPORT_FLAG.typeOnly : 0);
+      return [{ raw: unquote(src.text), bindings, flags }];
     }
     case 'call_expression': {
       // `require('x')` / dynamic `import('x')` — takes the whole module.
@@ -409,7 +445,14 @@ function edgesFor(node: TsNode): Array<{ raw: string; bindings: ImportBinding[] 
           (c.type === 'template_string' &&
             !c.namedChildren.some((n) => n.type === 'template_substitution')),
       );
-      return str ? [{ raw: unquote(str.text), bindings: [{ ...NAMESPACE_BINDING }] }] : [];
+      if (!str) return [];
+      return [
+        {
+          raw: unquote(str.text),
+          bindings: [{ ...NAMESPACE_BINDING }],
+          flags: fn === 'import' ? IMPORT_FLAG.dynamic : 0,
+        },
+      ];
     }
     case 'import_spec': {
       // Go: a single import line; the path is an interpreted string.
@@ -422,12 +465,27 @@ function edgesFor(node: TsNode): Array<{ raw: string; bindings: ImportBinding[] 
       const arg = node.namedChildren[0];
       return arg ? [{ raw: arg.text.replace(/\s+/g, ''), bindings: null }] : [];
     }
+    case 'mod_item': {
+      // Rust: `mod foo;` (no body) loads foo.rs / foo/mod.rs. An inline
+      // `mod foo { … }` is defined right here and depends on no file.
+      if (node.namedChildren.some((c) => c.type === 'declaration_list')) return [];
+      const name = node.childForFieldName('name')?.text.trim();
+      return name ? [{ raw: `mod ${name}`, bindings: null }] : [];
+    }
     case 'preproc_include': {
-      // C/C++: `#include <x>` / `"x"`.
+      // C/C++: `#include "x"` keeps the bare path; `#include <x>` keeps its
+      // brackets, so resolution can tell a project header from a system one.
       const s = node.namedChildren.find(
         (c) => c.type === 'string_literal' || c.type === 'system_lib_string',
       );
-      return s ? [{ raw: s.text.replace(/^[<"]/, '').replace(/[>"]$/, ''), bindings: null }] : [];
+      if (!s) return [];
+      const text = s.text.trim();
+      return [
+        {
+          raw: text.startsWith('<') ? text : text.replace(/^"/, '').replace(/"$/, ''),
+          bindings: null,
+        },
+      ];
     }
     default:
       return [];

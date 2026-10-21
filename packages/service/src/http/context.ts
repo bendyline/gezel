@@ -10,6 +10,7 @@ import type { ChatManager } from '../chat/manager.js';
 import type { CodexSetupManager } from '../codex-setup/manager.js';
 import type { ConnectorActionManager } from '../connectors/actions.js';
 import type { ConnectorManager } from '../connectors/manager.js';
+import type { HarnessToolsManager } from '../harness-tools/manager.js';
 
 import type { DiffpackManager } from '../diffpack/manager.js';
 
@@ -178,6 +179,8 @@ export interface ServiceContext extends EngineContext {
   ollamaEmulation: OllamaEmulationController;
   /** Gezel-owned Codex profile, credential, and loopback bridge lifecycle. */
   codexSetup: CodexSetupManager;
+  /** Gezel's tools in other AI apps: each app's `gezel` MCP entry, the launcher, and the person's choices. */
+  harnessTools: HarnessToolsManager;
   /** Gezel-owned OpenCode config, credential, and loopback bridge lifecycle. */
   opencodeSetup: OpenCodeSetupManager;
   /** Gezel-owned pi extension, model list, credential, and loopback bridge lifecycle. */

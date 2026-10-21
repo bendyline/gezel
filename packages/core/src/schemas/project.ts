@@ -119,11 +119,18 @@ export const ProjectNudgeStateSchema = z.object({
 export type ProjectNudgeState = z.infer<typeof ProjectNudgeStateSchema>;
 
 /**
+ * Every value a project's `selectedView` may hold, including view ids this
+ * build doesn't know (see core `project-views.ts`).
+ */
+export const PROJECT_VIEW_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+
+/**
  * Optional visibility overrides for the supporting tabs on a project.
  * Missing fields preserve the UI's historical defaults: most tabs are visible,
- * while Map keeps its project-type-aware auto visibility. Chat and Settings
- * are structural entry points and therefore are not configurable here; Output
- * remains capability-driven by previewable content.
+ * while `map` — the Views tab, historically the Village — keeps its
+ * view-aware auto visibility. Chat and Settings are structural entry points
+ * and therefore are not configurable here; Output remains capability-driven
+ * by previewable content.
  */
 export const ProjectTabVisibilitySchema = z
   .object({
@@ -364,6 +371,14 @@ export const ProjectSchema = z.object({
    * which mirror to the config for exactly this failure.
    */
   outputPaneVisible: z.boolean().optional(),
+  /**
+   * The view the Views tab last showed (`village`, `diagram`, …). Kept here
+   * for the same reason as `outputPaneVisible`. Stored as a plain string so
+   * an id from a newer build survives; `resolveProjectView` passes over one
+   * this build doesn't offer. Lenient: a bad hand edit drops the field
+   * instead of hiding the project.
+   */
+  selectedView: z.string().regex(PROJECT_VIEW_ID_PATTERN).optional().catch(undefined),
   /**
    * Policy for Gezel-managed workspace mutations. `auto` (and an absent
    * value) permits internal workspaces and denies external `workingDir`s;

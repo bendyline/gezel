@@ -190,6 +190,8 @@ const T1 = '2026-08-12T08:00:00.000Z';
 const T2 = '2026-08-12T09:00:00.000Z';
 const T3 = '2026-08-12T10:00:00.000Z';
 const T4 = '2026-08-12T11:00:00.000Z';
+/** The deletion watch a cursor carries: [id, created ms], newest first. */
+const watch = (...posts: [string, string][]) => posts.map(([id, iso]) => [id, Date.parse(iso)]);
 
 describe('XPostsAdapter auth', () => {
   it('fails ensureAuth with an actionable message when no credential is stored', async () => {
@@ -232,6 +234,29 @@ describe('XPostsAdapter auth', () => {
     await expect(adapter.ensureAuth()).rejects.toThrow(/no refresh token/i);
   });
 
+  it('a 401 with no refresh token stored asks for a re-link', async () => {
+    const { adapter, state } = await readyAdapter(
+      {},
+      cred({ refreshToken: undefined, clientId: undefined }),
+    );
+    state.listError = new XApiError(401, 'Unauthorized');
+    state.timeline = [tweet('103', T3)];
+    await expect(
+      adapter.listChangesSince('posts', { sinceId: '100', userId: USER_ID, username: USERNAME }),
+    ).rejects.toThrow(/revoked or has expired.*Re-link/);
+  });
+
+  it('a refused refresh (X answers invalid_request) asks for a re-link', async () => {
+    const { runtime, state } = harness();
+    const { deps } = makeDeps(cred({ expiresAt: '2000-01-01T00:00:00.000Z' }));
+    runtime.refreshToken = async () => {
+      throw new Error('oauth token request failed: Value passed for the token was invalid.');
+    };
+    const adapter = new XPostsAdapter(binding(), deps, runtime);
+    await expect(adapter.ensureAuth()).rejects.toThrow(/Re-link the account/);
+    expect(state.refreshCalls).toEqual([]);
+  });
+
   it('lists scopes per config: mentions OFF by default (paid reads), stats always', async () => {
     const { adapter } = await readyAdapter();
     expect(await adapter.listScopes()).toEqual(['posts', 'stats']);
@@ -263,6 +288,7 @@ describe('XPostsAdapter posts scope', () => {
       metricsRefreshedAt: '2026-08-12T12:00:00.000Z',
       userId: USER_ID,
       username: USERNAME,
+      recent: watch(['103', T3], ['102', T2], ['101', T1]),
     });
     expect(state.requests.filter((u) => u.includes('/users/me'))).toHaveLength(1);
   });
@@ -301,6 +327,7 @@ describe('XPostsAdapter posts scope', () => {
       metricsRefreshedAt: '2026-08-12T12:00:00.000Z',
       userId: USER_ID,
       username: USERNAME,
+      recent: watch(['104', T4], ['103', T3], ['102', T2], ['101', T1]),
     });
   });
 
@@ -341,7 +368,9 @@ describe('XPostsAdapter posts scope', () => {
       metricsRefreshedAt: '2026-08-13T13:00:00.000Z',
       userId: USER_ID,
       username: USERNAME,
+      recent: watch(['104', T4], ['103', T3], ['102', T2], ['101', T1]),
     });
+    expect(third.removed).toBeUndefined();
   });
 
   it('stamps metrics_updated_at from the pass and maps the raw tweet on fetch', async () => {
@@ -356,8 +385,31 @@ describe('XPostsAdapter posts scope', () => {
     expect(record.frontmatter.metrics_updated_at).toBe('2026-08-12T12:00:00.000Z');
   });
 
-  it('maps 429 and usage-cap 403s to a rateLimited batch, rethrowing other faults', async () => {
-    const { adapter, state } = await readyAdapter();
+  it('tombstones a post the metrics page no longer returns, with its readings', async () => {
+    const { adapter, state, makeAdapter } = await readyAdapter();
+    state.timeline = [tweet('103', T3), tweet('102', T2), tweet('101', T1)];
+    const first = await adapter.listChangesSince('posts', undefined);
+
+    state.timeline = state.timeline.filter((t) => t.id !== '102');
+    state.now = new Date('2026-08-13T13:00:00.000Z');
+    const nextPass = await makeAdapter();
+    const second = await nextPass.listChangesSince('posts', first.cursor);
+    expect(second.removed).toEqual(['102', 'metrics:102:2026-08-12', 'metrics:102:2026-08-13']);
+    expect((second.cursor as { recent?: unknown }).recent).toEqual(watch(['103', T3], ['101', T1]));
+  });
+
+  it('never tombstones a post that merely aged out of the window', async () => {
+    const { adapter, state, makeAdapter } = await readyAdapter({ metricsWindowDays: 1 });
+    state.timeline = [tweet('103', T3)];
+    const first = await adapter.listChangesSince('posts', undefined);
+    state.now = new Date('2026-08-14T13:00:00.000Z');
+    const second = await (await makeAdapter()).listChangesSince('posts', first.cursor);
+    expect(second.removed).toBeUndefined();
+    expect((second.cursor as { recent?: unknown }).recent).toBeUndefined();
+  });
+
+  it('maps 429 to a rateLimited batch, a spent budget to an actionable error, rethrowing others', async () => {
+    const { adapter, state, makeAdapter } = await readyAdapter();
     const cursor = {
       sinceId: '103',
       lastFetchAt: '2026-08-12T00:00:00.000Z',
@@ -370,12 +422,26 @@ describe('XPostsAdapter posts scope', () => {
     const limited = await adapter.listChangesSince('posts', cursor);
     expect(limited).toEqual({ records: [], cursor, rateLimited: true });
 
-    state.listError = new XApiError(403, 'UsageCapExceeded: Monthly product cap');
-    const capped = await adapter.listChangesSince('posts', cursor);
-    expect(capped).toEqual({ records: [], cursor, rateLimited: true });
-
     state.listError = new XApiError(500, 'oops');
     await expect(adapter.listChangesSince('posts', cursor)).rejects.toThrow(/x api 500/);
+
+    // A spent budget does not clear on a backoff: fail the pass with the fix.
+    const gatedStats = { lastFetchAt: '2026-08-12T11:59:00.000Z', lastDay: '2026-08-12' };
+    for (const err of [
+      new XApiError(429, '{"title":"UsageCapExceeded","detail":"Usage cap exceeded"}'),
+      new XApiError(403, 'UsageCapExceeded: Monthly product cap'),
+      new XApiError(402, '{"title":"CreditsDepleted"}'),
+    ]) {
+      state.listError = err;
+      const pass = await makeAdapter();
+      await expect(pass.listChangesSince('posts', cursor)).rejects.toThrow(
+        /credits or spending limit.*Developer Console/,
+      );
+      // The budget is the account's: the rest of this pass fails with it,
+      // even a scope whose interval gate would have asked for nothing.
+      state.listError = undefined;
+      await expect(pass.listChangesSince('stats', gatedStats)).rejects.toThrow(/spending limit/);
+    }
   });
 });
 

@@ -356,3 +356,46 @@ describe('POST /api/image-gen/models/:id/pull', () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe('image generation for an outside AI app', () => {
+  const harnessCall = (body: unknown) => {
+    const harness = svc.context.tokenStore.issueHarness({
+      client: 'codex',
+      projectId: 'default',
+      appName: 'Codex',
+    });
+    return httpFetch(`${baseUrl}/api/image-gen/generate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${harness.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  };
+
+  it('renders on this computer and never copies into the folder', async () => {
+    const res = await harnessCall({
+      prompt: 'a tiny compass',
+      width: 8,
+      height: 8,
+      projectId: 'default',
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { artifactPath: string; workspacePath: string | null };
+    expect(body.artifactPath.startsWith('generated/')).toBe(true);
+    expect(body.workspacePath).toBeNull();
+  });
+
+  it('refuses when the person turned image generation off for other apps', async () => {
+    await svc.context.store.writeConfig({ harnessTools: { images: 'off' } });
+    try {
+      const res = await harnessCall({
+        prompt: 'a tiny compass',
+        width: 8,
+        height: 8,
+        projectId: 'default',
+      });
+      expect(res.status).toBe(403);
+    } finally {
+      await svc.context.store.writeConfig({ harnessTools: {} });
+    }
+  });
+});

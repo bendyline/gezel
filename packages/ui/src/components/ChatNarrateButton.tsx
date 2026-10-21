@@ -193,7 +193,9 @@ export function ChatNarrateButton({
   return (
     <button
       type="button"
-      className={`chat-narrate-btn${recording ? ' chat-narrate-btn-recording' : ''}`}
+      className={`squisq-toolbar-button chat-composer-tool-btn chat-narrate-btn${
+        recording ? ' squisq-toolbar-button--danger chat-narrate-btn-recording' : ''
+      }`}
       data-testid="chat-narrate"
       onClick={recording ? () => void stop() : () => void start()}
       disabled={buttonDisabled}

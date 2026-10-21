@@ -15120,7 +15120,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(record.craftbookRef ? ['craftbook_update_step'] : []),
       ...(project?.connectors?.some((binding) => binding.type.startsWith('mail-')) &&
       securityPolicy.allowMail
-        ? ['draft_email', 'queue_email', 'send_email']
+        ? ['draft_email', 'queue_email', 'send_email', 'save_email_draft']
         : []),
       ...(hasSocialConnectorBinding(project?.connectors) && securityPolicy.allowExternalServices
         ? ['draft_post', 'queue_post', 'publish_post']

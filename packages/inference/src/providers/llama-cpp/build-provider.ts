@@ -66,6 +66,7 @@ import {
   resolveLlamaCppKvCacheType,
 } from './kv-cache-type.js';
 import {
+  type MoeOffloadDecision,
   degradeDenseFfnOffloadDecision,
   degradeMoeOffloadDecision,
   estimateExactPerSlotKvBytesF16,
@@ -73,6 +74,7 @@ import {
   estimateWindowedKvLinearization,
   planDenseFfnOffload,
   planMoeOffload,
+  shedSlotsForGpuResidency,
 } from './offload-planner.js';
 import { LlamaCppProvider } from './provider.js';
 import { reasoningLaunchOverridesFromEnv } from './reasoning-launch.js';
@@ -814,6 +816,10 @@ export async function buildLlamaCppProvider(opts: {
   // mode. Undefined when the GGUF is unreadable — the pool builder then
   // falls back to the legacy weights-multiplier reservation.
   let plannedReservationBytes: number | undefined;
+  // What prices that reservation, kept for the out-of-memory ladder: when it
+  // drops a slot, the relaunch is charged for the KV it actually allocates.
+  let reservationKvFor: ((slotCount: number) => number | undefined) | undefined;
+  let reservationResidentBytes: number | undefined;
   // Graphics memory the MoE offload plan puts on the card. Device admission
   // charges this rather than the whole card; undefined keeps the old charge.
   let plannedGpuBytes: number | undefined;
@@ -1162,66 +1168,78 @@ export async function buildLlamaCppProvider(opts: {
             ssmConvKernel: summary.ssmConvKernel,
             kvCacheType,
           });
-      const kvReserveBytes = windowedKvPlan
-        ? Math.round(
-            windowedKvPlan.fixedBytes * slots +
-              windowedKvPlan.bytesPerToken * effectiveNumCtx * slots,
-          )
-        : estimateKvReserveBytes({
-            blockCount: summary.blockCount,
-            embeddingLength: summary.embeddingLength,
-            headCount: summary.headCount,
-            headCountKv: summary.headCountKv,
-            headCountKvPerLayer: summary.headCountKvPerLayer,
-            slidingWindowPattern: summary.slidingWindowPattern,
-            sharedKvLayers: summary.sharedKvLayers,
-            loopCount: summary.loopCount,
-            keyLength: summary.keyLength,
-            valueLength: summary.valueLength,
-            keyLengthSwa: summary.keyLengthSwa,
-            valueLengthSwa: summary.valueLengthSwa,
-            fullAttentionInterval: summary.fullAttentionInterval,
-            ssmInnerSize: summary.ssmInnerSize,
-            ssmStateSize: summary.ssmStateSize,
-            ssmConvKernel: summary.ssmConvKernel,
-            ctxTokens: effectiveNumCtx * slots,
-            kvCacheType,
-          });
-      // The broker-ledger reservation for this launch: resident weights
-      // plus the KV the engine will allocate at the granted window (M1 —
-      // the weights-only ledger under-reserved dense models whose KV
-      // rivals their weights: qwen3.5-4b at 64K carries more KV than
-      // parameters). Consumed by the pool builder via
-      // `plannedReservationBytes` so co-residency admission can see it.
-      if (kvReserveBytes !== undefined) {
-        plannedReservationBytes = residentBytes + kvReserveBytes;
-      }
+      const kvReserveFor = (slotCount: number): number | undefined =>
+        windowedKvPlan
+          ? Math.round(
+              windowedKvPlan.fixedBytes * slotCount +
+                windowedKvPlan.bytesPerToken * effectiveNumCtx * slotCount,
+            )
+          : estimateKvReserveBytes({
+              blockCount: summary.blockCount,
+              embeddingLength: summary.embeddingLength,
+              headCount: summary.headCount,
+              headCountKv: summary.headCountKv,
+              headCountKvPerLayer: summary.headCountKvPerLayer,
+              slidingWindowPattern: summary.slidingWindowPattern,
+              sharedKvLayers: summary.sharedKvLayers,
+              loopCount: summary.loopCount,
+              keyLength: summary.keyLength,
+              valueLength: summary.valueLength,
+              keyLengthSwa: summary.keyLengthSwa,
+              valueLengthSwa: summary.valueLengthSwa,
+              fullAttentionInterval: summary.fullAttentionInterval,
+              ssmInnerSize: summary.ssmInnerSize,
+              ssmStateSize: summary.ssmStateSize,
+              ssmConvKernel: summary.ssmConvKernel,
+              ctxTokens: effectiveNumCtx * slotCount,
+              kvCacheType,
+            });
+      // Plan against the card as it is now. Sized to the whole card, a plan
+      // counts memory other programs hold: MoE admission then charged the
+      // model the whole card and refused it (2026-10-11), and a dense
+      // 31B planned into 30.3 GiB of a 32 GB card that the desktop and its
+      // apps were already holding ~5 GB of died with a Vulkan out-of-memory
+      // (2026-10-19).
+      const freeGpuBytes =
+        vramBytes > 0 ? await measureAvailableGpuBytes().catch(() => undefined) : undefined;
+      // A lane count the person chose is not the planner's to spend, and
+      // eval runs under GEZEL_LLAMA_NUM_CTX accept the memory consequences.
+      const mayShedSlots = configuredSlots === undefined && envNumCtx === undefined;
+      const placeSlots = (
+        gpuBytes: number,
+        plan: (slotCount: number, gpuBytes: number) => MoeOffloadDecision,
+      ) =>
+        mayShedSlots
+          ? shedSlotsForGpuResidency({ slots, vramBytes: gpuBytes, plan })
+          : { slots, decision: plan(slots, gpuBytes), shed: false };
+      let placement: ReturnType<typeof placeSlots> | undefined;
       if (isMoE) {
-        // Plan against the card as it is now. Sized to the whole card, the
-        // plan counted memory other programs held, and admission then had
-        // to charge the model the whole card and refuse it (2026-10-11).
-        const freeGpuBytes =
-          vramBytes > 0 ? await measureAvailableGpuBytes().catch(() => undefined) : undefined;
-        const moePlan = planMoeOffload({
-          isMoE,
-          residentBytes,
-          vramBytes: freeGpuBytes !== undefined ? Math.min(vramBytes, freeGpuBytes) : vramBytes,
-          ...(split
-            ? {
-                split,
-                ...(summary.blockCount !== undefined ? { blockCount: summary.blockCount } : {}),
-                ...(kvReserveBytes !== undefined ? { kvReserveBytes } : {}),
-              }
-            : {}),
-        });
-        offloadDecision = moePlan;
+        placement = placeSlots(
+          freeGpuBytes !== undefined ? Math.min(vramBytes, freeGpuBytes) : vramBytes,
+          (slotCount, gpuBytes) => {
+            const kvReserveBytes = kvReserveFor(slotCount);
+            return planMoeOffload({
+              isMoE,
+              residentBytes,
+              vramBytes: gpuBytes,
+              ...(split
+                ? {
+                    split,
+                    ...(summary.blockCount !== undefined ? { blockCount: summary.blockCount } : {}),
+                    ...(kvReserveBytes !== undefined ? { kvReserveBytes } : {}),
+                  }
+                : {}),
+            });
+          },
+        );
+        offloadDecision = placement.decision;
         // An explicit offload setting shadows the planner's flags, so its
         // footprint would describe a launch that is not the one made.
         const plannerPlacesExperts =
           (config.llamaCppCpuMoe ?? resolvedManifestEngineConfig?.cpuMoe) === undefined &&
           (config.llamaCppNCpuMoe ?? resolvedManifestEngineConfig?.nCpuMoe) === undefined &&
           (config.llamaCppNGpuLayers ?? resolvedManifestEngineConfig?.nGpuLayers) === undefined;
-        if (plannerPlacesExperts) plannedGpuBytes = moePlan.gpuBytes;
+        if (plannerPlacesExperts) plannedGpuBytes = placement.decision.gpuBytes;
       } else {
         const explicitNCpuFfn = config.llamaCppNCpuFfn ?? resolvedManifestEngineConfig?.nCpuFfn;
         const explicitNGpuLayers =
@@ -1230,16 +1248,30 @@ export async function buildLlamaCppProvider(opts: {
         // A finite whole-layer GPU count is a different placement strategy;
         // don't layer an automatic tensor override on top of it. `-1` means
         // all and is compatible with the planner's own attention-on-GPU plan.
-        offloadDecision =
+        if (
           explicitNCpuFfn === undefined &&
           (explicitNGpuLayers === undefined || explicitNGpuLayers === -1)
-            ? planDenseFfnOffload({
+        ) {
+          placement = placeSlots(
+            // Respect the usable accelerator pool, any explicit capacity
+            // ceiling, co-resident reservations, and what other programs
+            // hold on the card now. The raw probe still gates this to a real
+            // discrete-GPU build rather than treating a CPU/unified fast pool
+            // as VRAM.
+            vramBytes > 0
+              ? Math.max(
+                  0,
+                  Math.min(
+                    budgetBytes - committedOtherBytes,
+                    freeGpuBytes ?? Number.POSITIVE_INFINITY,
+                  ),
+                )
+              : 0,
+            (slotCount, gpuBytes) => {
+              const kvReserveBytes = kvReserveFor(slotCount);
+              return planDenseFfnOffload({
                 isMoE,
-                // Respect the usable accelerator pool, any explicit capacity
-                // ceiling, and co-resident reservations. The raw probe still
-                // gates this to a real discrete-GPU build rather than treating
-                // a CPU/unified fast pool as VRAM.
-                vramBytes: vramBytes > 0 ? Math.max(0, budgetBytes - committedOtherBytes) : 0,
+                vramBytes: gpuBytes,
                 ...(denseFfnSplit ? { split: denseFfnSplit } : {}),
                 ...(summary.blockCount !== undefined ? { blockCount: summary.blockCount } : {}),
                 ...(kvReserveBytes !== undefined ? { kvReserveBytes } : {}),
@@ -1248,9 +1280,32 @@ export async function buildLlamaCppProvider(opts: {
                   ? brokerSnap.pools.ramShareBytes
                   : hostCapacity.ramShareBytes,
                 freeSystemRamBytes: availableSystemRamBytes(),
-              })
-            : undefined;
+              });
+            },
+          );
+          offloadDecision = placement.decision;
+        } else {
+          offloadDecision = undefined;
+        }
       }
+      if (placement?.shed) {
+        log.info(
+          `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: reducing engine slots ${slots} -> 1 to keep the model on the GPU with room to spare (other programs' graphics memory moves)`,
+        );
+        slots = 1;
+      }
+      // The broker-ledger reservation for this launch: resident weights
+      // plus the KV the engine will allocate at the granted window (M1 —
+      // the weights-only ledger under-reserved dense models whose KV
+      // rivals their weights: qwen3.5-4b at 64K carries more KV than
+      // parameters). Consumed by the pool builder via
+      // `plannedReservationBytes` so co-residency admission can see it.
+      const kvReserveBytes = kvReserveFor(slots);
+      if (kvReserveBytes !== undefined) {
+        plannedReservationBytes = residentBytes + kvReserveBytes;
+      }
+      reservationKvFor = kvReserveFor;
+      reservationResidentBytes = residentBytes;
       if (offloadDecision?.reason) {
         log.info(
           `[llama-cpp] offload plan (${modelCatalogInfo?.id ?? 'model'}): ${offloadDecision.reason}`,
@@ -1433,15 +1488,35 @@ export async function buildLlamaCppProvider(opts: {
       gpuWatch?.observe(line);
       providerHolder.current?.onStdoutLine(line);
     },
-    // GPU-OOM recovery ladder: when a start dies of VRAM exhaustion and the
-    // planner's offload decision was in play, degrade it one step
-    // (partial split → all expert/FFN weights to RAM → engine-owned fit) and let the
-    // supervisor retry — `resolveLaunch` below re-reads `offloadDecision`
-    // on every spawn. The degraded plan sticks for later restarts of this
-    // provider, so a recovered engine doesn't re-OOM on its next boot.
+    // GPU-OOM recovery ladder: when a start dies of VRAM exhaustion, first
+    // give back the extra slots' KV (every weight stays on the GPU), then, if
+    // the planner's offload decision was in play, degrade it one step
+    // (partial split → all expert/FFN weights to RAM → engine-owned fit) and
+    // let the supervisor retry — `resolveLaunch` below re-reads `slots` and
+    // `offloadDecision` on every spawn. The degraded plan sticks for later
+    // restarts of this provider, so a recovered engine doesn't re-OOM on its
+    // next boot.
     recoverStartup: ({ panicKind }) => {
       if (panicKind !== 'cuda-out-of-memory' && panicKind !== 'vulkan-out-of-memory') {
         return false;
+      }
+      // A full-residency plan has no offload rung below it, so before this a
+      // two-slot launch that missed by one KV allocation failed outright
+      // (2026-10-19, Gemma 4 31B on a 32 GB card). This rung spends one of
+      // the supervisor's two retries; an offload rung still has the other.
+      if (slots > 1 && configuredSlots === undefined) {
+        const from = slots;
+        if (providerHolder.current?.narrowEngineSlots(1)) {
+          slots = 1;
+          const kvReserveBytes = reservationKvFor?.(1);
+          if (kvReserveBytes !== undefined && reservationResidentBytes !== undefined) {
+            plannedReservationBytes = reservationResidentBytes + kvReserveBytes;
+          }
+          log.warn(
+            `[llama-cpp] ${panicKind} while starting ${modelCatalogInfo?.id ?? 'model'} — retrying with one engine slot instead of ${from}`,
+          );
+          return true;
+        }
       }
       // Explicit config/manifest offload settings shadow the planner
       // per-field (see `buildLlamaCppEngineArgs`); when every field the

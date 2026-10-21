@@ -203,7 +203,7 @@ async function discoverLegacyFullService(
 
 /**
  * Connect a first-party client running as the same OS user that owns the
- * product daemon. This deliberately skips Connected Apps consent: the
+ * product daemon. This deliberately skips app consent: the
  * rotating credential comes from the user's protected runtime directory and
  * is the same scoped `ui` credential used by the desktop shell. External apps
  * must use {@link authorizeLocal} instead.

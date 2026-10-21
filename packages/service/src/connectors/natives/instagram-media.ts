@@ -3,7 +3,16 @@
  * professional account's media — posts, reels, carousels — plus a daily
  * account-stats series, normalized into the shared social corpus shape. Raw
  * `fetch` against graph.instagram.com through an injectable runtime seam — no
- * platform SDK, mirroring bluesky-posts and x-posts.
+ * platform SDK, mirroring bluesky-posts and x-posts. The default runtime
+ * rides `AdapterDeps.fetch`, so the provider simulator drives it end to end.
+ *
+ * A walk that outgrows one engine round continues from the page it stopped on
+ * (`partial: true`) instead of moving the high-water mark past media it never
+ * returned. Meta's paging links embed the access token, so a continuation
+ * stores the link with the token removed and adds it back when resuming. The
+ * metrics re-walk doubles as the deletion check (social-shared's deletion
+ * watch): media deleted inside the metrics window leaves the corpus, and a
+ * caption edited there is refreshed in place.
  *
  * Auth is Meta's long-lived-token contract, not refresh tokens: the OAuth
  * link flow (ConnectorManager.completeOAuth + oauth.ts's
@@ -35,17 +44,29 @@ import type {
   NormalizedRecord,
   RecordRef,
 } from '../types.js';
+import { ReconnectRequiredError } from './oauth-session.js';
 import {
+  type WatchedPost,
+  deletedPostRecordIds,
   firstLineTitle,
+  mergeWatchedPosts,
   metricsHistoryRecord,
   monthSegments,
   orderedFrontmatter,
+  parseWatchedPosts,
   postFileStem,
+  vanishedPosts,
   windowRefreshDue,
 } from './social-shared.js';
 
 const API_ORIGIN = 'https://graph.instagram.com';
-const API_BASE = `${API_ORIGIN}/v23.0`;
+/**
+ * Graph API versions live about two years; v25.0 (introduced 2026-02-18) is
+ * available until 2028-07-29. Every field read here is unchanged since v23.0.
+ * https://developers.facebook.com/docs/graph-api/changelog
+ */
+const API_VERSION = 'v25.0';
+const API_BASE = `${API_ORIGIN}/${API_VERSION}`;
 const PAGE_SIZE = 50;
 const MAX_PAGES_PER_PASS = 20;
 const MEDIA_FIELDS =
@@ -92,8 +113,12 @@ export interface InstagramRuntime {
   now(): Date;
 }
 
-async function graphJson(url: string, init?: RequestInit): Promise<unknown> {
-  const res = await fetch(url, {
+async function graphJson(
+  fetchImpl: typeof fetch,
+  url: string,
+  init?: RequestInit,
+): Promise<unknown> {
+  const res = await fetchImpl(url, {
     ...init,
     headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
     signal: AbortSignal.timeout(30_000),
@@ -114,20 +139,46 @@ async function graphJson(url: string, init?: RequestInit): Promise<unknown> {
   return json;
 }
 
-const defaultRuntime: InstagramRuntime = {
-  getJson: (url) => graphJson(url),
-  postForm: (url, form) =>
-    graphJson(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(form).toString(),
-    }),
-  now: () => new Date(),
-};
+/** The production runtime over a transport (`AdapterDeps.fetch`, else global fetch). */
+export function createInstagramRuntime(fetchImpl: typeof fetch = fetch): InstagramRuntime {
+  return {
+    getJson: (url) => graphJson(fetchImpl, url),
+    postForm: (url, form) =>
+      graphJson(fetchImpl, url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(form).toString(),
+      }),
+    now: () => new Date(),
+  };
+}
+
+/**
+ * Where a media walk stopped when it outgrew one engine round: the page it
+ * was consuming (a graph URL with its access token removed; absent for the
+ * first page), how many of that page's items it consumed, and the last one's
+ * id (so a page that shifted between rounds is re-found by identity).
+ */
+interface MediaWalk {
+  page?: string;
+  skip: number;
+  lastId?: string;
+  /** The incremental floor the walk started from. */
+  floorTs: string;
+  /** High-water mark seen so far; becomes `sinceTs` when the walk completes. */
+  newestTs?: string;
+  metricsDue: boolean;
+  windowFloorMs: number;
+  /** Watched media ids this walk has already seen (the deletion check's evidence). */
+  confirmed?: string[];
+}
 
 interface MediaCursor {
   sinceTs?: string;
   metricsRefreshedAt?: string;
+  /** Deletion watch (social-shared). */
+  recent?: WatchedPost[];
+  walk?: MediaWalk;
 }
 
 interface StatsCursor {
@@ -141,12 +192,17 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
   private token = '';
   /** One timestamp per pass so every refreshed record carries the same stamp. */
   private syncedAt = '';
+  private readonly runtime: InstagramRuntime;
+  /** An account-wide failure met earlier in this pass. */
+  private accountFailure?: Error;
 
   constructor(
     private readonly binding: ConnectorBindingRef,
     private readonly deps: AdapterDeps,
-    private readonly runtime: InstagramRuntime = defaultRuntime,
-  ) {}
+    runtime?: InstagramRuntime,
+  ) {
+    this.runtime = runtime ?? createInstagramRuntime(deps.fetch);
+  }
 
   async ensureAuth(): Promise<void> {
     this.config = parseConfig(this.binding.config);
@@ -157,13 +213,24 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
         `No stored credential for Instagram connector ${this.binding.id}. Re-link the account from the connector's settings.`,
       );
     }
-    let cred = JSON.parse(blob) as InstagramCred;
+    let cred: InstagramCred;
+    try {
+      cred = JSON.parse(blob) as InstagramCred;
+    } catch {
+      throw new Error(
+        `The stored Instagram credential for ${this.binding.id} is unreadable. Re-link the account.`,
+      );
+    }
     if (!cred.accessToken) {
       throw new Error(
         `The stored Instagram credential for ${this.binding.id} has no access token. Re-link the account.`,
       );
     }
     const now = this.runtime.now();
+    // Meta cannot renew a long-lived token once it has lapsed; only a new
+    // sign-in can. Say so instead of spending a request to learn it.
+    const expiresMs = cred.expiresAt ? Date.parse(cred.expiresAt) : Number.NaN;
+    if (Number.isFinite(expiresMs) && expiresMs <= now.getTime()) throw reconnectError();
     if (
       cred.refreshMode === 'long-lived-exchange' &&
       cred.refreshUrl &&
@@ -187,12 +254,19 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
     cursor: unknown,
     opts?: ListChangesOptions,
   ): Promise<ChangeBatch<unknown>> {
+    // A dead token is the account's, not one scope's: the rest of the pass
+    // fails with it rather than reporting a gated scope as synced.
+    if (this.accountFailure) throw this.accountFailure;
     try {
       if (scope === 'media') return await this.listMedia(cursor, opts);
       if (scope === 'stats') return await this.listStats(cursor);
       return { records: [], cursor };
     } catch (err) {
       if (isRateLimitError(err)) return { records: [], cursor, rateLimited: true };
+      if (isTokenRejected(err)) {
+        this.accountFailure = reconnectError();
+        throw this.accountFailure;
+      }
       throw err;
     }
   }
@@ -226,7 +300,7 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
     const parsed = parsePublishInput(input);
     // Two-step Graph publish: create a media container (Meta's servers fetch
     // the image from the public URL), then publish the container.
-    const container = (await this.runtime.postForm(`${API_BASE}/me/media`, {
+    const container = (await this.publishStep(`${API_BASE}/me/media`, {
       image_url: parsed.imageUrl,
       ...(parsed.caption ? { caption: parsed.caption } : {}),
       access_token: this.token,
@@ -237,7 +311,7 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
         'Instagram returned no media container id; check that the image URL is publicly reachable.',
       );
     }
-    const published = (await this.runtime.postForm(`${API_BASE}/me/media_publish`, {
+    const published = (await this.publishStep(`${API_BASE}/me/media_publish`, {
       creation_id: creationId,
       access_token: this.token,
     })) as { id?: unknown };
@@ -260,6 +334,20 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
     return this.config;
   }
 
+  private async publishStep(url: string, form: Record<string, string>): Promise<unknown> {
+    try {
+      return await this.runtime.postForm(url, form);
+    } catch (err) {
+      if (isTokenRejected(err)) throw reconnectError();
+      if (isRateLimitError(err)) {
+        throw new Error(
+          'Instagram rate-limited this publish (Meta caps posts per account per day). The draft is unchanged — wait a while and commit it again.',
+        );
+      }
+      throw err;
+    }
+  }
+
   private async refreshLongLived(
     refreshUrl: string,
     current: string,
@@ -279,6 +367,7 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
     try {
       json = await this.runtime.getJson(url.toString());
     } catch (err) {
+      if (isTokenRejected(err)) throw reconnectError();
       const detail = err instanceof Error ? ` ${err.message}` : '';
       throw new Error(
         `Instagram token refresh failed — re-link the account if this persists.${detail}`,
@@ -313,78 +402,162 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
     const config = this.assertReady();
     const prior = parseMediaCursor(cursorRaw);
     const now = this.runtime.now();
-    const sinceMs = tsMs(prior?.sinceTs);
+    const walk = prior?.walk;
+    const floorTs = walk ? walk.floorTs : prior?.sinceTs;
+    const sinceMs = tsMs(floorTs);
+    // The first sync is one window of the newest `maxMedia` items and never
+    // continues; older history is deliberately not backfilled.
+    const firstPass = sinceMs === undefined;
     const limit = Math.max(1, Math.min(opts?.limit ?? config.maxMedia, config.maxMedia));
     // The first pass is one bounded backfill; it observes metrics for
     // everything it fetches, so the refresh window starts counting from it.
-    const metricsDue =
-      sinceMs !== undefined &&
-      windowRefreshDue(prior?.metricsRefreshedAt, config.metricsRefreshHours, now);
-    const windowFloorMs = now.getTime() - config.metricsWindowDays * 86_400_000;
+    const metricsDue = walk
+      ? walk.metricsDue
+      : !firstPass && windowRefreshDue(prior?.metricsRefreshedAt, config.metricsRefreshHours, now);
+    const windowFloorMs = walk
+      ? walk.windowFloorMs
+      : now.getTime() - config.metricsWindowDays * 86_400_000;
 
     const records: RecordRef[] = [];
     const seen = new Set<string>();
-    let newestTs = prior?.sinceTs;
-    let newestMs = sinceMs ?? Number.NEGATIVE_INFINITY;
-    let nextUrl: string | undefined = this.firstMediaPageUrl();
-    let exhausted = false;
+    const sightings: WatchedPost[] = [];
+    let newestTs = walk ? walk.newestTs : prior?.sinceTs;
+    let newestMs = tsMs(newestTs) ?? Number.NEGATIVE_INFINITY;
+    /** The current page as stored in a cursor: no access token. */
+    let page = walk?.page && isApiOrigin(walk.page) ? walk.page : undefined;
+    let skip = walk?.skip ?? 0;
+    let lastId = walk?.lastId;
+    let done = false;
+    let feedEnded = false;
+    let full = false;
 
-    for (
-      let page = 0;
-      page < MAX_PAGES_PER_PASS && nextUrl && !exhausted && records.length < limit;
-      page++
-    ) {
-      const res = (await this.runtime.getJson(nextUrl)) as {
-        data?: unknown[];
-        paging?: { next?: unknown };
-      };
+    for (let p = 0; p < MAX_PAGES_PER_PASS && !done && !full; p++) {
+      const res = (await this.runtime.getJson(
+        page ? this.withToken(page) : this.firstMediaPageUrl(),
+      )) as { data?: unknown[]; paging?: { next?: unknown } };
       const items = Array.isArray(res.data) ? res.data : [];
-      for (const item of items) {
+      let i = p === 0 ? resumeIndex(items, skip, lastId) : 0;
+      for (; i < items.length; i++) {
+        const item = items[i];
         const scan = scanMedia(item);
-        if (!scan) continue;
-        if (scan.tsMs > newestMs) {
-          newestMs = scan.tsMs;
-          newestTs = scan.tsIso;
+        if (scan) {
+          // The feed is newest-first; once past both the incremental floor
+          // and the metrics window there is nothing left to want.
+          if (
+            sinceMs !== undefined &&
+            scan.tsMs <= sinceMs &&
+            (!metricsDue || scan.tsMs < windowFloorMs)
+          ) {
+            done = true;
+            break;
+          }
+          const wanted =
+            !seen.has(scan.id) &&
+            (sinceMs === undefined ||
+              scan.tsMs > sinceMs ||
+              (metricsDue && scan.tsMs >= windowFloorMs));
+          if (wanted && records.length >= limit) {
+            full = true;
+            break;
+          }
+          if (scan.tsMs > newestMs) {
+            newestMs = scan.tsMs;
+            newestTs = scan.tsIso;
+          }
+          sightings.push([scan.id, scan.tsMs]);
+          if (wanted) {
+            seen.add(scan.id);
+            records.push({ id: scan.id, raw: item, ts: scan.tsIso, ordinalKey: scan.tsMs });
+          }
         }
-        // The feed is newest-first; once past both the incremental floor and
-        // the metrics window there is nothing left to want.
-        if (
-          sinceMs !== undefined &&
-          scan.tsMs <= sinceMs &&
-          (!metricsDue || scan.tsMs < windowFloorMs)
-        ) {
-          exhausted = true;
-          break;
-        }
-        if (seen.has(scan.id)) continue;
-        const isNew = sinceMs === undefined || scan.tsMs > sinceMs;
-        const inWindow = metricsDue && scan.tsMs >= windowFloorMs;
-        if (!isNew && !inWindow) continue;
-        seen.add(scan.id);
-        records.push({ id: scan.id, raw: item, ts: scan.tsIso, ordinalKey: scan.tsMs });
-        if (records.length >= limit) break;
+        lastId = mediaId(item) || lastId;
       }
-      if (!exhausted) {
-        const next = typeof res.paging?.next === 'string' ? res.paging.next : '';
-        // Meta's `paging.next` embeds the access token; follow it only on the
-        // API's own origin so the credential cannot be redirected.
-        nextUrl = next && isApiOrigin(next) ? next : undefined;
-        if (!nextUrl || items.length === 0) exhausted = true;
+      if (done) break;
+      if (full) {
+        skip = i;
+        break;
       }
+      const next = typeof res.paging?.next === 'string' ? res.paging.next : '';
+      // Meta's `paging.next` embeds the access token; follow it only on the
+      // API's own origin so the credential cannot be redirected.
+      page = next && isApiOrigin(next) ? withoutToken(next) : undefined;
+      skip = 0;
+      lastId = undefined;
+      if (!page || items.length === 0) {
+        done = true;
+        feedEnded = true;
+      }
+    }
+
+    let recent = mergeWatchedPosts(prior?.recent ?? [], sightings, windowFloorMs);
+    const recentIds = new Set(recent.map(([id]) => id));
+    const confirmed = [
+      ...new Set([...(walk?.confirmed ?? []), ...sightings.map(([id]) => id)]),
+    ].filter((id) => recentIds.has(id));
+
+    if (!done && !firstPass && floorTs) {
+      // More than one round's worth: hold the high-water mark and resume at
+      // the exact item this round stopped before.
+      const cursor: MediaCursor = {
+        ...(prior?.sinceTs ? { sinceTs: prior.sinceTs } : {}),
+        ...(prior?.metricsRefreshedAt ? { metricsRefreshedAt: prior.metricsRefreshedAt } : {}),
+        ...(recent.length ? { recent } : {}),
+        walk: {
+          ...(page ? { page } : {}),
+          skip,
+          ...(lastId ? { lastId } : {}),
+          floorTs,
+          ...(newestTs ? { newestTs } : {}),
+          metricsDue,
+          windowFloorMs,
+          ...(metricsDue && confirmed.length ? { confirmed } : {}),
+        },
+      };
+      return { records: this.withHistory(records, limit), cursor, partial: true };
+    }
+
+    let removed: string[] = [];
+    if (metricsDue && done) {
+      // The walk enumerated every item at or after the window floor (all of
+      // them when the feed ran out): a watched item it never met is deleted.
+      const gone = vanishedPosts(
+        recent,
+        new Set(confirmed),
+        feedEnded ? Number.NEGATIVE_INFINITY : windowFloorMs,
+      );
+      const goneIds = new Set(gone.map(([id]) => id));
+      recent = recent.filter(([id]) => !goneIds.has(id));
+      removed = gone.flatMap(([id, ms]) => deletedPostRecordIds(id, ms, now));
     }
 
     const cursor: MediaCursor = {
       ...(newestTs ? { sinceTs: newestTs } : {}),
-      ...(metricsDue || sinceMs === undefined
+      ...(metricsDue || firstPass
         ? { metricsRefreshedAt: now.toISOString() }
         : prior?.metricsRefreshedAt
           ? { metricsRefreshedAt: prior.metricsRefreshedAt }
           : {}),
+      ...(recent.length ? { recent } : {}),
     };
-    const out = config.metricsHistory
+    return {
+      records: this.withHistory(records, limit),
+      cursor,
+      ...(removed.length ? { removed } : {}),
+    };
+  }
+
+  private withHistory(records: RecordRef[], limit: number): RecordRef[] {
+    const config = this.assertReady();
+    return config.metricsHistory
       ? [...records, ...this.metricsHistoryRefs(records, limit - records.length)]
       : records;
-    return { records: out, cursor };
+  }
+
+  /** A stored (token-free) page URL, made requestable again. */
+  private withToken(page: string): string {
+    const url = new URL(page);
+    url.searchParams.set('access_token', this.token);
+    return url.toString();
   }
 
   /**
@@ -501,18 +674,54 @@ function parsePublishInput(input: unknown): PublishInput {
   return { imageUrl, ...(caption ? { caption } : {}) };
 }
 
+const nonEmpty = (value: unknown): string | undefined =>
+  typeof value === 'string' && value ? value : undefined;
+
+/** A continuation only ever exists above an incremental floor. */
+function parseMediaWalk(raw: unknown): MediaWalk | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const value = raw as Record<string, unknown>;
+  const floorTs = nonEmpty(value.floorTs);
+  if (!floorTs || tsMs(floorTs) === undefined) return undefined;
+  if (typeof value.windowFloorMs !== 'number' || !Number.isFinite(value.windowFloorMs)) {
+    return undefined;
+  }
+  // A persisted page must point at the API and never carry a credential.
+  const pageRaw = nonEmpty(value.page);
+  const page = pageRaw && isApiOrigin(pageRaw) ? withoutToken(pageRaw) : undefined;
+  const lastId = nonEmpty(value.lastId);
+  const newestTs = nonEmpty(value.newestTs);
+  const confirmed = Array.isArray(value.confirmed)
+    ? value.confirmed.filter((id): id is string => typeof id === 'string' && !!id)
+    : [];
+  return {
+    ...(page ? { page } : {}),
+    skip:
+      typeof value.skip === 'number' && Number.isInteger(value.skip) && value.skip >= 0
+        ? value.skip
+        : 0,
+    ...(lastId ? { lastId } : {}),
+    floorTs,
+    ...(newestTs ? { newestTs } : {}),
+    metricsDue: value.metricsDue === true,
+    windowFloorMs: value.windowFloorMs,
+    ...(confirmed.length ? { confirmed } : {}),
+  };
+}
+
 function parseMediaCursor(raw: unknown): MediaCursor | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const value = raw as Record<string, unknown>;
-  const sinceTs = typeof value.sinceTs === 'string' && value.sinceTs ? value.sinceTs : undefined;
-  const metricsRefreshedAt =
-    typeof value.metricsRefreshedAt === 'string' && value.metricsRefreshedAt
-      ? value.metricsRefreshedAt
-      : undefined;
-  if (!sinceTs && !metricsRefreshedAt) return undefined;
+  const sinceTs = nonEmpty(value.sinceTs);
+  const metricsRefreshedAt = nonEmpty(value.metricsRefreshedAt);
+  const recent = parseWatchedPosts(value.recent);
+  const walk = parseMediaWalk(value.walk);
+  if (!sinceTs && !metricsRefreshedAt && !walk) return undefined;
   return {
     ...(sinceTs ? { sinceTs } : {}),
     ...(metricsRefreshedAt ? { metricsRefreshedAt } : {}),
+    ...(recent.length ? { recent } : {}),
+    ...(walk ? { walk } : {}),
   };
 }
 
@@ -549,16 +758,55 @@ function isApiOrigin(url: string): boolean {
   }
 }
 
+/** A paging link as a cursor may hold it: the access token removed. */
+function withoutToken(url: string): string {
+  const parsed = new URL(url);
+  parsed.searchParams.delete('access_token');
+  return parsed.toString();
+}
+
 /**
  * Meta throttling: HTTP 429/503, or an error body with code 4 (application
- * cap), 17 (user cap), or 32 (page cap) riding an ordinary 4xx status.
+ * cap), 17 (user cap), 32 (page cap), 613 (per-endpoint cap), or 80002 (the
+ * Instagram business-use-case cap, which is what the Instagram Login API
+ * answers with) riding an ordinary 4xx status.
  */
-const META_THROTTLE_CODES = new Set([4, 17, 32]);
+const META_THROTTLE_CODES = new Set([4, 17, 32, 613, 80002]);
 
 function isRateLimitError(err: unknown): boolean {
   const view = (err ?? null) as { status?: unknown; igCode?: unknown } | null;
   if (typeof view?.status === 'number' && isRateLimitStatus(view.status)) return true;
   return typeof view?.igCode === 'number' && META_THROTTLE_CODES.has(view.igCode);
+}
+
+/** Meta's OAuthException code 190: the token expired, was revoked, or the password changed. */
+function isTokenRejected(err: unknown): boolean {
+  const view = (err ?? null) as { status?: unknown; igCode?: unknown } | null;
+  return view?.igCode === 190 || view?.status === 401;
+}
+
+function reconnectError(): Error {
+  return new ReconnectRequiredError(
+    "Instagram no longer accepts this connector's sign-in (it expired or was revoked — Instagram tokens last about 60 days and cannot be renewed once they lapse). Re-link the account from the connector's settings.",
+  );
+}
+
+/** The id that identifies a media item (for resuming a page). */
+function mediaId(item: unknown): string {
+  const id = (item as { id?: unknown } | null)?.id;
+  return typeof id === 'string' ? id : '';
+}
+
+/**
+ * Where to resume inside a re-fetched page: just past the last item already
+ * consumed when it is still there, else by position.
+ */
+function resumeIndex(items: unknown[], skip: number, lastId: string | undefined): number {
+  if (lastId) {
+    const at = items.findIndex((item) => mediaId(item) === lastId);
+    if (at >= 0) return at + 1;
+  }
+  return Math.min(skip, items.length);
 }
 
 interface MediaScan {
@@ -629,9 +877,11 @@ export function mediaToRecord(item: unknown, opts: MediaRecordOptions): Normaliz
     ['title', firstLineTitle(caption) || mediaType || 'Media'],
     ['date', timestamp],
     ['platform', 'instagram'],
+    ['direction', 'inbound'],
     ['media_id', id],
     ['media_type', mediaType || undefined],
     ['permalink', permalink || undefined],
+    ['url', permalink || undefined],
     ['likes', count(media.like_count)],
     ['comments', count(media.comments_count)],
     ['has_media', true],
@@ -646,6 +896,8 @@ export function mediaToRecord(item: unknown, opts: MediaRecordOptions): Normaliz
     // Caption + permalink only in this version — media files are never
     // downloaded (`downloadMedia` is reserved).
     bodyMarkdown: [caption, permalink].filter(Boolean).join('\n\n'),
+    // The pass-time stamp alone is not a change worth rewriting the post for.
+    volatileKeys: ['metrics_updated_at'],
     scanOrigin: 'instagram-media',
     quarantineNamespace: 'instagram-media',
     quarantineLabel: `Instagram post ${id}`,
@@ -703,7 +955,9 @@ export function profileToStatsRecord(profile: unknown, day: string): NormalizedR
     ['title', `Account stats ${day}`],
     ['date', day],
     ['platform', 'instagram'],
+    ['direction', 'inbound'],
     ['author', username || undefined],
+    ['url', username ? `https://www.instagram.com/${username}/` : undefined],
     ['followers', followers],
     ['following', following],
     ['posts_count', postsCount],

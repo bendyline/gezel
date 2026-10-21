@@ -35,7 +35,7 @@ export function ComposerSparkleMenu({
       {assist.canUndo && busy === null && (
         <button
           type="button"
-          className="chat-task-btn"
+          className="squisq-toolbar-button chat-composer-tool-btn chat-composer-tool-btn-word"
           onClick={assist.undo}
           title="Put back the message as you wrote it"
         >
@@ -46,8 +46,11 @@ export function ComposerSparkleMenu({
         <DropdownMenu.Trigger asChild>
           <button
             type="button"
-            className="chat-task-btn chat-sparkle-btn"
+            className={`squisq-toolbar-button chat-composer-tool-btn chat-sparkle-btn${
+              busy ? ' chat-composer-tool-btn-word' : ''
+            }`}
             disabled={disabled || busy !== null}
+            aria-busy={busy !== null}
             aria-label={busy ? BUSY_LABEL[busy] : 'Improve this message'}
             title={busy ? BUSY_LABEL[busy] : 'Improve this message before you send it'}
             data-testid="chat-sparkle"

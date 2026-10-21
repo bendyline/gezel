@@ -393,9 +393,9 @@ Per-install default via `config.provider`. Per-gezel override via frontmatter. `
 
 When `config.provider` is unset, [default-provider.ts](packages/service/src/providers/default-provider.ts) resolves it — **to the on-device engine wherever we bundle one** (`mlx` on Apple Silicon, `llama-cpp` on the other platforms in the native build matrix), falling back to `copilot` only where no engine ships. Use it instead of writing `config.provider ?? 'copilot'`: that literal predates Copilot becoming an opt-in download and now points at something a fresh install has no way to run.
 
-### OpenAI-compatible endpoints (Connected Apps)
+### OpenAI-compatible endpoints (Integrations)
 
-Gezel serves third-party local apps through a public inference facade, controlled from Settings → Connected Apps and stored under `config.openaiEndpoints`:
+Gezel serves third-party local apps through a public inference facade, controlled from Settings → Integrations and stored under `config.openaiEndpoints`:
 
 - **`/v1/*`** on the main daemon port (canonical 6228) — OpenAI-shaped chat/models/embeddings, gated by bearer auth + the per-app consent flow (`/v1/apps/register`). Stateless: one fresh provider session per request; callers replay their own history. Unknown model strings fall back to the configured **serving gezel** (persona + frontmatter tuning apply). Tools are caller-executed (advertise-and-halt via `SessionOpts.externalTools`); providers that run their own tool loop reject tools loudly.
 - **`/ollama/v1/*`** — the same engine speaking Ollama's dialect (tags/chat/generate/show/embed/ps).

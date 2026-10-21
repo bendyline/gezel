@@ -731,7 +731,7 @@ function FullApp() {
     <div className={`app${compact ? ' app-compact' : ''}${preview ? ' app-mobile-preview' : ''}`}>
       {/* Global consent dialog for /v1/apps/register. Mounts here so a
           pending grant can surface from any view without the user having
-          to navigate to Settings → Connected Apps. */}
+          to navigate to Settings → Integrations. */}
       {runtimeCapabilities().connections && <GrantConsentDialog />}
       {runtimeCapabilities().daemonSettings && <MacUninstallDialog />}
       {runtimeCapabilities().daemonSettings && <StorageCleanupDialog />}

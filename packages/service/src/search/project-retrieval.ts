@@ -758,7 +758,7 @@ function withoutFrontmatter(text: string): string {
  * reply grounded on `.gitignore` and "About this library" told someone who
  * had shared nothing that it "used 2 sources from your files".
  */
-async function untouchedStarterFiles(
+export async function untouchedStarterFiles(
   store: Store,
   activeProjectId: string,
   results: readonly UnifiedSearchResult[],

@@ -82,6 +82,51 @@ it('passes an optional existing folder when creating a seedless catalog type', a
   );
 });
 
+it('opens straight on a named type’s form, and on the gallery once the type is gone', async () => {
+  vi.mocked(api.listCatalogItems).mockImplementation(
+    async (kind) =>
+      ({
+        items:
+          kind === 'project-type'
+            ? [
+                catalogItem({
+                  kind: 'project-type',
+                  id: 'media-library',
+                  name: 'Media Library',
+                  category: 'creative',
+                }),
+              ]
+            : [],
+      }) as never,
+  );
+  const named = render(
+    <NewProjectDialog
+      open
+      mode="crew"
+      initialTypeId="media-library"
+      onClose={() => undefined}
+      onCreated={() => undefined}
+    />,
+  );
+  // Nothing shows until the catalog answers, so the gallery never flashes.
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Project types' })).toBeInTheDocument();
+  expect(screen.queryByRole('radio', { name: 'Media Library' })).not.toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: /^Name/ })).toHaveValue('Media Library');
+  named.unmount();
+
+  render(
+    <NewProjectDialog
+      open
+      mode="crew"
+      initialTypeId="retired-type"
+      onClose={() => undefined}
+      onCreated={() => undefined}
+    />,
+  );
+  expect(await screen.findByRole('radio', { name: 'Media Library' })).toBeInTheDocument();
+});
+
 const repos = [
   {
     name: 'first',

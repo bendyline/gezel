@@ -342,7 +342,7 @@ export interface LocalOwnerAuthorizationDeps {
  * This is the path `connectOwned` (agent/env/task/TUI) has always taken, and
  * `gezel run` now takes it too. `authorizeLocalOwner` reads the daemon's
  * rotating scoped credential out of the protected `runtime/` directory under
- * this user's own Gezel home and deliberately skips Connected Apps consent,
+ * this user's own Gezel home and deliberately skips app consent,
  * because a local daemon's runtime directory lives in the calling user's home:
  * being able to read it and being the owner are the same fact, so a consent
  * handshake here protects nothing that the filesystem does not already.
@@ -799,7 +799,7 @@ export function cliGrantError(error: unknown, target: string): CliError {
   if (error instanceof GezelSdkError) {
     if (error.code === 'already_connected') {
       return new CliError(
-        'Gezel already has a CLI authorization, but this terminal no longer has its token. Revoke “Gezel CLI” in Settings → Connected Apps, then run this command again.',
+        'Gezel already has a CLI authorization, but this terminal no longer has its token. Revoke “Gezel CLI” in Settings → Integrations, then run this command again.',
       );
     }
     if (error.code === 'user_denied') {
@@ -817,7 +817,7 @@ export function cliGrantError(error: unknown, target: string): CliError {
     }
     if (error.code === 'grant_already_pending') {
       return new CliError(
-        `An earlier Gezel CLI connection request to ${target} is still waiting to be approved, so a new code cannot be issued yet. Approve or dismiss it in Gezel under Settings → Connected Apps, or wait ${PENDING_GRANT_MINUTES} minutes for it to expire and run this command again.`,
+        `An earlier Gezel CLI connection request to ${target} is still waiting to be approved, so a new code cannot be issued yet. Approve or dismiss it in Gezel under Settings → Integrations, or wait ${PENDING_GRANT_MINUTES} minutes for it to expire and run this command again.`,
       );
     }
     if (error.code === 'daemon_not_running') {
@@ -925,7 +925,7 @@ async function validateCliClient(client: GezelClient, label: string): Promise<vo
   } catch (error) {
     if (error instanceof GezelApiError && (error.status === 401 || error.status === 403)) {
       throw new CliError(
-        `${label} does not have CLI access. Revoke “Gezel CLI” in Settings → Connected Apps and authorize it again.`,
+        `${label} does not have CLI access. Revoke “Gezel CLI” in Settings → Integrations and authorize it again.`,
       );
     }
     throw error;

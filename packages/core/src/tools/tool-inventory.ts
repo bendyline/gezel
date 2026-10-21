@@ -321,6 +321,7 @@ export const CONDITIONALLY_REGISTERED_TOOLS = {
   draft_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1', modelFacing: true },
   queue_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1', modelFacing: true },
   send_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1', modelFacing: true },
+  save_email_draft: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1', modelFacing: true },
   // Social post write tools — registered only for projects with a social-type
   // connector binding (the chat manager sets GEZEL_SOCIAL_ENABLED).
   draft_post: { envVar: 'GEZEL_SOCIAL_ENABLED', envValue: '1', modelFacing: true },

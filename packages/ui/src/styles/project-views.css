@@ -1,0 +1,30 @@
+/* The project Views tab body: one view, the shared inspector beside it
+   (file-inspector.css), and on a phone a picker naming the view, since the
+   tab there shows only its icon. */
+
+.project-views {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.project-views-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.project-views-picker {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.project-views-picker-label {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}

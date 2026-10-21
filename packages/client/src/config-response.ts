@@ -622,7 +622,7 @@ export interface ConfigResponse {
   /** Per-model native-vision preference, keyed by catalog id. Absent → on. */
   nativeVision?: Record<string, boolean>;
   /**
-   * OpenAI-compatible endpoint controls (Settings → Connected Apps).
+   * OpenAI-compatible endpoint controls (Settings → Integrations).
    * `enabled` unset means ON; `servingGezelId` optionally overrides the
    * Meester/first-gezel fallback for requests naming an unknown model;
    * `supportingBehaviors` (unset = on) applies gezel's per-model

@@ -58,7 +58,7 @@ function deps(opts: { kind?: string; indexed?: boolean; blocks?: MapBlock[]; iss
     issues: [],
     counts: {
       total: opts.issues ?? 0,
-      bySeverity: opts.issues ? { high: 1, medium: opts.issues - 1 } : {},
+      bySeverity: opts.issues ? { major: 1, minor: opts.issues - 1 } : {},
       byCategory: {},
     },
     truncated: false,
@@ -78,7 +78,7 @@ function deps(opts: { kind?: string; indexed?: boolean; blocks?: MapBlock[]; iss
         written.set(path, content);
       },
     },
-    contentIndex: { fileMap: async () => map, listFileIssues: async () => issues },
+    contentIndex: { fileMapSnapshot: async () => map, listFileIssues: async () => issues },
   };
   return { d, written };
 }
@@ -102,7 +102,7 @@ describe('writeNightlyCodebaseReport', () => {
 
     expect(await writeNightlyCodebaseReport(d, 'app', NOW)).toBe('reports/codebase-2026-10-08.md');
     const body = written.get('reports/codebase-2026-10-08.md')!;
-    expect(body).toContain('4 source files · 4 open issues (1 high, 3 medium).');
+    expect(body).toContain('4 source files · 4 open issues (1 major, 3 minor).');
     const hotspots = body.slice(body.indexOf('## Hotspots'), body.indexOf('## Load-bearing'));
     expect(hotspots.indexOf('src/parser.ts')).toBeLessThan(hotspots.indexOf('src/core.ts'));
     expect(hotspots).toContain(

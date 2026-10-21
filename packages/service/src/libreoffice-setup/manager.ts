@@ -26,7 +26,7 @@ import { type LibreOfficeDetection, detectLibreOffice } from './detect.js';
  * Setting it up also writes the extension's token to `token` in this
  * folder, owner-only, where the extension already looks, so it connects
  * without a code. Only an explicit setup writes it: a token the user
- * revoked in Connected Apps is not quietly replaced, and the extension then
+ * revoked in Integrations is not quietly replaced, and the extension then
  * falls back to asking for a code.
  */
 

@@ -669,6 +669,27 @@
   margin-top: var(--space-xs);
 }
 
+/* Gezel's tools in other apps (Overview tab): one labeled tray per choice. */
+.harness-tools-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  margin-top: var(--space-md);
+}
+
+.harness-tools-choice p {
+  margin: 0;
+}
+
+.harness-tools-blocked {
+  margin-top: var(--space-md);
+}
+
+.harness-tools-blocked ul {
+  margin-top: var(--space-xs);
+}
+
 /* Office: which apps get the Gezel button. A plain group of checkboxes,
    not a tray: the choices are independent, not mutually exclusive. */
 .office-setup-apps {

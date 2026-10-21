@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
+import { fallbackProjectVillageFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { isGitInstalled, runGit } from '../git/git.js';
@@ -109,5 +110,26 @@ describe('the read-only promise', () => {
 
     expect(await snapshot(ws)).toEqual(before);
     expect(await ci.hasIndex('p1')).toBe(true);
+  });
+
+  it('a map snapshot founds no village, wherever the village file would live', async () => {
+    await mkdir(join(ws, 'src'), { recursive: true });
+    await writeFile(join(ws, 'src', 'a.ts'), "import { b } from './b';\nexport const a = b;\n");
+    await writeFile(join(ws, 'src', 'b.ts'), 'export const b = 1;\n');
+    await ci.refresh('p1');
+    const village = fallbackProjectVillageFile(home, 'p1');
+    const exists = () =>
+      lstat(village).then(
+        () => true,
+        () => false,
+      );
+
+    const snap = await ci.fileMapSnapshot('p1');
+    expect(snap.indexed).toBe(true);
+    expect(snap.blocks.map((b) => b.id).sort()).toEqual(['src/a.ts', 'src/b.ts']);
+    expect(await exists()).toBe(false);
+
+    await ci.fileMap('p1');
+    expect(await exists()).toBe(true);
   });
 });

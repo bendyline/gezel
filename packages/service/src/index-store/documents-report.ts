@@ -1,6 +1,7 @@
 import {
   FOLDER_KIND_PROPERTY,
   type ProjectFileEntry,
+  summaryLead as coreSummaryLead,
   createLogger,
   isSharedLibraryProject,
 } from '@bendyline/gezel';
@@ -101,15 +102,9 @@ async function lookbackStart(
 }
 
 /** The first prose paragraph of a summary, as one short plain line. */
+/** A report line's worth of a document's summary. */
 export function summaryLead(summary: string): string {
-  const paragraphs = summary
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-  const first =
-    paragraphs.find((p) => !/^#+\s/.test(p)) ?? paragraphs[0]?.replace(/^#+\s+/, '') ?? '';
-  const plain = first.replace(/[*_`]/g, '').replace(/\s+/g, ' ');
-  return plain.length > 200 ? `${plain.slice(0, 197).trimEnd()}…` : plain;
+  return coreSummaryLead(summary, 200);
 }
 
 function localDay(d: Date): string {

@@ -21,6 +21,8 @@ export interface ParseContext {
   flags: string[];
   /** Fallback date (e.g. IMAP internaldate) when the message has no Date. */
   fallbackDate?: string;
+  /** Web permalink, when the provider documents one. */
+  url?: string;
 }
 
 function addressText(addr: AddressObject | AddressObject[] | undefined): string {
@@ -39,9 +41,35 @@ function normalizeReferences(refs: string | string[] | undefined): string[] {
   return arr.map((r) => r.trim()).filter(Boolean);
 }
 
-function synthesizeMessageId(parsed: ParsedMail, ctx: ParseContext): string {
-  const basis = `${addressText(parsed.from)}|${parsed.subject ?? ''}|${parsed.date?.toISOString() ?? ctx.fallbackDate ?? ''}|${ctx.id}`;
+function synthesizeMessageId(
+  parsed: ParsedMail,
+  date: string | undefined,
+  ctx: ParseContext,
+): string {
+  const basis = `${addressText(parsed.from)}|${parsed.subject ?? ''}|${date ?? ''}|${ctx.id}`;
   return `<${createHash('sha256').update(basis).digest('hex').slice(0, 32)}@gezel.local>`;
+}
+
+/**
+ * The message's own Date, or undefined when it has none worth keeping.
+ * mailparser substitutes the time of parsing for a Date header it cannot read,
+ * and a date that moves on every fetch rewrites the record (and, without a
+ * Message-ID, re-identifies it) on every pass.
+ */
+function headerDate(parsed: ParsedMail): string | undefined {
+  const date = parsed.date;
+  if (!date || Number.isNaN(date.getTime())) return undefined;
+  const line = parsed.headerLines?.find((h) => h.key === 'date')?.line ?? '';
+  const value = line.slice(line.indexOf(':') + 1).trim();
+  const unreadable = !value || Number.isNaN(new Date(value).getTime());
+  if (unreadable && Math.abs(date.getTime() - Date.now()) < 5 * 60_000) return undefined;
+  return date.toISOString();
+}
+
+/** The first Message-ID of an In-Reply-To header (some clients list several). */
+function firstMessageId(value: string | undefined): string | undefined {
+  if (!value?.trim()) return undefined;
+  return /<[^<>\s]+>/.exec(value)?.[0] ?? value.trim().split(/\s+/)[0];
 }
 
 /** Parse raw RFC822 into a normalized, quote-stripped MailMessage. */
@@ -51,11 +79,13 @@ export async function parseRawMessage(
 ): Promise<MailMessage> {
   const parsed = await simpleParser(raw as Buffer);
 
-  const messageId = parsed.messageId?.trim() || synthesizeMessageId(parsed, ctx);
+  const ownDate = headerDate(parsed);
+  const messageId =
+    parsed.messageId?.trim() || synthesizeMessageId(parsed, ownDate ?? ctx.fallbackDate, ctx);
   const references = normalizeReferences(parsed.references);
-  const inReplyTo = parsed.inReplyTo?.trim() || undefined;
+  const inReplyTo = firstMessageId(parsed.inReplyTo);
   const threadKey = references[0] ?? inReplyTo ?? messageId;
-  const date = parsed.date?.toISOString() ?? ctx.fallbackDate ?? new Date(0).toISOString();
+  const date = ownDate ?? ctx.fallbackDate ?? new Date(0).toISOString();
 
   // Body: prefer plain text; otherwise convert the HTML alternative.
   let body: string;
@@ -71,8 +101,9 @@ export async function parseRawMessage(
   const attachments: MailAttachment[] = [];
   for (const att of parsed.attachments ?? []) {
     if (!att.content) continue;
-    // Skip inline-only parts with no filename (tracking pixels, css images).
-    const filename = att.filename ?? (att.cid ? `${att.cid}` : '');
+    // Skip inline-only parts with no filename (tracking pixels, css images):
+    // nobody attached them, and a Content-ID makes a poor filename.
+    const filename = att.filename?.trim();
     if (!filename) continue;
     attachments.push({
       filename,
@@ -95,6 +126,7 @@ export async function parseRawMessage(
     subject: parsed.subject ?? '',
     flags: ctx.flags,
     folder: ctx.folder,
+    ...(ctx.url ? { url: ctx.url } : {}),
     bodyMarkdown,
     attachments,
   };

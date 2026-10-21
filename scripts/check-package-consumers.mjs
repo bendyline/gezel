@@ -763,7 +763,7 @@ try {
   // The warm path, and the one an npm-only user actually hits. Any command
   // that starts a daemon — `gezel start`, or a read-only `gezel agent list` —
   // leaves one running, and `run` must then adopt it with the same-user
-  // runtime credential. It used to open a Connected Apps consent handshake
+  // runtime credential. It used to open an app consent handshake
   // and block for five minutes on a code that can only be typed into the
   // desktop app, which this install does not have. The cold case above cannot
   // see that: `run` only owns an in-process service when nothing is running.

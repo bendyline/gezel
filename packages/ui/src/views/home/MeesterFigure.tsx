@@ -1,6 +1,7 @@
 import type { Poppetje as PoppetjeStruct } from '@bendyline/gezel';
 import { GezelIcon } from '../../components/GezelIcon.js';
 import { Poppetje } from '../../poppetje/index.js';
+import { MeesterFigureFrame } from './MeesterFigureFrame.js';
 
 /**
  * The meester standing full-figure on their plank, with a name label. The
@@ -23,7 +24,7 @@ export function MeesterFigure({
   className?: string;
 }) {
   return (
-    <div className={className ? `home-workshop-figure ${className}` : 'home-workshop-figure'}>
+    <MeesterFigureFrame name={meesterName} className={className}>
       {meesterPoppetje ? (
         <Poppetje
           poppetje={meesterPoppetje}
@@ -41,10 +42,6 @@ export function MeesterFigure({
           variant="full"
         />
       )}
-      <div className="home-workshop-shelf" />
-      <div className="home-workshop-figure-label">
-        {meesterName} <em>- Meester</em>
-      </div>
-    </div>
+    </MeesterFigureFrame>
   );
 }

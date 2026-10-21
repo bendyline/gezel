@@ -321,9 +321,18 @@ export class AbortedWhileQueuedError extends Error {
 }
 
 export class ProviderQueue {
-  readonly concurrency: number;
-  readonly interactiveConcurrency: number;
-  readonly backgroundConcurrency: number;
+  private concurrencyCap: number;
+  private interactiveCap: number;
+  private backgroundCap: number;
+  get concurrency(): number {
+    return this.concurrencyCap;
+  }
+  get interactiveConcurrency(): number {
+    return this.interactiveCap;
+  }
+  get backgroundConcurrency(): number {
+    return this.backgroundCap;
+  }
   private readonly affinity: boolean;
   private readonly affinityWindowMs: number;
   private readonly maxWaitMs: number;
@@ -361,16 +370,16 @@ export class ProviderQueue {
     if (opts.concurrency < 1) {
       throw new Error(`ProviderQueue concurrency must be ≥ 1 (got ${opts.concurrency})`);
     }
-    this.concurrency = opts.concurrency;
+    this.concurrencyCap = opts.concurrency;
     // Default to the total concurrency — no cap, current behavior. Clamp
     // anything beyond [1, concurrency] so a misconfigured value can't
     // accidentally block all interactive dispatch.
     const requestedCap = opts.interactiveConcurrency ?? opts.concurrency;
-    this.interactiveConcurrency = Math.min(opts.concurrency, Math.max(1, requestedCap));
+    this.interactiveCap = Math.min(opts.concurrency, Math.max(1, requestedCap));
     // Dual of the interactive cap: reserve `concurrency - backgroundConcurrency`
     // slots for interactive turns. Default to no reservation (= concurrency).
     const requestedBgCap = opts.backgroundConcurrency ?? opts.concurrency;
-    this.backgroundConcurrency = Math.min(opts.concurrency, Math.max(1, requestedBgCap));
+    this.backgroundCap = Math.min(opts.concurrency, Math.max(1, requestedBgCap));
     this.affinity = opts.affinity ?? true;
     this.affinityWindowMs = opts.affinityWindowMs ?? 30_000;
     this.maxWaitMs = opts.maxWaitMs ?? 60_000;
@@ -428,6 +437,30 @@ export class ProviderQueue {
       else queuedBackground++;
     }
     return { running: this.running, queuedInteractive, queuedBackground };
+  }
+
+  /**
+   * Lower the caps in place; a value above the current cap is ignored. An
+   * engine that relaunches with fewer slots (after a GPU out-of-memory at
+   * startup) keeps its queue and the leases already granted: running work
+   * finishes, and nothing new starts past the new caps.
+   */
+  narrow(caps: {
+    concurrency?: number;
+    interactiveConcurrency?: number;
+    backgroundConcurrency?: number;
+  }): void {
+    const lower = (current: number, next: number | undefined) =>
+      next === undefined ? current : Math.max(1, Math.min(current, Math.floor(next)));
+    this.concurrencyCap = lower(this.concurrencyCap, caps.concurrency);
+    this.interactiveCap = Math.min(
+      this.concurrencyCap,
+      lower(this.interactiveCap, caps.interactiveConcurrency),
+    );
+    this.backgroundCap = Math.min(
+      this.concurrencyCap,
+      lower(this.backgroundCap, caps.backgroundConcurrency),
+    );
   }
 
   /**

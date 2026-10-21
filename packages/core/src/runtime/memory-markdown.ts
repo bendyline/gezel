@@ -60,6 +60,8 @@ export function isMemoryScope(value: string | undefined | null): value is Memory
 export interface MemorySource {
   project?: string;
   gezel?: string;
+  /** An outside AI app that saved it through Gezel's tools (`claude-code`, `codex`, …). */
+  app?: string;
 }
 
 /** The source an entry keeps: only what its scope does not already say. */
@@ -69,8 +71,9 @@ export function memoryEntrySource(
 ): MemorySource | undefined {
   const project = scope === 'project' ? undefined : source?.project;
   const gezel = scope === 'gezel' ? undefined : source?.gezel;
-  return project || gezel
-    ? { ...(project ? { project } : {}), ...(gezel ? { gezel } : {}) }
+  const app = source?.app;
+  return project || gezel || app
+    ? { ...(project ? { project } : {}), ...(gezel ? { gezel } : {}), ...(app ? { app } : {}) }
     : undefined;
 }
 
@@ -95,7 +98,7 @@ export function sameProjectMemoryScore(
  */
 export const MEMORY_HEADING_RE = /^## (\d{2}:\d{2})(?:\s*\[([a-z]+)\])?(?:\s*\{([^{}\n]*)\})?\s*$/;
 
-const SOURCE_KEYS = ['project', 'gezel'] as const;
+const SOURCE_KEYS = ['project', 'gezel', 'app'] as const;
 const SOURCE_VALUE_RE = /^[A-Za-z0-9._-]{1,128}$/;
 
 export function isMemoryKind(value: string | undefined | null): value is MemoryKind {
@@ -132,7 +135,7 @@ export function parseMemorySource(raw: string | undefined): MemorySource | undef
       source[key as (typeof SOURCE_KEYS)[number]] = value;
     }
   }
-  return source.project || source.gezel ? source : undefined;
+  return source.project || source.gezel || source.app ? source : undefined;
 }
 
 export interface ParsedMemoryBlock {

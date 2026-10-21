@@ -1,9 +1,13 @@
 import type { StartupHomeView } from '@bendyline/gezel';
-import { appendReading } from './reader.js';
+import { createElement } from 'react';
+import { flushSync } from 'react-dom';
+import { type Root, createRoot } from 'react-dom/client';
+import { AppBrand } from '../components/AppBrand.js';
+import { NavigationHome } from '../components/PrimaryNavigation.js';
+import { greetingForHour } from '../views/home/greeting.js';
+import { StartupReading } from './Reading.js';
 import type { StartupHomeBridge } from './types.js';
 import './startup.css';
-
-declare const __STARTUP_ARTICLES__: Array<{ id: string; markdown: string }>;
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = '') {
   const node = document.createElement(tag);
@@ -12,85 +16,80 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', 
   return node;
 }
 
-export function mountStartup(bridge: StartupHomeBridge, articles = __STARTUP_ARTICLES__): void {
+export function mountStartup(bridge: StartupHomeBridge): void {
   if (!bridge.active || document.getElementById('startup-home')) return;
   const snapshot = bridge.snapshot;
-  const name = snapshot?.meester?.name || 'your meester';
+  const name = snapshot?.meester?.name || '';
   const root = element('div', 'startup-home');
   root.id = 'startup-home';
   root.dataset.platform = window.__GEZEL__?.platform || '';
-  root.dataset.sidebar = snapshot?.sidebar || 'right';
+  document.documentElement.dataset.platform = root.dataset.platform;
+  document.documentElement.dataset.sidebarSide = snapshot?.sidebar || 'right';
   if (snapshot?.theme && snapshot.theme !== 'system')
     document.documentElement.dataset.theme = snapshot.theme;
-  let view = { ...bridge.state };
+  let view: StartupHomeView = {
+    ...bridge.state,
+    tab: bridge.state.tab === 'chat' ? ('greeting' as const) : bridge.state.tab,
+    focused: false,
+  };
   let busy = false;
   let accept: ((state: StartupHomeView) => Promise<void>) | undefined;
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const header = element('header', 'startup-header');
-  header.append(element('span', 'startup-brand', 'gezel'));
-  const search = element('div', 'startup-search', 'Search projects, files, docs…');
-  search.setAttribute('aria-disabled', 'true');
-  header.append(search);
-  const status = element('span', 'startup-status', 'Starting your workshop…');
+  const greeting = greetingForHour(hour);
+  const header = element('header', 'app-header startup-header');
+  const brand = element('div', 'startup-brand-host');
+  const brandRoot = createRoot(brand);
+  header.append(brand);
+  const right = element('div', 'app-header-right');
+  const pill = element('div', 'activity-control startup-status');
+  pill.append(element('span', 'activity-control-dot'));
+  const status = element('span', 'activity-control-label', 'Starting Gezel…');
   status.id = 'gezel-splash-status';
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
-  header.append(status);
+  pill.append(status);
+  right.append(pill);
+  header.append(right);
   root.append(header);
 
-  const layout = element('div', 'startup-layout');
-  const main = element('main', 'startup-main');
-  const tabs = element('div', 'startup-tabs');
+  const layout = element('div', 'app-body');
+  const pane = element('main', 'app-main');
+  const main = element('div', 'home-workshop');
+  const stage = element('div', 'home-workshop-stage');
+  const band = element('div', 'home-workshop-greeting');
+  const top = element('div', 'home-workshop-greeting-top');
+  const tabs = element('div', 'home-workshop-tabs');
   tabs.setAttribute('role', 'tablist');
-  tabs.setAttribute('aria-label', 'Home');
-  const content = element('section', 'startup-reading');
+  tabs.setAttribute('aria-label', 'Meester intro');
+  top.append(tabs);
+  const sheet = element('div', 'home-workshop-intro-sheet');
+  const content = element('section', 'home-workshop-greeting-cols startup-reading');
   content.id = 'startup-reading';
   content.setAttribute('role', 'tabpanel');
   content.tabIndex = 0;
-  const composer = element('section', 'startup-composer');
-  composer.append(element('div', 'startup-address', `To: ${name} · Meester`));
-  const input = element('textarea');
-  input.placeholder = 'Talk with your meester about what you’d like to do.';
-  input.setAttribute('aria-label', 'Message to your meester');
-  input.maxLength = 32_000;
-  input.value = view.draft;
-  composer.append(
-    input,
-    element(
-      'div',
-      'startup-draft-note',
-      'You can start writing. Send will be available when your workshop is ready.',
-    ),
-  );
-  const sidebar = element('aside', 'startup-sidebar');
+  sheet.append(content);
+  band.append(top, sheet);
+  const loading = element('div', 'startup-loading');
+  loading.setAttribute('role', 'status');
+  loading.append(element('span', 'home-loading-spinner'), element('span', '', 'Loading'));
+  stage.append(band, loading);
+  main.append(stage);
+  pane.append(main);
+  const sidebar = element('aside', 'app-sidebar startup-sidebar');
   sidebar.setAttribute('aria-label', 'Navigation');
-  sidebar.append(element('div', 'startup-home-link', `⌂  Home · ${name}`));
-  for (const label of ['Projects', 'Documents', 'Gezellen']) {
-    sidebar.append(element('div', 'startup-nav-label', label));
-    if (label === 'Gezellen' && snapshot?.meester) {
-      const person = element('div', 'startup-person');
-      person.append(
-        element('span', 'startup-avatar', name[0] || 'G'),
-        element('span', '', `${name}\nMeester`),
-      );
-      sidebar.append(person);
-    }
-  }
-  sidebar.append(element('p', 'startup-nav-note', 'Your workshop will join you here shortly.'));
-  main.append(tabs, content, composer);
-  layout.append(main, sidebar);
+  const nav = element('nav', 'app-sidebar-scroll');
+  const homeRoot = createRoot(nav);
+  const contentRoot = createRoot(content);
+  const readingRoots = new Map<HTMLElement, Root>([[content, contentRoot]]);
+  sidebar.append(nav);
+  layout.append(sidebar, pane);
   root.append(layout);
 
   function current(): StartupHomeView {
-    return {
-      ...view,
-      scroll: content.scrollTop,
-      draft: input.value,
-      focused: document.activeElement === input,
-      selectionStart: input.selectionStart,
-      selectionEnd: input.selectionEnd,
-    };
+    return { ...view, scroll: readingScroll() };
+  }
+  function readingScroll() {
+    return content.querySelector('.home-intro-doc')?.scrollTop || content.scrollTop;
   }
   // Navigation uses a synchronous, bounded IPC copy. Disk writes stay asynchronous.
   const save = () => {
@@ -102,9 +101,7 @@ export function mountStartup(bridge: StartupHomeBridge, articles = __STARTUP_ART
     clearTimeout(saveTimer);
     saveTimer = setTimeout(save, 120);
   };
-  input.addEventListener('input', deferSave);
-  input.addEventListener('select', deferSave);
-  content.addEventListener('scroll', deferSave, { passive: true });
+  content.addEventListener('scroll', deferSave, { passive: true, capture: true });
   window.addEventListener('pagehide', save);
   window.addEventListener('beforeunload', save);
 
@@ -112,127 +109,48 @@ export function mountStartup(bridge: StartupHomeBridge, articles = __STARTUP_ART
     ['greeting', greeting],
     ['night', 'Night shift'],
     ['tour', 'Handboek'],
-    ['chat', 'Conversation'],
   ];
   const buttons = new Map<StartupHomeView['tab'], HTMLButtonElement>();
-  const savedLabel = (at?: string) => {
-    const date = at ? new Date(at) : null;
-    return date && Number.isFinite(date.getTime())
-      ? `Saved ${date.toLocaleString()}`
-      : 'Saved for this visit';
-  };
   function render(target = content) {
-    target.replaceChildren();
+    target.classList.toggle('home-workshop-greeting-cols-fill', view.tab === 'tour');
     for (const [id, button] of buttons) {
       button.setAttribute('aria-selected', String(id === view.tab));
+      button.dataset.state = id === view.tab ? 'active' : 'inactive';
       button.tabIndex = id === view.tab ? 0 : -1;
     }
     target.setAttribute('aria-label', choices.find(([id]) => id === view.tab)?.[1] || greeting);
-    const content = target;
-    if (view.tab === 'tour') {
-      target.dataset.articleId = (articles[view.article] || articles[0])?.id || 'welcome';
-      content.append(element('p', 'startup-eyebrow', 'Handboek'));
-      const picker = element('div', 'startup-article-picker');
-      articles.forEach((article, index) => {
-        const title = /^title:\s*["']?(.+?)["']?\r?$/m.exec(article.markdown)?.[1] || article.id;
-        const button = element('button', '', title);
-        button.type = 'button';
-        button.setAttribute('aria-pressed', String(index === view.article));
-        button.onclick = () => {
-          view.article = index;
-          view.scroll = 0;
-          render(target);
-          save();
-        };
-        picker.append(button);
-      });
-      content.append(picker);
-      appendReading(
-        content,
-        (articles[view.article] || articles[0])?.markdown || 'Welcome to Gezel.',
+    target.dataset.articleId = 'welcome';
+    let renderer = readingRoots.get(target);
+    if (!renderer) {
+      renderer = createRoot(target);
+      readingRoots.set(target, renderer);
+      target.addEventListener(
+        'startup-reading-dispose',
+        () => {
+          renderer?.unmount();
+          readingRoots.delete(target);
+        },
+        { once: true },
       );
-    } else if (view.tab === 'night') {
-      content.append(element('h1', '', 'Night shift'));
-      const night = snapshot?.night;
-      if (night) {
-        content.append(
-          element(
-            'p',
-            'startup-eyebrow',
-            `Night ending ${new Date(night.windowEnd).toLocaleString()}`,
-          ),
-        );
-        content.append(
-          element(
-            'p',
-            '',
-            `${night.completed} tasks finished · ${night.reports.length} saved reports`,
-          ),
-        );
-        for (const report of night.reports) {
-          content.append(
-            element('h2', '', report.title),
-            element('p', 'startup-eyebrow', report.project),
-          );
-          appendReading(content, report.content);
-        }
-        content.append(
-          element(
-            'p',
-            'startup-note',
-            'The latest work and report actions will be available when your workshop opens.',
-          ),
-        );
-      } else
-        content.append(
-          element(
-            'p',
-            '',
-            'There isn’t a saved night report yet. Your latest work will appear when your workshop opens.',
-          ),
-        );
-    } else {
-      content.append(
-        element(
-          'p',
-          'startup-eyebrow',
-          `${new Date().toLocaleDateString(undefined, { weekday: 'long' })} · ${name}`,
-        ),
-      );
-      content.append(element('h1', '', greeting));
-      if (view.tab === 'greeting' && snapshot?.status) {
-        content.append(
-          element('h2', '', snapshot.status.headline),
-          element('p', 'startup-eyebrow', savedLabel(snapshot.status.at)),
-        );
-        appendReading(content, snapshot.status.content);
-      } else if (view.tab === 'greeting') {
-        content.append(
-          element(
-            'p',
-            '',
-            'Make yourself at home. Read the Handboek or start a message while your workshop opens.',
-          ),
-        );
-      }
-      if (snapshot?.lastMessage) {
-        const message = element('div', 'startup-last-message');
-        message.append(
-          element(
-            'p',
-            'startup-eyebrow',
-            `Your last message · ${savedLabel(snapshot.lastMessage.at)}`,
-          ),
-        );
-        appendReading(message, snapshot.lastMessage.content);
-        content.append(message);
-      } else if (view.tab === 'chat')
-        content.append(element('p', '', 'Start a new conversation below.'));
     }
-    content.scrollTop = view.scroll;
+    flushSync(() =>
+      renderer.render(
+        createElement(StartupReading, {
+          snapshot,
+          view: { ...view },
+          onReportChange: (index: number) => {
+            view.article = index;
+            view.scroll = 0;
+            render(target);
+            if (target === content) save();
+          },
+        }),
+      ),
+    );
+    if (view.tab !== 'tour') target.scrollTop = view.scroll;
   }
   choices.forEach(([id, label], index) => {
-    const button = element('button', '', label);
+    const button = element('button', 'gz-tabs-trigger home-workshop-tab', label);
     button.id = `startup-tab-${id}`;
     button.type = 'button';
     button.setAttribute('role', 'tab');
@@ -267,14 +185,28 @@ export function mountStartup(bridge: StartupHomeBridge, articles = __STARTUP_ART
   const appRoot = document.getElementById('root');
   if (appRoot) appRoot.inert = true;
   render();
-  if (view.focused) {
-    input.focus();
-    input.setSelectionRange(view.selectionStart, view.selectionEnd);
-  }
+  const goHome = () => buttons.get('greeting')?.click();
+  flushSync(() => {
+    brandRoot.render(createElement(AppBrand, { active: true, onClick: goHome }));
+    homeRoot.render(
+      createElement(NavigationHome, {
+        active: true,
+        onOpen: goHome,
+        label: createElement(
+          'span',
+          null,
+          'Home ',
+          name
+            ? createElement('span', { className: 'app-sidebar-home-meester' }, `· ${name}`)
+            : null,
+        ),
+      }),
+    );
+  });
   const retry = element('button', 'startup-retry', 'Open workshop');
   retry.type = 'button';
   retry.hidden = true;
-  header.append(retry);
+  right.append(retry);
 
   async function transfer() {
     if (!accept || busy) return;
@@ -295,11 +227,16 @@ export function mountStartup(bridge: StartupHomeBridge, articles = __STARTUP_ART
       clearTimeout(saveTimer);
       if (appRoot) appRoot.inert = false;
       root.classList.add('startup-leaving');
-      setTimeout(() => root.remove(), 160);
+      setTimeout(() => {
+        brandRoot.unmount();
+        homeRoot.unmount();
+        contentRoot.unmount();
+        root.remove();
+      }, 160);
       window.__GEZEL_STARTUP__ = undefined;
       window.dispatchEvent(new CustomEvent('gezel:startup-finished', { detail: finalState }));
     } catch {
-      status.textContent = 'Your draft is safe here. Try opening your workshop again.';
+      status.textContent = 'Still opening your workshop. Try again.';
       retry.hidden = false;
       root.inert = false;
       busy = false;
@@ -312,9 +249,12 @@ export function mountStartup(bridge: StartupHomeBridge, articles = __STARTUP_ART
     state: current,
     reading() {
       view = current();
-      const copy = element('section', 'startup-reading startup-reading-live');
+      const copy = element(
+        'section',
+        'home-workshop-greeting-cols startup-reading startup-reading-live',
+      );
       copy.dataset.startupScroll = String(view.scroll);
-      copy.dataset.articleId = articles[view.article]?.id || 'welcome';
+      copy.dataset.articleId = 'welcome';
       copy.tabIndex = 0;
       render(copy);
       return copy;

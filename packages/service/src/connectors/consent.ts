@@ -154,6 +154,38 @@ function withCanonicalRecipients(input: unknown): unknown {
   return out;
 }
 
+/**
+ * `mailbox-draft` gates mail's `save-draft`: the message is filed in the
+ * account's own Drafts folder and nothing leaves the account, so no recipient
+ * allowlist applies — the person reviews the draft in their mail app and
+ * sends it themselves. Recipients that are present must still each be one
+ * plain address (the same parser `recipient-allowlist` uses, so a draft cannot
+ * carry a header-shaped entry into the MIME the provider stores), and an
+ * empty draft is refused.
+ */
+registerConsentEnforcer('mailbox-draft', (ctx) => {
+  if (ctx.input === null || typeof ctx.input !== 'object' || Array.isArray(ctx.input)) {
+    return { ok: false, reason: 'the draft has no message' };
+  }
+  const malformed: string[] = [];
+  for (const entry of draftRecipients(ctx.data, ctx.input)) {
+    const parsed = parseRecipient(entry);
+    if (!parsed.ok) malformed.push(`${JSON.stringify(entry)} (${parsed.reason})`);
+  }
+  if (malformed.length) {
+    return {
+      ok: false,
+      reason: `recipient(s) must each be one plain email address: ${malformed.join(', ')}`,
+    };
+  }
+  const { subject, body } = ctx.input as { subject?: unknown; body?: unknown };
+  const filled = (v: unknown) => typeof v === 'string' && v.trim().length > 0;
+  if (!filled(subject) && !filled(body)) {
+    return { ok: false, reason: 'the draft has neither a subject nor a body' };
+  }
+  return { ok: true, input: withCanonicalRecipients(ctx.input) };
+});
+
 /** Cheap shape gate for a draft's `images`; byte-level checks (existence,
  *  size, mime) stay in the adapter's `runAction`. */
 function malformedImagesReason(input: unknown): string | undefined {
