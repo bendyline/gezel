@@ -10,6 +10,8 @@
  * person's shared library, knowledge catalogs and memories.
  */
 
+import type { HarnessClientId } from '../schemas/harness-tools.js';
+
 export const HARNESS_TOOL_NAMES = [
   'search',
   'read_doc_as_markdown',
@@ -55,6 +57,35 @@ export const HARNESS_SERVER_INSTRUCTIONS = [
   "Read Office documents and PDFs with `read_doc_as_markdown`. `search` also covers the person's shared document library and saved memories.",
   'Gezel never writes into this folder. A generated image is saved in Gezel; copy it into the folder yourself if it belongs there.',
 ].join(' ');
+
+/**
+ * The agent-instructions file each app reads from the folder it works in.
+ * Claude Desktop has no folder, so nothing to put a line in.
+ */
+export const HARNESS_AGENT_FILE: Partial<Record<HarnessClientId, 'CLAUDE.md' | 'AGENTS.md'>> = {
+  'claude-code': 'CLAUDE.md',
+  codex: 'AGENTS.md',
+  cursor: 'AGENTS.md',
+  vscode: 'AGENTS.md',
+};
+
+/**
+ * The line a person adds to a folder's CLAUDE.md or AGENTS.md so the app
+ * actually uses Gezel's search there. It is what decided adoption: Claude
+ * Code used `search` in 0 of 38 trials without it and 23 of 24 with it, and
+ * on an undocumented codebase answered in half the time (harness experiment,
+ * 2026-10-21). Gezel shows it for the person to add; it never writes into
+ * their folder. The Claude Code wording is the one tested; the others name
+ * the server, because each app spells MCP tool names its own way.
+ */
+export function harnessAgentFileLine(client: HarnessClientId): string | null {
+  if (!HARNESS_AGENT_FILE[client]) return null;
+  const tool =
+    client === 'claude-code'
+      ? "Gezel's `search` tool (`mcp__gezel__search`)"
+      : 'the `search` tool from the `gezel` MCP server';
+  return `This folder is indexed by Gezel. To find where a behavior or feature is implemented, call ${tool} with a plain-words description before grepping. It ranks files by meaning and returns paths with line ranges.`;
+}
 
 export const HARNESS_TOOL_DESCRIPTIONS: Record<HarnessToolName, string> = {
   search: [

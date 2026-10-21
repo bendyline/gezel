@@ -30,6 +30,8 @@ The rest of this page is about other apps using your gezels and models. This par
 
 Set an app up on its own tab: **Gezel's tools in Claude Code**, and so on. Gezel adds a server called `gezel` to that app's own settings and changes nothing else there. Claude Code and Codex are set up through their own commands; when Gezel cannot find the command, the tab shows the line to run yourself. If you use the Gezel extension for VS Code, it adds the tools to each workspace on its own.
 
+**Getting the app to use it.** An app with Gezel's tools still reaches for its own search first. Once it's set up, its tab shows one line to add to the instructions file in a folder you work in: *CLAUDE.md* for Claude Code, *AGENTS.md* for Codex, Cursor and VS Code. With that line, Claude Code used Gezel's search almost every time, and on a large, little-documented codebase it answered questions about the code in about half the time. In a codebase that's already well described, it makes little difference. Gezel shows the line for you to copy; it never changes your files.
+
 **Which folder.** An app works with the Gezel project for the folder it was started in. A folder Gezel does not know yet becomes a read-only project the first time the app uses Gezel's tools there, so Gezel can index it; Gezel never writes into it. If you would rather not, choose **Only folders already in Gezel**: in other folders the app still reaches your library, memories and knowledge. Claude Desktop has no folder, so you pick its project on its tab.
 
 **What they may do.** On the Overview tab, under **Gezel's tools in other apps**:

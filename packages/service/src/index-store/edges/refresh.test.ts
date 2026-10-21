@@ -66,6 +66,28 @@ describe('the stored dependency graph', () => {
     ]);
   });
 
+  it('resolves AMD module ids from the page that loads RequireJS', async () => {
+    await put('src/index.html', '<script src="thirdparty/require.js" data-main="main"></script>\n');
+    await put(
+      'src/main.js',
+      'require.config({ paths: { "fsImpl": "filesystem/impl" } });\ndefine(function (require) { require("app/boot"); });\n',
+    );
+    await put(
+      'src/app/boot.js',
+      'define(function (require) { var s = require("utils/strings"); var f = require("fsImpl"); });\n',
+    );
+    await put('src/utils/strings.js', 'define({ hello: "hi" });\n');
+    await put('src/filesystem/impl.js', 'define({});\n');
+
+    await index();
+
+    expect(edges()).toEqual([
+      'src/app/boot.js -> src/filesystem/impl.js (import/requirejs)',
+      'src/app/boot.js -> src/utils/strings.js (import/requirejs)',
+      'src/main.js -> src/app/boot.js (import/requirejs)',
+    ]);
+  });
+
   it('is left alone by an unchanged pass, and rebuilt when a new file completes an edge', async () => {
     await put('src/a.ts', "import { b } from './b';\nexport const a = b;\n");
     await index();

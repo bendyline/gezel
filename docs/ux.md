@@ -1071,6 +1071,21 @@ view, so switching views keeps the file selected. The split is a fraction
 with a grip (see Resizable splits); on a phone the pane covers the view as a
 sheet with a way back that names the view.
 
+**The Guide is the Village read aloud.** The **Guide** view, offered wherever
+the Village is except picture folders, shows the index's overnight codebase
+map (`GET /api/projects/:id/index/codebase-map`, the same data as
+`reports/codebase-map.md`) as a reading surface. It has three parts: the
+architecture note under "What this project is", a folder tree under "Where
+things live" with each folder's purpose beside its name, and "What the rest
+leans on", the most-imported files with "imported by N". Folder rows use the
+Knowledge topic tree's disclosure (a chevron column that rotates a quarter
+turn, `aria-expanded`, hover and selection on the whole row), and top-level
+folders start open. An open folder lists its key files first, then its mapped
+subfolders, and never repeats a subfolder as a file. Paths are set in mono at
+`--text-xs` and purposes in muted sans, wrapping beneath the name on a narrow
+pane. Selecting a file opens it in the shared inspector. Until the map is
+written, the view says so in a sentence and doesn't show an empty tree.
+
 **Integrations go out; Connections come in.** Settings → Integrations is
 where Gezel is put to work inside other apps (editors, Office, command-line
 tools). A project's **Connections** brings outside data, such as a mailbox,

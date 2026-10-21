@@ -9,6 +9,7 @@ import { resolveProjectTypeId } from './schemas/project.js';
  */
 export const KNOWN_PROJECT_VIEWS = [
   'village',
+  'guide',
   'diagram',
   'reports',
   'gallery',
@@ -50,6 +51,12 @@ export function projectViewApplies(p: ProjectViewSubject, view: ProjectViewId): 
   switch (view) {
     case 'village':
       return isVillageProject(p) || p.tabVisibility?.map === true;
+    // What each folder is for: written where the Village is offered, since a
+    // writing or media project never had a Views tab to grow one in.
+    case 'guide':
+      return (
+        (isVillageProject(p) || p.tabVisibility?.map === true) && folderKindOf(p) !== 'pictures'
+      );
     case 'diagram':
       return folderKindOf(p) !== 'pictures';
     default:

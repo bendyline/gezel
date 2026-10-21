@@ -5,6 +5,7 @@ import type {
   BoekwachterIssue,
   BoekwachterIssueDismissalReason,
   BoekwachterIssueStatus,
+  CodebaseMapResponse,
   DescribeFolderResponse,
   FileContextResponse,
   FileGraphRequest,
@@ -82,7 +83,13 @@ import {
 } from '../observations/workspace-drain.js';
 import { runSecurityScan } from '../security/scan.js';
 import { type AiShadowDeps, aiShadowFile } from './ai-shadow.js';
-import { ARCHITECTURE_KEY, type AreaPassResult, runAreaPass } from './area-pass.js';
+import {
+  ARCHITECTURE_KEY,
+  type AreaPassResult,
+  areaKeyFiles,
+  areaPurpose,
+  runAreaPass,
+} from './area-pass.js';
 import {
   type ArtifactsIndexStats,
   artifactsCollectionId,
@@ -165,6 +172,20 @@ const MAX_READ_BYTES = 2 * 1024 * 1024;
 
 const log = createLogger('index');
 const ARTIFACTS_REFRESH_DEBOUNCE_MS = 5_000;
+
+/** How many most-imported files the codebase map lists. */
+const MAX_MAP_LOAD_BEARING = 15;
+/**
+ * Barrel files, tests and vendored libraries are imported by many and say
+ * little about the project: Brackets' copy of lodash topped its list.
+ */
+const LOAD_BEARING_SKIP =
+  /(^|\/)index\.(ts|tsx|js|mjs)$|__tests__|\.(test|spec)\.|(^|\/)(test|tests|e2e|thirdparty|third_party|vendor|vendored|node_modules)\//;
+
+function firstSentence(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return (flat.match(/^.*?[.!?](\s|$)/)?.[0] ?? flat).trim();
+}
 
 /** Mirror of the `filesNeedingReview` SQL predicate's modality filter. */
 const REVIEWABLE_MODALITIES: ReadonlySet<string> = new Set(['code', 'text', 'doc']);
@@ -562,7 +583,8 @@ export class ContentIndex {
           .sort((a, b) => b.fileCount - a.fileCount),
         areas: [...areaCounts.entries()]
           .map(([path, fileCount]) => {
-            const purpose = areaSummaries.get(path);
+            const summary = areaSummaries.get(path);
+            const purpose = summary ? areaPurpose(summary) : undefined;
             return { path, fileCount, ...(purpose ? { purpose } : {}) };
           })
           .sort((a, b) => b.fileCount - a.fileCount)
@@ -1547,6 +1569,57 @@ export class ContentIndex {
     if (!opened) return null;
     try {
       return opened.index.getAreaSummary(ARCHITECTURE_KEY)?.summaryMd ?? null;
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /**
+   * Gezel's map of the codebase: every folder rollup with its purpose and key
+   * files, and the files the rest of the code imports most. No model runs
+   * here; the area pass wrote the summaries overnight.
+   */
+  async codebaseMap(projectId: string): Promise<CodebaseMapResponse> {
+    const opened = await this.open(projectId);
+    if (!opened) return { indexed: false, areas: [], loadBearing: [] };
+    try {
+      const { index } = opened;
+      const rows = index.allAreaSummaries();
+      const architecture = rows.find((r) => r.areaPath === ARCHITECTURE_KEY)?.summaryMd;
+      const areas = rows
+        .filter((r) => r.areaPath !== ARCHITECTURE_KEY)
+        .sort((a, b) => (a.areaPath < b.areaPath ? -1 : a.areaPath > b.areaPath ? 1 : 0))
+        .map((r) => ({
+          path: r.areaPath,
+          depth: r.areaPath === '.' ? 0 : r.areaPath.split('/').length - 1,
+          purpose: areaPurpose(r.summaryMd),
+          keyFiles: areaKeyFiles(r.summaryMd),
+        }));
+      const importers = new Map<string, Set<string>>();
+      for (const edge of index.fileEdges.all()) {
+        const set = importers.get(edge.dst) ?? new Set<string>();
+        set.add(edge.src);
+        importers.set(edge.dst, set);
+      }
+      const summaries = new Map(index.fileSummaries().map((f) => [f.path, f.summaryMd]));
+      const loadBearing = [...importers.entries()]
+        .filter(([path, srcs]) => srcs.size >= 2 && !LOAD_BEARING_SKIP.test(path))
+        .sort(([a, x], [b, y]) => y.size - x.size || (a < b ? -1 : 1))
+        .slice(0, MAX_MAP_LOAD_BEARING)
+        .map(([path, srcs]) => {
+          const summary = summaries.get(path);
+          return {
+            path,
+            importers: srcs.size,
+            ...(summary ? { purpose: firstSentence(summary) } : {}),
+          };
+        });
+      return {
+        indexed: areas.length > 0,
+        ...(architecture ? { architecture } : {}),
+        areas,
+        loadBearing,
+      };
     } finally {
       opened.index.close();
     }

@@ -127,6 +127,7 @@ import { invalidateModelsCache } from './http/routes/models.js';
 import { buildApp, buildPreviewApp } from './http/server.js';
 import { createTokenStore } from './http/token-store.js';
 import { VISION_RASTER_FORMATS } from './index-store/ai-shadow.js';
+import { writeCodebaseMap } from './index-store/codebase-map.js';
 import { writeNightlyCodebaseReport } from './index-store/codebase-report.js';
 import { ContentIndex } from './index-store/content-index.js';
 import { writeNightlyDocumentsReport } from './index-store/documents-report.js';
@@ -2083,6 +2084,9 @@ export async function startProductService(
     );
     await writeNightlyCodebaseReport({ store, contentIndex }, projectId, now, night).catch((err) =>
       log.warn(`[index] codebase report failed for ${projectId}: ${String(err)}`),
+    );
+    await writeCodebaseMap({ store, contentIndex }, projectId, now).catch((err) =>
+      log.warn(`[index] codebase map failed for ${projectId}: ${String(err)}`),
     );
   };
   indexEnrichment.setOnProjectCaughtUp(async (projectId) => {

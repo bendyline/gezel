@@ -1,8 +1,10 @@
 import {
+  HARNESS_AGENT_FILE,
   HARNESS_CLIENT_IDS,
   type HarnessClientId,
   HarnessClientIdSchema,
   type HarnessToolsClientStatus,
+  harnessAgentFileLine,
 } from '@bendyline/gezel';
 import { GezelApiError, type GezelClient, apiErrorMessage } from '@bendyline/gezel-client';
 import type { Command } from 'commander';
@@ -116,7 +118,21 @@ export function registerMcpCommands(
           ...(options.replace ? { replaceExisting: true } : {}),
         }),
       );
-      output(options.json ? JSON.stringify(status) : describe(status));
+      if (options.json) {
+        output(JSON.stringify(status));
+        return;
+      }
+      const lines = [describe(status)];
+      const line = harnessAgentFileLine(client);
+      if (status.state === 'configured' && line) {
+        lines.push(
+          '',
+          `${status.label} reaches for its own search first. So it uses Gezel's, add this line to the ${HARNESS_AGENT_FILE[client]} file in a folder you work in:`,
+          '',
+          `  ${line}`,
+        );
+      }
+      output(lines.join('\n'));
     });
 
   mcp

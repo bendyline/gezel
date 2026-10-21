@@ -149,6 +149,25 @@ what Gezel wrote):
 | `conflict` | an entry Gezel did not write, or one edited by hand; replacing it keeps a `.backup` |
 | `unavailable` | the app or its command was not found; a copyable command is offered |
 
+## Getting the app to use the tools
+
+Setup gives an app the tools, but the app still reaches for its own Grep and
+Glob first. One line in the folder's own agent file is what changed that:
+Claude Code called Gezel's tools in 0 of 38 unprompted trials, and in 23 of 24
+once the folder's CLAUDE.md told it to use `search`. On an undocumented
+codebase (Brackets, 2021) that halved the time it took to answer questions
+about the code and cut cost by about 28%; on a well-documented one (squisq)
+it made no difference, because the app's own search already found the code.
+
+Once an app is set up, its section in Settings → Integrations, and
+`gezel mcp install`, show the line to copy (`harnessAgentFileLine` in core
+`harness-profile.ts`) and the file it goes in (`HARNESS_AGENT_FILE`):
+CLAUDE.md for Claude Code, AGENTS.md for Codex, Cursor and VS Code. Claude
+Desktop has no folder and gets none. The Claude Code wording, naming
+`mcp__gezel__search`, is the one tested; the others name the `gezel` server,
+because each app spells MCP tool names its own way. Gezel shows the line; it
+never writes it into the person's folder.
+
 ## Adding a tool to the profile
 
 1. Its daemon route joins the `harnessRouteGuard` allowlist, bound to the

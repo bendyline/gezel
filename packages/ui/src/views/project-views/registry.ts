@@ -15,6 +15,13 @@ export const PROJECT_VIEWS: readonly ProjectViewDefinition[] = [
     icon: 'village',
     load: () => import('./village/index.js'),
   },
+  {
+    id: 'guide',
+    label: 'Guide',
+    hint: 'What each folder is for, and what the rest leans on',
+    icon: 'guide',
+    load: () => import('./guide/index.js'),
+  },
 ];
 
 /** The ids this build offers, for core's availability rules. */

@@ -31,13 +31,16 @@ describe('normalizeMarkdownBaseline', () => {
     expect(normalizeMarkdownBaseline(PROSE)).not.toBe(PROSE);
   });
 
-  it('EditorShell settles its mount emissions on the baseline form', async () => {
-    // Raw stored text: the editor emits at mount and settles on its
-    // canonical serialization — which must be exactly our baseline, or
-    // opening an editor reads as an edit.
-    const emissions = await mountEmissions(PROSE);
-    expect(emissions.length).toBeGreaterThan(0);
-    expect(emissions[emissions.length - 1]).toBe(normalizeMarkdownBaseline(PROSE));
+  it('EditorShell mount emissions of raw stored text are equivalent to it', async () => {
+    // Raw stored text: the editor emits at mount (squisq 2.13 echoes the
+    // source; earlier releases re-serialized it). Autosave lanes compare with
+    // `markdownEquivalent`, which must accept either, or opening an editor
+    // reads as an edit.
+    for (const raw of [PROSE, LIST]) {
+      const emissions = await mountEmissions(raw);
+      expect(emissions.length).toBeGreaterThan(0);
+      for (const src of emissions) expect(markdownEquivalent(src, raw)).toBe(true);
+    }
   });
 
   it('a baseline-seeded editor only ever emits the baseline at mount', async () => {

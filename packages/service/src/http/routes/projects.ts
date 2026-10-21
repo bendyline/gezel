@@ -920,6 +920,14 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     return c.json(aiDrive ? { ...status, aiDrive } : status);
   });
 
+  // Gezel's map of the codebase (folder purposes, key files, most-imported
+  // files) for views and reports; no model runs on read.
+  app.get('/:id/index/codebase-map', async (c) => {
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'not found' }, 404);
+    return c.json(await ctx.contentIndex.codebaseMap(id));
+  });
+
   app.post('/:id/index/refresh', async (c) => {
     const id = c.req.param('id');
     const status = await ctx.workspaceIndex.refresh(id);

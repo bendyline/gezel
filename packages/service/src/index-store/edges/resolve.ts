@@ -20,9 +20,9 @@ import type {
 /**
  * Bump when any resolver's answers change, so every project's stored graph
  * is rebuilt once. 1: relative, ts-paths, workspace, py-rel, py-abs, go-mod,
- * rust, c-include, md-link.
+ * rust, c-include, md-link. 2: requirejs and requirejs-local (AMD module ids).
  */
-export const EDGE_RESOLVER_VERSION = 1;
+export const EDGE_RESOLVER_VERSION = 2;
 
 const JS_LANGS = new Set(['typescript', 'tsx', 'javascript', 'jsx', 'vue', 'svelte']);
 

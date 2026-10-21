@@ -35,7 +35,7 @@ The rules live once in core,
 
 | Function | Answers |
 |---|---|
-| `projectViewApplies(p, view)` | Does this view suit the project at all? The Village suits code-ish and unclassified projects (or any project with an explicit `tabVisibility.map: true`); the Diagram suits everything but picture folders; the others suit everything. |
+| `projectViewApplies(p, view)` | Does this view suit the project at all? The Village suits code-ish and unclassified projects (or any project with an explicit `tabVisibility.map: true`); the Guide suits the same projects except picture folders; the Diagram suits everything but picture folders; the others suit everything. |
 | `availableProjectViews(p, offered)` | The views this build offers (`OFFERED_PROJECT_VIEWS`, from the UI registry) that apply, in menu order. |
 | `defaultProjectView(p)` | Where a project opens before the person chooses, by folder kind: code → Village; pictures, documents, mixed → Gallery. |
 | `resolveProjectView(p, available)` | The stored choice when available, else the default, else the first available. Never writes, so an id from a newer build survives on disk. |
@@ -88,7 +88,7 @@ the composition the tab uses.
 
 ## Data routes
 
-Both are reads; neither writes anything.
+All three are reads; none writes anything.
 
 - **`GET /api/projects/:id/index/graph`** (`getFileGraph`), with query
   `kind=code|docs|all`, `scope=core|tests|all`, `max`, `focus`, `hops`. It
@@ -119,6 +119,17 @@ Both are reads; neither writes anything.
 
   The inspector reads it; findings and the review keep their own routes,
   because they carry action state.
+- **`GET /api/projects/:id/index/codebase-map`** (`getCodebaseMap`) returns
+  the overnight codebase map:
+  - an architecture note;
+  - every summarized folder, with its depth, purpose and key files;
+  - the most-imported files (`loadBearing`), each with at least two importers.
+
+  `indexed` stays false until the area pass has written folder summaries.
+  `ContentIndex.codebaseMap` builds it from the same rows as
+  `reports/codebase-map.md`. The **Guide** view
+  ([guide/](../packages/ui/src/views/project-views/guide/)) reads it; see "The
+  Guide is the Village read aloud" in [ux.md](ux.md).
 
 ## Planned views
 

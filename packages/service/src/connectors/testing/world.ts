@@ -111,7 +111,7 @@ export class SimulatedWorld {
     const socialNow = opts.now ?? new Date();
     this.x = new FakeX({ now: socialNow });
     this.bluesky = new FakeBluesky({ now: socialNow });
-    this.instagram = new FakeInstagram();
+    this.instagram = new FakeInstagram({ now: socialNow });
     this.linkedin = new FakeLinkedIn();
     this.parts = [
       this.googleCalendar.http,

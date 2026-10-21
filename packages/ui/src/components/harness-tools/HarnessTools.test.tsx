@@ -126,6 +126,40 @@ describe('an app’s tools section', () => {
     expect(screen.queryByRole('button', { name: /Set up/ })).not.toBeInTheDocument();
   });
 
+  it('once set up, offers the line that makes the app use Gezel’s search', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const t = tools([
+      client({ client: 'claude-code', label: 'Claude Code', state: 'configured', canRemove: true }),
+      client({ client: 'codex', label: 'Codex', state: 'configured', canRemove: true }),
+    ]);
+    const { unmount } = render(<HarnessToolsSection client="claude-code" tools={t} />);
+    expect(screen.getByText('CLAUDE.md')).toBeInTheDocument();
+    expect(screen.getByText(/mcp__gezel__search/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy line' }));
+    expect(writeText).toHaveBeenCalledWith(
+      expect.stringContaining('This folder is indexed by Gezel.'),
+    );
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    unmount();
+
+    render(<HarnessToolsSection client="codex" tools={t} />);
+    expect(screen.getByText('AGENTS.md')).toBeInTheDocument();
+    expect(screen.getByText(/from the `gezel` MCP server/)).toBeInTheDocument();
+  });
+
+  it('shows no line before the app is set up, nor for Claude Desktop', () => {
+    const t = tools([
+      client({}),
+      client({ client: 'claude-desktop', label: 'Claude Desktop', state: 'configured' }),
+    ]);
+    const { unmount } = render(<HarnessToolsSection client="cursor" tools={t} />);
+    expect(screen.queryByRole('button', { name: 'Copy line' })).not.toBeInTheDocument();
+    unmount();
+    render(<HarnessToolsSection client="claude-desktop" tools={t} />);
+    expect(screen.queryByRole('button', { name: 'Copy line' })).not.toBeInTheDocument();
+  });
+
   it('says one-click setup needs the desktop app on this computer', () => {
     (window as unknown as { __GEZEL__: { mode: string } }).__GEZEL__ = { mode: 'remote' };
     render(<HarnessToolsSection client="cursor" tools={tools([client({})])} />);

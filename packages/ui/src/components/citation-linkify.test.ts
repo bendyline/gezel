@@ -9,7 +9,7 @@ const evidence = [
 describe('linkifyCitations', () => {
   it('links markers whose evidence exists and leaves the rest as text', () => {
     expect(linkifyCitations('Born 1732 [1]. Married 1759 [1, 2]. Died [9].', evidence)).toBe(
-      'Born 1732 [[1]](#cite:1 "Wikipedia: George Washington"). Married 1759 [[1]](#cite:1 "Wikipedia: George Washington")[[2]](#cite:2 "knowledge://wikipedia/en/martha#chunk=ab"). Died [9].',
+      'Born 1732 [\\[1\\]](#cite:1 "Wikipedia: George Washington"). Married 1759 [\\[1\\]](#cite:1 "Wikipedia: George Washington")[\\[2\\]](#cite:2 "knowledge://wikipedia/en/martha#chunk=ab"). Died [9].',
     );
   });
 

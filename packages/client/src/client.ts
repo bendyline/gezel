@@ -102,6 +102,7 @@ import type {
   CleanupRequest,
   ClientPerfReport,
   CodeReviewResponse,
+  CodebaseMapResponse,
   CodexSetupStatusResponse,
   CompleteStepRequest,
   CompleteStepResponse,
@@ -6875,6 +6876,11 @@ export class GezelClient {
 
   getProjectIndexStatus(id: string): Promise<WorkspaceIndexStatus> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/status`);
+  }
+
+  /** Gezel's map of the codebase: folder purposes, key files and the most-imported files. */
+  getCodebaseMap(id: string): Promise<CodebaseMapResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/codebase-map`);
   }
 
   /**

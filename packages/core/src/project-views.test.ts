@@ -39,6 +39,15 @@ describe('project views', () => {
     ]);
   });
 
+  it('offers the guide where the Village is, but not for a picture folder', () => {
+    expect(availableProjectViews(kind('code'), ['village', 'guide'])).toEqual(['village', 'guide']);
+    expect(availableProjectViews({}, ['guide'])).toEqual(['guide']);
+    expect(availableProjectViews(kind('pictures'), ['guide'])).toEqual([]);
+    expect(
+      availableProjectViews({ detectedProjectType: { id: 'content-writing' } }, ['guide']),
+    ).toEqual([]);
+  });
+
   it('opens on the view that suits what the folder mostly holds', () => {
     expect(defaultProjectView(kind('code'))).toBe('village');
     expect(defaultProjectView(kind('pictures'))).toBe('gallery');

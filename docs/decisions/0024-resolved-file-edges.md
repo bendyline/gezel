@@ -56,6 +56,8 @@ nothing resolved before.
 | `rust` | `mod x;`, `crate::`/`self::`/`super::`, workspace crate names |
 | `c-include` | Beside the includer, under include folders, else a unique path suffix; `<x>` only under include folders |
 | `md-link` | Relative and root-absolute links and images; a folder link opens its README or index |
+| `requirejs` | An AMD module id (`require("utils/StringUtils")`, `text!htmlContent/a.html`) against the RequireJS setup of the page that governs the importer: the page's `data-main` and local scripts give `require.config` `baseUrl` (relative to the page; else the data-main folder, else the page's) and `paths`. Added in resolver version 2: Brackets went from 33 resolved imports of 1,972 to 1,699 |
+| `requirejs-local` | When the page's base finds nothing, a folder between the importer and that base: a nested loader context, such as Brackets loading each extension with its own folder as the base |
 
 The extractor gained what the resolvers need (`EXTRACTOR_VERSION` 5):
 re-export, type-only and dynamic flags; Rust `mod` declarations; system

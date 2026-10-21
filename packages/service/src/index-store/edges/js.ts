@@ -1,13 +1,16 @@
 import { resolveSpecifier } from '../../filemap/affinity.js';
 import { type ResolveContext, type WorkspacePackage, isRecord } from './context.js';
 import { dirOf, joinPath, normalizePath, probeModule } from './paths.js';
+import { resolveRequireJsImport } from './requirejs.js';
 import type { Resolution } from './types.js';
 
 /**
  * JS/TS (and Vue/Svelte script) imports: a relative specifier exactly as the
  * Village has always resolved it, then the importer's tsconfig `paths` and
  * `baseUrl`, then a workspace package by its manifest name — mapped back to
- * the package's source, because `exports` usually names built output.
+ * the package's source, because `exports` usually names built output — then
+ * an AMD module id against the RequireJS `baseUrl` of the page that governs
+ * the importer.
  */
 export function resolveJsImport(ctx: ResolveContext, src: string, raw: string): Resolution | null {
   if (raw.startsWith('.')) {
@@ -19,6 +22,13 @@ export function resolveJsImport(ctx: ResolveContext, src: string, raw: string): 
   if (viaPaths) return { dsts: [viaPaths], resolver: 'ts-paths' };
   const viaPackage = resolveWorkspacePackage(ctx, raw);
   if (viaPackage) return { dsts: [viaPackage], resolver: 'workspace' };
+  const viaRequireJs = resolveRequireJsImport(ctx, src, raw);
+  if (viaRequireJs) {
+    return {
+      dsts: [viaRequireJs.dst],
+      resolver: viaRequireJs.local ? 'requirejs-local' : 'requirejs',
+    };
+  }
   return null;
 }
 

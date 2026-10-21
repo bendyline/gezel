@@ -1,4 +1,9 @@
-import type { HarnessClientId, HarnessToolsClientStatus } from '@bendyline/gezel';
+import {
+  HARNESS_AGENT_FILE,
+  type HarnessClientId,
+  type HarnessToolsClientStatus,
+  harnessAgentFileLine,
+} from '@bendyline/gezel';
 import { useEffect, useId, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { Select } from '../../primitives/index.js';
@@ -41,11 +46,13 @@ export function HarnessToolsSection({
   const [projectId, setProjectId] = useState<string>(NO_PROJECT);
   const [profileId, setProfileId] = useState<string>('');
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<'command' | 'line' | null>(null);
   const copyTimer = useRef<number | null>(null);
   const { localDesktopMode, remoteMode } = harnessDesktopMode();
   const label = status?.label ?? client;
   const busy = tools.busy?.endsWith(`:${client}`) === true;
+  const agentLine = harnessAgentFileLine(client);
+  const agentFile = HARNESS_AGENT_FILE[client];
 
   useEffect(() => {
     if (client !== 'claude-desktop') return;
@@ -91,15 +98,14 @@ export function HarnessToolsSection({
           ? 'Change project…'
           : "Set up Gezel's tools…";
 
-  const copyCommand = async () => {
-    if (!status?.manualCommand) return;
+  const copyText = async (text: string, kind: 'command' | 'line') => {
     try {
-      await navigator.clipboard.writeText(status.manualCommand);
-      setCopied(true);
+      await navigator.clipboard.writeText(text);
+      setCopied(kind);
       if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
-      copyTimer.current = window.setTimeout(() => setCopied(false), 2_000);
+      copyTimer.current = window.setTimeout(() => setCopied(null), 2_000);
     } catch {
-      // The command stays selectable on screen.
+      // The text stays selectable on screen.
     }
   };
 
@@ -241,11 +247,16 @@ export function HarnessToolsSection({
                 {state === 'unavailable' ? 'To set it up yourself, run' : 'Or run it yourself'}
               </span>
               <code>{status.manualCommand}</code>
-              <button type="button" onClick={() => void copyCommand()}>
-                {copied ? 'Copied' : 'Copy command'}
+              <button
+                type="button"
+                onClick={() =>
+                  status.manualCommand && void copyText(status.manualCommand, 'command')
+                }
+              >
+                {copied === 'command' ? 'Copied' : 'Copy command'}
               </button>
               <output className="sr-only" aria-live="polite">
-                {copied ? 'Command copied.' : ''}
+                {copied === 'command' ? 'Command copied.' : ''}
               </output>
             </div>
           )}
@@ -254,6 +265,22 @@ export function HarnessToolsSection({
             <p className="muted small">
               Restart Claude Desktop after a change so it starts Gezel's tools.
             </p>
+          )}
+
+          {agentLine && agentFile && state === 'configured' && (
+            <div className="harness-setup-command-row">
+              <span className="muted small">
+                {label} reaches for its own search first. So it uses Gezel's, add this line to the{' '}
+                <code>{agentFile}</code> file in a folder you work in:
+              </span>
+              <code>{agentLine}</code>
+              <button type="button" onClick={() => void copyText(agentLine, 'line')}>
+                {copied === 'line' ? 'Copied' : 'Copy line'}
+              </button>
+              <output className="sr-only" aria-live="polite">
+                {copied === 'line' ? 'Line copied.' : ''}
+              </output>
+            </div>
           )}
 
           <div className="harness-setup-actions">

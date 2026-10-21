@@ -2061,6 +2061,20 @@ export class IndexStore {
       .map((r) => ({ areaPath: r.area_path, summaryMd: r.summary_md, inputHash: r.input_hash }));
   }
 
+  /** Drop area summaries for folders that are no longer areas. Returns how many went. */
+  deleteAreaSummaries(areaPaths: readonly string[]): number {
+    if (areaPaths.length === 0) return 0;
+    const stmt = this.db.prepare(
+      'DELETE FROM area_summaries WHERE collection_id = ? AND area_path = ?',
+    );
+    let removed = 0;
+    this.db.transaction(() => {
+      for (const path of areaPaths)
+        removed += Number(stmt.run(this.collectionId, path).changes ?? 0);
+    });
+    return removed;
+  }
+
   // ── metadata ───────────────────────────────────────────────────────────
 
   /** Replace a file's metadata. Keys under the reserved `git:` prefix are

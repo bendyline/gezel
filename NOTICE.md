@@ -126,6 +126,8 @@ repository and linked into the workspace. Their license matches Squisq's
 - `@bendyline/squisq-react` — MIT
 - `@bendyline/squisq-editor-react` — MIT
 - `@bendyline/squisq-formats` — MIT
+- `@bendyline/squisq-graph` — MIT. A dependency of `@bendyline/squisq`; it has
+  no dependencies of its own.
 - `@bendyline/squisq-video` — MIT
 - `@bendyline/squisq-video-react` — MIT. Gezel's editors use its
   cover-image, dashboard-image, and media-edit entries. The media-edit worker

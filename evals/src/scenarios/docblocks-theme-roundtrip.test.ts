@@ -192,6 +192,7 @@ async function callDocblocks(
   calls: Array<{ name: string; args: (roots: Record<string, string>) => Record<string, unknown> }>,
 ): Promise<Array<Record<string, unknown>>> {
   const { installPath = '', runtime } = bundledDocblocksToolset();
+  if (runtime.kind !== 'npm-package') throw new Error('Bundled DocBlocks npm runtime is missing');
   const child = spawn(
     process.execPath,
     [

@@ -86,6 +86,14 @@ describe('gezel mcp', () => {
     expect(client.removeHarnessTools).toHaveBeenCalledWith('cursor');
   });
 
+  it('after setup, prints the line that makes the app use Gezel’s search', async () => {
+    const { run, lines } = fixture();
+    await run('mcp', 'install', 'cursor');
+    const out = lines.join('\n');
+    expect(out).toContain('add this line to the AGENTS.md file in a folder you work in');
+    expect(out).toContain('the `search` tool from the `gezel` MCP server');
+  });
+
   it('names the apps it knows when given another', async () => {
     const { run } = fixture();
     await expect(run('mcp', 'install', 'emacs')).rejects.toThrow(

@@ -2144,9 +2144,10 @@ describe('ProjectsView', () => {
     render(<ProjectsView forceProjectId="pj-alpha" />);
     await screen.findByTestId('project-chat');
 
-    // One view on offer: a plain tab, no menu to open.
-    const views = screen.getByRole('tab', { name: 'Village view' });
-    expect(views).not.toHaveAttribute('aria-haspopup');
+    // A view id this build doesn't know falls back to the project's default.
+    // (The mocked Tabs.Trigger drops aria attributes, so the menu is covered
+    // by FittedTabsList's tests and project-views/registry.test.ts.)
+    expect(screen.getByRole('tab', { name: 'Village view' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
     expect(screen.getByRole('checkbox', { name: 'Views' })).toBeChecked();

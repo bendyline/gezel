@@ -6,6 +6,7 @@ import { jsoncToJson } from '../../utils/jsonc.js';
 import type { IndexStore } from '../index-store.js';
 import { cargoPackageName, isRecord } from './context.js';
 import { baseOf } from './paths.js';
+import { type RequireJsConfig, requireJsConfigFor, requireJsPage } from './requirejs.js';
 import { EDGE_RESOLVER_VERSION, resolveFileEdges } from './resolve.js';
 import type { EdgeCoverage, ProjectConfigFiles } from './types.js';
 
@@ -138,7 +139,43 @@ export async function readProjectConfigs(
       /* a malformed manifest just resolves nothing */
     }
   }
+  configs.requireJs = await readRequireJsConfigs(workspaceDir, paths);
   return configs;
+}
+
+/** Pages read for a RequireJS setup, shallowest first: test fixtures pile up deep. */
+const MAX_REQUIREJS_PAGES = 200;
+const MAX_REQUIREJS_SCRIPTS = 8;
+
+/** The RequireJS setup of every page that loads the loader, from its local scripts. */
+async function readRequireJsConfigs(
+  workspaceDir: string,
+  paths: readonly string[],
+): Promise<RequireJsConfig[]> {
+  const indexed = new Set(paths);
+  const pages = paths
+    .filter((p) => /\.html?$/i.test(p) && !p.split('/').includes('node_modules'))
+    .sort((a, b) => a.split('/').length - b.split('/').length || (a < b ? -1 : 1))
+    .slice(0, MAX_REQUIREJS_PAGES);
+  const out: RequireJsConfig[] = [];
+  for (const pagePath of pages) {
+    const html = await readConfig(workspaceDir, pagePath);
+    if (html === null || !/require(?:\.min)?\.js/i.test(html)) continue;
+    const page = requireJsPage(html, pagePath);
+    if (!page) continue;
+    // Global `var require = {…}` scripts run before the loader, data-main after it.
+    const scripts = [...page.scripts, ...(page.dataMain ? [page.dataMain] : [])]
+      .filter((s) => indexed.has(s))
+      .slice(0, MAX_REQUIREJS_SCRIPTS);
+    const texts: string[] = [];
+    for (const script of scripts) {
+      const text = await readConfig(workspaceDir, script);
+      if (text !== null) texts.push(text);
+    }
+    const config = requireJsConfigFor(pagePath, page, texts);
+    if (config) out.push(config);
+  }
+  return out;
 }
 
 async function readConfig(workspaceDir: string, path: string): Promise<string | null> {

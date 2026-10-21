@@ -1,4 +1,5 @@
 import type { FileEdge, ImportBinding } from '../index-store-types.js';
+import type { RequireJsConfig } from './requirejs.js';
 
 /** One indexed file, as resolution sees it. */
 export interface EdgeFile {
@@ -28,6 +29,8 @@ export interface ProjectConfigFiles {
   goMods: Map<string, string>;
   /** Cargo.toml text. */
   cargoTomls: Map<string, string>;
+  /** RequireJS setups, one per page that loads the loader. */
+  requireJs?: RequireJsConfig[];
 }
 
 /** Where one specifier resolved: one or more files, and the resolver that found them. */

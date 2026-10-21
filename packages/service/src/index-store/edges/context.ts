@@ -1,4 +1,5 @@
 import { baseOf, dirOf, joinPath } from './paths.js';
+import type { RequireJsConfig } from './requirejs.js';
 import type { EdgeFile, ProjectConfigFiles } from './types.js';
 
 /** A workspace package: its manifest name, folder, and manifest. */
@@ -41,6 +42,8 @@ export interface ResolveContext {
   includeRoots: readonly string[];
   /** File name → every path with that name, for a unique-suffix header match. */
   pathsByBase: ReadonlyMap<string, readonly string[]>;
+  /** RequireJS setups, for AMD module ids. */
+  requireJs: readonly RequireJsConfig[];
 }
 
 const PY_PROJECT_MARKERS = new Set(['pyproject.toml', 'setup.py', 'setup.cfg']);
@@ -117,6 +120,7 @@ export function buildResolveContext(
     rustCrates,
     includeRoots: [...includeRoots].sort(),
     pathsByBase,
+    requireJs: configs.requireJs ?? [],
   };
 }
 

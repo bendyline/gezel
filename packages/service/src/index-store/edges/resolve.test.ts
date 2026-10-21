@@ -110,6 +110,80 @@ describe('resolveFileEdges', () => {
     ]);
   });
 
+  it('resolves AMD module ids against the RequireJS base of the page that governs the importer', () => {
+    const cfg = configs({
+      requireJs: [
+        {
+          pageDir: 'src',
+          baseDir: 'src',
+          paths: { fileSystemImpl: 'filesystem/impls/appshell/AppshellFileSystem' },
+        },
+        { pageDir: 'test', baseDir: 'src', paths: { spec: '../test/spec' } },
+      ],
+    });
+    const paths = [
+      'src/editor/CodeHintManager.js',
+      'src/command/Commands.js',
+      'src/strings.js',
+      'src/nls/strings.js',
+      'src/htmlContent/main-view.html',
+      'src/filesystem/impls/appshell/AppshellFileSystem.js',
+      'src/utils/StringUtils.js',
+      'test/spec/Editor-test.js',
+      'test/spec/SpecRunnerUtils.js',
+      'tools/build.js',
+    ];
+    expect(
+      pairs(
+        paths,
+        [
+          row('src/editor/CodeHintManager.js', 'command/Commands'),
+          row('src/editor/CodeHintManager.js', 'strings'),
+          row('src/editor/CodeHintManager.js', 'fileSystemImpl'),
+          row('src/editor/CodeHintManager.js', 'text!htmlContent/main-view.html'),
+          row('src/editor/CodeHintManager.js', 'i18n!nls/strings'),
+          row('src/editor/CodeHintManager.js', 'lodash'),
+          row('test/spec/Editor-test.js', 'spec/SpecRunnerUtils'),
+          row('test/spec/Editor-test.js', 'utils/StringUtils'),
+          // Outside every RequireJS page: a bare id stays an npm package.
+          row('tools/build.js', 'utils/StringUtils'),
+        ],
+        cfg,
+      ),
+    ).toEqual([
+      'src/editor/CodeHintManager.js -> src/command/Commands.js (requirejs)',
+      'src/editor/CodeHintManager.js -> src/filesystem/impls/appshell/AppshellFileSystem.js (requirejs)',
+      'src/editor/CodeHintManager.js -> src/htmlContent/main-view.html (requirejs)',
+      'src/editor/CodeHintManager.js -> src/nls/strings.js (requirejs)',
+      'src/editor/CodeHintManager.js -> src/strings.js (requirejs)',
+      'test/spec/Editor-test.js -> src/utils/StringUtils.js (requirejs)',
+      'test/spec/Editor-test.js -> test/spec/SpecRunnerUtils.js (requirejs)',
+    ]);
+  });
+
+  it('falls back to a nested loader context only when the page base finds nothing', () => {
+    const cfg = configs({ requireJs: [{ pageDir: 'src', baseDir: 'src', paths: {} }] });
+    expect(
+      pairs(
+        [
+          'src/extensions/default/Debug/main.js',
+          'src/extensions/default/Debug/keyboard.json',
+          'src/extensions/default/Debug/strings.js',
+          'src/strings.js',
+        ],
+        [
+          row('src/extensions/default/Debug/main.js', 'text!keyboard.json'),
+          // Both exist: the page's base is what RequireJS loads.
+          row('src/extensions/default/Debug/main.js', 'strings'),
+        ],
+        cfg,
+      ),
+    ).toEqual([
+      'src/extensions/default/Debug/main.js -> src/extensions/default/Debug/keyboard.json (requirejs-local)',
+      'src/extensions/default/Debug/main.js -> src/strings.js (requirejs)',
+    ]);
+  });
+
   it('resolves Python relative imports by dots and submodule names', () => {
     expect(
       pairs(

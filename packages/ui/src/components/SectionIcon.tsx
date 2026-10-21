@@ -13,6 +13,7 @@ export type SectionIconName =
   | 'github'
   | 'mail'
   | 'village'
+  | 'guide'
   | 'settings'
   | 'skills'
   | 'references';
@@ -127,6 +128,14 @@ const SECTION_PATHS: Record<Exclude<SectionIconName, 'tasks' | 'settings'>, JSX.
       <path d="M4.5 20.5v-7l4-3.5 4 3.5v7" />
       <path d="M12.5 20.5V11l3.5-3 3.5 3v9.5" />
       <path d="M7.5 20.5v-3h2v3" />
+    </>
+  ),
+  // Signpost — what each folder is for, and where things live
+  guide: (
+    <>
+      <path d="M12 3v18" />
+      <path d="M12 5.5h6l2.5 2.25L18 10h-6" />
+      <path d="M12 12.5H6l-2.5 2.25L6 17h6" />
     </>
   ),
   // Sparkle — something the crew knows how to do
