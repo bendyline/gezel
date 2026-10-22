@@ -334,8 +334,8 @@ export class KokoroEngine {
       const loading = mod.KokoroTTS.from_pretrained(this.config.modelDirectory ?? KOKORO_HF_REPO, {
         dtype: this.config.dtype,
       });
-      // A pull downloads ~88 MB of weights; a deadline there would only
-      // punish a slow connection.
+      // A pull downloads hundreds of MB of weights; a deadline there would
+      // only punish a slow connection.
       const tts = deadline
         ? await withTimeout(
             loading,

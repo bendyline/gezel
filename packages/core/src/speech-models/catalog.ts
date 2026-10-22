@@ -132,7 +132,15 @@ export const KOKORO_VOICES: readonly {
 
 /** 510 style vectors × 256 float32 values per voice. */
 export const KOKORO_VOICE_BYTES = 522_240;
-export const KOKORO_MODEL_FILE = 'onnx/model_quantized.onnx';
+/**
+ * Full-precision weights. ONNX Runtime's CPU kernels run this export 2–2.5×
+ * faster than the int8 `model_quantized.onnx` on Apple Silicon (3.6× against
+ * 1.7× realtime at four threads, M5 Max), which is what keeps streamed
+ * narration ahead of playback. The cost is a 326 MB download instead of 92 MB.
+ */
+export const KOKORO_MODEL_FILE = 'onnx/model.onnx';
+/** The Transformers.js dtype that loads {@link KOKORO_MODEL_FILE}. */
+export const KOKORO_MODEL_DTYPE = 'fp32';
 
 export const SPEECH_MODEL_CATALOG: readonly SpeechModelEntry[] = [
   whisper(
@@ -174,8 +182,8 @@ export const SPEECH_MODEL_CATALOG: readonly SpeechModelEntry[] = [
         // `durations` contains float predictions BEFORE ONNX Round (ties to
         // even) and Clip(min=1). Each resulting frame is 600 samples at 24 kHz.
         url: `https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX-timestamped/resolve/${KOKORO_MODEL_COMMIT}/${KOKORO_MODEL_FILE}`,
-        sha256: 'c0c02b3299fd97c34ea92a98e6d41eaa1a739c8f77bf685aac34bd7b34c1132c',
-        size: 92_361_055,
+        sha256: '651ea8291843a92276a4a003581a215cb07d15e47dde6fcfb1b768f9a1682054',
+        size: 325_532_171,
       },
       ...KOKORO_VOICES.map((voice) => ({
         name: `voices/${voice.id}.bin`,
