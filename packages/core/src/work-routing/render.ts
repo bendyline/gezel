@@ -46,23 +46,32 @@ export function renderSuggestWorkResult(
     lines.push(`${index + 1}. ${optionLine(option, opts.ordinalIds === true)}`);
   });
   if (result.options.length > 0) lines.push(opts.ordinalIds ? ORDINAL_START_LINE : START_LINE);
+  // With nothing to start, a hand-off is the answer; "if none of these fits,
+  // answer in chat" would point at a list that is not there.
+  const handOffOnly = result.options.length === 0 && handsOff(result);
   for (const verdict of questionFirst ? result.guidance.slice(1) : result.guidance) {
+    if (handOffOnly && verdict.kind === 'self') continue;
     lines.push(guidanceLine(verdict, false));
   }
   return lines.join('\n');
 }
 
+function handsOff(result: SuggestWorkResult): boolean {
+  return result.guidance.some((g) => g.kind === 'specialist');
+}
+
 /**
  * The pre-ranked block for a turn (the `prompt.work-options-prelude` arm):
  * the same list, framed as already looked up, so the first call can be
- * `start_work` itself. Null when there is nothing to start — a menu on
- * "what's 17 × 23?" only invites over-routing.
+ * `start_work` itself. Null when there is nothing to start or hand off — a
+ * menu on "what's 17 × 23?" only invites over-routing.
  */
 export function renderWorkOptionsPrelude(
   result: SuggestWorkResult,
   opts: WorkOptionsRenderOptions = {},
 ): string | null {
-  if (result.options.length === 0 || result.question) return null;
+  if (result.question) return null;
+  if (result.options.length === 0 && !handsOff(result)) return null;
   return `(System note for this turn: suggest_work already ran for this message.\n${renderSuggestWorkResult(result, opts)})`;
 }
 
@@ -124,7 +133,9 @@ function guidanceLine(verdict: WorkGuidance, lead: boolean): string {
     case 'ask':
       return `Nothing clearly fits yet. Ask the person with ask_user_question({ question: ${JSON.stringify(verdict.question)}, choices: ${JSON.stringify(verdict.choices)} }), then end your turn.`;
     case 'specialist':
-      return `This is ${verdict.role} work in this project: you can hand it over with ${verdict.tool}.`;
+      return verdict.otherProject
+        ? `This is ${verdict.role} work on code that already exists: hand it over with ${verdict.tool}, passing the project that holds the code.`
+        : `This is ${verdict.role} work in this project: you can hand it over with ${verdict.tool}.`;
     case 'author':
       return 'No existing recipe fits this repeatable procedure: read one with craftbook_read for the shape, save a new one with craftbook_write({ create: true, content }), then start it with start_work({ option: "craftbook:<new id>" }).';
   }

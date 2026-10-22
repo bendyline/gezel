@@ -7149,13 +7149,35 @@ async function findActiveMacroProject(name: string): Promise<{ id: string; name:
   }
 }
 
-function duplicateMacroProjectNotice(
+/**
+ * A same-named project is not proof the work started. The guard exists for a
+ * second call on the same request, whose first call left a running kickoff
+ * task. A project the person (or a scenario) made has none: told "its lead is
+ * on this deliverable", a Meester relayed "Already in motion" to the person
+ * while nothing ran (start_work in the Customer List Cleanup project,
+ * qwen3.8-27b, 2026-10-22).
+ */
+async function duplicateMacroProjectNotice(
   tool: MacroTool,
   existing: {
     id: string;
     name: string;
   },
-): { content: { type: 'text'; text: string }[] } {
+): Promise<{ content: { type: 'text'; text: string }[] }> {
+  const live = await api
+    .listProjectTasks(existing.id)
+    .then((res) => res.tasks.some((t) => t.status === 'active' && !t.cron && !t.nightShift))
+    .catch(() => true);
+  if (!live) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `[runtime] A project named "${existing.name}" (projectId: ${existing.id}) already exists, and no work is running in it yet. Do NOT start a second project. Start the work inside this one: call suggest_work({ project: "${existing.id}" }), then start_work with the option that fits and project "${existing.id}".`,
+        },
+      ],
+    };
+  }
   return {
     content: [
       {
@@ -8428,13 +8450,17 @@ server.tool(
       .describe("Only what the person's message does not already say. Usually omit it."),
   },
   async ({ option, project, name, details }) => {
-    const resolvedProject = project ? await resolveProjectId(project) : projectId;
     const said = (await personsRoutingRequest()) ?? details?.trim();
     if (!said) {
       return workRoutingError(
         'There is no request in this turn to start work for. Pass `details` with what the person asked for.',
       );
     }
+    // The ranking binds a request to a project it names, and the prelude tells
+    // the model the destination is bound, so an omitted `project` takes it.
+    const resolvedProject = project
+      ? await resolveProjectId(project)
+      : ((await rankingForTurn(projectId, said).catch(() => null))?.projectId ?? projectId);
     const parsed =
       parseWorkOptionId(option) ?? (await resolveBareWorkOption(option, resolvedProject, said));
     if (!parsed) {

@@ -42,3 +42,36 @@ export function projectNameFromRequest(text: string, fallback = 'New project'): 
   const name = words.join(' ');
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
+
+const SOURCE_FILE_RE =
+  /(?:^|[\s`'"(])(?:[\w.-]+\/)*[a-z_][\w.-]*\.(?:[cm]?[jt]sx?|py|rb|go|rs|java|kt|swift|c|cc|cpp|h|hpp|cs|php|scala|sh|sql|vue|svelte)\b/;
+const REPO_URL_RE =
+  /\bhttps?:\/\/(?:www\.)?(?:github\.com|gitlab\.com|bitbucket\.org|codeberg\.org)\/[\w.-]+\/[\w.-]+/i;
+const FAILING_TEST_RE =
+  /\b(?:failing\s+(?:tests?|specs?|builds?|checks?)|tests?\s+(?:fail|are\s+failing|keep\s+failing|is\s+failing))\b/i;
+const CODE_CHANGE_RE =
+  /\b(?:bug(?:gy|s)?|fix(?:e[sd]|ing)?|broken|break(?:s|ing)?|crash(?:es|ed|ing)?|debug(?:s|ged|ging)?|refactor(?:s|ed|ing)?|review(?:s|ed|ing)?|fail(?:s|ed|ing)?|errors?|exceptions?|regressions?)\b/i;
+
+/**
+ * Work on code that already exists: the request points at it and asks for a
+ * fix or a review. `files` when it names source files or failing tests, which
+ * live in some project; `repository` when it names a hosted repository, which
+ * has to be fetched before anyone can work on it. Nothing new is being built,
+ * so neither a new project nor a recipe matched on the code's subject fits: a
+ * cart-total bug read to the embedder as billing and was offered Invoice
+ * Generator, and a review of src/pricing.js was offered Pricing Page first
+ * (2026-10-22).
+ *
+ * The file pattern wants a lowercase or path-qualified name, so product names
+ * ("Node.js", "D3.js") do not count as code being pointed at.
+ */
+export function existingCodeTarget(text: string): 'files' | 'repository' | undefined {
+  if (!CODE_CHANGE_RE.test(text)) return undefined;
+  if (REPO_URL_RE.test(text)) return 'repository';
+  if (SOURCE_FILE_RE.test(text) || FAILING_TEST_RE.test(text)) return 'files';
+  return undefined;
+}
+
+export function looksLikeExistingCodeRequest(text: string): boolean {
+  return existingCodeTarget(text) !== undefined;
+}

@@ -5,6 +5,9 @@ import {
   type WorkCraftbookCandidate,
   briefAsksForBuild,
   fillProjectTypeParams,
+  existingCodeTarget,
+  interestAreasForCraftbook,
+  isSharedLibraryProject,
   matchProjectTypeForBrief,
   projectTypesMentionedByBrief,
   rankWorkOptions,
@@ -122,7 +125,16 @@ export async function suggestWork(
   input: SuggestWorkInput,
 ): Promise<SuggestWorkResult> {
   const request = input.request.trim();
-  const projectId = input.projectId;
+  // Asked from Default about a project the person names, the work belongs in
+  // that project: "clean up the spreadsheets in the "Customer List Cleanup"
+  // project" was offered a new Data Analysis project instead of the
+  // dataset-clean recipe the same words get inside it (2026-10-22). The
+  // result carries the project, which start_work binds.
+  const named =
+    input.projectId === DEFAULT_PROJECT_ID && !explicitlyRequestsSeparateProject(request)
+      ? await namedProject(deps.store, request)
+      : undefined;
+  const projectId = named ?? input.projectId;
   const inDefault = projectId === DEFAULT_PROJECT_ID;
   const tools = new Set(input.tools ?? []);
   const separateProject = explicitlyRequestsSeparateProject(request);
@@ -137,18 +149,29 @@ export async function suggestWork(
   const setupFor = (craftbookId: string): string[] =>
     (offer?.missingToolsets[craftbookId] ?? []).map((need) => need.toolsetId);
   const paramSchemas = new Map<string, unknown>();
+  const softwareBooks = new Set<string>();
   for (const item of offer?.items ?? []) {
     if (item.manifest.kind === 'craftbook-template') {
       paramSchemas.set(item.manifest.id, item.manifest.paramSchema);
+      if (interestAreasForCraftbook(item.manifest).includes('software')) {
+        softwareBooks.add(item.manifest.id);
+      }
     }
   }
+  // Work on code that already exists is the developer's, or a code recipe's:
+  // never a new project, a project type, or a recipe matched on what the code
+  // is about. From Default no recipe fits at all: start_work runs it in
+  // Default, away from the code.
+  const existingCode = existingCodeTarget(request);
+  const recipesFit = !(existingCode && inDefault);
   // start_work fills only a book's main content param from the message, so a
   // book that needs a picked file or another answer cannot start from chat:
   // tidy-spreadsheet was offered for a CSV clean-up, start_work failed on
   // "Choose the spreadsheet", and Gemma asked instead of launching
   // dataset-clean (2026-10-17).
   const launchable = (craftbookId: string): boolean =>
-    triggerCandidateIsLaunchable(paramSchemas.get(craftbookId));
+    triggerCandidateIsLaunchable(paramSchemas.get(craftbookId)) &&
+    (!existingCode || softwareBooks.has(craftbookId));
 
   const plan = resolveTurnIntentPlan({ text: request, isMeester: true });
   const exactPlan =
@@ -171,8 +194,10 @@ export async function suggestWork(
   const [ranked, projectTypes, recurring] = exact
     ? [{ candidates: [], vague: false }, [], []]
     : await Promise.all([
-        rankedCraftbooks(deps, input, request, setupFor, launchable),
-        inDefault || separateProject
+        recipesFit
+          ? rankedCraftbooks(deps, { ...input, projectId }, request, setupFor, launchable)
+          : { candidates: [], vague: false },
+        (inDefault || separateProject) && !existingCode
           ? fittingProjectTypes(deps.catalog, request, input.rankTypes ?? rankCraftbookSuggestions)
           : [],
         matchingRecurringWork(deps, projectId, request),
@@ -192,15 +217,69 @@ export async function suggestWork(
     craftbooks,
     recurring,
     newProject:
-      looksLikeNewBuildRequest(request) && (!namesDocumentDeliverable(request) || separateProject),
+      !existingCode &&
+      looksLikeNewBuildRequest(request) &&
+      (!namesDocumentDeliverable(request) || separateProject),
     separateProject,
     procedure: looksLikeProcedureRequest(request),
-    implementation: looksLikeImplementationRequest(request),
+    implementation: existingCode !== undefined || looksLikeImplementationRequest(request),
+    ...(existingCode ? { existingCode } : {}),
     selfTools: selfTools(tools),
-    ...(tools.has('delegate_developer')
-      ? { specialist: { role: 'developer', tool: 'delegate_developer' } }
-      : {}),
+    ...specialistFor(request, existingCode, tools),
   });
+}
+
+const REVIEW_REQUEST_RE = /\b(?:review|audit|assess|critique)\b/i;
+
+/**
+ * Who takes implementation work. A review of existing code is the reviewer's
+ * when one is on the roster: handed to the developer, a review of
+ * src/pricing.js was drafted as if it were a build (2026-10-22).
+ */
+function specialistFor(
+  request: string,
+  existingCode: 'files' | 'repository' | undefined,
+  tools: ReadonlySet<string>,
+): { specialist?: { role: string; tool: string } } {
+  if (existingCode && REVIEW_REQUEST_RE.test(request) && tools.has('delegate_reviewer')) {
+    return { specialist: { role: 'reviewer', tool: 'delegate_reviewer' } };
+  }
+  return tools.has('delegate_developer')
+    ? { specialist: { role: 'developer', tool: 'delegate_developer' } }
+    : {};
+}
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The existing project a request names: quoted ("Customer List Cleanup") or
+ * written as "the <name> project". A bare mention does not count, because a
+ * project named after its type ("Trip Planner") would otherwise pull every
+ * new trip into an old one.
+ */
+async function namedProject(store: Store, request: string): Promise<string | undefined> {
+  const projects = await Promise.resolve()
+    .then(() => store.listProjects())
+    .catch(() => []);
+  let best: { id: string; length: number } | undefined;
+  for (const project of projects) {
+    const name = project.name?.trim() ?? '';
+    if (
+      name.length < 3 ||
+      project.id === DEFAULT_PROJECT_ID ||
+      isSharedLibraryProject(project) ||
+      (project.status ?? 'active') !== 'active'
+    ) {
+      continue;
+    }
+    const n = escapeRegExp(name);
+    const quoted = new RegExp(`["“'‘]${n}["”'’]`, 'i');
+    const called = new RegExp(`(?<![\\w-])${n}\\s+project\\b|\\bproject\\s+(?:called\\s+)?${n}(?![\\w-])`, 'i');
+    if ((quoted.test(request) || called.test(request)) && name.length > (best?.length ?? 0)) {
+      best = { id: project.id, length: name.length };
+    }
+  }
+  return best?.id;
 }
 
 async function rankedCraftbooks(

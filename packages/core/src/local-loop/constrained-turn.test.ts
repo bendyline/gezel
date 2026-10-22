@@ -59,6 +59,32 @@ describe('isImmediateFileWriteTurn', () => {
     expect(isImmediateFileWriteTurn(prompt, ROSTER)).toBe(false);
   });
 
+  it('reads a written review of code as a new document, not a repair of the code', () => {
+    // The work-routing whole-project A/B, qwen3.8-27b, 2026-10-22.
+    const review =
+      "[Message from Zara]: Review `src/pricing.js` in this project and write up the quality risks. Deliver the findings as a written file in the project artifacts drawer — not just a chat summary. Structure it as: (1) a short overview, (2) findings ordered by severity, each with file/line references, what the risk is, and a suggested fix, (3) a short conclusion. Cover correctness bugs, edge cases, error handling, and maintainability issues.\n\n[Deliverable expected as a FILE at `artifacts/pricing-review-findings.md`. Your first assistant action should be the tool call `write_file({ path, content })`.]";
+    expect(isScenarioFileRepairPrompt(review)).toBe(false);
+    const fix =
+      '[Message from Celestine]: Fix the bug in src/cart.js: cartTotal ignores item quantity. The failing test in src/cart.test.js should pass after the fix.';
+    expect(isScenarioFileRepairPrompt(fix)).toBe(true);
+    // A review that names the code file itself as the deliverable is still a repair.
+    expect(
+      isScenarioFileRepairPrompt(
+        'Review `src/pricing.js` and fix the rounding bug.\n[Deliverable expected as a FILE at `src/pricing.js`.]',
+      ),
+    ).toBe(true);
+  });
+
+  it('never makes a review a write-only turn, so the code is read first', () => {
+    // The rerun of the same scenario: the code path unquoted, the deliverable
+    // the first backticked path, and the hand-off's write-first line.
+    const review =
+      "[Message from Vanya]: Review src/pricing.js and write up the quality risks you find. Produce a written findings document — not just a chat summary.\n\n[Deliverable expected as a FILE at `pricing-quality-risks.md`. Your first assistant action should be the tool call `write_file({ path, content })`; draft inside the tool argument, not in chat.]";
+    expect(isScenarioFileRepairPrompt(review)).toBe(false);
+    expect(isImmediateFileWritePrompt(review, { toolSurfaceIsWriteFileOnly: false })).toBe(false);
+    expect(isImmediateFileWriteTurn(review, ROSTER)).toBe(false);
+  });
+
   it('keeps explicit file intent authoritative over gate text', () => {
     const prompt = 'GATE_TARGETED_EDIT: The checks for `src/worker.py` failed. Write a note first.';
     const create = { kind: 'create-file' as const, path: 'src/worker.py' };

@@ -3,7 +3,12 @@ import { parseWorkOptionId, workOptionId } from '../schemas/work-options.js';
 import { looksLikeQuestionOrAdvice } from './question.js';
 import { type WorkRankInput, rankWorkOptions } from './rank.js';
 import { renderSuggestWorkResult, renderWorkOptionsPrelude, shortDescription } from './render.js';
-import { projectNameFromRequest, routingRequestText } from './request.js';
+import {
+  existingCodeTarget,
+  looksLikeExistingCodeRequest,
+  projectNameFromRequest,
+  routingRequestText,
+} from './request.js';
 import { isOrdinalWorkOptionId, shapeWorkOptions } from './shape.js';
 
 describe('projectNameFromRequest', () => {
@@ -55,6 +60,11 @@ describe('looksLikeQuestionOrAdvice', () => {
     'Which is better for a beginner, Spanish or Italian?',
     'Can you help me understand how recursion works?',
     'Quick question, please: should I use tabs or spaces?',
+    // No-action notes from the core suite's hand-off scenarios.
+    "Heads up: Theo is debugging why accept.mjs fails in the \"Pagination Service\" project. You don't need to do anything — just confirm you've seen this note.",
+    'Heads up: Onno is executing the maintenance runbook. You do not need to do anything — just confirm you have seen this note.',
+    'Just letting you know the launch moved to Friday.',
+    'The migration is underway, no action needed.',
   ])('reads %j as a question', (text) => {
     expect(looksLikeQuestionOrAdvice(text)).toBe(true);
   });
@@ -72,6 +82,8 @@ describe('looksLikeQuestionOrAdvice', () => {
     'Is it possible to make a deck about Alaska?',
     'What should we eat this week? Two of us, no meat, cheap dinners please.',
     "Can you help me get better at French conversation? I'm a beginner.",
+    'Heads up: the deploy is broken, can you fix it?',
+    'FYI the build is failing on main. Can you get someone to look at it?',
   ])('reads %j as a request for work', (text) => {
     expect(looksLikeQuestionOrAdvice(text)).toBe(false);
   });
@@ -260,6 +272,46 @@ describe('rankWorkOptions', () => {
     expect(result.guidance.map((g) => g.kind)).toEqual(['specialist', 'self']);
   });
 
+  it('hands a fix to existing code from Default to the specialist, naming its project', () => {
+    const result = rankWorkOptions({
+      ...DEFAULT_INPUT,
+      request: 'There is a bug in src/cart.js. Can you get that fixed?',
+      implementation: true,
+      existingCode: 'files',
+      specialist: { role: 'developer', tool: 'delegate_developer' },
+    });
+    expect(result.options).toEqual([]);
+    expect(result.guidance).toEqual([
+      { kind: 'specialist', role: 'developer', tool: 'delegate_developer', otherProject: true },
+      { kind: 'self', tools: ['consult_researcher'] },
+    ]);
+  });
+
+  it('leaves a repository named from Default to the coordinator: no hand-off, no ask', () => {
+    const result = rankWorkOptions({
+      ...DEFAULT_INPUT,
+      request: 'Can you review the code in https://github.com/bendyline/gezel?',
+      implementation: true,
+      existingCode: 'repository',
+      specialist: { role: 'developer', tool: 'delegate_developer' },
+    });
+    expect(result.options).toEqual([]);
+    expect(result.guidance.map((g) => g.kind)).toEqual(['self']);
+    expect(renderWorkOptionsPrelude(result)).toBeNull();
+  });
+
+  it('keeps implementation work from Default without existing code off the specialist', () => {
+    const result = rankWorkOptions({
+      ...DEFAULT_INPUT,
+      request: 'Build me a small website for my bakery',
+      implementation: true,
+      newProject: true,
+      specialist: { role: 'developer', tool: 'delegate_developer' },
+    });
+    expect(result.options.map((o) => o.id)).toEqual(['new-project']);
+    expect(result.guidance.map((g) => g.kind)).toEqual(['self']);
+  });
+
   it('offers authoring when no recipe fits a repeatable procedure', () => {
     const result = rankWorkOptions({
       ...DEFAULT_INPUT,
@@ -370,6 +422,53 @@ describe('renderWorkOptionsPrelude', () => {
     );
     expect(text ?? '').toMatch(/^\(System note for this turn: suggest_work already ran/);
     expect(text ?? '').toContain('[type:trip-planner]');
+  });
+
+  it('carries a hand-off with nothing to start, without pointing at a missing list', () => {
+    const text = renderWorkOptionsPrelude(
+      rankWorkOptions({
+        ...DEFAULT_INPUT,
+        request: 'There is a bug in src/cart.js. Can you get that fixed?',
+        implementation: true,
+        existingCode: 'files',
+        specialist: { role: 'developer', tool: 'delegate_developer' },
+        selfTools: ['search'],
+      }),
+    );
+    expect(text ?? '').toContain(
+      'hand it over with delegate_developer, passing the project that holds the code',
+    );
+    expect(text ?? '').not.toContain('start_work');
+    expect(text ?? '').not.toContain('If none of these fits');
+  });
+});
+
+describe('looksLikeExistingCodeRequest', () => {
+  it.each([
+    'There is a bug in src/cart.js — cartTotal ignores item quantity. Can you get that fixed?',
+    'Can you get someone to review src/pricing.js and write up what the quality risks are?',
+    'Can you review the code in https://github.com/bendyline/gezel and tell me the main risks?',
+    'The failing tests in the checkout service need fixing.',
+    'app.py crashes when the config file is missing',
+  ])('reads %j as work on existing code', (text) => {
+    expect(looksLikeExistingCodeRequest(text)).toBe(true);
+  });
+
+  it.each([
+    'Build me a small website for my bakery',
+    'Create a new project and build a tic-tac-toe game in workspace/index.html',
+    'I want to learn Node.js and review the basics',
+    'Please clean up the raw customer spreadsheets under data/raw/',
+    'Write a script called report.py that summarizes sales',
+  ])('does not read %j as work on existing code', (text) => {
+    expect(looksLikeExistingCodeRequest(text)).toBe(false);
+  });
+
+  it('tells a hosted repository from files in a project', () => {
+    expect(existingCodeTarget('Review the code in https://github.com/bendyline/gezel')).toBe(
+      'repository',
+    );
+    expect(existingCodeTarget('There is a bug in src/cart.js')).toBe('files');
   });
 });
 

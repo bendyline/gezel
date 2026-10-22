@@ -72,6 +72,7 @@ export function isFileRepairPrompt(prompt: string, intent?: FileTurnIntent): boo
   // missing file is a different intent, even if it arrives from a validator.
   if (/\b(?:no|missing)\s+`?[^`\n]+`?\s+(?:file|in the workspace)\b/i.test(repairPrompt))
     return false;
+  if (isWrittenReviewRequest(repairPrompt)) return false;
   return (
     /\b(?:assertions?|checks?|tests?)\b[\s\S]{0,120}\b(?:failed|failing|failures?)\b|\b(?:success|acceptance) criteria (?:aren't|are not) met\b|\b(?:same|still)\b[\s\S]{0,80}\b(?:failing|fails|broken)\b/i.test(
       repairPrompt,
@@ -83,6 +84,31 @@ export function isFileRepairPrompt(prompt: string, intent?: FileTurnIntent): boo
       repairPrompt,
     )
   );
+}
+
+const REVIEW_ASK_RE =
+  /\b(?:review|audit|assess(?:ment)?|critique|evaluate|write\s+up|findings)\b/i;
+const DOCUMENT_DELIVERABLE_RE =
+  /\[Deliverable expected as a FILE at `([^`]+\.(?:md|markdown|txt|docx?|pdf|html?))`/i;
+const NAMED_PATH_RE = /[\w./-]*[\w-]\.[a-z][a-z0-9]*\b/gi;
+
+/**
+ * A written review of code is a new document about it: read the code, then
+ * write the document. Neither a repair nor an immediate write fits.
+ * "Review `src/pricing.js` … each finding with … a suggested fix" read as a
+ * repair of pricing.js, and the reviewer patched the file under review; with
+ * the hand-off's "first action should be write_file", a developer wrote the
+ * findings without being able to read the file (qwen3.8-27b, 2026-10-22).
+ * Needs the ask, a document deliverable, and another file named beside it, so
+ * "fix the bug in src/cart.js" stays a repair.
+ */
+export function isWrittenReviewRequest(prompt: string): boolean {
+  if (!REVIEW_ASK_RE.test(prompt)) return false;
+  const deliverable = DOCUMENT_DELIVERABLE_RE.exec(prompt)?.[1]?.toLowerCase();
+  if (!deliverable) return false;
+  const sameFile = (path: string): boolean =>
+    path === deliverable || path.endsWith(`/${deliverable}`) || deliverable.endsWith(`/${path}`);
+  return [...prompt.matchAll(NAMED_PATH_RE)].some((m) => !sameFile(m[0].toLowerCase()));
 }
 
 /** Compatibility name for callers predating the general repair contract. */
@@ -131,6 +157,9 @@ export function isImmediateFileWritePrompt(
 ): boolean {
   if (intent) return intent.kind === 'create-file';
   if (isFileRepairPrompt(prompt)) return false;
+  // A review is written from the code: a write_file-only turn wrote
+  // pricing-quality-risks.md without reading src/pricing.js (2026-10-22).
+  if (isWrittenReviewRequest(prompt)) return false;
   // Stage 1 can target workspace patches, artifacts, or task notes. Never
   // turn its failure text (for example, "write the note first") into a
   // write_file-only request.

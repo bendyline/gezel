@@ -852,6 +852,18 @@ describe('computeToolAllowlist', () => {
     expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
+  it('leaves a written review of code its read tools, whatever the deliverable line says', () => {
+    // Whole-project work-routing A/B rerun, qwen3.8-27b, 2026-10-22.
+    const review =
+      '[Message from Vanya]: Review src/pricing.js and write up the quality risks you find.\n\n' +
+      '[Deliverable expected as a FILE at `pricing-quality-risks.md`. Your first assistant action should be the tool call ' +
+      '`write_file({ path, content })`; draft inside the tool argument, not in chat.]';
+    for (const role of ['Developer', 'Reviewer']) {
+      expect(shouldConstrainToImmediateFileWrite({ role, latestUserMessage: review })).toBe(false);
+      expect(shouldConstrainToScenarioFileRepair({ role, latestUserMessage: review })).toBe(false);
+    }
+  });
+
   it('constrains initial index.html deliverable handoffs to write_file only', () => {
     const nudge =
       '[Deliverable expected as a FILE at `index.html`. Your first assistant action should be the tool call ' +
