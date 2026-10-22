@@ -105,7 +105,10 @@ function setup(over: { storage?: string; review?: boolean; questions?: boolean }
 
 const LOOP = SIMULATED_SCENE.reduce((s, x) => s + x.seconds, 0);
 
-describe('CameraPipeline on the simulated mud room', () => {
+// Each test plays the whole simulated scene frame by frame. Alone that is
+// under 2 s, but under the full CI suite on a 4-vCPU runner it reached 5.6 s
+// and timed out against the unit project's default budget.
+describe('CameraPipeline on the simulated mud room', { timeout: 30_000 }, () => {
   it('turns the cat scene into one episode, a yes while it squats, and an event record', async () => {
     const t = setup();
     await t.run(LOOP);

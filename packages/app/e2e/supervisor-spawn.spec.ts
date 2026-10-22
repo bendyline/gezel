@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
@@ -33,7 +34,6 @@ let runtimePidPath: string;
 const DAEMON_BOOT_TIMEOUT_MS = 180_000;
 /** Slack past the daemon boot for the splash-to-UI handoff and Electron launch. */
 const HOOK_TIMEOUT_MS = DAEMON_BOOT_TIMEOUT_MS + 60_000;
-const UI_LOAD_TIMEOUT_MS = 60_000;
 
 async function waitForRuntimePid(path: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -80,7 +80,7 @@ test.beforeAll(async () => {
   // the bundle unpack. Wait on the daemon's own artifacts instead: the pid file
   // the supervisor writes, then the UI the splash hands off to.
   await waitForRuntimePid(runtimePidPath, DAEMON_BOOT_TIMEOUT_MS);
-  await expect(page.locator('.app-header')).toBeVisible({ timeout: UI_LOAD_TIMEOUT_MS });
+  await waitForAppReady(page);
 });
 
 test.afterAll(async () => {

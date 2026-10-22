@@ -185,6 +185,7 @@ describe('toolActivityPhrase', () => {
     'Opening',
     'Outlining',
     'Pressing',
+    'Proposing',
     'Publishing',
     'Queuing',
     'Reading',

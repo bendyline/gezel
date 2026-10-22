@@ -607,4 +607,32 @@ describe('portable craftbook inputs and samples', () => {
     const loose = { ...book, steps: [{ ...book.steps[0]!, toolPolicy: {} }] };
     expect(craftbookHostGap(loose as never, host)).toBe('Can use tools this device does not have.');
   });
+
+  it('runs a verdict review loop here, but not a reviewer gate', () => {
+    const host = {
+      tools: new Set(['read_artifact', 'write_artifact', 'write_task_note']),
+      standardScripts: new Set<string>(),
+      gateCheckKinds: new Set(['minBytes']),
+    };
+    const gated = (gate: Record<string, unknown>) => ({
+      ...book,
+      steps: [
+        {
+          ...book.steps[0]!,
+          gate: {
+            at: 'completion',
+            checks: [{ kind: 'minBytes', file: 'v.md', bytes: 1 }],
+            ...gate,
+          },
+        },
+        ...book.steps.slice(1),
+      ],
+    });
+    expect(
+      craftbookHostGap(gated({ onReject: 'draft', maxAttempts: 3 }) as never, host),
+    ).toBeNull();
+    expect(craftbookHostGap(gated({ reviewer: 'Reviewer' }) as never, host)).toBe(
+      'Has a review step this device cannot run yet.',
+    );
+  });
 });

@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
@@ -51,7 +52,7 @@ test.describe('preview network boundary', () => {
     });
     page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
-    await expect(page.locator('.app-header')).toBeVisible({ timeout: UI_LOAD_TIMEOUT_MS });
+    await waitForAppReady(page);
     expect(await page.evaluate(() => Boolean(window.__GEZEL__?.token))).toBe(true);
 
     const workspace = join(home, 'projects', 'default', 'workspace');

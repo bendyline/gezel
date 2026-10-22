@@ -59,7 +59,6 @@ minimumReleaseAgeExclude:
   # 2026-10-06, taken before the hold expires by explicit decision.
   - "@huggingface/transformers@4.3.1"
   - "@vitejs/plugin-react@6.0.4"
-  - "dompurify@3.4.13"
   - "electron@43.7.7"
   - "jose@6.2.4"
   - "mermaid@11.16.1"
@@ -97,7 +96,7 @@ overrides:
   # html-to-text 10.x still declares deepmerge-ts ^7.1.5. Force the patched
   # major until it widens that range (GHSA-ggr8-5vv4-36mx).
   "deepmerge-ts": "8.0.1"
-  "dompurify@>=3 <4": "3.4.13"
+  "dompurify@>=3 <4": "3.4.17"
   "fast-uri": "3.1.8"
   "form-data": "4.0.6"
   "hono": "4.13.9"
