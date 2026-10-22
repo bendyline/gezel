@@ -1,3 +1,7 @@
+// The adapter imports @atproto/api lazily on its first pass, and that cold
+// import alone takes ~5 s on a loaded machine: inside the first conformance
+// check, it timed the check out. Loaded here, collection pays for it instead.
+import '@atproto/api';
 import { afterEach, describe, expect, it } from 'vitest';
 import { syncWithAdapter } from '../manager.js';
 import { NATIVE_ADAPTERS } from '../registry.js';

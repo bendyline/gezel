@@ -61,7 +61,7 @@ describe('looksLikeQuestionOrAdvice', () => {
     'Can you help me understand how recursion works?',
     'Quick question, please: should I use tabs or spaces?',
     // No-action notes from the core suite's hand-off scenarios.
-    "Heads up: Theo is debugging why accept.mjs fails in the \"Pagination Service\" project. You don't need to do anything — just confirm you've seen this note.",
+    'Heads up: Theo is debugging why accept.mjs fails in the "Pagination Service" project. You don\'t need to do anything — just confirm you\'ve seen this note.',
     'Heads up: Onno is executing the maintenance runbook. You do not need to do anything — just confirm you have seen this note.',
     'Just letting you know the launch moved to Friday.',
     'The migration is underway, no action needed.',

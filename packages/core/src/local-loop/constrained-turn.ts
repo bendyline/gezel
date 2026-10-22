@@ -86,8 +86,7 @@ export function isFileRepairPrompt(prompt: string, intent?: FileTurnIntent): boo
   );
 }
 
-const REVIEW_ASK_RE =
-  /\b(?:review|audit|assess(?:ment)?|critique|evaluate|write\s+up|findings)\b/i;
+const REVIEW_ASK_RE = /\b(?:review|audit|assess(?:ment)?|critique|evaluate|write\s+up|findings)\b/i;
 const DOCUMENT_DELIVERABLE_RE =
   /\[Deliverable expected as a FILE at `([^`]+\.(?:md|markdown|txt|docx?|pdf|html?))`/i;
 const NAMED_PATH_RE = /[\w./-]*[\w-]\.[a-z][a-z0-9]*\b/gi;

@@ -66,5 +66,8 @@ export default defineConfig({
     await stripSourcemapCommentsFromBuild();
     await mkdir('dist/speech-models', { recursive: true });
     await copyFile('src/speech-models/LICENSE.kokoro.txt', 'dist/speech-models/LICENSE.kokoro.txt');
+    // The Kokoro frontend's sense table is generated from misaki's dictionaries.
+    await mkdir('dist/kokoro', { recursive: true });
+    await copyFile('src/kokoro/LICENSE.misaki.txt', 'dist/kokoro/LICENSE.misaki.txt');
   },
 });

@@ -4,8 +4,8 @@ import {
   type SuggestedWorkItem,
   type WorkCraftbookCandidate,
   briefAsksForBuild,
-  fillProjectTypeParams,
   existingCodeTarget,
+  fillProjectTypeParams,
   interestAreasForCraftbook,
   isSharedLibraryProject,
   matchProjectTypeForBrief,
@@ -274,7 +274,10 @@ async function namedProject(store: Store, request: string): Promise<string | und
     }
     const n = escapeRegExp(name);
     const quoted = new RegExp(`["“'‘]${n}["”'’]`, 'i');
-    const called = new RegExp(`(?<![\\w-])${n}\\s+project\\b|\\bproject\\s+(?:called\\s+)?${n}(?![\\w-])`, 'i');
+    const called = new RegExp(
+      `(?<![\\w-])${n}\\s+project\\b|\\bproject\\s+(?:called\\s+)?${n}(?![\\w-])`,
+      'i',
+    );
     if ((quoted.test(request) || called.test(request)) && name.length > (best?.length ?? 0)) {
       best = { id: project.id, length: name.length };
     }
