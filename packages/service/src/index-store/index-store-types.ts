@@ -265,6 +265,8 @@ export interface CurrentFileReviewIssues {
   path: string;
   contentHash: string;
   issues: FileReviewIssue[];
+  /** The model that wrote the review, when recorded. */
+  model?: string;
 }
 
 export interface OpenOptions {

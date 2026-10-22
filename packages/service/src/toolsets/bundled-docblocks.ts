@@ -12,9 +12,9 @@ import { dirname, join } from 'node:path';
 import type { InstalledToolset } from '@bendyline/gezel';
 
 const require = createRequire(import.meta.url);
-const VERSION = '2.7.3';
+const VERSION = '2.7.5';
 // SHA-256 of this exact published package, kept with the service dependency pin.
-const SHA256 = '7b484705f8bd59438d2e0badcad9a2ab9486d52acae2941b5adc8ec68f582c5a';
+const SHA256 = 'd51a9db085298eb6ecb39f8de8cf1032497a86f7420c0650ec00006c285744f8';
 
 export function bundledDocblocksToolset(): InstalledToolset {
   const packageFile = require.resolve('@bendyline/docblocks-cli/package.json');
@@ -27,7 +27,7 @@ export function bundledDocblocksToolset(): InstalledToolset {
     toolsetId: 'docblocks',
     sourceId: 'bundled',
     version,
-    installedAt: '2026-10-19T00:00:00.000Z',
+    installedAt: '2026-10-21T00:00:00.000Z',
     installPath,
     runtime: {
       kind: 'npm-package',

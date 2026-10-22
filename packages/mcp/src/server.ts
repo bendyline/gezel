@@ -193,6 +193,7 @@ import {
   normalizeAssigneeArg,
 } from './assignee-arg.js';
 import { extractPageElementsFromYaml, scorePageElementMatch } from './browser-page-elements.js';
+import { registerCameraTools } from './camera-tools.js';
 import { commandResultIsError } from './command-result.js';
 import {
   registerConnectorTools,
@@ -1211,6 +1212,10 @@ if (process.env.GEZEL_SCRIPT_TOOLS) {
 
 if (process.env.GEZEL_CONNECTORS_ENABLED === '1') {
   registerConnectorTools(connectorActionDependencies);
+}
+
+if (process.env.GEZEL_CAMERAS_ENABLED === '1') {
+  registerCameraTools({ server, api, projectId, unwrapApiError });
 }
 
 // ── Observation tables (the tabular connector corpus) ───────────────────────

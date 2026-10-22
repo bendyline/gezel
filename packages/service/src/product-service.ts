@@ -61,6 +61,9 @@ import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
+import { CAMERA_ADAPTER_ID, CameraService } from './connectors/live/camera/service.js';
+import { LiveConnectorHost } from './connectors/live/host.js';
+import { registerLiveAdapter } from './connectors/live/registry.js';
 import { ConnectorManager } from './connectors/manager.js';
 import {
   registerProductConnectorAdapters,
@@ -83,7 +86,10 @@ import { DiffpackManager } from './diffpack/manager.js';
 import { planProjectNightFixes, releaseStaleNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { prepareNativeEngines } from './engine-discovery.js';
+import { LookoutManager } from './lookouts/manager.js';
+import { SoundPlayer } from './lookouts/sound-player.js';
 import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
+import { resolveCraftbookOwner, startCraftbookRun } from './tasks/craftbook-run.js';
 
 import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
 import { KnowledgeManager } from '@bendyline/gezel-inference/internal/knowledge/manager';
@@ -127,7 +133,6 @@ import { invalidateModelsCache } from './http/routes/models.js';
 import { buildApp, buildPreviewApp } from './http/server.js';
 import { createTokenStore } from './http/token-store.js';
 import { VISION_RASTER_FORMATS } from './index-store/ai-shadow.js';
-import { writeCodebaseMap } from './index-store/codebase-map.js';
 import { writeNightlyCodebaseReport } from './index-store/codebase-report.js';
 import { ContentIndex } from './index-store/content-index.js';
 import { writeNightlyDocumentsReport } from './index-store/documents-report.js';
@@ -141,6 +146,7 @@ import { albumMediaDeps, storeAllAlbumPhotos } from './index-store/photo-albums.
 import { writeNightlyPhotoReport } from './index-store/photo-report.js';
 import { toDecodableRaster } from './index-store/raster-normalize.js';
 import { ensureIndexFresh } from './index-store/readiness.js';
+import { writeNightlyCodeFolderFiles } from './issue-triage/handoff-report.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
 import { createSharedKnowledgeInstaller } from './knowledge/shared-install.js';
@@ -2097,9 +2103,7 @@ export async function startProductService(
     await writeNightlyCodebaseReport({ store, contentIndex }, projectId, now, night).catch((err) =>
       log.warn(`[index] codebase report failed for ${projectId}: ${String(err)}`),
     );
-    await writeCodebaseMap({ store, contentIndex }, projectId, now).catch((err) =>
-      log.warn(`[index] codebase map failed for ${projectId}: ${String(err)}`),
-    );
+    await writeNightlyCodeFolderFiles({ store, contentIndex, diffpacks }, projectId, now);
   };
   indexEnrichment.setOnProjectCaughtUp(async (projectId) => {
     if (!nightShift.isActive()) return;
@@ -2189,6 +2193,9 @@ export async function startProductService(
   if (connectorFetch) {
     log.warn('[service] GEZEL_CONNECTOR_SIMULATOR is set — connectors sync simulated accounts');
   }
+  // The live host (built below) runs device bindings; the manager tells it
+  // when bindings change and folds its status into the Connections view.
+  let liveConnectorsRef: LiveConnectorHost | null = null;
   const connectors = new ConnectorManager({
     store,
     secrets,
@@ -2197,6 +2204,8 @@ export async function startProductService(
     scriptRunner,
     locks: connectorLocks,
     ...(connectorFetch ? { fetch: connectorFetch } : {}),
+    onBindingsChanged: () => void liveConnectorsRef?.reconcile(),
+    liveStatus: (projectId) => liveConnectorsRef?.status(projectId) ?? [],
   });
   const connectorActions = new ConnectorActionManager({
     store,
@@ -2215,11 +2224,112 @@ export async function startProductService(
     isNightShiftActive: () => nightShift.isActive(),
     source: {
       label: 'connectors',
-      listBindings: (p) => p.connectors ?? [],
+      // Device bindings never sync (the live host runs them), so they must
+      // not make a project look "due" on every tick.
+      listBindings: (p) => (p.connectors ?? []).filter((b) => b.driver !== 'device'),
       posture: (pol) => pol.allowExternalServices,
       syncProject: (p) => connectors.syncProject(p),
     },
   });
+
+  // Device connectors (cameras) and lookouts. A camera binding is a
+  // long-running capture the live host keeps going — never a sync pass — and
+  // what it sees reaches the person's lookouts, which act on it. See
+  // docs/device-connectors.md and docs/lookouts.md.
+  const soundPlayer = new SoundPlayer({ home });
+  const cameras = new CameraService({
+    home,
+    store,
+    recognition: {
+      recognize: (input) => recognition.recognize(input),
+      isAvailable: () => recognition.isAvailable(),
+    },
+    publishProject: (projectId, event) => chatEvents.publishProjectEvent(projectId, event),
+    refreshArtifacts: (projectId) => contentIndex.refreshArtifacts(projectId),
+  });
+  registerLiveAdapter(CAMERA_ADAPTER_ID, cameras);
+  const liveConnectors = new LiveConnectorHost({
+    store,
+    catalog,
+    persist: (projectId, bindingId, patch) =>
+      connectors.setDeviceState(projectId, bindingId, patch),
+    publishProject: (projectId, event) => chatEvents.publishProjectEvent(projectId, event),
+    publishGlobal: (event) => chatEvents.publishGlobalEvent(event),
+  });
+  liveConnectorsRef = liveConnectors;
+  const craftbookRunDeps = {
+    store,
+    tasks,
+    taskRunner,
+    history,
+    craftbookResolver,
+    resolveRole: roleResolverClosure,
+  };
+  const lookouts = new LookoutManager({
+    home,
+    store,
+    history,
+    publishProject: (projectId, event) => chatEvents.publishProjectEvent(projectId, event),
+    publishGlobal: (event) => chatEvents.publishGlobalEvent(event),
+    sound: soundPlayer,
+    push: (text) => channels.send(text, { source: 'lookout' }),
+    pushConfigured: async () => (await channels.list()).some((c) => c.configured),
+    speak: async (text, signal) =>
+      (await (await tts.providerForModel(undefined)).synthesize({ text, signal })).wav,
+    email: async ({ projectId, bindingId, recipients, subject, body }) => {
+      const project = await store.getProject(projectId);
+      if (!project) throw new Error(`project not found: ${projectId}`);
+      const { draftId } = await connectorActions.draft(project, {
+        bindingId,
+        action: 'send',
+        input: { to: recipients, subject, body },
+      });
+      const result = await connectorActions.commit(project, draftId, {
+        standingRecipients: recipients,
+      });
+      return result.status === 'committed' ? 'sent' : 'queued';
+    },
+    deliverReaction: (args) => chat.deliverReaction(args),
+    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
+    gezelName: async (gezelId) =>
+      (await store.getGezel(gezelId).catch(() => null))?.parsed.frontmatter.name,
+    craftbookOwner: async (projectId, craftbookId) => {
+      const resolved = await craftbookResolver
+        .resolve(craftbookId, { projectId })
+        .catch(() => null);
+      if (!resolved) return undefined;
+      const m = resolved.craftbook;
+      const role = m.steps.find((step) => step.id === m.entryStepId)?.suggestedRole;
+      const owner = await resolveCraftbookOwner(craftbookRunDeps, projectId, role);
+      return owner.kind === 'gezel' ? owner.gezelId : undefined;
+    },
+    craftbookExists: async (projectId, craftbookId) =>
+      Boolean(await craftbookResolver.resolve(craftbookId, { projectId }).catch(() => null)),
+    craftbookInputParam: async (projectId, craftbookId) => {
+      const resolved = await craftbookResolver
+        .resolve(craftbookId, { projectId })
+        .catch(() => null);
+      const props = (
+        resolved?.craftbook.paramSchema as { properties?: Record<string, unknown> } | undefined
+      )?.properties;
+      return Object.entries(props ?? {}).find(
+        ([, schema]) => !!schema && typeof schema === 'object' && 'input' in (schema as object),
+      )?.[0];
+    },
+    runCraftbook: async (input) => ({
+      taskRef: (await startCraftbookRun(craftbookRunDeps, input)).task.ref,
+    }),
+    liveRunFor: async (projectId, lookoutId) => {
+      for (const status of ['active', 'paused'] as const) {
+        const live = await tasks.list({ projectId, status }).catch(() => []);
+        if (live.some((t) => t.origin?.kind === 'lookout' && t.origin.lookoutId === lookoutId)) {
+          return true;
+        }
+      }
+      return false;
+    },
+  });
+  cameras.setLookoutSink(lookouts);
 
   // A craftbook that reads a connector corpus gets it pulled down at
   // LAUNCH, before its first step's prompt is built — the gezel then
@@ -2418,6 +2528,9 @@ export async function startProductService(
     inputStaging,
     connectors,
     connectorActions,
+    liveConnectors,
+    cameras,
+    lookouts,
     duck,
     renderer,
     imageProvider,
@@ -2779,6 +2892,12 @@ export async function startProductService(
   }
   globalIndexManager.start();
   connectorSync.start();
+  // Lookouts load before cameras start, so the first episode already knows
+  // what to ask.
+  void lookouts
+    .load()
+    .catch((err) => log.warn('[lookouts] load failed:', err instanceof Error ? err.message : err))
+    .finally(() => liveConnectors.start());
 
   // Idle-session summarization sweep: every hour, distill any non-archived
   // session that's been quiet for `config.summarization.idleHours` (default
@@ -2909,6 +3028,11 @@ export async function startProductService(
       // An open document-edit window would otherwise lose its audit event.
       await shutdownStep('document audit flush', () => store.flushDocumentAudit().catch(() => {}));
       connectorSync.stop();
+      await shutdownStep('cameras', async () => {
+        await liveConnectors.stop();
+        await cameras.stop();
+        soundPlayer.stopAll();
+      });
       cacheController.stop();
       imagePulls.clear();
       chatInstalls.llamaCpp.clear();

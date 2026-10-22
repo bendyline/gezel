@@ -4,8 +4,6 @@ import './ProjectsView.css';
 import '@bendyline/squisq-editor-react/styles';
 import type {
   BoekwachterIssue,
-  BoekwachterIssueDismissalReason,
-  BoekwachterIssueStatus,
   ClaudePermissionMode,
   CodexPermissionMode,
   FileReviewResponse,
@@ -94,7 +92,11 @@ import {
   projectFileSource,
   useFileMutations,
 } from '../components/file-browser/index.js';
-import { announceBoekwachterIssuesChanged } from '../components/file-inspector/tracked-issues.js';
+import {
+  type BoekwachterIssuePatch,
+  announceBoekwachterIssuesChanged,
+  sendIssuePatch,
+} from '../components/file-inspector/tracked-issues.js';
 import {
   ARTIFACT_VIEW_MODES,
   type FileViewMode,
@@ -160,6 +162,11 @@ const ProjectChat = lazy(() =>
 const ProjectConnectionsTab = lazy(() =>
   loadProjectConnectionsModule().then(({ ProjectConnectionsTab }) => ({
     default: ProjectConnectionsTab,
+  })),
+);
+const ProjectLookoutsSection = lazy(() =>
+  import('../components/lookouts/ProjectLookoutsSection.js').then(({ ProjectLookoutsSection }) => ({
+    default: ProjectLookoutsSection,
   })),
 );
 const ProjectMailTab = lazy(() =>
@@ -1069,16 +1076,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   }, [selectedProjectId, workspaceReviewPath]);
 
   const updateWorkspaceIssue = useCallback(
-    async (
-      issue: BoekwachterIssue,
-      patch: {
-        status?: BoekwachterIssueStatus;
-        seen?: boolean;
-        dismissalReason?: BoekwachterIssueDismissalReason;
-      },
-    ) => {
+    async (issue: BoekwachterIssue, patch: BoekwachterIssuePatch) => {
       if (!selectedProjectId) return;
-      await api.updateBoekwachterIssue(selectedProjectId, { ref: issue.ref, ...patch });
+      await sendIssuePatch(selectedProjectId, issue, patch);
       await refreshWorkspaceIssueSurfaces();
     },
     [refreshWorkspaceIssueSurfaces, selectedProjectId],
@@ -2550,6 +2550,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               project={selected}
                               onProjectChange={setSelected}
                             />
+                          </ProjectPaneBoundary>
+                          <ProjectPaneBoundary>
+                            <ProjectLookoutsSection projectId={selected.id} />
                           </ProjectPaneBoundary>
                         </section>
                       )}

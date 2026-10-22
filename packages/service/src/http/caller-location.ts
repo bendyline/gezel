@@ -1,5 +1,10 @@
 import { isLocalProvider } from '@bendyline/gezel';
+import type { ProjectConnectorBinding } from '@bendyline/gezel';
 import type { Context } from 'hono';
+import {
+  cameraAllowsCloud,
+  cameraBindingForArtifact,
+} from '../connectors/live/camera/frame-access.js';
 import { isOwnerCaller } from './auth.js';
 import type { ServiceContext } from './context.js';
 
@@ -18,4 +23,21 @@ export async function callerMaySeeLocation(ctx: ServiceContext, c: Context): Pro
     return session?.providerName ? isLocalProvider(session.providerName) : false;
   }
   return isOwnerCaller(c);
+}
+
+/**
+ * Whether this caller may read the pixels of an artifact image. Everything
+ * outside a camera's corpus is unaffected. A camera's keyframes reach the
+ * person's own app and on-device sessions; a cloud-model session only when
+ * the camera allows it.
+ */
+export async function callerMaySeeArtifactPixels(
+  ctx: ServiceContext,
+  c: Context,
+  project: { connectors?: ProjectConnectorBinding[] },
+  artifactPath: string,
+): Promise<boolean> {
+  const binding = cameraBindingForArtifact(project, artifactPath);
+  if (!binding || cameraAllowsCloud(binding)) return true;
+  return callerMaySeeLocation(ctx, c);
 }

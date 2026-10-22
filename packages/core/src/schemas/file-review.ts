@@ -52,6 +52,93 @@ export const BoekwachterIssueDismissalReasonSchema = z.enum([
 export type BoekwachterIssueDismissalReason = z.infer<typeof BoekwachterIssueDismissalReasonSchema>;
 
 /**
+ * What someone concluded about a BW issue after checking it against the code.
+ * `nit` (true but not worth fixing) is separate from `not_a_bug` on purpose:
+ * frontier models are picky about low-grade leads, and calling a valid minor
+ * lead "not a bug" must not count against the reviewer that raised it.
+ * See docs/issue-triage.md.
+ */
+export const ISSUE_VERDICT_KINDS = [
+  'fixed',
+  'confirmed',
+  'not_a_bug',
+  'nit',
+  'wont_fix',
+  'duplicate',
+  'unsure',
+] as const;
+export const IssueVerdictKindSchema = z.enum(ISSUE_VERDICT_KINDS);
+export type IssueVerdictKind = z.infer<typeof IssueVerdictKindSchema>;
+
+/** Why a lead is not a bug: wrong about the code, prevented elsewhere, or deliberate. */
+export const IssueVerdictReasonSchema = z.enum(['incorrect', 'handled_elsewhere', 'intended']);
+export type IssueVerdictReason = z.infer<typeof IssueVerdictReasonSchema>;
+
+/**
+ * Entries gezel writes into the verdict log itself; never accepted from a
+ * caller. `reopened` is the person overriding an earlier verdict.
+ */
+export const IssueVerdictSystemKindSchema = z.enum(['recurred', 'echo', 'superseded', 'reopened']);
+export const IssueVerdictLogKindSchema = z.union([
+  IssueVerdictKindSchema,
+  IssueVerdictSystemKindSchema,
+]);
+export type IssueVerdictLogKind = z.infer<typeof IssueVerdictLogKindSchema>;
+
+/**
+ * Who reached a verdict. Always derived from the caller's credential, never
+ * from a request body. An imported document is not the person, whatever app
+ * filled it in.
+ */
+export const IssueVerdictActorSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('person') }),
+  z.object({ kind: z.literal('app'), client: z.string().min(1).max(40) }),
+  z.object({ kind: z.literal('gezel'), gezelId: z.string().min(1) }),
+  z.object({ kind: z.literal('import'), declaredApp: z.string().max(60).optional() }),
+  z.object({ kind: z.literal('system') }),
+]);
+export type IssueVerdictActor = z.infer<typeof IssueVerdictActorSchema>;
+
+/** The latest verdict, as carried on the issue itself. The full history is the verdict log. */
+export const IssueVerdictSummarySchema = z.object({
+  kind: IssueVerdictLogKindSchema,
+  reason: IssueVerdictReasonSchema.optional(),
+  by: IssueVerdictActorSchema,
+  at: z.string(),
+  /** First 300 characters of the note. */
+  note: z.string().max(300).optional(),
+  duplicateOf: z.string().optional(),
+  /** "Fixed" while the file was unchanged since the review: gezel could not confirm it. */
+  unverified: z.boolean().optional(),
+});
+export type IssueVerdictSummary = z.infer<typeof IssueVerdictSummarySchema>;
+
+/**
+ * One line of `boekwachter-verdicts.jsonl`: append-only, the issue's history
+ * and the calibration dataset. Snapshots the lead as it read when judged, so
+ * the log stays meaningful after the record changes.
+ */
+export const IssueVerdictEntrySchema = IssueVerdictSummarySchema.extend({
+  id: z.string().min(1),
+  issueId: z.string().min(1),
+  fingerprint: z.string().min(1),
+  ref: z.string(),
+  path: z.string(),
+  note: z.string().max(2000).optional(),
+  /** The file's hash when judged, read from the file itself; null when unreadable. */
+  fileHash: z.string().nullable().optional(),
+  /** The hash the lead was last reported on; a later review of this exact content means a revert. */
+  preFixHash: z.string().optional(),
+  reviewModel: z.string().optional(),
+  severity: FileReviewIssueSeveritySchema,
+  category: z.string(),
+  message: z.string(),
+  /** For `echo`/`superseded`: the other issue involved. */
+  relatedRef: z.string().optional(),
+});
+export type IssueVerdictEntry = z.infer<typeof IssueVerdictEntrySchema>;
+
+/**
  * A review issue after it has been materialized into the project-local
  * lifecycle registry. `stale` means the current file hash differs from the
  * hash whose review last reported the issue; the old line is retained as
@@ -76,6 +163,16 @@ export const BoekwachterIssueSchema = FileReviewIssueSchema.extend({
   seenAt: z.string().optional(),
   resolvedAt: z.string().optional(),
   dismissedAt: z.string().optional(),
+  /** Dropped by an older client that meets a verdict kind it doesn't know. */
+  latestVerdict: IssueVerdictSummarySchema.optional().catch(undefined),
+  /** The model whose review last reported this lead. */
+  reviewModel: z.string().optional(),
+  /** An earlier issue this one repeats in other words. */
+  echoOf: z.string().optional(),
+  /** A later rewording of this lead replaced it. */
+  supersededBy: z.string().optional(),
+  /** An outside app is checking this issue until `until`; the night shift leaves it alone. */
+  handoff: z.object({ client: z.string(), until: z.string() }).optional().catch(undefined),
 });
 export type BoekwachterIssue = z.infer<typeof BoekwachterIssueSchema>;
 

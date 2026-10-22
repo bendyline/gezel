@@ -35,6 +35,13 @@ export type HarnessMemoryMode = z.infer<typeof HarnessMemoryModeSchema>;
 export const HarnessImageModeSchema = z.enum(['off', 'local', 'any']);
 export type HarnessImageMode = z.infer<typeof HarnessImageModeSchema>;
 
+/**
+ * What a harness may do with the night shift's BW issues: nothing, list them,
+ * or also report verdicts (fixed, not a bug, ...). See docs/issue-triage.md.
+ */
+export const HarnessIssueModeSchema = z.enum(['off', 'read', 'triage']);
+export type HarnessIssueMode = z.infer<typeof HarnessIssueModeSchema>;
+
 /** Whether a folder Gezel does not know yet becomes a project when a harness starts there. */
 export const HarnessNewFolderModeSchema = z.enum(['add', 'existing']);
 export type HarnessNewFolderMode = z.infer<typeof HarnessNewFolderModeSchema>;
@@ -56,6 +63,7 @@ export const HarnessToolsConfigSchema = z.object({
   memory: HarnessMemoryModeSchema.optional().catch(undefined),
   images: HarnessImageModeSchema.optional().catch(undefined),
   newFolders: HarnessNewFolderModeSchema.optional().catch(undefined),
+  issues: HarnessIssueModeSchema.optional().catch(undefined),
   blocked: z.array(HarnessBlockSchema).max(1000).optional().catch(undefined),
 });
 export type HarnessToolsConfig = z.infer<typeof HarnessToolsConfigSchema>;
@@ -65,6 +73,7 @@ export interface ResolvedHarnessToolsConfig {
   memory: HarnessMemoryMode;
   images: HarnessImageMode;
   newFolders: HarnessNewFolderMode;
+  issues: HarnessIssueMode;
   blocked: HarnessBlock[];
 }
 
@@ -73,6 +82,7 @@ export const HARNESS_TOOLS_DEFAULTS: ResolvedHarnessToolsConfig = {
   memory: 'save',
   images: 'local',
   newFolders: 'add',
+  issues: 'triage',
   blocked: [],
 };
 
@@ -85,6 +95,7 @@ export function resolveHarnessToolsConfig(
     memory: raw.memory ?? HARNESS_TOOLS_DEFAULTS.memory,
     images: raw.images ?? HARNESS_TOOLS_DEFAULTS.images,
     newFolders: raw.newFolders ?? HARNESS_TOOLS_DEFAULTS.newFolders,
+    issues: raw.issues ?? HARNESS_TOOLS_DEFAULTS.issues,
     blocked: raw.blocked ?? [],
   };
 }
@@ -140,6 +151,8 @@ export const HarnessConnectResponseSchema = z.object({
   artifactsDir: z.string().optional(),
   memory: HarnessMemoryModeSchema,
   images: HarnessImageModeSchema,
+  /** Absent from a daemon that predates issue triage; the app then says to update Gezel. */
+  issues: HarnessIssueModeSchema.optional(),
 });
 export type HarnessConnectResponse = z.infer<typeof HarnessConnectResponseSchema>;
 
@@ -227,6 +240,7 @@ export const HarnessToolsStatusResponseSchema = z.object({
     memory: HarnessMemoryModeSchema,
     images: HarnessImageModeSchema,
     newFolders: HarnessNewFolderModeSchema,
+    issues: HarnessIssueModeSchema,
   }),
   /** Why no app can use the tools at all right now (the security level, a missing Node). */
   unavailableReason: z.string().optional(),
@@ -242,6 +256,7 @@ export const HarnessToolsConfigUpdateSchema = z
     memory: HarnessMemoryModeSchema,
     images: HarnessImageModeSchema,
     newFolders: HarnessNewFolderModeSchema,
+    issues: HarnessIssueModeSchema,
   })
   .partial();
 export type HarnessToolsConfigUpdate = z.infer<typeof HarnessToolsConfigUpdateSchema>;

@@ -2,6 +2,7 @@
 export * from './schemas/index.js';
 export * from './recording/distill.js';
 export * from './filemap/index.js';
+export * from './filegraph/index.js';
 export * from './code-intel/compose.js';
 export * from './scripts/source-split.js';
 export * from './chat-model-aliases.js';
@@ -26,8 +27,11 @@ export * from './project-icons.js';
 export * from './search-ranking.js';
 export * from './media-label.js';
 export * from './shared-project.js';
+export * from './file-type.js';
 export * from './folder-kind.js';
 export * from './project-views.js';
+export * from './issue-triage/verdicts.js';
+export * from './issue-triage/handoff.js';
 export * from './summary-lead.js';
 export { forbiddenFolderPlainName } from './project-inference/forbidden-names.js';
 export * from './inferred-project.js';
@@ -159,6 +163,7 @@ export * from './tools/coerce.js';
 export * from './tools/descriptions.js';
 export * from './tools/gezel-tool-descriptions.js';
 export * from './tools/harness-profile.js';
+export * from './tools/harness-prompts.js';
 export * from './tools/receipt.js';
 export * from './tools/tool-call-fixtures.js';
 export * from './tools/tool-names.js';
@@ -235,3 +240,6 @@ export * from './tools/step-kit.js';
 
 export * from './project-types/page-demo.js';
 export * from './project-types/page-demo-stub.js';
+
+export * from './camera/index.js';
+export * from './lookouts/index.js';

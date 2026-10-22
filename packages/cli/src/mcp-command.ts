@@ -5,6 +5,7 @@ import {
   HarnessClientIdSchema,
   type HarnessToolsClientStatus,
   harnessAgentFileLine,
+  harnessPromptInvocation,
 } from '@bendyline/gezel';
 import { GezelApiError, type GezelClient, apiErrorMessage } from '@bendyline/gezel-client';
 import type { Command } from 'commander';
@@ -130,6 +131,13 @@ export function registerMcpCommands(
           `${status.label} reaches for its own search first. So it uses Gezel's, add this line to the ${HARNESS_AGENT_FILE[client]} file in a folder you work in:`,
           '',
           `  ${line}`,
+        );
+      }
+      const triage = harnessPromptInvocation(client, 'triage_issues');
+      if (status.state === 'configured' && triage) {
+        lines.push(
+          '',
+          `To have ${status.label} check the suspected problems Gezel's night shift found, run ${triage} in a folder Gezel knows.`,
         );
       }
       output(lines.join('\n'));

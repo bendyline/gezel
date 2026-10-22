@@ -1,0 +1,199 @@
+/* Lookouts: the sentence builder, the list on a project, and the alert. */
+
+.lookout-builder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.lookout-builder-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  font-family: var(--font-serif, inherit);
+  font-size: var(--text-md);
+}
+
+.lookout-builder-select {
+  min-width: 10rem;
+}
+
+.lookout-builder-question {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.lookout-builder-question textarea,
+.lookout-builder-sub textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.lookout-builder-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.lookout-builder-actions > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.lookout-builder-actions > div > .gz-tray,
+.lookout-builder-actions > div > input,
+.lookout-builder-actions > div > button {
+  margin-left: 1.6rem;
+  align-self: flex-start;
+}
+
+.lookout-builder-sub {
+  margin-left: 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.lookout-builder-limits {
+  font-size: var(--text-sm);
+}
+
+.lookout-builder-limits summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.lookout-builder-limits label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+}
+
+.lookout-builder-limits input[type="number"] {
+  width: 5rem;
+}
+
+/* ── The list ──────────────────────────────────────────────────────── */
+
+.settings-list > li.lookout-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-xs);
+}
+
+.lookout-row-text .badge {
+  margin-left: var(--space-xs);
+}
+
+.lookout-row-actions {
+  align-self: flex-start;
+  flex-wrap: wrap;
+}
+
+.lookout-key-accent {
+  color: var(--accent-text);
+}
+
+.lookout-firings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.lookout-firing {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+}
+
+.lookout-firing > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lookout-firing--dismissed {
+  opacity: 0.6;
+}
+
+.lookout-firing-frame {
+  flex: 0 0 auto;
+  width: 96px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.lookout-firing-frame--empty {
+  display: inline-block;
+  background: color-mix(in srgb, var(--text) 8%, var(--surface));
+}
+
+.lookout-firing-feedback {
+  flex: 0 0 auto;
+}
+
+/* ── The alert while the app is open ───────────────────────────────── */
+
+.lookout-toasts {
+  position: fixed;
+  right: var(--space-lg);
+  bottom: var(--space-lg);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  max-width: min(380px, calc(100vw - 2 * var(--space-lg)));
+}
+
+.lookout-toast {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-radius: var(--radius-lg);
+  border: 1px solid color-mix(in srgb, var(--warning) 50%, var(--border));
+  background: var(--surface);
+  box-shadow: var(--surface-shadow);
+  animation: lookout-toast-in 160ms ease-out;
+}
+
+.lookout-toast-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+@keyframes lookout-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lookout-toast {
+    animation: none;
+  }
+}
+
+.lookouts-section {
+  margin-top: var(--space-xl);
+}

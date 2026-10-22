@@ -3,6 +3,7 @@ import {
   type HarnessClientId,
   type HarnessToolsClientStatus,
   harnessAgentFileLine,
+  harnessPromptInvocation,
 } from '@bendyline/gezel';
 import { useEffect, useId, useRef, useState } from 'react';
 import { api } from '../../api.js';
@@ -14,15 +15,15 @@ import type { HarnessTools } from './useHarnessTools.js';
 /** What each app does with Gezel's tools, in its own words. */
 const INTROS: Record<HarnessClientId, string> = {
   'claude-code':
-    'Claude Code can search the folder you start it in, your shared library, your memories and knowledge through Gezel, read Word, PowerPoint, Excel and PDF files, and describe and make images. Gezel adds itself to Claude Code for every folder.',
+    'Claude Code can search the folder you start it in, your shared library, your memories and knowledge through Gezel, read Word, PowerPoint, Excel and PDF files, describe and make images, and check the issues Gezel found overnight. Gezel adds itself to Claude Code for every folder.',
   'claude-desktop':
-    'Claude Desktop can search your projects, shared library, memories and knowledge through Gezel, read Office files, and describe and make images. It has no folder of its own, so it works in the project you pick here.',
+    'Claude Desktop can search your projects, shared library, memories and knowledge through Gezel, read Office files, describe and make images, and check the issues Gezel found overnight. It has no folder of its own, so it works in the project you pick here.',
   codex:
-    'Codex can use Gezel to search the folder you run it in, your shared library, memories and knowledge, read Office files, and describe and make images.',
+    'Codex can use Gezel to search the folder you run it in, your shared library, memories and knowledge, read Office files, describe and make images, and check the issues Gezel found overnight.',
   cursor:
-    'Cursor can use Gezel to search the folder it has open, your shared library, memories and knowledge, read Office files, and describe and make images.',
+    'Cursor can use Gezel to search the folder it has open, your shared library, memories and knowledge, read Office files, describe and make images, and check the issues Gezel found overnight.',
   vscode:
-    "VS Code's agent mode can use Gezel to search the folder it has open, your shared library, memories and knowledge, read Office files, and describe and make images. The Gezel extension for VS Code adds these tools to each workspace by itself, so set them up here only if you don't use it.",
+    "VS Code's agent mode can use Gezel to search the folder it has open, your shared library, memories and knowledge, read Office files, describe and make images, and check the issues Gezel found overnight. The Gezel extension for VS Code adds these tools to each workspace by itself, so set them up here only if you don't use it.",
 };
 
 /** Apps Gezel sets up through their own command line rather than by editing a file. */
@@ -46,13 +47,14 @@ export function HarnessToolsSection({
   const [projectId, setProjectId] = useState<string>(NO_PROJECT);
   const [profileId, setProfileId] = useState<string>('');
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
-  const [copied, setCopied] = useState<'command' | 'line' | null>(null);
+  const [copied, setCopied] = useState<'command' | 'line' | 'triage' | null>(null);
   const copyTimer = useRef<number | null>(null);
   const { localDesktopMode, remoteMode } = harnessDesktopMode();
   const label = status?.label ?? client;
   const busy = tools.busy?.endsWith(`:${client}`) === true;
   const agentLine = harnessAgentFileLine(client);
   const agentFile = HARNESS_AGENT_FILE[client];
+  const triageCommand = harnessPromptInvocation(client, 'triage_issues');
 
   useEffect(() => {
     if (client !== 'claude-desktop') return;
@@ -98,7 +100,7 @@ export function HarnessToolsSection({
           ? 'Change project…'
           : "Set up Gezel's tools…";
 
-  const copyText = async (text: string, kind: 'command' | 'line') => {
+  const copyText = async (text: string, kind: 'command' | 'line' | 'triage') => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(kind);
@@ -279,6 +281,24 @@ export function HarnessToolsSection({
               </button>
               <output className="sr-only" aria-live="polite">
                 {copied === 'line' ? 'Line copied.' : ''}
+              </output>
+            </div>
+          )}
+
+          {triageCommand && state === 'configured' && config?.issues !== 'off' && (
+            <div className="harness-setup-command-row">
+              <span className="muted small">
+                To have {label} check the suspected problems the night shift found, run this in a
+                folder Gezel knows (add a number for how many, or use{' '}
+                <code>{harnessPromptInvocation(client, 'fix_issues')}</code> to fix the real ones
+                too):
+              </span>
+              <code>{triageCommand}</code>
+              <button type="button" onClick={() => void copyText(triageCommand, 'triage')}>
+                {copied === 'triage' ? 'Copied' : 'Copy command'}
+              </button>
+              <output className="sr-only" aria-live="polite">
+                {copied === 'triage' ? 'Command copied.' : ''}
               </output>
             </div>
           )}

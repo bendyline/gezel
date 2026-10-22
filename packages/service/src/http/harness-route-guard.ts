@@ -59,10 +59,42 @@ async function readJson(c: Context): Promise<Record<string, unknown> | null> {
   }
 }
 
+/**
+ * How many issue verdicts one app may report per project in an hour: a
+ * bound on a runaway loop, not the main safeguard (attribution, the verdict
+ * log and Reopen are). 100 was too tight: a person running 20-issue batches
+ * back to back hit it after five, about twenty minutes in (evaluation,
+ * 2026-10-22).
+ */
+export const VERDICTS_PER_HOUR = 400;
+
+/** A sliding hour of verdict counts per harness token (one app in one project). */
+export class VerdictBudget {
+  private readonly spent = new Map<string, number[]>();
+
+  constructor(
+    private readonly perHour = VERDICTS_PER_HOUR,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  take(appId: string, count: number): boolean {
+    const now = this.now();
+    const recent = (this.spent.get(appId) ?? []).filter((t) => now - t < 3_600_000);
+    if (recent.length + count > this.perHour) {
+      this.spent.set(appId, recent);
+      return false;
+    }
+    for (let i = 0; i < count; i++) recent.push(now);
+    this.spent.set(appId, recent);
+    return true;
+  }
+}
+
 export async function harnessRouteVerdict(
   c: Context,
   projectId: string | null,
   config: ResolvedHarnessToolsConfig,
+  budget: VerdictBudget = new VerdictBudget(),
 ): Promise<Verdict> {
   const method = c.req.method;
   const path = c.req.path;
@@ -98,6 +130,23 @@ export async function harnessRouteVerdict(
     if (rest === '' && method === 'GET') return ALLOW;
     if (rest === '/index/status' && method === 'GET') return ALLOW;
     if (rest === '/tools/read-doc-as-markdown' && method === 'POST') return ALLOW;
+    if (rest === '/tools/issue-handoff' && method === 'POST') {
+      return config.issues === 'off' ? deny('issues are off for other apps') : ALLOW;
+    }
+    if (rest === '/tools/issue-verdicts' && method === 'POST') {
+      if (config.issues !== 'triage') return deny('reporting verdicts is off for other apps');
+      const body = await readJson(c);
+      if (!body || !Array.isArray(body.verdicts)) return deny('verdicts need a JSON body');
+      if (body.by !== undefined) return deny('who decided comes from the app, never the body');
+      // The token narrows what the app's model may do, and a model talked
+      // into it by a file in the repo could otherwise dismiss everything.
+      if (!budget.take(c.get('auth')?.appId ?? '', body.verdicts.length)) {
+        return deny(
+          `this app reported more than ${VERDICTS_PER_HOUR} verdicts in the last hour; wait and try again`,
+        );
+      }
+      return ALLOW;
+    }
     return deny('route is not part of the harness API');
   }
 
@@ -161,7 +210,9 @@ export async function harnessRouteVerdict(
 export function harnessRouteGuard(opts: {
   readConfig: () => Promise<GezelConfig>;
   log?: (msg: string) => void;
+  budget?: VerdictBudget;
 }): MiddlewareHandler {
+  const budget = opts.budget ?? new VerdictBudget();
   return async (c, next) => {
     const auth = c.get('auth');
     if (!auth?.scopes.includes('harness')) return next();
@@ -178,7 +229,7 @@ export function harnessRouteGuard(opts: {
     if (isHarnessBlocked(config, binding.client, binding.projectId)) {
       return c.json({ error: 'harness_disconnected', hint: HARNESS_STOPPED_HINT }, 403);
     }
-    const verdict = await harnessRouteVerdict(c, binding.projectId, config);
+    const verdict = await harnessRouteVerdict(c, binding.projectId, config, budget);
     if (verdict.allow) return next();
     opts.log?.(
       `[harness-scope] DENY ${auth.appId} ${c.req.method} ${c.req.path}: ${verdict.reason}`,

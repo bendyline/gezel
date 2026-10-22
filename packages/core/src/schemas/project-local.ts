@@ -134,8 +134,20 @@ export const PendingPersonaSchema = z.object({
 });
 export type PendingPersona = z.infer<typeof PendingPersonaSchema>;
 
-/** One skill's pending import proposal (craftbook draft + generated scripts). */
-export const PendingImportItemSchema = z.object({
+/**
+ * One skill's pending import proposal (craftbook draft + generated scripts).
+ * Annotated so declarations keep the craftbook as a reference instead of
+ * expanding its whole shape here and again in `PendingImportsSchema`.
+ */
+export const PendingImportItemSchema: z.ZodObject<{
+  skillSource: z.ZodString;
+  sourceHash: z.ZodString;
+  craftbook: typeof CraftbookSchema;
+  scripts: z.ZodDefault<z.ZodArray<typeof PendingScriptSchema>>;
+  persona: z.ZodOptional<typeof PendingPersonaSchema>;
+  notes: z.ZodOptional<z.ZodArray<z.ZodString>>;
+  createdAt: z.ZodString;
+}> = z.object({
   /** Workspace-relative SKILL.md path this proposal came from. */
   skillSource: z.string(),
   /** sha256 of the raw skill body + companion-file list — lets sync skip an unchanged, still-pending skill. */
@@ -153,7 +165,10 @@ export const PendingImportItemSchema = z.object({
 export type PendingImportItem = z.infer<typeof PendingImportItemSchema>;
 
 /** `.gezel/pending-imports.json` — review-before-save queue for generated JS. */
-export const PendingImportsSchema = z.object({
+export const PendingImportsSchema: z.ZodObject<{
+  version: z.ZodDefault<z.ZodLiteral<1>>;
+  items: z.ZodDefault<z.ZodArray<typeof PendingImportItemSchema>>;
+}> = z.object({
   version: z.literal(1).default(1),
   items: z.array(PendingImportItemSchema).default([]),
 });

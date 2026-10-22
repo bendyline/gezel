@@ -50,6 +50,8 @@ export async function writeNightlyDocumentsReport(
   now: Date,
   /** The night's day key, so one night files one report whichever side of midnight it lands. */
   day = localDay(now),
+  /** Replace the day's report instead of keeping it: a person asked for one now. */
+  opts: { force?: boolean } = {},
 ): Promise<string | null> {
   const project = await deps.store.getProject(projectId).catch(() => null);
   const kind = project?.properties?.[FOLDER_KIND_PROPERTY];
@@ -57,10 +59,14 @@ export async function writeNightlyDocumentsReport(
   if (isSharedLibraryProject(project)) return null;
 
   const path = `reports/documents-${day}.md`;
-  if ((await deps.store.readProjectArtifact(projectId, path).catch(() => null)) !== null) {
+  if (
+    !opts.force &&
+    (await deps.store.readProjectArtifact(projectId, path).catch(() => null)) !== null
+  ) {
     return null;
   }
-  const since = await lookbackStart(deps, projectId, now);
+  // A rewrite reaches back as far as the report it replaces did.
+  const since = await lookbackStart(deps, projectId, now, opts.force ? day : undefined);
   const recent = await deps.contentIndex.recentDocuments(projectId, since);
   if (!recent || recent.length === 0) return null;
 
@@ -88,11 +94,12 @@ async function lookbackStart(
   deps: DocumentsReportDeps,
   projectId: string,
   now: Date,
+  skipDay?: string,
 ): Promise<number> {
   const entries = await deps.store.listProjectArtifacts(projectId, 'reports').catch(() => []);
   const days = entries
     .map((e) => REPORT_NAME.exec(e.name)?.[1])
-    .filter((d): d is string => Boolean(d))
+    .filter((d): d is string => Boolean(d) && d !== skipDay)
     .sort();
   const last = days[days.length - 1];
   const floor = now.getTime() - MAX_LOOKBACK_MS;

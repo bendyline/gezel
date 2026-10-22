@@ -81,6 +81,17 @@ export const ProjectConnectorBindingSchema = z.object({
   cursor: z.unknown().optional(),
   /** Pause syncing without unbinding. */
   disabled: z.boolean().optional(),
+  /**
+   * Why a device binding is paused. `emergency-stop` is set by the panic
+   * stop and cleared only by the person resuming that camera.
+   */
+  disabledReason: z.enum(['user', 'emergency-stop']).optional(),
+  /**
+   * The type's driver, stamped at bind time so loops can tell a device
+   * binding (kept running by the live host) from a synced one without a
+   * catalog read. Absent on bindings created before device connectors.
+   */
+  driver: z.enum(['mcp', 'script', 'spectral', 'native', 'device']).optional(),
   lastSyncedAt: z.string().optional(),
   /** Last sync error, surfaced in the UI; cleared on the next success. */
   lastError: z.string().optional(),
@@ -535,6 +546,27 @@ export function projectAllowsAmbientWork(project: {
   // (automatic via the task lifecycle vs. a deliberate user choice) —
   // for the scheduler's purposes they're all "don't nudge."
   return status === 'active';
+}
+
+/**
+ * True when a project's device connectors (cameras) may run and its lookouts
+ * may act. Deliberately wider than {@link projectAllowsAmbientWork}: the task
+ * lifecycle sets `stable` on its own once the last task finishes, and a
+ * camera that went deaf because a craftbook run completed would be a bug.
+ * Only a person's explicit choice (readonly, inactive, archived) stops it.
+ */
+export function projectAcceptsLiveWork(project: {
+  status?: 'active' | 'readonly' | 'inactive' | 'stable';
+  archived?: boolean;
+}): boolean {
+  if (project.archived) return false;
+  const status = project.status ?? 'active';
+  return status === 'active' || status === 'stable';
+}
+
+/** True when a binding drives local hardware rather than syncing a source. */
+export function isDeviceConnectorBinding(binding: { driver?: string }): boolean {
+  return binding.driver === 'device';
 }
 
 /**

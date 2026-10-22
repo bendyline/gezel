@@ -260,6 +260,31 @@ describe('issue selection', () => {
     expect(updated.map((u) => u.ref)).toEqual(['BW-3', 'BW-2', 'BW-4', 'BW-1']);
   });
 
+  it('fixes confirmed issues first and doubted ones after the unjudged', async () => {
+    const person = { kind: 'person' as const };
+    issues = [
+      issue('BW-1', { severity: 'major', latestVerdict: { kind: 'unsure', by: person, at: 'x' } }),
+      issue('BW-2', { severity: 'major' }),
+      issue('BW-3', {
+        severity: 'minor',
+        latestVerdict: { kind: 'confirmed', by: person, at: 'x' },
+      }),
+    ];
+    await planProjectNightFixes(makeDeps(), projectId);
+    expect(updated.map((u) => u.ref)).toEqual(['BW-3', 'BW-2', 'BW-1']);
+  });
+
+  it('leaves an issue an outside app is checking until its lease runs out', async () => {
+    const later = new Date(Date.now() + 3_600_000).toISOString();
+    const earlier = new Date(Date.now() - 1_000).toISOString();
+    issues = [
+      issue('BW-1', { handoff: { client: 'claude-code', until: later } }),
+      issue('BW-2', { handoff: { client: 'claude-code', until: earlier } }),
+    ];
+    await planProjectNightFixes(makeDeps(), projectId);
+    expect(updated.map((u) => u.ref)).toEqual(['BW-2']);
+  });
+
   it('caps the night and reports what it deferred rather than truncating silently', async () => {
     issues = Array.from({ length: MAX_ISSUES_PER_NIGHT + 5 }, (_, i) => issue(`BW-${i + 1}`));
     const result = await planProjectNightFixes(makeDeps(), projectId);

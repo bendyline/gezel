@@ -53,6 +53,7 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     // The desktop's default is off, so the daemon answers resolved.
     social: resolveSocialMode(config, 'desktop'),
     notifications: config.notifications,
+    lookouts: config.lookouts,
     narrateAssistantReplies: config.narrateAssistantReplies === true,
     narrateProgressUpdates: config.narrateProgressUpdates !== false,
     aiEngagementMode: config.aiEngagementMode ?? 'proactive',

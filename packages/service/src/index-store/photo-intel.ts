@@ -158,24 +158,7 @@ export function photoGroups(
     };
   }
   if (req.by === 'event') {
-    const dated = ctx.rows
-      .filter((r) => r.taken_at && r.screenshot !== '1')
-      .sort((a, b) => (a.taken_at! < b.taken_at! ? -1 : 1));
-    const events: PhotoRow[][] = [];
-    let current: PhotoRow[] = [];
-    let last = Number.NEGATIVE_INFINITY;
-    for (const row of dated) {
-      const t = Date.parse(`${row.taken_at!}Z`);
-      if (current.length > 0 && t - last > EVENT_GAP_MS) {
-        events.push(current);
-        current = [];
-      }
-      current.push(row);
-      last = t;
-    }
-    if (current.length > 0) events.push(current);
-    const groups: PhotoGroup[] = events
-      .filter((e) => e.length >= MIN_EVENT_SIZE)
+    const groups: PhotoGroup[] = photoEvents(ctx.rows)
       .reverse()
       .map((e) => {
         const located = e
@@ -242,6 +225,31 @@ export function photoGroups(
     engine: 'vector',
     ...flags,
   };
+}
+
+/**
+ * The outings in a photo library: dated photos (screenshots aside) split
+ * wherever three hours pass without one, keeping runs of at least
+ * {@link MIN_EVENT_SIZE}. Oldest first, each in capture order.
+ */
+export function photoEvents(rows: readonly PhotoRow[]): PhotoRow[][] {
+  const dated = rows
+    .filter((r) => r.taken_at && r.screenshot !== '1')
+    .sort((a, b) => (a.taken_at! < b.taken_at! ? -1 : 1));
+  const events: PhotoRow[][] = [];
+  let current: PhotoRow[] = [];
+  let last = Number.NEGATIVE_INFINITY;
+  for (const row of dated) {
+    const t = Date.parse(`${row.taken_at!}Z`);
+    if (current.length > 0 && t - last > EVENT_GAP_MS) {
+      events.push(current);
+      current = [];
+    }
+    current.push(row);
+    last = t;
+  }
+  if (current.length > 0) events.push(current);
+  return events.filter((e) => e.length >= MIN_EVENT_SIZE);
 }
 
 /** Photos taken on `monthDay` (`MM-DD`) in years before `currentYear`, newest year first. */

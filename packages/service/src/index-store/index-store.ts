@@ -9,6 +9,7 @@ import { imageEmbedModelId } from '../memory/image-embed-core.js';
 import { reconcileEmbedModel, reconcileImageEmbedModel } from './embed-model-reconcile.js';
 import { FACE_WIPED_AT_META_KEY } from './face/constants.js';
 import { FileEdgeTable } from './file-edge-table.js';
+import { GitHistoryTable } from './git-history-table.js';
 import { HybridFusion, type HybridHit } from './hybrid-fusion.js';
 import type {
   ChunkInput,
@@ -209,6 +210,13 @@ export class IndexStore {
   get fileEdges(): FileEdgeTable {
     this.edgeTable ??= new FileEdgeTable(this.db, this.collectionId);
     return this.edgeTable;
+  }
+
+  private historyTable?: GitHistoryTable;
+  /** The workspace's git history (`git_commits`), for the Timeline view. */
+  get gitHistory(): GitHistoryTable {
+    this.historyTable ??= new GitHistoryTable(this.db, this.collectionId);
+    return this.historyTable;
   }
 
   get vecAvailable(): boolean {
@@ -467,6 +475,17 @@ export class IndexStore {
         signature: r.signature,
         ...(r.parent ? { parent: r.parent } : {}),
       }));
+  }
+
+  /** Each markdown document's first top-level heading, in one query (path → heading). */
+  firstHeadings(): Map<string, string> {
+    const rows = this.db
+      .prepare(
+        `SELECT file_path, name, MIN(line_start) AS line FROM symbols
+          WHERE collection_id = ? AND kind = 'h1' GROUP BY file_path`,
+      )
+      .all<{ file_path: string; name: string }>(this.collectionId);
+    return new Map(rows.map((r) => [r.file_path, r.name]));
   }
 
   /** Every symbol in the collection, ordered by file then line — bulk read for
@@ -1647,17 +1666,20 @@ export class IndexStore {
   currentFileReviewIssues(): CurrentFileReviewIssues[] {
     return this.db
       .prepare(
-        `SELECT f.path, f.hash AS content_hash, r.issues
+        `SELECT f.path, f.hash AS content_hash, r.issues, r.model
          FROM files f
          JOIN file_reviews r ON r.content_hash = f.hash
          WHERE f.collection_id = ? AND f.hash IS NOT NULL AND r.notes_md IS NOT NULL
          ORDER BY f.path`,
       )
-      .all<{ path: string; content_hash: string; issues: string | null }>(this.collectionId)
+      .all<{ path: string; content_hash: string; issues: string | null; model: string | null }>(
+        this.collectionId,
+      )
       .map((row) => ({
         path: row.path,
         contentHash: row.content_hash,
         issues: parseIssuesJson(row.issues),
+        ...(row.model ? { model: row.model } : {}),
       }));
   }
 
@@ -1669,17 +1691,21 @@ export class IndexStore {
   currentFileReviewIssuesForPath(path: string): CurrentFileReviewIssues[] {
     return this.db
       .prepare(
-        `SELECT f.path, f.hash AS content_hash, r.issues
+        `SELECT f.path, f.hash AS content_hash, r.issues, r.model
          FROM files f
          JOIN file_reviews r ON r.content_hash = f.hash
          WHERE f.collection_id = ? AND f.path = ? AND f.hash IS NOT NULL
            AND r.notes_md IS NOT NULL`,
       )
-      .all<{ path: string; content_hash: string; issues: string | null }>(this.collectionId, path)
+      .all<{ path: string; content_hash: string; issues: string | null; model: string | null }>(
+        this.collectionId,
+        path,
+      )
       .map((row) => ({
         path: row.path,
         contentHash: row.content_hash,
         issues: parseIssuesJson(row.issues),
+        ...(row.model ? { model: row.model } : {}),
       }));
   }
 

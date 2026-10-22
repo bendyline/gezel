@@ -143,3 +143,42 @@ describe('image recognition from a session', () => {
     expect((await app.request('/api/recognition/cache/clear', post({}))).status).toBe(403);
   });
 });
+
+describe('cameras and lookouts are the person’s', () => {
+  // A prompt-injected gezel must never arm a camera, read its live view, or
+  // change what a lookout does; it reads event records and proposes.
+  const denied: Array<[string, RequestInit]> = [
+    [`/api/projects/${PROJECT}/connectors/bind`, post({ type: 'camera-local' })],
+    [`/api/projects/${PROJECT}/connectors/cam1/sync`, post({})],
+    [`/api/projects/${PROJECT}/connectors/cam1`, { method: 'PATCH', body: '{}' }],
+    [`/api/projects/${PROJECT}/connectors/cam1`, { method: 'DELETE' }],
+    [`/api/projects/${PROJECT}/connectors/cam1/preview`, { method: 'GET' }],
+    [`/api/projects/${PROJECT}/connectors/cam1/captures`, { method: 'GET' }],
+    [`/api/projects/${PROJECT}/connectors/cam1/captures/file?path=x`, { method: 'GET' }],
+    [`/api/projects/${PROJECT}/lookouts`, post({})],
+    [`/api/projects/${PROJECT}/lookouts/lk1`, { method: 'PUT', body: '{}' }],
+    [`/api/projects/${PROJECT}/lookouts/lk1/approve`, post({})],
+    [`/api/projects/${PROJECT}/lookouts/lk1/test`, post({})],
+  ];
+  for (const team of [false, true]) {
+    for (const [path, init] of denied) {
+      it(`${team ? 'coordinator' : 'worker'}: ${init.method} ${path}`, async () => {
+        expect((await stack(team).request(path, init)).status).toBe(403);
+      });
+    }
+  }
+
+  it('still lets a worker draft and commit connector actions, list lookouts, and propose one', async () => {
+    const app = stack(false);
+    expect(
+      (await app.request(`/api/projects/${PROJECT}/connectors/mail1/actions`, post({}))).status,
+    ).toBe(200);
+    expect(
+      (await app.request(`/api/projects/${PROJECT}/connectors/actions/d1/commit`, post({}))).status,
+    ).toBe(200);
+    expect((await app.request(`/api/projects/${PROJECT}/lookouts`)).status).toBe(200);
+    expect(
+      (await app.request(`/api/projects/${PROJECT}/lookouts/proposals`, post({}))).status,
+    ).toBe(200);
+  });
+});

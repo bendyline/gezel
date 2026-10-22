@@ -112,6 +112,25 @@ CREATE TABLE IF NOT EXISTS file_edges (
 );
 CREATE INDEX IF NOT EXISTS idx_file_edges_dst ON file_edges (collection_id, dst_path);
 
+-- The workspace's git history, for the Timeline view: each commit's time and
+-- subject (never its author), and the indexed files it touched. Replaced
+-- wholesale by the git-stats ingest, which reads the same capped log.
+CREATE TABLE IF NOT EXISTS git_commits (
+  collection_id TEXT NOT NULL,
+  sha TEXT NOT NULL,
+  committed_at INTEGER NOT NULL,
+  subject TEXT NOT NULL,
+  PRIMARY KEY (collection_id, sha)
+);
+CREATE INDEX IF NOT EXISTS idx_git_commits_at ON git_commits (collection_id, committed_at);
+CREATE TABLE IF NOT EXISTS git_commit_files (
+  collection_id TEXT NOT NULL,
+  sha TEXT NOT NULL,
+  path TEXT NOT NULL,
+  PRIMARY KEY (collection_id, sha, path)
+);
+CREATE INDEX IF NOT EXISTS idx_git_commit_files_path ON git_commit_files (collection_id, path);
+
 -- Persisted, stable city-map layout. Districts (folders) and blocks (files)
 -- keep their coordinates build-over-build so the map stays familiar; buildings
 -- (symbols) are derived on the fly and not stored. removed_at tombstones a
@@ -496,7 +515,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_history
 // v15: imports.flags (re-export / type-only / dynamic) and file_edges, the
 // resolved dependency graph as a stored artifact. Additive; the first static
 // pass after the upgrade fills file_edges.
-const SCHEMA_VERSION = 15;
+// v16: git_commits and git_commit_files, the history the Timeline view reads.
+// Additive; the next git-stats ingest fills them.
+const SCHEMA_VERSION = 16;
 
 /**
  * Add a column to an existing table if it isn't already present. SQLite has no

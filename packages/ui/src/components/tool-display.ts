@@ -224,6 +224,9 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   draft_post: 'Draft a post',
   queue_post: 'Queue a post',
   publish_post: 'Publish a post',
+  look_at_camera: 'Look at the camera',
+  list_lookouts: 'Check lookouts',
+  propose_lookout: 'Propose a lookout',
   draft_connector_action: 'Draft an action',
 
   // GitHub

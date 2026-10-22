@@ -2129,7 +2129,8 @@ describe('ProjectsView', () => {
     render(<ProjectsView forceProjectId="pj-alpha" />);
     await screen.findByTestId('project-chat');
 
-    expect(screen.getByRole('tab', { name: 'Village view' })).toBeInTheDocument();
+    // The tab shows; a writing project opens it on its default view, the Gallery.
+    expect(screen.getByRole('tab', { name: 'Gallery view' })).toBeInTheDocument();
   });
 
   it('names the Views tab after its view and lists it as Views in Settings', async () => {

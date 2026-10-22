@@ -179,8 +179,13 @@ import type {
   FireReportActionResponse,
   FixBoekwachterIssueRequest,
   FixBoekwachterIssueResponse,
+  GalleryRequest,
+  GalleryResponse,
+  GalleryShelfRequest,
+  GalleryShelfResponse,
   GenerateGezelAboutRequest,
   GenerateGezelIconRequest,
+  GenerateProjectReportResponse,
   GetBoekwachterIssueRequest,
   GetBoekwachterIssueResponse,
   GetScriptSourceResponse,
@@ -337,6 +342,7 @@ import type {
   ProjectCompletionResponse,
   ProjectFolderPreviewResponse,
   ProjectIndexOverview,
+  ProjectReportsResponse,
   ProjectResponse,
   ProjectSearchRequest,
   ProjectSearchResponse,
@@ -443,6 +449,10 @@ import type {
   TaskOutputsResponse,
   TaskStatus,
   TerminalThread,
+  TimelineBucketRequest,
+  TimelineBucketResponse,
+  TimelineRequest,
+  TimelineResponse,
   ToolsetsScope,
   TraceTaintRequest,
   TraceTaintResponse,
@@ -485,6 +495,7 @@ import type {
   WorkspaceIndexFilesDetailResponse,
   WorkspaceIndexStatus,
   WorkspaceSkillIndex,
+  WritableReportKind,
   WritePromptDraftContentResponse,
 } from '@bendyline/gezel';
 import { type ChatEvent, KnowledgeInstallEventSchema, parseTaskRef } from '@bendyline/gezel';
@@ -532,6 +543,7 @@ import type {
   FolderScope,
   FoldersStatusResponse,
 } from './folders.js';
+import { IssueTriageClient } from './issue-triage.js';
 import type { LlamaCppInstalledModel } from './llama-cpp-model.js';
 import type { MlxInstallEvent, MlxInstalledModel, MlxRuntimeInfo } from './mlx-model.js';
 import { OfficeIntegrationsClient } from './office-integrations.js';
@@ -1281,6 +1293,7 @@ export class GezelClient {
   readonly taskInputs: TaskInputsClient;
   readonly officeIntegrations: OfficeIntegrationsClient;
   readonly retrieval: RetrievalClient;
+  readonly issueTriage: IssueTriageClient;
 
   constructor(opts: GezelClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '');
@@ -1295,6 +1308,7 @@ export class GezelClient {
     const json = <T>(m: string, p: string, b?: unknown) => this.request<T>(m, p, b);
     this.officeIntegrations = new OfficeIntegrationsClient(json);
     this.retrieval = new RetrievalClient(json);
+    this.issueTriage = new IssueTriageClient(json);
   }
 
   private async request<T>(
@@ -5246,6 +5260,14 @@ export class GezelClient {
       lastSyncedAt?: string;
       lastError?: string;
       disabled?: boolean;
+      /** Why a device binding is paused (`emergency-stop` needs the person to resume it). */
+      disabledReason?: 'user' | 'emergency-stop';
+      /** `device` for a binding the live host runs (a camera). */
+      driver?: string;
+      /** A device binding's settings (synced types omit theirs). */
+      config?: Record<string, unknown>;
+      /** A device binding's live status. */
+      live?: import('@bendyline/gezel').LiveBindingStatus;
       /** Rate-limit backoff expiry (ISO); autonomous sync skips until then. */
       backoffUntil?: string;
       /**
@@ -5292,11 +5314,234 @@ export class GezelClient {
     );
   }
 
-  /** Remove a binding + its stored credential. */
-  unbindConnector(id: string, bindingId: string): Promise<void> {
+  /**
+   * Remove a binding + its stored credential. A camera's saved pictures go
+   * with it unless `keepPictures` is set.
+   */
+  unbindConnector(id: string, bindingId: string, opts?: { keepPictures?: boolean }): Promise<void> {
     return this.request(
       'DELETE',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}${opts?.keepPictures ? '?keepPictures=1' : ''}`,
+    );
+  }
+
+  /** Rename, reconfigure, pause, or resume a binding. */
+  patchConnector(
+    id: string,
+    bindingId: string,
+    patch: { displayName?: string; config?: Record<string, unknown>; disabled?: boolean },
+  ): Promise<{ ok: boolean; binding: { id: string; type: string } }> {
+    return this.request(
+      'PATCH',
       `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}`,
+      patch,
+    );
+  }
+
+  // ── Cameras ─────────────────────────────────────────────────────────────
+
+  /** The cameras this computer has. `refresh` re-checks for ffmpeg first. */
+  listCameraDevices(opts?: { refresh?: boolean }): Promise<
+    import('@bendyline/gezel').CameraDiscoveryResponse
+  > {
+    return this.request('GET', `/api/devices/cameras${opts?.refresh ? '?refresh=1' : ''}`);
+  }
+
+  /** Every camera that is watching right now, across projects. */
+  listWatchingCameras(): Promise<{
+    cameras: Array<{ projectId: string; bindingId: string; name: string }>;
+  }> {
+    return this.request('GET', '/api/devices/cameras/watching');
+  }
+
+  /** One test picture from a camera, for the setup panel. */
+  async probeCamera(device: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await this.fetchImpl(`${this.baseUrl}/api/devices/cameras/probe`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device }),
+      ...(signal ? { signal } : {}),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new GezelApiError(body.error ?? `camera test failed: ${res.status}`, res.status);
+    }
+    return res.blob();
+  }
+
+  /** A running camera's newest picture (never written to disk). */
+  fetchCameraPreview(id: string, bindingId: string, signal?: AbortSignal): Promise<Blob> {
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/preview`,
+      'camera preview failed',
+      signal,
+    );
+  }
+
+  /** A camera's saved pictures, oldest first; one day's when `date` is given. */
+  listCameraCaptures(
+    id: string,
+    bindingId: string,
+    date?: string,
+  ): Promise<{ captures: import('@bendyline/gezel').CameraCapture[]; totalBytes: number }> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/captures${date ? `?date=${encodeURIComponent(date)}` : ''}`,
+    );
+  }
+
+  fetchCameraCapture(
+    id: string,
+    bindingId: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/captures/file?path=${encodeURIComponent(path)}`,
+      'camera picture fetch failed',
+      signal,
+    );
+  }
+
+  /** Delete every picture a camera saved. */
+  clearCameraCaptures(id: string, bindingId: string): Promise<void> {
+    return this.request(
+      'DELETE',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/captures`,
+    );
+  }
+
+  // ── Lookouts ────────────────────────────────────────────────────────────
+
+  listLookouts(id: string): Promise<import('@bendyline/gezel').LookoutListResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/lookouts`);
+  }
+
+  createLookout(
+    id: string,
+    input: import('@bendyline/gezel').LookoutInput,
+  ): Promise<{ lookout: import('@bendyline/gezel').Lookout }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/lookouts`, input);
+  }
+
+  updateLookout(
+    id: string,
+    lookoutId: string,
+    patch: import('@bendyline/gezel').LookoutUpdate,
+  ): Promise<{ lookout: import('@bendyline/gezel').Lookout }> {
+    return this.request(
+      'PUT',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/${encodeURIComponent(lookoutId)}`,
+      patch,
+    );
+  }
+
+  deleteLookout(id: string, lookoutId: string): Promise<void> {
+    return this.request(
+      'DELETE',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/${encodeURIComponent(lookoutId)}`,
+    );
+  }
+
+  /** Approve a gezel's proposed lookout: it becomes the person's and starts. */
+  approveLookout(
+    id: string,
+    lookoutId: string,
+  ): Promise<{ lookout: import('@bendyline/gezel').Lookout }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/${encodeURIComponent(lookoutId)}/approve`,
+      {},
+    );
+  }
+
+  /** Rehearse a lookout's actions now (AI actions report what they would do). */
+  testLookout(
+    id: string,
+    lookoutId: string,
+  ): Promise<{ firing: import('@bendyline/gezel').LookoutFiring }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/${encodeURIComponent(lookoutId)}/test`,
+      {},
+    );
+  }
+
+  /** Snooze for `minutes`, or clear the snooze with null. */
+  snoozeLookout(
+    id: string,
+    lookoutId: string,
+    minutes: number | null,
+  ): Promise<{ lookout: import('@bendyline/gezel').Lookout }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/${encodeURIComponent(lookoutId)}/snooze`,
+      { minutes },
+    );
+  }
+
+  /** Mark a firing a false alarm (or clear the mark). */
+  lookoutFeedback(id: string, firingId: string, feedback: 'false-alarm' | null): Promise<void> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/firings/${encodeURIComponent(firingId)}/feedback`,
+      { feedback },
+    );
+  }
+
+  /**
+   * A gezel proposes a lookout; it waits, disabled, for the person to approve
+   * it. The daemon resolves the camera by name or id and maps the simple
+   * action words (`notify`, `chime`, `alarm`, `whistle`, `phone`).
+   */
+  proposeLookout(
+    id: string,
+    input: {
+      name: string;
+      camera?: string;
+      question?: string;
+      actions?: Array<'notify' | 'chime' | 'alarm' | 'whistle' | 'phone'>;
+      follow_up?: string;
+    },
+  ): Promise<{ lookout: import('@bendyline/gezel').Lookout }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/proposals`,
+      input,
+    );
+  }
+
+  /**
+   * The newest frame from a watching camera: the picture when this caller
+   * may see it, otherwise a description made on this computer.
+   */
+  lookAtCamera(
+    id: string,
+    camera?: string,
+  ): Promise<{
+    camera: string;
+    at: string;
+    image?: { mimeType: string; base64: string };
+    description?: string;
+    note?: string;
+  }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/cameras/look`, {
+      ...(camera ? { camera } : {}),
+    });
+  }
+
+  /** Stop any sound a lookout is playing. */
+  stopLookoutSounds(): Promise<{ stopped: number }> {
+    return this.request('POST', '/api/lookouts/stop-sound', {});
+  }
+
+  /** Alerts fired since `since` (default: the last five minutes). */
+  recentLookoutAlerts(since?: string): Promise<{
+    alerts: Array<Extract<ChatEvent, { type: 'lookout_fired' }>>;
+  }> {
+    return this.request(
+      'GET',
+      `/api/lookouts/recent-alerts${since ? `?since=${encodeURIComponent(since)}` : ''}`,
     );
   }
 
@@ -6362,6 +6607,21 @@ export class GezelClient {
     return res.summary;
   }
 
+  /** The project's reports, newest first, and which ones Gezel can write for it now. */
+  listProjectReports(id: string): Promise<ProjectReportsResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/reports`);
+  }
+
+  /** Write one model-free report now, replacing today's. */
+  generateProjectReport(
+    id: string,
+    kind: WritableReportKind,
+  ): Promise<GenerateProjectReportResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/reports/generate`, {
+      kind,
+    });
+  }
+
   /** The project's dependency graph, for a Views diagram. */
   getFileGraph(id: string, req: FileGraphRequest = {}): Promise<FileGraphResponse> {
     const query = new URLSearchParams();
@@ -6373,6 +6633,54 @@ export class GezelClient {
       'GET',
       `/api/projects/${encodeURIComponent(id)}/index/graph${qs ? `?${qs}` : ''}`,
     );
+  }
+
+  /** The project's files as shelves, for the Gallery view. */
+  getGallery(id: string, req: GalleryRequest = {}): Promise<GalleryResponse> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/index/gallery${queryString(req)}`,
+    );
+  }
+
+  /** The next page of one gallery shelf; null when the shelf no longer exists. */
+  async getGalleryShelf(
+    id: string,
+    req: GalleryShelfRequest,
+  ): Promise<GalleryShelfResponse | null> {
+    try {
+      return await this.request<GalleryShelfResponse>(
+        'GET',
+        `/api/projects/${encodeURIComponent(id)}/index/gallery/shelf${queryString(req)}`,
+      );
+    } catch (error) {
+      if (error instanceof GezelApiError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  /** What changed when in the project, for the Timeline view. */
+  getTimeline(id: string, req: TimelineRequest = {}): Promise<TimelineResponse> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/index/timeline${queryString(req)}`,
+    );
+  }
+
+  /** The commits and files in one stretch of the timeline; null before the first scan. */
+  async getTimelineBucket(
+    id: string,
+    req: TimelineBucketRequest,
+  ): Promise<TimelineBucketResponse | null> {
+    try {
+      return await this.request<TimelineBucketResponse>(
+        'GET',
+        `/api/projects/${encodeURIComponent(id)}/index/timeline/bucket${queryString(req)}`,
+      );
+    } catch (error) {
+      if (error instanceof GezelApiError && error.status === 404) return null;
+      throw error;
+    }
   }
 
   /** Everything the index knows about one file; null when the file is not indexed. */
@@ -8336,6 +8644,16 @@ export class GezelClient {
   ): ReturnType<GezelClient['gitHubLogout']> {
     return this.gitHubLogout(...args);
   }
+}
+
+/** `?a=1&b=2` from a request's defined fields; empty when it has none. */
+function queryString(req: object): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(req)) {
+    if (value !== undefined && value !== '') query.set(key, String(value));
+  }
+  const qs = query.toString();
+  return qs ? `?${qs}` : '';
 }
 
 function toolsetsQueryString(scope: ToolsetsScope): string {

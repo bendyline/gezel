@@ -22,6 +22,8 @@ export const HARNESS_TOOL_NAMES = [
   'describe_image',
   'generate_image',
   'gezel_status',
+  'list_issues',
+  'report_issue_verdicts',
 ] as const;
 export type HarnessToolName = (typeof HARNESS_TOOL_NAMES)[number];
 
@@ -128,5 +130,15 @@ export const HARNESS_TOOL_DESCRIPTIONS: Record<HarnessToolName, string> = {
   gezel_status: [
     'Show which Gezel project this folder belongs to, how far Gezel has indexed it, which knowledge catalogs are installed, and whether saving memories and making images are allowed.',
     'Call it when a Gezel tool says something is unavailable, or the person asks what Gezel knows.',
+  ].join(' '),
+  list_issues: [
+    "List suspected problems Gezel's overnight reviewer found in this folder (codes like BW-17), grouped by file with absolute paths and lines.",
+    'They are leads from a smaller model, often wrong: check each against the code before believing it. Report what you find with `report_issue_verdicts`.',
+    'Pass `severity`, `pathPrefix` or `limit` to narrow the batch; info-level leads are left out unless `includeInfo` is true.',
+  ].join(' '),
+  report_issue_verdicts: [
+    'Tell Gezel what you concluded about issues from `list_issues`, in batches of up to 25: fixed, confirmed (real, not fixed), not_a_bug (with reason incorrect, handled_elsewhere or intended), nit (true but not worth fixing), wont_fix, duplicate (with duplicateOf) or unsure.',
+    'Give each a short note with your evidence, ideally a file:line or a test. Gezel closes or keeps each issue accordingly and learns which leads to stop raising.',
+    'Only report issues you actually checked.',
   ].join(' '),
 };

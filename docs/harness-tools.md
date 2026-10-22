@@ -11,6 +11,7 @@ the Handboek's [Connected apps](handboek/conceptual/connected-apps.md).
 | Piece | Where |
 |---|---|
 | Tool profile and descriptions | [core tools/harness-profile.ts](../packages/core/src/tools/harness-profile.ts) |
+| Prompts (`triage_issues`, `fix_issues`) | [core tools/harness-prompts.ts](../packages/core/src/tools/harness-prompts.ts), registered in [mcp harness/issues.ts](../packages/mcp/src/harness/issues.ts) |
 | Schemas (clients, config, connect, setup status) | [core schemas/harness-tools.ts](../packages/core/src/schemas/harness-tools.ts) |
 | Harness entry (`gezel-mcp --harness`, `dist/harness.js`) | [mcp src/harness/](../packages/mcp/src/harness/) |
 | Owner-credential exchange | [service http/routes/harness-connect.ts](../packages/service/src/http/routes/harness-connect.ts) |
@@ -58,6 +59,8 @@ Deny by default, on `/api/*` and `/events/*`:
 | `POST /api/memory/save` | scope `project`, the bound id, memory `save` |
 | `GET /api/documents`, `/search`, `/read` | no `projects/` path, no `?project=` |
 | `GET /api/knowledge/catalogs`, `…/:id/(document\|passage)` | — |
+| `POST /api/projects/<bound>/tools/issue-handoff` | bound project only; issues not `off`; the issues handed over are leased to the app for two hours |
+| `POST /api/projects/<bound>/tools/issue-verdicts` | bound project only; issues `triage`; no `by` in the body; at most 25 per call and 400 an hour per app and project |
 
 **Sink rules for a harness caller:**
 - **image-gen:**
@@ -67,6 +70,7 @@ Deny by default, on `/api/*` and `/events/*`:
 - **memory save:** stamped `{app:<client>}`, and the request's own `source` is ignored.
 - **photo locations:** withheld (`callerMaySeeLocation`).
 - **search:** no craftbook hints.
+- **issue verdicts:** recorded as `{kind:'app', client}` from the token. An app may not judge an issue a task is working on, and may never import a handoff document (`/issue-verdicts/import` is first-party only). See [issue-triage.md](issue-triage.md).
 
 ## What `search` returns
 
@@ -122,6 +126,7 @@ is optional and lenient:
 | `memory` | `off` · `read` · `save` | `save` |
 | `images` | `off` · `local` · `any` | `local` |
 | `newFolders` | `add` · `existing` | `add` |
+| `issues` | `off` · `read` · `triage` | `triage` |
 | `blocked` | `[{ client, projectId }]` (`none` for unbound) | `[]` |
 
 Changing any of them through `PUT /api/harness-tools/config` revokes every
@@ -167,6 +172,19 @@ Desktop has no folder and gets none. The Claude Code wording, naming
 `mcp__gezel__search`, is the one tested; the others name the `gezel` server,
 because each app spells MCP tool names its own way. Gezel shows the line; it
 never writes it into the person's folder.
+
+## Prompts: working through the night shift's issues
+
+The server also offers two MCP prompts, `triage_issues` and `fix_issues`
+([harness-prompts.ts](../packages/core/src/tools/harness-prompts.ts)). A person
+runs one in their app (`/mcp__gezel__triage_issues` in Claude Code,
+`/mcp.gezel.triage_issues` in VS Code; `harnessPromptInvocation` names the
+command where it is known), and the prompt arrives with the next batch of BW
+issues already in it. Nothing is written into the folder or the app's
+settings, and the text updates with Gezel. Because the person runs it, it
+needs no line in CLAUDE.md to get used. Settings → Integrations and
+`gezel mcp install` show the command once an app is set up. The full contract
+is in [issue-triage.md](issue-triage.md).
 
 ## Adding a tool to the profile
 

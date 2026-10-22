@@ -2,7 +2,8 @@
  * Earned notifications: the one policy every host runs. A notification is
  * earned by something durable that happened — a question a gezel asked,
  * work the person asked for that finished, a level reached, the night's
- * review, or a reminder a project's own script computed from its state.
+ * review, a reminder a project's own script computed from its state, or a
+ * lookout the person set up that saw what it was told to watch for.
  * Nothing here can fire on the clock alone. Hosts own delivery (Electron's
  * `Notification`, the phone's local notifications); this module decides
  * what is worth saying, folds what arrives together into one, and holds the
@@ -30,7 +31,7 @@ export const REMINDER_HORIZON_DAYS = 7;
 const SEEN_LIMIT = 200;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export type EarnedKind = 'question' | 'ready' | 'level-up' | 'morning' | 'reminder';
+export type EarnedKind = 'question' | 'ready' | 'level-up' | 'morning' | 'reminder' | 'lookout';
 
 export interface EarnedItem {
   /** Identity of the thing it is about, so a replay never notifies twice. */
@@ -164,6 +165,43 @@ export function earnedItemFor(envelope: ChatEventEnvelope, ctx: EarnedContext): 
     };
   }
   return null;
+}
+
+/**
+ * The alert a lookout firing earns, or null when the lookout has no notify
+ * action. Lookout alerts are the one kind that is not grouped and does not
+ * spend the daily allowance: the person asked to be told the moment it
+ * happens, and each lookout's own cooldown and daily limit bound how often
+ * that can be. Still earned — a stored sighting and a yes, never the clock.
+ */
+export function lookoutAlertItem(envelope: ChatEventEnvelope): EarnedItem | null {
+  const event = envelope.event;
+  if (event.type !== 'lookout_fired' || !event.alert) return null;
+  return {
+    key: `lookout:${event.firingId}`,
+    kind: 'lookout',
+    title: event.alert.title,
+    body: event.alert.body,
+    line: event.alert.title,
+    view: 'projects',
+  };
+}
+
+/**
+ * Decide whether a lookout alert reaches the person now: once per firing,
+ * outside the daily allowance (`sent` is left alone).
+ */
+export function admitLookoutAlert(
+  ledger: NotificationLedger | undefined,
+  item: EarnedItem,
+  now: Date,
+): { ledger: NotificationLedger; notification: EarnedNotification | null } {
+  const current = today(ledger, now);
+  if (current.seen.includes(item.key)) return { ledger: current, notification: null };
+  return {
+    ledger: { ...current, seen: remember(current.seen, [item.key]) },
+    notification: { title: item.title, body: item.body, view: item.view, kinds: ['lookout'] },
+  };
 }
 
 /** The notification a due reminder becomes. */

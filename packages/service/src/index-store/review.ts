@@ -1,4 +1,4 @@
-import { FileReviewReplySchema } from '@bendyline/gezel';
+import { FileReviewReplySchema, createLogger } from '@bendyline/gezel';
 import type { FileReviewIssue, FileReviewReply } from '@bendyline/gezel';
 import {
   CompletionBlockedError,
@@ -6,6 +6,11 @@ import {
   completionBudgetChars,
   runLargeContentCompletion,
 } from '../chat/large-content.js';
+import {
+  type PriorVerdict,
+  priorVerdictsInWindow,
+  renderPriorVerdicts,
+} from '../issue-triage/prior-verdicts.js';
 import {
   type EnrichDeps,
   type ResolvedEnrichCompletion,
@@ -17,6 +22,8 @@ import type { FileRecord } from './index-store-types.js';
 import type { IndexStore } from './index-store.js';
 import { isSpuriousTruncationClaim } from './review-claims.js';
 import type { ResolvedRubric } from './rubrics.js';
+
+const log = createLogger('index');
 
 /**
  * The boekwachter review pass: type-specific cliffs notes, a structured issue
@@ -102,6 +109,8 @@ export function buildReviewPrompt(
   opts: {
     inviteDiagram?: boolean;
     window?: Pick<ContentWindow, 'index' | 'count' | 'lineStart' | 'lineEnd' | 'totalLines'>;
+    /** Leads on this file already judged not worth reporting. */
+    priorVerdicts?: readonly PriorVerdict[];
   } = {},
 ): { prompt: string; lineStart: number; shownLines: number } {
   const lineStart = opts.window?.lineStart ?? 1;
@@ -140,6 +149,7 @@ export function buildReviewPrompt(
     '- "line" refers to the numbered lines below.',
     `${kindRules}${diagram}`,
     '',
+    ...(opts.priorVerdicts?.length ? [renderPriorVerdicts(opts.priorVerdicts), ''] : []),
     `File: ${file.path}`,
     `${numbered}${continuation}`,
   ].join('\n');
@@ -291,6 +301,18 @@ export async function reviewFile(
 
   const inviteDiagram =
     file.kind === 'code' && ((file.loc ?? 0) >= 60 || store.symbolsForFile(file.path).length >= 5);
+  // A review row is shared by every copy of the same content, so a note about
+  // one path must not shape the review another path reads.
+  const priors =
+    deps.priorVerdicts && store.pathsWithHash(file.hash).length <= 1
+      ? deps.priorVerdicts(file)
+      : [];
+  if (priors.length > 0) {
+    log.info(
+      `[review] ${file.path}: told the reviewer about ${priors.map((p) => p.ref).join(', ')}`,
+    );
+  }
+  const priorChars = renderPriorVerdicts(priors).length;
   const complete = deps.review;
   const completions: Array<ResolvedEnrichCompletion | undefined> = [];
   let run: Awaited<ReturnType<typeof runLargeContentCompletion>>;
@@ -313,11 +335,12 @@ export async function reviewFile(
         buildReviewPrompt(file, window.text, rubric, {
           inviteDiagram,
           ...(window.count > 1 ? { window } : {}),
+          ...(priors.length > 0 ? { priorVerdicts: priorVerdictsInWindow(priors, window) } : {}),
         }).prompt,
       {
         budgetChars: Math.max(
           MIN_WINDOW_CHARS,
-          completionBudgetChars(deps.provenance?.provider) - REVIEW_SCAFFOLD_CHARS,
+          completionBudgetChars(deps.provenance?.provider) - REVIEW_SCAFFOLD_CHARS - priorChars,
         ),
         maxWindows: reviewMaxWindows(),
         overlapLines: REVIEW_WINDOW_OVERLAP_LINES,

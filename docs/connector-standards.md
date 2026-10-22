@@ -181,7 +181,21 @@ already advanced past it — so a gezel write here would be silent permanent los
 residual gap: script-dispatch artifact mutations bypass the model-facing artifact write
 route; closing that fully is a sandbox/fs-policy conversation, not a connector one. A gezel
 can also technically write into `_sent/` (receipt spoofing) — receipts are informational;
-the commit itself is server-side.
+the commit itself is server-side. Binary writes and deletes from a gezel follow the same
+rule (a camera's keyframes are a corpus too).
+
+### 1.8 Device connectors keep raw samples out of the corpus
+
+A `device` connector ([device-connectors.md](./device-connectors.md)) produces samples far
+faster than one record per sample can carry: a camera at one frame a second would overrun
+the 3-digit ordinal, rewrite `_flags.json` on every frame, and swamp the artifacts index.
+So raw samples (saved camera frames) go to the project's private sidecar
+(`projectCapturesDir`), never under `artifacts/`, and only what *happened* becomes a record:
+one document per episode under `<corpus>/events/YYYY-MM-DD/HH/`, through the ordinary
+writer, with a handful of attachments. Hourly folders keep ordinals small; a per-hour cap
+and a retention sweep keep the index walk bounded. A camera's pictures stay on the
+computer: sessions on a cloud model receive a local description of a keyframe, not its
+pixels, unless the person allowed cloud AI for that camera.
 
 ## 2. The adapter contract
 
@@ -270,6 +284,7 @@ set `rateLimited` — documented limitation.
 | `script` | No server, but a REST API or CLI you can drive from a sandboxed SDK script. | You write and maintain the fetch loop and its pagination. |
 | `spectral` | No server, and a Prismatic component covers the source. | A pinned third-party SDK in the sync host. |
 | `native` | A cornerstone corpus the user lives in, whose fidelity resists declarative expression. | Bespoke service code, forever. |
+| `device` | Local hardware (a webcam) that must run continuously rather than sync. | A live adapter under the device host; never enters the sync loop. See [device-connectors.md](./device-connectors.md). |
 
 The decision rule from [connectors.md](./connectors.md) stands: **own the sources users live
 in, rent the long tail.** Reach for `native` when a source needs real parsing (MIME,
@@ -408,7 +423,9 @@ Never traded away, for any driver:
    `gezel.http.authed` by *name*), not into the model's context.
 5. **Ingest-bound MCP servers stay off the model's tool surface.**
 6. **Autonomous sync rides `allowExternalServices`.** Lockdown stops the loop. A
-   user-initiated sync is a separate route with its own gate.
+   user-initiated sync is a separate route with its own gate. Device connectors are not
+   synced: a local device runs at any security level, a network device needs
+   `allowConnectorData`, and only the person binds, pauses, or edits one.
 
 ## 8. Testing a connector
 

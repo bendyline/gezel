@@ -14,6 +14,7 @@ import {
 import { CompletionBlockedError } from '../chat/large-content.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
+import type { PriorVerdict } from '../issue-triage/prior-verdicts.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
 import { shadowDocFilesPaths } from './docs.js';
 import { type EnrichOutcome, classifyEnrichFailure } from './enrich-breaker.js';
@@ -76,6 +77,11 @@ export interface EnrichDeps {
    * reports 1 until its first call spins it up.
    */
   oneShotWidth?: () => number;
+  /**
+   * Leads on a file someone already judged not worth reporting, for the
+   * review prompt. Absent when the project has none.
+   */
+  priorVerdicts?: (file: FileRecord) => readonly PriorVerdict[];
 }
 
 /**

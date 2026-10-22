@@ -169,6 +169,7 @@ export * from './api/completions.js';
 export * from './api/file-map.js';
 export * from './api/project-views.js';
 export * from './api/git.js';
+export * from './api/issue-triage.js';
 export * from './api/security-intel.js';
 
 /**
@@ -1039,6 +1040,12 @@ export const GezelConfigSchema = z.object({
    * `core/notifications`.
    */
   notifications: NotificationsConfigSchema.optional(),
+  /**
+   * Lookouts ("keep a lookout for X, then do Y"). `paused` holds every
+   * lookout's actions on the install without changing any of them; cameras
+   * keep watching and recording. See docs/lookouts.md.
+   */
+  lookouts: z.object({ paused: z.boolean().optional() }).optional(),
   /**
    * When true, the chat UI calls `/api/audio/synthesize` for each
    * completed assistant message and plays the resulting WAV using the

@@ -487,6 +487,11 @@ export function projectBoekwachterIssuesFile(root: string, projectId: string): s
   return join(projectPrivateDir(root, projectId), 'boekwachter-issues.json');
 }
 
+/** Append-only verdicts on BW issues: their history and the calibration data. Account-private. */
+export function projectBoekwachterVerdictsFile(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'boekwachter-verdicts.jsonl');
+}
+
 /** Durable per-project code-review records for this account. */
 export function projectCodeReviewsFile(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'code-reviews.json');
@@ -505,6 +510,26 @@ export function projectReportActionsFile(root: string, projectId: string): strin
 /** The project's one reminder, set by its own scripts. Account-private. */
 export function projectReminderFile(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'reminder.json');
+}
+
+/** The person's lookouts ("keep a lookout for X, then do Y"). Account-private. */
+export function projectLookoutsFile(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'lookouts.json');
+}
+
+/** Lookout counters and the recent-firings log, written only by the daemon. */
+export function projectLookoutStateFile(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'lookout-state.json');
+}
+
+/**
+ * Pictures a camera binding saved, `<corpus>/YYYY-MM-DD/HH/HHMMSS-mmm.jpg`.
+ * Account-private and outside artifacts on purpose: artifacts can live in a
+ * cloud-synced folder or a machine-shared project, and camera frames never
+ * leave this computer. Only an episode's few keyframes enter the corpus.
+ */
+export function projectCapturesDir(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'captures');
 }
 
 /** Per-project documents folder — holds about.md, missionObjectives.md, etc. */

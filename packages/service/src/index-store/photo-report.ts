@@ -1,4 +1,5 @@
 import {
+  FOLDER_KIND_PROPERTY,
   type OnThisDayResponse,
   type PhotoGroupsResponse,
   type ProjectIndexOverview,
@@ -8,7 +9,7 @@ import {
 const log = createLogger('index');
 
 /** A folder with fewer photos than this is not a photo library. */
-const MIN_PHOTOS = 20;
+export const MIN_PHOTOS = 20;
 /** Outings from this many days back make the report. */
 const RECENT_EVENT_DAYS = 45;
 const MAX_EVENTS = 6;
@@ -17,6 +18,7 @@ export interface PhotoReportDeps {
   store: {
     readProjectArtifact(id: string, path: string): Promise<string | null>;
     writeProjectArtifact(id: string, path: string, content: string): Promise<unknown>;
+    getProject?(id: string): Promise<{ properties?: Record<string, string> } | null>;
   };
   contentIndex: {
     overview(projectId: string): Promise<ProjectIndexOverview | null>;
@@ -43,11 +45,19 @@ export async function writeNightlyPhotoReport(
   now: Date,
   /** The night's day key, so one night files one report whichever side of midnight it lands. */
   day = localDay(now),
+  /** Replace the day's report instead of keeping it: a person asked for one now. */
+  opts: { force?: boolean } = {},
 ): Promise<string | null> {
   const path = `reports/photos-${day}.md`;
-  if ((await deps.store.readProjectArtifact(projectId, path).catch(() => null)) !== null) {
+  if (
+    !opts.force &&
+    (await deps.store.readProjectArtifact(projectId, path).catch(() => null)) !== null
+  ) {
     return null;
   }
+  // A codebase's icons and screenshots are not a photo library.
+  const project = await deps.store.getProject?.(projectId).catch(() => null);
+  if (project?.properties?.[FOLDER_KIND_PROPERTY] === 'code') return null;
   const overview = await deps.contentIndex.overview(projectId);
   const photos = overview?.byModality.image ?? 0;
   if (!overview || photos < MIN_PHOTOS) return null;

@@ -31,8 +31,8 @@ search and run files themselves. What they lack is what only Gezel has:
 ## Decision
 
 **A separate, small entry point.** `gezel-mcp --harness <client>` runs
-`dist/harness.js`, which never imports the in-app server. It registers nine
-tools (`HARNESS_TOOL_NAMES` in core) with descriptions written for an app
+`dist/harness.js`, which never imports the in-app server. It registers the
+tools in `HARNESS_TOOL_NAMES` in core (nine at first; [0027](0027-issue-triage.md) added two for issues) with descriptions written for an app
 that has its own file tools. Every path it returns is absolute. The bare
 command keeps its old, owner-credential behavior for compatibility.
 

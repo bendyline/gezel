@@ -564,3 +564,124 @@ describe('the tools', () => {
     expect(outside.isError).toBe(true);
   });
 });
+
+describe("the night shift's issues", () => {
+  const batch = {
+    files: [
+      {
+        path: 'src/save.ts',
+        issues: [
+          {
+            ref: 'BW-4',
+            severity: 'major',
+            category: 'bug',
+            message: 'The loop stops one item early.',
+            line: 12,
+            stale: false,
+          },
+          {
+            ref: 'BW-9',
+            severity: 'minor',
+            category: 'smell',
+            message: 'A long function.',
+            line: 40,
+            stale: true,
+          },
+        ],
+      },
+    ],
+    count: 2,
+    remaining: 7,
+    firstBatch: true,
+    indexed: true,
+  };
+
+  function withIssues(fake: Fake) {
+    fake.routes.set('POST /api/projects/repo/tools/issue-handoff', () => batch);
+    fake.routes.set('POST /api/projects/repo/tools/issue-verdicts', () => ({
+      results: [
+        { ref: 'BW-4', outcome: 'applied', message: 'BW-4 is now open.' },
+        { ref: 'BW-9', outcome: 'refused', message: 'BW-9 is being worked on in task repo/3.' },
+      ],
+      applied: 1,
+      refused: 1,
+    }));
+    return fake;
+  }
+
+  it('lists issues with absolute paths and says which lines moved', async () => {
+    const fake = withIssues(fakeGezel(() => connectResponse({ issues: 'triage' })));
+    const client = await harness(fake);
+    const out = textOf(await client.callTool({ name: 'list_issues', arguments: { limit: 5 } }));
+    expect(out).toContain(join(folder, 'src/save.ts'));
+    expect(out).toContain('BW-4 · major · bug · line 12: The loop stops one item early.');
+    expect(out).toContain('was line 40; the file changed since the review');
+    expect(out).toContain('7 more waiting');
+    expect(fake.requests.at(-1)).toMatchObject({ auth: 'Bearer HARNESS', body: { limit: 5 } });
+  });
+
+  it('reports verdicts in the daemon shape and repeats what was refused', async () => {
+    const fake = withIssues(fakeGezel(() => connectResponse({ issues: 'triage' })));
+    const client = await harness(fake);
+    const out = textOf(
+      await client.callTool({
+        name: 'report_issue_verdicts',
+        arguments: {
+          verdicts: [
+            { ref: 'BW-4', verdict: 'confirmed', note: 'Reproduced with three rows.' },
+            { ref: 'BW-9', verdict: 'nit', note: 'True but harmless.', reason: 'intended' },
+          ],
+        },
+      }),
+    );
+    expect(out).toContain('Gezel recorded 1 verdict; 1 refused.');
+    expect(out).toContain('BW-9: BW-9 is being worked on in task repo/3.');
+    expect(fake.requests.at(-1)?.body).toEqual({
+      verdicts: [
+        { ref: 'BW-4', kind: 'confirmed', note: 'Reproduced with three rows.' },
+        { ref: 'BW-9', kind: 'nit', note: 'True but harmless.' },
+      ],
+    });
+  });
+
+  it('says so when the person turned verdicts or issues off', async () => {
+    const read = await harness(withIssues(fakeGezel(() => connectResponse({ issues: 'read' }))));
+    const refused = await read.callTool({
+      name: 'report_issue_verdicts',
+      arguments: { verdicts: [{ ref: 'BW-4', verdict: 'fixed', note: 'Fixed the bound.' }] },
+    });
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).toContain('Reporting verdicts is turned off');
+
+    const off = await harness(withIssues(fakeGezel(() => connectResponse({ issues: 'off' }))));
+    const listed = await off.callTool({ name: 'list_issues', arguments: {} });
+    expect(listed.isError).toBe(true);
+  });
+
+  it('asks for an update when the daemon predates issue triage', async () => {
+    const client = await harness(withIssues(fakeGezel(() => connectResponse())));
+    const res = await client.callTool({ name: 'list_issues', arguments: {} });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain('Update Gezel');
+  });
+
+  it('serves the triage and fix prompts with the batch embedded', async () => {
+    const fake = withIssues(fakeGezel(() => connectResponse({ issues: 'triage' })));
+    const client = await harness(fake);
+    const { prompts } = await client.listPrompts();
+    expect(prompts.map((p) => p.name).sort()).toEqual(['fix_issues', 'triage_issues']);
+
+    const triage = await client.getPrompt({ name: 'triage_issues', arguments: { count: '3' } });
+    const text = (triage.messages[0]?.content as { text: string }).text;
+    expect(text).toContain("Don't change any code");
+    expect(text).toContain('nit, not not_a_bug');
+    expect(text).toContain('BW-4 · major · bug · line 12');
+    expect(fake.requests.at(-1)?.body).toEqual({ limit: 3 });
+
+    const fix = await client.getPrompt({ name: 'fix_issues', arguments: {} });
+    expect((fix.messages[0]?.content as { text: string }).text).toContain(
+      'Fix what is real and small',
+    );
+    expect(fake.requests.at(-1)?.body).toEqual({ limit: 5, mode: 'fix' });
+  });
+});

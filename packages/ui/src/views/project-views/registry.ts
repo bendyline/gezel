@@ -22,6 +22,34 @@ export const PROJECT_VIEWS: readonly ProjectViewDefinition[] = [
     icon: 'guide',
     load: () => import('./guide/index.js'),
   },
+  {
+    id: 'diagram',
+    label: 'Diagram',
+    hint: 'Files as boxes, and arrows for what each one uses',
+    icon: 'diagram',
+    load: () => import('./diagram/index.js'),
+  },
+  {
+    id: 'reports',
+    label: 'Reports',
+    hint: 'What Gezel has written about this project, read in place',
+    icon: 'reports',
+    load: () => import('./reports/index.js'),
+  },
+  {
+    id: 'gallery',
+    label: 'Gallery',
+    hint: 'Your files as shelves to browse, by type, folder or outing',
+    icon: 'gallery',
+    load: () => import('./gallery/index.js'),
+  },
+  {
+    id: 'timeline',
+    label: 'Timeline',
+    hint: 'What changed when, week by week',
+    icon: 'timeline',
+    load: () => import('./timeline/index.js'),
+  },
 ];
 
 /** The ids this build offers, for core's availability rules. */

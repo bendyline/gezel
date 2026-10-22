@@ -1,5 +1,6 @@
 import type {
   HarnessImageMode,
+  HarnessIssueMode,
   HarnessMemoryMode,
   HarnessNewFolderMode,
   HarnessToolsConfigUpdate,
@@ -24,6 +25,12 @@ const IMAGES: ReadonlyArray<Choice<HarnessImageMode>> = [
   { value: 'off', label: 'Off' },
   { value: 'local', label: 'On this computer' },
   { value: 'any', label: 'Any image engine' },
+];
+
+const ISSUES: ReadonlyArray<Choice<HarnessIssueMode>> = [
+  { value: 'off', label: 'Off' },
+  { value: 'read', label: 'List them' },
+  { value: 'triage', label: 'List and judge them' },
 ];
 
 const NEW_FOLDERS: ReadonlyArray<Choice<HarnessNewFolderMode>> = [
@@ -97,9 +104,9 @@ export function HarnessToolsOverview({ tools }: { tools: HarnessTools }) {
       <h3>Gezel's tools in other apps</h3>
       <p className="muted small">
         Claude Code, Claude Desktop, Codex, Cursor and VS Code can search your projects, documents
-        and knowledge, read Office files, describe and make images, and remember things through
-        Gezel. Each one works with the project for the folder it was started in. Set one up on its
-        own tab.
+        and knowledge, read Office files, describe and make images, remember things, and check the
+        issues Gezel found overnight. Each one works with the project for the folder it was started
+        in. Set one up on its own tab.
       </p>
 
       {status?.unavailableReason && (
@@ -137,6 +144,20 @@ export function HarnessToolsOverview({ tools }: { tools: HarnessTools }) {
             value={config.images}
             disabled={!config.enabled || saving}
             onChange={(images) => save({ images })}
+          />
+          <Tray
+            label="Issues"
+            hint={
+              config.issues === 'triage'
+                ? 'Apps can work through the suspected problems the night shift found and tell Gezel which are real. Each verdict shows which app gave it, and you can reopen any issue.'
+                : config.issues === 'read'
+                  ? "Apps can see the night shift's issues but not close or confirm them."
+                  : 'Apps never see the issues the night shift found.'
+            }
+            choices={ISSUES}
+            value={config.issues}
+            disabled={!config.enabled || saving}
+            onChange={(issues) => save({ issues })}
           />
           <Tray
             label="New folders"

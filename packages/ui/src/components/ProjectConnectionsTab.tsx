@@ -12,6 +12,13 @@ import {
   initialConnectorConfig,
 } from './ConnectorConfigFields.js';
 import { OAuthAppSetup, type RegisteredOAuthClient } from './OAuthAppSetup.js';
+import { CameraBindingCard } from './cameras/CameraBindingCard.js';
+import {
+  type CameraForm,
+  CameraSetupPanel,
+  DEFAULT_CAMERA_FORM,
+  cameraConfigFromForm,
+} from './cameras/CameraSetupPanel.js';
 import { connectOAuth } from './connector-link.js';
 import { isOAuthNotConfiguredError, parseOAuthAppRequirement } from './oauth-app-setup.js';
 
@@ -36,6 +43,8 @@ interface ConnManifest extends ConnectorFormManifest {
   };
   completeness?: string;
   tags?: string[];
+  /** `device` for connectors that drive local hardware (cameras). */
+  driver?: string;
 }
 
 interface ConnectorOption extends ConnManifest {
@@ -45,6 +54,7 @@ interface ConnectorOption extends ConnManifest {
 
 function connectorGlyph(connector: ConnManifest): ProjectGlyphId {
   const identity = `${connector.id} ${(connector.tags ?? []).join(' ')}`.toLowerCase();
+  if (/(camera|webcam)/.test(identity)) return 'camera';
   if (identity.includes('wiki')) return 'sheet';
   if (identity.includes('calendar')) return 'calendar';
   if (/(mail|gmail|imap|email)/.test(identity)) return 'envelope';
@@ -55,6 +65,7 @@ function connectorGlyph(connector: ConnManifest): ProjectGlyphId {
 }
 
 function connectorCredentialLabel(connector: ConnManifest): string {
+  if (connector.driver === 'device') return 'On this computer';
   const kind = connector.secretShape?.kind;
   if (kind === 'oauth2') return 'OAuth';
   if (kind === 'imap') return 'Mail login';
@@ -97,6 +108,7 @@ function TableStats({ tables }: { tables: NonNullable<ConnBinding['tables']> }) 
 }
 
 function connectorCoverageLabel(connector: ConnManifest): string {
+  if (connector.driver === 'device') return 'Live';
   return connector.completeness === 'window' ? 'Recent window' : 'Full mirror';
 }
 
@@ -132,6 +144,7 @@ export function ProjectConnectionsTab({
   const [imapHost, setImapHost] = useState('');
   const [imapPort, setImapPort] = useState('');
   const [imapSecure, setImapSecure] = useState(true);
+  const [cameraForm, setCameraForm] = useState<CameraForm>(DEFAULT_CAMERA_FORM);
   // Bring-your-own OAuth apps registered on this install, keyed by the
   // manifest's `clientIdEnv` name. The daemon may additionally hold env-var
   // overrides the UI can't see, so an absent key never blocks Connect —
@@ -204,6 +217,7 @@ export function ProjectConnectionsTab({
     setImapHost('');
     setImapPort('');
     setImapSecure(true);
+    setCameraForm(DEFAULT_CAMERA_FORM);
     setOauthSetupNudge(0);
   }, []);
 
@@ -319,6 +333,34 @@ export function ProjectConnectionsTab({
     if (!selected) return;
     setError('');
     setNotice('');
+    // A camera has its own panel and starts watching on its own: there is
+    // nothing to sync.
+    if (selected.driver === 'device') {
+      if (!cameraForm.device) {
+        setError('Pick a camera first.');
+        return;
+      }
+      setBusy('add');
+      try {
+        await api.bindConnector(project.id, {
+          type: selected.id,
+          ...(cameraForm.displayName.trim()
+            ? { displayName: cameraForm.displayName.trim() }
+            : cameraForm.deviceName
+              ? { displayName: cameraForm.deviceName }
+              : {}),
+          config: cameraConfigFromForm(cameraForm),
+        });
+        setNotice('Camera added. It starts watching in a moment.');
+        closeAdd();
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(null);
+      }
+      return;
+    }
     const built = buildConfig();
     const kind = selected.secretShape?.kind;
     const missingConfig = (selected.configSchema?.required ?? []).find((key) => {
@@ -411,6 +453,7 @@ export function ProjectConnectionsTab({
     onProjectChange,
     oauthRequirement,
     handleSync,
+    cameraForm,
   ]);
 
   /**
@@ -481,43 +524,54 @@ export function ProjectConnectionsTab({
         </p>
       ) : (
         <ul className="settings-list">
-          {bindings.map((b) => (
-            <li key={b.id}>
-              <div>
-                <strong>{b.displayName || b.type}</strong>
-                <span className="muted small"> · {b.type}</span>
-                <div className="small">
-                  {b.lastError ? (
-                    <span className="error">Error: {b.lastError}</span>
-                  ) : b.lastSyncedAt ? (
-                    <span className="muted" title={formatAbsoluteTime(b.lastSyncedAt)}>
-                      Last synced {formatRelativeTime(b.lastSyncedAt)}
-                    </span>
-                  ) : (
-                    <span className="muted">Not synced yet</span>
-                  )}
+          {bindings.map((b) =>
+            b.driver === 'device' ? (
+              <li key={b.id} className="camera-card-item">
+                <CameraBindingCard
+                  projectId={project.id}
+                  binding={b}
+                  onChanged={() => void refresh()}
+                  onRemove={(id) => setConfirmUnbind(id)}
+                />
+              </li>
+            ) : (
+              <li key={b.id}>
+                <div>
+                  <strong>{b.displayName || b.type}</strong>
+                  <span className="muted small"> · {b.type}</span>
+                  <div className="small">
+                    {b.lastError ? (
+                      <span className="error">Error: {b.lastError}</span>
+                    ) : b.lastSyncedAt ? (
+                      <span className="muted" title={formatAbsoluteTime(b.lastSyncedAt)}>
+                        Last synced {formatRelativeTime(b.lastSyncedAt)}
+                      </span>
+                    ) : (
+                      <span className="muted">Not synced yet</span>
+                    )}
+                  </div>
+                  {b.tables && b.tables.length > 0 ? <TableStats tables={b.tables} /> : null}
                 </div>
-                {b.tables && b.tables.length > 0 ? <TableStats tables={b.tables} /> : null}
-              </div>
-              <div className="gz-mail-link-actions">
-                <button
-                  type="button"
-                  onClick={() => void handleSync(b.id)}
-                  disabled={busy === b.id}
-                >
-                  {busy === b.id ? 'Working…' : 'Sync now'}
-                </button>
-                <button
-                  type="button"
-                  className="danger"
-                  onClick={() => setConfirmUnbind(b.id)}
-                  disabled={busy === b.id}
-                >
-                  Remove
-                </button>
-              </div>
-            </li>
-          ))}
+                <div className="gz-mail-link-actions">
+                  <button
+                    type="button"
+                    onClick={() => void handleSync(b.id)}
+                    disabled={busy === b.id}
+                  >
+                    {busy === b.id ? 'Working…' : 'Sync now'}
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => setConfirmUnbind(b.id)}
+                    disabled={busy === b.id}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </li>
+            ),
+          )}
         </ul>
       )}
 
@@ -635,23 +689,37 @@ export function ProjectConnectionsTab({
                 </div>
               </div>
 
-              <ConnectorConfigFields
-                connector={selected}
-                config={config}
-                onConfigChange={(key, value) =>
-                  setConfig((current) => ({ ...current, [key]: value }))
-                }
-                displayName={displayName}
-                onDisplayNameChange={setDisplayName}
-                credential={credential}
-                onCredentialChange={setCredential}
-                imapHost={imapHost}
-                onImapHostChange={setImapHost}
-                imapPort={imapPort}
-                onImapPortChange={setImapPort}
-                imapSecure={imapSecure}
-                onImapSecureChange={setImapSecure}
-              />
+              {selected.driver === 'device' ? (
+                <>
+                  {selected.setupInstructions ? (
+                    <aside className="gz-connector-setup-instructions">
+                      <strong>{selected.setupInstructions.title}</strong>
+                      {selected.setupInstructions.description ? (
+                        <p>{selected.setupInstructions.description}</p>
+                      ) : null}
+                    </aside>
+                  ) : null}
+                  <CameraSetupPanel form={cameraForm} onChange={setCameraForm} />
+                </>
+              ) : (
+                <ConnectorConfigFields
+                  connector={selected}
+                  config={config}
+                  onConfigChange={(key, value) =>
+                    setConfig((current) => ({ ...current, [key]: value }))
+                  }
+                  displayName={displayName}
+                  onDisplayNameChange={setDisplayName}
+                  credential={credential}
+                  onCredentialChange={setCredential}
+                  imapHost={imapHost}
+                  onImapHostChange={setImapHost}
+                  imapPort={imapPort}
+                  onImapPortChange={setImapPort}
+                  imapSecure={imapSecure}
+                  onImapSecureChange={setImapSecure}
+                />
+              )}
 
               {oauthRequirement && (
                 <OAuthAppSetup
@@ -690,7 +758,11 @@ export function ProjectConnectionsTab({
       <ConfirmDialog
         open={confirmUnbind !== null}
         title="Remove connector?"
-        message="This removes the binding and its stored credential. Synced files stay on disk."
+        message={
+          bindings.find((b) => b.id === confirmUnbind)?.driver === 'device'
+            ? 'This stops the camera and deletes the pictures it saved on this computer. The moments it recorded stay in the project.'
+            : 'This removes the binding and its stored credential. Synced files stay on disk.'
+        }
         confirmLabel="Remove"
         danger
         onConfirm={() => {

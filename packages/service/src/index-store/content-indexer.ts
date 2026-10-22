@@ -15,6 +15,7 @@ import {
   shadowDocFilesPaths,
 } from './docs.js';
 import { refreshFileEdges } from './edges/refresh.js';
+import { evalIndexAllowlist } from './eval-index-allowlist.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { sha256, sha256File } from './hash.js';
 import { exifFromHeifItem, readHeifHeader, readImageStaticMeta } from './image-meta.js';
@@ -159,7 +160,9 @@ export async function indexWorkspaceContent(
     // document already in the listing) and whatever a cloud-sync client
     // leaves behind. Indexing either produces a second, worse hit for the
     // same document.
-    ...(opts.scope === 'library' ? { ignorePath: isLibraryInternalPath } : {}),
+    ...(opts.scope === 'library'
+      ? { ignorePath: isLibraryInternalPath }
+      : evalIndexAllowlist(workspaceDir)),
   });
   // Newest first: a pass stopped part-way (window end, a big first scan)
   // has covered the photos and documents the person touched last.

@@ -27,6 +27,7 @@ The rest of this page is about other apps using your gezels and models. This par
 - **Describe** an image on this computer, or read the text in it.
 - **Make an image** with the image engine you chose in Gezel.
 - **Remember** a decision or a preference, so Gezel and every other app see it later.
+- **Check the issues** Gezel's night shift found: say which are real, and fix them if you ask.
 
 Set an app up on its own tab: **Gezel's tools in Claude Code**, and so on. Gezel adds a server called `gezel` to that app's own settings and changes nothing else there. Claude Code and Codex are set up through their own commands; when Gezel cannot find the command, the tab shows the line to run yourself. If you use the Gezel extension for VS Code, it adds the tools to each workspace on its own.
 
@@ -39,6 +40,9 @@ Set an app up on its own tab: **Gezel's tools in Claude Code**, and so on. Gezel
 - **Let other apps use Gezel's tools** turns all of it off or on.
 - **Memory**: *Off*, *Read*, or *Save to the project*. A saved memory goes to the project the app is working in, labeled with the app's name, and every gezel in that project sees it. Apps never save to your own "About you" memories.
 - **Images**: *Off*, *On this computer* (the default), or *Any image engine*. With *Any image engine* an app can use a cloud engine you set up, which may charge for each image without asking you first. Images are saved in Gezel; the app copies one into its folder when it needs it there.
+- **Issues**: *Off*, *List them*, or *List and judge them* (the default). See below.
+
+**Checking the night shift's issues.** Overnight, a small model on this computer reads your code and flags things that look wrong. Many of them aren't, and a stronger model like the one in Claude Code is good at telling which. Once Claude Code is set up, run `/mcp__gezel__triage_issues` in a folder Gezel knows (add a number for how many), or `/mcp__gezel__fix_issues` to have it fix the real ones too; in VS Code it's `/mcp.gezel.triage_issues`. The app reads the code at each issue and tells Gezel what it found: fixed, real, not a bug, true but not worth fixing, and so on. Each issue then shows the answer and which app gave it, and you can reopen any of them. Gezel also learns from the answers: a lead judged not a bug stops coming back the next night in different words. For an app without Gezel's tools, open **Reports → Issues for review**, copy or save the list, let the app fill in the answer under each issue, and use **Import answers**.
 
 The same section lists the apps using Gezel's tools right now and the folder each is working in. **Stop for this folder** stops that app there until you turn it back on. Under the strictest security level, Super Lockdown, no app can use Gezel's tools: Gezel cannot see whether an outside app's model runs on this computer.
 

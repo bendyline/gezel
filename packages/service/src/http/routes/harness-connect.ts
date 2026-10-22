@@ -97,6 +97,7 @@ export function harnessConnectRoutes(ctx: ServiceContext): Hono {
         artifactsDir: ctx.store.projectArtifactsDir(projectId ?? HARNESS_UNBOUND_SEARCH_PROJECT),
         memory: config.memory,
         images: config.images,
+        issues: config.issues,
       };
       return c.json(response);
     },

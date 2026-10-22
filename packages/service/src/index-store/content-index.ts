@@ -17,6 +17,11 @@ import type {
   FindEntityResponse,
   FindSimilarImagesResponse,
   FindSymbolResponse,
+  FolderKind,
+  GalleryRequest,
+  GalleryResponse,
+  GalleryShelfRequest,
+  GalleryShelfResponse,
   ImageRegion,
   ListDependenciesResponse,
   ListEntityMentionsResponse,
@@ -43,6 +48,10 @@ import type {
   SecurityFindingWire,
   SecurityOverviewResponse,
   SecurityScanResponse,
+  TimelineBucketRequest,
+  TimelineBucketResponse,
+  TimelineRequest,
+  TimelineResponse,
   TraceTaintResponse,
 } from '@bendyline/gezel';
 import {
@@ -66,6 +75,7 @@ import { buildFileMap } from '../filemap/build.js';
 import { VillageFileStore } from '../filemap/village-file.js';
 import type { Store } from '../fs/store.js';
 import { gitIgnoredPaths } from '../git/ignore.js';
+import { withPriorVerdicts } from '../issue-triage/prior-verdicts.js';
 import type { MediaEmbedJob, MediaEmbedOutcome } from '../memory/image-embed-core.js';
 import type {
   FaceDetectOutcome,
@@ -113,6 +123,7 @@ import { clusterNewFaces, mergeFaceClusters, syncPersonEntities } from './face/c
 import { buildFileContext } from './file-context.js';
 import { buildFileGraph } from './file-graph.js';
 import { buildFileInsight } from './file-insight.js';
+import { type GalleryContext, buildGallery, buildGalleryShelf, emptyGallery } from './gallery.js';
 import { refreshGitStats } from './git-stats.js';
 import {
   type SearchImagesOpts,
@@ -148,6 +159,7 @@ import {
 import { isTransientIndexError } from './sqlite-driver.js';
 import { runStaticIndex } from './static-index-runner.js';
 import { extractCodeSymbols, extractMarkdownOutline, isCodeLangSupported } from './symbols.js';
+import { buildTimeline, buildTimelineBucket, emptyTimeline } from './timeline.js';
 
 /**
  * Service-side façade over the per-project content `IndexStore`. Owns nothing
@@ -1711,6 +1723,7 @@ export class ContentIndex {
       let emptySinceSuccess = 0;
       let wedged = false;
       const drain = opts?.drain;
+      const reviewDeps = await withPriorVerdicts(deps, this.store, projectId);
       for (const rubric of resolved.values()) {
         if ((!drain && files >= limit) || wedged) break;
         // Same in-flight/retry guard as enrich: a file is only marked after
@@ -1741,7 +1754,7 @@ export class ContentIndex {
           next,
           opts?.concurrency ?? (() => 1),
           async (file) => {
-            const r = await reviewFile(index, workspaceDir, artifactsDir, file, rubric, deps);
+            const r = await reviewFile(index, workspaceDir, artifactsDir, file, rubric, reviewDeps);
             if (r.reviewed || r.attempted) files++;
             if (r.reviewed) reviewed++;
             if (r.emptyReply) {
@@ -2121,6 +2134,62 @@ export class ContentIndex {
       return buildFileGraph(index, req, { ignoredPaths, packageRoots: manifestRoots(configs) });
     } finally {
       index.close();
+    }
+  }
+
+  /** The Gallery view's shelves (see `gallery.ts`). A pure read. */
+  async gallery(
+    projectId: string,
+    req: GalleryRequest,
+    kind?: FolderKind,
+  ): Promise<GalleryResponse> {
+    const res = await this.readForView(projectId, kind, (index, ctx) =>
+      buildGallery(index, req, ctx),
+    );
+    return res ?? emptyGallery(req);
+  }
+
+  /** The next page of one gallery shelf; null when the index or the shelf is gone. */
+  async galleryShelf(
+    projectId: string,
+    req: GalleryShelfRequest,
+    kind?: FolderKind,
+  ): Promise<GalleryShelfResponse | null> {
+    return this.readForView(projectId, kind, (index, ctx) => buildGalleryShelf(index, req, ctx));
+  }
+
+  /** The Timeline view's buckets (see `timeline.ts`). A pure read. */
+  async timeline(projectId: string, req: TimelineRequest): Promise<TimelineResponse> {
+    const res = await this.readForView(projectId, undefined, (index, ctx) =>
+      buildTimeline(index, req, ctx),
+    );
+    return res ?? emptyTimeline(req);
+  }
+
+  /** What changed in one stretch of the timeline; null before the first scan. */
+  async timelineBucket(
+    projectId: string,
+    req: TimelineBucketRequest,
+  ): Promise<TimelineBucketResponse | null> {
+    return this.readForView(projectId, undefined, (index, ctx) =>
+      buildTimelineBucket(index, req, ctx),
+    );
+  }
+
+  /** Open the index for a view's read, with what Git ignores left out; null without an index. */
+  private async readForView<T>(
+    projectId: string,
+    folderKind: FolderKind | undefined,
+    read: (index: IndexStore, ctx: GalleryContext) => T,
+  ): Promise<T | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    try {
+      const paths = opened.index.allFiles().map((f) => f.path);
+      const ignoredPaths = await gitIgnoredPaths(opened.workspaceDir, paths);
+      return read(opened.index, { ignoredPaths, folderKind });
+    } finally {
+      opened.index.close();
     }
   }
 

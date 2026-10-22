@@ -334,6 +334,12 @@ export const CONDITIONALLY_REGISTERED_TOOLS = {
     envValue: '1',
     modelFacing: true,
   },
+  // Cameras and lookouts — registered only for projects with a camera (the
+  // chat manager sets GEZEL_CAMERAS_ENABLED). What a camera recorded is read
+  // as files; these are what files cannot do.
+  look_at_camera: { envVar: 'GEZEL_CAMERAS_ENABLED', envValue: '1', modelFacing: true },
+  list_lookouts: { envVar: 'GEZEL_CAMERAS_ENABLED', envValue: '1', modelFacing: true },
+  propose_lookout: { envVar: 'GEZEL_CAMERAS_ENABLED', envValue: '1', modelFacing: true },
 } as const;
 
 /**

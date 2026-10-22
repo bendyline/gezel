@@ -356,6 +356,28 @@ async function isSessionRouteAllowed(
     if (/^\/report-actions\/(?:fire|dismiss)\/?$/.test(rest)) {
       return sessionDeny('report actions are fired from a first-party client');
     }
+    // Connecting a source, pausing or editing one, and a camera's live feed
+    // are the person's: a prompt-injected gezel must never bind or arm a
+    // camera, read its pictures past the cloud-model rule, or change what a
+    // lookout does. Gezels draft connector actions, read event records as
+    // files, and propose lookouts for the person to approve.
+    if (
+      (method === 'POST' && /^\/connectors\/(?:bind|oauth\/[^/]+)\/?$/.test(rest)) ||
+      (method === 'POST' && /^\/connectors\/[^/]+\/sync\/?$/.test(rest)) ||
+      ((method === 'PATCH' || method === 'DELETE') &&
+        /^\/connectors\/[^/]+\/?$/.test(rest) &&
+        !/^\/connectors\/actions\//.test(rest)) ||
+      /^\/connectors\/[^/]+\/(?:preview|captures)(?:\/|$)/.test(rest)
+    ) {
+      return sessionDeny('connector setup and camera pictures require a first-party client');
+    }
+    if (
+      /^\/lookouts(?:\/|$)/.test(rest) &&
+      !(method === 'GET' && /^\/lookouts\/?$/.test(rest)) &&
+      !(method === 'POST' && /^\/lookouts\/proposals\/?$/.test(rest))
+    ) {
+      return sessionDeny('lookouts are set up by the person; propose one with propose_lookout');
+    }
     if (rest === '/preview-capability' || rest === '/preview-capability/') {
       return sessionDeny('preview capabilities require a first-party client');
     }

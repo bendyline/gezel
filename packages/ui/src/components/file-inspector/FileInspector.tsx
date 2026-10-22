@@ -27,6 +27,7 @@ import {
   TrackedIssueItem,
   announceBoekwachterIssuesChanged,
   isOpenIssue,
+  sendIssuePatch,
   useIssueActions,
 } from './tracked-issues.js';
 import '../../styles/file-inspector.css';
@@ -393,7 +394,7 @@ export function FileInspector({
 
   const updateIssue = useCallback(
     async (issue: BoekwachterIssue, patch: BoekwachterIssuePatch) => {
-      await api.updateBoekwachterIssue(projectId, { ref: issue.ref, ...patch });
+      await sendIssuePatch(projectId, issue, patch);
       announceBoekwachterIssuesChanged(projectId);
     },
     [projectId],

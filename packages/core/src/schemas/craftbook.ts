@@ -1388,7 +1388,11 @@ export const SuggestCraftbooksResponseSchema = z.object({
 });
 export type SuggestCraftbooksResponse = z.infer<typeof SuggestCraftbooksResponseSchema>;
 
-export const CraftbookResponseSchema = z.object({
+// Preserve the schema reference in declarations instead of expanding the
+// whole craftbook shape again.
+export const CraftbookResponseSchema: z.ZodObject<{
+  craftbook: typeof CraftbookSchema;
+}> = z.object({
   craftbook: CraftbookSchema,
 });
 export type CraftbookResponse = z.infer<typeof CraftbookResponseSchema>;

@@ -76,6 +76,12 @@ export interface ResolveTurnImagesInput {
   limits?: Partial<TurnImageLimits>;
   /** Wraps the recognition pass so the bubble narrates instead of going quiet. */
   onRecognitionPhase?: (state: 'started' | 'ended', detail?: string) => void;
+  /**
+   * Images whose pixels must not reach this provider (a camera's pictures on
+   * a cloud model). They are described by the local reader instead, the
+   * same way a model without vision gets them.
+   */
+  withholdPixels?: (ref: string) => boolean;
 }
 
 export interface ResolveTurnImagesResult {
@@ -131,17 +137,25 @@ export async function resolveTurnImages(
     { mode: input.mode, recognitionAvailable },
   );
 
+  const withheld = input.withholdPixels ? images.filter((i) => input.withholdPixels?.(i.ref)) : [];
+  let nativeAttachments: ImageAttachment[] = [];
   if (plan.verdict === 'native') {
+    const shipped = images.filter((i) => !withheld.includes(i));
     log.info(
-      `attaching ${images.length} image${images.length === 1 ? '' : 's'} natively — ${plan.reason}`,
+      `attaching ${shipped.length} image${shipped.length === 1 ? '' : 's'} natively — ${plan.reason}`,
     );
-    return {
-      attachments: images.map((i) => i.attachment),
-      digests: [],
-      warnings: [],
-      verdict: 'native',
-      reason: plan.reason,
-    };
+    if (withheld.length === 0) {
+      return {
+        attachments: shipped.map((i) => i.attachment),
+        digests: [],
+        warnings: [],
+        verdict: 'native',
+        reason: plan.reason,
+      };
+    }
+    // Camera pictures this provider may not see go through the local reader.
+    nativeAttachments = shipped.map((i) => i.attachment);
+    images = withheld;
   }
 
   // A chat turn is not a batch job. Beyond the cap, the remaining images still
@@ -233,10 +247,21 @@ export async function resolveTurnImages(
     );
   }
 
+  if (withheld.length > 0) {
+    warnings.push(
+      "Camera pictures stay on this computer: this gezel's model was sent a description, not the picture.",
+    );
+  }
   log.info(
     `${plan.verdict} for ${images.length} image${images.length === 1 ? '' : 's'} — ${plan.reason}`,
   );
-  return { attachments: [], digests, warnings, verdict: plan.verdict, reason: plan.reason };
+  return {
+    attachments: nativeAttachments,
+    digests,
+    warnings,
+    verdict: plan.verdict,
+    reason: plan.reason,
+  };
 }
 
 function staticOnly(

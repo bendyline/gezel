@@ -388,6 +388,7 @@ import {
 } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
 import type { RecognitionMode } from '@bendyline/gezel-inference/internal/chat/vision-capability';
 import { nativeVisionEnabledFor } from '@bendyline/gezel-inference/internal/chat/vision-capability';
+import { cameraPixelsWithheld } from '../connectors/live/camera/frame-access.js';
 import { extractReferencedTasks } from '../references/task-references.js';
 import { readTaskWithEffectiveStatus } from '../tasks/effective-status.js';
 import { artifactReadSlices } from './artifact-read-evidence.js';
@@ -7643,12 +7644,19 @@ export class ChatManager extends LocalEngineRuntime {
     let pendingDigests: MessageImageDigest[] = [];
     let pendingImageWarnings: string[] = [];
     try {
+      const turnProject = await this.store.getProject(state.record.projectId).catch(() => null);
       const resolved = await resolveTurnImages({
         store: this.store,
         projectId: state.record.projectId,
         sessionId,
         markdown: userText,
         provider: state.record.providerName,
+        ...(turnProject?.connectors?.some((b) => b.driver === 'device')
+          ? {
+              withholdPixels: (ref: string) =>
+                cameraPixelsWithheld(turnProject, state.record.providerName, ref),
+            }
+          : {}),
         ...(await this.resolveTurnVisionContext(state)),
         ...(this.recognition ? { recognition: this.recognition } : {}),
         mode: await this.resolveRecognitionMode(state),
@@ -16281,6 +16289,10 @@ export class ChatManager extends LocalEngineRuntime {
           : {}),
         // Only projects with bound connectors expose draft_connector_action.
         ...(project?.connectors?.length ? { GEZEL_CONNECTORS_ENABLED: '1' } : {}),
+        // Only projects with a camera expose look_at_camera and the lookout tools.
+        ...(project?.connectors?.some((b) => b.driver === 'device')
+          ? { GEZEL_CAMERAS_ENABLED: '1' }
+          : {}),
         // Same pattern again for the observation-table tools. A project with
         // no tabular corpus would otherwise carry list_tables/describe_table/
         // query_table in every system prompt's tool listing for nothing, and

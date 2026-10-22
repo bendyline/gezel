@@ -17,6 +17,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type {
   ConnectorTypeManifest,
+  LiveBindingStatus,
   ProjectConnectorBinding,
   ProjectDetail,
 } from '@bendyline/gezel';
@@ -662,6 +663,20 @@ export interface ConnectorManagerOptions {
    * Production leaves it unset; tests inject the provider simulator.
    */
   fetch?: typeof fetch;
+  /**
+   * Called after a binding is added, edited, paused, or removed — the live
+   * host reconciles its running devices against disk.
+   */
+  onBindingsChanged?: (projectId: string) => void;
+  /** Live status of a project's device bindings (cameras), merged into `status()`. */
+  liveStatus?: (projectId: string) => LiveBindingStatus[];
+}
+
+export interface PatchConnectorInput {
+  displayName?: string;
+  config?: Record<string, unknown>;
+  /** Pause (true) or resume (false). Resuming clears an emergency stop. */
+  disabled?: boolean;
 }
 
 export interface BindConnectorInput {
@@ -687,6 +702,12 @@ export interface ConnectorStatus {
     lastSyncedAt?: string;
     lastError?: string;
     disabled?: boolean;
+    disabledReason?: 'user' | 'emergency-stop';
+    /** `device` for bindings the live host runs (cameras). */
+    driver?: string;
+    config?: Record<string, unknown>;
+    /** Live status of a device binding. */
+    live?: LiveBindingStatus;
     /** Rate-limit backoff expiry (ISO); autonomous sync skips until then. */
     backoffUntil?: string;
     /**
@@ -821,6 +842,7 @@ export class ConnectorManager {
         version: type.version,
         corpusDir: resolveCorpusDir(existing, input.type, input.displayName),
         config: input.config ?? {},
+        driver: type.driver,
         ...(input.displayName ? { displayName: input.displayName } : {}),
       };
       // A `script` connector's fetch script reaches its credential parent-side
@@ -855,7 +877,101 @@ export class ConnectorManager {
           summary: `Connector bound: ${input.displayName ?? input.type}`,
         })
         .catch(() => {});
+      this.opts.onBindingsChanged?.(project.id);
       return binding;
+    });
+  }
+
+  /**
+   * Rename, reconfigure, pause, or resume a binding. The config is validated
+   * against the type's schema like a new binding's. Resuming always clears
+   * the pause reason, including an emergency stop's: the person pressing
+   * Resume is the consent that stop asked for.
+   */
+  async patchBinding(
+    project: ProjectDetail,
+    bindingId: string,
+    patch: PatchConnectorInput,
+  ): Promise<ProjectConnectorBinding> {
+    const before = (await this.reread(project)).connectors?.find((b) => b.id === bindingId);
+    if (!before) throw new Error(`no connector binding ${bindingId}`);
+    if (patch.config) {
+      const resolved = await this.loadType(
+        before.type,
+        before.version,
+        before.sourceId ?? 'bundled',
+      );
+      const errors = validateConnectorConfig(resolved.manifest.configSchema, patch.config);
+      if (errors.length)
+        throw new Error(`invalid ${before.type} configuration: ${errors.join('; ')}`);
+    }
+    const next = await this.withLock(project.id, async () => {
+      const current = await this.reread(project);
+      const binding = (current.connectors ?? []).find((b) => b.id === bindingId);
+      if (!binding) throw new Error(`no connector binding ${bindingId}`);
+      const updated: ProjectConnectorBinding = { ...binding };
+      if (patch.displayName !== undefined) {
+        const name = patch.displayName.trim();
+        if (name) updated.displayName = name;
+        else delete updated.displayName;
+      }
+      if (patch.config) updated.config = patch.config;
+      if (patch.disabled === true) {
+        updated.disabled = true;
+        updated.disabledReason = 'user';
+      } else if (patch.disabled === false) {
+        delete updated.disabled;
+        delete updated.disabledReason;
+      }
+      await this.opts.store.updateProject(project.id, {
+        connectors: (current.connectors ?? []).map((b) => (b.id === bindingId ? updated : b)),
+      });
+      if (patch.disabled !== undefined && patch.disabled !== Boolean(binding.disabled)) {
+        await this.opts.store.historyManager
+          ?.log({
+            kind: patch.disabled ? 'project.connector.paused' : 'project.connector.resumed',
+            projectId: project.id,
+            summary: `Connector ${patch.disabled ? 'paused' : 'resumed'}: ${binding.displayName ?? binding.type}`,
+          })
+          .catch(() => {});
+      }
+      return updated;
+    });
+    this.opts.onBindingsChanged?.(project.id);
+    return next;
+  }
+
+  /**
+   * The live host's write: a device binding's error line and pause state.
+   * `lastError: null` clears it. Never touches config.
+   */
+  async setDeviceState(
+    projectId: string,
+    bindingId: string,
+    patch: {
+      lastError?: string | null;
+      disabled?: boolean;
+      disabledReason?: 'user' | 'emergency-stop';
+    },
+  ): Promise<void> {
+    await this.withLock(projectId, async () => {
+      const project = await this.opts.store.getProject(projectId);
+      if (!project?.connectors?.some((b) => b.id === bindingId)) return;
+      const connectors = project.connectors.map((b) => {
+        if (b.id !== bindingId) return b;
+        const next: ProjectConnectorBinding = { ...b };
+        if (patch.lastError === null) delete next.lastError;
+        else if (patch.lastError !== undefined) next.lastError = patch.lastError;
+        if (patch.disabled === true) {
+          next.disabled = true;
+          next.disabledReason = patch.disabledReason ?? 'user';
+        } else if (patch.disabled === false) {
+          delete next.disabled;
+          delete next.disabledReason;
+        }
+        return next;
+      });
+      await this.opts.store.updateProject(projectId, { connectors });
     });
   }
 
@@ -1077,6 +1193,7 @@ export class ConnectorManager {
           summary: `Connector unbound: ${binding?.displayName ?? bindingId}`,
         })
         .catch(() => {});
+      this.opts.onBindingsChanged?.(project.id);
     });
   }
 
@@ -1136,12 +1253,14 @@ export class ConnectorManager {
       if (stats.length > 0) tablesByBinding.set(b.id, stats);
     }
 
+    const live = new Map((this.opts.liveStatus?.(project.id) ?? []).map((s) => [s.bindingId, s]));
     return {
       configured: bindings.length > 0,
       bindings: bindings.map((b) => {
         const backoffAt = this.backoffUntil(b.id);
         const completeness = completenessByType.get(b.type);
         const tables = tablesByBinding.get(b.id);
+        const liveStatus = live.get(b.id);
         return {
           id: b.id,
           type: b.type,
@@ -1150,6 +1269,11 @@ export class ConnectorManager {
           ...(b.lastSyncedAt ? { lastSyncedAt: b.lastSyncedAt } : {}),
           ...(b.lastError ? { lastError: b.lastError } : {}),
           ...(b.disabled ? { disabled: b.disabled } : {}),
+          ...(b.disabledReason ? { disabledReason: b.disabledReason } : {}),
+          // A device binding's settings are what its card edits; synced
+          // types keep their config out of the status payload.
+          ...(b.driver === 'device' ? { driver: 'device', config: b.config } : {}),
+          ...(liveStatus ? { live: liveStatus } : {}),
           ...(backoffAt ? { backoffUntil: new Date(backoffAt).toISOString() } : {}),
           ...(tables ? { tables } : {}),
         };
@@ -1172,6 +1296,9 @@ export class ConnectorManager {
       const current = await this.reread(project);
       const binding = (current.connectors ?? []).find((b) => b.id === bindingId);
       if (!binding) throw new Error(`no connector binding ${bindingId}`);
+      if (binding.driver === 'device') {
+        throw new Error('This connection watches a device continuously; there is nothing to sync.');
+      }
       return this.syncBindingInner(current, binding, opts);
     });
   }
@@ -1183,6 +1310,8 @@ export class ConnectorManager {
       const results: BindingSyncResult[] = [];
       for (const binding of current.connectors ?? []) {
         if (binding.disabled) continue;
+        // Device bindings are kept running by the live host, never synced.
+        if (binding.driver === 'device') continue;
         // Rate-limit backoff applies to the autonomous loop; a user-initiated
         // syncBinding deliberately bypasses it.
         if (this.backoffUntil(binding.id)) continue;

@@ -166,7 +166,10 @@ manifest*, so a new source is a JSON file, not a compile. The registry dispatche
   > its uploaded assets are immutable-ish inbound files, not an editable working tree. The native
   > releases adapter mirrors both and can reuse the user's existing GitHub sign-in to see drafts.
 
-All four implement one `ConnectorAdapter`. What gezel provides across all of them is the
+All four implement one `ConnectorAdapter`. A fifth driver, `device`, is not a pass at all:
+local hardware such as a webcam runs continuously under its own host, never enters the sync
+loop, and writes only event records into its corpus — see
+[device-connectors.md](./device-connectors.md). What gezel provides across all of them is the
 part users never want to rebuild per source: the connect UX, credential management, the sync
 host, normalization, and the **fault-tolerance envelope** — retry/backoff (mail's `rateLimited`
 handling), per-binding `lastError` surfacing, timeouts, quarantine of malformed/hostile
@@ -511,6 +514,7 @@ mail" or "my calendar" never needs to know the provider.
 | Social | `x-posts`, `bluesky-posts`, `instagram-media`, `linkedin-posts` | OAuth; Bluesky app password | window | `publish` (`social-publish`) |
 | Code | `github-pulls`, `github-releases`, `github-wiki`; `github-issues` (script) | optional token | window / mirror | — |
 | Data | `azure-monitor-logs`, `airtable-records` (spectral), `http-json-rows`, `linear-issues` | API keys | observation / window | — |
+| Cameras | `camera-local` (`device` driver) | none (local hardware) | window: one event record per episode; raw frames stay in a private folder | — (lookouts act on what it sees; see [lookouts.md](./lookouts.md)) |
 
 One Google Cloud OAuth client serves every Google type and one Entra app registration
 every Microsoft type (the manifests name the same `clientIdEnv`), so a person registers

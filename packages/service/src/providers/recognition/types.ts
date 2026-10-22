@@ -16,6 +16,19 @@ export interface RecognizeInput {
   mode: RecognitionMode;
   /** JSON Schema for `extract` mode, fed to llama-server `response_format`. */
   schema?: unknown;
+  /**
+   * Replaces the mode's fixed prompt. The camera pipeline asks one
+   * structured question per review this way; every other caller keeps the
+   * shared `MODE_PROMPTS`.
+   */
+  prompt?: { system?: string; user: string; maxTokens?: number };
+  /**
+   * `false` skips the result cache and single-flight. Camera frames are
+   * never the same twice, and caching each one would grow the cache forever.
+   */
+  cache?: false;
+  /** Abandons the request (the reply is then `failed`). */
+  signal?: AbortSignal;
   timeoutMsOverride?: number;
 }
 

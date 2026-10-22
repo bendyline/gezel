@@ -83,7 +83,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.113.0",
     "@atproto/api": "0.20.38",
-    "@bendyline/docblocks-cli": "2.7.3",
+    "@bendyline/docblocks-cli": "2.7.5",
     "@bendyline/gezel": "workspace:*",
     "@bendyline/gezel-catalog": "workspace:*",
     "@bendyline/gezel-client": "workspace:*",
@@ -95,7 +95,7 @@
     "@bendyline/gezel-script-stdlib": "workspace:*",
     "@bendyline/gezel-sdk": "workspace:*",
     "@bendyline/squisq": "2.13.0",
-    "@bendyline/squisq-cli": "2.9.11",
+    "@bendyline/squisq-cli": "2.9.12",
     "@bendyline/squisq-formats": "2.8.1",
     "@hono/node-server": "2.0.11",
     "@modelcontextprotocol/sdk": "1.31.0",

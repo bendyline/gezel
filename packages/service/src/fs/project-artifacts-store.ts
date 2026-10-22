@@ -527,6 +527,11 @@ export class ProjectArtifactsStore {
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned) throw new Error('empty artifact path');
     assertNoTemplatePlaceholderPath(cleaned);
+    // The binary path is how a camera's keyframes or a mirrored file would be
+    // overwritten; it owes the corpus the same read-only rule as text.
+    if (options?.initiatedByGezel && isProtectedConnectorCorpusPath(cleaned)) {
+      throw new ConnectorCorpusWriteDeniedError();
+    }
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
     if (isReservedTabularArtifactPath(cleaned)) throw new TabularPathWriteDeniedError();
     if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
@@ -552,6 +557,10 @@ export class ProjectArtifactsStore {
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned || namesArtifactsRoot(base, cleaned, null)) {
       throw new ArtifactRootDeniedError('deleted');
+    }
+    // A deleted record is never fetched again — the cursor is past it.
+    if (opts?.initiatedByGezel && isProtectedConnectorCorpusPath(cleaned)) {
+      throw new ConnectorCorpusWriteDeniedError();
     }
     if (opts?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
       throw new PromptDraftPathWriteDeniedError();

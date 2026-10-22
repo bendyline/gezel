@@ -304,6 +304,8 @@ const TOOL_OUTPUT_SCHEMAS = {
   queue_post: ActionToolOutputSchema,
   publish_post: ActionToolOutputSchema,
   draft_connector_action: ActionToolOutputSchema,
+  list_lookouts: ListToolOutputSchema,
+  propose_lookout: ActionToolOutputSchema,
 } as const satisfies Partial<Record<CanonicalToolName, ToolOutputSchema>>;
 
 /** Output schema advertised for tools migrated to the structured contract. */
@@ -364,6 +366,8 @@ export function errorResult(message: string, options: ToolErrorOptions = {}): Ca
  * hints, never an authorization boundary.
  */
 const READ_ONLY_TOOLS = new Set<CanonicalToolName>([
+  'look_at_camera',
+  'list_lookouts',
   'list_tables',
   'describe_table',
   'query_table',

@@ -1,14 +1,47 @@
-import type {
-  BoekwachterIssue,
-  BoekwachterIssueDismissalReason,
-  BoekwachterIssueStatus,
+import {
+  type BoekwachterIssue,
+  type BoekwachterIssueDismissalReason,
+  type BoekwachterIssueStatus,
+  ISSUE_VERDICT_LABELS,
+  type IssueVerdictKind,
+  type IssueVerdictReason,
+  issueVerdictActorLabel,
 } from '@bendyline/gezel';
-import { useCallback, useState } from 'react';
+import { useCallback, useId, useState } from 'react';
+import { api } from '../../api.js';
+import { onRadioKeyDown } from '../../primitives/radio-keyboard.js';
 
 export interface BoekwachterIssuePatch {
   status?: BoekwachterIssueStatus;
   seen?: boolean;
   dismissalReason?: BoekwachterIssueDismissalReason;
+  /** A verdict with its reason and note; sent as a verdict, not a status change. */
+  verdict?: { kind: IssueVerdictKind; reason?: IssueVerdictReason; note?: string };
+}
+
+/**
+ * Send a row's change to the daemon: a verdict through the verdict route (so
+ * the note and the kind are kept), anything else as a plain update. Throws
+ * the daemon's own words when a verdict is refused.
+ */
+export async function sendIssuePatch(
+  projectId: string,
+  issue: BoekwachterIssue,
+  patch: BoekwachterIssuePatch,
+): Promise<void> {
+  const { verdict, ...rest } = patch;
+  if (verdict) {
+    const res = await api.issueTriage.applyVerdicts(projectId, {
+      verdicts: [{ ref: issue.ref, ...verdict }],
+    });
+    const refused = res.results.find((r) => r.outcome === 'refused');
+    if (refused) throw new Error(refused.message);
+    if (rest.seen !== undefined) {
+      await api.updateBoekwachterIssue(projectId, { ref: issue.ref, seen: rest.seen });
+    }
+    return;
+  }
+  await api.updateBoekwachterIssue(projectId, { ref: issue.ref, ...rest });
 }
 
 export type UpdateBoekwachterIssue = (
@@ -80,8 +113,10 @@ export function TrackedIssueItem({
     patch: BoekwachterIssuePatch,
   ) => Promise<void>;
 }) {
+  const [judging, setJudging] = useState(false);
   const line = issue.line;
   const location = line == null ? null : issue.stale ? `Previously line ${line}` : `Line ${line}`;
+  const verdict = issue.latestVerdict;
   const content = (
     <>
       <div className="workspace-index-issue-meta">
@@ -95,9 +130,20 @@ export function TrackedIssueItem({
         <span>{issue.category}</span>
         {location && <span>{location}</span>}
         {issue.stale && <span>Needs recheck</span>}
-        {issue.status !== 'open' && <span>{issueStatusLabel(issue.status)}</span>}
+        {issue.status !== 'open' && (
+          <span>{issueStatusLabel(issue.status, issue.dismissalReason)}</span>
+        )}
       </div>
       <p>{issue.message}</p>
+      {verdict && (
+        <p className="workspace-index-issue-verdict">
+          <span className="workspace-index-issue-verdict-label">
+            {ISSUE_VERDICT_LABELS[verdict.kind]}
+            {verdict.unverified ? ' (unconfirmed)' : ''} · {issueVerdictActorLabel(verdict.by)}
+          </span>
+          {verdict.note && <span> — {verdict.note}</span>}
+        </p>
+      )}
     </>
   );
   return (
@@ -150,16 +196,12 @@ export function TrackedIssueItem({
           {onUpdateIssue && issue.status === 'open' && (
             <>
               <IssueActionKey
-                icon="fa-ban"
-                label="Not an issue"
+                icon="fa-scale-balanced"
+                label="Give a verdict"
+                title="Not a bug, not worth fixing, or confirmed real"
                 disabled={busy}
-                onClick={() =>
-                  void runIssueAction(issue, 'dismiss', {
-                    status: 'dismissed',
-                    seen: true,
-                    dismissalReason: 'not_an_issue',
-                  })
-                }
+                pressed={judging}
+                onClick={() => setJudging((open) => !open)}
               />
               <IssueActionKey
                 icon="fa-check"
@@ -198,7 +240,133 @@ export function TrackedIssueItem({
           )}
         </div>
       </div>
+      {judging && issue.status === 'open' && (
+        <IssueVerdictForm
+          issue={issue}
+          busy={busy}
+          onCancel={() => setJudging(false)}
+          onSave={async (verdict) => {
+            await runIssueAction(issue, 'verdict', { verdict, seen: true });
+            setJudging(false);
+          }}
+        />
+      )}
     </li>
+  );
+}
+
+const FORM_VERDICTS: readonly { kind: IssueVerdictKind; label: string }[] = [
+  { kind: 'not_a_bug', label: 'Not a bug' },
+  { kind: 'nit', label: 'Not worth fixing' },
+  { kind: 'confirmed', label: 'Confirmed real' },
+  { kind: 'fixed', label: 'Fixed' },
+];
+
+const FORM_REASONS: readonly { reason: IssueVerdictReason; label: string }[] = [
+  { reason: 'incorrect', label: 'Wrong about the code' },
+  { reason: 'handled_elsewhere', label: 'Handled elsewhere' },
+  { reason: 'intended', label: 'On purpose' },
+];
+
+/** A small radio tray of keys (docs/ux.md → "Controls: keys in trays"). */
+function KeyRadios<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: readonly { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="gz-tray" role="radiogroup" aria-label={label} onKeyDown={onRadioKeyDown}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+          role="radio"
+          aria-checked={value === option.value}
+          tabIndex={value === option.value ? 0 : -1}
+          className={`gz-key${value === option.value ? ' gz-key-active' : ''}`}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * What the person concluded about one issue, with an optional note. Telling
+ * "not a bug" from "not worth fixing" matters: only the first counts against
+ * the reviewer that raised it (docs/issue-triage.md).
+ */
+function IssueVerdictForm({
+  issue,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  issue: BoekwachterIssue;
+  busy: boolean;
+  onSave: (verdict: NonNullable<BoekwachterIssuePatch['verdict']>) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [kind, setKind] = useState<IssueVerdictKind>('not_a_bug');
+  const [reason, setReason] = useState<IssueVerdictReason>('incorrect');
+  const [note, setNote] = useState('');
+  const noteId = useId();
+  return (
+    <form
+      className="workspace-index-issue-verdict-form"
+      aria-label={`Verdict for ${issue.ref}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onSave({
+          kind,
+          ...(kind === 'not_a_bug' ? { reason } : {}),
+          ...(note.trim() ? { note: note.trim() } : {}),
+        });
+      }}
+    >
+      <KeyRadios
+        label="Verdict"
+        options={FORM_VERDICTS.map((o) => ({ value: o.kind, label: o.label }))}
+        value={kind}
+        onChange={setKind}
+      />
+      {kind === 'not_a_bug' && (
+        <KeyRadios
+          label="Why it is not a bug"
+          options={FORM_REASONS.map((o) => ({ value: o.reason, label: o.label }))}
+          value={reason}
+          onChange={setReason}
+        />
+      )}
+      <label htmlFor={noteId} className="workspace-index-issue-verdict-note-label">
+        Note (optional)
+      </label>
+      <textarea
+        id={noteId}
+        rows={2}
+        maxLength={2000}
+        value={note}
+        placeholder="What you checked"
+        onChange={(event) => setNote(event.target.value)}
+      />
+      <div className="workspace-index-issue-verdict-actions">
+        <button type="submit" className="primary" disabled={busy}>
+          Save verdict
+        </button>
+        <button type="button" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -213,6 +381,7 @@ function IssueActionKey({
   title,
   className,
   disabled,
+  pressed,
   onClick,
 }: {
   icon: string;
@@ -220,6 +389,8 @@ function IssueActionKey({
   title?: string;
   className?: string;
   disabled?: boolean;
+  /** For a key that opens something in place: whether it is open. */
+  pressed?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -229,6 +400,7 @@ function IssueActionKey({
       aria-label={label}
       title={title ?? label}
       disabled={disabled}
+      aria-pressed={pressed}
       onClick={onClick}
     >
       {/* biome-ignore lint/a11y/noAriaHiddenOnFocusable: decorative icon, not focusable */}
@@ -237,14 +409,21 @@ function IssueActionKey({
   );
 }
 
-export function issueStatusLabel(status: BoekwachterIssueStatus): string {
+export function issueStatusLabel(
+  status: BoekwachterIssueStatus,
+  dismissalReason?: BoekwachterIssueDismissalReason,
+): string {
   switch (status) {
     case 'in_progress':
       return 'In progress';
     case 'resolved':
       return 'Resolved';
     case 'dismissed':
-      return 'Not an issue';
+      return dismissalReason === 'wont_fix'
+        ? "Won't fix"
+        : dismissalReason === 'duplicate'
+          ? 'Duplicate'
+          : 'Not an issue';
     default:
       return 'Open';
   }

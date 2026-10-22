@@ -148,6 +148,14 @@ function leadsEvidence(issues: readonly BoekwachterIssue[]): string {
         i.message.length > LEAD_MESSAGE_MAX
           ? `${i.message.slice(0, LEAD_MESSAGE_MAX)}…`
           : i.message,
+      // Someone already checked it: "confirmed" with what they saw, or
+      // "unsure" with what would settle it.
+      ...(i.latestVerdict?.kind === 'confirmed' || i.latestVerdict?.kind === 'unsure'
+        ? {
+            verdict: i.latestVerdict.kind,
+            ...(i.latestVerdict.note ? { verdictNote: i.latestVerdict.note } : {}),
+          }
+        : {}),
     })),
     null,
     2,

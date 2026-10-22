@@ -161,6 +161,7 @@ export class HarnessToolsManager {
         memory: config.memory,
         images: config.images,
         newFolders: config.newFolders,
+        issues: config.issues,
       },
       ...(unavailableReason ? { unavailableReason } : {}),
       clients,

@@ -1,11 +1,6 @@
 import type { NightShiftReviewResponse } from '@bendyline/gezel';
-import { LinearDocView } from '@bendyline/squisq-react';
-import { markdownToDoc } from '@bendyline/squisq/doc';
-import { parseMarkdown } from '@bendyline/squisq/markdown';
-import { useEffect, useMemo, useState } from 'react';
-import { api } from '../../api.js';
-import { gezelChatTheme } from '../../components/chat-theme.js';
-import { makeReportActionFenceRenderers } from '../../components/report-actions/ReportActionFence.js';
+import { ReportDocument } from '../../components/ReportDocument.js';
+import { openProjectViewActions, runNavActions } from '../../components/nav-actions.js';
 import { formatAbsoluteTime } from '../../relative-time.js';
 import { NightReviewSummary } from './NightReviewSummary.js';
 import { timeAgo } from './utils.js';
@@ -25,61 +20,16 @@ export function NightPrimaryReport({
 }: {
   primary: NightShiftReviewResponse['reports'][number] | undefined;
 }) {
-  const [primaryContent, setPrimaryContent] = useState<string | null>(null);
-  const [primaryError, setPrimaryError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setPrimaryContent(null);
-    setPrimaryError(null);
-    if (!primary) return;
-    let cancelled = false;
-    api
-      .readProjectArtifact(primary.projectId, primary.path)
-      .then((res) => {
-        if (!cancelled) setPrimaryContent(res.content);
-      })
-      .catch((err) => {
-        if (!cancelled) setPrimaryError((err as Error).message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [primary]);
-
-  const primaryDoc = useMemo(() => {
-    if (primaryContent === null) return null;
-    try {
-      return markdownToDoc(parseMarkdown(primaryContent), { articleId: 'night-review' });
-    } catch {
-      return null;
-    }
-  }, [primaryContent]);
-
-  const fenceRenderers = useMemo(
-    () =>
-      primary
-        ? makeReportActionFenceRenderers({
-            projectId: primary.projectId,
-            reportPath: primary.path,
-          })
-        : undefined,
-    [primary],
-  );
-
   if (!primary) return null;
   return (
     <div className="home-workshop-status-body">
-      {primaryDoc ? (
-        <LinearDocView
-          doc={primaryDoc}
-          theme={gezelChatTheme}
-          thinMargins
-          imageDisplayMode="thumbnail"
-          fenceRenderers={fenceRenderers}
-        />
-      ) : primaryError ? (
-        <p className="error small">{primaryError}</p>
-      ) : null}
+      <ReportDocument
+        projectId={primary.projectId}
+        path={primary.path}
+        onOpenPath={(path) =>
+          runNavActions(openProjectViewActions({ projectId: primary.projectId, path }))
+        }
+      />
     </div>
   );
 }

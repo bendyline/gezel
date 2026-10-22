@@ -27,8 +27,18 @@ export class MockRecognitionProvider implements RecognitionProvider {
    * session shows "No model" until something is pulled, matching what a real
    * fresh install looks like. Tests that need a ready engine pass `installed`.
    */
-  constructor(opts?: { installed?: InstalledRecognitionModelInfo[] }) {
+  private readonly respond?: (input: RecognizeInput) => unknown;
+
+  /**
+   * `respond` scripts an extract reply (the camera tests and simulator use
+   * it); returning `undefined` falls back to the hash tag.
+   */
+  constructor(opts?: {
+    installed?: InstalledRecognitionModelInfo[];
+    respond?: (input: RecognizeInput) => unknown;
+  }) {
     this.installed = opts?.installed ?? [];
+    if (opts?.respond) this.respond = opts.respond;
   }
 
   async recognize(input: RecognizeInput): Promise<ImageRecognition> {
@@ -47,7 +57,8 @@ export class MockRecognitionProvider implements RecognitionProvider {
       at: nowIso(),
     };
     if (input.mode === 'ocr') out.ocrText = `MOCK OCR ${tag}`;
-    else if (input.mode === 'extract') out.structured = { data: { mock: tag } };
+    else if (input.mode === 'extract')
+      out.structured = { data: this.respond?.(input) ?? { mock: tag } };
     else if (input.mode === 'ui') out.description = `MOCK UI ${tag}`;
     else out.description = `MOCK DESCRIPTION ${tag}`;
     return out;

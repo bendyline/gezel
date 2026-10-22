@@ -8,7 +8,9 @@ import {
   type EarnedNotification,
   NotificationGate,
   type NotificationLedger,
+  admitLookoutAlert,
   earnedItemFor,
+  lookoutAlertItem,
   markNotificationsSeen,
   notificationDailyCap,
   planReminders,
@@ -103,6 +105,7 @@ export class EarnedNotifier {
     const event = envelope.event;
     if (event.type === 'reminders_updated') return this.replanReminders();
     if (event.type === 'gezel_created') this.names = undefined;
+    if (event.type === 'lookout_fired') return this.alertLookout(envelope);
     if (
       event.type !== 'question_asked' &&
       event.type !== 'task_settled' &&
@@ -113,6 +116,24 @@ export class EarnedNotifier {
     if (!item) return;
     this.deps.earned?.(item);
     this.gate.offer(item);
+  }
+
+  /**
+   * A lookout alert skips the gate: it is said at once, never folded into
+   * "3 things are waiting", and never held by the daily allowance. While a
+   * window is focused the app shows its own alert, so the OS one stays quiet.
+   */
+  private alertLookout(envelope: ChatEventEnvelope): void {
+    const item = lookoutAlertItem(envelope);
+    if (!item) return;
+    this.deps.earned?.(item);
+    if (this.deps.watching()) {
+      this.deps.writeLedger(markNotificationsSeen(this.deps.readLedger(), [item], this.now()));
+      return;
+    }
+    const { ledger, notification } = admitLookoutAlert(this.deps.readLedger(), item, this.now());
+    this.deps.writeLedger(ledger);
+    if (notification) this.deps.deliver(notification);
   }
 
   /** Re-read every project's reminder and arm the next one. */

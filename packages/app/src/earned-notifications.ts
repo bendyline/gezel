@@ -28,7 +28,7 @@ function notificationLedgerPath(): string {
  */
 export function startEarnedNotifications(
   apiClient: GezelClient | null,
-  notify: (opts: { title: string; body?: string; view?: string }) => boolean,
+  notify: (opts: { title: string; body?: string; view?: string; urgent?: boolean }) => boolean,
 ): void {
   earnedAbort?.abort();
   earnedNotifier?.dispose();
@@ -39,7 +39,8 @@ export function startEarnedNotifications(
   earnedAbort = controller;
   const notifier = new EarnedNotifier({
     client,
-    deliver: (n) => notify({ title: n.title, body: n.body, view: n.view }),
+    deliver: (n) =>
+      notify({ title: n.title, body: n.body, view: n.view, urgent: n.kinds.includes('lookout') }),
     watching: () => BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isFocused()),
     readLedger: () => {
       try {
@@ -58,8 +59,23 @@ export function startEarnedNotifications(
   });
   earnedNotifier = notifier;
   void notifier.replanReminders().catch(() => {});
+  // Lookout alerts are never replayed by the event stream, so an alarm that
+  // fired while this process was reconnecting (or starting) is asked for
+  // explicitly; the ledger keeps each one to a single notification.
+  let alertsSince = new Date(Date.now() - 5 * 60_000).toISOString();
+  const catchUpLookoutAlerts = async () => {
+    const since = alertsSince;
+    alertsSince = new Date().toISOString();
+    const { alerts } = await client.recentLookoutAlerts(since);
+    for (const event of alerts) {
+      await notifier
+        .handle({ sessionId: '', gezelId: '', projectId: event.projectId, event })
+        .catch(() => {});
+    }
+  };
   void (async () => {
     while (!controller.signal.aborted) {
+      void catchUpLookoutAlerts().catch(() => {});
       try {
         for await (const envelope of streamAllChatEvents({
           url: client.allEventsUrl(),

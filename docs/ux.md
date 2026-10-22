@@ -1086,6 +1086,109 @@ subfolders, and never repeats a subfolder as a file. Paths are set in mono at
 pane. Selecting a file opens it in the shared inspector. Until the map is
 written, the view says so in a sentence and doesn't show an empty tree.
 
+**The Diagram draws what each file uses.** The **Diagram** view, offered
+everywhere but picture folders, draws the project's files as boxes and their
+imports as arrows, left to right from the file that uses to the file used.
+Folders are the unit of reading:
+
+- **Boxes.** A closed folder is one box that says how many files it holds,
+  drawn with a second box behind it so it reads as a stack. An open folder is a
+  frame around its files and subfolders. A chevron opens and closes either, and
+  so does a double-click on a closed folder. A chain of folders holding only
+  one subfolder (`packages/core/src` under `packages`) is one folder, and a
+  package root takes its package name.
+- **Opening.** Before the person chooses, folders open level by level, the
+  shallowest first, while the drawing stays near 40 boxes: a small project
+  opens all the way, and a monorepo opens onto its packages, few enough to read
+  at a glance. What the person opens is remembered per project in this
+  browser; Reset goes back to the default and Collapse all closes everything.
+- **The camera.** A folder opened or closed stays where it was on screen while
+  the drawing rearranges around it, so the person never loses their place. A
+  whole new picture (Focus, a new focus file or depth, Code · Documents, Tests,
+  Collapse all, Reset) fits itself to the canvas once it is drawn.
+- **Arrows.** One arrow stands for every import between two boxes and grows
+  thicker with how many it carries. Dashed means type-only imports, which
+  vanish at build time. Two arrowheads mean the boxes use each other. Amber
+  means the arrow is part of an import cycle, and a closed folder hiding a
+  cycle takes the amber border.
+- **Less to read.** A line a longer path already shows is hidden (the Hide
+  shortcuts key), and a box nearly everything uses leaves its incoming lines
+  out, says "Used by N" on the box, and is named in the status line. Neither
+  hides a box.
+- **Focus.** Double-clicking a file, or the Focus key with a file selected,
+  shows that file with what it uses and what uses it, each followed 0–3
+  steps. A box whose neighbors were left out carries "+k".
+- **Toolbar.** Keys in trays: Overview · Focus; the focus depths; Code ·
+  Documents (imports, or links between documents); Tests and Hide shortcuts;
+  a Find box that keeps matching boxes bright and selects the first on
+  Enter; Fit, Collapse all and Reset. A muted status line under it gives the
+  file count, cycles, hubs left out, shortcuts hidden, and whether the index
+  has resolved more than relative imports yet.
+
+A file's box opens it in the shared inspector, and a file selected in another
+view is brought into sight, inside its closed folder when it is closed. The
+canvas is squisq's `DiagramViewer` (`@bendyline/squisq-react/graph`), themed
+through its `--squisq-graph-*` properties from the app's tokens in
+[diagram-view.css](../packages/ui/src/styles/diagram-view.css); the layout runs
+in a worker, so a large drawing never freezes the window.
+
+**Reports read in place.** The **Reports** view, offered on every project,
+lists every report in the project's artifacts drawer — the codebase map, the
+nightly codebase, documents and photos reports, code reviews, digests, and
+what tasks wrote — grouped by kind with the standing map first, newest first
+within a kind, each with a relative date and its count of suggestions. The
+reader beside the list is the same document view Home's night review uses,
+suggested actions live. A file a report names opens in the shared inspector
+whether it is a link or a path in inline code; paths read as dotted-underlined
+links and take the keyboard. **Write … now** runs a model-free report writer on
+request, replacing the day's report, so a project never waits for its first
+night; a folder that suits several reports gets the first as the key and the
+rest in its menu. A report with nothing to say writes nothing and says so in a
+muted line. On a phone the list becomes a picker above the reader. **Issues for
+review** (the night shift's suspected problems, laid out for a coding app to
+answer) sits right after the map and carries a key tray above the reader:
+Copy, Save…, and Import answers…, with the import's outcome in one muted line
+("12 answers imported, 2 not applied, 3 left empty").
+
+**A gallery is shelves, not a wall.** The **Gallery** view, offered on every
+project, shows the files as shelves of cards rather than one endless grid, so
+a folder of thousands reads as a dozen groups:
+
+- **Grouping.** Keys in a tray: Outings · Folders · Types, only the ones the
+  folder supports. A picture folder opens on its outings (photos split
+  wherever three hours pass without one), a code folder on its folders, and
+  everything else on types. The choice is remembered per project in this
+  browser.
+- **Special shelves come first.** In a photo library, **Exact copies** (with
+  the space they could free) and **Look-alikes** (bursts and retakes) lead,
+  then each outing named by its day ("Sunday, July 14, 2024") with its hours
+  underneath.
+- **Cards.** A photo is its picture, square, with nothing printed over it.
+  Any other file is a card: its type in muted small text with the file icon,
+  its title (a document's own title, else its name), the first lines of what
+  the index says about it, and its folder and age. The selected card takes the
+  accent border.
+- **Narrowing.** Filter keys (All · Photos · Documents · Data · Media · Code)
+  show only families the folder holds, and a Find box keeps the files whose
+  path, title, type or summary carries every word typed.
+- **A page at a time.** A shelf shows two dozen cards and a **Show N more**
+  key; more shelves come with **Show more groups**. A card opens its file in
+  the shared inspector.
+
+**The Timeline shows what changed when.** The **Timeline** view, offered on
+every project, is a row of bars, one per week, month or year (Weeks · Months ·
+Years keys; the default follows how long the history runs). A git repository's
+bars count its commits' file changes, stacked by area of the project, at most
+seven areas plus "Everything else"; any other folder's bars count its files at
+their own dates, a photo when it was taken, stacked by kind. A muted line says
+which. The colors are a fixed categorical palette named in a legend under the
+bars, so color is never the only label: every bar's name says its stretch and
+its counts. The bars open scrolled to the newest, take the arrow keys, Home and
+End, and the newest busy stretch is chosen at first. Below them, the chosen
+stretch lists its commits (time, subject, and the files each touched as links)
+and then the files it changed most as Gallery cards; each opens its file in the
+shared inspector.
+
 **Integrations go out; Connections come in.** Settings → Integrations is
 where Gezel is put to work inside other apps (editors, Office, command-line
 tools). A project's **Connections** brings outside data, such as a mailbox,
@@ -1601,7 +1704,8 @@ dialog ([`CameraCaptureDialog`](../packages/ui/src/components/CameraCaptureDialo
 live preview, one shutter press, then a still to Retake or Insert. The key
 appears only where a camera exists. The camera runs only while its preview
 is on screen: it stops on the shutter press, so the indicator light never
-outlives what the person can see. Photos are capped at 2048px on the long
+outlives what the person can see. (A camera connected to a project to *watch*
+a room is the deliberate exception; see "Watching cameras" below.) Photos are capped at 2048px on the long
 edge and re-encoded, which also strips a phone photo's GPS metadata before it
 reaches a prompt. When the model cannot see images, the message carries a
 warning saying so; never let the person assume a gezel saw a picture it only
@@ -1609,6 +1713,35 @@ had the name of. On a phone the photo is read on the device before the model
 runs (labels and text always, a description where a describer is ready), and
 the warning names what was missing: only labels, or nothing. Settings → AI →
 Photos is where a describer is fetched; a chat turn never starts a download.
+
+**Watching cameras.** A camera connected to a project (Connections → Webcam)
+watches continuously, so watching must always be visible and stopping it is
+one click. While any camera is on, the titlebar shows a "Camera on" pill
+(`WatchingIndicator`, the Boekwachter pill's recipe with a danger-red dot);
+its menu pauses each camera where the person noticed it. The camera's card
+shows a small live view that refreshes only while the card is on screen and
+is served from memory, a status line in plain words ("Something is in view.",
+"Paused.", "Another app is using the camera."), and Pause/Resume, Settings,
+Remove. Setup uses keys in trays for *What to keep* (stacked keys with
+hints) and *Motion sensitivity*, a range for the 1–60 s interval, and plain
+checkboxes for the two consent-shaped switches (recognize what's happening;
+let cloud AI see the pictures, off by default). Removing a camera says that
+its saved pictures go with it.
+
+**Lookouts are sentences.** A lookout is built as the sentence the person
+would say — "When [Mud room] sees [Anything moving | A person | A pet |
+Something specific], then [tell me] [play a sound] …" — never as a trigger
+form. The watch-for choice is a tray; *Something specific* opens a yes/no
+question field with "only when it is clearly happening". Actions are
+checkboxes, each opening its own small field (a clip tray, a line to speak,
+recipients). Names and limits sit in a closed disclosure. A lookout row reads
+back the same sentence, then a `role="toolbar"` tray of verbs (Turn off ·
+Test · Snooze 1 hour · Edit · Remove; Approve in accent ink for a gezel's
+proposal). The *Recently* list pairs each firing's keyframe with what each
+action did and, when held, why — in plain words — plus *Not this*.
+A lookout alert while the app is open is a bottom-right toast with
+*Stop sound* when a sound is playing; it never replaces the OS notification
+when the window is not focused.
 
 **Mid-turn composer actions.** While a gezel is working, the composer keeps
 accepting text. With an empty draft the toolbar shows only the quiet
@@ -2840,8 +2973,16 @@ one-line reason, the reviewer's cliffs notes as read-only markdown prose, and
 durable issue rows identified by a short project-scoped reference (`BW-12`).
 Selecting a current line reveals it in the source; after the file changes, the
 old location is explicitly labelled **Previously line N** and **Needs recheck**
-instead of pretending it is still exact. Rows support read/unread, dismiss as
-not an issue, resolve, and reopen. With project editing enabled, **Fix** opens a
+instead of pretending it is still exact. Rows support read/unread, a verdict,
+resolve, and reopen. **Give a verdict** (a scale icon) opens a small form in
+the row rather than a popover: a key tray of Not a bug · Not worth fixing ·
+Confirmed real · Fixed, a second tray of reasons when it is Not a bug (Wrong
+about the code · Handled elsewhere · On purpose), an optional note, and Save.
+"Not worth fixing" is a separate key on purpose: a true but minor lead is not
+the reviewer being wrong. A judged issue shows one muted line under its
+message naming the verdict and who gave it ("Not a bug · Claude Code — …"),
+with "(unconfirmed)" when "fixed" came with an unchanged file. Reopen is the
+one-click override. With project editing enabled, **Fix** opens a
 confirmation dialog and creates an assigned terminal task; the row stays in
 progress and links to that task until completion resolves it. Review severities
 (info / minor / major) are a deliberately separate vocabulary from security

@@ -70,11 +70,13 @@ export default defineConfig({
         // entry without a circular chunk import, and the startup graph grows
         // from 42 to 53 requests at the same byte size. Keeping core in one
         // chunk, as its unsplit browser entry was, restores the old shape.
+        // A linked squisq checkout (`pnpm link:squisq`) has a packages/core
+        // too; matching it put all of squisq's core in the startup chunk.
         codeSplitting: {
           groups: [
             {
               name: 'gezel-core',
-              test: /[\\/](?:packages[\\/]core|node_modules[\\/]@bendyline[\\/]gezel)[\\/]dist[\\/]/,
+              test: /(?<![\\/]squisq)[\\/]packages[\\/]core[\\/]dist[\\/]|[\\/]node_modules[\\/]@bendyline[\\/]gezel[\\/]dist[\\/]/,
             },
           ],
         },

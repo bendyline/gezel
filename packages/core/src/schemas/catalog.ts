@@ -1245,7 +1245,12 @@ export type ProjectTypeManifest = z.infer<typeof ProjectTypeManifestSchema>;
 // AI-readable corpus. The manifest is mostly configuration over a generic
 // `driver`; `native` adapters (mail, calendar) map to service code.
 
-const ConnectorDriverSchema = z.enum(['mcp', 'script', 'spectral', 'native']);
+/**
+ * `device` drives local hardware (a webcam today) through the daemon's live
+ * host instead of a sync pass: its `source` names `{adapterId, family}` and
+ * the connector sync loop never touches it. See docs/device-connectors.md.
+ */
+const ConnectorDriverSchema = z.enum(['mcp', 'script', 'spectral', 'native', 'device']);
 
 const ConnectorNormalizeSchema = z.union([
   z.object({ kind: z.literal('mapping'), map: z.record(z.string(), z.unknown()) }),

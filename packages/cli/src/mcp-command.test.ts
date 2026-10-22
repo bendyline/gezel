@@ -26,7 +26,7 @@ const CLAUDE: HarnessToolsClientStatus = {
 
 function fixture() {
   const status: HarnessToolsStatusResponse = {
-    config: { enabled: true, memory: 'save', images: 'local', newFolders: 'add' },
+    config: { enabled: true, memory: 'save', images: 'local', newFolders: 'add', issues: 'triage' },
     clients: [CLAUDE, CURSOR],
     connections: [
       {
@@ -92,6 +92,8 @@ describe('gezel mcp', () => {
     const out = lines.join('\n');
     expect(out).toContain('add this line to the AGENTS.md file in a folder you work in');
     expect(out).toContain('the `search` tool from the `gezel` MCP server');
+    // Cursor has no prompt command Gezel can name, so none is printed.
+    expect(out).not.toContain('triage_issues');
   });
 
   it('names the apps it knows when given another', async () => {

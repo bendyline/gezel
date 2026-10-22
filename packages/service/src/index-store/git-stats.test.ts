@@ -7,6 +7,7 @@ import {
   GIT_META_COMMITS,
   GIT_META_LAST_COMMIT,
   gitStatsAvailable,
+  parseGitLog,
   parseGitLogNameOnly,
   refreshGitStats,
   resetGitProbeForTests,
@@ -48,6 +49,24 @@ describe('parseGitLogNameOnly', () => {
   it('skips records with an unparseable timestamp', () => {
     const stats = parseGitLogNameOnly([`${SOH}nope`, 'a.ts'].join('\n'), 0);
     expect(stats.size).toBe(0);
+  });
+});
+
+describe('parseGitLog', () => {
+  it('reads hash, time and subject, keeping a subject that holds the separator', () => {
+    const STX = '\x02';
+    const stdout = [
+      `${SOH}abc${STX}2000${STX}Fix the parser`,
+      'a.ts',
+      '',
+      `${SOH}def${STX}1000${STX}Odd ${STX} subject`,
+      'b.ts',
+      'c.ts',
+    ].join('\n');
+    expect(parseGitLog(stdout)).toEqual([
+      { sha: 'abc', at: 2_000_000, subject: 'Fix the parser', files: ['a.ts'] },
+      { sha: 'def', at: 1_000_000, subject: 'Odd   subject', files: ['b.ts', 'c.ts'] },
+    ]);
   });
 });
 
@@ -137,6 +156,17 @@ describe('refreshGitStats', () => {
     expect(meta.get('b.ts')?.[GIT_META_COMMITS]).toBe('0');
     expect(meta.get('b.ts')?.[GIT_META_LAST_COMMIT]).toBe('2024-06-01T00:00:00.000Z');
     expect(meta.has('untracked-by-index.ts')).toBe(false);
+
+    // The commits themselves, oldest first, with only the files the index tracks.
+    expect(
+      store.gitHistory.commits().map((c) => [new Date(c.at).toISOString(), c.subject, c.files]),
+    ).toEqual([
+      ['2024-06-01T00:00:00.000Z', 'touch b.ts', ['b.ts']],
+      ['2026-05-01T00:00:00.000Z', 'touch a.ts', ['a.ts']],
+      ['2026-06-01T00:00:00.000Z', 'touch a.ts', ['a.ts']],
+      ['2026-06-02T00:00:00.000Z', 'touch untracked-by-index.ts', []],
+    ]);
+    expect(store.gitHistory.commits()[0]!.sha).toMatch(/^[0-9a-f]{40}$/);
     store.close();
   });
 

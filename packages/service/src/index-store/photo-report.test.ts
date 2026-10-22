@@ -75,4 +75,13 @@ describe('writeNightlyPhotoReport', () => {
     expect(await writeNightlyPhotoReport(deps({ images: 5 }).d, 'docs', NOW)).toBeNull();
     expect(await writeNightlyPhotoReport(deps({ images: 400 }).d, 'pics', NOW)).toBeNull();
   });
+
+  it('writes nothing for a codebase, whatever pictures it holds', async () => {
+    const { d } = deps({
+      images: 400,
+      duplicates: [{ count: 2, paths: ['icon.png', 'copy/icon.png'], bytes: 1_048_576 }],
+    });
+    d.store.getProject = async () => ({ properties: { 'gezel.folderKind': 'code' } });
+    expect(await writeNightlyPhotoReport(d, 'repo', NOW)).toBeNull();
+  });
 });

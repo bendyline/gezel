@@ -75,6 +75,18 @@ export const HistoryEventKindSchema = z.enum([
   'project.connector.bound',
   'project.connector.unbound',
   'project.connector.synced',
+  /** A device connector (camera) was paused, resumed, or stopped by emergency stop. */
+  'project.connector.paused',
+  'project.connector.resumed',
+  /**
+   * A lookout matched and its actions ran (`fired`), or matched but every
+   * action was held by a gate (`held`). `details` carries
+   * `{ lookoutId, firingId, bindingId, episodeId, outcomes }`.
+   */
+  'lookout.fired',
+  'lookout.held',
+  /** A lookout was created, proposed, approved, edited, paused, or removed. */
+  'lookout.changed',
   'document.created',
   'document.folder.created',
   'document.updated',
@@ -246,6 +258,12 @@ export const HistoryEventKindSchema = z.enum([
    * `{ files, issues, model }`.
    */
   'project.index.reviewed',
+  /**
+   * Verdicts on BW issues (fixed, not a bug, confirmed, …) from the person, a
+   * gezel or an outside app. One event per call, never per issue; details
+   * carry `{ by, refs, counts, applied, refused }`.
+   */
+  'project.issue.verdicts',
   'meester.status.generated',
   'meester.dashboard.generated',
   'gezel.level.up',

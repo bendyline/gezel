@@ -1,7 +1,7 @@
 import type { GezelConfig, HarnessToolsConfig } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
-import { harnessRouteGuard } from './harness-route-guard.js';
+import { VERDICTS_PER_HOUR, harnessRouteGuard } from './harness-route-guard.js';
 
 const PROJECT = 'repo';
 
@@ -129,6 +129,60 @@ describe('harnessRouteGuard', () => {
     ]) {
       expect((await app.request(path)).status, path).toBe(200);
     }
+  });
+
+  it('hands over issues and takes verdicts as the Issues setting allows', async () => {
+    const handoff = (harnessTools?: HarnessToolsConfig) =>
+      stack(harnessTools ? { harnessTools } : {}).request(
+        `/api/projects/${PROJECT}/tools/issue-handoff`,
+        post({}),
+      );
+    const verdicts = (body: unknown, harnessTools?: HarnessToolsConfig) =>
+      stack(harnessTools ? { harnessTools } : {}).request(
+        `/api/projects/${PROJECT}/tools/issue-verdicts`,
+        post(body),
+      );
+    const one = { verdicts: [{ ref: 'BW-1', kind: 'confirmed' }] };
+    expect((await handoff()).status).toBe(200);
+    expect((await verdicts(one)).status).toBe(200);
+    expect((await handoff({ issues: 'read' })).status).toBe(200);
+    expect((await verdicts(one, { issues: 'read' })).status).toBe(403);
+    expect((await handoff({ issues: 'off' })).status).toBe(403);
+    expect((await verdicts({ ...one, by: { kind: 'person' } })).status).toBe(403);
+  });
+
+  it('never lets an app import a handoff document or reach another project issues', async () => {
+    const app = stack();
+    expect(
+      (
+        await app.request(
+          `/api/projects/${PROJECT}/tools/issue-verdicts/import`,
+          post({ markdown: 'x' }),
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (await app.request('/api/projects/other/tools/issue-verdicts', post({ verdicts: [] })))
+        .status,
+    ).toBe(403);
+    expect(
+      (
+        await stack({ projectId: null }).request(
+          `/api/projects/${PROJECT}/tools/issue-handoff`,
+          post({}),
+        )
+      ).status,
+    ).toBe(403);
+  });
+
+  it('stops an app that reports too many verdicts in an hour', async () => {
+    const app = stack();
+    const batch = { verdicts: Array.from({ length: 25 }, () => ({ ref: 'BW-1', kind: 'nit' })) };
+    const send = () => app.request(`/api/projects/${PROJECT}/tools/issue-verdicts`, post(batch));
+    for (let i = 0; i < VERDICTS_PER_HOUR / 25; i++) expect((await send()).status).toBe(200);
+    const res = await send();
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ hint: expect.stringMatching(/last hour/) });
   });
 
   it('saves memories only to the bound project, and only when saving is on', async () => {

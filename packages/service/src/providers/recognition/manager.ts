@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ImageRecognition, RecognitionHealth, RecognitionMode } from '@bendyline/gezel';
 import { createRecognitionProvider } from './factory.js';
 import { RecognitionCache } from './store.js';
@@ -115,10 +116,18 @@ export class RecognitionManager {
     input: Omit<RecognizeInput, 'mode'> & { mode: RecognitionMode },
   ): Promise<ImageRecognition> {
     const provider = await this.current();
+    if (input.cache === false) return provider.recognize(input);
+    const variant =
+      input.schema !== undefined || input.prompt
+        ? createHash('sha256')
+            .update(JSON.stringify({ schema: input.schema ?? null, prompt: input.prompt ?? null }))
+            .digest('hex')
+        : undefined;
     const key = this.cache.keyFor({
       bytes: input.bytes,
       mode: input.mode,
       modelId: this.modelId ?? provider.name,
+      ...(variant ? { variant } : {}),
     });
 
     const cached = await this.cache.get(key);

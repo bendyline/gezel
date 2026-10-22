@@ -83,6 +83,9 @@ export const BACKUP_DERIVED_SUBPATHS = {
     'artifacts/.tabular',
     'toolsets',
     'terminals',
+    // A camera's saved pictures: bulky, bounded by the camera's own
+    // retention, and never meant to leave this computer.
+    'captures',
     '.gezel/index',
     '.gezel/terminals',
   ],

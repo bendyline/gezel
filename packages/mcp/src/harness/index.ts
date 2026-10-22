@@ -4,6 +4,7 @@ import { HARNESS_SERVER_INSTRUCTIONS, HarnessClientIdSchema } from '@bendyline/g
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { RootsListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
+import { registerHarnessIssueTools, registerHarnessPrompts } from './issues.js';
 import { type HarnessOptions, HarnessSession } from './session.js';
 import { registerHarnessTools } from './tools.js';
 
@@ -59,6 +60,8 @@ export function createHarnessServer(session: HarnessSession): McpServer {
     { instructions: HARNESS_SERVER_INSTRUCTIONS },
   );
   registerHarnessTools(server, session);
+  registerHarnessIssueTools(server, session);
+  registerHarnessPrompts(server, session);
   session.setRootsProvider(async () => {
     if (!server.server.getClientCapabilities()?.roots) return null;
     const { roots } = await server.server.listRoots(undefined, { timeout: ROOTS_TIMEOUT_MS });

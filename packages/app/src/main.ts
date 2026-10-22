@@ -2360,9 +2360,14 @@ async function ensureWindow(): Promise<void> {
  * target view is given, navigates there. No-ops where the platform reports
  * notifications unsupported.
  */
-function notify(opts: { title: string; body?: string; view?: string }): boolean {
+function notify(opts: { title: string; body?: string; view?: string; urgent?: boolean }): boolean {
   if (!Notification.isSupported()) return false;
-  const n = new Notification({ title: opts.title, body: opts.body ?? '' });
+  // A lookout's alert is urgent: on Linux it stays until dismissed.
+  const n = new Notification({
+    title: opts.title,
+    body: opts.body ?? '',
+    ...(opts.urgent ? { urgency: 'critical' as const } : {}),
+  });
   n.on('click', () => {
     void ensureWindow();
     if (opts.view) navigateTo(opts.view);

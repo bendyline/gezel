@@ -52,7 +52,7 @@ function tools(
   extra: Partial<HarnessToolsStatusResponse> = {},
 ): Tools {
   const status: HarnessToolsStatusResponse = {
-    config: { enabled: true, memory: 'save', images: 'local', newFolders: 'add' },
+    config: { enabled: true, memory: 'save', images: 'local', newFolders: 'add', issues: 'triage' },
     clients,
     connections: [],
     blocked: [],
@@ -160,6 +160,32 @@ describe('an app’s tools section', () => {
     expect(screen.queryByRole('button', { name: 'Copy line' })).not.toBeInTheDocument();
   });
 
+  it('offers the command that works through the night shift issues where the app has one', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const configured = [
+      client({ client: 'claude-code', label: 'Claude Code', state: 'configured', canRemove: true }),
+      client({ client: 'cursor', label: 'Cursor', state: 'configured', canRemove: true }),
+    ];
+    const { unmount } = render(
+      <HarnessToolsSection client="claude-code" tools={tools(configured)} />,
+    );
+    expect(screen.getByText('/mcp__gezel__triage_issues')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy command' }));
+    expect(writeText).toHaveBeenCalledWith('/mcp__gezel__triage_issues');
+    unmount();
+
+    const off = tools(configured, {
+      config: { enabled: true, memory: 'save', images: 'local', newFolders: 'add', issues: 'off' },
+    });
+    const second = render(<HarnessToolsSection client="claude-code" tools={off} />);
+    expect(screen.queryByText('/mcp__gezel__triage_issues')).not.toBeInTheDocument();
+    second.unmount();
+
+    render(<HarnessToolsSection client="cursor" tools={tools(configured)} />);
+    expect(screen.queryByRole('button', { name: 'Copy command' })).not.toBeInTheDocument();
+  });
+
   it('says one-click setup needs the desktop app on this computer', () => {
     (window as unknown as { __GEZEL__: { mode: string } }).__GEZEL__ = { mode: 'remote' };
     render(<HarnessToolsSection client="cursor" tools={tools([client({})])} />);
@@ -176,6 +202,8 @@ describe('the Overview section', () => {
     expect(t.updateConfig).toHaveBeenCalledWith({ memory: 'read' });
     fireEvent.click(screen.getByRole('radio', { name: 'Any image engine' }));
     expect(t.updateConfig).toHaveBeenCalledWith({ images: 'any' });
+    fireEvent.click(screen.getByRole('radio', { name: 'List them' }));
+    expect(t.updateConfig).toHaveBeenCalledWith({ issues: 'read' });
     fireEvent.click(screen.getByRole('radio', { name: 'Only folders already in Gezel' }));
     expect(t.updateConfig).toHaveBeenCalledWith({ newFolders: 'existing' });
     fireEvent.click(screen.getByRole('checkbox', { name: "Let other apps use Gezel's tools" }));

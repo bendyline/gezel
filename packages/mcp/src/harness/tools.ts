@@ -79,11 +79,11 @@ const IMAGE_MIME: Record<string, string> = {
   '.heic': 'image/heic',
 };
 
-function text(value: string): CallToolResult {
+export function text(value: string): CallToolResult {
   return { content: [{ type: 'text', text: value }] };
 }
 
-function failure(value: string): CallToolResult {
+export function failure(value: string): CallToolResult {
   return { content: [{ type: 'text', text: value }], isError: true };
 }
 
@@ -97,7 +97,7 @@ function gezelMessage(err: unknown): string {
   return apiErrorMessage(err);
 }
 
-async function guarded(fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
+export async function guarded(fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
   try {
     return await fn();
   } catch (err) {

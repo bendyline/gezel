@@ -65,6 +65,7 @@ import { configRoutes } from './routes/config.js';
 import { connectorRoutes } from './routes/connectors.js';
 import { craftbookRoutes } from './routes/craftbooks.js';
 import { credentialRoutes } from './routes/credentials.js';
+import { deviceRoutes } from './routes/devices.js';
 import { diffpackRoutes } from './routes/diffpacks.js';
 import { documentMediaExportRoutes } from './routes/document-media-export.js';
 import { documentRoutes } from './routes/documents.js';
@@ -84,6 +85,7 @@ import { imageGenRoutes } from './routes/image-gen.js';
 import { imagesRoutes } from './routes/images.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { llamaCppRoutes } from './routes/llama-cpp.js';
+import { lookoutRoutes, projectLookoutRoutes } from './routes/lookouts.js';
 import { machineServingRoutes } from './routes/machine-serving.js';
 import { mcpToolRoutes } from './routes/mcp-tools.js';
 import { meesterStatusRoutes } from './routes/meester-status.js';
@@ -110,6 +112,8 @@ import { previewLogRoutes } from './routes/preview-log.js';
 import { previewRoutes } from './routes/preview.js';
 import { projectContinuationRoutes } from './routes/project-continuation.js';
 import { projectGezelRoutes } from './routes/project-gezels.js';
+import { projectIndexViewRoutes } from './routes/project-index-views.js';
+import { projectReportRoutes } from './routes/project-reports.js';
 import { globalTaskRoutes, projectTaskRoutes } from './routes/project-tasks.js';
 import { projectRoutes } from './routes/projects.js';
 import { promptAssistRoutes } from './routes/prompt-assist.js';
@@ -555,6 +559,9 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Report-embedded action requests at /api/projects/:id/report-actions/*
   app.route('/api/projects', reportActionRoutes(ctx));
   app.route('/api/projects', diffpackRoutes(ctx));
+  // The Reports view's list and write-now at /api/projects/:id/reports*
+  app.route('/api/projects', projectReportRoutes(ctx));
+  app.route('/api/projects', projectIndexViewRoutes(ctx));
   app.route('/api/projects', promptDraftRoutes(ctx));
   // Per-project GitHub operations live at /api/projects/:id/github/*
   app.route('/api/projects', gitRoutes(ctx, 'git'));
@@ -567,6 +574,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Per-project mail operations live at /api/projects/:id/mail/*
   // Per-project connector operations live at /api/projects/:id/connectors/*
   app.route('/api/projects', connectorRoutes(ctx));
+  // Per-project lookouts live at /api/projects/:id/lookouts/*
+  app.route('/api/projects', projectLookoutRoutes(ctx));
   // Per-project tasks live at /api/projects/:id/tasks/*
   // Before the task routes: `/tasks/input-preview` must not read as a task number.
   app.route('/api/projects', taskInputRoutes(ctx));
@@ -624,6 +633,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/video-gen', videoGenRoutes(ctx));
   app.route('/api/audio', audioRoutes(ctx));
   app.route('/api/recognition', recognitionRoutes(ctx));
+  app.route('/api/devices', deviceRoutes(ctx));
+  app.route('/api/lookouts', lookoutRoutes(ctx));
   app.route('/api/catalog', catalogRoutes(ctx));
   app.route('/api/toolset', toolsetConfigRoutes(ctx));
   app.route('/api/sessions', sessionRoutes(ctx));

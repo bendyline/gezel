@@ -171,3 +171,233 @@ export const FileInsightResponseSchema = z.object({
   }),
 });
 export type FileInsightResponse = z.infer<typeof FileInsightResponseSchema>;
+
+// ── reports, for the Reports view ────────────────────────────────────────
+
+/** What a report is about, from where it lives in the artifacts drawer. */
+export const ProjectReportKindSchema = z.enum([
+  'codebase',
+  'map',
+  'issues',
+  'documents',
+  'photos',
+  'review',
+  'digest',
+  'other',
+]);
+export type ProjectReportKind = z.infer<typeof ProjectReportKindSchema>;
+
+/** The reports Gezel can write on request, without a model. */
+export const WritableReportKindSchema = z.enum([
+  'codebase',
+  'map',
+  'issues',
+  'documents',
+  'photos',
+]);
+export type WritableReportKind = z.infer<typeof WritableReportKindSchema>;
+
+export const ProjectReportSchema = z.object({
+  /** Path in the project's artifacts drawer. */
+  path: z.string(),
+  title: z.string(),
+  kind: ProjectReportKindSchema,
+  mtimeMs: z.number(),
+  size: z.number().int().nonnegative(),
+  /** Suggested actions written into it (gezel-action blocks). */
+  actions: z.number().int().nonnegative(),
+});
+export type ProjectReport = z.infer<typeof ProjectReportSchema>;
+
+export const ProjectReportsResponseSchema = z.object({
+  /** Newest first. */
+  reports: z.array(ProjectReportSchema),
+  /** The reports this project's folder suits, in the order to offer them. */
+  writable: z.array(WritableReportKindSchema),
+  /** More reports exist than were listed. */
+  truncated: z.boolean(),
+});
+export type ProjectReportsResponse = z.infer<typeof ProjectReportsResponseSchema>;
+
+export const GenerateProjectReportRequestSchema = z.object({ kind: WritableReportKindSchema });
+export type GenerateProjectReportRequest = z.infer<typeof GenerateProjectReportRequestSchema>;
+
+export const GenerateProjectReportResponseSchema = z.object({
+  /** The report now on disk; null when there was nothing to write about. */
+  path: z.string().nullable(),
+  /** False when the report was already up to date or there was nothing to say. */
+  wrote: z.boolean(),
+});
+export type GenerateProjectReportResponse = z.infer<typeof GenerateProjectReportResponseSchema>;
+
+// ── the gallery, for the Gallery view ────────────────────────────────────
+
+/** How the gallery forms its shelves. `event` is a photo library's outings. */
+export const GalleryGroupSchema = z.enum(['type', 'folder', 'event']);
+export type GalleryGroup = z.infer<typeof GalleryGroupSchema>;
+
+/** Which families of files to show (see core's `ruleFileType`). */
+export const GalleryFilterSchema = z.enum(['all', 'photos', 'documents', 'data', 'media', 'code']);
+export type GalleryFilter = z.infer<typeof GalleryFilterSchema>;
+
+export const GalleryRequestSchema = z.object({
+  /** Defaults by what the folder holds: outings for pictures, folders for code, types otherwise. */
+  group: GalleryGroupSchema.optional(),
+  filter: GalleryFilterSchema.optional(),
+  /** Words every shown file must contain, in its path, title, type or summary. */
+  q: z.string().max(200).optional(),
+  /** Shelves to return (default 12). */
+  shelves: z.coerce.number().int().positive().max(200).optional(),
+  /** Items per shelf (default 24). */
+  perShelf: z.coerce.number().int().positive().max(200).optional(),
+});
+export type GalleryRequest = z.infer<typeof GalleryRequestSchema>;
+
+export const GalleryItemSchema = z.object({
+  path: z.string(),
+  name: z.string(),
+  /** `ruleFileType` id: `photo`, `slides`, `code:typescript`, … */
+  type: z.string(),
+  typeLabel: z.string(),
+  family: z.enum(['photos', 'documents', 'data', 'media', 'code', 'other']),
+  size: z.number().nonnegative(),
+  mtimeMs: z.number(),
+  /** A photo's capture time, `YYYY-MM-DDTHH:MM:SS` as the camera recorded it. */
+  takenAt: z.string().optional(),
+  /** A document's title: its frontmatter title or first heading. */
+  title: z.string().optional(),
+  /** The opening of the index's summary (a photo's description). */
+  lead: z.string().optional(),
+});
+export type GalleryItem = z.infer<typeof GalleryItemSchema>;
+
+export const GalleryShelfSchema = z.object({
+  /** Stable across requests with the same group: `type:photo`, `folder:src`, `event:…`, `copies`. */
+  id: z.string(),
+  label: z.string(),
+  /** One line under the label: what the folder is for, what a special shelf holds. */
+  description: z.string().optional(),
+  /** Where the label came from: a rule, the folder's path, or the photos' dates. */
+  labelSource: z.enum(['rule', 'path', 'date']),
+  count: z.number().int().nonnegative(),
+  items: z.array(GalleryItemSchema),
+});
+export type GalleryShelf = z.infer<typeof GalleryShelfSchema>;
+
+export const GalleryResponseSchema = z.object({
+  indexed: z.boolean(),
+  /** The grouping used: the request's, or the folder's default. */
+  group: GalleryGroupSchema,
+  /** The groupings this folder supports, in the order to offer them. */
+  groups: z.array(GalleryGroupSchema),
+  filter: GalleryFilterSchema,
+  /** Files per family before the filter, for the filter keys. */
+  families: z.record(z.string(), z.number().int().nonnegative()),
+  /** Files the filter and words kept. */
+  total: z.number().int().nonnegative(),
+  shelves: z.array(GalleryShelfSchema),
+  /** Shelves in all; more than `shelves.length` means more can be asked for. */
+  shelfCount: z.number().int().nonnegative(),
+});
+export type GalleryResponse = z.infer<typeof GalleryResponseSchema>;
+
+export const GalleryShelfRequestSchema = z.object({
+  group: GalleryGroupSchema,
+  filter: GalleryFilterSchema.optional(),
+  q: z.string().max(200).optional(),
+  shelf: z.string().min(1),
+  offset: z.coerce.number().int().nonnegative().optional(),
+  limit: z.coerce.number().int().positive().max(200).optional(),
+});
+export type GalleryShelfRequest = z.infer<typeof GalleryShelfRequestSchema>;
+
+export const GalleryShelfResponseSchema = z.object({
+  shelf: z.string(),
+  offset: z.number().int().nonnegative(),
+  count: z.number().int().nonnegative(),
+  items: z.array(GalleryItemSchema),
+});
+export type GalleryShelfResponse = z.infer<typeof GalleryShelfResponseSchema>;
+
+// ── the timeline, for the Timeline view ──────────────────────────────────
+
+export const TimelineBucketSizeSchema = z.enum(['week', 'month', 'year']);
+export type TimelineBucketSize = z.infer<typeof TimelineBucketSizeSchema>;
+
+export const TimelineRequestSchema = z.object({
+  /** Defaults by how long the history runs: weeks for months, months for years. */
+  bucket: TimelineBucketSizeSchema.optional(),
+});
+export type TimelineRequest = z.infer<typeof TimelineRequestSchema>;
+
+/** A row of the timeline: an area of the project (git) or a family of files. */
+export const TimelineLaneSchema = z.object({ id: z.string(), label: z.string() });
+export type TimelineLane = z.infer<typeof TimelineLaneSchema>;
+
+export const TimelineBucketSchema = z.object({
+  /** First day in it, `YYYY-MM-DD` in the machine's time zone. */
+  start: z.string(),
+  /** The day after its last, `YYYY-MM-DD`. */
+  end: z.string(),
+  /** "Week of October 13, 2026", "October 2026", "2026". */
+  label: z.string(),
+  /** Commits in it; 0 when the timeline reads file dates. */
+  commits: z.number().int().nonnegative(),
+  /** Files changed in it (git), or dated in it (file dates). */
+  files: z.number().int().nonnegative(),
+  /** Per lane id: file changes (git) or files (file dates). */
+  lanes: z.record(z.string(), z.number().int().nonnegative()),
+});
+export type TimelineBucket = z.infer<typeof TimelineBucketSchema>;
+
+export const TimelineResponseSchema = z.object({
+  indexed: z.boolean(),
+  /** `git`: the project's commits. `files`: each file at its own date (a photo when taken). */
+  source: z.enum(['git', 'files']),
+  bucket: TimelineBucketSizeSchema,
+  lanes: z.array(TimelineLaneSchema),
+  /** Oldest first, every bucket between the first and the last, empty ones included. */
+  buckets: z.array(TimelineBucketSchema),
+  /** The history runs further back than the buckets returned. */
+  truncated: z.boolean(),
+});
+export type TimelineResponse = z.infer<typeof TimelineResponseSchema>;
+
+const LocalDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
+
+export const TimelineBucketRequestSchema = z.object({
+  start: LocalDateSchema,
+  end: LocalDateSchema,
+  /** The timeline's own source, so the detail matches the bars; git when history exists. */
+  source: z.enum(['git', 'files']).optional(),
+});
+export type TimelineBucketRequest = z.infer<typeof TimelineBucketRequestSchema>;
+
+export const TimelineCommitSchema = z.object({
+  sha: z.string(),
+  at: z.string(),
+  subject: z.string(),
+  /** The files it changed that the timeline shows, first 12. */
+  files: z.array(z.string()),
+  fileCount: z.number().int().nonnegative(),
+});
+export type TimelineCommit = z.infer<typeof TimelineCommitSchema>;
+
+export const TimelineFileSchema = GalleryItemSchema.extend({
+  /** Commits in the range that changed it (git). */
+  changes: z.number().int().nonnegative().optional(),
+});
+export type TimelineFile = z.infer<typeof TimelineFileSchema>;
+
+export const TimelineBucketResponseSchema = z.object({
+  start: z.string(),
+  end: z.string(),
+  source: z.enum(['git', 'files']),
+  /** Newest first. */
+  commits: z.array(TimelineCommitSchema),
+  /** Most changed first (git), newest first (file dates). */
+  files: z.array(TimelineFileSchema),
+  /** More commits or files than were listed. */
+  truncated: z.boolean(),
+});
+export type TimelineBucketResponse = z.infer<typeof TimelineBucketResponseSchema>;

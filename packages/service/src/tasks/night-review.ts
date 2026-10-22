@@ -19,6 +19,7 @@ import {
   isNightShiftReportArchive,
 } from '../meester/night-shift-oversight.js';
 import type { ReportActionManager } from '../report-actions/report-action-manager.js';
+import { isReportShaped } from '../reports/report-paths.js';
 import type { TaskManager } from '../tasks/manager.js';
 
 /**
@@ -265,16 +266,4 @@ export async function latestNightShiftTaskReport(
 function isProseArtifact(path: string): boolean {
   const lower = path.toLowerCase();
   return lower.endsWith('.md') || lower.endsWith('.markdown');
-}
-
-/** Markdown that reads as a report: under reports/, or *report*.md, or digest. */
-function isReportShaped(path: string): boolean {
-  const lower = path.toLowerCase();
-  if (!lower.endsWith('.md')) return false;
-  return (
-    lower.startsWith('reports/') ||
-    lower.includes('/reports/') ||
-    lower.includes('report') ||
-    lower.includes('digest')
-  );
 }

@@ -40,10 +40,12 @@ import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
 import { ActivityProvider, useActivity } from './components/activity-context.js';
+import { WatchingIndicator } from './components/cameras/WatchingIndicator.js';
 import { projectRecipientKey, writeChatThreadSelection } from './components/chat-thread-memory.js';
 import { ENGAGEMENT_MODES } from './components/engagement-modes.js';
 import { FirstRunProvider } from './components/first-run-context.js';
 import { HeaderDensityContext, useHeaderDensityMeasurement } from './components/header-density.js';
+import { LookoutAlertToast } from './components/lookouts/LookoutAlertToast.js';
 import { navigateToTab, openProjectFileActions, runNavActions } from './components/nav-actions.js';
 import { NIGHT_SHIFT_MOON_PATH, NightShiftMoonGlyph } from './components/night-shift-glyph.js';
 import {
@@ -790,6 +792,7 @@ function FullApp() {
               (runtimeCapabilities().engineStatus || runtimeCapabilities().structuredQuestions) && (
                 <ActivityControl />
               )}
+            {!firstRun && runtimeCapabilities().connections && <WatchingIndicator />}
             {!firstRun && runtimeCapabilities().daemonSettings && <BoekwachterPill />}
             {!firstRun && runtimeCapabilities().engineStatus && <EngineStatusPill />}
             {!firstRun && runtimeCapabilities().daemonSettings && (
@@ -874,6 +877,7 @@ function FullApp() {
           </Suspense>
         </ResponsiveAppShell>
       </FirstRunProvider>
+      {runtimeCapabilities().connections && <LookoutAlertToast />}
     </div>
   );
 }
