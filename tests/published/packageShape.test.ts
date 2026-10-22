@@ -54,8 +54,12 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // trips again. Keep this close to the measurement so the next growth
   // reopens it. (It tripped at 3.36 MB when `./local-loop` became an entry:
   // unsplit, every entry bundled
-  // its own copy of the shared code. tsup now splits it into chunks.)
-  '@bendyline/gezel': 2_000_000, //                    1.96 MB
+  // its own copy of the shared code. tsup now splits it into chunks. It
+  // tripped again at 2.06 MB from feature schemas spread across lookouts,
+  // devices, issue triage and project views; no one declaration was at fault.
+  // The largest remain TaskSchema at 174 KB and the four craftbook manifest
+  // schemas at ~78 KB each, in the shared `.d.ts` chunk.)
+  '@bendyline/gezel': 2_100_000, //                    2.06 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
   '@bendyline/gezel-script-runtime': 50_000,

@@ -97,6 +97,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listAvailableCredentials: { credentials: [] },
   listConnectors: { bindings: [] },
   listConnectorActions: { pending: [] },
+  listWatchingCameras: { cameras: [] },
   listOAuthClients: { clients: [] },
   listHistory: { entries: [] },
   listChannels: { channels: [] },

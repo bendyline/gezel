@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { GezelConfig } from '@bendyline/gezel';
+import { type GezelConfig, HARNESS_TOOL_NAMES } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type TokenStore, createTokenStore } from '../http/token-store.js';
 import { readJsonMember, upsertJsonMember } from '../local-harness/json-member.js';
@@ -359,7 +359,7 @@ describe('the launcher, run as an app runs it', () => {
     );
     try {
       const { tools } = await client.listTools();
-      expect(tools).toHaveLength(9);
+      expect(tools.map((t) => t.name).sort()).toEqual([...HARNESS_TOOL_NAMES].sort());
       const status = await client.callTool({ name: 'gezel_status', arguments: {} });
       expect(status.isError).toBe(true);
       expect(JSON.stringify(status.content)).toContain("Gezel isn't running");
