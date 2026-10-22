@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, posix } from 'node:path';
-import { formatKnowledgeUri } from '@bendyline/gezel';
+import { assetExtension, formatKnowledgeUri } from '@bendyline/gezel';
 import {
   HANDBOEK_KNOWLEDGE_CATALOG,
   HANDBOEK_KNOWLEDGE_PUBLISHER,
@@ -95,7 +95,8 @@ export async function handboekKnowledgeSource(
       const path = posix.join(relative, entry.name);
       const absolute = join(directory, entry.name);
       if (entry.isDirectory()) collectAssets(absolute, path);
-      else if (entry.isFile()) assets.push({ path, absPath: absolute });
+      // Website downloads share this tree, but .gezk assets are media only.
+      else if (entry.isFile() && assetExtension(path)) assets.push({ path, absPath: absolute });
     }
   };
   collectAssets(join(contentDir, 'assets'), 'assets');
@@ -140,10 +141,14 @@ export function rewriteHandboekKnowledgeLinks(
           if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//') || href.startsWith('#'))
             return whole;
           const [, rawPath = '', suffix = ''] = /^([^?#]*)(.*)$/.exec(href) ?? [];
-          if (image) {
-            const assetPath = posix.normalize(`${area}/${rawPath}`);
-            return assetPath.startsWith('assets/') ? `![${label}](${assetPath}${suffix})` : whole;
+          const assetPath = posix.normalize(`${area}/${rawPath}`);
+          if (assetPath.startsWith('assets/')) {
+            const target = assetExtension(assetPath)
+              ? assetPath
+              : `https://gezel.com/docs/${assetPath}`;
+            return `${image}[${label}](${target}${suffix})`;
           }
+          if (image) return whole;
           const withoutMd = rawPath.replace(/\.md$/i, '');
           const relativePath = posix.normalize(`${area}/${withoutMd}`);
           const id = ids.has(withoutMd)
