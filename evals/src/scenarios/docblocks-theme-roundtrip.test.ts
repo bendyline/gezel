@@ -246,10 +246,15 @@ async function callDocblocks(
     child.stdin.write(
       `${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`,
     );
+    // Structured content wraps the listing in `result`; the text form does not.
+    type Roots = Array<{ id: string; label: string }>;
     const listed = structured(await rpc('tools/call', { name: 'list_roots', arguments: {} })) as {
-      roots: Array<{ id: string; label: string }>;
+      roots?: Roots;
+      result?: { roots?: Roots };
     };
-    const roots = Object.fromEntries(listed.roots.map((root) => [root.label, root.id]));
+    const roots = Object.fromEntries(
+      (listed.roots ?? listed.result?.roots ?? []).map((root) => [root.label, root.id]),
+    );
     const out: Array<Record<string, unknown>> = [];
     for (const call of calls) {
       out.push(

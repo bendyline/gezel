@@ -66,6 +66,7 @@ import {
   summarizeInflightTurnsForLog,
   summarizeSilentRecoveries,
   taskGraphPoisonedSessionRecoveryLine,
+  throughputScale,
   throughputScaledMaxDurationMs,
   totalWorkspaceFileCount,
   trialHardProgressTimeoutMs,
@@ -2234,6 +2235,36 @@ describe('trialHardProgressTimeoutMs', () => {
         envProgressFloorMs: 45 * MINUTE,
       }),
     ).toBe(45 * MINUTE);
+  });
+});
+
+describe('the STALL path at a slow decode rate', () => {
+  it('stretches its in-flight grace with the throughput scale', () => {
+    // petshop / deepseek-v4.1 at 8.36 tok/s, 2026-10-21: the image generator
+    // had queued 28 minutes for the one engine slot and was 3 minutes into
+    // its turn when an unscaled 15-minute grace ended the trial.
+    const queued = [
+      { sessionId: '908046a9', gezelId: 'niklas', projectId: 'pet-shop', elapsedMs: 31 * 60_000 },
+    ];
+    const tripped = {
+      fastPathTripped: false,
+      longPathTripped: false,
+      stallPathTripped: true,
+      chatterPathTripped: false,
+      inflightTurns: queued,
+    };
+    expect(shouldDeferRetryLoopForInflight(tripped)).toBe(false);
+    expect(
+      shouldDeferRetryLoopForInflight({ ...tripped, throughputScale: throughputScale(8.36) }),
+    ).toBe(true);
+  });
+
+  it('scales from the reference rate, never below 1 and never past the cap', () => {
+    expect(throughputScale(20)).toBe(1);
+    expect(throughputScale(40)).toBe(1);
+    expect(throughputScale(10)).toBe(2);
+    expect(throughputScale(0.5)).toBe(8);
+    expect(throughputScale(undefined)).toBe(1);
   });
 });
 

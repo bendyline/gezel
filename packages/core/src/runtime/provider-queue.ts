@@ -928,9 +928,10 @@ export interface QueueLease {
    * has waited long enough, release the slot, queue again behind that turn,
    * and resolve `true` once the slot is back. Otherwise resolve `false` at
    * once. Rejects with {@link AbortedWhileQueuedError} if the turn is
-   * cancelled while it waits to resume.
+   * cancelled while it waits to resume. `onYield` runs as the slot is handed
+   * over, so the hand-off is visible even if the turn never resumes.
    */
-  yieldIfContended(): Promise<boolean>;
+  yieldIfContended(onYield?: () => void): Promise<boolean>;
 }
 
 /** The lease for work that runs outside a queue: it never yields. */
@@ -970,13 +971,14 @@ export async function runInQueue<T>(
   let release = await acquireNoticingWait(queue, opts, acquireOpts);
   let heldSince = queue.currentTime();
   const lease: QueueLease = {
-    yieldIfContended: async () => {
+    yieldIfContended: async (onYield) => {
       const quantum = queue.yieldQuantumMs;
       if (quantum <= 0 || queue.currentTime() - heldSince < quantum) return false;
       if (!queue.hasYieldableWaiter({ sessionId: opts.sessionId, lane: opts.lane })) return false;
       const held = release;
       release = () => {};
       held();
+      onYield?.();
       // The turn shows as queued while it waits to resume, the same as
       // before it first started, rather than as a silent, stalled reply.
       release = await acquireNoticingWait(queue, opts, acquireOpts);

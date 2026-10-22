@@ -187,7 +187,9 @@ describe('ChatManager + app tools', () => {
       { name: 'doc_read', arguments: {} },
       {
         name: 'doc_insert_text',
-        arguments: { text: 'His father died in 1743 [1]. He had a brother named Ezekiel.' },
+        // An invented year is refused; an unsourced name alone would only be
+        // noted (docs/factual-writing.md).
+        arguments: { text: 'His father died in 1743 [1]. His brother Ezekiel was born in 1745.' },
       },
       {
         name: 'doc_insert_text',
@@ -205,7 +207,7 @@ describe('ChatManager + app tools', () => {
     );
     const refused = mock.toolCallOutputs.filter(({ name }) => name === 'doc_insert_text')[0];
     expect(refused?.output).toContain('Not inserted');
-    expect(refused?.output).toContain('"Ezekiel"');
+    expect(refused?.output).toContain('1745');
     expect(inserted).toEqual(['His father, Augustine Washington, died in 1743.']);
 
     const persisted = await store.getSession('ada', session.id);

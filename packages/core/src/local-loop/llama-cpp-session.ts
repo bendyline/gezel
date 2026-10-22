@@ -2087,10 +2087,14 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
   ): Promise<void> {
     const resumeBudget = budget.hold();
     const startedAt = Date.now();
+    const session = (opts?.queue?.sessionId ?? 'anonymous').slice(0, 8);
     try {
-      if (await lease.yieldIfContended()) {
+      const yielded = await lease.yieldIfContended(() =>
+        log.info(`[llama-cpp] session=${session} handed its queue slot to a waiting conversation`),
+      );
+      if (yielded) {
         log.info(
-          `[llama-cpp] session=${(opts?.queue?.sessionId ?? 'anonymous').slice(0, 8)} handed its queue slot to a waiting conversation; resumed after ${Math.round((Date.now() - startedAt) / 1000)}s`,
+          `[llama-cpp] session=${session} resumed after ${Math.round((Date.now() - startedAt) / 1000)}s`,
         );
       }
     } catch (err) {

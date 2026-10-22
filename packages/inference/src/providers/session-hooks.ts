@@ -21,5 +21,11 @@ export interface ToolGroundingHooks {
     toolName: string,
     args: Record<string, unknown>,
   ): { kind: 'reject'; error: string } | { kind: 'allow'; args: Record<string, unknown> } | null;
-  labelEvidence(toolName: string, args: Record<string, unknown>, text: string): string | null;
+  /** `source.thirdParty` is true for a tool served by any server but gezel's own. */
+  labelEvidence(
+    toolName: string,
+    args: Record<string, unknown>,
+    text: string,
+    source?: { thirdParty: boolean },
+  ): string | null;
 }

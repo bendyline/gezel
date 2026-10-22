@@ -179,6 +179,17 @@ describe('EvidenceLedger', () => {
     );
   });
 
+  it("labels a third-party server's lookups, but not its writes or gezel's own notes", () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn('');
+    const page = 'Ada Lovelace published her Notes in 1843.';
+    expect(
+      ledger.labelToolResult('read_wikipedia_sources', {}, page, { thirdParty: true }),
+    ).toMatch(/^\[1\]/);
+    expect(ledger.labelToolResult('save_artifact', {}, page, { thirdParty: true })).toBeNull();
+    expect(ledger.labelToolResult('read_task_notes', {}, page, { thirdParty: false })).toBeNull();
+  });
+
   it('numbers each file of a batch read as its own evidence', () => {
     const ledger = new EvidenceLedger();
     ledger.beginTurn('');

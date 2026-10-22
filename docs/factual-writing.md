@@ -101,7 +101,10 @@ holds one session's evidence:
   session's `grounding` hooks, after the output cap, so the ledger holds
   exactly what the model saw. The batch readers (`read_files`,
   `read_artifacts`) count like their single-file twins, numbered once per
-  file section.
+  file section. A third-party server's tools count when their names read as
+  lookups (`search_*`, `read_*`, `get_*`, `fetch_*`, … and nothing that
+  writes), through `isEvidenceTool`; gezel's own tools count only from the
+  list, so a model cannot ground a claim by reading back its own task notes.
 - **Refusal remedies follow the source.** When the session's evidence so far
   came from a workspace reader, or the person's messages name source files,
   a refused write is sent back to `read_file` on those files rather than to

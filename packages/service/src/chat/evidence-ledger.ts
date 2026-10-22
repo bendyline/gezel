@@ -20,7 +20,6 @@
 import {
   type ChatMessage,
   DOCUMENT_WRITE_TOOLS,
-  EVIDENCE_TOOLS,
   type EvidenceItem,
   type FactualLookupPreference,
   type GroundingEvidence,
@@ -35,6 +34,7 @@ import {
   factualLookupTools,
   groundText,
   groundingProblems,
+  isEvidenceTool,
   isProseFile,
   parseCitationNumbers,
 } from '@bendyline/gezel';
@@ -379,8 +379,13 @@ export class EvidenceLedger {
   }
 
   /** The `[n]` header for an evidence tool's result, or null for any other tool. */
-  labelToolResult(tool: string, args: Record<string, unknown>, text: string): string | null {
-    if (!EVIDENCE_TOOLS.has(tool) || !text.trim()) return null;
+  labelToolResult(
+    tool: string,
+    args: Record<string, unknown>,
+    text: string,
+    source?: { thirdParty: boolean },
+  ): string | null {
+    if (!isEvidenceTool(tool, source) || !text.trim()) return null;
     const structured = structuredToolEvidence(tool, text);
     if (structured.length > 0) {
       return structured
@@ -655,7 +660,7 @@ export class EvidenceLedger {
     return {
       checkWrite: (tool, args) =>
         this.checkDocumentWrite(tool, args) ?? this.checkProseFileWrite(tool, args),
-      labelEvidence: (tool, args, text) => this.labelToolResult(tool, args, text),
+      labelEvidence: (tool, args, text, source) => this.labelToolResult(tool, args, text, source),
     };
   }
 

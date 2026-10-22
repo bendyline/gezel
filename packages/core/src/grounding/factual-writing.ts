@@ -71,6 +71,61 @@ export const EVIDENCE_TOOLS: ReadonlySet<string> = new Set([
   'sheet_describe_table',
 ]);
 
+const LOOKUP_VERBS = new Set([
+  'search',
+  'read',
+  'get',
+  'fetch',
+  'lookup',
+  'query',
+  'find',
+  'browse',
+  'retrieve',
+  'scrape',
+  'extract',
+  'list',
+]);
+const CHANGE_VERBS = new Set([
+  'write',
+  'create',
+  'update',
+  'delete',
+  'remove',
+  'set',
+  'save',
+  'send',
+  'post',
+  'put',
+  'insert',
+  'replace',
+  'append',
+  'upload',
+  'edit',
+  'apply',
+]);
+
+/**
+ * Whether a successful result is evidence the model may cite.
+ *
+ * Gezel's own tools count only from {@link EVIDENCE_TOOLS}: its notes and
+ * drafts are the model's own words, and reading them back must not ground
+ * them. A third-party server names its lookups however it likes, so there a
+ * tool whose name reads as a lookup counts too. An eval's Wikipedia server
+ * named its tools `search_wikipedia` and `read_wikipedia_sources`, and every
+ * sentence built from them was refused as unsourced (2026-10-21).
+ */
+export function isEvidenceTool(tool: string, opts: { thirdParty?: boolean } = {}): boolean {
+  if (EVIDENCE_TOOLS.has(tool)) return true;
+  if (!opts.thirdParty) return false;
+  const words = tool
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return (
+    words.some((word) => LOOKUP_VERBS.has(word)) && !words.some((word) => CHANGE_VERBS.has(word))
+  );
+}
+
 /** Which source family should lead a factual lookup. */
 export type FactualLookupPreference = 'default' | 'knowledge' | 'wikipedia';
 
