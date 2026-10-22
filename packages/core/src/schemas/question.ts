@@ -60,6 +60,13 @@ export const QuestionAnswerSchema = z.object({
    */
   silentSkip: z.boolean().optional(),
   /**
+   * Set beside `silentSkip` when the runtime closed the card itself
+   * because the task step that asked it has moved on. The person never
+   * answered, so the card reads "No longer needed", not "Skipped". Never
+   * accepted from a client.
+   */
+  withdrawn: z.boolean().optional(),
+  /**
    * Per-package decisions for `npm-install-approval` questions. When
    * set, the answer handler installs / always-allows / declines each
    * package and emits a single follow-up summary into the session.

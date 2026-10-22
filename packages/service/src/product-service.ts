@@ -244,6 +244,7 @@ import { SystemIdleState } from './system/idle-state.js';
 import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-capability.js';
 import { loadTaskOutputs } from './tasks/completion-wrapup.js';
 import { reviewTaskFigures } from './tasks/figure-review.js';
+import { withdrawFinishedPassQuestions } from './tasks/finished-pass-questions.js';
 import { TaskLauncher } from './tasks/launcher.js';
 import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
 import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
@@ -929,7 +930,13 @@ export async function startProductService(
   // Reconcile immediately on every durable status transition: inactive
   // ancestors prune queued/running child turns, while a resumed ancestor
   // rehydrates only descendants whose own stored status is still active.
-  tasks.setTaskStatusChangedHook(({ task }) => taskRunner.reconcileStatusChange(task));
+  tasks.setTaskStatusChangedHook(async ({ task }) => {
+    await taskRunner.reconcileStatusChange(task);
+    // A finished or canceled task has no step pass left to answer for.
+    await withdrawFinishedPassQuestions({ store, chatEvents }, task).catch((err: unknown) =>
+      log.warn(`[tasks] ${task.ref}: question withdrawal failed: ${String(err)}`),
+    );
+  });
   nightShift.setOnActivated(async () => {
     // Index first, tasks second: the catch-up flag is raised synchronously,
     // so the runner's night dispatch holds until static + AI indexing is
@@ -1441,6 +1448,11 @@ export async function startProductService(
     if (kind !== 'entry' && kind !== 'redispatch' && completedStep.completedAt) {
       xpRefresher.note(stepCreditedGezelId(completedStep));
     }
+    // The pass that asked is over, including an earlier pass of this same
+    // step after a gate loops back (tasks/finished-pass-questions.ts).
+    await withdrawFinishedPassQuestions({ store, chatEvents }, task).catch((err: unknown) =>
+      log.warn(`[tasks] ${task.ref}: question withdrawal failed: ${String(err)}`),
+    );
     introduceFreshHire(task, newStep);
     if (await runActivationGate(runtimeActivation, { projectId, task, newStep })) return;
     if (await runSpawnFanout(runtimeActivation, { projectId, task, newStep })) return;

@@ -111,6 +111,25 @@ export function plateauScore(
   return score;
 }
 
+/**
+ * A review gate: its rejections send the task to another step (`onReject`
+ * or a check's `goto` names the step that made the work). The gated file
+ * is the reviewer's verdict, and a FAIL in it is the review doing its job,
+ * so the edit and rewrite stages must never fire there: on week-plan
+ * (qwen3.8-27b, 2026-10-22) they told whoever read the notes to rewrite
+ * verdict.md until "contains FAIL" cleared, while each review pass was
+ * finding a different, real gap in the report. The pause at stage 3 stays:
+ * it is the bound a review loop promises ("a review that keeps failing
+ * pauses the task"), because a loop back to an earlier step starts the
+ * gate's attempt count again.
+ */
+export function routesRejectionAway(
+  stepId: string,
+  loopTarget: string | undefined,
+): loopTarget is string {
+  return loopTarget !== undefined && loopTarget !== stepId;
+}
+
 export function stageForPlateau(score: number): EscalationStage {
   if (score >= 4) return 3;
   if (score === 3) return 2;

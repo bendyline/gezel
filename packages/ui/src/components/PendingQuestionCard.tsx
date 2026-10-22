@@ -1228,7 +1228,9 @@ function AnsweredView({ question }: { question: Question }) {
     return (
       <div className="pending-question pending-question-answered">
         <span className="pending-question-label muted">Question</span>
-        <span className="pending-question-summary">Skipped: {oneLine(question.prompt, 100)}</span>
+        <span className="pending-question-summary">
+          {ans.withdrawn ? 'No longer needed' : 'Skipped'}: {oneLine(question.prompt, 100)}
+        </span>
       </div>
     );
   }
