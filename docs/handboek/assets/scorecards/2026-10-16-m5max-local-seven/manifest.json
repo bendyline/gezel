@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "kind": "gezel-scorecard-publication-package",
+  "generatedAt": "2026-10-22T13:20:28.824Z",
+  "status": "integrated-in-website-source-not-deployed",
+  "recordedObservations": 601,
+  "scorecardObservations": 600,
+  "quarantinedObservations": 1,
+  "sourceOutcomeCounts": {
+    "recorded": 601,
+    "passed": 476,
+    "taskFailures": 119,
+    "infrastructureExclusions": 6
+  },
+  "scorecardOutcomeCounts": {
+    "recorded": 600,
+    "passed": 476,
+    "infrastructureExclusions": 6,
+    "taskFailures": 118
+  },
+  "judgingCoverage": {
+    "recordedTrials": 601,
+    "reviewedTrials": 601,
+    "judged": 248,
+    "noArtifact": 4,
+    "invalidRubric": 14,
+    "noDeclaredRubric": 335,
+    "pending": 0
+  },
+  "files": {
+    "scorecard.json": {
+      "sha256": "23ebb6e5377966170bf4b7b4963a52de1351b7544a24e53b60815072308adc7b",
+      "bytes": 59981
+    },
+    "scorecard-details.json": {
+      "sha256": "44a2e795afb2469f26755d89700b96e97deb0a74239dbc1190ca9b3367b65123",
+      "bytes": 4320269
+    },
+    "scorecard-details.schema.json": {
+      "sha256": "db1ca49cd3b5342c79226b250cddb25de491bc33d1d5f9c962f4bea499afd98c",
+      "bytes": 57571
+    },
+    "README.md": {
+      "sha256": "ec63a14fcaa2b9d80f56b871cd2cd661a32d42c7bb44bac17eeb59be66c0aa85",
+      "bytes": 5119
+    },
+    "runs/2026-10-21-m5max-ornith-observed-subset.json": {
+      "sha256": "8e30ba8696ac986b30067a6c1b42c75f2dafd5bc3e8a0f03236e6e0b377ff407",
+      "bytes": 14296
+    },
+    "runs/2026-10-16-m5max-local-seven-completed-arms.json": {
+      "sha256": "dfada7dc00bad4adb396c863151befb2ec39de6f4525b72a692fcdd86852c326",
+      "bytes": 45745
+    }
+  },
+  "runIds": [
+    "2026-10-21-m5max-ornith-observed-subset",
+    "2026-10-16-m5max-local-seven-completed-arms"
+  ],
+  "schemaSource": "packages/core/src/scorecard/schema.ts",
+  "schemaSourceSha256": "f87ceb07ae3ccc2973df12c62988f7c8d6aca304d06059251f729cf60da34589",
+  "newInferenceCalls": 0,
+  "newJudgeCalls": 0,
+  "originalScoresChanged": false,
+  "published": false,
+  "integration": {
+    "assetsSource": "docs/handboek/assets/scorecards/2026-10-16-m5max-local-seven",
+    "scorecardSource": "packages/core/src/scorecard/data/runs",
+    "barrel": "packages/core/src/scorecard/data/index.ts",
+    "article": "docs/handboek/technical/model-scorecard.md",
+    "exportedAssetPath": "assets/scorecards/2026-10-16-m5max-local-seven",
+    "deployed": false
+  }
+}

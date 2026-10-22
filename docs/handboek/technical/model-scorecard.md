@@ -40,6 +40,33 @@ reusable recipes of its own.
 
 ::handboek-model-scorecard{suites=core,productivity,developer,complex-work}
 
+## October 2026 Mac results and review data
+
+The Apple M5 Max campaign closed at 601 recorded attempts: 476 passed,
+119 failed their tasks, and six were excluded for infrastructure problems.
+LFM 2.5, Qwen 3.6, Qwen 3.8 and BTL4 each completed 129 attempts. Ornith
+completed 85 of 129 planned attempts; Nemotron and MiniCPM were not run.
+
+The tables retain 600 attempts in two separate rounds: four complete model
+arms and the partial Ornith round. One additional failed Ornith attempt had
+comparison-identity drift and remains in the evidence download with its
+original classification, outside the comparison tables.
+
+The [scorecard data](../assets/scorecards/2026-10-16-m5max-local-seven/scorecard.json)
+and [full judging and performance data](../assets/scorecards/2026-10-16-m5max-local-seven/scorecard-details.json)
+are available as JSON. The companion includes all 601 observations, 248
+artifact reviews, each task's rubric and sample counts, and per-trial speed
+and memory measurements. Four declared artifacts were missing, 14 reviews
+had a mismatched rubric, and 335 tasks had no applicable declared rubric.
+No review is pending. Different task rubrics are kept separate, so this
+round has no combined quality score in the tables.
+
+All nine admission probes generated fewer than 256 output tokens; Ornith's
+single probe generated 84. Treat the table's speeds as preliminary. The
+companion also records engine-derived speeds during the actual tasks and
+their sample counts. [Download notes and validation details](../assets/scorecards/2026-10-16-m5max-local-seven/README.md)
+explain the populations and caveats.
+
 ## Reading the table
 
 **Tasks passed** counts every attempt across every job in the set. A model
@@ -51,10 +78,12 @@ gap.
 
 **Quality** is an AI reviewer's opinion of the finished work, and the count
 beside it is how many pieces that opinion covers. It only grades work that
-was actually produced, so a model that fails often is judged on its
-successes alone — `6.5/10 (18 pieces)` is a weaker claim than `6.5/10 (26
+was actually produced, including declared artifacts from failed attempts
+where the round used inline judging. Missing artifacts receive no invented
+quality score — `6.5/10 (18 pieces)` is a weaker claim than `6.5/10 (26
 pieces)`. Treat it as color next to the pass rate, never as a substitute
-for it.
+for it. Task-specific rubrics stay separate rather than being averaged into
+one score.
 
 **Performance** shows two measured speeds on the machine named above: output
 speed is how fast the model writes its answer, and prefill speed is how fast it

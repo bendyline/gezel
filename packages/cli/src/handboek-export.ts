@@ -361,11 +361,12 @@ export function rewriteSiteLinks(
       return whole;
     }
     const [path, suffix = ''] = splitLinkSuffix(rawTarget);
-    const candidate = path.replace(/\.md$/, '').replace(/^(\.\.?\/)+/, '');
+    const candidate = path.replace(/^(\.\.?\/)+/, '');
     if (candidate.startsWith('assets/')) {
       return `](${prefix}${candidate}${suffix})`;
     }
-    const target = ids.has(candidate) ? candidate : byStem.get(candidate.split('/').pop() ?? '');
+    const article = candidate.replace(/\.md$/, '');
+    const target = ids.has(article) ? article : byStem.get(article.split('/').pop() ?? '');
     if (!target) return whole;
     return `](${prefix}${target}/${suffix})`;
   });

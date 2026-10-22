@@ -578,6 +578,20 @@ describe('::handboek-model-scorecard in site mode', () => {
     expect(latest).toBeLessThan(older);
   });
 
+  it('keeps a newer partial round available without replacing the full default', () => {
+    const data = twoRounds();
+    data.runs[0]!.scope = 'subset';
+    const html = renderScorecardFilterHtml(data, ['core', 'productivity'], {
+      includeTaskCount: false,
+    });
+    const blocks = html.split('<div class="hb-scorecard-round"').slice(1);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toContain(`${SCORECARD_DATA_ATTRS.round}="mac-latest"`);
+    expect(blocks[0]).not.toContain(`${SCORECARD_DATA_ATTRS.latest}="1"`);
+    expect(blocks[1]).toContain(`${SCORECARD_DATA_ATTRS.round}="win-older"`);
+    expect(blocks[1]).toContain(`${SCORECARD_DATA_ATTRS.latest}="1"`);
+  });
+
   it('stamps every row with its model family, not its quantization', () => {
     const html = renderScorecardFilterHtml(twoRounds(), ['core', 'productivity'], {
       includeTaskCount: false,

@@ -769,17 +769,17 @@ export function renderScorecardRunsMarkdown(
   }
 
   const lines: string[] = [];
-  const headline = runs[0]!.run;
+  const headline = (runs.find((entry) => entry.run.scope !== 'subset') ?? runs[0]!).run;
   for (const [index, entry] of runs.entries()) {
     if (index > 0) lines.push('');
     lines.push(
-      `### ${index === 0 ? 'Latest round' : 'Earlier round'} — ${entry.run.provenance.startedAt.slice(0, 10)}`,
+      `### ${entry.run.id === headline.id ? 'Latest round' : entry.run.scope === 'subset' ? 'Partial round' : 'Earlier round'} — ${entry.run.provenance.startedAt.slice(0, 10)}`,
     );
     lines.push('');
     const engines = entry.suites.flatMap((suite) =>
       suite.scores.map((score) => score.result.engine),
     );
-    const why = index === 0 ? [] : provenanceDifferences(headline, entry.run);
+    const why = entry.run.id === headline.id ? [] : provenanceDifferences(headline, entry.run);
     lines.push(
       `**${describeProvenance(entry.run, engines)}**${why.length > 0 ? ` — ${why.join(', ')}` : ''}`,
     );
@@ -859,20 +859,21 @@ export function renderScorecardFilterHtml(
   }
 
   const attr = SCORECARD_DATA_ATTRS;
-  const headline = rounds[0]!.run;
+  const headline = (rounds.find((entry) => entry.run.scope !== 'subset') ?? rounds[0]!).run;
   const labels = roundLabels(rounds.map((entry) => entry.run));
   const parts: string[] = [
     `<div class="hb-scorecard" ${attr.root}="1">`,
     `<div class="hb-scorecard-controls" ${attr.controls}="1"></div>`,
   ];
 
-  for (const [index, entry] of rounds.entries()) {
+  for (const entry of rounds) {
     const { run } = entry;
     const date = run.provenance.startedAt.slice(0, 10);
     const engines = entry.suites.flatMap((suite) =>
       suite.scores.map((score) => score.result.engine),
     );
-    const why = index === 0 ? [] : provenanceDifferences(headline, run);
+    const isHeadline = run.id === headline.id;
+    const why = isHeadline ? [] : provenanceDifferences(headline, run);
     const models = [
       ...new Set(
         entry.suites.flatMap((suite) =>
@@ -894,9 +895,9 @@ export function renderScorecardFilterHtml(
         `${attr.hardwareLabel}="${esc(scorecardHardwareLabel(run.provenance.device))}"`,
         `${attr.models}="${esc(models.join(' '))}"`,
         `${attr.tiers}="${esc(tiers.join(' '))}"`,
-        ...(index === 0 ? [`${attr.latest}="1"`] : []),
+        ...(isHeadline ? [`${attr.latest}="1"`] : []),
       ].join(' ')}>`,
-      `<h4 class="hb-scorecard-round-title">${index === 0 ? 'Latest round' : 'Earlier round'} — ${esc(date)}</h4>`,
+      `<h4 class="hb-scorecard-round-title">${isHeadline ? 'Latest round' : run.scope === 'subset' ? 'Partial round' : 'Earlier round'} — ${esc(date)}</h4>`,
       `<p class="hb-scorecard-stamp"><strong>${esc(describeProvenance(run, engines))}</strong>${
         why.length > 0 ? ` — ${esc(why.join(', '))}` : ''
       }</p>`,
