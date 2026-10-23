@@ -25,6 +25,7 @@ import {
   type OpenAIFunctionTool,
   behaviorWrappersFor,
   capToolOutput,
+  isGezelMcp,
 } from '@bendyline/gezel/local-loop';
 
 export { redactObject, redactString };
@@ -226,6 +227,8 @@ export class McpBridge {
    */
   private wrappers: readonly McpToolWrapper[] = [];
   private wrapperCtx: McpToolWrapperContext | null = null;
+  /** gezel-mcp's own tools are evidence only by name; see `isEvidenceTool`. */
+  private servesGezelMcp = false;
   /** Fires after every tool invocation (success or failure). */
   onToolCall?: (info: ToolCallEvent) => void | Promise<void>;
   /**
@@ -554,6 +557,7 @@ export class McpBridge {
     // runs. The wrappers themselves still gate on `matches(spec)` so
     // gezel-mcp-only wrappers won't fire on a Playwright bridge etc.
     this.wrappers = [...behaviorWrappersFor(this.profile, spec), ...selectWrappersFor(spec)];
+    this.servesGezelMcp = isGezelMcp(spec);
     // Bind the wrapper context up front so `decorateTools` can read
     // `modelTier` (a schema-relaxer needs to know whether the model
     // is tiny before deciding to demote required fields). The context
@@ -1143,7 +1147,9 @@ export class McpBridge {
         deliveredResultTruncated = capped !== redactedText;
         if (this.grounding) {
           try {
-            const label = this.grounding.labelEvidence(toolName, effectiveArgs, capped);
+            const label = this.grounding.labelEvidence(toolName, effectiveArgs, capped, {
+              thirdParty: !this.servesGezelMcp,
+            });
             if (label) capped = `${label}\n${capped}`;
           } catch (err) {
             log.warn(

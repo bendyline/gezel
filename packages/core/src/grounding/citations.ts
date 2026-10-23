@@ -176,10 +176,24 @@ const SMALL_NUMBERS = [
 
 /** Capitalized words that open clauses rather than name anything. */
 const COMMON_CAPITALIZED = new Set(
-  'a an the and but or nor so yet for if when while after before during although though because since until unless as at by from in into of on onto to with without within he she it they we you i his her its their our your my this that these those there here then today tonight yesterday tomorrow later earlier meanwhile however instead still also each every both either neither many most some few all one two three no not yes later once soon now who what where which why how'.split(
+  'a an the and but or nor so yet for if when while after before during although though because since until unless as at by from in into of on onto to with without within he she it they we you i his her its their our your my this that these those there here then today tonight yesterday tomorrow later earlier meanwhile however instead still also each every both either neither many most some few all one two three no not yes later once soon now who what where which why how do does did is are was were be been being am has have had will would can could should shall may might must'.split(
     ' ',
   ),
 );
+/**
+ * A weekday is also stated by an ISO date that falls on it: calendar evidence
+ * carries dates, so "Friday is yours" was refused against `2026-10-23`
+ * entries (2026-10-21, week-plan on Qwen 3.8 27B).
+ */
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+function weekdayOfIsoDate(evidence: string, weekday: number): boolean {
+  for (const m of evidence.matchAll(/(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)/g)) {
+    const date = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    if (!Number.isNaN(date.getTime()) && date.getUTCDay() === weekday) return true;
+  }
+  return false;
+}
 /**
  * Technical acronyms are vocabulary, not names a source must state: "HTTP
  * 504" was refused because the chat log said only "504s" (2026-10-07,
@@ -205,34 +219,84 @@ const NAME_JOINERS = new Set([
   'and',
 ]);
 
+/** A checkable detail, and how literally the evidence must state it. */
+export interface Claim {
+  kind: ClaimKind;
+  value: string;
+  /** The writer marked the number as approximate ("~1,270", "about 30"). */
+  approx?: boolean;
+  /** The number is a percentage ("100%", "0 percent"). */
+  percent?: boolean;
+  /** A time of day ("14:38"), checked whole and never as a name's attribute. */
+  clock?: boolean;
+}
+
+/**
+ * "14:38" or "14:38:05". Split into 14 and 38, a timestamp read as two loose
+ * numbers that each had to sit near a name: "root cause at 14:38, using
+ * Grafana" was refused as "38 next to Grafana" because the chat log named
+ * Grafana at 14:35 (2026-10-20, incident-postmortem on GLM 5.3).
+ */
+const CLOCK_TIME = /(?<![\d:.])((?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)(?![\d:])/g;
+
+/**
+ * The writer says the next number, or the far end of a range, is rounded:
+ * "~1,180–1,270 rps" restates a metrics column that runs 1,179 to 1,271.
+ */
+const APPROXIMATE =
+  /(?:[~≈]\s*|\b(?:about|around|roughly|approximately|approx\.|nearly|almost|circa|some)\s+)(?:\d[\d,.]*\s*(?:[-–—]|to)\s*)?$/i;
+
 /** The checkable details a sentence states. */
-export function extractClaims(text: string): Array<{ kind: ClaimKind; value: string }> {
-  // Code spans and link targets name things in a workspace or on the web,
-  // not facts about the world; their digits and identifiers are not claims.
+export function extractClaims(text: string): Claim[] {
+  // Code spans, link targets and file references name things in a workspace
+  // or on the web, not facts about the world; their digits and identifiers are
+  // not claims. "(timeline.md:36–42)" points at lines: it was refused as "36
+  // next to Anita" (2026-10-20, incident-postmortem on GLM 5.3).
   const sentence = text
     .replace(/`[^`]*`/g, ' ')
     .replace(/\]\([^)]*\)/g, ']')
-    .replace(/\bhttps?:\/\/\S+/g, ' ');
-  const claims: Array<{ kind: ClaimKind; value: string }> = [];
+    .replace(/\bhttps?:\/\/\S+/g, ' ')
+    .replace(ATTRIBUTION_PARENTHETICAL, ' ')
+    .replace(FILE_REFERENCE, ' ');
+  const claims: Claim[] = [];
   const seen = new Set<string>();
-  const add = (kind: ClaimKind, value: string) => {
+  const add = (
+    kind: ClaimKind,
+    value: string,
+    flags: { approx?: boolean; percent?: boolean; clock?: boolean } = {},
+  ) => {
     const key = `${kind}:${value.toLowerCase()}`;
     if (!seen.has(key)) {
       seen.add(key);
-      claims.push({ kind, value });
+      claims.push({
+        kind,
+        value,
+        ...(flags.approx ? { approx: true } : {}),
+        ...(flags.percent ? { percent: true } : {}),
+        ...(flags.clock ? { clock: true } : {}),
+      });
     }
   };
   for (const m of sentence.matchAll(/["“]([^"”]{8,}?)["”]/g)) {
     if ((m[1] ?? '').trim().split(/\s+/).length >= 3) add('quote', (m[1] ?? '').trim());
   }
   const unquoted = sentence.replace(/["“][^"”]*["”]/g, ' ');
-  for (const m of unquoted.matchAll(
+  for (const m of unquoted.matchAll(CLOCK_TIME)) add('number', m[1] ?? '', { clock: true });
+  // Blanked to the same length, so match offsets still index `unquoted`.
+  const numeric = unquoted.replace(CLOCK_TIME, (time) => ' '.repeat(time.length));
+  for (const m of numeric.matchAll(
     /(?<![\w.])(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?:st|nd|rd|th|s)?(?![\w.]*\d)/g,
   )) {
     const digits = (m[1] ?? '').replace(/,/g, '');
     const value = Number(digits);
-    if (/^(1[0-9]{3}|20[0-9]{2})$/.test(digits)) add('year', digits);
-    else if (Number.isFinite(value)) add('number', digits);
+    const at = m.index ?? 0;
+    // No one writes a year with a thousands separator: "~1,270 rps" is a rate.
+    if (/^(1[0-9]{3}|20[0-9]{2})$/.test(digits) && !(m[1] ?? '').includes(',')) add('year', digits);
+    else if (Number.isFinite(value))
+      add('number', digits, {
+        approx: APPROXIMATE.test(unquoted.slice(Math.max(0, at - 24), at)),
+        percent: /^\s*(?:%|percent\b)/i.test(unquoted.slice(at + m[0].length)),
+      });
   }
   for (const m of unquoted.matchAll(
     /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/g,
@@ -247,10 +311,13 @@ export function extractClaims(text: string): Array<{ kind: ClaimKind; value: str
   // So does the first word of a list item or quote line: "- **Caveat:** …"
   // and "1. Salivary amylase …" named "Caveat" and "Salivary" until the
   // marker counted as the start of the line (2026-10-06 review).
+  // An option in a slash list ("Ship / Do not ship / Inconclusive") is a
+  // choice offered, not a name, whichever side of the slash it sits on.
   const opensClause = (i: number) =>
     i === 0 ||
-    /[:;—–]\**$/.test(raw[i - 1] ?? '') ||
-    /^(?:[-*+>•]|\d{1,3}[.)])$/.test(raw[i - 1] ?? '');
+    raw[i + 1] === '/' ||
+    /[:;—–·|•/\]]\**$/.test(raw[i - 1] ?? '') ||
+    /^(?:[-*+>•·|/]|\d{1,3}[.)])$/.test(raw[i - 1] ?? '');
   // "CO₂", "CO2": a formula, not a name called "CO".
   const isFormula = (i: number) => /\p{Lu}\p{L}*[0-9₀-₉]/u.test(raw[i] ?? '');
   let run: string[] = [];
@@ -262,7 +329,16 @@ export function extractClaims(text: string): Array<{ kind: ClaimKind; value: str
     // "Mira Chen assumed IC" names Mira, "Clean IC handoff" does not name Clean.
     const named =
       startsSentence && words.filter((w) => isEntityName(w)).length < 2 ? words.slice(1) : words;
-    for (const word of named) {
+    // A hyphenated word names only its capitalized parts: "PaymentGateway-side"
+    // names PaymentGateway, and "CI-green" (an acronym and an adjective) names
+    // nothing. Both were refused as whole words the source never wrote
+    // (2026-10-20, incident-postmortem on GLM 5.3).
+    const parts = named.flatMap((word) =>
+      word.includes('-')
+        ? word.split('-').filter((part) => /^\p{Lu}/u.test(part) && !/^\p{Lu}{2,}$/u.test(part))
+        : [word],
+    );
+    for (const word of parts) {
       const bare = word.replace(/['’]s$/, '');
       if (
         bare.length > 1 &&
@@ -306,6 +382,10 @@ const THOUSANDS = /(?<![\d.,])\d{1,3}(?:,\d{3})+(?:\.\d+)?(?!\d|,\d)/g;
 
 const normalizeEvidence = (text: string): string =>
   ` ${text
+    // read_file's "12→" line gutters split a quote that crosses a line break:
+    // "raise PaymentGateway client timeout\n 13→ from 800ms to 8000ms" was
+    // refused as a misquote (2026-10-20, incident-postmortem on GLM 5.3).
+    .replace(/^[ \t]*\d+→ ?/gm, '')
     .toLowerCase()
     .replace(THOUSANDS, (n) => n.replace(/,/g, ''))
     .replace(/[“”]/g, '"')
@@ -349,18 +429,58 @@ function quoteFound(value: string, evidence: string): boolean {
   return pieces.length > 0 && pieces.every((piece) => evidence.includes(piece));
 }
 
-function claimFound(kind: ClaimKind, value: string, evidence: string): boolean {
+const EVIDENCE_NUMBER = /(?<![\d.])\d+(?:\.\d+)?(?![\d]|\.\d)/g;
+
+function claimFound(claim: Claim, evidence: string): boolean {
+  const { kind, value } = claim;
   if (kind === 'quote') return quoteFound(value, evidence);
   if (claimPattern(kind, value).test(evidence)) return true;
+  if (kind === 'name') {
+    const weekday = WEEKDAYS.indexOf(value.toLowerCase());
+    return weekday >= 0 && weekdayOfIsoDate(evidence, weekday);
+  }
+  // "moved to September" restates `2026-09-01`.
+  if (kind === 'month') {
+    const month = String(MONTHS.indexOf(value.toLowerCase()) + 1).padStart(2, '0');
+    return new RegExp(`\\b\\d{4}-${month}\\b`).test(evidence);
+  }
+  if (kind !== 'number') return false;
+  // "9:05" and "09:05" are the same time.
+  if (claim.clock) {
+    const other = /^0\d:/.test(value) ? value.slice(1) : /^\d:/.test(value) ? `0${value}` : '';
+    return other !== '' && claimPattern(kind, other).test(evidence);
+  }
+  // "100% of errors were 504" restates "errors are all 504": a whole or empty
+  // share is a quantifier this literal check reads as one.
+  if (claim.percent && value === '100') return /\b(?:all|every|entire|whole)\b/.test(evidence);
+  if (claim.percent && value === '0') return /\b(?:none|zero|no)\b/.test(evidence);
   // "5.18 s", "~5.1 s" and "0.8 s" restate 5180, 5090 and 800 ms: a decimal
   // also counts when the source states it a thousandfold (ms, KB, mm),
   // rounded to the places the writer kept.
-  if (kind === 'number' && value.includes('.')) {
-    const target = Number(value);
+  const target = Number(value);
+  const evidenceNumbers = () => [...evidence.matchAll(EVIDENCE_NUMBER)].map((m) => Number(m[0]));
+  // "12.00% → 13.25%" restates rates of 0.12 and 0.1325: a percentage also
+  // counts when the source states the fraction, to the places the writer kept.
+  // Refused, it became "0.12 → 0.1325" in the readout (2026-10-21, ab-test).
+  if (claim.percent) {
+    const places = value.split('.')[1]?.length ?? 0;
+    const tolerance = 0.5 * 10 ** -places + 1e-9;
+    if (evidenceNumbers().some((n) => n < 1 && Math.abs(n * 100 - target) <= tolerance))
+      return true;
+  }
+  if (value.includes('.')) {
     const tolerance = 0.5 * 10 ** -(value.split('.')[1]?.length ?? 0) + 1e-9;
-    for (const m of evidence.matchAll(/(?<![\d.])\d+(?:\.\d+)?(?![\d]|\.\d)/g)) {
-      if (Math.abs(Number(m[0]) / 1000 - target) <= tolerance) return true;
-    }
+    if (evidenceNumbers().some((n) => Math.abs(n / 1000 - target) <= tolerance)) return true;
+    if (claim.approx && evidenceNumbers().some((n) => Math.abs(n - target) <= tolerance))
+      return true;
+    return false;
+  }
+  // "~1,270" is rounded to tens and stands for any source number within
+  // five of it; an unmarked 1,270 must appear as written.
+  const zeros = /0*$/.exec(value)?.[0].length ?? 0;
+  if (claim.approx && zeros > 0 && zeros < value.length) {
+    const tolerance = 0.5 * 10 ** zeros;
+    return evidenceNumbers().some((n) => Math.abs(n - target) <= tolerance);
   }
   return false;
 }
@@ -377,6 +497,10 @@ function isEntityName(word: string): boolean {
 
 const ATTRIBUTION_PARENTHETICAL =
   /\([^()]*\b[\w.-]+\.(?:md|csv|txt|log|json|diff|ya?ml|tsv|html?)\b[^()]*\)/gi;
+
+/** "timeline.md", "oncall-chat.txt:14:42:38", "timeline.md:10–13". */
+const FILE_REFERENCE =
+  /\b[\w./-]+\.(?:md|csv|txt|log|json|diff|ya?ml|tsv|html?)\b(?::[\d:,–-]+)?/gi;
 
 /** How far apart a number and the name it belongs to may sit in a source. */
 const NEAR_CHARS = 160;
@@ -395,7 +519,7 @@ const NEAR_CHARS = 160;
  * the engineering memo the date (2026-10-07, conflict-synthesis).
  */
 function detachedNumbers(
-  claims: ReadonlyArray<{ kind: ClaimKind; value: string }>,
+  claims: readonly Claim[],
   sources: readonly string[],
   sentence = '',
 ): string[] {
@@ -428,7 +552,7 @@ function detachedNumbers(
   );
   const out: string[] = [];
   for (const claim of claims) {
-    if (claim.kind !== 'year' && claim.kind !== 'number') continue;
+    if ((claim.kind !== 'year' && claim.kind !== 'number') || claim.clock) continue;
     const run = nearestRun(runs, claim, subject);
     const anchor = rarest(run ?? names.map((c) => c.value));
     const near = new RegExp(claimPattern('name', anchor).source, 'u');
@@ -531,12 +655,13 @@ function groundContext(
   };
 }
 
-function checkAgainst(
-  claims: Array<{ kind: ClaimKind; value: string }>,
-  text: string,
-): ClaimCheck[] {
+function checkAgainst(claims: readonly Claim[], text: string): ClaimCheck[] {
   return withShownArithmetic(
-    claims.map((claim) => ({ ...claim, found: claimFound(claim.kind, claim.value, text) })),
+    claims.map((claim) => ({
+      kind: claim.kind,
+      value: claim.value,
+      found: claimFound(claim, text),
+    })),
   );
 }
 
@@ -548,7 +673,10 @@ function checkAgainst(
  * sentence states and the evidence holds counts.
  */
 function withShownArithmetic(checks: ClaimCheck[]): ClaimCheck[] {
-  const sourced = checks.filter((c) => c.kind === 'number' && c.found).map((c) => Number(c.value));
+  const sourced = checks
+    .filter((c) => c.kind === 'number' && c.found)
+    .map((c) => Number(c.value))
+    .filter(Number.isFinite);
   if (sourced.length < 2) return checks;
   const derived = (value: number) =>
     sourced.some((a, i) =>

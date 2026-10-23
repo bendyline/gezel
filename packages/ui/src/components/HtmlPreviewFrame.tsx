@@ -1,8 +1,12 @@
-import type {
-  InvokePageToolResponse,
-  PageReadRequest,
-  PreviewLogEntry,
-  ScriptRun,
+import {
+  type InvokePageToolResponse,
+  PAGE_IMPORT_MAX_BYTES,
+  PageImportRequestSchema,
+  type PageReadRequest,
+  PageTableRequestSchema,
+  type PreviewLogEntry,
+  type ScriptRun,
+  normalizePagePath,
 } from '@bendyline/gezel';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -167,6 +171,7 @@ export function HtmlPreviewFrame({
   const themeRef = useRef(theme);
   themeRef.current = theme;
   const [securityPolicyRevision, setSecurityPolicyRevision] = useState(0);
+  const bridgeRequestKey = useRef('');
   const requestKey = JSON.stringify([
     projectId,
     path,
@@ -174,6 +179,7 @@ export function HtmlPreviewFrame({
     refreshKey ?? null,
     securityPolicyRevision,
   ]);
+  bridgeRequestKey.current = requestKey;
   const [loadState, setLoadState] = useState<PreviewLoadState | null>(null);
   // Effects run after React commits. Keying the resolved lease to the props
   // that requested it prevents that commit from briefly remounting the old,
@@ -440,7 +446,10 @@ export function HtmlPreviewFrame({
         });
     };
 
+    const inflightTables = new Set<string>();
+    const imports = new Map<string, AbortController>();
     function handleV1Message(raw: Record<string, unknown>): void {
+      if (bridgeRequestKey.current !== requestKey) return;
       const kind = raw.kind;
       if (kind === 'hello') {
         postToFrame({
@@ -457,6 +466,151 @@ export function HtmlPreviewFrame({
       }
       const id = raw.id;
       if (typeof id !== 'string' || id.length === 0 || id.length > 64) return;
+      if (kind === 'import-cancel') {
+        imports.get(id)?.abort();
+        return;
+      }
+      if (kind === 'import-targets' || kind === 'import-file') {
+        const requestingWindow = iframeRef.current?.contentWindow;
+        const reply = (payload: Record<string, unknown>) => {
+          if (!disposed && requestingWindow === iframeRef.current?.contentWindow)
+            postToFrame({ kind: 'import-result', id, ...payload });
+        };
+        if (source !== 'type') {
+          reply({
+            ok: false,
+            errorCode: 'not-allowed',
+            error: 'Only project pages may import files.',
+          });
+          return;
+        }
+        if (imports.size >= 2 || imports.has(id)) {
+          reply({ ok: false, errorCode: 'rate-limited', error: 'Too many imports.' });
+          return;
+        }
+        const controller = new AbortController();
+        imports.set(id, controller);
+        const run = async () => {
+          if (kind === 'import-targets') return api.listProjectPageImportTargets(projectId);
+          const parsed = PageImportRequestSchema.safeParse(raw);
+          if (
+            !parsed.success ||
+            !(raw.file instanceof Blob) ||
+            raw.file.size > PAGE_IMPORT_MAX_BYTES
+          )
+            throw Object.assign(new Error('Invalid file or import size limit exceeded.'), {
+              status: 400,
+            });
+          const result = await api.importProjectPageFile(
+            projectId,
+            parsed.data.target,
+            parsed.data.name,
+            raw.file,
+            controller.signal,
+          );
+          if (!disposed) {
+            void sweepWatches();
+          }
+          return result;
+        };
+        void run()
+          .then((result) => reply({ ok: true, result }))
+          .catch((error) =>
+            reply({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+              errorCode: pageErrorCode((error as { status?: number }).status),
+            }),
+          )
+          .finally(() => imports.delete(id));
+        return;
+      }
+      if (kind === 'table') {
+        const requestingWindow = iframeRef.current?.contentWindow;
+        const reply = (payload: Record<string, unknown>) => {
+          if (!disposed && requestingWindow === iframeRef.current?.contentWindow)
+            postToFrame({ kind: 'table-result', id, ...payload });
+        };
+        if (source !== 'type') {
+          reply({
+            ok: false,
+            errorCode: 'not-allowed',
+            error: 'Only project pages may query tables.',
+          });
+          return;
+        }
+        const parsed = PageTableRequestSchema.safeParse(raw.request);
+        if (!parsed.success) {
+          reply({ ok: false, errorCode: 'invalid-input', error: 'Invalid table request.' });
+          return;
+        }
+        if (inflightTables.size >= 2 || inflightTables.has(id)) {
+          reply({ ok: false, errorCode: 'rate-limited', error: 'Too many table requests.' });
+          return;
+        }
+        inflightTables.add(id);
+        void api
+          .invokeProjectPageTables(projectId, parsed.data)
+          .then((result) => reply({ ok: true, result }))
+          .catch((err) =>
+            reply({
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+              errorCode: pageErrorCode((err as { status?: number }).status),
+            }),
+          )
+          .finally(() => inflightTables.delete(id));
+        return;
+      }
+      if (kind === 'open') {
+        const reply = (ok: boolean, error?: string, errorCode?: string) =>
+          postToFrame({ kind: 'open-result', id, ok, error, errorCode });
+        if (source !== 'type') {
+          reply(false, 'Only project type pages may open files', 'not-allowed');
+          return;
+        }
+        const src = raw.source;
+        const target = typeof raw.path === 'string' ? normalizePagePath(raw.path) : null;
+        if ((src !== 'workspace' && src !== 'artifacts') || !target) {
+          reply(false, 'Invalid file path or source', 'invalid-input');
+          return;
+        }
+        if (inflightReads.current.size >= MAX_INFLIGHT_READS) {
+          reply(false, 'Too many concurrent reads', 'rate-limited');
+          return;
+        }
+        inflightReads.current.add(id);
+        const requestingWindow = iframeRef.current?.contentWindow;
+        // Reuse the server's manifest scope and symlink checks without
+        // reading file bytes (a workbook can exceed the page read limit).
+        void api
+          .invokeProjectPageRead(projectId, { op: 'stat', source: src, path: target })
+          .then((res) => {
+            if (disposed || iframeRef.current?.contentWindow !== requestingWindow) return;
+            if (res.exists === false || res.size === undefined) {
+              reply(false, 'File not found or path is a folder', 'not-allowed');
+              return;
+            }
+            reply(true);
+            window.dispatchEvent(
+              new CustomEvent('gezel:open-file', {
+                detail: { projectId, source: src, path: target },
+              }),
+            );
+          })
+          .catch((err) => {
+            if (!disposed)
+              reply(
+                false,
+                err instanceof Error ? err.message : String(err),
+                pageErrorCode((err as { status?: number }).status),
+              );
+          })
+          .finally(() => {
+            inflightReads.current.delete(id);
+          });
+        return;
+      }
       if (kind === 'invoke') {
         if (typeof raw.tool !== 'string') return;
         const input =
@@ -613,6 +767,7 @@ export function HtmlPreviewFrame({
     window.addEventListener('message', handleMessage);
     return () => {
       disposed = true;
+      for (const controller of imports.values()) controller.abort();
       window.removeEventListener('message', handleMessage);
       if (flushTimer) clearTimeout(flushTimer);
       if (pollTimer) clearInterval(pollTimer);
@@ -621,7 +776,7 @@ export function HtmlPreviewFrame({
       watches.current.clear();
       flush();
     };
-  }, [onLog, projectId, path, source, pageTools, onPageScriptError, onRequestRefresh]);
+  }, [onLog, projectId, path, source, pageTools, onPageScriptError, onRequestRefresh, requestKey]);
 
   useEffect(() => {
     // Live theme push (v1 pages). Pages get the mount-time theme via their

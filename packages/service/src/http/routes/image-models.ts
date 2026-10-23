@@ -1,3 +1,4 @@
+import { ImageQualitySchema, imageModelDefaultSide } from '@bendyline/gezel';
 import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import {
   INVALID_MODEL_ID_CODE,
@@ -28,19 +29,24 @@ export function imageModelRoutes(ctx: EngineContext): Hono {
     // Cloud image APIs are all edit-capable; local models resolve through
     // the explicit-field → assessment-map → weights-kind ladder so the UI
     // and MCP callers can tell which installed models can edit an image.
+    const defaultModel = await provider.resolveDefaultModelId?.().catch(() => undefined);
     return c.json({
-      models: models.map((m) => ({
-        ...m,
-        kind,
-        supportsImg2Img:
-          kind === 'cloud'
-            ? true
-            : resolveImg2ImgSupport({
-                modelId: m.id,
-                explicit: m.supportsImg2Img,
-                weightsKind: m.weightsKind,
-              }).supported,
-      })),
+      ...(defaultModel ? { defaultModel } : {}),
+      models: await Promise.all(
+        models.map(async (m) => ({
+          ...m,
+          kind,
+          supportsImg2Img:
+            kind === 'cloud'
+              ? true
+              : resolveImg2ImgSupport({
+                  modelId: m.id,
+                  explicit: m.supportsImg2Img,
+                  weightsKind: m.weightsKind,
+                }).supported,
+          ...(kind === 'local' ? await localImageModelFacts(ctx, m.id) : {}),
+        })),
+      ),
     });
   });
 
@@ -86,7 +92,10 @@ export function imageModelRoutes(ctx: EngineContext): Hono {
    * docs/media-model-memory.md.
    */
   app.get('/models/fit', proxy, async (c) => {
-    return c.json(await imageCatalogFits(mediaFitContext(ctx)));
+    const quality = ImageQualitySchema.safeParse(c.req.query('quality'));
+    return c.json(
+      await imageCatalogFits(mediaFitContext(ctx), quality.success ? quality.data : undefined),
+    );
   });
 
   app.post('/models/:id/pull', proxy, async (c) => {
@@ -201,4 +210,17 @@ function withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void 
 }
 export function providerKind(name: string): 'local' | 'cloud' {
   return name === 'google-ai' || name === 'openai' ? 'cloud' : 'local';
+}
+
+/** Size and prompting facts a client needs to describe a local model's render. */
+async function localImageModelFacts(ctx: EngineContext, modelId: string) {
+  const item = await ctx.catalog.get('image-model', modelId).catch(() => null);
+  const manifest = item?.manifest.kind === 'image-model' ? item.manifest : undefined;
+  return {
+    defaultSidePx: imageModelDefaultSide(modelId),
+    ...(manifest?.widthRange ? { widthRange: manifest.widthRange } : {}),
+    ...(manifest?.heightRange ? { heightRange: manifest.heightRange } : {}),
+    ...(manifest?.promptStyle ? { promptStyle: manifest.promptStyle } : {}),
+    ...(manifest?.rendersText !== undefined ? { rendersText: manifest.rendersText } : {}),
+  };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GoogleAiImageProvider, snapImageConfig } from './google-ai.js';
+import { GoogleAiImageProvider, googleImageConfig, snapImageConfig } from './google-ai.js';
 
 const FAKE_PNG_B64 = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64');
 
@@ -199,5 +199,30 @@ describe('snapImageConfig', () => {
 
   it('snaps tiny dim 256x256 → 1:1 / 512', () => {
     expect(snapImageConfig(256, 256)).toEqual({ aspectRatio: '1:1', imageSize: '512' });
+  });
+});
+
+describe('googleImageConfig', () => {
+  it('passes an asked ratio and quality tier through as Gemini values', () => {
+    expect(googleImageConfig({ aspectRatio: '9:16', quality: 'high' })).toEqual({
+      aspectRatio: '9:16',
+      imageSize: '2K',
+    });
+    expect(googleImageConfig({ aspectRatio: '21:9' })).toEqual({
+      aspectRatio: '21:9',
+      imageSize: '1K',
+    });
+    expect(googleImageConfig({ quality: 'draft' })).toEqual({
+      aspectRatio: '1:1',
+      imageSize: '512',
+    });
+  });
+
+  it('lets explicit pixels win, and sends nothing when nothing is asked', () => {
+    expect(googleImageConfig({ width: 1920, height: 1080, aspectRatio: '1:1' })).toEqual({
+      aspectRatio: '16:9',
+      imageSize: '2K',
+    });
+    expect(googleImageConfig({})).toBeUndefined();
   });
 });

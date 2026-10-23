@@ -3,6 +3,7 @@ import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { defineConfig, normalizePath } from 'vite';
+import { projectPageTypographyPlugin } from '../../scripts/project-page-typography.mjs';
 import { harperWasmPlugin } from '../ui/scripts/vite-harper-wasm.js';
 import { browserTypeScriptPlugin } from './scripts/browser-typescript.js';
 import { kokoroLexiconPlugin } from './scripts/kokoro-lexicon.js';
@@ -32,6 +33,7 @@ function mobileBoundary() {
 export default defineConfig({
   plugins: [
     mobileBoundary(),
+    projectPageTypographyPlugin(fileURLToPath(new URL('../ui', import.meta.url))),
     {
       name: 'native-preview-isolation',
       generateBundle() {

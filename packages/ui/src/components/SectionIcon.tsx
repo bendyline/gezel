@@ -13,6 +13,11 @@ export type SectionIconName =
   | 'github'
   | 'mail'
   | 'village'
+  | 'guide'
+  | 'diagram'
+  | 'reports'
+  | 'gallery'
+  | 'timeline'
   | 'settings'
   | 'skills'
   | 'references';
@@ -127,6 +132,51 @@ const SECTION_PATHS: Record<Exclude<SectionIconName, 'tasks' | 'settings'>, JSX.
       <path d="M4.5 20.5v-7l4-3.5 4 3.5v7" />
       <path d="M12.5 20.5V11l3.5-3 3.5 3v9.5" />
       <path d="M7.5 20.5v-3h2v3" />
+    </>
+  ),
+  // Signpost — what each folder is for, and where things live
+  guide: (
+    <>
+      <path d="M12 3v18" />
+      <path d="M12 5.5h6l2.5 2.25L18 10h-6" />
+      <path d="M12 12.5H6l-2.5 2.25L6 17h6" />
+    </>
+  ),
+  // Three boxes joined by lines — files and what connects them
+  diagram: (
+    <>
+      <rect x="3" y="4" width="7" height="5" rx="1" />
+      <rect x="14" y="4" width="7" height="5" rx="1" />
+      <rect x="14" y="15" width="7" height="5" rx="1" />
+      <path d="M10 6.5h4" />
+      <path d="M6.5 9v7.5h7.5" />
+    </>
+  ),
+  // A page with a heading line and three lines of text — a report to read
+  reports: (
+    <>
+      <path d="M6.5 3.5h8l4 4v13h-12z" />
+      <path d="M14.5 3.5v4h4" />
+      <path d="M9 11h6.5M9 14h6.5M9 17h4" />
+    </>
+  ),
+  // Three cards of different sizes standing on a shelf — files grouped to browse
+  gallery: (
+    <>
+      <path d="M3 20.5h18" />
+      <rect x="4" y="9.5" width="4.5" height="8.5" rx="1" />
+      <rect x="10" y="5" width="4.5" height="13" rx="1" />
+      <rect x="16" y="11.5" width="4" height="6.5" rx="1" />
+    </>
+  ),
+  // Bars of different heights on a baseline, with a time axis tick — activity over time
+  timeline: (
+    <>
+      <path d="M3 20.5h18" />
+      <path d="M5.5 17.5v-4" />
+      <path d="M9.5 17.5v-9" />
+      <path d="M13.5 17.5v-6" />
+      <path d="M17.5 17.5v-11" />
     </>
   ),
   // Sparkle — something the crew knows how to do

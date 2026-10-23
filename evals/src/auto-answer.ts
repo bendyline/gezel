@@ -1,5 +1,6 @@
 import { setTimeout as wait } from 'node:timers/promises';
 import type { GezelClient } from '@bendyline/gezel-client/node';
+import { sessionServesFinishedPass } from './stale-step-session.ts';
 
 /**
  * Pick the "best" multiple-choice option for a headless eval.
@@ -304,6 +305,15 @@ export function createAutoAnswerPoller(opts: AutoAnswerOptions): () => Promise<v
     for (const q of questions) {
       if (seenStructured.has(q.id)) continue;
       seenStructured.add(q.id);
+      // An answer is a new turn for the asking session. One whose step pass
+      // is over can no longer move its task, so its turn only holds the
+      // engine the live pass needs; no person would answer it either.
+      if (q.sessionId && (await sessionServesFinishedPass(opts.client, q.sessionId))) {
+        opts.log(
+          `[auto-answer] skipped ${q.id} (${q.gezelId}/${q.projectId}): its session's step pass is over`,
+        );
+        continue;
+      }
       // Surface the question prompt in the log so the postmortem can read
       // it without cross-referencing session JSONs. Truncate aggressively
       // — full markdown bodies blow past readable log-line width and the

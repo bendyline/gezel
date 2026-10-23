@@ -29,8 +29,12 @@ native speech.
   through the shared `@bendyline/gezel/kokoro` frontend, reading the voice
   pack's own dictionary, and the desktop daemon runs the identical code over
   the identical data — so a sentence sounds the same on a phone and a laptop.
-  Words the dictionary lacks fall back to plain letter-to-sound rules. The
-  host splits sentences and joins the audio, because nothing native does.
+  The neighbouring words choose between readings the dictionary flattened
+  ("we present" against "the present") and reduce function words the way
+  Kokoro was trained ("the" before a consonant). Capitals and vowelless words
+  are spelled as letters ("PDF", "npm"). Other words the dictionary lacks fall
+  back to plain letter-to-sound rules. The host splits sentences and joins the
+  audio, because nothing native does.
 
 The first build bundles approximately 260 MiB of uncompressed model data. It
 therefore does not require an initial network download. Android verifies and

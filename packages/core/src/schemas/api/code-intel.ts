@@ -354,3 +354,34 @@ export const MapRepoResponseSchema = z.object({
     .optional(),
 });
 export type MapRepoResponse = z.infer<typeof MapRepoResponseSchema>;
+
+/**
+ * Gezel's map of a codebase: what each folder is for, its key files, and the
+ * files the rest of the code imports most. Assembled from the index's folder
+ * rollups and dependency graph with no model at read time; the nightly
+ * `reports/codebase-map.md` is the same data as markdown.
+ */
+export const CodebaseMapAreaSchema = z.object({
+  /** Folder path relative to the project root; "." is the root's own files. */
+  path: z.string(),
+  /** Folder depth: 0 for "." and top-level folders. */
+  depth: z.number().int().nonnegative(),
+  purpose: z.string(),
+  keyFiles: z.array(z.object({ path: z.string(), purpose: z.string() })),
+});
+export type CodebaseMapArea = z.infer<typeof CodebaseMapAreaSchema>;
+
+export const CodebaseMapResponseSchema = z.object({
+  /** false until the index has written folder summaries. */
+  indexed: z.boolean(),
+  architecture: z.string().optional(),
+  areas: z.array(CodebaseMapAreaSchema),
+  loadBearing: z.array(
+    z.object({
+      path: z.string(),
+      importers: z.number().int().nonnegative(),
+      purpose: z.string().optional(),
+    }),
+  ),
+});
+export type CodebaseMapResponse = z.infer<typeof CodebaseMapResponseSchema>;

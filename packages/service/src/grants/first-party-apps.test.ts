@@ -19,7 +19,7 @@ afterEach(async () => {
 const record = (appId: string) => tokenStore.list().find((r) => r.appId === appId);
 
 describe('first-party app tokens', () => {
-  it('issues each add-in its fixed scopes under its Connected Apps name', async () => {
+  it('issues each add-in its fixed scopes under its Integrations name', async () => {
     const apps = createFirstPartyAppTokens(tokenStore);
     const token = await apps.connect('vscode');
     expect(record('vscode')).toMatchObject({

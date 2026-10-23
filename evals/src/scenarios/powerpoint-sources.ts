@@ -18,12 +18,12 @@
  *                       the pass condition, and stalling is the failure
  *   pptx-source-decoy   a named source PLUS a plausible wrong one beside it
  *
- * All five run the real craftbook task (`mode: 'workflow'`) against the
- * deterministic DocBlocks mock the book already ships, so a trial measures the
- * model and the runtime rather than the conversion toolchain. The real
- * DocBlocks boundary is a separate, slower rail — see docblocks-integration.ts.
+ * All five run the real craftbook task (`mode: 'workflow'`) through the
+ * DocBlocks the daemon bundles: the conversion, preview, save and inspection
+ * calls are real and graded through History (craftbooks/bundled-toolsets.ts).
  */
 
+import { withHistory } from '../craftbooks/bundled-toolsets.ts';
 import { craftbookScenarioFromSpec } from '../craftbooks/scenario.ts';
 import { craftbookEvalSpecMap } from '../craftbooks/specs.ts';
 import type { CraftbookEvalGateCheck, CraftbookEvalSpec } from '../craftbooks/types.ts';
@@ -262,8 +262,8 @@ export function variant(source: CraftbookEvalSpec, opts: VariantOptions): Craftb
       summary: opts.objective,
       deliverables,
       checks: opts.checks ?? [],
-      mocks: source.success.mocks,
-      ...(opts.history ? { history: opts.history } : {}),
+      ...(source.success.mocks ? { mocks: source.success.mocks } : {}),
+      history: withHistory(source.success.history, opts.history ?? []),
       taskGraph: { requireCraftbookTask: true, requireTerminalStep: true },
     },
     coverage: {

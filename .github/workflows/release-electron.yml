@@ -386,12 +386,11 @@ jobs:
           node scripts/verify-service-host-contract.mjs $host_exe
           if ($LASTEXITCODE -ne 0) { throw '[service-host] launch contract mismatch — the pinned native release is stale' }
 
-      # The NSIS hook's link helper decides what an elevated recursive ACL
-      # sweep may follow, and only Windows has junctions. Run its suite against
-      # real ones before packaging, so a change in how libuv stats, reads, or
-      # deletes a junction fails here instead of in the upgrade smoke below.
-      - name: Test the installer link helper against real junctions
-        run: pnpm --filter @bendyline/gezel-app exec vitest run src/reparse-sweep.test.ts
+      # The installer's link policy and handle-based ACL repair need real Windows APIs.
+      # Exercise concurrent replacements before packaging, not just static
+      # planted links in the upgrade smoke below.
+      - name: Test installer link and ACL helpers against real junction races
+        run: pnpm --filter @bendyline/gezel-app exec vitest run src/reparse-sweep.test.ts src/windows-acl.test.ts
 
       - name: Install Trusted Signing SDK
         shell: pwsh
@@ -460,7 +459,9 @@ jobs:
             (Join-Path $installRoot 'gezel-service-host.exe'),
             (Join-Path $installRoot 'resources/app.asar.unpacked/dist/node-bundle/node.exe'),
             (Join-Path $installRoot 'resources/app.asar.unpacked/dist/extract-service-bundle.js'),
-            (Join-Path $installRoot 'resources/app.asar.unpacked/dist/neutralize-reparse-points.js')
+            (Join-Path $installRoot 'resources/app.asar.unpacked/dist/neutralize-reparse-points.js'),
+            (Join-Path $installRoot 'resources/installer-security/reset-tree-acl.ps1'),
+            (Join-Path $installRoot 'resources/installer-security/ResetTreeAcl.cs')
           )) {
             if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
               throw "Installed Windows payload is missing $required"

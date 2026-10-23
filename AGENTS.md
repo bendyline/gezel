@@ -8,6 +8,31 @@ This document is for anyone (human or AI) extending gezel. It captures the menta
 
 For UX philosophy and the visual direction the app is heading — read [docs/ux.md](docs/ux.md) before touching UI.
 
+## Building Gezel apps
+
+For requests to build a custom app, dashboard, project experience, crew, or
+craftbook-backed workflow, start with [Building Gezel apps](docs/building-gezel-apps.md).
+Read its public [authoring guide](docs/handboek/technical/building-ai-apps-inside-gezel.md),
+[page API guide](docs/handboek/technical/gezel-page-apis.md), and
+[page style guide](docs/handboek/technical/gezel-app-page-style-guide.md) before implementing.
+
+A Gezel app is composed by a project type; its page, roles, craftbooks, scripts,
+and project defaults are optional parts chosen for the user flow. Public catalog
+content belongs in sibling `gilde`; private apps use a `gezapp.json` + `items/`
+source folder. Extend the shared runtime only when a reusable capability is missing.
+Pages use `window.gezel` ([API reference](docs/output-pane-api.md)), inherit the
+host's fonts, and own their remaining CSS. Do not copy font assets or build a
+private filesystem/query bridge. Specify data ownership and permissions first,
+validate against the current schemas, and test a real host flow as well as the demo.
+Report the catalog release/install step separately from source-code completion.
+Reuse `gezel.ui.components.fileCard` / `fileAdder` for file interfaces; declare
+`pages.imports` for scoped uploads and keep `pages.reads` explicit. Never bypass
+workspace write policy. Let the demo publisher/exporter inject the shared bootstrap and fonts; never
+copy platform assets into app source. Reset in-memory imports, and test the
+live relay as well as generated demo controls.
+These linked guides are the maintained authoring contract; proposals in the
+[platform review](docs/gezel-app-platform-review.md) are not available APIs.
+
 ## The soul of gezel
 
 Three ideas are load-bearing:
@@ -368,9 +393,9 @@ Per-install default via `config.provider`. Per-gezel override via frontmatter. `
 
 When `config.provider` is unset, [default-provider.ts](packages/service/src/providers/default-provider.ts) resolves it — **to the on-device engine wherever we bundle one** (`mlx` on Apple Silicon, `llama-cpp` on the other platforms in the native build matrix), falling back to `copilot` only where no engine ships. Use it instead of writing `config.provider ?? 'copilot'`: that literal predates Copilot becoming an opt-in download and now points at something a fresh install has no way to run.
 
-### OpenAI-compatible endpoints (Connected Apps)
+### OpenAI-compatible endpoints (Integrations)
 
-Gezel serves third-party local apps through a public inference facade, controlled from Settings → Connected Apps and stored under `config.openaiEndpoints`:
+Gezel serves third-party local apps through a public inference facade, controlled from Settings → Integrations and stored under `config.openaiEndpoints`:
 
 - **`/v1/*`** on the main daemon port (canonical 6228) — OpenAI-shaped chat/models/embeddings, gated by bearer auth + the per-app consent flow (`/v1/apps/register`). Stateless: one fresh provider session per request; callers replay their own history. Unknown model strings fall back to the configured **serving gezel** (persona + frontmatter tuning apply). Tools are caller-executed (advertise-and-halt via `SessionOpts.externalTools`); providers that run their own tool loop reject tools loudly.
 - **`/ollama/v1/*`** — the same engine speaking Ollama's dialect (tags/chat/generate/show/embed/ps).
@@ -494,6 +519,8 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/bin/`, `~/.gezel/service/`, `~/.gezel/runtime/` — supervisor-owned (extracted runtimes, bundle, daemon handshake state)
   - `~/.gezel/.transactions/` — private durable operation journals and isolated staging state, owned by the transaction coordinator that creates each subtree; never expose this through `runtime/`
   - `~/.gezel/logs/` — owned by the logger / log-rotator
+  - `~/.gezel/startup-home.json` — bounded, disposable Home reading cache, written through Store and read by Electron before the daemon starts; never contains credentials or active commands
+  - `~/.gezel/desktop/startup-*.json` — Electron-owned startup navigation and unsent text, scoped by the selected connection; text is cleared only after the live UI saves it as a normal prompt draft
   - `~/.gezel/history.jsonl` and `~/.gezel/projects/{id}/history.jsonl` — append-only, owned by [HistoryManager](packages/service/src/history/manager.ts)
   - `~/.gezel/keurmeester/` — append-only JSONL intervention case records plus generated digest reports, owned by [KeurmeesterManager](packages/service/src/keurmeester/manager.ts)
   - `~/.gezel/gilde/` — opt-in live catalog content cache (`versions/<v>/` holding extracted `@bendyline/gilde` releases + `state.json`), owned by [GildeUpdateManager](packages/service/src/gilde-updates/manager.ts); rebuildable, safe to delete — the bundled pin is the permanent fallback

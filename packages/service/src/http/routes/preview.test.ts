@@ -332,7 +332,8 @@ describe('preparePreviewHtml', () => {
   });
 
   it('injects the window.gezel page API only when a bootstrap is supplied', () => {
-    const html = '<html><head></head><body>page</body></html>';
+    const html =
+      '<html><head><style id="authored">body{font-family:serif}</style></head><body>page</body></html>';
     const bootstrap = {
       api: 1 as const,
       projectId: 'p1',
@@ -345,6 +346,11 @@ describe('preparePreviewHtml', () => {
     const withApi = preparePreviewHtml(html, { pageApi: bootstrap });
     expect(withApi).toContain("Object.defineProperty(window,'gezel'");
     expect(withApi).toContain('"projectId":"p1"');
+    expect(withApi).toContain('<style data-gezel-typography>');
+    expect(withApi).toContain('--font-body: var(--font-ui)');
+    expect(withApi).toContain('--font-heading: var(--font-display)');
+    expect(withApi).toContain('data:font/woff2;base64,');
+    expect(withApi.indexOf('data-gezel-typography')).toBeLessThan(withApi.indexOf('id="authored"'));
     // Ordering: log shim first so page-api failures are captured.
     expect(withApi.indexOf('__gezelPreviewLog')).toBeLessThan(
       withApi.indexOf("Object.defineProperty(window,'gezel'"),
@@ -352,5 +358,6 @@ describe('preparePreviewHtml', () => {
 
     const without = preparePreviewHtml(html);
     expect(without).not.toContain("Object.defineProperty(window,'gezel'");
+    expect(without).not.toContain('data-gezel-typography');
   });
 });

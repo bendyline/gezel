@@ -39,10 +39,16 @@ export class RecognitionCache {
     this.root = join(opts.home, 'recognition');
   }
 
-  keyFor(input: { bytes: Buffer; mode: string; modelId: string }): string {
+  /**
+   * `variant` covers whatever else shapes the answer — the extract schema, a
+   * custom prompt. Two extract calls on one image with different schemas
+   * are different questions and must not share an answer.
+   */
+  keyFor(input: { bytes: Buffer; mode: string; modelId: string; variant?: string }): string {
     const imageHash = createHash('sha256').update(input.bytes).digest('hex');
+    const variant = input.variant ? `\0${input.variant}` : '';
     return createHash('sha256')
-      .update(`${imageHash}\0${input.mode}\0${input.modelId}\0v${PROMPT_VERSION}`)
+      .update(`${imageHash}\0${input.mode}\0${input.modelId}\0v${PROMPT_VERSION}${variant}`)
       .digest('hex');
   }
 

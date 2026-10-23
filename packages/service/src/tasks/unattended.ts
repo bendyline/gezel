@@ -29,8 +29,11 @@ function isNightFixHost(task: UnattendedTask): boolean {
 export function unattendedNightWork(
   task: UnattendedTask,
   parent?: UnattendedTask | null,
-): 'review' | 'night-fix' | null {
+): 'review' | 'night-fix' | 'lookout' | null {
   if (isNightShiftOversightTask(task)) return 'review';
+  // A lookout's run starts whenever its camera sees something — 3 a.m.
+  // included — and nobody launched it by hand, so it asks nobody anything.
+  if (task.origin?.kind === 'lookout' || parent?.origin?.kind === 'lookout') return 'lookout';
   if (task.nightShift?.enabled !== true) return null;
   if (isNightFixHost(task)) return 'night-fix';
   if (task.parentTaskRef && parent && isNightFixHost(parent)) return 'night-fix';
@@ -40,7 +43,11 @@ export function unattendedNightWork(
 const NIGHT_WORK_QUESTION_DECLINED =
   'Nobody is awake to answer during the night, so this question was not posted. Leave out what you cannot settle without the person, say why in a task note, and carry on with the rest of the step.';
 
-/** What `ask_user_question` returns to unattended night work instead of posting. */
-export function unattendedQuestionDecline(kind: 'review' | 'night-fix'): string {
+const LOOKOUT_QUESTION_DECLINED =
+  'A lookout started this run on its own, so nobody is waiting to answer and this question was not posted. Leave out what you cannot settle without the person, say why in a task note, and carry on with the rest of the step.';
+
+/** What `ask_user_question` returns to unattended work instead of posting. */
+export function unattendedQuestionDecline(kind: 'review' | 'night-fix' | 'lookout'): string {
+  if (kind === 'lookout') return LOOKOUT_QUESTION_DECLINED;
   return kind === 'review' ? OVERSIGHT_QUESTION_DECLINED : NIGHT_WORK_QUESTION_DECLINED;
 }

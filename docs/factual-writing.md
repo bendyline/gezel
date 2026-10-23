@@ -101,7 +101,10 @@ holds one session's evidence:
   session's `grounding` hooks, after the output cap, so the ledger holds
   exactly what the model saw. The batch readers (`read_files`,
   `read_artifacts`) count like their single-file twins, numbered once per
-  file section.
+  file section. A third-party server's tools count when their names read as
+  lookups (`search_*`, `read_*`, `get_*`, `fetch_*`, … and nothing that
+  writes), through `isEvidenceTool`; gezel's own tools count only from the
+  list, so a model cannot ground a claim by reading back its own task notes.
 - **Refusal remedies follow the source.** When the session's evidence so far
   came from a workspace reader, or the person's messages name source files,
   a refused write is sent back to `read_file` on those files rather than to
@@ -150,16 +153,22 @@ Each sentence ends up as one of:
 | `bad-citation` | Cites a number that is not in the evidence list. |
 | `cited` / `non-factual` | Nothing checkable: connective prose, opinion. |
 
-**Document writes are refused.** Before `doc_insert_text`,
-`doc_replace_selection` or `slide_insert` is forwarded to the app, the text
-is checked. If any sentence is `uncited`, `unsupported` or `bad-citation`, the
-call is refused with each sentence and the detail no evidence shows, and the
-model is told to look it up, drop it, or say it is unverified. After two
-refusals of one tool in one turn the third attempt goes through. The reply
-then carries a warning that names how many statements went into the
-document unverified. A turn that can never write anything is worse than one
-the person is told to check. Passing text has its `[n]` markers removed
-before it reaches the document. Indentation and Markdown links are kept.
+**Document writes are refused when a fact is invented.** Before
+`doc_insert_text`, `doc_replace_selection` or `slide_insert` is forwarded to
+the app, the text is checked. A write is refused when a sentence states a
+year, number, month or quotation no evidence shows, sets a year beside the
+wrong person, or cites a number that is not in the evidence list. The refusal
+names each sentence and the detail no evidence shows, and the model is told
+to look it up, drop it, or say it is unverified. A sentence whose only
+unsourced details are names does not refuse a write by itself, because
+capitalized-word heuristics are the noisiest part of the check; three or more
+such sentences still do. After one refusal of a target in one turn the next
+attempt goes through: each refusal costs a whole rewrite, and the writer has
+already seen every problem. Whatever goes through unsourced is listed in the
+reply's warning, which names how many statements went into the document
+unverified. A turn that can never write anything is worse than one the person
+is told to check. Passing text has its `[n]` markers removed before it
+reaches the document. Indentation and Markdown links are kept.
 
 **Prose files are refused too.** `write_file`, `write_artifact` and
 `write_document` of a `.md`, `.txt`, `.rst` or similar file get the same
@@ -188,6 +197,13 @@ the turn added (with a 600-character excerpt each), the status counts, and up
 to 20 problem sentences, worst first. In the chat the markers become links
 and a Sources row lists the evidence and the unsourced statements (see
 [ux.md](ux.md)).
+
+**Apps run the same check.** The citation checker is published on its own as
+`@bendyline/gezel/grounding`: model-free, dependency-free and small enough to
+run on every draft. An app asks the SDK for numbered passages
+(`knowledgeContext({ citations: 'numbered' })`) and checks the model's text
+with `groundText()`. DocBlocks does this for Add content and Rewrite; see
+[DocBlocks text AI with Gezel](handboek/technical/docblocks-text-ai-with-gezel.md).
 
 ## What the check cannot do
 

@@ -669,6 +669,27 @@
   margin-top: var(--space-xs);
 }
 
+/* Gezel's tools in other apps (Overview tab): one labeled tray per choice. */
+.harness-tools-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  margin-top: var(--space-md);
+}
+
+.harness-tools-choice p {
+  margin: 0;
+}
+
+.harness-tools-blocked {
+  margin-top: var(--space-md);
+}
+
+.harness-tools-blocked ul {
+  margin-top: var(--space-xs);
+}
+
 /* Office: which apps get the Gezel button. A plain group of checkboxes,
    not a tray: the choices are independent, not mutually exclusive. */
 .office-setup-apps {
@@ -1282,6 +1303,30 @@
 
 .ff-tool-name {
   font-weight: 600;
+}
+
+.ff-image-defaults {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.75rem;
+}
+
+.ff-image-defaults .ff-defaults-label {
+  flex-basis: 100%;
+}
+
+.ff-image-defaults-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ff-defaults-advanced > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }
 
 .ff-defaults {
@@ -2153,9 +2198,9 @@
   font-weight: 700;
 }
 
-/* The ellipsis is always there: it holds the project's status and write
-   grant, which no longer stand in the bar. When the bar's own container is
-   too narrow, the inline exceptions fold into it too. */
+/* The compact status key keeps the lifecycle label and light visible while
+   grouping project settings in one menu. Narrow bars fold inline exceptions
+   into this menu too. */
 .project-controls-overflow {
   display: inline-flex;
   flex: 0 0 auto;
@@ -2165,16 +2210,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
+  gap: 0.4rem;
+  height: 1.5rem;
+  padding: 0 0.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 1.1rem;
+  font-size: var(--text-sm);
   line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
 }
 

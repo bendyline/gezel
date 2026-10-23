@@ -1,4 +1,9 @@
-import { type ProviderQueue, runInQueue } from '../runtime/provider-queue.js';
+import {
+  type ProviderQueue,
+  type QueueLease,
+  UNQUEUED_LEASE,
+  runInQueue,
+} from '../runtime/provider-queue.js';
 import type { SendAndWaitOpts } from './provider-contract.js';
 
 /** Safe to retry only when rejected before a session starts inference or tools. */
@@ -25,7 +30,7 @@ export class ProviderDrainingError extends ProviderDisposedError {
 export async function runOnLiveProvider(
   provider: { readonly name: string; readonly isDisposed: boolean; readonly queue: ProviderQueue },
   opts: SendAndWaitOpts | undefined,
-  send: () => Promise<string>,
+  send: (lease: QueueLease) => Promise<string>,
 ): Promise<string> {
   const assertLive = () => {
     if (provider.isDisposed) throw new ProviderDisposedError(provider.name);
@@ -35,10 +40,10 @@ export async function runOnLiveProvider(
     if (opts?.queue?.yieldToSwap?.()) throw new ProviderDrainingError(provider.name);
   };
   assertLive();
-  const start = () => {
+  const start = (lease: QueueLease) => {
     assertLive();
-    return send();
+    return send(lease);
   };
-  if (opts?.queue?.bypassQueue) return start();
+  if (opts?.queue?.bypassQueue) return start(UNQUEUED_LEASE);
   return runInQueue(provider.queue, opts?.queue, start);
 }

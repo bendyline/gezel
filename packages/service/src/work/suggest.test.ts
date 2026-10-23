@@ -276,4 +276,123 @@ describe('suggestWork', () => {
       tool: 'delegate_developer',
     });
   });
+
+  // qwen3.8-27b work-routing check, 2026-10-22: bge-small read a cart-total
+  // bug as billing, and the only option was Invoice Generator.
+  const codeShelf = (async () => ({
+    items: [
+      { manifest: { kind: 'craftbook-template', id: 'invoice-generator', category: 'business' } },
+      { manifest: { kind: 'craftbook-template', id: 'bug-fix-tdd', category: 'code-quality' } },
+    ],
+    missingToolsets: {},
+    establishedCodebase: false,
+  })) as unknown as NonNullable<SuggestWorkInput['listOffer']>;
+  const billingFirst = books(
+    { id: 'invoice-generator', score: 0.55, semantic: 0.6, lexical: 0.1 },
+    { id: 'bug-fix-tdd', score: 0.52, semantic: 0.58, lexical: 0.2 },
+  );
+  const cartBug =
+    'There is a bug in src/cart.js — cartTotal ignores item quantity, so three $5 items bill as $5. Can you get that fixed?';
+
+  it('hands a fix to existing code from Default to the developer, with no recipe to start', async () => {
+    const result = await suggestWork(deps(), {
+      request: cartBug,
+      projectId: 'default',
+      tools: ['delegate_developer', 'search'],
+      listOffer: codeShelf,
+      rankCraftbooks: billingFirst,
+    });
+    expect(result.options).toEqual([]);
+    expect(result.guidance[0]).toEqual({
+      kind: 'specialist',
+      role: 'developer',
+      tool: 'delegate_developer',
+      otherProject: true,
+    });
+  });
+
+  it('hands a review of existing code to the reviewer when one is on the roster', async () => {
+    const result = await suggestWork(deps(), {
+      request: 'Can you get someone to review src/pricing.js and write up the quality risks?',
+      projectId: 'default',
+      tools: ['delegate_developer', 'delegate_reviewer'],
+      listOffer: codeShelf,
+      rankCraftbooks: billingFirst,
+    });
+    expect(result.guidance[0]).toEqual({
+      kind: 'specialist',
+      role: 'reviewer',
+      tool: 'delegate_reviewer',
+      otherProject: true,
+    });
+  });
+
+  it('offers only code recipes for existing code inside a project', async () => {
+    const result = await suggestWork(deps(), {
+      request: cartBug,
+      projectId: 'shop',
+      tools: ['delegate_developer'],
+      listOffer: codeShelf,
+      rankCraftbooks: billingFirst,
+    });
+    expect(result.options.map((o) => o.id)).toEqual(['craftbook:bug-fix-tdd', 'task-here']);
+    expect(result.guidance[0]).toMatchObject({ kind: 'specialist', tool: 'delegate_developer' });
+  });
+
+  // qwen3.8-27b work-routing check, 2026-10-22: the request named an existing
+  // project, and Default offered a new Data Analysis project instead.
+  const withProjects = (...projects: Array<{ id: string; name: string }>) =>
+    deps({ store: { listProjects: async () => projects } as unknown as Store });
+  const dataShelf = (async () => ({
+    items: [
+      {
+        manifest: {
+          kind: 'craftbook-template',
+          id: 'dataset-clean',
+          category: 'code-data',
+          paramSchema: { properties: { topic: { type: 'string' } }, required: ['topic'] },
+        },
+      },
+    ],
+    missingToolsets: {},
+    establishedCodebase: false,
+  })) as unknown as NonNullable<SuggestWorkInput['listOffer']>;
+
+  it('ranks a request inside the existing project it names', async () => {
+    const result = await suggestWork(
+      withProjects({ id: 'customer-list-cleanup', name: 'Customer List Cleanup' }),
+      {
+        request:
+          'Please clean up the raw customer spreadsheets in the "Customer List Cleanup" project: normalize the emails and dates, and dedupe the records.',
+        projectId: 'default',
+        listOffer: dataShelf,
+        rankCraftbooks: books({ id: 'dataset-clean', score: 0.55, semantic: 0.6, lexical: 0.2 }),
+        rankTypes: typeScores({ id: 'trip-planner', score: 0.6, semantic: 0.6 }),
+      },
+    );
+    expect(result.projectId).toBe('customer-list-cleanup');
+    expect(result.options.map((o) => o.id)).toEqual(['craftbook:dataset-clean', 'task-here']);
+  });
+
+  it('does not move a request for a bare mention of a project name', async () => {
+    const result = await suggestWork(withProjects({ id: 'trip-planner-1', name: 'Trip Planner' }), {
+      request: 'Plan a week in Rome with the trip planner for the two of us.',
+      projectId: 'default',
+      rankCraftbooks: books(),
+    });
+    expect(result.projectId).toBe('default');
+  });
+
+  it('offers nothing for a repository named from Default, which has to be fetched first', async () => {
+    const result = await suggestWork(deps(), {
+      request: 'Can you review the code in https://github.com/bendyline/gezel and list the risks?',
+      projectId: 'default',
+      tools: ['delegate_developer', 'fetch_repo'],
+      listOffer: codeShelf,
+      rankCraftbooks: billingFirst,
+      rankTypes: typeScores({ id: 'trip-planner', score: 0.6, semantic: 0.6 }),
+    });
+    expect(result.options).toEqual([]);
+    expect(result.guidance.map((g) => g.kind)).toEqual(['self']);
+  });
 });

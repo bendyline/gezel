@@ -29,6 +29,42 @@ export const ImageInputSourceSchema = z.union([
 ]);
 export type ImageInputSource = z.infer<typeof ImageInputSourceSchema>;
 
+/**
+ * The shapes a person or a model can ask for instead of pixels. Each is also
+ * one of Google's native ratios, so a cloud request passes it through as is.
+ */
+export const IMAGE_ASPECT_RATIOS = [
+  '1:1',
+  '4:5',
+  '5:4',
+  '3:4',
+  '4:3',
+  '2:3',
+  '3:2',
+  '9:16',
+  '16:9',
+  '21:9',
+] as const;
+export const ImageAspectRatioSchema = z.enum(IMAGE_ASPECT_RATIOS);
+export type ImageAspectRatio = z.infer<typeof ImageAspectRatioSchema>;
+
+/**
+ * How large to render relative to the model's trained size: a quarter of the
+ * area for a fast draft, the trained area, or 2.25 times it, held to the
+ * model's range.
+ */
+export const IMAGE_QUALITIES = ['draft', 'standard', 'high'] as const;
+export const ImageQualitySchema = z.enum(IMAGE_QUALITIES);
+export type ImageQuality = z.infer<typeof ImageQualitySchema>;
+
+/** The settings a person picks for a direct image gezel's next render. */
+export const ImageSettingsSchema = z.object({
+  aspectRatio: ImageAspectRatioSchema.optional(),
+  quality: ImageQualitySchema.optional(),
+  model: z.string().min(1).optional(),
+});
+export type ImageSettings = z.infer<typeof ImageSettingsSchema>;
+
 export const ImageGenerationRequestSchema = z.object({
   prompt: z.string().min(1),
   negativePrompt: z.string().optional(),
@@ -37,6 +73,12 @@ export const ImageGenerationRequestSchema = z.object({
   model: z.string().optional(),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
+  /**
+   * Shape and size without pixels. The service resolves them against the
+   * model's trained size and range; explicit `width` and `height` win.
+   */
+  aspectRatio: ImageAspectRatioSchema.optional(),
+  quality: ImageQualitySchema.optional(),
   steps: z.number().int().positive().optional(),
   seed: z.number().int().optional(),
   /**
@@ -95,6 +137,13 @@ export const ImageGenerationRequestSchema = z.object({
    * caller is asking for a specific name.
    */
   saveAs: z.string().optional(),
+  /**
+   * Hold `steps` at or below the model's recommended count. The agent tool
+   * sets this: steps above the recommendation buy a 4-step turbo model
+   * nothing but a longer wait, while a fixed cap below it ruins a model that
+   * needs 30 to 100 steps.
+   */
+  capStepsAtRecommended: z.boolean().optional(),
 });
 export type ImageGenerationRequest = z.infer<typeof ImageGenerationRequestSchema>;
 
@@ -140,6 +189,12 @@ export const ImageGenerationResponseSchema = z.object({
    * via the authenticated artifact-blob endpoint instead.
    */
   b64Png: z.string().optional(),
+  /**
+   * One sentence on how the model that rendered reads a prompt (sentences or
+   * tags, whether it letters text, whether it reads a negative prompt), for
+   * the gezel that writes the next one. See core `imagePromptGuide`.
+   */
+  promptGuide: z.string().optional(),
 });
 export type ImageGenerationResponse = z.infer<typeof ImageGenerationResponseSchema>;
 
@@ -163,6 +218,17 @@ export const InstalledImageModelSchema = z.object({
    * Optional for back-compat with older responses.
    */
   supportsImg2Img: z.boolean().optional(),
+  /**
+   * Size facts for a local model, so a client can show the pixels a shape
+   * and tier will render at (core `resolveImageSize`). Absent for cloud
+   * models, which pick their own sizes.
+   */
+  defaultSidePx: z.number().int().positive().optional(),
+  widthRange: z.object({ min: z.number().int(), max: z.number().int() }).optional(),
+  heightRange: z.object({ min: z.number().int(), max: z.number().int() }).optional(),
+  /** How the model reads a prompt; see the catalog's `promptStyle`. */
+  promptStyle: z.enum(['sentences', 'tags']).optional(),
+  rendersText: z.boolean().optional(),
 });
 export type InstalledImageModel = z.infer<typeof InstalledImageModelSchema>;
 

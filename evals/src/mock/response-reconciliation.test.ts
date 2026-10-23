@@ -2,13 +2,26 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { MockService } from '@bendyline/gezel';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, describe, expect, it } from 'vitest';
-import { craftbookEvalSpecMap } from '../craftbooks/specs.ts';
+import { loadCraftbookTestSpecsSync } from '../craftbooks/test-spec-loader.ts';
 import { readStoredZip } from '../fixtures/office-documents.ts';
 import { type MockServicesRuntime, minimalPptxFixture, startMockServices } from './mock-server.ts';
 import { createMockDocumentLedger, reconcileMockResponse } from './response-reconciliation.ts';
+
+/**
+ * The DocBlocks simulator powerpoint-deck's `test.json` still declares. Eval
+ * specs drop it for the bundled DocBlocks (craftbooks/bundled-toolsets.ts),
+ * so the simulator is exercised from the book's sidecar directly.
+ */
+function deckMockServices(): MockService[] {
+  const loaded = loadCraftbookTestSpecsSync().find(
+    (spec) => spec.craftbookId === 'powerpoint-deck',
+  );
+  return (loaded?.spec.mocks ?? []) as MockService[];
+}
 
 const PROJECT = 'pptx-eval';
 const DECK_MD = 'powerpoint/eval/deck.md';
@@ -46,10 +59,10 @@ const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest(
 
 /** Start the powerpoint-deck book's own declared mocks, bound to a fresh trial project. */
 async function startDeckMocks(): Promise<void> {
-  const spec = craftbookEvalSpecMap().get('powerpoint-deck');
-  expect(spec?.mocks?.length, 'powerpoint-deck ships mock services').toBeTruthy();
+  const mocks = deckMockServices();
+  expect(mocks.length, 'powerpoint-deck ships mock services').toBeTruthy();
   home = await mkdtemp(join(tmpdir(), 'gezel-mock-reconcile-'));
-  runtime = await startMockServices(spec!.mocks!, { trialHome: home });
+  runtime = await startMockServices(mocks, { trialHome: home });
   runtime!.bindProject(PROJECT);
   previousTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -167,7 +180,7 @@ describe('powerpoint-deck mock responses agree with the trial', () => {
       source: { kind: 'artifact', uri: firstArtifact(converted).uri as string },
     });
 
-    const tools = craftbookEvalSpecMap().get('powerpoint-deck')!.mocks![0]!;
+    const tools = deckMockServices()[0]!;
     const template = (name: string) =>
       tools.kind === 'mcp' ? tools.tools.find((tool) => tool.name === name)?.resultTemplate : null;
     expect(template('preview_document')).toMatchObject({ slides: 7 });

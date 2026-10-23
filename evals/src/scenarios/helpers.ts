@@ -259,6 +259,25 @@ export async function listAllFiles(
 }
 
 /**
+ * Whether any session in the project has a turn running: its tool calls are
+ * not committed yet, so `readProjectToolTrace` cannot see them. Read from the
+ * session summaries' `turnStartedAt`, which a turn sets at start and clears
+ * when it ends. Errors read as "not running" so a failed probe never defers
+ * a verdict forever.
+ */
+export async function projectTurnInProgress(
+  client: GezelClient,
+  projectId: string,
+): Promise<boolean> {
+  try {
+    const { sessions } = await client.listChatSessions({ projectId });
+    return sessions.some((session) => Boolean(session.turnStartedAt));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Every tool call across every chat session in a project, ordered by the
  * message timestamp and then by stable position, so provenance checks can
  * reason about "was X read before Y was written" and "was a forbidden tool

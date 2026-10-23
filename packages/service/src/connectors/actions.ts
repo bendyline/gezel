@@ -26,12 +26,38 @@ import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/ty
 import type { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import { parseFrontmatter, withFrontmatter } from '../index-store/frontmatter.js';
-import { enforceConsent } from './consent.js';
+import { parseRecipient } from '../mail/recipient.js';
+import { draftRecipients, enforceConsent } from './consent.js';
 import { corpusDirFor, createConnectorAdapter } from './manager.js';
 import { newDraftId } from './outbox.js';
 import { connectorCorpusStorage } from './storage.js';
 
 const log = createLogger('connectors');
+
+/**
+ * Consent scopes whose commit reaches nobody but the account owner — a draft
+ * saved into their own mailbox. Night-shift deferral exists so nothing is sent
+ * to other people unattended; holding these until morning would only mean an
+ * overnight "draft my replies" run leaves the Drafts folder empty when the
+ * person sits down to review it.
+ */
+const NON_TRANSMITTING_SCOPES: ReadonlySet<string> = new Set(['mailbox-draft']);
+
+/** Every recipient the draft names is one of `standing` (case-insensitive). */
+function coveredByStandingRecipients(
+  data: Record<string, string>,
+  input: unknown,
+  standing: readonly string[] | undefined,
+): boolean {
+  if (!standing?.length) return false;
+  const allowed = new Set(standing.map((a) => a.trim().toLowerCase()));
+  const entries = draftRecipients(data, input);
+  if (entries.length === 0) return false;
+  return entries.every((entry) => {
+    const parsed = parseRecipient(entry);
+    return parsed.ok && allowed.has(parsed.address.toLowerCase());
+  });
+}
 
 export class ActionDraftNotFoundError extends Error {
   constructor(draftId: string) {
@@ -70,6 +96,8 @@ export interface ConnectorActionManagerOptions {
   isNightShiftActive?: () => boolean;
   /** Shared with ConnectorManager so commits can't race syncs. */
   locks?: KeyedLock;
+  /** HTTP transport for the committing adapter; tests inject the simulator. */
+  fetch?: typeof fetch;
 }
 
 export class ConnectorActionManager {
@@ -169,7 +197,17 @@ export class ConnectorActionManager {
    * = deny), and during night shift the commit defers to `_outbox/` for
    * daytime approval instead of transmitting.
    */
-  async commit(project: ProjectDetail, draftId: string): Promise<CommitResult> {
+  /**
+   * `standingRecipients` is a lookout's own recipient list: a send whose every
+   * recipient the person typed on that lookout transmits even during the
+   * night shift (a 3 a.m. alert is no use at breakfast). The consent scope
+   * still runs; this only waives the deferral, and only for those addresses.
+   */
+  async commit(
+    project: ProjectDetail,
+    draftId: string,
+    opts: { standingRecipients?: readonly string[] } = {},
+  ): Promise<CommitResult> {
     return this.locks.run(project.id, async () => {
       const found = await this.find(project, draftId);
       if (!found) throw new ActionDraftNotFoundError(draftId);
@@ -193,7 +231,11 @@ export class ConnectorActionManager {
       if (!verdict.ok) throw new Error(`commit denied: ${verdict.reason}`);
       const committedInput = verdict.input !== undefined ? verdict.input : input;
 
-      if (this.opts.isNightShiftActive?.()) {
+      if (
+        this.opts.isNightShiftActive?.() &&
+        !NON_TRANSMITTING_SCOPES.has(declared.consentScope ?? '') &&
+        !coveredByStandingRecipients(found.data, committedInput, opts.standingRecipients)
+      ) {
         const { abs, rel } = await this.paths(
           project,
           found.bindingId,
@@ -214,6 +256,7 @@ export class ConnectorActionManager {
         store: this.opts.store,
         ...(this.opts.scriptRunner ? { scriptRunner: this.opts.scriptRunner } : {}),
         projectId: project.id,
+        ...(this.opts.fetch ? { fetch: this.opts.fetch } : {}),
       });
       try {
         await adapter.ensureAuth();

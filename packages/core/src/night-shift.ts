@@ -243,6 +243,8 @@ export function formatNightShiftSummary(counts: {
   pausedReview?: boolean;
   /** What the sweep got through: files summarized, files reviewed, photos and recordings described. */
   indexing?: NightShiftIndexing;
+  /** Suspected problems the reviewer first flagged tonight, in code folders. */
+  newIssues?: number;
 }): string {
   const swept = indexingParts(counts.indexing);
   const leftBehind: string[] = [];
@@ -270,6 +272,10 @@ export function formatNightShiftSummary(counts: {
   const actions = counts.actions ?? 0;
   if (actions > 0) {
     summary = `${summary} ${actions === 1 ? 'There is' : 'There are'} ${countOf(actions, 'suggested action')} to review.`;
+  }
+  const newIssues = counts.newIssues ?? 0;
+  if (newIssues > 0) {
+    summary = `${summary} The reviewer flagged ${countOf(newIssues, 'new suspected problem')}; your codebase report lists them, and your coding app can check them.`;
   }
   if (counts.pausedReview) {
     summary = `${summary} Your nightly review didn't finish; it tries again tonight on its own.`;

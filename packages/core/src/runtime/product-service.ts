@@ -2340,10 +2340,13 @@ export class PortableProductService {
 
   private async recruit(role: string) {
     const roster = await this.store.listGezels();
-    const existing = roster.find((member) =>
-      resolveRoleId(role)
-        ? resolveRoleId(member.role) === resolveRoleId(role)
-        : member.role?.toLowerCase() === role.toLowerCase(),
+    // A fixed-function gezel forwards one message to one tool; it never fills a role.
+    const existing = roster.find(
+      (member) =>
+        !member.fixedFunction &&
+        (resolveRoleId(role)
+          ? resolveRoleId(member.role) === resolveRoleId(role)
+          : member.role?.toLowerCase() === role.toLowerCase()),
     );
     if (existing) return existing;
     return this.createGezel({

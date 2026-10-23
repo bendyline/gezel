@@ -36,6 +36,12 @@ const ActionDraftSchema = z.object({
   input: z.unknown().optional(),
 });
 
+const PatchSchema = z.object({
+  displayName: z.string().max(120).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
+  disabled: z.boolean().optional(),
+});
+
 export function connectorRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
@@ -109,7 +115,89 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
   app.delete('/:id/connectors/:bindingId', async (c) => {
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
-    await ctx.connectors.unbind(project, c.req.param('bindingId'));
+    const bindingId = c.req.param('bindingId');
+    const binding = project.connectors?.find((b) => b.id === bindingId);
+    await ctx.connectors.unbind(project, bindingId);
+    // A camera's saved pictures go with it unless the person keeps them.
+    if (binding?.driver === 'device' && c.req.query('keepPictures') !== '1') {
+      await ctx.cameras
+        .capturesFor(project.id, binding)
+        .clear()
+        .catch(() => {});
+    }
+    return c.body(null, 204);
+  });
+
+  // Rename, reconfigure, pause, or resume a binding (a camera's settings).
+  app.patch('/:id/connectors/:bindingId', async (c) => {
+    const project = await ctx.store.getProject(c.req.param('id'));
+    if (!project) return c.json({ error: 'not found' }, 404);
+    const body = PatchSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: body.error.message }, 400);
+    try {
+      const binding = await ctx.connectors.patchBinding(project, c.req.param('bindingId'), {
+        ...(body.data.displayName !== undefined ? { displayName: body.data.displayName } : {}),
+        ...(body.data.config ? { config: body.data.config } : {}),
+        ...(body.data.disabled !== undefined ? { disabled: body.data.disabled } : {}),
+      });
+      return c.json({ ok: true, binding });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  // ── Cameras (device bindings) ───────────────────────────────────────────
+  // The live preview is the newest frame in memory; nothing is written to
+  // disk for it. Saved pictures live in the project's private sidecar.
+
+  app.get('/:id/connectors/:bindingId/preview', async (c) => {
+    const project = await ctx.store.getProject(c.req.param('id'));
+    const binding = project?.connectors?.find((b) => b.id === c.req.param('bindingId'));
+    if (!project || !binding || binding.driver !== 'device')
+      return c.json({ error: 'not found' }, 404);
+    const frame = ctx.cameras.preview(binding);
+    if (!frame) return c.json({ error: 'not watching' }, 404);
+    return c.body(new Uint8Array(frame.jpeg), 200, {
+      'Content-Type': 'image/jpeg',
+      'Cache-Control': 'no-store',
+      'X-Frame-At': new Date(frame.at).toISOString(),
+    });
+  });
+
+  app.get('/:id/connectors/:bindingId/captures', async (c) => {
+    const project = await ctx.store.getProject(c.req.param('id'));
+    const binding = project?.connectors?.find((b) => b.id === c.req.param('bindingId'));
+    if (!project || !binding || binding.driver !== 'device')
+      return c.json({ error: 'not found' }, 404);
+    const store = ctx.cameras.capturesFor(project.id, binding);
+    const day = c.req.query('date');
+    const captures = await store.list(day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : undefined);
+    return c.json({ captures, totalBytes: captures.reduce((n, x) => n + x.bytes, 0) });
+  });
+
+  app.get('/:id/connectors/:bindingId/captures/file', async (c) => {
+    const project = await ctx.store.getProject(c.req.param('id'));
+    const binding = project?.connectors?.find((b) => b.id === c.req.param('bindingId'));
+    if (!project || !binding || binding.driver !== 'device')
+      return c.json({ error: 'not found' }, 404);
+    const path = c.req.query('path') ?? '';
+    try {
+      const bytes = await ctx.cameras.capturesFor(project.id, binding).read(path);
+      return c.body(new Uint8Array(bytes), 200, {
+        'Content-Type': 'image/jpeg',
+        'Cache-Control': 'private, max-age=3600',
+      });
+    } catch {
+      return c.json({ error: 'not found' }, 404);
+    }
+  });
+
+  app.delete('/:id/connectors/:bindingId/captures', async (c) => {
+    const project = await ctx.store.getProject(c.req.param('id'));
+    const binding = project?.connectors?.find((b) => b.id === c.req.param('bindingId'));
+    if (!project || !binding || binding.driver !== 'device')
+      return c.json({ error: 'not found' }, 404);
+    await ctx.cameras.capturesFor(project.id, binding).clear();
     return c.body(null, 204);
   });
 

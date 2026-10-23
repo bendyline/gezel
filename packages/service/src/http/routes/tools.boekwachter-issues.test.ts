@@ -70,27 +70,31 @@ describe('Boekwachter issue tool routes', () => {
     } as unknown as ServiceContext);
   }
 
-  it('updates read and lifecycle state by BW reference', async () => {
+  it('updates read and in-progress state by BW reference', async () => {
     const response = await app().request('/p1/tools/update-file-issue', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ref: 'BW-7',
-        status: 'dismissed',
-        dismissalReason: 'not_an_issue',
-        seen: true,
-      }),
+      body: JSON.stringify({ ref: 'BW-7', status: 'in_progress', seen: true }),
     });
 
     expect(response.status).toBe(200);
     expect(updateBoekwachterIssue).toHaveBeenCalledWith('p1', 'BW-7', {
-      status: 'dismissed',
-      dismissalReason: 'not_an_issue',
+      status: 'in_progress',
       seen: true,
     });
     await expect(response.json()).resolves.toMatchObject({
-      issue: { ref: 'BW-7', status: 'dismissed', seen: true },
+      issue: { ref: 'BW-7', status: 'in_progress', seen: true },
     });
+  });
+
+  it('refuses to close an issue for a caller with no identity to judge it under', async () => {
+    const response = await app().request('/p1/tools/update-file-issue', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ref: 'BW-7', status: 'dismissed', dismissalReason: 'not_an_issue' }),
+    });
+    expect(response.status).toBe(403);
+    expect(updateBoekwachterIssue).not.toHaveBeenCalled();
   });
 
   it('creates and dispatches a linked specialist task with stale-anchor guidance', async () => {

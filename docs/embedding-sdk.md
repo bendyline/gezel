@@ -97,6 +97,16 @@ the task, and treats character-based context budgeting as advisory. Plain
 `app.chat` never retrieves implicitly. `streamText` opts in per request through
 its `knowledge` field, using the same budgets.
 
+`knowledgeContext()` takes the same options and returns the messages together
+with what happened: `status` is `used`, `none` (searched, nothing relevant) or
+`skipped`, with a `reason` such as `no_room`, and `passages` lists what the
+model was given. Two options serve apps that write for people. `query` searches
+for what the person asked instead of the last user message, which in a
+templated prompt is mostly document. `citations: 'numbered'` labels the passages
+`[1]`, `[2]`, … and asks the model to cite them; `passages[i].n` is each label.
+Check the output with `groundText()` from `@bendyline/gezel/grounding`, the
+same model-free check Gezel's [factual writing](factual-writing.md) uses.
+
 ## Models and readiness
 
 `ModelManager` has the same contract on both platforms:

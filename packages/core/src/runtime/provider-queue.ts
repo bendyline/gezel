@@ -273,6 +273,19 @@ export interface ProviderQueueOptions {
    * the default is off.
    */
   engineOverflow?: boolean;
+  /**
+   * Let a turn hand its slot to another conversation's turn between tool-loop
+   * iterations ({@link QueueLease.yieldIfContended}), once it has held the slot
+   * this long. A single-slot local engine otherwise runs one tool loop to the
+   * end while every other conversation waits: on ds4, a delegated image
+   * generator waited 72 minutes behind a developer's turn and never ran
+   * (2026-10-20, DeepSeek V4.1 petshop). The quantum bounds how often a slow
+   * engine re-reads a prompt for a switch. Unset or 0 keeps a slot for the
+   * whole turn.
+   */
+  yieldQuantumMs?: number;
+  /** How long a waiting turn must have queued before a holder yields to it. Default 30 s. */
+  yieldMinWaitMs?: number;
   /** Injectable clock for tests. Default `Date.now`. */
   now?: () => number;
 }
@@ -284,6 +297,9 @@ export interface ProviderQueueOptions {
  * beyond an active session's natural end.
  */
 export const DEFAULT_AMBIENT_QUIET_MS = 180_000;
+
+/** Default {@link ProviderQueueOptions.yieldQuantumMs} for local engine queues. */
+export const DEFAULT_LOCAL_YIELD_QUANTUM_MS = 120_000;
 
 /**
  * How many slots the background lane may hold on an engine that can
@@ -321,9 +337,18 @@ export class AbortedWhileQueuedError extends Error {
 }
 
 export class ProviderQueue {
-  readonly concurrency: number;
-  readonly interactiveConcurrency: number;
-  readonly backgroundConcurrency: number;
+  private concurrencyCap: number;
+  private interactiveCap: number;
+  private backgroundCap: number;
+  get concurrency(): number {
+    return this.concurrencyCap;
+  }
+  get interactiveConcurrency(): number {
+    return this.interactiveCap;
+  }
+  get backgroundConcurrency(): number {
+    return this.backgroundCap;
+  }
   private readonly affinity: boolean;
   private readonly affinityWindowMs: number;
   private readonly maxWaitMs: number;
@@ -345,6 +370,9 @@ export class ProviderQueue {
   private runningBackground = 0;
   /** See {@link ProviderQueueOptions.engineOverflow}. */
   private readonly engineOverflow: boolean;
+  /** See {@link ProviderQueueOptions.yieldQuantumMs}; 0 disables yielding. */
+  readonly yieldQuantumMs: number;
+  private readonly yieldMinWaitMs: number;
   private readonly now: () => number;
 
   private running = 0;
@@ -361,21 +389,23 @@ export class ProviderQueue {
     if (opts.concurrency < 1) {
       throw new Error(`ProviderQueue concurrency must be ≥ 1 (got ${opts.concurrency})`);
     }
-    this.concurrency = opts.concurrency;
+    this.concurrencyCap = opts.concurrency;
     // Default to the total concurrency — no cap, current behavior. Clamp
     // anything beyond [1, concurrency] so a misconfigured value can't
     // accidentally block all interactive dispatch.
     const requestedCap = opts.interactiveConcurrency ?? opts.concurrency;
-    this.interactiveConcurrency = Math.min(opts.concurrency, Math.max(1, requestedCap));
+    this.interactiveCap = Math.min(opts.concurrency, Math.max(1, requestedCap));
     // Dual of the interactive cap: reserve `concurrency - backgroundConcurrency`
     // slots for interactive turns. Default to no reservation (= concurrency).
     const requestedBgCap = opts.backgroundConcurrency ?? opts.concurrency;
-    this.backgroundConcurrency = Math.min(opts.concurrency, Math.max(1, requestedBgCap));
+    this.backgroundCap = Math.min(opts.concurrency, Math.max(1, requestedBgCap));
     this.affinity = opts.affinity ?? true;
     this.affinityWindowMs = opts.affinityWindowMs ?? 30_000;
     this.maxWaitMs = opts.maxWaitMs ?? 60_000;
     this.ambientQuietMs = Math.max(0, opts.ambientQuietMs ?? 0);
     this.engineOverflow = opts.engineOverflow === true;
+    this.yieldQuantumMs = Math.max(0, opts.yieldQuantumMs ?? 0);
+    this.yieldMinWaitMs = Math.max(0, opts.yieldMinWaitMs ?? 30_000);
     this.now = opts.now ?? Date.now;
     this.lastNonAmbientActivityAt = this.now();
   }
@@ -420,6 +450,28 @@ export class ProviderQueue {
     });
   }
 
+  /** The queue's clock, so a lease measures its hold on the same one. */
+  currentTime(): number {
+    return this.now();
+  }
+
+  /**
+   * Whether another conversation's turn is waiting for the slot a holder in
+   * `lane` would give up: not ambient housekeeping, queued at least
+   * {@link ProviderQueueOptions.yieldMinWaitMs}, and in the same or a more
+   * urgent lane — a person's chat never steps aside for background work.
+   */
+  hasYieldableWaiter(holder: { sessionId?: string; lane: Lane }): boolean {
+    const now = this.now();
+    return this.pending.some(
+      (p) =>
+        !p.ambient &&
+        p.sessionId !== holder.sessionId &&
+        laneRank(p.lane) <= laneRank(holder.lane) &&
+        now - p.enqueuedAt >= this.yieldMinWaitMs,
+    );
+  }
+
   snapshot(): QueueSnapshot {
     let queuedInteractive = 0;
     let queuedBackground = 0;
@@ -428,6 +480,30 @@ export class ProviderQueue {
       else queuedBackground++;
     }
     return { running: this.running, queuedInteractive, queuedBackground };
+  }
+
+  /**
+   * Lower the caps in place; a value above the current cap is ignored. An
+   * engine that relaunches with fewer slots (after a GPU out-of-memory at
+   * startup) keeps its queue and the leases already granted: running work
+   * finishes, and nothing new starts past the new caps.
+   */
+  narrow(caps: {
+    concurrency?: number;
+    interactiveConcurrency?: number;
+    backgroundConcurrency?: number;
+  }): void {
+    const lower = (current: number, next: number | undefined) =>
+      next === undefined ? current : Math.max(1, Math.min(current, Math.floor(next)));
+    this.concurrencyCap = lower(this.concurrencyCap, caps.concurrency);
+    this.interactiveCap = Math.min(
+      this.concurrencyCap,
+      lower(this.interactiveCap, caps.interactiveConcurrency),
+    );
+    this.backgroundCap = Math.min(
+      this.concurrencyCap,
+      lower(this.backgroundCap, caps.backgroundConcurrency),
+    );
   }
 
   /**
@@ -844,6 +920,23 @@ export const QUEUE_WAIT_NOTICE_DELAY_MS = 200;
  */
 export const QUEUE_WAIT_NOTICE_REPEAT_MS = 5_000;
 
+/** A held queue slot, handed to the work so a long turn can share it. */
+export interface QueueLease {
+  /**
+   * Call between tool-loop iterations. When the queue allows yielding, this
+   * turn has held its slot for the quantum, and another conversation's turn
+   * has waited long enough, release the slot, queue again behind that turn,
+   * and resolve `true` once the slot is back. Otherwise resolve `false` at
+   * once. Rejects with {@link AbortedWhileQueuedError} if the turn is
+   * cancelled while it waits to resume. `onYield` runs as the slot is handed
+   * over, so the hand-off is visible even if the turn never resumes.
+   */
+  yieldIfContended(onYield?: () => void): Promise<boolean>;
+}
+
+/** The lease for work that runs outside a queue: it never yields. */
+export const UNQUEUED_LEASE: QueueLease = { yieldIfContended: async () => false };
+
 /**
  * Common acquire-run-release pattern. The caller provides the queue
  * (optional; no-op if undefined), the queueing opts, and the work
@@ -859,10 +952,53 @@ export const QUEUE_WAIT_NOTICE_REPEAT_MS = 5_000;
 export async function runInQueue<T>(
   queue: ProviderQueue | undefined,
   opts: QueueWaitOpts | undefined,
-  work: () => Promise<T>,
+  work: (lease: QueueLease) => Promise<T>,
 ): Promise<T> {
-  if (!queue || !opts) return work();
+  if (!queue || !opts) return work(UNQUEUED_LEASE);
 
+  const acquireOpts: EnqueueRequest = { lane: opts.lane };
+  if (opts.ambient) acquireOpts.ambient = true;
+  if (opts.sessionId !== undefined) acquireOpts.sessionId = opts.sessionId;
+  if (opts.gezelId !== undefined) acquireOpts.gezelId = opts.gezelId;
+  if (opts.projectId !== undefined) acquireOpts.projectId = opts.projectId;
+  if (opts.provider !== undefined) acquireOpts.provider = opts.provider;
+  if (opts.actorLabel !== undefined) acquireOpts.actorLabel = opts.actorLabel;
+  if (opts.signal !== undefined) acquireOpts.signal = opts.signal;
+  if (opts.affinity === false) acquireOpts.affinity = false;
+  if (opts.job !== undefined) acquireOpts.job = opts.job;
+  if (opts.enginePriority !== undefined) acquireOpts.enginePriority = opts.enginePriority;
+
+  let release = await acquireNoticingWait(queue, opts, acquireOpts);
+  let heldSince = queue.currentTime();
+  const lease: QueueLease = {
+    yieldIfContended: async (onYield) => {
+      const quantum = queue.yieldQuantumMs;
+      if (quantum <= 0 || queue.currentTime() - heldSince < quantum) return false;
+      if (!queue.hasYieldableWaiter({ sessionId: opts.sessionId, lane: opts.lane })) return false;
+      const held = release;
+      release = () => {};
+      held();
+      onYield?.();
+      // The turn shows as queued while it waits to resume, the same as
+      // before it first started, rather than as a silent, stalled reply.
+      release = await acquireNoticingWait(queue, opts, acquireOpts);
+      heldSince = queue.currentTime();
+      return true;
+    },
+  };
+  try {
+    return await work(lease);
+  } finally {
+    release();
+  }
+}
+
+/** Acquire a slot, publishing `onQueueWait` notices for as long as it waits. */
+async function acquireNoticingWait(
+  queue: ProviderQueue,
+  opts: QueueWaitOpts,
+  acquireOpts: EnqueueRequest,
+): Promise<() => void> {
   let acquired = false;
   let waitNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   let waitNoticeRepeat: ReturnType<typeof setInterval> | null = null;
@@ -886,30 +1022,12 @@ export async function runInQueue<T>(
     waitNoticeTimer.unref?.();
   }
 
-  const acquireOpts: EnqueueRequest = { lane: opts.lane };
-  if (opts.ambient) acquireOpts.ambient = true;
-  if (opts.sessionId !== undefined) acquireOpts.sessionId = opts.sessionId;
-  if (opts.gezelId !== undefined) acquireOpts.gezelId = opts.gezelId;
-  if (opts.projectId !== undefined) acquireOpts.projectId = opts.projectId;
-  if (opts.provider !== undefined) acquireOpts.provider = opts.provider;
-  if (opts.actorLabel !== undefined) acquireOpts.actorLabel = opts.actorLabel;
-  if (opts.signal !== undefined) acquireOpts.signal = opts.signal;
-  if (opts.affinity === false) acquireOpts.affinity = false;
-  if (opts.job !== undefined) acquireOpts.job = opts.job;
-  if (opts.enginePriority !== undefined) acquireOpts.enginePriority = opts.enginePriority;
-
-  let release: () => void;
   try {
-    release = await queue.acquire(acquireOpts);
+    return await queue.acquire(acquireOpts);
   } finally {
     acquired = true;
     if (waitNoticeTimer) clearTimeout(waitNoticeTimer);
     if (waitNoticeRepeat) clearInterval(waitNoticeRepeat);
-  }
-  try {
-    return await work();
-  } finally {
-    release();
   }
 }
 

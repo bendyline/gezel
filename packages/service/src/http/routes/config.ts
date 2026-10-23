@@ -258,6 +258,8 @@ export function configRoutes(ctx: ServiceContext): Hono {
       plainPatch.openaiEndpoints = { ...plainPatch.openaiEndpoints, emulateOllama: false };
     }
     const updated = await ctx.store.writeConfig(plainPatch);
+    // Engagement and the security level decide which cameras may run.
+    void ctx.liveConnectors?.reconcile();
     if (body.remoteServing !== undefined) {
       try {
         await ctx.remoteServing.reconfigure(updated.remoteServing);

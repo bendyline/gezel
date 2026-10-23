@@ -188,7 +188,7 @@ describe('ChatManager — clamped first-turn context', () => {
       // asynchronously-admitted context must activate the curated coordinator
       // surface before the first prompt is built.
       expect(admissionCalls).toBeGreaterThan(0);
-      expect(recalled?.toolAllowlist?.has('start_project')).toBe(true);
+      expect(recalled?.toolAllowlist?.has('start_work')).toBe(true);
       expect(recalled?.toolAllowlist?.has('read_task_notes')).toBe(true);
       // The diet caps at the curated Meester list (60 once the task-oversight
       // kit joined it), well under the ~71-tool surface the floor sheds.
@@ -6240,7 +6240,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     }
   });
 
-  it('medium local meester cap keeps the project kickoff and trims the full MCP roster', async () => {
+  it('medium local meester cap keeps the routing pair and trims the full MCP roster', async () => {
     const home = await mkdtemp(join(tmpdir(), 'gezel-medium-meester-cap-'));
     const localStore = new Store({ home });
     await localStore.ensureLayout();
@@ -6277,10 +6277,12 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(
         [...allow].filter((t) => !t.startsWith('delegate_') && !t.startsWith('consult_')).length,
       ).toBeLessThanOrEqual(16);
-      expect(allow.has('start_project')).toBe(true);
+      // The routing pair (on by default for medium models) stands in for
+      // start_project.
+      expect(allow.has('start_work')).toBe(true);
+      expect(allow.has('suggest_work')).toBe(true);
+      expect(allow.has('start_project')).toBe(false);
       expect(allow.has('start_job')).toBe(false);
-      const allowOrder = Array.from(allow);
-      expect(allowOrder).toContain('start_project');
       expect(allow.has('message_gezel')).toBe(true);
       expect(allow.has('write_file')).toBe(false);
       expect(allow.has('write_artifact')).toBe(false);
@@ -6290,7 +6292,8 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(toolsBlockStart).toBeGreaterThanOrEqual(0);
       const toolsBlock = sys.slice(toolsBlockStart);
       const listedTools = toolsBlock.slice(0, toolsBlock.indexOf('---'));
-      expect(listedTools).toContain('`start_project`');
+      expect(listedTools).toContain('`start_work`');
+      expect(listedTools).not.toContain('`start_project`');
       expect(listedTools).not.toContain('`start_job`');
       expect(listedTools).toContain('`message_gezel`');
       expect(listedTools).not.toContain('`write_file`');
@@ -6341,7 +6344,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       const allow = create!.opts!.toolAllowlist!;
       expect(allow.has('fetch_repo')).toBe(true);
       expect(allow.has('fetch_diff')).toBe(true);
-      expect(allow.has('start_project')).toBe(true);
+      expect(allow.has('start_work')).toBe(true);
       expect(allow.has('message_gezel')).toBe(true);
       expect(allow.has('delegate_reviewer')).toBe(false);
       expect(allow.has('consult_reviewer')).toBe(false);
@@ -6354,7 +6357,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       const listedTools = toolsBlock.slice(0, toolsBlock.indexOf('---'));
       expect(listedTools).toContain('`fetch_repo`');
       expect(listedTools).toContain('`fetch_diff`');
-      expect(listedTools).toContain('`start_project`');
+      expect(listedTools).toContain('`start_work`');
       expect(listedTools).toContain('`message_gezel`');
       expect(listedTools).not.toContain('`delegate_reviewer`');
       expect(listedTools).not.toContain('`consult_reviewer`');
@@ -6400,16 +6403,20 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       const create = localMock.calls.find((c) => c.kind === 'create');
       const allow = create!.opts!.toolAllowlist!;
       // Non-delegation router surface stays compact; role tools are exempt.
-      // The two craftbook entry points keep exact-format deliverables on
-      // their bundled production path instead of falling back to ad-hoc work.
+      // The routing pair (on by default for large local models) keeps
+      // exact-format deliverables on their bundled craftbook path: start_work
+      // launches the craftbook suggest_work ranks, in place of the older
+      // suggest_craftbook / invoke_craftbook / start_project trio.
       expect(
         [...allow].filter((t) => !t.startsWith('delegate_') && !t.startsWith('consult_')).length,
       ).toBeLessThanOrEqual(14);
       expect(allow.has('start_job')).toBe(false);
-      expect(allow.has('start_project')).toBe(true);
+      expect(allow.has('start_work')).toBe(true);
+      expect(allow.has('suggest_work')).toBe(true);
+      expect(allow.has('start_project')).toBe(false);
       expect(allow.has('message_gezel')).toBe(true);
-      expect(allow.has('suggest_craftbook')).toBe(true);
-      expect(allow.has('invoke_craftbook')).toBe(true);
+      expect(allow.has('suggest_craftbook')).toBe(false);
+      expect(allow.has('invoke_craftbook')).toBe(false);
       expect(allow.has('ask_user_question')).toBe(false);
       expect(allow.has('ask_gezel')).toBe(false);
       expect(allow.has('ask_specialist')).toBe(false);
@@ -6422,10 +6429,11 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
         const toolsBlock = sys.slice(toolsBlockStart);
         const listedTools = toolsBlock.slice(0, toolsBlock.indexOf('---'));
         expect(listedTools).not.toContain('`start_job`');
-        expect(listedTools).toContain('`start_project`');
+        expect(listedTools).toContain('`start_work`');
+        expect(listedTools).toContain('`suggest_work`');
         expect(listedTools).toContain('`message_gezel`');
-        expect(listedTools).toContain('`suggest_craftbook`');
-        expect(listedTools).toContain('`invoke_craftbook`');
+        expect(listedTools).not.toContain('`start_project`');
+        expect(listedTools).not.toContain('`suggest_craftbook`');
         expect(listedTools).not.toContain('`ask_user_question`');
         expect(listedTools).not.toContain('`ask_gezel`');
         expect(listedTools).not.toContain('`ask_specialist`');

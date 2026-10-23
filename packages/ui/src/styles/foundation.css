@@ -1,3 +1,5 @@
+@import "../assets/fonts/typography-tokens.css";
+
 :root {
   color-scheme: light dark;
 
@@ -17,10 +19,6 @@
      'OpenMoji Color' is scoped to emoji codepoints via unicode-range in
      fonts.css so it fills emoji glyphs in either stack without affecting
      text. System emoji fonts stay as fallbacks if OpenMoji fails to load. */
-  --font-ui: "Hanken Grotesk", "OpenMoji Color", "Apple Color Emoji", "Segoe UI Emoji",
-    "Noto Color Emoji", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-display: "PT Serif", "OpenMoji Color", "Apple Color Emoji", "Segoe UI Emoji",
-    "Noto Color Emoji", Georgia, "Times New Roman", serif;
   font-family: var(--font-ui);
 
   /* Type scale. A small, deliberate set of sizes so chrome (settings,
@@ -49,9 +47,17 @@
   --gezel-paper-control: #ece8e5;
   --gezel-paper-control-deep: #e4dfdc;
   --gezel-paper-inset: #ddd3bd;
-  /* The rag paper Workshop Marks are drawn on. Theme-stable on purpose: a
-     surface that hosts the artwork sits on this ground in both themes. */
-  --gezel-paper-mark: #e6d5bc;
+  /* Colored paper painted behind a craftbook's or project type's transparent
+     cut-paper mark, one tone per category (catalogGroundFor in core). */
+  --gezel-ground-indigo: #4f5d7e;
+  --gezel-ground-slate: #6f8aa0;
+  --gezel-ground-teal: #5f8a86;
+  --gezel-ground-sage: #8a9a76;
+  --gezel-ground-forest: #4f6249;
+  --gezel-ground-ochre: #c49a45;
+  --gezel-ground-terracotta: #b0724c;
+  --gezel-ground-rose: #c08a86;
+  --gezel-ground-plum: #7d6378;
   /* True black, for surfaces that must meet the phone's own system bars. */
   --gezel-paper-night: #000;
   --gezel-ink: #1c1c1c;
@@ -219,6 +225,17 @@
   --key-pressed-ink: #fff6ea;
   --key-pressed-shadow: inset 0 1px 2px rgba(60, 30, 10, 0.28);
 
+  /* Native dropdown face (the `select` rule below). Light mode recasts it in
+     warm brown with cream text so it reads as interactive on parchment. The
+     chevron is a data URI, so its stroke color is spelled out per theme. */
+  --select-bg: #8a5235;
+  --select-bg-hover: #74442b;
+  --select-ink: var(--gezel-cream-ink);
+  --select-border: rgba(0, 0, 0, 0.2);
+  --select-border-hover: rgba(0, 0, 0, 0.2);
+  --select-focus: var(--gezel-cream-ink);
+  --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f3ede0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+
   /* Scrollbars — a quiet greige-brown over the light canvas keeps the
      control warm without the old yellow-orange cast. Dark mode swaps
      to a muted cream over its dark canvas below. */
@@ -240,6 +257,15 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    --gezel-ground-indigo: #3e4961;
+    --gezel-ground-slate: #576b7b;
+    --gezel-ground-teal: #4b6b67;
+    --gezel-ground-sage: #6b775b;
+    --gezel-ground-forest: #3e4c39;
+    --gezel-ground-ochre: #977736;
+    --gezel-ground-terracotta: #88593b;
+    --gezel-ground-rose: #946b67;
+    --gezel-ground-plum: #614d5d;
     --gezel-paper-canvas: #141517;
     --gezel-paper-workshop: #1f1c18;
     --gezel-paper-panel: #1c1d20;
@@ -299,6 +325,13 @@
     --key-pressed-border: rgba(30, 15, 5, 0.7);
     --key-pressed-ink: #231207;
     --key-pressed-shadow: inset 0 1px 2px rgba(30, 15, 5, 0.38);
+    --select-bg: var(--gezel-paper-panel);
+    --select-bg-hover: var(--gezel-paper-inset);
+    --select-ink: var(--gezel-ink);
+    --select-border: rgba(255, 255, 255, 0.18);
+    --select-border-hover: var(--gezel-terra);
+    --select-focus: var(--gezel-terra);
+    --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f0f0f0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   }
 }
 
@@ -313,6 +346,15 @@
 
 [data-theme="dark"] {
   color-scheme: dark;
+  --gezel-ground-indigo: #3e4961;
+  --gezel-ground-slate: #576b7b;
+  --gezel-ground-teal: #4b6b67;
+  --gezel-ground-sage: #6b775b;
+  --gezel-ground-forest: #3e4c39;
+  --gezel-ground-ochre: #977736;
+  --gezel-ground-terracotta: #88593b;
+  --gezel-ground-rose: #946b67;
+  --gezel-ground-plum: #614d5d;
   --gezel-paper-canvas: #141517;
   --gezel-paper-workshop: #1f1c18;
   --gezel-paper-panel: #1c1d20;
@@ -370,6 +412,13 @@
   --key-pressed-border: rgba(30, 15, 5, 0.7);
   --key-pressed-ink: #231207;
   --key-pressed-shadow: inset 0 1px 2px rgba(30, 15, 5, 0.38);
+  --select-bg: var(--gezel-paper-panel);
+  --select-bg-hover: var(--gezel-paper-inset);
+  --select-ink: var(--gezel-ink);
+  --select-border: rgba(255, 255, 255, 0.18);
+  --select-border-hover: var(--gezel-terra);
+  --select-focus: var(--gezel-terra);
+  --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f0f0f0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 
 * {
@@ -519,52 +568,38 @@ select:focus-visible {
   outline-offset: -1px;
 }
 
-/* Themed dropdown — light mode only. The OS-native <select> renders
-   as a foreign dark-grey block against the parchment palette; recasting
-   it in warm brown with cream text keeps the control clearly interactive
-   while sitting in the gezellig palette. Dark mode keeps native
-   rendering (the UA defaults already sit well on dark canvas).
-   Targeting: explicit `[data-theme="light"]`, plus the implicit-light
-   case (no theme attribute on a light-OS install) via `:not([data-theme="dark"])`
-   combined with the media-query opt-out below. */
-:root:not([data-theme="dark"]) select {
+/* One dropdown face for every native <select>, in both themes; the palette
+   is the `--select-*` tokens above. We draw the chevron ourselves in a
+   reserved right gutter because Chromium's native Windows select paints its
+   arrow over any value too long to fit (Settings → llama.cpp's "Auto-detect
+   (machine supports: …)" ran under it in dark mode, 2026-10-19). The
+   `:root` prefix lifts the rule to (0,2,1) on purpose: surface rules such as
+   `.history-filters select` use `background:` and `padding:` shorthands,
+   which would otherwise erase the chevron and its gutter. List boxes
+   (`multiple`) keep native rendering. */
+:root select:not([multiple]) {
   appearance: none;
   -webkit-appearance: none;
-  background-color: #8a5235;
-  color: #f3ede0;
-  border: 1px solid rgba(0, 0, 0, 0.2);
+  background-color: var(--select-bg);
+  color: var(--select-ink);
+  border: 1px solid var(--select-border);
   border-radius: var(--radius-sm);
-  padding: 0.35rem 1.75rem 0.35rem 0.6rem;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f3ede0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  padding: 0.45rem 1.85rem 0.45rem 0.7rem;
+  background-image: var(--select-chevron);
   background-repeat: no-repeat;
-  background-position: right 0.55rem center;
+  background-position: right 0.65rem center;
   background-size: 0.7rem;
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 
-:root:not([data-theme="dark"]) select:hover {
-  background-color: #74442b;
+:root select:not([multiple]):hover {
+  background-color: var(--select-bg-hover);
+  border-color: var(--select-border-hover);
 }
 
-:root:not([data-theme="dark"]) select:focus-visible {
-  outline-color: #f3ede0;
-}
-
-/* OS-dark fallback: when no explicit theme is pinned and the OS prefers
-   dark, opt back out of the brown styling so the native dark dropdown
-   shows. An explicit `[data-theme="light"]` still wins via specificity. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) select {
-    appearance: auto;
-    -webkit-appearance: auto;
-    background-color: revert;
-    color: revert;
-    border: revert;
-    border-radius: revert;
-    padding: revert;
-    background-image: none;
-    cursor: revert;
-  }
+:root select:not([multiple]):focus-visible {
+  outline-color: var(--select-focus);
 }
 
 /* ── Reduced motion ── */

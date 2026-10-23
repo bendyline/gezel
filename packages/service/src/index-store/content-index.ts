@@ -5,14 +5,23 @@ import type {
   BoekwachterIssue,
   BoekwachterIssueDismissalReason,
   BoekwachterIssueStatus,
+  CodebaseMapResponse,
   DescribeFolderResponse,
   FileContextResponse,
+  FileGraphRequest,
+  FileGraphResponse,
+  FileInsightResponse,
   FileMapRequest,
   FileMapResponse,
   FileReviewResponse,
   FindEntityResponse,
   FindSimilarImagesResponse,
   FindSymbolResponse,
+  FolderKind,
+  GalleryRequest,
+  GalleryResponse,
+  GalleryShelfRequest,
+  GalleryShelfResponse,
   ImageRegion,
   ListDependenciesResponse,
   ListEntityMentionsResponse,
@@ -39,6 +48,10 @@ import type {
   SecurityFindingWire,
   SecurityOverviewResponse,
   SecurityScanResponse,
+  TimelineBucketRequest,
+  TimelineBucketResponse,
+  TimelineRequest,
+  TimelineResponse,
   TraceTaintResponse,
 } from '@bendyline/gezel';
 import {
@@ -58,10 +71,11 @@ import {
   projectLocalVillageFile,
   projectStorageScope,
 } from '@bendyline/gezel/paths';
-import { resolveImportEdges } from '../filemap/affinity.js';
 import { buildFileMap } from '../filemap/build.js';
 import { VillageFileStore } from '../filemap/village-file.js';
 import type { Store } from '../fs/store.js';
+import { gitIgnoredPaths } from '../git/ignore.js';
+import { withPriorVerdicts } from '../issue-triage/prior-verdicts.js';
 import type { MediaEmbedJob, MediaEmbedOutcome } from '../memory/image-embed-core.js';
 import type {
   FaceDetectOutcome,
@@ -79,7 +93,13 @@ import {
 } from '../observations/workspace-drain.js';
 import { runSecurityScan } from '../security/scan.js';
 import { type AiShadowDeps, aiShadowFile } from './ai-shadow.js';
-import { ARCHITECTURE_KEY, type AreaPassResult, runAreaPass } from './area-pass.js';
+import {
+  ARCHITECTURE_KEY,
+  type AreaPassResult,
+  areaKeyFiles,
+  areaPurpose,
+  runAreaPass,
+} from './area-pass.js';
 import {
   type ArtifactsIndexStats,
   artifactsCollectionId,
@@ -94,11 +114,16 @@ import {
   isConvertibleDoc,
   shadowDocFilesPaths,
 } from './docs.js';
+import { codeDependencyEdges } from './edges/readers.js';
+import { manifestRoots, readProjectConfigs } from './edges/refresh.js';
 import { type EnrichDeps, embedOnlyFile, enrichFile } from './enrich.js';
 import { buildEntitiesFromMetadata } from './entities.js';
 import { ensureFaceModels, installedFaceModels } from './face/catalog.js';
 import { clusterNewFaces, mergeFaceClusters, syncPersonEntities } from './face/clustering.js';
 import { buildFileContext } from './file-context.js';
+import { buildFileGraph } from './file-graph.js';
+import { buildFileInsight } from './file-insight.js';
+import { type GalleryContext, buildGallery, buildGalleryShelf, emptyGallery } from './gallery.js';
 import { refreshGitStats } from './git-stats.js';
 import {
   type SearchImagesOpts,
@@ -134,6 +159,7 @@ import {
 import { isTransientIndexError } from './sqlite-driver.js';
 import { runStaticIndex } from './static-index-runner.js';
 import { extractCodeSymbols, extractMarkdownOutline, isCodeLangSupported } from './symbols.js';
+import { buildTimeline, buildTimelineBucket, emptyTimeline } from './timeline.js';
 
 /**
  * Service-side façade over the per-project content `IndexStore`. Owns nothing
@@ -158,6 +184,20 @@ const MAX_READ_BYTES = 2 * 1024 * 1024;
 
 const log = createLogger('index');
 const ARTIFACTS_REFRESH_DEBOUNCE_MS = 5_000;
+
+/** How many most-imported files the codebase map lists. */
+const MAX_MAP_LOAD_BEARING = 15;
+/**
+ * Barrel files, tests and vendored libraries are imported by many and say
+ * little about the project: Brackets' copy of lodash topped its list.
+ */
+const LOAD_BEARING_SKIP =
+  /(^|\/)index\.(ts|tsx|js|mjs)$|__tests__|\.(test|spec)\.|(^|\/)(test|tests|e2e|thirdparty|third_party|vendor|vendored|node_modules)\//;
+
+function firstSentence(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return (flat.match(/^.*?[.!?](\s|$)/)?.[0] ?? flat).trim();
+}
 
 /** Mirror of the `filesNeedingReview` SQL predicate's modality filter. */
 const REVIEWABLE_MODALITIES: ReadonlySet<string> = new Set(['code', 'text', 'doc']);
@@ -555,7 +595,8 @@ export class ContentIndex {
           .sort((a, b) => b.fileCount - a.fileCount),
         areas: [...areaCounts.entries()]
           .map(([path, fileCount]) => {
-            const purpose = areaSummaries.get(path);
+            const summary = areaSummaries.get(path);
+            const purpose = summary ? areaPurpose(summary) : undefined;
             return { path, fileCount, ...(purpose ? { purpose } : {}) };
           })
           .sort((a, b) => b.fileCount - a.fileCount)
@@ -838,10 +879,7 @@ export class ContentIndex {
       const files = index.allFiles().map((f) => f.path);
       if (!files.includes(req.file)) return empty;
 
-      const edges = resolveImportEdges(
-        files,
-        index.allImports().map((i) => ({ srcPath: i.srcPath, raw: i.raw })),
-      );
+      const edges = codeDependencyEdges(index);
       const fwd = new Map<string, string[]>();
       const rev = new Map<string, string[]>();
       const push = (m: Map<string, string[]>, k: string, v: string) => {
@@ -885,6 +923,24 @@ export class ContentIndex {
    * `indexed: false` model when the index hasn't been built yet.
    */
   async fileMap(projectId: string, req: FileMapRequest = {}): Promise<FileMapResponse> {
+    return this.buildMap(projectId, req, true);
+  }
+
+  /**
+   * The same model with nothing written: no `map_layout` rows, no
+   * `village.json`. For background readers that only want the per-file
+   * signals — the nightly codebase report used `fileMap` and founded a
+   * village in code folders whose owner had never opened one.
+   */
+  async fileMapSnapshot(projectId: string, req: FileMapRequest = {}): Promise<FileMapResponse> {
+    return this.buildMap(projectId, req, false);
+  }
+
+  private async buildMap(
+    projectId: string,
+    req: FileMapRequest,
+    persist: boolean,
+  ): Promise<FileMapResponse> {
     const opened = await this.open(projectId);
     if (!opened) {
       return {
@@ -900,12 +956,23 @@ export class ContentIndex {
       };
     }
     try {
-      return await buildFileMap(opened.index, opened.workspaceDir, {
-        scope: req.scope,
-        persist: true,
-        villageFile: this.cityStoreFor(projectId, opened.workspaceDir, opened.workspaceWritable),
-        userFacing: true,
-      });
+      return await buildFileMap(
+        opened.index,
+        opened.workspaceDir,
+        persist
+          ? {
+              scope: req.scope,
+              persist: true,
+              villageFile: this.cityStoreFor(
+                projectId,
+                opened.workspaceDir,
+                opened.workspaceWritable,
+              ),
+              userFacing: true,
+              ...(req.edgePolicy ? { edgePolicy: req.edgePolicy } : {}),
+            }
+          : { scope: req.scope, persist: false },
+      );
     } finally {
       opened.index.close();
     }
@@ -1520,6 +1587,57 @@ export class ContentIndex {
   }
 
   /**
+   * Gezel's map of the codebase: every folder rollup with its purpose and key
+   * files, and the files the rest of the code imports most. No model runs
+   * here; the area pass wrote the summaries overnight.
+   */
+  async codebaseMap(projectId: string): Promise<CodebaseMapResponse> {
+    const opened = await this.open(projectId);
+    if (!opened) return { indexed: false, areas: [], loadBearing: [] };
+    try {
+      const { index } = opened;
+      const rows = index.allAreaSummaries();
+      const architecture = rows.find((r) => r.areaPath === ARCHITECTURE_KEY)?.summaryMd;
+      const areas = rows
+        .filter((r) => r.areaPath !== ARCHITECTURE_KEY)
+        .sort((a, b) => (a.areaPath < b.areaPath ? -1 : a.areaPath > b.areaPath ? 1 : 0))
+        .map((r) => ({
+          path: r.areaPath,
+          depth: r.areaPath === '.' ? 0 : r.areaPath.split('/').length - 1,
+          purpose: areaPurpose(r.summaryMd),
+          keyFiles: areaKeyFiles(r.summaryMd),
+        }));
+      const importers = new Map<string, Set<string>>();
+      for (const edge of index.fileEdges.all()) {
+        const set = importers.get(edge.dst) ?? new Set<string>();
+        set.add(edge.src);
+        importers.set(edge.dst, set);
+      }
+      const summaries = new Map(index.fileSummaries().map((f) => [f.path, f.summaryMd]));
+      const loadBearing = [...importers.entries()]
+        .filter(([path, srcs]) => srcs.size >= 2 && !LOAD_BEARING_SKIP.test(path))
+        .sort(([a, x], [b, y]) => y.size - x.size || (a < b ? -1 : 1))
+        .slice(0, MAX_MAP_LOAD_BEARING)
+        .map(([path, srcs]) => {
+          const summary = summaries.get(path);
+          return {
+            path,
+            importers: srcs.size,
+            ...(summary ? { purpose: firstSentence(summary) } : {}),
+          };
+        });
+      return {
+        indexed: areas.length > 0,
+        ...(architecture ? { architecture } : {}),
+        areas,
+        loadBearing,
+      };
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /**
    * Query the deep-pass folder/project rollups without another embedding or
    * schema migration. These are a small corpus (usually tens of rows), so a
    * deterministic token-overlap rank is cheaper and easier to keep current
@@ -1605,6 +1723,7 @@ export class ContentIndex {
       let emptySinceSuccess = 0;
       let wedged = false;
       const drain = opts?.drain;
+      const reviewDeps = await withPriorVerdicts(deps, this.store, projectId);
       for (const rubric of resolved.values()) {
         if ((!drain && files >= limit) || wedged) break;
         // Same in-flight/retry guard as enrich: a file is only marked after
@@ -1635,7 +1754,7 @@ export class ContentIndex {
           next,
           opts?.concurrency ?? (() => 1),
           async (file) => {
-            const r = await reviewFile(index, workspaceDir, artifactsDir, file, rubric, deps);
+            const r = await reviewFile(index, workspaceDir, artifactsDir, file, rubric, reviewDeps);
             if (r.reviewed || r.attempted) files++;
             if (r.reviewed) reviewed++;
             if (r.emptyReply) {
@@ -1997,6 +2116,94 @@ export class ContentIndex {
    * view. Keyed by the file's current content hash, so an edited file shows
    * nothing until it is read again rather than describing what it used to say.
    */
+  /**
+   * The dependency graph for a project view (see `file-graph.ts`). Leaves out
+   * what the workspace's Git ignore rules hide, as the Village does. A pure
+   * read: nothing is written, unlike `fileMap`.
+   */
+  async fileGraph(projectId: string, req: FileGraphRequest = {}): Promise<FileGraphResponse> {
+    const opened = await this.open(projectId);
+    if (!opened) return emptyFileGraph(req);
+    const { index, workspaceDir } = opened;
+    try {
+      const paths = index.allFiles().map((f) => f.path);
+      const [ignoredPaths, configs] = await Promise.all([
+        gitIgnoredPaths(workspaceDir, paths),
+        readProjectConfigs(workspaceDir, paths),
+      ]);
+      return buildFileGraph(index, req, { ignoredPaths, packageRoots: manifestRoots(configs) });
+    } finally {
+      index.close();
+    }
+  }
+
+  /** The Gallery view's shelves (see `gallery.ts`). A pure read. */
+  async gallery(
+    projectId: string,
+    req: GalleryRequest,
+    kind?: FolderKind,
+  ): Promise<GalleryResponse> {
+    const res = await this.readForView(projectId, kind, (index, ctx) =>
+      buildGallery(index, req, ctx),
+    );
+    return res ?? emptyGallery(req);
+  }
+
+  /** The next page of one gallery shelf; null when the index or the shelf is gone. */
+  async galleryShelf(
+    projectId: string,
+    req: GalleryShelfRequest,
+    kind?: FolderKind,
+  ): Promise<GalleryShelfResponse | null> {
+    return this.readForView(projectId, kind, (index, ctx) => buildGalleryShelf(index, req, ctx));
+  }
+
+  /** The Timeline view's buckets (see `timeline.ts`). A pure read. */
+  async timeline(projectId: string, req: TimelineRequest): Promise<TimelineResponse> {
+    const res = await this.readForView(projectId, undefined, (index, ctx) =>
+      buildTimeline(index, req, ctx),
+    );
+    return res ?? emptyTimeline(req);
+  }
+
+  /** What changed in one stretch of the timeline; null before the first scan. */
+  async timelineBucket(
+    projectId: string,
+    req: TimelineBucketRequest,
+  ): Promise<TimelineBucketResponse | null> {
+    return this.readForView(projectId, undefined, (index, ctx) =>
+      buildTimelineBucket(index, req, ctx),
+    );
+  }
+
+  /** Open the index for a view's read, with what Git ignores left out; null without an index. */
+  private async readForView<T>(
+    projectId: string,
+    folderKind: FolderKind | undefined,
+    read: (index: IndexStore, ctx: GalleryContext) => T,
+  ): Promise<T | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    try {
+      const paths = opened.index.allFiles().map((f) => f.path);
+      const ignoredPaths = await gitIgnoredPaths(opened.workspaceDir, paths);
+      return read(opened.index, { ignoredPaths, folderKind });
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /** Everything the index knows about one file, for the shared inspector. */
+  async fileInsight(projectId: string, relPath: string): Promise<FileInsightResponse | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    try {
+      return buildFileInsight(opened.index, relPath);
+    } finally {
+      opened.index.close();
+    }
+  }
+
   async fileSummary(projectId: string, relPath: string): Promise<string | null> {
     const opened = await this.open(projectId);
     if (!opened) return null;
@@ -2764,3 +2971,23 @@ async function embeddableRaster(
 }
 
 const EMBED_RASTER_FORMATS = new Set(['png', 'jpg', 'jpeg']);
+
+/** The graph of a project with no index yet. */
+function emptyFileGraph(req: FileGraphRequest): FileGraphResponse {
+  return {
+    indexed: false,
+    builtAt: nowIso(),
+    kind: req.kind ?? 'code',
+    scope: req.scope ?? 'core',
+    resolved: false,
+    partial: false,
+    nodes: [],
+    edges: [],
+    externals: [],
+    folders: [],
+    packageRoots: [],
+    coverage: {},
+    signature: '',
+    truncated: null,
+  };
+}

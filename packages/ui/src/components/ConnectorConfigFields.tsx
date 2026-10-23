@@ -302,7 +302,8 @@ export function ConnectorConfigFields({
     />
   );
 
-  const credentialField = kind !== 'oauth2' && kind !== 'imap' && (
+  // A type that declares no secret (a public feed) asks for nothing.
+  const credentialField = connector.secretShape && kind !== 'oauth2' && kind !== 'imap' && (
     <TextField
       key="credential"
       connectorId={connector.id}

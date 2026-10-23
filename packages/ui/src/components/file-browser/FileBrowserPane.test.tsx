@@ -98,6 +98,73 @@ describe('FileBrowserPane narrow navigation', () => {
   });
 });
 
+describe('FileBrowserPane tree collapse', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => 1024);
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  function Pane({ collapseTreeRequest }: { collapseTreeRequest?: number | null }) {
+    return (
+      <FileBrowserPane
+        source={source}
+        entries={[entry]}
+        selectedPath="notes.md"
+        onSelect={() => {}}
+        viewMode="tree-alpha"
+        modes={['tree-alpha']}
+        onViewModeChange={() => {}}
+        showHidden={false}
+        onShowHiddenChange={() => {}}
+        emptyMessage="No files"
+        mutations={mutations}
+        collapseTreeRequest={collapseTreeRequest}
+        viewer={<textarea aria-label="Document draft" defaultValue="Original" />}
+      />
+    );
+  }
+
+  // Dragging the grip past its threshold was the only way to fold the tree.
+  it('hides and shows the tree from its own keys and remembers the choice', () => {
+    render(<Pane />);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Workspace files' }));
+    expect(screen.queryByRole('button', { name: 'notes.md' })).toBeNull();
+    expect(window.localStorage.getItem('gezel:project-file-tree-collapsed:v1')).toBe('1');
+    fireEvent.click(screen.getByRole('button', { name: 'Show Workspace files' }));
+    expect(screen.getByRole('button', { name: 'notes.md' })).toBeVisible();
+    expect(window.localStorage.getItem('gezel:project-file-tree-collapsed:v1')).toBe('0');
+  });
+
+  it('folds for a host request without storing it, and an answered request stays answered', () => {
+    const { rerender } = render(<Pane collapseTreeRequest={1} />);
+    expect(screen.queryByRole('button', { name: 'notes.md' })).toBeNull();
+    expect(window.localStorage.getItem('gezel:project-file-tree-collapsed:v1')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Workspace files' }));
+    expect(screen.getByRole('button', { name: 'notes.md' })).toBeVisible();
+    rerender(<Pane collapseTreeRequest={1} />);
+    expect(screen.getByRole('button', { name: 'notes.md' })).toBeVisible();
+
+    rerender(<Pane collapseTreeRequest={2} />);
+    expect(screen.queryByRole('button', { name: 'notes.md' })).toBeNull();
+
+    rerender(<Pane collapseTreeRequest={null} />);
+    expect(screen.getByRole('button', { name: 'notes.md' })).toBeVisible();
+  });
+});
+
 describe('FileBrowserPane viewer notice', () => {
   // A person who opened a quote from a review question had no way back to it.
   it('renders the notice above the viewer at full width', () => {

@@ -228,14 +228,16 @@ describe('roleToolsetGroups', () => {
     // artifact via `write_artifact`, fabricating the deliverable.
     const groups = roleToolsetGroups('AI Image Generation Specialist');
     expect(groups).toContain('images');
-    // No workspace writes — the image-gen route already drops a
-    // workspace copy of every render at `assets/generated/`.
-    expect(groups).not.toContain('workspace-fs-write');
+    // Workspace writes are for the SVGs and manifests image books ask for;
+    // `write_file` and `write_artifact` refuse a raster image path, which
+    // is what stops the prose-in-logo.png fabrication now.
+    expect(groups).toContain('workspace-fs-write');
     expect(groups).not.toContain('code-execution');
     // generate_image is reachable from the resolved allowlist.
     const allow = roleToolAllowlist('AI Image Generation Specialist');
     expect(allow.has('generate_image')).toBe(true);
-    expect(allow.has('write_file')).toBe(false);
+    expect(allow.has('write_file')).toBe(true);
+    expect(roleToolsetGroups('Illustrator')).toEqual(groups);
   });
 
   it('still routes "Visual Designer" to the designer preset (not image-generator)', () => {
@@ -848,6 +850,18 @@ describe('computeToolAllowlist', () => {
       true,
     );
     expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
+  });
+
+  it('leaves a written review of code its read tools, whatever the deliverable line says', () => {
+    // Whole-project work-routing A/B rerun, qwen3.8-27b, 2026-10-22.
+    const review =
+      '[Message from Vanya]: Review src/pricing.js and write up the quality risks you find.\n\n' +
+      '[Deliverable expected as a FILE at `pricing-quality-risks.md`. Your first assistant action should be the tool call ' +
+      '`write_file({ path, content })`; draft inside the tool argument, not in chat.]';
+    for (const role of ['Developer', 'Reviewer']) {
+      expect(shouldConstrainToImmediateFileWrite({ role, latestUserMessage: review })).toBe(false);
+      expect(shouldConstrainToScenarioFileRepair({ role, latestUserMessage: review })).toBe(false);
+    }
   });
 
   it('constrains initial index.html deliverable handoffs to write_file only', () => {

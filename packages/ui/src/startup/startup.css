@@ -1,0 +1,122 @@
+@import "../assets/fonts/ui-fonts.css";
+@import "../styles/foundation.css";
+@import "../styles/app-shell.css";
+@import "../styles/primary-navigation.css";
+@import "../styles/activity.css";
+@import "../styles/primitives.css";
+@import "../styles/controls-handbook-and-admin.css";
+@import "../styles/home-view.css";
+
+/* The retained chrome and Home content use the live app's rules above. */
+.startup-home {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  transition: opacity 140ms ease-out;
+}
+.startup-home *,
+.startup-reading-live * {
+  box-sizing: border-box;
+}
+.startup-header {
+  flex-shrink: 0;
+}
+.startup-header .app-header-right {
+  min-height: 34px;
+}
+.startup-brand-host {
+  display: contents;
+}
+.startup-status {
+  cursor: default;
+}
+.startup-sidebar {
+  width: 240px;
+}
+.startup-reading:focus {
+  outline: none;
+}
+.startup-reading .home-intro-doc {
+  /* Restored scroll must not be adjusted again as bundled images decode. */
+  overflow-anchor: none;
+}
+.startup-reading button:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.startup-loading {
+  grid-area: 2 / 1;
+  align-self: end;
+  height: 10%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  color: var(--text-muted);
+  opacity: 0.4;
+  font-size: var(--text-xs);
+}
+.startup-retry {
+  -webkit-app-region: no-drag;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: var(--text-xs);
+}
+.startup-leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+.startup-reading-live-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.startup-reading-live-host {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.startup-reading-live {
+  width: 100%;
+  height: 100%;
+}
+.startup-reading-live-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  padding: 4px 12px;
+  background: var(--paper);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+.home-workshop-greeting-cols:has(.startup-reading-live-host) {
+  padding: 0;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .startup-home {
+    transition: none;
+  }
+  .startup-loading .home-loading-spinner {
+    animation: none;
+  }
+}

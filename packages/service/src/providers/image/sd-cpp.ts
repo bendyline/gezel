@@ -20,7 +20,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createLogger } from '@bendyline/gezel';
+import { createLogger, imageModelDefaultSide } from '@bendyline/gezel';
 import { resolveModelDirectory } from '@bendyline/gezel-inference/internal/models/model-id';
 import {
   MODEL_HASH_READ_BUFFER_BYTES,
@@ -37,6 +37,7 @@ import {
 import type { GpuArbiter } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
 import type { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
 import { downloadWithRetry } from '@bendyline/gezel-inference/internal/utils/download-with-retry';
+import { readImageMeta } from '../../index-store/image-meta.js';
 import { resolveImg2ImgSupport } from './img2img-support.js';
 import type {
   ImageEngineHealth,
@@ -109,8 +110,8 @@ export interface StableDiffusionCppProviderOptions {
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_SAMPLE_STEPS = 20;
 /**
- * Model-specific step counts, from fast distilled models to Iris's
- * 100-step quality default. Shared with `buildSdServerArgs`, which sets
+ * Model-specific step counts, from fast distilled models to the 50 of MOSS
+ * and Iris. Shared with `buildSdServerArgs`, which sets
  * the same server launch default for endpoints that ignore request steps.
  */
 export const MODEL_SAMPLE_STEP_DEFAULTS = new Map<string, number>([
@@ -132,7 +133,9 @@ export const MODEL_SAMPLE_STEP_DEFAULTS = new Map<string, number>([
   ['krea-2-turbo-q8', 8],
   ['ming-image-0.1-design-bf16', 12],
   ['moss-image-sft-q4', 50],
-  ['iris-3b-f32', 100],
+  // The publisher recommends 100; 50 renders the same at half the time
+  // (300 s to 148 s per 1024px image on a DGX Spark, image bench 2026-10-19).
+  ['iris-3b-f32', 50],
 ]);
 
 /**
@@ -159,20 +162,25 @@ export const MODEL_CFG_DEFAULTS = new Map<string, number>([
   ['ming-image-0.1-design-bf16', 1],
   ['moss-image-sft-q4', 3],
   ['iris-3b-f32', 3],
+  // The model card's recommendation; the server's 7 over-saturates it.
+  ['animagine-xl-4', 5],
 ]);
+
+/**
+ * Whether the engine runs this model with guidance that reads a negative
+ * prompt. At CFG 1 the unconditional pass that carries it is skipped.
+ * Models absent from the map run at the server's default of 7.
+ */
+export function sdCppHonorsNegativePrompt(modelId: string): boolean {
+  const cfg = MODEL_CFG_DEFAULTS.get(modelId);
+  return cfg === undefined || cfg > 1;
+}
 
 /** Pin samplers validated with the native engine for these models. */
 export const MODEL_SAMPLER_DEFAULTS = new Map<string, string>([
   ['ming-image-0.1-design-bf16', 'Euler'],
   ['moss-image-sft-q4', 'Euler'],
   ['iris-3b-f32', 'Euler'],
-]);
-
-/** Models that target 1024px when a request names no size; 512px is the legacy SD default. */
-const MODEL_1024PX_DEFAULT = new Set<string>([
-  'ming-image-0.1-design-bf16',
-  'moss-image-sft-q4',
-  'iris-3b-f32',
 ]);
 
 /**
@@ -199,12 +207,29 @@ export const VAE_TILING_INCOMPATIBLE_MODELS = new Set<string>([
  */
 export interface SdServerLoadProfile {
   vaeDecode: 'tiled' | 'untiled' | 'none';
+  /** The default render size, which working memory follows more than the weights do. */
+  defaultSidePx: number;
   /** A `--tensor-type-rules` pattern whose tensors load as bfloat16. */
   bf16TensorPattern?: string;
   diffusionFlashAttention: boolean;
+  /**
+   * Reuse a diffusion transformer's output across steps whose input barely
+   * changed (`--cache-mode easycache`). Only for a model whose renders it was
+   * measured not to change.
+   */
+  stepCache?: 'easycache';
 }
 
+/**
+ * Models that render the same with EasyCache step reuse. MOSS took 205 s per
+ * 1024px image at 50 steps on a DGX Spark and 93 s with it, with renders a
+ * person could not tell apart (image bench, 2026-10-19). cache-dit and spectrum
+ * were as fast but changed text and detail.
+ */
+const EASYCACHE_MODELS = new Set<string>(['moss-image-sft-q4']);
+
 export function sdServerLoadProfile(modelId: string): SdServerLoadProfile {
+  const stepCache = EASYCACHE_MODELS.has(modelId) ? { stepCache: 'easycache' as const } : {};
   if (modelId === 'iris-3b-f32') {
     // Iris generates pixels directly: no VAE to tile. Upstream's Iris recipe
     // enables diffusion flash attention for the 1024px sequence. The
@@ -212,15 +237,19 @@ export function sdServerLoadProfile(modelId: string): SdServerLoadProfile {
     // weights convert at load, preserving the quantized encoder.
     return {
       vaeDecode: 'none',
+      defaultSidePx: imageModelDefaultSide(modelId),
       bf16TensorPattern: '^model\\.diffusion_model\\.',
       diffusionFlashAttention: true,
+      ...stepCache,
     };
   }
   // Tiling avoids VAE-decode OOM on large images, but produces visible
   // tile-boundary seams with some VAEs — see VAE_TILING_INCOMPATIBLE_MODELS.
   return {
     vaeDecode: VAE_TILING_INCOMPATIBLE_MODELS.has(modelId) ? 'untiled' : 'tiled',
+    defaultSidePx: imageModelDefaultSide(modelId),
     diffusionFlashAttention: false,
+    ...stepCache,
   };
 }
 
@@ -269,8 +298,8 @@ export class StableDiffusionCppProvider implements ImageProvider {
   }
 
   private async generateInner(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
-    const modelId = input.model ?? (await this.currentDefaultModelId());
-    const defaultDimension = modelId && MODEL_1024PX_DEFAULT.has(modelId) ? 1024 : 512;
+    const modelId = input.model ?? (await this.resolveDefaultModelId());
+    const defaultDimension = imageModelDefaultSide(modelId);
     const width = input.width ?? defaultDimension;
     const height = input.height ?? defaultDimension;
     const steps = input.steps ?? (await this.defaultSampleSteps(modelId));
@@ -415,6 +444,9 @@ export class StableDiffusionCppProvider implements ImageProvider {
     const b64 = payload.images?.[0];
     if (!b64) throw new Error('sd-server response missing images[0]');
     const png = Buffer.from(b64, 'base64');
+    // The engine rounds a size its network cannot take (SDXL to 64), so the
+    // picture's own header is the size the person got.
+    const rendered = readImageMeta(png);
 
     return {
       png,
@@ -422,8 +454,8 @@ export class StableDiffusionCppProvider implements ImageProvider {
         model: modelId ?? 'unknown',
         seed,
         steps,
-        widthPx: width,
-        heightPx: height,
+        widthPx: rendered?.width || width,
+        heightPx: rendered?.height || height,
         durationMs: Date.now() - started,
         ...(img2imgSkippedReason ? { img2imgSkippedReason } : {}),
       },
@@ -727,10 +759,11 @@ export class StableDiffusionCppProvider implements ImageProvider {
   }
 
   /**
-   * Returns the first installed model id, or undefined. Stable ordering
-   * matches {@link listInstalledModels} so the default is deterministic.
+   * The configured default when it is installed, else the first installed
+   * model id, else undefined. Stable ordering matches
+   * {@link listInstalledModels} so the default is deterministic.
    */
-  private async currentDefaultModelId(): Promise<string | undefined> {
+  async resolveDefaultModelId(): Promise<string | undefined> {
     const models = await this.listInstalledModels();
     if (this.defaultModelId && models.some((m) => m.id === this.defaultModelId)) {
       return this.defaultModelId;
@@ -795,21 +828,26 @@ export class StableDiffusionCppProvider implements ImageProvider {
  * upstream stable-diffusion.cpp server prints lines shaped like:
  *
  *     |==>                                               | 1/20 - 18.20s/it
+ *     |====>                                             | 2/25 - 7.18it/s
  *
  * sometimes with a leading log prefix from our supervisor ("[sd-server] ").
- * Returns the extracted step / total / per-step seconds when the line
- * matches; otherwise null. Anchored on the fraction-with-suffix shape
- * (`N/M - X.Ys/it`) so unrelated log noise can never trip a false match.
+ * The rate flips to `it/s` once a step takes under a second, which on a
+ * fast GPU is every step of a turbo or SD 1.5 render. Returns the extracted
+ * step / total / per-step seconds when the line matches; otherwise null.
+ * Anchored on the fraction-with-suffix shape (`N/M - X.Ys/it`) so unrelated
+ * log noise, including the `MB/s` weight-load bar, can never trip a false
+ * match.
  */
 export function parseSamplingProgress(line: string): ImageGenerationProgress | null {
-  const m = line.match(/(\d+)\s*\/\s*(\d+)\s*-\s*([\d.]+)s\/it/);
+  const m = line.match(/(\d+)\s*\/\s*(\d+)\s*-\s*([\d.]+)(s\/it|it\/s)/);
   if (!m) return null;
   const step = Number.parseInt(m[1]!, 10);
   const totalSteps = Number.parseInt(m[2]!, 10);
-  const secondsPerStep = Number.parseFloat(m[3]!);
+  const rate = Number.parseFloat(m[3]!);
   if (!Number.isFinite(step) || !Number.isFinite(totalSteps) || totalSteps <= 0) return null;
   const out: ImageGenerationProgress = { step, totalSteps };
-  if (Number.isFinite(secondsPerStep)) out.secondsPerStep = secondsPerStep;
+  const secondsPerStep = m[4] === 'it/s' ? 1 / rate : rate;
+  if (Number.isFinite(secondsPerStep) && secondsPerStep > 0) out.secondsPerStep = secondsPerStep;
   return out;
 }
 

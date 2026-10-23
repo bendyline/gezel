@@ -48,6 +48,7 @@ export interface DeliverableReachabilityFinding {
 }
 
 interface StepLike {
+  id?: string;
   advanceWhen?: unknown;
   gate?: unknown;
 }
@@ -73,6 +74,22 @@ export function craftbookGatedPaths(template: CraftbookTemplateSummary): string[
     fileFieldsOf(step.gate, out);
   }
   return [...out].sort();
+}
+
+/**
+ * Paths a review step gates on. Its rejections send the task to another step,
+ * so the file is the reviewer's verdict about the work, never the work itself.
+ */
+function reviewVerdictPaths(template: CraftbookTemplateSummary): Set<string> {
+  const out = new Set<string>();
+  for (const step of (template.steps ?? []) as StepLike[]) {
+    const onReject = (step.gate as { onReject?: unknown } | undefined)?.onReject;
+    if (typeof onReject !== 'string' || onReject === step.id) continue;
+    const advance = step.advanceWhen as { file?: string } | undefined;
+    if (typeof advance?.file === 'string') out.add(advance.file);
+    fileFieldsOf(step.gate, out);
+  }
+  return out;
 }
 
 /**
@@ -172,8 +189,11 @@ export function classifyDeliverableReachability(
   // is a valid workflow eval only when the sidecar proves both attribution
   // and terminal progress. Without those two invariants it remains the old
   // false-positive shape (a freehand worker can write anything and pass).
+  // A review step's verdict file does not give the book a static output: it
+  // judges the deliverable rather than naming it (reviewer-loop, gilde 0.2.7).
+  const verdicts = reviewVerdictPaths(template);
   if (
-    gatedPaths.length === 0 &&
+    gatedPaths.every((path) => verdicts.has(path)) &&
     spec.mode === 'workflow' &&
     spec.success.taskGraph?.requireCraftbookTask === true &&
     spec.success.taskGraph.requireTerminalStep === true

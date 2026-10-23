@@ -27,7 +27,7 @@ npm install @bendyline/gezel
 | `@bendyline/gezel/local-loop` | The turn loop for on-device models: tool-call recovery, turn policy, and repeat and failure tracking |
 | `@bendyline/gezel/poppetje` | The poppetje character schema, its catalogs, and seeding from a gezel id |
 | `@bendyline/gezel/svg` | SVG sanitizing |
-| `@bendyline/gezel/kokoro` | The Kokoro text-to-speech frontend: text normalization, pronunciation dictionaries, and letter-to-sound rules |
+| `@bendyline/gezel/kokoro` | The Kokoro text-to-speech frontend: text normalization, pronunciation dictionaries, readings chosen by context, spelled abbreviations, and letter-to-sound rules |
 | `@bendyline/gezel/speech-models` | Node only. The pinned speech-model catalog (Whisper, Kokoro) and `SpeechAssetStore`, verified downloads shared between apps |
 | `@bendyline/gezel/remote` | The client side of serving models between paired devices |
 | `@bendyline/gezel/app-models` | Zod schemas for the model list apps read from Gezel |

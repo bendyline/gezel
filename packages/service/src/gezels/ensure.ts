@@ -5,6 +5,7 @@ import {
   inferGenderForName,
   pickUnusedGezelName,
   pickUnusedSuggestedName,
+  resolveGezelTemplateById,
   resolveGezelTemplateForRole,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -96,8 +97,8 @@ export async function ensureGezel(args: {
         templateId: opts.templateId,
       };
     }
-    const exact = await resolveGildeTemplateForRole(catalog, opts.templateId);
-    if (exact && exact.templateId === opts.templateId) {
+    const exact = await resolveGildeTemplateById(catalog, opts.templateId);
+    if (exact) {
       const { name: chosenName, gender: chosenGender } = pickNameAndGender({
         preferredName: opts.preferredName,
         ...(exact.nameSuggestions ? { suggestions: exact.nameSuggestions } : {}),
@@ -123,13 +124,17 @@ export async function ensureGezel(args: {
     }
   }
 
-  // 1. Reuse: score the existing roster.
-  const rosterCandidates: MatchCandidate[] = existing.map((g) => ({
-    id: g.id,
-    role: g.role,
-    name: g.name,
-    description: g.description,
-  }));
+  // 1. Reuse: score the existing roster. A fixed-function gezel forwards one
+  // message to one tool, so it never fills a role (see
+  // resolveGezelTemplateForRole); step 0 still reuses one by template id.
+  const rosterCandidates: MatchCandidate[] = existing
+    .filter((g) => !g.fixedFunction)
+    .map((g) => ({
+      id: g.id,
+      role: g.role,
+      name: g.name,
+      description: g.description,
+    }));
   const rosterRanked = rankCandidates(query, rosterCandidates);
   const rosterBest = rosterRanked[0];
   if (rosterBest && rosterBest.score >= MATCH_THRESHOLD) {
@@ -252,6 +257,13 @@ export async function resolveGildeTemplateForRole(
   );
 }
 
+export async function resolveGildeTemplateById(
+  catalog: CatalogService,
+  templateId: string,
+): Promise<GildeTemplateResolution | null> {
+  return resolveGezelTemplateById({ get: (id) => catalog.get('gezel-template', id) }, templateId);
+}
+
 /**
  * Resolve `{ name, gender }` for a new gezel. Precedence:
  *   1. caller-supplied `preferredName` wins — gender is inferred from
@@ -299,12 +311,14 @@ export async function _scoreReuse(
   const existing = await store.listGezels();
   const ranked = rankCandidates(
     query,
-    existing.map((g) => ({
-      id: g.id,
-      role: g.role,
-      name: g.name,
-      description: g.description,
-    })),
+    existing
+      .filter((g) => !g.fixedFunction)
+      .map((g) => ({
+        id: g.id,
+        role: g.role,
+        name: g.name,
+        description: g.description,
+      })),
   );
   const best = ranked[0];
   if (!best || best.score < MATCH_THRESHOLD) return null;

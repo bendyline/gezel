@@ -43,6 +43,23 @@ export interface UseHarnessSetupCardOptions<S extends HarnessSetupStatusLike, C 
 }
 
 /**
+ * Whether one-click setup means anything here: it writes into the apps on the
+ * computer the service runs on, so only a desktop app connected to its own
+ * user service on this computer offers it.
+ */
+export function harnessDesktopMode(): { localDesktopMode: boolean; remoteMode: boolean } {
+  const desktopMode = window.__GEZEL__?.mode;
+  return {
+    localDesktopMode:
+      desktopMode === 'local-adopt' ||
+      desktopMode === 'local-spawn-packaged' ||
+      desktopMode === 'local-spawn-dev' ||
+      desktopMode === 'embedded',
+    remoteMode: desktopMode === 'remote',
+  };
+}
+
+/**
  * State and behaviour shared by every harness setup card: status fetching, the
  * model-selection cascade, the confirm-then-act flow, clipboard handling, and
  * the desktop-mode gating that decides whether one-click setup is meaningful
@@ -104,13 +121,7 @@ export function useHarnessSetupCard<S extends HarnessSetupStatusLike, C extends 
     if (state) latest.current.onStateChange?.(state);
   }, [state]);
 
-  const desktopMode = window.__GEZEL__?.mode;
-  const localDesktopMode =
-    desktopMode === 'local-adopt' ||
-    desktopMode === 'local-spawn-packaged' ||
-    desktopMode === 'local-spawn-dev' ||
-    desktopMode === 'embedded';
-  const remoteMode = desktopMode === 'remote';
+  const { localDesktopMode, remoteMode } = harnessDesktopMode();
   const configured = status?.state === 'configured' || status?.state === 'update-needed';
   const canLaunch =
     status?.state === 'configured' &&

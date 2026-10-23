@@ -885,7 +885,7 @@ describe('per-model context overrides config', () => {
 });
 
 describe('openaiEndpoints config', () => {
-  it('parses the Connected Apps endpoint controls and tolerates absence', () => {
+  it('parses the Integrations endpoint controls and tolerates absence', () => {
     const cfg = GezelConfigSchema.parse({
       openaiEndpoints: {
         enabled: false,

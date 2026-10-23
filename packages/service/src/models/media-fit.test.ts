@@ -8,6 +8,7 @@ import { CatalogService } from '@bendyline/gezel-catalog';
 import { describe, expect, it } from 'vitest';
 import {
   imageMediaPool,
+  imageRenderMegapixels,
   sdServerRequirement,
   videoMediaPool,
   wontRunRefusal,
@@ -105,6 +106,24 @@ describe('sdServerRequirement', () => {
       files,
     });
     expect(krea.bytes).toBeGreaterThan(flux.bytes);
+  });
+
+  it('prices a larger render above the default size', () => {
+    const files = [{ component: 'diffusion_model', sizeBytes: 6 * GiB, format: 'gguf' as const }];
+    const base = { modelId: 'flux-2-klein-4b-q4', weightsKind: 'diffusion-model' as const, files };
+    const standard = sdServerRequirement({ ...base, pool: 'unified' });
+    const high = sdServerRequirement({ ...base, pool: 'unified', megapixels: 2.25 });
+    expect(high.bytes - standard.bytes).toBe(1.25 * 1.5 * GiB);
+  });
+});
+
+describe('imageRenderMegapixels', () => {
+  it('prices a quality tier at the size it renders, inside the range', () => {
+    const range = { widthRange: { min: 512, max: 2048 }, heightRange: { min: 512, max: 2048 } };
+    expect(imageRenderMegapixels({ id: 'flux-2-klein-4b-q4', ...range }, 'high')).toBe(2.25);
+    expect(imageRenderMegapixels({ id: 'flux-2-klein-4b-q4', ...range }, 'draft')).toBe(0.25);
+    const sd15 = { widthRange: { min: 256, max: 768 }, heightRange: { min: 256, max: 768 } };
+    expect(imageRenderMegapixels({ id: 'sd-1.5', ...sd15 }, 'high')).toBe(0.5625);
   });
 });
 

@@ -10,11 +10,8 @@ import { recoverInterruptedScriptRuns } from './scripts/runs.js';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { basename, join } from 'node:path';
 import {
-  GENERALIST_TEMPLATE_ID,
   type GezelConfig,
-  type ProviderName,
   createLogger,
-  effectiveGeneralistModeSetting,
   formatSuspension,
   isOwnerLaunchedCompletion,
   isSharedLibraryProject,
@@ -28,17 +25,10 @@ import {
   projectNightWorkEnabled,
   resolveSecurityPolicy,
   resolveSocialMode,
-  resolveTaskExecutionMode,
   startSuspendMonitor,
   stopSuspendMonitor,
 } from '@bendyline/gezel';
-import {
-  type ExternalFolders,
-  KeyedLock,
-  type Task,
-  type TaskCraftbookStep,
-  resolveDistributionProfile,
-} from '@bendyline/gezel';
+import { type ExternalFolders, KeyedLock, resolveDistributionProfile } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 
 import {
@@ -61,6 +51,9 @@ import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
+import { CAMERA_ADAPTER_ID, CameraService } from './connectors/live/camera/service.js';
+import { LiveConnectorHost } from './connectors/live/host.js';
+import { registerLiveAdapter } from './connectors/live/registry.js';
 import { ConnectorManager } from './connectors/manager.js';
 import {
   registerProductConnectorAdapters,
@@ -83,7 +76,10 @@ import { DiffpackManager } from './diffpack/manager.js';
 import { planProjectNightFixes, releaseStaleNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { prepareNativeEngines } from './engine-discovery.js';
+import { LookoutManager } from './lookouts/manager.js';
+import { SoundPlayer } from './lookouts/sound-player.js';
 import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
+import { resolveCraftbookOwner, startCraftbookRun } from './tasks/craftbook-run.js';
 
 import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
 import { KnowledgeManager } from '@bendyline/gezel-inference/internal/knowledge/manager';
@@ -109,6 +105,7 @@ import { createXpRefresher } from './growth/xp-refresher.js';
 import { stepCreditedGezelId } from './growth/xp.js';
 import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
+import { HarnessToolsManager } from './harness-tools/manager.js';
 import { generateLoopbackCert } from './http/cert.js';
 import type { ServiceContext } from './http/context.js';
 import { bindMainListener } from './http/main-listener.js';
@@ -139,6 +136,7 @@ import { albumMediaDeps, storeAllAlbumPhotos } from './index-store/photo-albums.
 import { writeNightlyPhotoReport } from './index-store/photo-report.js';
 import { toDecodableRaster } from './index-store/raster-normalize.js';
 import { ensureIndexFresh } from './index-store/readiness.js';
+import { writeNightlyCodeFolderFiles } from './issue-triage/handoff-report.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
 import { createSharedKnowledgeInstaller } from './knowledge/shared-install.js';
@@ -240,14 +238,12 @@ import { SystemStatusBus } from './system-toolsets/status-bus.js';
 import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
 import { SystemIdleState } from './system/idle-state.js';
 import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-capability.js';
-import { loadTaskOutputs } from './tasks/completion-wrapup.js';
-import { reviewTaskFigures } from './tasks/figure-review.js';
+import { withdrawFinishedPassQuestions } from './tasks/finished-pass-questions.js';
 import { TaskLauncher } from './tasks/launcher.js';
 import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
 import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
 import { postNightShiftReviewCard } from './tasks/night-review-card.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
-import { ownerStepQuestion } from './tasks/owner-step.js';
 import { gatherTaskReferences } from './tasks/references.js';
 import { TaskRunner } from './tasks/runner.js';
 import { runActivationGate, runSpawnFanout } from './tasks/runtime-activation.js';
@@ -257,10 +253,11 @@ import {
   pauseTaskAfterFailedHandoff as pauseAfterFailedHandoff,
 } from './tasks/step-pause.js';
 import { isOwnerStep } from './tasks/step-runtime.js';
+import { wireTaskCreation } from './tasks/task-creation.js';
 import { TerminalEventBus } from './terminal/events.js';
 import { TerminalManager } from './terminal/manager.js';
+import { bundledDocblocksToolset } from './toolsets/bundled-docblocks.js';
 import { WorkspaceIndexManager } from './workspace/index-manager.js';
-import { ensureCommandApprovalQuestions } from './workspace/scripts.js';
 import { WorkspaceWatchManager } from './workspace/watch-manager.js';
 
 const log = createLogger('service');
@@ -404,7 +401,14 @@ export async function startProductService(
     (rawConfigForExternal.externalFolders as ExternalFolders | undefined) ?? undefined;
   const { HistoryManager } = await import('./history/manager.js');
   const history = new HistoryManager(home);
-  const store = new Store({ home, history, external, serviceRole, privateUserHome });
+  const store = new Store({
+    home,
+    history,
+    external,
+    serviceRole,
+    privateUserHome,
+    bundledToolsets: [bundledDocblocksToolset()],
+  });
   await recoverTypedProjectCreations(store);
   await store.ensureLayout();
   // Settle the runs a dead daemon left `running`, found by in-flight marker
@@ -440,7 +444,7 @@ export async function startProductService(
   // per-launch token so the one-time `?token=` URL the CLI prints never
   // carries the root token. Same lifecycle as root (in-memory only, not
   // persisted). `appId: 'web-ui'` keeps it independently identifiable in
-  // the Connected Apps roster and revocable.
+  // the Integrations roster and revocable.
   const webUiEnabled = opts.webUi ?? process.env.GEZEL_WEB === '1';
   const webUiToken = webUiEnabled ? randomBytes(24).toString('base64url') : null;
   // Per-app bearer tokens (issued via /v1/apps/register) persist to
@@ -919,7 +923,13 @@ export async function startProductService(
   // Reconcile immediately on every durable status transition: inactive
   // ancestors prune queued/running child turns, while a resumed ancestor
   // rehydrates only descendants whose own stored status is still active.
-  tasks.setTaskStatusChangedHook(({ task }) => taskRunner.reconcileStatusChange(task));
+  tasks.setTaskStatusChangedHook(async ({ task }) => {
+    await taskRunner.reconcileStatusChange(task);
+    // A finished or canceled task has no step pass left to answer for.
+    await withdrawFinishedPassQuestions({ store, chatEvents }, task).catch((err: unknown) =>
+      log.warn(`[tasks] ${task.ref}: question withdrawal failed: ${String(err)}`),
+    );
+  });
   nightShift.setOnActivated(async () => {
     // Index first, tasks second: the catch-up flag is raised synchronously,
     // so the runner's night dispatch holds until static + AI indexing is
@@ -1079,233 +1089,11 @@ export async function startProductService(
     }
   });
 
-  // Role auto-assignment: a craftbook step's `suggestedRole` resolves
-  // to a concrete gezel id (roster match → gilde template → bespoke)
-  // at step-activation time. Without this a /review craftbook
-  // assigned to a Developer-template gezel keeps that Developer; with
-  // it, the entry step pulls the Reviewer onto the project and hands
-  // off cleanly. Errors are swallowed inside TaskManager — a
-  // misconfigured wiring falls back to the task-level assignee.
-  const { ensureGezel } = await import('./gezels/ensure.js');
-  // Gezels the resolver hired (not reused) wait here until their first step
-  // starts, when the owner's thread introduces them.
-  const freshHires = new Set<string>();
-  const introduceFreshHire = (task: Task, step: TaskCraftbookStep | undefined): void => {
-    const gezelId = step ? stepOwnerGezelId(task, step) : undefined;
-    if (!step || !gezelId || !freshHires.delete(gezelId)) return;
-    void chat
-      .postCrewIntroduction(task, gezelId, step, 'joined')
-      .catch((err) =>
-        log.warn(`[service] crew introduction failed for ${task.ref}: ${String(err)}`),
-      );
-  };
-  // A task launched from a chat introduces its crew there as it starts:
-  // whoever takes the entry step, and the lead when that is someone else.
-  // A typed project's lead and a kickoff's voorman are not resolver hires,
-  // so before this they arrived without a word.
-  const introduceAtKickoff = (task: Task, step: TaskCraftbookStep | undefined): void => {
-    const gezelId = step ? stepOwnerGezelId(task, step) : undefined;
-    if (!step || !gezelId) return;
-    const fresh = freshHires.delete(gezelId);
-    if (!fresh && !task.launchSessionId) return;
-    void chat
-      .postCrewIntroduction(task, gezelId, step, 'kickoff')
-      .catch((err) =>
-        log.warn(`[service] crew introduction failed for ${task.ref}: ${String(err)}`),
-      );
-  };
-  // Named so the craftbook command launcher (below) can reuse the exact
-  // same role→gezel resolution the step-activation path uses.
-  const roleResolverClosure = async (
-    role: string,
-    projectId: string,
-  ): Promise<{ gezelId: string } | null> => {
-    try {
-      const res = await ensureGezel({
-        opts: { jobTitle: role },
-        store,
-        catalog,
-        chat,
-        // Role resolution runs inside advance_task_step's HTTP/MCP request.
-        // Never synchronously invoke the local model that is waiting for this
-        // tool result; curated Gilde templates still win above this fallback.
-        bespokeMode: 'static',
-      });
-      // Pull the resolved gezel onto the project roster so the step
-      // assignee is actually a project member — without this the
-      // handoff fires but the project sidebar doesn't show the
-      // gezel, and `list_project_gezels` misses them.
-      await store.addGezelToProject(projectId, res.gezelId, { source: 'task' }).catch(() => {
-        /* roster add is best-effort */
-      });
-      if (res.action !== 'reused') freshHires.add(res.gezelId);
-      return { gezelId: res.gezelId };
-    } catch (err) {
-      log.warn(
-        `[tasks] ensureGezel failed for role="${role}":`,
-        err instanceof Error ? err.message : err,
-      );
-      return null;
-    }
-  };
-  tasks.setRoleResolver(roleResolverClosure);
-
-  // Execution mode (generalist v2): decided once per task from the install
-  // setting and the provider that will actually run it, then stamped on
-  // the task. An auto-assigned generalist task gets the Generalist gezel
-  // (one per install, reused by template id) pulled onto the project;
-  // a task whose caller pinned an owner keeps that owner. Errors fall back
-  // to stepwise inside TaskManager, the behavior every task had before.
-  tasks.setExecutionModeResolver(async ({ projectId, assigneeGezelId, nightShift, requested }) => {
-    const config = await store.readConfig();
-    const setting = effectiveGeneralistModeSetting(config);
-    let providerName: ProviderName | undefined;
-    let tier: string | undefined;
-    let mode: 'generalist' | 'stepwise';
-    if (requested === 'generalist' || requested === 'stepwise') {
-      mode = requested;
-    } else {
-      providerName = assigneeGezelId
-        ? await chat.providerForGezel(assigneeGezelId, { nightShift: Boolean(nightShift) })
-        : resolveDefaultProviderName(config);
-      tier = await chat.classifyExecutionTier(providerName, assigneeGezelId);
-      mode = resolveTaskExecutionMode(setting, providerName, tier);
-    }
-    const base = {
-      ...(setting ? { setting } : {}),
-      ...(providerName ? { providerName } : {}),
-      ...(tier ? { tier } : {}),
-    };
-    if (mode !== 'generalist' || assigneeGezelId) return { mode, ...base };
-    const generalist = await ensureGezel({
-      opts: { jobTitle: 'Generalist', templateId: GENERALIST_TEMPLATE_ID },
-      store,
-      catalog,
-      chat,
-      bespokeMode: 'static',
-    });
-    await store.addGezelToProject(projectId, generalist.gezelId, { source: 'task' }).catch(() => {
-      /* roster add is best-effort */
-    });
-    // The Generalist may carry its own provider pin (a user parked it on a
-    // local model). Under `auto` that pin decides, not the install default:
-    // a single-session run on a model the rule says is not ready for it is
-    // exactly what `auto` exists to avoid.
-    if (requested === 'auto') {
-      const ownerProvider = await chat.providerForGezel(generalist.gezelId, {
-        nightShift: Boolean(nightShift),
-      });
-      if (ownerProvider !== providerName) {
-        const ownerTier = await chat.classifyExecutionTier(ownerProvider, generalist.gezelId);
-        if (resolveTaskExecutionMode(setting, ownerProvider, ownerTier) !== 'generalist') {
-          log.info(
-            `[tasks] generalist ${generalist.gezelId} is pinned to ${ownerProvider} (${ownerTier}); running stepwise under auto`,
-          );
-          return { mode: 'stepwise', ...base, providerName: ownerProvider, tier: ownerTier };
-        }
-      }
-    }
-    return { mode: 'generalist', ownerGezelId: generalist.gezelId, ...base };
-  });
-
-  // Install a craftbook's bundled scripts into the project's scripts/
-  // folder the first time a task is created from it. Idempotent — the
-  // provenance marker comment makes re-installs no-ops when the
-  // catalog version matches what's on disk. Without this hook the
-  // bundledScripts list goes nowhere and onExit script refs error at
-  // first call ("script not found").
-  const { installCraftbookScripts, installLocalCraftbookScripts } = await import(
-    './scripts/install.js'
-  );
-  // Owner-step card: one unanswered card per (task, step), attributed to the
-  // gezel whose work is under review so the card reads as their hand-over.
-  const fileOwnerStepCard = async (
-    task: Task,
-    step: TaskCraftbookStep,
-    reviewed: TaskCraftbookStep | undefined,
-  ): Promise<void> => {
-    const existing = await store.listProjectQuestions(task.projectId).catch(() => []);
-    if (
-      existing.some(
-        (q) =>
-          q.intent?.kind === 'step-awaits-owner' &&
-          q.intent.taskRef === task.ref &&
-          q.intent.stepId === step.id &&
-          !q.answer,
-      )
-    ) {
-      return;
-    }
-    const returnTo = reviewed && reviewed.id !== step.id ? reviewed : undefined;
-    const config = await store.readConfig().catch(() => ({}) as GezelConfig);
-    const asker =
-      (returnTo ? stepOwnerGezelId(task, returnTo) : undefined) ?? config.meesterGezelId ?? '';
-    const outputs = await loadTaskOutputs(store, task);
-    const question = ownerStepQuestion({
-      task,
-      step,
-      ...(returnTo ? { returnTo } : {}),
-      askerGezelId: asker,
-      outputs,
-      figures: await reviewTaskFigures(store, task, outputs).catch(() => null),
-    });
-    await store.writeQuestion(question);
-    chatEvents.publishProjectEvent(task.projectId, { type: 'question_asked', question });
-    log.info(`[tasks] ${task.ref} step "${step.id}" waits for the owner; filed a card`);
-  };
-  tasks.setTaskCreatedHook(async ({ projectId, task, sources }) => {
-    // A task that opens on an owner step (approve the plan first) never
-    // passes through the activation hook, so its card is filed here.
-    const entry = task.craftbook.steps.find((s) => s.id === task.activeStepId);
-    if (task.status === 'active' && entry && isOwnerStep(entry)) {
-      await fileOwnerStepCard(task, entry, undefined).catch((err) =>
-        log.warn(`[service] owner-step card failed for ${task.ref}: ${String(err)}`),
-      );
-    }
-    if (task.status === 'active') introduceAtKickoff(task, entry);
-    // A book that verifies its work by running project commands
-    // (`commandEvidence` gates) declares them as `commands` needs; raise
-    // their first-use approval questions NOW so the user answers at
-    // launch instead of the run stalling steps later. Fire-and-forget —
-    // an unanswered question just means the mid-task path asks again.
-    if (task.craftbook.commands && task.craftbook.commands.length > 0) {
-      await ensureCommandApprovalQuestions({
-        store,
-        home,
-        projectId,
-        needs: task.craftbook.commands,
-        requestedBy: `The "${task.craftbook.name}" craftbook (task ${task.ref})`,
-      }).catch((err) => {
-        log.warn(`[tasks] kickoff command approvals for ${task.ref} failed: ${String(err)}`);
-      });
-    }
-    for (const src of sources) {
-      // Local craftbooks (editor-authored) carry their scripts on disk —
-      // copy from the local template dir rather than the bundled catalog.
-      if (src.sourceId === 'local') {
-        await installLocalCraftbookScripts(
-          home,
-          projectId,
-          src.catalogId,
-          src.version ?? '1.0.0',
-        ).catch((err) => {
-          log.warn(
-            `[tasks] failed to install local craftbook scripts for ${src.catalogId}: ${err instanceof Error ? err.message : err}`,
-          );
-        });
-        continue;
-      }
-      const detail = await catalog
-        .get('craftbook-template', src.catalogId, src.sourceId, src.version)
-        .catch(() => null);
-      if (!detail || detail.manifest.kind !== 'craftbook-template') continue;
-      await installCraftbookScripts(home, projectId, detail.manifest, catalog).catch((err) => {
-        log.warn(
-          `[tasks] failed to install craftbook scripts for ${src.catalogId}: ${err instanceof Error ? err.message : err}`,
-        );
-      });
-    }
-  });
+  const {
+    introduceFreshHire,
+    fileOwnerStepCard,
+    resolveRole: roleResolverClosure,
+  } = await wireTaskCreation({ home, store, catalog, chat, chatEvents, tasks });
 
   // Wire the craftbook resolver: project-local books shadow local
   // templates, which shadow the bundled catalog. Shared with the
@@ -1431,6 +1219,11 @@ export async function startProductService(
     if (kind !== 'entry' && kind !== 'redispatch' && completedStep.completedAt) {
       xpRefresher.note(stepCreditedGezelId(completedStep));
     }
+    // The pass that asked is over, including an earlier pass of this same
+    // step after a gate loops back (tasks/finished-pass-questions.ts).
+    await withdrawFinishedPassQuestions({ store, chatEvents }, task).catch((err: unknown) =>
+      log.warn(`[tasks] ${task.ref}: question withdrawal failed: ${String(err)}`),
+    );
     introduceFreshHire(task, newStep);
     if (await runActivationGate(runtimeActivation, { projectId, task, newStep })) return;
     if (await runSpawnFanout(runtimeActivation, { projectId, task, newStep })) return;
@@ -1784,7 +1577,13 @@ export async function startProductService(
     // notifies a spawn host that its crew finished.
     if (task.parentTaskRef) {
       const parsedParent = parseTaskRef(task.parentTaskRef);
-      if (parsedParent) {
+      const parent = parsedParent ? await tasks.getByRef(task.parentTaskRef) : null;
+      const parentStep = parent?.craftbook.steps.find((step) => step.id === parent.activeStepId);
+      // Only spawn hosts can be held by the activation barrier above. Ordinary
+      // CLI-owned batch parents have no barrier to release. Scanning their
+      // entire project history for every completed child held Codex slots for
+      // minutes once a media project accumulated tens of thousands of tasks.
+      if (parsedParent && parent?.spawnsCraftbook && parentStep && !parentStep.spawnFanout) {
         const stillActive = await tasks
           .listChildren(task.parentTaskRef, { status: 'active' })
           .catch(() => []);
@@ -2069,6 +1868,7 @@ export async function startProductService(
     await writeNightlyCodebaseReport({ store, contentIndex }, projectId, now, night).catch((err) =>
       log.warn(`[index] codebase report failed for ${projectId}: ${String(err)}`),
     );
+    await writeNightlyCodeFolderFiles({ store, contentIndex, diffpacks }, projectId, now);
   };
   indexEnrichment.setOnProjectCaughtUp(async (projectId) => {
     if (!nightShift.isActive()) return;
@@ -2147,6 +1947,20 @@ export async function startProductService(
   // staging dirs), so the sync manager and the action manager share ONE lock —
   // a commit can't race a sync or a concurrent discard on the same project.
   const connectorLocks = new KeyedLock();
+  // GEZEL_CONNECTOR_SIMULATOR=1 answers every native connector's provider
+  // traffic from in-process fakes seeded with a demo inbox and calendars —
+  // the connector counterpart of GEZEL_MOCK_PROVIDER, for E2E and eval runs.
+  // Bind with any placeholder credential; nothing reaches the network.
+  const connectorFetch =
+    process.env.GEZEL_CONNECTOR_SIMULATOR && process.env.GEZEL_CONNECTOR_SIMULATOR !== '0'
+      ? (await import('./connectors/testing/world.js')).createSimulatedWorld().fetch
+      : undefined;
+  if (connectorFetch) {
+    log.warn('[service] GEZEL_CONNECTOR_SIMULATOR is set — connectors sync simulated accounts');
+  }
+  // The live host (built below) runs device bindings; the manager tells it
+  // when bindings change and folds its status into the Connections view.
+  let liveConnectorsRef: LiveConnectorHost | null = null;
   const connectors = new ConnectorManager({
     store,
     secrets,
@@ -2154,6 +1968,9 @@ export async function startProductService(
     contentIndex,
     scriptRunner,
     locks: connectorLocks,
+    ...(connectorFetch ? { fetch: connectorFetch } : {}),
+    onBindingsChanged: () => void liveConnectorsRef?.reconcile(),
+    liveStatus: (projectId) => liveConnectorsRef?.status(projectId) ?? [],
   });
   const connectorActions = new ConnectorActionManager({
     store,
@@ -2163,6 +1980,7 @@ export async function startProductService(
     scriptRunner,
     isNightShiftActive: () => nightShift.isActive(),
     locks: connectorLocks,
+    ...(connectorFetch ? { fetch: connectorFetch } : {}),
   });
   const connectorSync = new ConnectorSyncManager({
     store,
@@ -2171,11 +1989,112 @@ export async function startProductService(
     isNightShiftActive: () => nightShift.isActive(),
     source: {
       label: 'connectors',
-      listBindings: (p) => p.connectors ?? [],
+      // Device bindings never sync (the live host runs them), so they must
+      // not make a project look "due" on every tick.
+      listBindings: (p) => (p.connectors ?? []).filter((b) => b.driver !== 'device'),
       posture: (pol) => pol.allowExternalServices,
       syncProject: (p) => connectors.syncProject(p),
     },
   });
+
+  // Device connectors (cameras) and lookouts. A camera binding is a
+  // long-running capture the live host keeps going — never a sync pass — and
+  // what it sees reaches the person's lookouts, which act on it. See
+  // docs/device-connectors.md and docs/lookouts.md.
+  const soundPlayer = new SoundPlayer({ home });
+  const cameras = new CameraService({
+    home,
+    store,
+    recognition: {
+      recognize: (input) => recognition.recognize(input),
+      isAvailable: () => recognition.isAvailable(),
+    },
+    publishProject: (projectId, event) => chatEvents.publishProjectEvent(projectId, event),
+    refreshArtifacts: (projectId) => contentIndex.refreshArtifacts(projectId),
+  });
+  registerLiveAdapter(CAMERA_ADAPTER_ID, cameras);
+  const liveConnectors = new LiveConnectorHost({
+    store,
+    catalog,
+    persist: (projectId, bindingId, patch) =>
+      connectors.setDeviceState(projectId, bindingId, patch),
+    publishProject: (projectId, event) => chatEvents.publishProjectEvent(projectId, event),
+    publishGlobal: (event) => chatEvents.publishGlobalEvent(event),
+  });
+  liveConnectorsRef = liveConnectors;
+  const craftbookRunDeps = {
+    store,
+    tasks,
+    taskRunner,
+    history,
+    craftbookResolver,
+    resolveRole: roleResolverClosure,
+  };
+  const lookouts = new LookoutManager({
+    home,
+    store,
+    history,
+    publishProject: (projectId, event) => chatEvents.publishProjectEvent(projectId, event),
+    publishGlobal: (event) => chatEvents.publishGlobalEvent(event),
+    sound: soundPlayer,
+    push: (text) => channels.send(text, { source: 'lookout' }),
+    pushConfigured: async () => (await channels.list()).some((c) => c.configured),
+    speak: async (text, signal) =>
+      (await (await tts.providerForModel(undefined)).synthesize({ text, signal })).wav,
+    email: async ({ projectId, bindingId, recipients, subject, body }) => {
+      const project = await store.getProject(projectId);
+      if (!project) throw new Error(`project not found: ${projectId}`);
+      const { draftId } = await connectorActions.draft(project, {
+        bindingId,
+        action: 'send',
+        input: { to: recipients, subject, body },
+      });
+      const result = await connectorActions.commit(project, draftId, {
+        standingRecipients: recipients,
+      });
+      return result.status === 'committed' ? 'sent' : 'queued';
+    },
+    deliverReaction: (args) => chat.deliverReaction(args),
+    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
+    gezelName: async (gezelId) =>
+      (await store.getGezel(gezelId).catch(() => null))?.parsed.frontmatter.name,
+    craftbookOwner: async (projectId, craftbookId) => {
+      const resolved = await craftbookResolver
+        .resolve(craftbookId, { projectId })
+        .catch(() => null);
+      if (!resolved) return undefined;
+      const m = resolved.craftbook;
+      const role = m.steps.find((step) => step.id === m.entryStepId)?.suggestedRole;
+      const owner = await resolveCraftbookOwner(craftbookRunDeps, projectId, role);
+      return owner.kind === 'gezel' ? owner.gezelId : undefined;
+    },
+    craftbookExists: async (projectId, craftbookId) =>
+      Boolean(await craftbookResolver.resolve(craftbookId, { projectId }).catch(() => null)),
+    craftbookInputParam: async (projectId, craftbookId) => {
+      const resolved = await craftbookResolver
+        .resolve(craftbookId, { projectId })
+        .catch(() => null);
+      const props = (
+        resolved?.craftbook.paramSchema as { properties?: Record<string, unknown> } | undefined
+      )?.properties;
+      return Object.entries(props ?? {}).find(
+        ([, schema]) => !!schema && typeof schema === 'object' && 'input' in (schema as object),
+      )?.[0];
+    },
+    runCraftbook: async (input) => ({
+      taskRef: (await startCraftbookRun(craftbookRunDeps, input)).task.ref,
+    }),
+    liveRunFor: async (projectId, lookoutId) => {
+      for (const status of ['active', 'paused'] as const) {
+        const live = await tasks.list({ projectId, status }).catch(() => []);
+        if (live.some((t) => t.origin?.kind === 'lookout' && t.origin.lookoutId === lookoutId)) {
+          return true;
+        }
+      }
+      return false;
+    },
+  });
+  cameras.setLookoutSink(lookouts);
 
   // A craftbook that reads a connector corpus gets it pulled down at
   // LAUNCH, before its first step's prompt is built — the gezel then
@@ -2265,6 +2184,7 @@ export async function startProductService(
     resolveMachineEngineRemoteId,
   });
   const { codexSetup, opencodeSetup, piSetup, vscodeSetup } = localHarnesses;
+  const harnessTools = new HarnessToolsManager({ home, store, tokenStore });
   // Word / Excel / PowerPoint and LibreOffice; see office-host/integrations.ts.
   const officeIntegrations = createOfficeIntegrations(home, opts, firstPartyApps);
 
@@ -2320,6 +2240,7 @@ export async function startProductService(
   // App-serve sites — per-site visitor listeners for shared AI App
   // mini-sites. A product feature: the machine-engine role never serves.
   const appServe = createAppServeController({
+    duck,
     store,
     catalog,
     chat,
@@ -2372,6 +2293,9 @@ export async function startProductService(
     inputStaging,
     connectors,
     connectorActions,
+    liveConnectors,
+    cameras,
+    lookouts,
     duck,
     renderer,
     imageProvider,
@@ -2413,6 +2337,7 @@ export async function startProductService(
     remoteTenantLimits,
     ollamaEmulation,
     codexSetup,
+    harnessTools,
     opencodeSetup,
     piSetup,
     vscodeSetup,
@@ -2537,6 +2462,11 @@ export async function startProductService(
   await ollamaEmulation.reconfigure(config.openaiEndpoints).catch((err) => {
     log.warn(`[service] ollama emulation not started: ${err instanceof Error ? err.message : err}`);
   });
+  await harnessTools.reconcile().catch((err) => {
+    log.warn(
+      `[service] Gezel tools launcher not prepared: ${err instanceof Error ? err.message : err}`,
+    );
+  });
   await codexSetup.reconcile().catch((err) => {
     log.warn(
       `[service] Codex local-model bridge not started: ${err instanceof Error ? err.message : err}`,
@@ -2617,6 +2547,7 @@ export async function startProductService(
       store,
       statusBus: systemStatus,
       debug,
+      docblocksInstallPath: bundledDocblocksToolset().installPath,
       logger: {
         info: (m) => log.info(m),
         warn: (m) => log.warn(m),
@@ -2726,6 +2657,12 @@ export async function startProductService(
   }
   globalIndexManager.start();
   connectorSync.start();
+  // Lookouts load before cameras start, so the first episode already knows
+  // what to ask.
+  void lookouts
+    .load()
+    .catch((err) => log.warn('[lookouts] load failed:', err instanceof Error ? err.message : err))
+    .finally(() => liveConnectors.start());
 
   // Idle-session summarization sweep: every hour, distill any non-archived
   // session that's been quiet for `config.summarization.idleHours` (default
@@ -2755,6 +2692,15 @@ export async function startProductService(
   // Cancelled by stop(): deferred work that starts during shutdown can load a
   // model worker that process.exit then aborts mid-load (see boot-work.ts).
   const cancelBootWork: Array<() => void> = [];
+  cancelBootWork.push(
+    deferBootWork(
+      10_000,
+      () => {
+        void store.refreshStartupHome().catch(() => {});
+      },
+      () => stopping,
+    ),
+  );
   cancelBootWork.push(
     deferBootWork(
       60_000,
@@ -2847,6 +2793,11 @@ export async function startProductService(
       // An open document-edit window would otherwise lose its audit event.
       await shutdownStep('document audit flush', () => store.flushDocumentAudit().catch(() => {}));
       connectorSync.stop();
+      await shutdownStep('cameras', async () => {
+        await liveConnectors.stop();
+        await cameras.stop();
+        soundPlayer.stopAll();
+      });
       cacheController.stop();
       imagePulls.clear();
       chatInstalls.llamaCpp.clear();

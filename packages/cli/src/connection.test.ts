@@ -353,7 +353,7 @@ describe('local owner authorization for `gezel run`', () => {
   /**
    * The regression this seam exists for: a daemon is already running — because
    * `gezel start`, or an ordinary `gezel agent list`, left one — and `run` must
-   * adopt it with the runtime credential rather than open a Connected Apps
+   * adopt it with the runtime credential rather than open an app
    * consent handshake that nobody can answer on a headless install.
    */
   it('adopts a running daemon with the owner credential and never asks for consent', async () => {
@@ -427,7 +427,7 @@ describe('grant failure messages', () => {
     );
 
     expect(error.message).toContain('https://gezel.example');
-    expect(error.message).toContain('Settings → Connected Apps');
+    expect(error.message).toContain('Settings → Integrations');
     expect(error.message).toContain(`${PENDING_GRANT_MINUTES} minutes`);
     expect(error.message).not.toContain('grant_already_pending');
   });

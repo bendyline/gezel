@@ -4,8 +4,17 @@ export interface GenerateImageToolArgs {
   steps?: number;
 }
 
-const AGENT_IMAGE_MAX_SIDE_PX = 768;
-const AGENT_IMAGE_MAX_STEPS = 4;
+/**
+ * Agent requests are held to about a megapixel, the size most current models
+ * were trained at; the daemon then fits the size to the model's own range, so
+ * SD 1.5 still lands at 768 and Ming at no less than 1024. A cap below the
+ * training size degrades the image rather than speeding it up: SDXL-class
+ * models garble composition at 512. Steps are not touched here: the daemon
+ * holds them at the model's own recommendation (`capStepsAtRecommended`),
+ * because a fixed cap of 4 suits only the distilled models and ruined every
+ * one that needs 25 to 100 steps.
+ */
+const AGENT_IMAGE_MAX_SIDE_PX = 1024;
 const SIZE_MULTIPLE = 64;
 
 export function normalizeGenerateImageToolArgs<T extends GenerateImageToolArgs>(
@@ -45,11 +54,6 @@ export function normalizeGenerateImageToolArgs<T extends GenerateImageToolArgs>(
     changes.push(`width ${args.width} -> ${next.width}`);
   } else if (args.height !== next.height && typeof next.height === 'number') {
     changes.push(`height ${args.height} -> ${next.height}`);
-  }
-
-  if (typeof args.steps === 'number' && args.steps > AGENT_IMAGE_MAX_STEPS) {
-    next.steps = AGENT_IMAGE_MAX_STEPS;
-    changes.push(`steps ${args.steps} -> ${next.steps}`);
   }
 
   return {

@@ -63,7 +63,7 @@ function kokoroDictionary(language: 'us' | 'gb'): Promise<KokoroLexicon> {
     const text = await new Response(
       response.body.pipeThrough(new DecompressionStream('gzip')),
     ).text();
-    return parseKokoroLexicon(text);
+    return parseKokoroLexicon(text, { language });
   })();
   // A failed read must not be cached as a permanent failure.
   void pending.catch(() => dictionaries.delete(language));

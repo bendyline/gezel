@@ -131,5 +131,29 @@ export function composeFileMapScopes(
     // offset — falling back to Tests when there is no code at all.
     ...((code.urbanity ?? tests.urbanity) ? { urbanity: (code.urbanity ?? tests.urbanity)! } : {}),
     ...((code.signals ?? tests.signals) ? { signals: code.signals ?? tests.signals } : {}),
+    // Either city still on the old graph keeps the offer up; the update moves both.
+    ...(code.edgePolicy || tests.edgePolicy
+      ? {
+          edgePolicy: {
+            current: Math.min(
+              code.edgePolicy?.current ?? Number.POSITIVE_INFINITY,
+              tests.edgePolicy?.current ?? Number.POSITIVE_INFINITY,
+            ),
+            ...((code.edgePolicy?.upgrade ?? tests.edgePolicy?.upgrade)
+              ? { upgrade: combinedUpgrade(code.edgePolicy?.upgrade, tests.edgePolicy?.upgrade) }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+function combinedUpgrade(
+  a: { roadsNow: number; roadsAfter: number } | undefined,
+  b: { roadsNow: number; roadsAfter: number } | undefined,
+): { roadsNow: number; roadsAfter: number } {
+  return {
+    roadsNow: (a?.roadsNow ?? 0) + (b?.roadsNow ?? 0),
+    roadsAfter: (a?.roadsAfter ?? 0) + (b?.roadsAfter ?? 0),
   };
 }

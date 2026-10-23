@@ -94,10 +94,19 @@ export function isTransientNetworkError(err: unknown): boolean {
   if (err instanceof HttpStatusError) return isTransientHttpStatus(err.status);
   const raw = flattenErrorMessage(err);
   if (/AbortError|The operation was aborted|This operation was aborted/i.test(raw)) return false;
-  return /fetch failed|ENOTFOUND|EAI_AGAIN|getaddrinfo|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENETDOWN|EAGAIN|socket hang up|premature close|terminated|UND_ERR_|timed out|network/i.test(
-    raw,
-  );
+  return TRANSIENT_ERRNO.test(raw) || TRANSIENT_PHRASE.test(raw);
 }
+
+/**
+ * Errno and undici codes, matched case-sensitively as whole words. Matched
+ * case-insensitively as substrings they caught class names — a
+ * `YouTubeNotFoundError` contains "eNotFound" — and a permanent failure was
+ * retried three times with backoff before it was reported.
+ */
+const TRANSIENT_ERRNO =
+  /\b(?:ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENETDOWN|EAGAIN|UND_ERR_[A-Z_]+)\b/;
+const TRANSIENT_PHRASE =
+  /fetch failed|getaddrinfo|socket hang up|premature close|terminated|timed out|network/i;
 
 /** Error name + message + the whole `cause` chain, for pattern matching. */
 export function flattenErrorMessage(err: unknown): string {

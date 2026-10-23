@@ -1,7 +1,7 @@
-import { type TaskAssignee, projectLeadGezelId } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../fs/store.js';
-import { type EntryDispatchDeps, dispatchTaskEntry } from '../tasks/entry-dispatch.js';
+import { startCraftbookRun } from '../tasks/craftbook-run.js';
+import type { EntryDispatchDeps } from '../tasks/entry-dispatch.js';
 import type { CraftbookResolver, TaskManager } from '../tasks/manager.js';
 import type { CraftbookInvoker } from '../terminal/manager.js';
 import type { CraftbookCommandSpec } from '../terminal/resolve.js';
@@ -73,90 +73,15 @@ export function createCraftbookTerminalCommands(
   // create route's `dispatchEntry` flag (routes/project-tasks.ts, the
   // meester macros' path).
   const craftbookInvoker: CraftbookInvoker = async ({ projectId, craftbookId, params }) => {
-    // Resolve through the task resolver's chain, not the catalog alone: a
-    // project-local book (`.gezel/craftbooks/`, usually converted from a
-    // repo SKILL.md) is offered by the launcher rail, so a catalog-only
-    // lookup here rejected exactly the books this project defined itself.
-    const resolved = await craftbookResolver.resolve(craftbookId, { projectId }).catch(() => null);
-    if (!resolved) {
-      throw new Error(`unknown craftbook "${craftbookId}"`);
-    }
-    const m = resolved.craftbook;
-
-    const paramSummary = Object.entries(params)
-      .map(([k, v]) => `${k}=${v}`)
-      .join(', ');
-    const withClause = paramSummary ? ` with ${paramSummary}.` : '.';
-    const tail = m.description ? ` ${m.description}` : '';
-    const description =
-      `Run the "${m.name}" craftbook against this project${withClause}${tail}`.slice(0, 2000);
-
-    // Assignee = role-matched gezel for the entry step, not the user.
-    const entryRole = m.steps.find((s) => s.id === m.entryStepId)?.suggestedRole;
-    let assignee: TaskAssignee = { kind: 'user' };
-    if (entryRole) {
-      const owner = await resolveRole(entryRole, projectId).catch(() => null);
-      if (owner?.gezelId) assignee = { kind: 'gezel', gezelId: owner.gezelId };
-    }
-    if (assignee.kind === 'user') {
-      // A book whose entry step names no role — every SKILL.md conversion
-      // that carried no persona — would otherwise launch owned by the user
-      // and never dispatch: created, active, and inert, which reads to the
-      // user as "I ran it and nothing happened". The project lead (voorman,
-      // or the Meester in Default) is the standing answer to "who picks
-      // this up?". Falls through to the user only when there is none.
-      const project = await store.getProject(projectId).catch(() => null);
-      const config = await store.readConfig().catch(() => null);
-      const leadGezelId = project ? projectLeadGezelId(project, config?.meesterGezelId) : undefined;
-      if (leadGezelId) assignee = { kind: 'gezel', gezelId: leadGezelId };
-    }
-
-    const task = await tasks.create(projectId, {
-      title: `${m.name} — ${new Date().toLocaleString()}`,
-      description,
-      craftbookId,
-      assignee,
-      ...(Object.keys(params).length > 0 ? { craftbookParams: params } : {}),
-      // A craftbook with a declarative `spawn` block becomes a spawn host:
-      // its child template rides in as `spawnsCraftbook`, and the runtime
-      // fans out one child per item when the `spawnFanout` step activates
-      // (see the onStepActivated fanout branch). No cron/fanout needed —
-      // the fanout trigger is the spawn-host mechanism for this book.
-      ...(m.spawn
-        ? {
-            spawnsSteps: m.spawn.steps,
-            ...(m.spawn.entryStepId ? { spawnsEntryStepId: m.spawn.entryStepId } : {}),
-          }
-        : {}),
-      createdBy: { kind: 'user' },
-    });
-
-    // Stamp invocation params as an entry-step note so the gezel reads
-    // them via `read_task_notes` (mirrors spawnChild's instance context).
-    if (Object.keys(params).length > 0 && task.activeStepId) {
-      const lines = ['# Invocation parameters', ''];
-      for (const [k, v] of Object.entries(params)) lines.push(`- **${k}**: ${v}`);
-      await tasks
-        .appendNote(task.projectId, task.num, {
-          text: lines.join('\n'),
-          author: { kind: 'user' },
-          stepId: task.activeStepId,
-        })
-        .catch(() => {
-          /* note is best-effort */
-        });
-    }
-
-    // Entry-gezel resolution + ambient-work guard + enqueue live in the
-    // shared helper so this launcher and the create-route `dispatchEntry`
-    // flag (the meester macros' path) cannot drift.
-    const dispatch = await dispatchTaskEntry({ store, taskRunner, history }, task);
-
+    const run = await startCraftbookRun(
+      { store, tasks, taskRunner, ...(history ? { history } : {}), craftbookResolver, resolveRole },
+      { projectId, craftbookId, params },
+    );
     return {
-      taskRef: task.ref,
-      craftbookName: m.name,
-      ...(dispatch.assigneeName ? { assigneeName: dispatch.assigneeName } : {}),
-      started: dispatch.enqueued,
+      taskRef: run.task.ref,
+      craftbookName: run.craftbookName,
+      ...(run.assigneeName ? { assigneeName: run.assigneeName } : {}),
+      started: run.started,
     };
   };
 

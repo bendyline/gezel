@@ -1,8 +1,9 @@
-import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build, defineConfig } from 'tsup';
 import { ensureHandboekGezk } from '../../scripts/handboek-gezk-lock.mjs';
+import { buildProjectPageTypography } from '../../scripts/project-page-typography.mjs';
 import { stageServiceFontLegalBundle } from '../../scripts/service-font-legal.mjs';
 import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
 
@@ -195,6 +196,11 @@ export default defineConfig({
   // shell string) because PowerShell 5.1 mangles forward slashes inside
   // embedded JS string literals when invoking native commands.
   onSuccess: async () => {
+    // Project pages inherit the shell's fonts even in a headless service install.
+    writeFileSync(
+      'dist/page-typography.css',
+      buildProjectPageTypography(resolve(__dirname, '../ui')),
+    );
     // Handboek content: the hand-curated documentation tree lives at the
     // repo root (docs/handboek/) so humans author it next to the other
     // docs, and ships inside the service package so the engine can serve

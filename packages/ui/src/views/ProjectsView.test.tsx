@@ -1422,6 +1422,33 @@ describe('ProjectsView', () => {
     expect(window.localStorage.getItem('gezel:project-file-tree-collapsed:v1')).toBe('0');
   });
 
+  it('folds the file tree for a file opened from a link, for that visit only', async () => {
+    vi.mocked(api.readProjectArtifact).mockResolvedValue({
+      path: 'reports/night-shift.md',
+      content: '# Night shift',
+    } as never);
+    await act(async () => {
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+    });
+    expect(screen.getByTestId('project-chat')).toBeInTheDocument();
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('gezel:open-file', {
+          detail: { projectId: 'pj-alpha', path: 'reports/night-shift.md', source: 'artifacts' },
+        }),
+      );
+    });
+    await screen.findByTestId('editor');
+    expect(screen.getByRole('button', { name: 'Show Artifacts files' })).toBeVisible();
+    expect(screen.queryByText('Artifacts', { selector: '.file-tree-title' })).toBeNull();
+    expect(window.localStorage.getItem('gezel:project-file-tree-collapsed:v1')).toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+    expect(await screen.findByText('Workspace', { selector: '.file-tree-title' })).toBeVisible();
+    fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
+    expect(await screen.findByText('Artifacts', { selector: '.file-tree-title' })).toBeVisible();
+  });
+
   it('ranks the issue triage views by count and weighted criticality', async () => {
     const issueAt = (path: string, severity: 'major' | 'minor', ref: string) => ({
       ...trackedWorkspaceIssue,
@@ -2064,7 +2091,7 @@ describe('ProjectsView', () => {
 
     expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
-    for (const name of ['Overview', 'Tasks', 'Tools', 'Workspace', 'Artifacts', 'Village']) {
+    for (const name of ['Overview', 'Tasks', 'Tools', 'Workspace', 'Artifacts', 'Village view']) {
       expect(screen.queryByRole('tab', { name })).not.toBeInTheDocument();
     }
 
@@ -2102,7 +2129,29 @@ describe('ProjectsView', () => {
     render(<ProjectsView forceProjectId="pj-alpha" />);
     await screen.findByTestId('project-chat');
 
-    expect(screen.getByRole('tab', { name: 'Village' })).toBeInTheDocument();
+    // The tab shows; a writing project opens it on its default view, the Gallery.
+    expect(screen.getByRole('tab', { name: 'Gallery view' })).toBeInTheDocument();
+  });
+
+  it('names the Views tab after its view and lists it as Views in Settings', async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Code',
+      packages: [],
+      managedWorkspaceWritePolicy: 'deny',
+      selectedView: 'some-view-from-a-newer-build',
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+
+    // A view id this build doesn't know falls back to the project's default.
+    // (The mocked Tabs.Trigger drops aria attributes, so the menu is covered
+    // by FittedTabsList's tests and project-views/registry.test.ts.)
+    expect(screen.getByRole('tab', { name: 'Village view' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+    expect(screen.getByRole('checkbox', { name: 'Views' })).toBeChecked();
   });
 
   it('shows an error message when listProjects rejects', async () => {

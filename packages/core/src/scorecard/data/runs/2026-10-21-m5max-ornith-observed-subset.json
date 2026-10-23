@@ -1,0 +1,487 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "2026-10-21-m5max-ornith-observed-subset",
+      "provenance": {
+        "startedAt": "2026-10-21T09:53:34.651Z",
+        "device": {
+          "label": "Mac · Apple M5 Max",
+          "platform": "darwin",
+          "arch": "arm64",
+          "memoryGb": 128,
+          "osRelease": "darwin 27.0.0",
+          "cpuModel": "Apple M5 Max",
+          "gpuModel": "Apple M5 Max (integrated GPU)"
+        },
+        "harnessCommit": "bc4af5dc2649",
+        "sourceHash": "d68acf8def595c54deea3468ab9efe7ff2c6970be4e1d64e6fe034dbb82dd042",
+        "serviceBuildHash": "3acca0c382dfe21a3194e9e27a77e51b47e5cfb46e1ecd5af8a0b000f6754241",
+        "catalogHash": "a95cdb382c0974f495a3f868a17b0b450a27ffa7dbfe472f6b82c668bcde1d4a",
+        "gildeVersion": "0.2.3",
+        "count": 3,
+        "judgeModelId": null,
+        "engineBuilds": {
+          "llama-cpp": "d81235049384534c167caea52b85a694f6103d14"
+        }
+      },
+      "scope": "subset",
+      "memoryCoverage": "full",
+      "suites": [
+        "core",
+        "productivity",
+        "developer",
+        "complex-work"
+      ],
+      "scenariosBySuite": {
+        "core": [
+          "tictactoe",
+          "petshop",
+          "tankcombat",
+          "schema-migration",
+          "failing-tests-spec",
+          "symptom-debug",
+          "data-wrangle",
+          "incident-postmortem",
+          "ops-runbook-anomaly",
+          "plan-and-estimate",
+          "conflict-synthesis"
+        ],
+        "productivity": [
+          "constrained-comms",
+          "records-intake",
+          "plan-and-estimate",
+          "meeting-followup",
+          "craftbook-spreadsheet-model",
+          "conflict-synthesis",
+          "docblocks-theme-roundtrip",
+          "craftbook-powerpoint-deck",
+          "wikipedia-research-brief",
+          "craftbook-week-plan",
+          "craftbook-ab-test-readout",
+          "craftbook-annotated-bibliography",
+          "craftbook-research-to-document"
+        ],
+        "developer": [
+          "fix-squisq-bugs",
+          "dev-craftbook-routing",
+          "interface-contract",
+          "craftbook-code-review",
+          "craftbook-api-contract-review",
+          "craftbook-deep-security-review",
+          "large-pr-review",
+          "craftbook-codemod-sweep",
+          "craftbook-refactor-module",
+          "craftbook-bug-fix-tdd"
+        ],
+        "complex-work": [
+          "craftbook-find-vs-create",
+          "craftbook-edit-midtask",
+          "craftbook-invoice-run",
+          "craftbook-author-linear",
+          "craftbook-route-multi",
+          "craftbook-export-generalize",
+          "craftbook-author-params",
+          "craftbook-author-gate-script",
+          "craftbook-author-fanout"
+        ]
+      },
+      "note": "PARTIAL OBSERVATIONS: Ornith recorded 85 of 129 planned trials; 84 stable-identity observations are included here. The final drift-flagged failure is retained in the 601-observation companion and omitted from these comparison cells. No third repetition was run; report counts, not rates. Nemotron and MiniCPM were not run. Four suites, 43 suite entries, three requested repetitions. Fixed classifications and scores are unchanged. No pooled qualitative judge score: see scorecard-details.json for exact per-task rubrics and 248 artifact reviews. Performance columns are arithmetic means of short admission probes (each under 256 decode tokens), not sustained in-trial speeds; prefer the companion in-trial distributions for throughput comparisons. Six frozen infrastructure exclusions remain recorded across the package. Models ran sequentially on one device, with model-specific frozen tuning."
+    }
+  ],
+  "results": [
+    {
+      "modelId": "ornith1.5-35b-a3b-q4",
+      "label": "Ornith 1.5 (35B-A3B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "35B-A3B",
+      "quantization": "Q4_K_M",
+      "grantedContextTokens": 262144,
+      "runId": "2026-10-21-m5max-ornith-observed-subset",
+      "suiteId": "complex-work",
+      "performance": {
+        "prefillTokensPerSec": 2619,
+        "decodeTokensPerSec": 190.6,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 37090,
+        "kvCacheType": "f16"
+      },
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 264559
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 837923
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 457599
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2313716
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 408666
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 2,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 1049764
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 4396658
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 3849165
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3250134
+        }
+      ]
+    },
+    {
+      "modelId": "ornith1.5-35b-a3b-q4",
+      "label": "Ornith 1.5 (35B-A3B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "35B-A3B",
+      "quantization": "Q4_K_M",
+      "grantedContextTokens": 262144,
+      "runId": "2026-10-21-m5max-ornith-observed-subset",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 2619,
+        "decodeTokensPerSec": 190.6,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 29403,
+        "kvCacheType": "f16"
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 273114
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 343125
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 287672
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 331817
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 412958
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 282311
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 287391
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 323081
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 272756
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 262619
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 2,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 330480
+        }
+      ]
+    },
+    {
+      "modelId": "ornith1.5-35b-a3b-q4",
+      "label": "Ornith 1.5 (35B-A3B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "35B-A3B",
+      "quantization": "Q4_K_M",
+      "grantedContextTokens": 262144,
+      "runId": "2026-10-21-m5max-ornith-observed-subset",
+      "suiteId": "developer",
+      "performance": {
+        "prefillTokensPerSec": 2619,
+        "decodeTokensPerSec": 190.6,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 33246,
+        "kvCacheType": "f16"
+      },
+      "cells": [
+        {
+          "scenarioId": "fix-squisq-bugs",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 295664
+        },
+        {
+          "scenarioId": "dev-craftbook-routing",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 297156
+        },
+        {
+          "scenarioId": "interface-contract",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 489689
+        },
+        {
+          "scenarioId": "craftbook-code-review",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 414169
+        },
+        {
+          "scenarioId": "craftbook-api-contract-review",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 645975
+        },
+        {
+          "scenarioId": "craftbook-deep-security-review",
+          "trials": 2,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 393937
+        },
+        {
+          "scenarioId": "large-pr-review",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 845216
+        },
+        {
+          "scenarioId": "craftbook-codemod-sweep",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 415800
+        },
+        {
+          "scenarioId": "craftbook-refactor-module",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1133039
+        },
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 2,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1100134
+        }
+      ]
+    },
+    {
+      "modelId": "ornith1.5-35b-a3b-q4",
+      "label": "Ornith 1.5 (35B-A3B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "35B-A3B",
+      "quantization": "Q4_K_M",
+      "grantedContextTokens": 262144,
+      "runId": "2026-10-21-m5max-ornith-observed-subset",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 2619,
+        "decodeTokensPerSec": 190.6,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 33083,
+        "kvCacheType": "f16"
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 259926
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 521559
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 265230
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 353050
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1115483
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 2,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 422319
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 282786
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 431923
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 345492
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 2,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3324322
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 843111
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 467505
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 360697
+        }
+      ]
+    }
+  ]
+}

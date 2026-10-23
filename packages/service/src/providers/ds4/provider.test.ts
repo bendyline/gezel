@@ -146,6 +146,51 @@ describe('Ds4Provider (composition over llama.cpp)', () => {
     }
   });
 
+  it('gives supervised sessions the context window ds4 launches with', async () => {
+    const savedBin = process.env.GEZEL_DS4_SERVER_BIN;
+    const savedModel = process.env.GEZEL_DS4_MODEL;
+    process.env.GEZEL_DS4_SERVER_BIN = '/opt/gezel/gezel-ds4-server';
+    delete process.env.GEZEL_DS4_MODEL;
+    try {
+      const p = await buildDs4Provider({
+        config: {
+          defaultModel: { ds4: 'glm-5.3-flash-q2' },
+          ds4SsdStreaming: true,
+          ds4NumCtx: 65_536,
+        } as unknown as GezelConfig,
+        affinity: undefined,
+        home: join(tmpdir(), 'gezel-ds4-launch-ctx-test'),
+        ds4Models: {
+          resolveModel: vi.fn().mockResolvedValue({
+            id: 'glm-5.3-flash-q2',
+            weightsPath: '/models/GLM-5.3-Flash-Q2.gguf',
+            approxSizeBytes: 96_505_816_384,
+          }),
+        } as never,
+        catalog: {
+          get: vi.fn().mockResolvedValue({
+            manifest: {
+              kind: 'chat-model',
+              ds4: { approxSizeBytes: 96_505_816_384, maxLaunchCtx: 32_768 },
+            },
+          }),
+        } as never,
+      });
+      const inner = p.llamaCpp as unknown as {
+        supervisor: { resolveLaunch: () => Promise<{ args: string[] }> };
+      };
+      const launch = await inner.supervisor.resolveLaunch();
+      const ctxArg = launch.args[launch.args.indexOf('--ctx') + 1];
+      expect(ctxArg).toBe('32768');
+      expect(p.getContextWindow()).toBe(32_768);
+    } finally {
+      if (savedBin === undefined) delete process.env.GEZEL_DS4_SERVER_BIN;
+      else process.env.GEZEL_DS4_SERVER_BIN = savedBin;
+      if (savedModel === undefined) delete process.env.GEZEL_DS4_MODEL;
+      else process.env.GEZEL_DS4_MODEL = savedModel;
+    }
+  });
+
   it('presents name "ds4" while wrapping a llama-cpp engine', () => {
     const inner = mockInner();
     const p = new Ds4Provider({ inner });

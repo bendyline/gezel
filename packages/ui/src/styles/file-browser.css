@@ -963,7 +963,8 @@ button.danger {
   cursor: pointer;
 }
 
-.app-nightshift-report:hover .app-nightshift-task-title {
+.app-nightshift-report:hover .app-nightshift-task-title,
+.app-nightshift-report[data-highlighted] .app-nightshift-task-title {
   color: var(--accent-text);
 }
 
@@ -2526,6 +2527,47 @@ button.tree-row-trailing-select {
 .workspace-index-issue-error {
   margin-top: 0.5rem;
   font-size: var(--text-xs);
+}
+
+/* Who judged the issue and what they said: "Not a bug · Claude Code — …". */
+.workspace-index-issue-verdict {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.workspace-index-issue-verdict-label {
+  font-weight: 600;
+}
+
+.workspace-index-issue-verdict-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.workspace-index-issue-verdict-form .gz-tray {
+  flex-wrap: wrap;
+}
+
+.workspace-index-issue-verdict-note-label {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.workspace-index-issue-verdict-form textarea {
+  font: inherit;
+  font-size: var(--text-sm);
+  resize: vertical;
+}
+
+.workspace-index-issue-verdict-actions {
+  display: flex;
+  gap: var(--space-sm);
 }
 
 .workspace-index-issues li p,

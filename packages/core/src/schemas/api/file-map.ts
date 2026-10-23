@@ -239,8 +239,29 @@ export const FileMapRequestSchema = z.object({
   scope: FileMapScopeSchema.optional(),
   /** When set, overlay this pull request's changed files onto the map. */
   pr: z.number().int().positive().optional(),
+  /**
+   * The person asked to move this village onto the resolved import graph
+   * (see `VillageDomainState.edgePolicy`). Only ever 2; a village never moves back.
+   */
+  edgePolicy: z.literal(2).optional(),
 });
 export type FileMapRequest = z.infer<typeof FileMapRequestSchema>;
+
+export const MapEdgePolicySchema = z.object({
+  /** 1: relative imports only (every older village); 2: the resolved graph. */
+  current: z.number().int().positive(),
+  /**
+   * Present on a policy-1 village when the resolved graph would add at least
+   * a tenth more roads: offer the update, with what it would change.
+   */
+  upgrade: z
+    .object({
+      roadsNow: z.number().int().nonnegative(),
+      roadsAfter: z.number().int().nonnegative(),
+    })
+    .optional(),
+});
+export type MapEdgePolicy = z.infer<typeof MapEdgePolicySchema>;
 
 export const FileMapResponseSchema = z.object({
   domain: z.string(),
@@ -267,5 +288,7 @@ export const FileMapResponseSchema = z.object({
       churnWindowDays: z.number().int().positive(),
     })
     .optional(),
+  /** Which import graph the roads follow, and whether a richer one is on offer. */
+  edgePolicy: MapEdgePolicySchema.optional(),
 });
 export type FileMapResponse = z.infer<typeof FileMapResponseSchema>;

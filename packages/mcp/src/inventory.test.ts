@@ -123,6 +123,7 @@ function readStaticServerToolRegistrations(): string[] {
     resolve(__dirname, 'server.ts'),
     resolve(__dirname, 'cross-drawer-read-tools.ts'),
     resolve(__dirname, 'connector-action-tools.ts'),
+    resolve(__dirname, 'camera-tools.ts'),
     resolve(__dirname, 'github-tools.ts'),
   ];
   const names: string[] = [];

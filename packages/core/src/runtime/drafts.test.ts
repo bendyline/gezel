@@ -105,6 +105,23 @@ describe('prompt drafts on the portable host', () => {
     });
   });
 
+  it('keeps the image strip settings, copies them, and clears them with null', async () => {
+    const f = await fixture();
+    const draft = await f.create({
+      content: 'a lighthouse at dusk',
+      imageSettings: { aspectRatio: '9:16', quality: 'draft' },
+    });
+    expect(draft.imageSettings).toEqual({ aspectRatio: '9:16', quality: 'draft' });
+    const patched = await f.store.patchPromptDraft('default', draft.id, {
+      imageSettings: { aspectRatio: '16:9' },
+    });
+    expect(patched.imageSettings).toEqual({ aspectRatio: '16:9' });
+    const copy = await f.store.duplicatePromptDraft('default', draft.id);
+    expect(copy.imageSettings).toEqual({ aspectRatio: '16:9' });
+    const cleared = await f.store.patchPromptDraft('default', draft.id, { imageSettings: null });
+    expect(cleared.imageSettings).toBeUndefined();
+  });
+
   it('copies an attached task but drops its uploaded inputs', async () => {
     const f = await fixture();
     const source = await f.create({

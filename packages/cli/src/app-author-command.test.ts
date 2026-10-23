@@ -27,8 +27,8 @@ afterEach(async () => {
 const output = (): string => logged.join('\n');
 
 describe('gezel app new / validate / pack', () => {
-  it('scaffolds an app that validates with zero findings and packs clean', async () => {
-    await runAppNew('field-notes', { dir, withPage: true });
+  it.each([false, true])('validates and packs without findings (withPage=%s)', async (withPage) => {
+    await runAppNew('field-notes', { dir, withPage });
     const appDir = join(dir, 'field-notes');
     expect(output()).toContain('Scaffolded field-notes');
 

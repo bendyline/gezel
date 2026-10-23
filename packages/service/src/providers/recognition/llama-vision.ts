@@ -192,7 +192,12 @@ export class LlamaVisionProvider implements RecognitionProvider {
     input: RecognizeInput,
     baseUrl: string,
   ): Promise<{ text: string; truncated: boolean; truncationReason?: string }> {
-    const prompt = MODE_PROMPTS[input.mode];
+    const modePrompt = MODE_PROMPTS[input.mode];
+    const prompt = {
+      system: input.prompt?.system ?? modePrompt.system,
+      user: input.prompt?.user ?? modePrompt.user,
+      maxTokens: input.prompt?.maxTokens ?? modePrompt.maxTokens,
+    };
     const body: Record<string, unknown> = {
       messages: [
         { role: 'system', content: prompt.system },
@@ -247,6 +252,14 @@ export class LlamaVisionProvider implements RecognitionProvider {
     };
     const onCeiling = () => cut(`stopped at the ${Math.round(ceilingMs / 1000)}s ceiling`);
     ceiling.signal.addEventListener('abort', onCeiling, { once: true });
+    // A caller that gave up (a camera that stopped) ends the request outright;
+    // unlike the ceiling, what streamed so far is not a partial worth keeping.
+    const onCallerAbort = () => {
+      ctrl.abort();
+      activeReader?.cancel().catch(() => {});
+    };
+    if (input.signal?.aborted) onCallerAbort();
+    input.signal?.addEventListener('abort', onCallerAbort, { once: true });
 
     // No-progress watchdog. Polled rather than armed, so a wake-up burst
     // after a suspend can't fire it, and disposed below so a finished call
@@ -300,8 +313,10 @@ export class LlamaVisionProvider implements RecognitionProvider {
     } finally {
       clearInterval(idlePoll);
       ceiling.signal.removeEventListener('abort', onCeiling);
+      input.signal?.removeEventListener('abort', onCallerAbort);
       ceiling.dispose();
     }
+    if (input.signal?.aborted) throw new Error('recognition was canceled');
 
     const trimmed = text.trim();
     if (!trimmed) {

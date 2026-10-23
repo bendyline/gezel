@@ -339,6 +339,11 @@ export function firstSentence(text: string): string {
   return trimmed.slice(0, cut).trim();
 }
 
+function truncatePrompt(prompt: string): string {
+  const flat = prompt.replace(/\s+/g, ' ').trim();
+  return flat.length > 300 ? `${flat.slice(0, 299).trimEnd()}…` : flat;
+}
+
 const ADAPTERS: Record<string, FixedFunctionAdapter> = {
   generate_image: {
     /**
@@ -349,22 +354,30 @@ const ADAPTERS: Record<string, FixedFunctionAdapter> = {
      * result back to a builder, and that exact path is load-bearing for
      * HTML tasks.
      */
-    formatResult(rawText) {
+    formatResult(rawText, toolArgs) {
       const match = /Generated\s+(\d+\s*[×x]\s*\d+)\s+image\s+with\s+(\S+)/i.exec(rawText);
       if (match) {
         const dims = match[1]!.replace(/\s+/g, '');
         const model = match[2]!;
+        const shape = typeof toolArgs.aspectRatio === 'string' ? ` (${toolArgs.aspectRatio})` : '';
         // Surface an img2img skip honestly: the user asked for an edit
         // of the previous image but the model can't do that, so the
         // result is a prompt-only regeneration.
         const skipSuffix = /source image was not used/i.test(rawText)
           ? ' (This model cannot edit an existing image — regenerated from the revised prompt instead.)'
           : '';
+        // The prompt the engine drew, after the request words, the size
+        // words and any follow-up composition were worked out. Without it
+        // the person cannot tell what their message turned into.
+        const promptLine =
+          typeof toolArgs.prompt === 'string' && toolArgs.prompt.trim()
+            ? `\n\nPrompt: ${truncatePrompt(toolArgs.prompt)}`
+            : '';
         const imgTag = /<img\s+src="([^"]+)">/i.exec(rawText);
         if (imgTag) {
-          return `Generated ${dims} image with ${model}. Use \`<img src="${imgTag[1]!}">\` in workspace HTML.${skipSuffix}`;
+          return `Generated ${dims}${shape} image with ${model}. Use \`<img src="${imgTag[1]!}">\` in workspace HTML.${skipSuffix}${promptLine}`;
         }
-        return `Generated ${dims} image with ${model}.${skipSuffix}`;
+        return `Generated ${dims}${shape} image with ${model}.${skipSuffix}${promptLine}`;
       }
       return firstSentence(rawText);
     },

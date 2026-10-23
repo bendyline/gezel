@@ -147,7 +147,7 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
       '/v1/apps': {
         get: {
           summary: 'List connected apps and grants.',
-          description: 'Requires a first-party root or UI scope. Drives Connected Apps settings.',
+          description: 'Requires a first-party root or UI scope. Drives Integrations settings.',
           security: [{ bearerAuth: [] }],
           responses: {
             '200': {

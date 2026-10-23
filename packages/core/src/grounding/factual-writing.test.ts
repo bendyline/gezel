@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   factualLookupTools,
   factualWritingGuidance,
+  isEvidenceTool,
   isFactualRole,
   resolveFactualWriting,
 } from './factual-writing.js';
@@ -111,5 +112,27 @@ describe('factualWritingGuidance', () => {
       lookupPreference: 'knowledge',
     });
     expect(knowledge).toContain('`search({ query, sources: ["knowledge"] })`');
+  });
+});
+
+describe('isEvidenceTool', () => {
+  it("counts gezel's own tools only from the fixed list", () => {
+    expect(isEvidenceTool('read_file')).toBe(true);
+    expect(isEvidenceTool('read_task_notes')).toBe(false);
+    expect(isEvidenceTool('search_wikipedia')).toBe(false);
+  });
+
+  it("counts a third-party server's lookups by name, never its writes", () => {
+    for (const tool of [
+      'search_wikipedia',
+      'read_wikipedia_sources',
+      'brave_web_search',
+      'get_page',
+    ]) {
+      expect(isEvidenceTool(tool, { thirdParty: true }), tool).toBe(true);
+    }
+    for (const tool of ['save_artifact', 'create_page', 'update_record', 'convert_document']) {
+      expect(isEvidenceTool(tool, { thirdParty: true }), tool).toBe(false);
+    }
   });
 });

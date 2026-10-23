@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 /**
  * `@bendyline/gezel-sdk/page` — the Output Pane API v1 typing contract for
  * `window.gezel`, the object every served project-type page codes against.
@@ -5,7 +6,8 @@
  * The runtime object is injected server-side by the daemon
  * (`packages/service/src/http/routes/page-api-shim.ts` splices the shim
  * into every `text/html` response served from the `type` preview source),
- * so pages never bundle an implementation — this module exists so gilde
+ * so hosted pages need no bundled implementation (the demo publisher/exporter supplies the same
+ * components and fonts) — this module exists so gilde
  * page authors and the host UI relay share one contract. The postMessage
  * envelope behind it is validated by the zod schemas in
  * `@bendyline/gezel` (`packages/core/src/schemas/page-bridge.ts`); the
@@ -24,8 +26,8 @@
  *    and `data.*` travel as same-origin fetches against the head API under
  *    the visitor's cookie; `data.watch` polls; `refresh()` reloads. The
  *    page still never sees a credential.
- *  - `demo` — a raw file opened outside gezel entirely. The real shim is
- *    never present there; gilde ships a paste-in stub that defines
+ *  - `demo` — a published preview or exported offline page. The shared demo
+ *    bootstrap defines
  *    `window.gezel` only when the real one is absent.
  *
  * Guard accordingly: `if (window.gezel) { ... }`.
@@ -178,11 +180,32 @@ export interface GezelPageWatchOptions {
 }
 
 /**
- * Read-only access to the project's files, scoped to what the page's
+ * Read access to the project's files, scoped to what the page's
  * manifest declared readable. Out-of-scope paths reject with code
- * `'not-allowed'`; writes happen through {@link GezelPageToolsApi} only.
+ * `'not-allowed'`. Uploads use separately declared import destinations;
+ * other writes happen through {@link GezelPageToolsApi}.
  */
 export interface GezelPageDataApi {
+  /** Explicit manifest destinations and current workspace write availability. */
+  importTargets(): Promise<GezelImportTarget[]>;
+  /** Copies selected files, keeping both on name conflicts. Results include partial failures.
+   * Embedded desktop only; demo adapters keep files in memory. Maximum 100 files/batch,
+   * 256 MiB/file (destinations can lower this). Cancellation does not undo completed files. */
+  importFiles(
+    files: Iterable<File>,
+    opts: {
+      target: string;
+      signal?: AbortSignal;
+      onProgress?: (progress: { completed: number; total: number; name: string }) => void;
+    },
+  ): Promise<GezelImportResult[]>;
+  /**
+   * Open a declared file in Gezel's existing file viewer (CSV table,
+   * spreadsheet, document, etc.). Checks the manifest's read scope and
+   * file existence before navigating. Embedded mode only; rejects with
+   * 'unavailable' in standalone browser and serve modes.
+   */
+  open(path: string, opts?: GezelPageSourceOptions): Promise<void>;
   /**
    * Read one file. Resolves to a string for `'text'`, a parsed value for
    * `'json'`, or a `Uint8Array` for `'bytes'` (see
@@ -213,6 +236,52 @@ export interface GezelPageDataApi {
   url(path: string, opts?: GezelPageSourceOptions): string;
 }
 
+/** A queryable table backed by a file/directory in the page's declared reads. */
+export interface GezelPageTable {
+  /** Stable SQL identifier issued by the host. Do not derive this from a filename. */
+  name: string;
+  title: string;
+  source: GezelPageReadSource;
+  /** Original workspace file, or the connector's artifact table directory. */
+  path: string;
+  rows: number;
+  columnCount: number;
+  updatedAt?: string;
+  schemaInferred: boolean;
+}
+export interface GezelPageTableSchema {
+  op: 'describe';
+  table: GezelPageTable;
+  columns: Array<{
+    name: string;
+    type: 'BOOLEAN' | 'BIGINT' | 'DOUBLE' | 'VARCHAR' | 'DATE' | 'TIMESTAMP' | 'JSON';
+    role: 'time' | 'dimension' | 'measure' | 'identifier' | 'attribute';
+    description?: string;
+    unit?: string;
+    cardinalityHint?: string;
+    examples?: string[];
+  }>;
+  description?: string;
+  grain?: string;
+}
+export interface GezelPageTableQuery {
+  op: 'query';
+  rows: Record<string, unknown>[];
+  columns: string[];
+  truncated: boolean;
+  limit: number;
+  tablesInScope: string[];
+}
+/** Read-only DuckDB access in embedded/serve mode on hosts with a query engine.
+ * Permissions are checked again on every call; no table names grant authority. */
+export interface GezelPageTablesApi {
+  list(): Promise<GezelPageTable[]>;
+  describe(table: string): Promise<GezelPageTableSchema>;
+  /** One read-only statement. Default limit 100, max 1000 rows and 1 MiB.
+   * `tables` can narrow the readable scope, never expand it. */
+  query(sql: string, opts?: { tables?: string[]; limit?: number }): Promise<GezelPageTableQuery>;
+}
+
 /** The host UI theme as seen by the page. */
 export interface GezelPageTheme {
   mode: 'light' | 'dark';
@@ -220,6 +289,7 @@ export interface GezelPageTheme {
 
 /** Host UI state the page can mirror. */
 export interface GezelPageUiApi {
+  components: GezelPageComponents;
   /** The current theme. Live — reflects the host's latest pushed value. */
   theme: GezelPageTheme;
   /**
@@ -228,6 +298,54 @@ export interface GezelPageUiApi {
    * @returns An unsubscribe function.
    */
   onTheme(cb: (t: GezelPageTheme) => void): () => void;
+}
+
+export interface GezelPageFile {
+  source?: GezelPageReadSource;
+  path: string;
+  name?: string;
+  size?: number;
+  mtime?: number;
+}
+export interface GezelImportTarget {
+  id: string;
+  source: 'workspace';
+  path: string;
+  accept?: string[];
+  maxFileBytes?: number;
+  writable: boolean;
+  reason?: string;
+}
+export type GezelImportResult =
+  | { ok: true; name: string; file: GezelPageFile }
+  | { ok: false; name: string; error: string };
+export interface GezelFileCardOptions {
+  file: GezelPageFile;
+  variant?: 'tile' | 'row';
+  thumbnail?: string | false;
+  onActivate?: (file: GezelPageFile) => void | Promise<void>;
+}
+export interface GezelFileAdderOptions {
+  target: string;
+  onAdded?: (files: GezelPageFile[]) => void | Promise<void>;
+}
+export interface GezelPageComponent<T> {
+  element: HTMLElement;
+  update(options: Partial<T>): void;
+  destroy(): void;
+}
+export interface GezelPageComponents {
+  version: 1;
+  fileCard(
+    target: string | HTMLElement,
+    options: GezelFileCardOptions,
+  ): GezelPageComponent<GezelFileCardOptions>;
+  fileAdder(
+    target: string | HTMLElement,
+    options: GezelFileAdderOptions,
+  ): GezelPageComponent<GezelFileAdderOptions> & { refresh(): Promise<void> };
+  /** Present only in standalone demo mode; releases imported object URLs on reset. */
+  demo?: { files(): GezelPageFile[]; reset(): void };
 }
 
 /**
@@ -242,6 +360,7 @@ export interface GezelPageApi {
   tools: GezelPageToolsApi;
   /** Read and watch project files within the page's declared scope. */
   data: GezelPageDataApi;
+  tables: GezelPageTablesApi;
   /** Mirror host UI state (theme). */
   ui: GezelPageUiApi;
   /** Ask the host to re-serve the page (embedded); reloads the tab in browser mode. */

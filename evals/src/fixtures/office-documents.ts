@@ -15,6 +15,8 @@
  * stable across runs.
  */
 
+import { inflateRawSync } from 'node:zlib';
+
 /** Stored (uncompressed) ZIP — the container under every Open XML format. */
 export function zipStored(files: Array<[string, string]>): Uint8Array {
   const encoder = new TextEncoder();
@@ -88,6 +90,40 @@ export function readStoredZip(bytes: Uint8Array): Map<string, string> {
       decoder.decode(bytes.subarray(dataStart, dataStart + size)),
     );
     cursor = dataStart + size;
+  }
+  return out;
+}
+
+/**
+ * Read any ZIP's entries — stored or deflated — through its central
+ * directory. Real converters compress their containers, which
+ * {@link readStoredZip} cannot read; graders use this one on tool output.
+ */
+export function readZip(bytes: Uint8Array): Map<string, Uint8Array> {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const decoder = new TextDecoder();
+  const out = new Map<string, Uint8Array>();
+  let end = bytes.length - 22;
+  while (end >= 0 && view.getUint32(end, true) !== 0x06054b50) end--;
+  if (end < 0) return out;
+  const count = view.getUint16(end + 10, true);
+  let cursor = view.getUint32(end + 16, true);
+  for (let i = 0; i < count && cursor + 46 <= bytes.length; i++) {
+    if (view.getUint32(cursor, true) !== 0x02014b50) break;
+    const method = view.getUint16(cursor + 10, true);
+    const compressedSize = view.getUint32(cursor + 20, true);
+    const nameLength = view.getUint16(cursor + 28, true);
+    const extraLength = view.getUint16(cursor + 30, true);
+    const commentLength = view.getUint16(cursor + 32, true);
+    const localOffset = view.getUint32(cursor + 42, true);
+    const name = decoder.decode(bytes.subarray(cursor + 46, cursor + 46 + nameLength));
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    const data = bytes.subarray(dataStart, dataStart + compressedSize);
+    if (method === 0) out.set(name, data);
+    else if (method === 8) out.set(name, new Uint8Array(inflateRawSync(data)));
+    cursor += 46 + nameLength + extraLength + commentLength;
   }
   return out;
 }
@@ -239,4 +275,125 @@ export function buildMarkdown(blocks: readonly DocumentBlock[]): string {
             : block.text,
     )
     .join('\n\n')}\n`;
+}
+
+/** The brand values a deck's theme part carries. Colors are six hex digits, no `#`. */
+export interface PptxTheme {
+  name: string;
+  headingFont: string;
+  bodyFont: string;
+  /** dk1, lt1, dk2, lt2, accent1..accent6, hlink, folHlink — in that order. */
+  colors: {
+    dark1: string;
+    light1: string;
+    dark2: string;
+    light2: string;
+    accents: [string, string, string, string, string, string];
+    hyperlink: string;
+    followedHyperlink: string;
+  };
+}
+
+export interface PptxSlide {
+  title: string;
+  bullets?: readonly string[];
+}
+
+const PPTX_NS =
+  'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"';
+const REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+
+function pptxThemeXml(theme: PptxTheme): string {
+  const c = theme.colors;
+  const srgb = (tag: string, hex: string) => `<a:${tag}><a:srgbClr val="${hex}"/></a:${tag}>`;
+  const solid = '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>';
+  const line = `<a:ln w="9525">${solid}</a:ln>`;
+  return `${XML_DECL}<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="${xmlEscape(theme.name)}"><a:themeElements><a:clrScheme name="${xmlEscape(theme.name)}">${srgb('dk1', c.dark1)}${srgb('lt1', c.light1)}${srgb('dk2', c.dark2)}${srgb('lt2', c.light2)}${c.accents.map((hex, i) => srgb(`accent${i + 1}`, hex)).join('')}${srgb('hlink', c.hyperlink)}${srgb('folHlink', c.followedHyperlink)}</a:clrScheme><a:fontScheme name="${xmlEscape(theme.name)}"><a:majorFont><a:latin typeface="${xmlEscape(theme.headingFont)}"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="${xmlEscape(theme.bodyFont)}"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="${xmlEscape(theme.name)}"><a:fillStyleLst>${solid}${solid}${solid}</a:fillStyleLst><a:lnStyleLst>${line}${line}${line}</a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst>${solid}${solid}${solid}</a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>`;
+}
+
+function pptxShape(id: number, name: string, placeholder: string, paragraphs: string): string {
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph ${placeholder}/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>${paragraphs}</p:txBody></p:sp>`;
+}
+
+const PPTX_GROUP =
+  '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>';
+
+/**
+ * A PowerPoint deck with a real master, layout and theme part.
+ *
+ * The theme is the point: its fonts and colors are what a theme-inference
+ * tool reads, so a fixture that invents them gives a scenario values no model
+ * can know without opening the file. Slides use title/body placeholders so
+ * the text inherits the theme exactly as an authored deck's would.
+ */
+export function buildPptx(slides: readonly PptxSlide[], theme: PptxTheme): Uint8Array {
+  const paragraph = (text: string) =>
+    `<a:p><a:r><a:rPr lang="en-US"/><a:t>${xmlEscape(text)}</a:t></a:r></a:p>`;
+  const slideXml = (slide: PptxSlide) =>
+    `${XML_DECL}<p:sld ${PPTX_NS}><p:cSld><p:spTree>${PPTX_GROUP}${pptxShape(2, 'Title 1', 'type="title"', paragraph(slide.title))}${
+      slide.bullets?.length
+        ? pptxShape(3, 'Content 2', 'idx="1"', slide.bullets.map(paragraph).join(''))
+        : ''
+    }</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
+  const slideOverrides = slides
+    .map(
+      (_, i) =>
+        `<Override PartName="/ppt/slides/slide${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`,
+    )
+    .join('');
+  const files: Array<[string, string]> = [
+    [
+      '[Content_Types].xml',
+      `${XML_DECL}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>${slideOverrides}</Types>`,
+    ],
+    [
+      '_rels/.rels',
+      `${XML_DECL}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${REL_NS}/officeDocument" Target="ppt/presentation.xml"/></Relationships>`,
+    ],
+    [
+      'ppt/presentation.xml',
+      `${XML_DECL}<p:presentation ${PPTX_NS}><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst>${slides
+        .map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${i + 3}"/>`)
+        .join(
+          '',
+        )}</p:sldIdLst><p:sldSz cx="12192000" cy="6858000" type="screen16x9"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>`,
+    ],
+    [
+      'ppt/_rels/presentation.xml.rels',
+      `${XML_DECL}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${REL_NS}/slideMaster" Target="slideMasters/slideMaster1.xml"/><Relationship Id="rId2" Type="${REL_NS}/theme" Target="theme/theme1.xml"/>${slides
+        .map(
+          (_, i) =>
+            `<Relationship Id="rId${i + 3}" Type="${REL_NS}/slide" Target="slides/slide${i + 1}.xml"/>`,
+        )
+        .join('')}</Relationships>`,
+    ],
+    [
+      'ppt/slideMasters/slideMaster1.xml',
+      `${XML_DECL}<p:sldMaster ${PPTX_NS}><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg><p:spTree>${PPTX_GROUP}${pptxShape(2, 'Title Placeholder 1', 'type="title"', '<a:p><a:endParaRPr lang="en-US"/></a:p>')}${pptxShape(3, 'Text Placeholder 2', 'type="body" idx="1"', '<a:p><a:endParaRPr lang="en-US"/></a:p>')}</p:spTree></p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst><p:txStyles><p:titleStyle><a:lvl1pPr><a:defRPr sz="4000"><a:solidFill><a:schemeClr val="accent1"/></a:solidFill><a:latin typeface="+mj-lt"/></a:defRPr></a:lvl1pPr></p:titleStyle><p:bodyStyle><a:lvl1pPr><a:defRPr sz="2000"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/></a:defRPr></a:lvl1pPr></p:bodyStyle><p:otherStyle/></p:txStyles></p:sldMaster>`,
+    ],
+    [
+      'ppt/slideMasters/_rels/slideMaster1.xml.rels',
+      `${XML_DECL}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${REL_NS}/slideLayout" Target="../slideLayouts/slideLayout1.xml"/><Relationship Id="rId2" Type="${REL_NS}/theme" Target="../theme/theme1.xml"/></Relationships>`,
+    ],
+    [
+      'ppt/slideLayouts/slideLayout1.xml',
+      `${XML_DECL}<p:sldLayout ${PPTX_NS} type="obj" preserve="1"><p:cSld name="Title and Content"><p:spTree>${PPTX_GROUP}${pptxShape(2, 'Title 1', 'type="title"', '<a:p><a:endParaRPr lang="en-US"/></a:p>')}${pptxShape(3, 'Content Placeholder 2', 'idx="1"', '<a:p><a:endParaRPr lang="en-US"/></a:p>')}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>`,
+    ],
+    [
+      'ppt/slideLayouts/_rels/slideLayout1.xml.rels',
+      `${XML_DECL}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${REL_NS}/slideMaster" Target="../slideMasters/slideMaster1.xml"/></Relationships>`,
+    ],
+    ['ppt/theme/theme1.xml', pptxThemeXml(theme)],
+    ...slides.flatMap(
+      (slide, i): Array<[string, string]> => [
+        [`ppt/slides/slide${i + 1}.xml`, slideXml(slide)],
+        [
+          `ppt/slides/_rels/slide${i + 1}.xml.rels`,
+          `${XML_DECL}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${REL_NS}/slideLayout" Target="../slideLayouts/slideLayout1.xml"/></Relationships>`,
+        ],
+      ],
+    ),
+  ];
+  return zipStored(files);
 }

@@ -80,6 +80,52 @@ describe('LlamaCppProvider physical request gate', () => {
     expect(provider.getLaunchedSlots()).toBe(4);
   });
 
+  it('narrows to one slot exactly like a one-slot launch', async () => {
+    const supervisor = {
+      async ensureRunning() {
+        return { command: 'fake', args: [], baseUrl: 'http://llama.test' };
+      },
+      markUsed() {},
+      async stop() {},
+    } as unknown as NativeEngineSupervisor;
+    const narrowed = new LlamaCppProvider({ supervisor, concurrency: 2 });
+    const oneSlot = new LlamaCppProvider({ supervisor, concurrency: 1 });
+    const setSlotCount = vi.fn();
+    narrowed.setCacheAdapter({ setSlotCount } as never);
+    // The request that asked for the engine keeps its lease across the retry.
+    const release = await narrowed.acquireExclusiveEngineRequest('first turn');
+
+    expect(narrowed.narrowEngineSlots(1)).toBe(true);
+    expect(narrowed.getLaunchedSlots()).toBe(1);
+    expect(narrowed.batch.maxConcurrency).toBe(oneSlot.batch.maxConcurrency);
+    const { concurrency, interactiveConcurrency, backgroundConcurrency } = oneSlot.queue.describe();
+    expect(narrowed.queue.describe()).toMatchObject({
+      concurrency,
+      interactiveConcurrency,
+      backgroundConcurrency,
+    });
+    expect(setSlotCount).toHaveBeenCalledWith(1);
+    release();
+  });
+
+  it('refuses to narrow below the requests already holding a slot', async () => {
+    const supervisor = {
+      async ensureRunning() {
+        return { command: 'fake', args: [], baseUrl: 'http://llama.test' };
+      },
+      markUsed() {},
+      async stop() {},
+    } as unknown as NativeEngineSupervisor;
+    const provider = new LlamaCppProvider({ supervisor, concurrency: 2 });
+    const first = await provider.acquireExclusiveEngineRequest('first turn');
+    const second = await provider.acquireExclusiveEngineRequest('second turn');
+
+    expect(provider.narrowEngineSlots(1)).toBe(false);
+    expect(provider.getLaunchedSlots()).toBe(2);
+    first();
+    second();
+  });
+
   it('keeps an external server serial unless its batch width is explicit', () => {
     const provider = new LlamaCppProvider({
       baseUrl: 'http://llama.test',

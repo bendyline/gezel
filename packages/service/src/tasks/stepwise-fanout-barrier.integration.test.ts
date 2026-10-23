@@ -121,3 +121,37 @@ describe('create-time fanout under stepwise mode', () => {
     );
   }, 60_000);
 });
+
+it('ordinary batch children settle without scanning siblings or redispatching their owner', async () => {
+  const { store, tasks } = svc.context;
+  const project = await store.createProject({ name: 'Media batch throughput' });
+  const parent = await tasks.create(project.id, {
+    title: 'CLI-owned media batch',
+    description: 'The CLI dispatches and reconciles children itself.',
+    assignee: { kind: 'user' },
+    createdBy: { kind: 'user' },
+    steps: [{ id: 'batch', name: 'Batch', prompt: 'Await the CLI.', terminal: true }],
+    entryStepId: 'batch',
+  });
+  const child = await tasks.create(project.id, {
+    title: 'Inspect one image',
+    description: 'One media stage in an ordinary task hierarchy.',
+    assignee: { kind: 'user' },
+    createdBy: { kind: 'user' },
+    parentTaskRef: parent.ref,
+    steps: [{ id: 'review', name: 'Review', prompt: 'Inspect the image.', terminal: true }],
+    entryStepId: 'review',
+  });
+  const children = vi.spyOn(tasks, 'listChildren');
+  const redispatch = vi.spyOn(tasks, 'redispatchActiveStep');
+  try {
+    const completed = await tasks.completeStep(project.id, child.num, 'review');
+    expect(completed.status).toBe('complete');
+    expect(children).not.toHaveBeenCalled();
+    expect(redispatch).not.toHaveBeenCalled();
+    expect((await tasks.getByRef(parent.ref))?.status).toBe('active');
+  } finally {
+    children.mockRestore();
+    redispatch.mockRestore();
+  }
+}, 30_000);

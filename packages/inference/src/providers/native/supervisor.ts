@@ -281,7 +281,9 @@ const RESTART_WINDOW_MS = 60_000;
 /**
  * Ceiling on `recoverStartup` retries within one start. Two covers the
  * full MoE degradation ladder (partial split → all experts to RAM →
- * engine-owned fit); a hook that keeps asking past that is looping.
+ * engine-owned fit), or one slot and one offload rung; a hook that keeps
+ * asking past that is looping. Every failed start also spends the restart
+ * budget, which refuses a fourth start inside its window anyway.
  */
 const MAX_STARTUP_RECOVERIES = 2;
 const HEALTH_FAIL_THRESHOLD = 3;

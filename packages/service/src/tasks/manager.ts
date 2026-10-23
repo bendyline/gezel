@@ -104,6 +104,7 @@ import {
   gateFailureSignature,
   gateRemaining,
   plateauScore,
+  routesRejectionAway,
   stageForPlateau,
   withMissingDeliverableHint,
 } from './gate-escalation.js';
@@ -460,11 +461,22 @@ export class TaskManager {
    * also calls it to self-heal projects stuck `active` with no active
    * tasks — see `TaskScheduler.maybeNudge`.
    */
-  async maybeStabilizeProject(projectId: string): Promise<void> {
+  async maybeStabilizeProject(projectId: string, knownParentRef?: string): Promise<void> {
     try {
       const project = await this.store.getProject(projectId);
       const status = project?.status ?? 'active';
       if (status !== 'active') return;
+      // A live parent is already proof that this project has unfinished work.
+      // In large CLI batches the collection root is one of the oldest tasks;
+      // finding it by walking newest-first history can take minutes.
+      if (knownParentRef) {
+        const parent = await this.getByRef(knownParentRef);
+        if (
+          parent?.projectId === projectId &&
+          ['active', 'draft'].includes(taskEffectiveStatus(parent))
+        )
+          return;
+      }
       // Task completion is frequent in bulk workflows. Stop at the first
       // live task instead of retaining the project's entire completed history.
       // A draft is pending work and blocks stabilization just like an active task.
@@ -1676,7 +1688,7 @@ export class TaskManager {
     // Drive the project lifecycle: closing/completing may bring the
     // project to rest; reopening/pausing is live work that wakes it.
     if (status === 'complete' || status === 'canceled') {
-      await this.maybeStabilizeProject(projectId);
+      await this.maybeStabilizeProject(projectId, task.parentTaskRef);
     } else {
       await this.reactivateProject(projectId);
     }
@@ -2744,7 +2756,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     // Terminal step closed the task → the project may have come to rest;
     // advancing to a new step is live work → keep/make it active.
     if (terminating) {
-      await this.maybeStabilizeProject(projectId);
+      await this.maybeStabilizeProject(projectId, task.parentTaskRef);
     } else {
       await this.reactivateProject(projectId);
     }
@@ -3010,12 +3022,17 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     // fresh stage directive, fresh fingerprint, so the nudge actually
     // delivers. Which inputs are hashed, and why scripted gates and
     // multi-input checks are never damped, is gate-damping.ts's contract.
-    const contentHash = await gateDampingHash(gate, step, (file, artifact) =>
-      (artifact
-        ? this.store.readProjectArtifact(projectId, file)
-        : this.store.readProjectWorkspaceFile(projectId, file)
-      ).catch(() => null),
-    );
+    // A review gate is never damped: an unchanged FAIL verdict means the
+    // work still falls short, so it must route back like any other, not
+    // earn a nudge to change the verdict.
+    const contentHash = routesRejectionAway(step.id, gate.onReject)
+      ? undefined
+      : await gateDampingHash(gate, step, (file, artifact) =>
+          (artifact
+            ? this.store.readProjectArtifact(projectId, file)
+            : this.store.readProjectWorkspaceFile(projectId, file)
+          ).catch(() => null),
+        );
     if (
       contentHash !== undefined &&
       step.lastGateReject?.contentHash !== undefined &&
@@ -3394,6 +3411,9 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         .map((r) => `script:${r.scriptName}`),
     ]);
     let stage: EscalationStage = modelDriven ? stageForPlateau(score) : 0;
+    const loopTarget = outcome.goto ?? gate.onReject;
+    const reviewLoop = routesRejectionAway(step.id, loopTarget);
+    if (reviewLoop && stage < 3) stage = 0;
     // See the frozen path: a passing deliverable is not the thing to
     // rewrite, and notes, read evidence, and opaque scripts have no file to name.
     const deliverableFile =
@@ -3484,8 +3504,16 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     const noteHeading = converging
       ? `# Gate — batch accepted, corpus incomplete (pass ${progressAttempts}/${GATE_MAX_PROGRESS_ATTEMPTS})`
       : `# Gate — not yet met (attempt ${attempt}/${gate.maxAttempts})`;
+    // The work step reads this note on its next pass; telling it to "advance
+    // again" on the review's file sent it after the verdict.
+    const reworkStep = reviewLoop
+      ? task.craftbook.steps.find((s) => s.id === loopTarget)
+      : undefined;
+    const noteTail = reworkStep
+      ? `The task goes back to "${reworkStep.name}" to fix the gaps the review named.`
+      : 'Address these specifically, then advance again — the gate re-checks automatically.';
     await this.appendNote(projectId, task.num, {
-      text: `${noteHeading}\n\n${message}\n\nAddress these specifically, then advance again — the gate re-checks automatically.`,
+      text: `${noteHeading}\n\n${message}\n\n${noteTail}`,
       author: { kind: 'user' },
       stepId: step.id,
     }).catch(() => {});
@@ -3663,7 +3691,6 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       };
     }
 
-    const loopTarget = outcome.goto ?? gate.onReject;
     if (loopTarget) {
       updated = await this.reactivateStepForGate(projectId, updated, loopTarget, step, cause);
     }

@@ -57,6 +57,13 @@ export interface WorkRankInput {
   procedure?: boolean;
   /** Implementation work (code, a site, an app). */
   implementation?: boolean;
+  /**
+   * The request is about code that already exists (`existingCodeTarget`).
+   * Nothing new is being built, so files in a project go to the developer,
+   * from Default too. A repository is not in any project yet, so from Default
+   * nothing here fits it: fetching it is the coordinator's own first move.
+   */
+  existingCode?: 'files' | 'repository';
   /** On-roster tools that serve an answer the coordinator gives itself. */
   selfTools?: string[];
   /** The on-roster delegate for implementation inside an existing project. */
@@ -150,8 +157,21 @@ export function rankWorkOptions(input: WorkRankInput): SuggestWorkResult {
   const guidance: WorkGuidance[] = [];
   const selfVerdict: WorkGuidance = { kind: 'self', tools: (input.selfTools ?? []).slice(0, 6) };
   if (question) guidance.push(selfVerdict);
-  if (!question && input.implementation && !input.inDefault && input.specialist) {
-    guidance.push({ kind: 'specialist', ...input.specialist });
+  // A fix to a file in another project, asked from Default: the baseline
+  // coordinator found the project and delegated, and the list without this
+  // verdict offered only Invoice Generator for a cart-total bug (2026-10-22).
+  const specialistHere = !input.inDefault;
+  const specialist =
+    !question &&
+    input.implementation === true &&
+    input.specialist !== undefined &&
+    (specialistHere || input.existingCode === 'files');
+  if (specialist) {
+    guidance.push({
+      kind: 'specialist',
+      ...input.specialist!,
+      ...(specialistHere ? {} : { otherProject: true }),
+    });
   }
   // A type or a new project is the whole job, so a new recipe is not what is
   // missing: "post on LinkedIn every day" read as a procedure beside Social
@@ -165,7 +185,13 @@ export function rankWorkOptions(input: WorkRankInput): SuggestWorkResult {
   ) {
     guidance.push({ kind: 'author' });
   }
-  if (!question && options.length === 0 && !input.procedure) {
+  if (
+    !question &&
+    options.length === 0 &&
+    !input.procedure &&
+    !specialist &&
+    !(input.inDefault && input.existingCode)
+  ) {
     guidance.push(askVerdict(input.inDefault));
   }
   if (!question) guidance.push(selfVerdict);

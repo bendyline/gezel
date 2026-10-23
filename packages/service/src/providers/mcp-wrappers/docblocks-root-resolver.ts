@@ -48,7 +48,7 @@ interface ReadRoot {
 
 const readRootTables = new WeakMap<McpToolWrapperContext, Promise<ReadRoot[]>>();
 
-function isDocblocksMcp(spec: McpServerSpec): boolean {
+export function isDocblocksMcp(spec: McpServerSpec): boolean {
   return spec.toolsetId === 'docblocks';
 }
 
@@ -58,19 +58,27 @@ export function docblocksRootId(physicalPath: string, platform = process.platfor
   return `root-${createHash('sha256').update(normalized).digest('hex').slice(0, 16)}`;
 }
 
-/** Directories granted by `--allow-read`, a commander variadic option. */
-export function allowReadDirs(args: readonly string[]): string[] {
+/** Directories granted by a commander variadic option such as `--allow-read`. */
+export function allowedDirs(
+  args: readonly string[],
+  flag: '--allow-read' | '--allow-write',
+): string[] {
   const dirs: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg.startsWith('--allow-read=')) {
-      dirs.push(arg.slice('--allow-read='.length));
+    if (arg.startsWith(`${flag}=`)) {
+      dirs.push(arg.slice(flag.length + 1));
       continue;
     }
-    if (arg !== '--allow-read') continue;
+    if (arg !== flag) continue;
     while (i + 1 < args.length && !args[i + 1]!.startsWith('-')) dirs.push(args[++i]!);
   }
   return dirs;
+}
+
+/** Directories granted by `--allow-read`. */
+export function allowReadDirs(args: readonly string[]): string[] {
+  return allowedDirs(args, '--allow-read');
 }
 
 function listedReadRoots(text: string): Map<string, string> {
@@ -152,7 +160,7 @@ function unrootedFileSource(value: unknown): Record<string, unknown> | null {
 }
 
 /** DocBlocks' root-relative grammar. Anything else is left for DocBlocks to reject in its own words. */
-function isRootRelativePath(path: string): boolean {
+export function isRootRelativePath(path: string): boolean {
   if (!path || path.length > 4096 || path.includes('\\') || path.startsWith('/')) return false;
   if (/^[a-zA-Z]:/.test(path)) return false;
   return path

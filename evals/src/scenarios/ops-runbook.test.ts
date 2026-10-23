@@ -139,6 +139,16 @@ describe('ops-runbook grader', () => {
     expect(check.signals).toContain('source-reads-grounded');
   });
 
+  it('defers provenance while a turn is still running, and judges it once committed', () => {
+    const running = evaluateRunbook({ toolTrace: [], turnInProgress: true });
+    expect(running.ok).toBe(false);
+    expect(running.failReason ?? '').not.toContain('source-read provenance');
+    expect(running.signals).not.toContain('source-reads-grounded');
+
+    const committed = evaluateRunbook({ toolTrace: [] });
+    expect(committed.failReason).toContain('cannot identify committed final recording');
+  });
+
   it('accepts CLI-native shell reads and writes as ordered provenance', () => {
     const shellTrace = [
       shellCall(

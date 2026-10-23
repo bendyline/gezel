@@ -1,6 +1,12 @@
 import type { ChatMessage } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { EvidenceLedger, MAX_WRITE_REFUSALS, removeCitationMarkers } from './evidence-ledger.js';
+import {
+  EvidenceLedger,
+  MAX_WRITE_REFUSALS,
+  blocksWrite,
+  personGivenText,
+  removeCitationMarkers,
+} from './evidence-ledger.js';
 
 const article =
   'George Washington was born on February 22, 1732, in Westmoreland County, Virginia. His father Augustine Washington died in 1743. He married Martha Dandridge Custis on January 6, 1759.';
@@ -98,21 +104,24 @@ describe('EvidenceLedger', () => {
     ledger.setLookupTools(['wikipedia_search', 'wikipedia_read'], 'wikipedia');
     ledger.labelToolResult('wikipedia_read', { title: 'George Washington' }, article);
     const bad = {
-      text: 'Washington was born in 1732 [1]. He had a son named Samuel.',
+      text: 'Washington was born in 1732 [1]. He had a son named Samuel in 1741.',
       format: 'markdown',
     };
     for (let i = 0; i < MAX_WRITE_REFUSALS; i++) {
       const verdict = ledger.checkDocumentWrite('doc_insert_text', bad);
       expect(verdict?.kind).toBe('reject');
       if (verdict?.kind === 'reject') {
-        expect(verdict.error).toContain('no evidence shows "Samuel"');
+        expect(verdict.error).toContain('"1741"');
         expect(verdict.error).toContain('Your next tool call must be `wikipedia_search`');
       }
     }
     const through = ledger.checkDocumentWrite('doc_insert_text', bad);
     expect(through).toEqual({
       kind: 'allow',
-      args: { text: 'Washington was born in 1732. He had a son named Samuel.', format: 'markdown' },
+      args: {
+        text: 'Washington was born in 1732. He had a son named Samuel in 1741.',
+        format: 'markdown',
+      },
     });
     const unverified = ledger.takeUnverifiedWrites();
     expect(unverified.places).toEqual(['the document']);
@@ -120,6 +129,41 @@ describe('EvidenceLedger', () => {
       'uncited',
     ]);
     expect(ledger.takeUnverifiedWrites()).toEqual({ sentences: [], places: [] });
+  });
+
+  // 2026-10-21 sweep: refusals of "Report", "Status", "Does" and a dashboard
+  // called Grafana cost whole rewrites. A few unsourced names are noted.
+  it('notes a write with only a few unsourced names instead of refusing it', () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn('Write about Washington.');
+    ledger.setLookupTools(['wikipedia_search', 'wikipedia_read'], 'wikipedia');
+    ledger.labelToolResult('wikipedia_read', { title: 'George Washington' }, article);
+    const nameOnly = {
+      path: 'notes.md',
+      content: 'Washington was born in 1732 [1]. He had a son named Samuel.',
+    };
+    expect(ledger.checkProseFileWrite('write_file', nameOnly)?.kind).not.toBe('reject');
+    expect(ledger.takeUnverifiedWrites().sentences.map((s) => s.status)).toEqual(['uncited']);
+
+    const manyNames = {
+      path: 'family.md',
+      content:
+        'He had a son named Samuel. His daughter was Prudence. His brother Ezekiel farmed nearby.',
+    };
+    expect(ledger.checkProseFileWrite('write_file', manyNames)?.kind).toBe('reject');
+  });
+
+  it('refuses for invented dates, numbers, quotes and citations, not for names alone', () => {
+    const sentence = (checks: Array<{ kind: string; found: boolean }>, missing: string[] = []) =>
+      ({ text: 's', cites: [], status: 'uncited', checks, missing }) as never;
+    expect(blocksWrite(sentence([{ kind: 'name', found: false }], ['Samuel']))).toBe(false);
+    expect(blocksWrite(sentence([{ kind: 'year', found: false }], ['1741']))).toBe(true);
+    expect(blocksWrite(sentence([{ kind: 'quote', found: false }], ['a quote']))).toBe(true);
+    expect(blocksWrite(sentence([], ['1737 next to Mildred']))).toBe(true);
+    expect(blocksWrite(sentence([], ['3094 next to Anita']))).toBe(false);
+    expect(
+      blocksWrite({ text: 's', cites: [9], status: 'bad-citation', checks: [], missing: ['[9]'] }),
+    ).toBe(true);
   });
 
   it('tells a refused writer which lookup to call next, or to cut when it has none', () => {
@@ -133,6 +177,17 @@ describe('EvidenceLedger', () => {
     expect(armed?.kind === 'reject' && armed.error).toContain(
       'Your next tool call must be `wikipedia_search`',
     );
+  });
+
+  it("labels a third-party server's lookups, but not its writes or gezel's own notes", () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn('');
+    const page = 'Ada Lovelace published her Notes in 1843.';
+    expect(
+      ledger.labelToolResult('read_wikipedia_sources', {}, page, { thirdParty: true }),
+    ).toMatch(/^\[1\]/);
+    expect(ledger.labelToolResult('save_artifact', {}, page, { thirdParty: true })).toBeNull();
+    expect(ledger.labelToolResult('read_task_notes', {}, page, { thirdParty: false })).toBeNull();
   });
 
   it('numbers each file of a batch read as its own evidence', () => {
@@ -183,6 +238,41 @@ describe('EvidenceLedger', () => {
       expect(refused.error).toContain('`memo-product.md`');
       expect(refused.error).toContain('`search`');
     }
+  });
+
+  // incident-postmortem on GLM 5.3, 2026-10-20: the project about said
+  // "500-rate spike", every session read it, and restating it was refused.
+  it("takes the project's about and mission as the person's own words", () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn(
+      personGivenText({
+        messages: ['Write the postmortem.'],
+        clockLines: ['2026-10-20'],
+        gezelName: 'Jordan',
+        project: {
+          name: 'Checkout incident',
+          about: 'checkout-api saw a 500-rate spike after a timeout change.',
+          missionObjectives: '1. Read all 5 evidence files.',
+        },
+      }),
+    );
+    ledger.setLookupTools(['read_file', 'write_file']);
+    ledger.labelToolResult('read_file', { path: 'evidence/oncall-chat.txt' }, 'errors are all 504');
+    const write = {
+      path: 'postmortem.md',
+      content: 'Checkout saw a 500-rate spike after the timeout change.',
+    };
+    expect(ledger.checkProseFileWrite('write_file', write)).toBeNull();
+
+    const briefless = new EvidenceLedger();
+    briefless.beginTurn(personGivenText({ messages: ['Write the postmortem.'], clockLines: [] }));
+    briefless.setLookupTools(['read_file', 'write_file']);
+    briefless.labelToolResult(
+      'read_file',
+      { path: 'evidence/oncall-chat.txt' },
+      'errors are all 504',
+    );
+    expect(briefless.checkProseFileWrite('write_file', write)?.kind).toBe('reject');
   });
 
   it('names the source files the conversation mentions when nothing was read yet', () => {
@@ -261,7 +351,7 @@ describe('EvidenceLedger', () => {
     ledger.setLookupTools(['write_file', 'wikipedia_read', 'wikipedia_search'], 'wikipedia');
     const write = {
       path: 'report.md',
-      content: 'Washington was born in 1732. He had a son named Samuel.',
+      content: 'Washington was born in 1732. He had a son named Samuel in 1741.',
     };
 
     ledger.beginTurn('Write a sourced report.');
@@ -310,7 +400,7 @@ describe('EvidenceLedger', () => {
     restored.labelToolResult('wikipedia_read', { title: 'George Washington' }, article);
     const write = {
       path: 'report.md',
-      content: 'Washington was born in 1732. He had a son named Samuel.',
+      content: 'Washington was born in 1732. He had a son named Samuel in 1741.',
     };
     expect(restored.checkProseFileWrite('write_file', write)?.kind).not.toBe('reject');
 
@@ -388,7 +478,9 @@ describe('EvidenceLedger', () => {
         content: 'const year = 1753;',
       }),
     ).toBeNull();
-    expect(ledger.hooks().checkWrite('write_file', fromMemory)?.kind).toBe('reject');
+    expect(
+      ledger.hooks().checkWrite('write_file', { ...fromMemory, path: 'custis.md' })?.kind,
+    ).toBe('reject');
   });
 
   it('passes a grounded insert with its markers removed, and ignores non-document tools', () => {

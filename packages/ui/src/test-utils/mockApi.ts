@@ -78,6 +78,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listPhotoAlbums: [],
   getOnThisDay: null,
   getFileSummary: null,
+  getFileInsight: null,
   listProjectLocalGezels: { gezels: [] },
   listProjects: { projects: [] },
   listProjectWorkspaceHtmlPages: { files: [] },
@@ -96,6 +97,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listAvailableCredentials: { credentials: [] },
   listConnectors: { bindings: [] },
   listConnectorActions: { pending: [] },
+  listWatchingCameras: { cameras: [] },
   listOAuthClients: { clients: [] },
   listHistory: { entries: [] },
   listChannels: { channels: [] },
@@ -285,6 +287,12 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   },
   getConfig: { provider: 'mock' },
   listRemoteServerModels: { servers: [] },
+  getHarnessTools: {
+    config: { enabled: true, memory: 'save', images: 'local', newFolders: 'add' },
+    clients: [],
+    connections: [],
+    blocked: [],
+  },
   getCodexSetupStatus: {
     state: 'not-configured',
     models: [],

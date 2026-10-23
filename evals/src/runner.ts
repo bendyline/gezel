@@ -14,7 +14,7 @@ import {
 } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { startAutoAnswerer } from './auto-answer.ts';
-import { seedDocblocksRuntime } from './docblocks-runtime.ts';
+import { seedDocblocksBrowser, seedDocblocksRuntime } from './docblocks-runtime.ts';
 import { type EngineContextRecord, extractEngineContext } from './engine-context.ts';
 import {
   classifyTrial,
@@ -90,6 +90,7 @@ import {
   noteHarnessInterventionDelivered,
 } from './sniff-feedback.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
+import { sessionServesFinishedPass } from './stale-step-session.ts';
 import { taskStepRouteFor } from './task-step-routing.ts';
 import { writeTrialFacts } from './trial-facts.ts';
 import type {
@@ -994,6 +995,18 @@ export async function runTrial(
       });
     }
   }
+  await seedDocblocksBrowser({
+    trialHome,
+    cacheRoot,
+    ...(scenario.requiresDocblocks && process.env.GEZEL_EVAL_DOCBLOCKS_DIR
+      ? { docblocksInstallPath: process.env.GEZEL_EVAL_DOCBLOCKS_DIR }
+      : {}),
+    log,
+  }).catch((error) =>
+    log(
+      `[docblocks] preview browser seeding failed: ${error instanceof Error ? error.message : String(error)}`,
+    ),
+  );
   if (fetchUrlMockIds.length > 0) {
     let originEnv: Record<string, string>;
     try {
@@ -1412,6 +1425,7 @@ export async function runTrial(
         hardProgressTimeoutMs,
         softProgressTimeoutMs,
         inflightDeferMs: inflightDeferMsForEngine(engine),
+        throughputScale: throughputScale(opts.decodeRateTokensPerSec),
         writeCounterTrustworthy: isLocalEngine(engine),
         daemonLogPath: join(runDir, 'daemon.log'),
         ...(opts.signal ? { signal: opts.signal } : {}),
@@ -1980,15 +1994,23 @@ export function throughputScaledMaxDurationMs(args: {
   authoredMaxDurationMs: number;
   decodeRateTokensPerSec?: number | null;
 }): number {
-  const rate = args.decodeRateTokensPerSec;
-  if (rate === undefined || rate === null || !Number.isFinite(rate) || rate <= 0) {
-    return args.authoredMaxDurationMs;
-  }
-  const scale = Math.min(
+  const scale = throughputScale(args.decodeRateTokensPerSec);
+  if (scale === 1) return args.authoredMaxDurationMs;
+  return Math.min(Math.round(args.authoredMaxDurationMs * scale), DEFAULT_MAX_DURATION_MS);
+}
+
+/**
+ * How much slower than the reference rate this trial decodes, from 1 (at or
+ * above it) to {@link MAX_CEILING_THROUGHPUT_SCALE}. Every wall-clock window
+ * calibrated on the reference machine stretches by it.
+ */
+export function throughputScale(decodeRateTokensPerSec?: number | null): number {
+  const rate = decodeRateTokensPerSec;
+  if (rate === undefined || rate === null || !Number.isFinite(rate) || rate <= 0) return 1;
+  return Math.min(
     Math.max(CEILING_REFERENCE_TOKENS_PER_SEC / rate, 1),
     MAX_CEILING_THROUGHPUT_SCALE,
   );
-  return Math.min(Math.round(args.authoredMaxDurationMs * scale), DEFAULT_MAX_DURATION_MS);
 }
 
 /**
@@ -2196,9 +2218,22 @@ export function mergeLlamaCppEvalLaunchOverrides(
 
 export function llamaCppEvalLaunchOverridesForModel(
   modelId: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): LlamaCppEvalLaunchOverrides | undefined {
+  const rawSlots = env.GEZEL_EVAL_LLAMA_SLOTS?.trim();
+  const slots = rawSlots ? Number(rawSlots) : undefined;
+  if (slots !== undefined && (!Number.isSafeInteger(slots) || slots < 1 || slots > 16)) {
+    throw new Error('GEZEL_EVAL_LLAMA_SLOTS must be an integer from 1 to 16');
+  }
   const billions = modelBillionsForEval(modelId);
-  if (billions === undefined || billions < 120) return undefined;
+  if (billions === undefined || billions < 120) {
+    return slots === undefined
+      ? undefined
+      : {
+          config: { providerConcurrency: { 'llama-cpp': slots } },
+          summary: `llama-cpp eval override: concurrency=${slots}, tuning=catalog`,
+        };
+  }
 
   // Frontier-size local evals run one foreground trial at a time. The
   // production default of 2 llama-server slots × 65K context is useful
@@ -2222,13 +2257,12 @@ export function llamaCppEvalLaunchOverridesForModel(
       GEZEL_CAPACITY_BUDGET_GB: '110',
     },
     config: {
-      providerConcurrency: { 'llama-cpp': 1 },
+      providerConcurrency: { 'llama-cpp': slots ?? 1 },
     },
     fallbackKvCacheType: 'q4_0',
     minTrialTimeoutMs: 60 * 60_000,
     hardProgressTimeoutMs: 45 * 60_000,
-    summary:
-      'llama-cpp large-model eval override: numCtx=65536, concurrency=1, kvCache=product plan (q4_0 when it cannot admit numCtx), capacityBudget=110GB, tuning=catalog, startup/pre-first-byte=900s, hardProgressTimeout=45m, minTrialTimeout=60m',
+    summary: `llama-cpp large-model eval override: numCtx=65536, concurrency=${slots ?? 1}, kvCache=product plan (q4_0 when it cannot admit numCtx), capacityBudget=110GB, tuning=catalog, startup/pre-first-byte=900s, hardProgressTimeout=45m, minTrialTimeout=60m`,
   };
 }
 
@@ -2582,6 +2616,14 @@ export async function pollUntilDone(
      */
     writeCounterTrustworthy?: boolean;
     /**
+     * {@link throughputScale} for this trial. The STALL path is a pure
+     * wall-clock plateau, so it stretches with decode speed like the
+     * ceiling: DeepSeek V4.1 at 8 tok/s was ended 18 minutes into a plateau
+     * while its image generator, queued behind two slow turns on the one
+     * engine slot, had just started on the logo (petshop, 2026-10-21).
+     */
+    throughputScale?: number;
+    /**
      * How long a single in-flight turn may defer the SOFT watchdog. Engine-
      * scaled (MLX gets a larger cap for slow Apple-Silicon prefill — see
      * {@link inflightDeferMsForEngine}). Default {@link WATCHDOG_INFLIGHT_DEFER_MS}.
@@ -2830,7 +2872,7 @@ export async function pollUntilDone(
   // budgets 45m / "start writing around 25m", so an 18m no-improvement
   // plateau on an existing artifact is a real stall — while still finite,
   // so a genuine read-loop can't ride the 8h hard ceiling.
-  const RETRY_LOOP_STALL_WINDOW_MS = 18 * 60 * 1000;
+  const RETRY_LOOP_STALL_WINDOW_MS = Math.round(18 * 60 * 1000 * (args.throughputScale ?? 1));
   // CHATTER path: a scored artifact is flat, the team keeps starting
   // turns, but none of those turns writes an artifact. This catches the
   // "repair nudge answered in chat / coordination loop" case earlier
@@ -3608,6 +3650,7 @@ export async function pollUntilDone(
               ...(args.inflightDeferMs === undefined
                 ? {}
                 : { inflightDeferMs: args.inflightDeferMs }),
+              throughputScale: args.throughputScale ?? 1,
             })
           ) {
             if (Date.now() - inflightRetryLoopDeferralLoggedAt >= 60_000) {
@@ -3927,7 +3970,13 @@ async function listPoisonedSessionsForWatchdog(
       activeSteps.set(task.ref, live ? (task.activeStepId ?? null) : null);
     }
   }
-  return pickPoisonedSessionsForRecovery(list, meesterId, activeSteps);
+  // A loop back to the same step leaves earlier passes' sessions on the
+  // step the task is on, so the step-id check above cannot see them.
+  const live: PoisonedSessionSnapshot[] = [];
+  for (const session of pickPoisonedSessionsForRecovery(list, meesterId, activeSteps)) {
+    if (!(await sessionServesFinishedPass(client, session.sessionId))) live.push(session);
+  }
+  return live;
 }
 
 /**
@@ -4322,11 +4371,15 @@ export function shouldDeferRetryLoopForInflight(args: {
   chatterPathTripped: boolean;
   inflightTurns: InflightTurnSnapshot[];
   inflightDeferMs?: number;
+  /** A turn's age includes its queue wait, which grows as decode slows. */
+  throughputScale?: number;
 }): boolean {
   if (args.fastPathTripped || args.chatterPathTripped) return false;
   if (!args.longPathTripped && !args.stallPathTripped) return false;
   const base = args.inflightDeferMs ?? WATCHDOG_INFLIGHT_DEFER_MS;
-  const deferMs = args.stallPathTripped ? Math.max(base, STALL_INFLIGHT_DEFER_MS) : base;
+  const deferMs = args.stallPathTripped
+    ? Math.max(base, Math.round(STALL_INFLIGHT_DEFER_MS * (args.throughputScale ?? 1)))
+    : base;
   return shouldDeferSoftWatchdog(args.inflightTurns, deferMs);
 }
 

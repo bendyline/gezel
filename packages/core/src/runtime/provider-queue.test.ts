@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AbortedWhileQueuedError,
   ProviderQueue,
+  type QueueLease,
   backgroundLaneCap,
   runInQueue,
 } from './provider-queue.js';
@@ -53,6 +54,33 @@ describe('ProviderQueue — basic gating', () => {
 
   it('throws on invalid concurrency', () => {
     expect(() => new ProviderQueue({ concurrency: 0 })).toThrow();
+  });
+});
+
+describe('ProviderQueue — narrow', () => {
+  it('keeps granted leases and starts nothing past the new caps', async () => {
+    const q = new ProviderQueue({ concurrency: 3, interactiveConcurrency: 2 });
+    const r1 = await q.acquire({ lane: 'interactive' });
+    q.narrow({ concurrency: 2, interactiveConcurrency: 1, backgroundConcurrency: 1 });
+    expect(q.describe()).toMatchObject({
+      concurrency: 2,
+      interactiveConcurrency: 1,
+      backgroundConcurrency: 1,
+    });
+
+    const p2 = q.acquire({ lane: 'interactive' });
+    await flush();
+    expect(q.snapshot()).toMatchObject({ running: 1, queuedInteractive: 1 });
+    r1();
+    const r2 = await p2;
+    r2();
+  });
+
+  it('never widens', () => {
+    const q = new ProviderQueue({ concurrency: 2, interactiveConcurrency: 1 });
+    q.narrow({ concurrency: 4, interactiveConcurrency: 3 });
+    expect(q.concurrency).toBe(2);
+    expect(q.interactiveConcurrency).toBe(1);
   });
 });
 
@@ -1316,5 +1344,114 @@ describe('ProviderQueue — engine overflow', () => {
     );
     expect(result).toBe('served');
     task();
+  });
+});
+
+// DeepSeek V4.1 petshop, 2026-10-20: a delegated image generator waited 72
+// minutes behind a developer's single tool-loop turn on a one-slot engine.
+describe('runInQueue — a long turn yields between iterations', () => {
+  function yieldingQueue(clock: ReturnType<typeof fakeClock>, quantum = 120_000) {
+    return new ProviderQueue({
+      concurrency: 1,
+      yieldQuantumMs: quantum,
+      yieldMinWaitMs: 30_000,
+      now: clock.now,
+    });
+  }
+
+  function holdTurn(q: ProviderQueue, sessionId: string, signal?: AbortSignal) {
+    let lease: QueueLease | undefined;
+    let finish!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const done = runInQueue(
+      q,
+      { lane: 'interactive', sessionId, ...(signal ? { signal } : {}) },
+      async (l) => {
+        lease = l;
+        markStarted();
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+      },
+    );
+    return { done, started, lease: () => lease!, finish: () => finish() };
+  }
+
+  it('hands the slot to another conversation that has waited, then resumes', async () => {
+    const clock = fakeClock();
+    const q = yieldingQueue(clock);
+    const developer = holdTurn(q, 'developer');
+    await developer.started;
+    const imageTurn = vi.fn();
+    const image = runInQueue(q, { lane: 'interactive', sessionId: 'image' }, async () => {
+      imageTurn();
+    });
+    await flush();
+    expect(await developer.lease().yieldIfContended()).toBe(false);
+
+    clock.advance(120_000);
+    const yielded = developer.lease().yieldIfContended();
+    await image;
+    expect(imageTurn).toHaveBeenCalledOnce();
+    expect(await yielded).toBe(true);
+    expect(q.snapshot().running).toBe(1);
+
+    developer.finish();
+    await developer.done;
+    expect(q.snapshot().running).toBe(0);
+  });
+
+  it('yields only to a turn from another conversation, in its lane or a more urgent one, that has waited', async () => {
+    const clock = fakeClock();
+    const q = yieldingQueue(clock);
+    const holder = holdTurn(q, 'developer');
+    await holder.started;
+    void q.acquire({ lane: 'interactive', sessionId: 'developer' });
+    void q.acquire({ lane: 'background', sessionId: 'chore', ambient: true });
+    void q.acquire({ lane: 'background', sessionId: 'task' });
+    clock.advance(120_000);
+    expect(q.hasYieldableWaiter({ sessionId: 'developer', lane: 'interactive' })).toBe(false);
+    expect(await holder.lease().yieldIfContended()).toBe(false);
+
+    void q.acquire({ lane: 'interactive', sessionId: 'image' });
+    expect(q.hasYieldableWaiter({ sessionId: 'developer', lane: 'interactive' })).toBe(false);
+    clock.advance(30_000);
+    expect(q.hasYieldableWaiter({ sessionId: 'developer', lane: 'interactive' })).toBe(true);
+    expect(q.hasYieldableWaiter({ sessionId: 'developer', lane: 'background' })).toBe(true);
+  });
+
+  it('keeps the slot for the whole turn when the queue sets no quantum', async () => {
+    const clock = fakeClock();
+    const q = new ProviderQueue({ concurrency: 1, now: clock.now });
+    const holder = holdTurn(q, 'developer');
+    await holder.started;
+    void q.acquire({ lane: 'interactive', sessionId: 'image' });
+    clock.advance(3_600_000);
+    expect(await holder.lease().yieldIfContended()).toBe(false);
+  });
+
+  it('rejects a turn cancelled while it waits to resume, and leaks no slot', async () => {
+    const clock = fakeClock();
+    const q = yieldingQueue(clock);
+    const controller = new AbortController();
+    const developer = holdTurn(q, 'developer', controller.signal);
+    await developer.started;
+    const image = holdTurn(q, 'image');
+    await flush();
+    clock.advance(120_000);
+
+    const yielded = developer.lease().yieldIfContended();
+    await flush();
+    controller.abort();
+    await expect(yielded).rejects.toBeInstanceOf(AbortedWhileQueuedError);
+    developer.finish();
+    await developer.done;
+
+    image.finish();
+    await image.done;
+    expect(q.snapshot().running).toBe(0);
   });
 });

@@ -273,6 +273,10 @@ export function v1KnowledgeRoutes(ctx: Pick<ServiceContext, 'knowledge' | 'relev
       maxResults: 24,
       queryEmbedBudgetMs: 5000,
       catalogs: enabled.map((entry) => entry.ref.catalogId),
+      // Let the reranker choose among an article's sections: one passage per
+      // article, picked by embedding similarity, sent an infobox in place of
+      // the history the person asked about.
+      chunksPerDocument: 3,
     });
     c.req.raw.signal.throwIfAborted();
     const candidates: Array<{ hit: UnifiedSearchResult; passage: Passage }> = [];

@@ -8,7 +8,7 @@ import { MockProvider } from '../../providers/mock.js';
 import { type RunningService, startService } from '../../service.js';
 
 /**
- * Settings → Connected Apps controls for the OpenAI-compatible facade:
+ * Settings → Integrations controls for the OpenAI-compatible facade:
  *
  *   - `openaiEndpoints.enabled: false` gates every inference surface and
  *     OpenAI-scoped registrations, while CLI registration and the panel's
@@ -82,7 +82,7 @@ describe('openaiEndpoints.enabled = false', () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe('openai_endpoints_disabled');
-    expect(body.error.message).toContain('Connected Apps');
+    expect(body.error.message).toContain('Integrations');
   });
 
   it('gates /v1/models and the ollama facade', async () => {
@@ -101,7 +101,7 @@ describe('openaiEndpoints.enabled = false', () => {
       body: { appId: 'headless-cli', appName: 'Gezel CLI', scopes: ['cli'] },
     });
     expect(cliRegister.status).toBe(201);
-    // The Connected Apps panel still needs its listing while the facade
+    // The Integrations panel still needs its listing while the facade
     // is off — that's how the user turns it back on.
     const list = await call('GET', '/v1/apps', { token: rootToken });
     expect(list.status).toBe(200);

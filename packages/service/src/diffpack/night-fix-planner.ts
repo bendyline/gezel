@@ -254,6 +254,12 @@ export async function planProjectNightFixes(
 
 const SEVERITY_RANK: Record<string, number> = { major: 0, minor: 1, info: 2 };
 
+/** Someone confirmed it real: fix it first. Someone could not tell: after the unjudged. */
+function verdictRank(issue: BoekwachterIssue): number {
+  const kind = issue.latestVerdict?.kind;
+  return kind === 'confirmed' ? 0 : kind === 'unsure' ? 2 : 1;
+}
+
 /**
  * Open, non-stale issues worth handing a developer tonight, most serious
  * first and oldest-first within a severity.
@@ -271,9 +277,19 @@ async function openIssuesForFixing(
   const listed = await deps.contentIndex
     .listFileIssues(projectId, { status: 'open', maxResults: 1000 })
     .catch(() => null);
+  const now = new Date().toISOString();
   const eligible = (listed?.issues ?? [])
-    .filter((issue) => !issue.stale && !issue.taskRef && !claimedPaths.has(issue.path))
+    .filter(
+      (issue) =>
+        !issue.stale &&
+        !issue.taskRef &&
+        !claimedPaths.has(issue.path) &&
+        // An outside app is checking it right now; don't race it.
+        !(issue.handoff && issue.handoff.until > now),
+    )
     .sort((a, b) => {
+      const byVerdict = verdictRank(a) - verdictRank(b);
+      if (byVerdict !== 0) return byVerdict;
       const bySeverity = (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9);
       return bySeverity !== 0 ? bySeverity : a.createdAt.localeCompare(b.createdAt);
     });

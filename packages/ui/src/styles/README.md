@@ -58,6 +58,7 @@ an example of restoring the old winner explicitly.
 | `diffpacks.css` | **On demand:** Change-proposal review pane (owned by `DiffpackReviewView`) |
 | `scripts-and-craftbooks.css` | **Surface:** Script editor, craftbook editor, automation, and gates |
 | `village-and-overview.css` | **Surface:** Village, project overview, machine budget, and remote serving |
+| `codebase-guide.css` | **On demand:** The Guide view of the project Views tab (owned by `project-views/guide`) |
 | `controls-handbook-and-admin.css` | Late shared control recipes, storage cleanup, backup/restore, and first-run content |
 | `squisq-theme.css` | Rebinds the vendored Squisq editor's `--squisq-*` chrome palette onto gezel's tokens |
 | `handbook.css` | Legacy Handboek master/detail surface, retained for compatibility tests |

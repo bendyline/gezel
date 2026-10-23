@@ -14,6 +14,7 @@ import {
 import { CompletionBlockedError } from '../chat/large-content.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
+import type { PriorVerdict } from '../issue-triage/prior-verdicts.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
 import { shadowDocFilesPaths } from './docs.js';
 import { type EnrichOutcome, classifyEnrichFailure } from './enrich-breaker.js';
@@ -76,6 +77,11 @@ export interface EnrichDeps {
    * reports 1 until its first call spins it up.
    */
   oneShotWidth?: () => number;
+  /**
+   * Leads on a file someone already judged not worth reporting, for the
+   * review prompt. Absent when the project has none.
+   */
+  priorVerdicts?: (file: FileRecord) => readonly PriorVerdict[];
 }
 
 /**
@@ -628,10 +634,17 @@ function largeSymbolWindows(
   return out;
 }
 
+/**
+ * Purpose before mechanism: asked "what it does and its most important
+ * functions/classes", Qwen 3.8 27B described squisq's `dependencyGraph.ts` as
+ * interval trees and Tarjan's algorithm, and no query about formulas or cells
+ * could reach it. This wording retrieved better on every measure and ran 14%
+ * shorter (evals/src/index-bench/LEVERS.md, 2026-10-20).
+ */
 export function buildSummaryPrompt(file: FileRecord, content: string): string {
   const body = content.length > PROMPT_CONTENT_CAP ? content.slice(0, PROMPT_CONTENT_CAP) : content;
   if (file.kind === 'code') {
-    return `Summarize this ${file.lang ?? 'source'} file in 2-3 sentences for a code-search index: what it does and its most important functions/classes. Reply with prose only, no preamble.\n\nFile: ${file.path}\n\n${body}`;
+    return `Summarize this ${file.lang ?? 'source'} file in 2-3 sentences for a code-search index. First say what it is for: the feature or behavior it serves, in the words someone looking for it would search with (for example "lets users reset a forgotten password", not only "a token store"). Then name its most important functions or classes. Reply with prose only, no preamble.\n\nFile: ${file.path}\n\n${body}`;
   }
   return `Summarize this document in 2-3 sentences for a search index. Reply with prose only, no preamble.\n\nDocument: ${file.path}\n\n${body}`;
 }

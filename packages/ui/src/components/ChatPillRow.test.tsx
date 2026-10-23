@@ -5,7 +5,7 @@ import type {
   Task,
   TerminalThreadSummary,
 } from '@bendyline/gezel';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -132,9 +132,11 @@ beforeEach(() => {
 });
 
 describe('ChatPillRow', () => {
-  it('shows an empty state and no task-creation key — that lives in the composer', async () => {
+  it('keeps the status band blank when there is no recent work', async () => {
     renderRow();
-    expect(await screen.findByText('No recent threads')).toBeVisible();
+    await act(async () => {});
+    expect(screen.getByRole('toolbar')).toHaveTextContent(/^$/);
+    expect(screen.queryByText('No recent threads')).toBeNull();
     expect(screen.queryByRole('button', { name: 'New task' })).toBeNull();
   });
 
@@ -257,7 +259,7 @@ describe('ChatPillRow', () => {
 
   it('reconciles a newly-created thread when its first live event arrives', async () => {
     renderRow();
-    await screen.findByText('No recent threads');
+    await act(async () => {});
     const callsAfterMount = vi.mocked(api.listChatSessions).mock.calls.length;
 
     vi.mocked(api.listChatSessions).mockResolvedValue({ sessions: [session('s-new', 'g1')] });
@@ -271,7 +273,7 @@ describe('ChatPillRow', () => {
 
   it('re-reads sessions when a just-created thread becomes active', async () => {
     const row = renderRow();
-    await screen.findByText('No recent threads');
+    await act(async () => {});
 
     vi.mocked(api.listChatSessions).mockResolvedValue({ sessions: [session('s-new', 'g1')] });
     row.rerender(
@@ -469,7 +471,7 @@ describe('ChatPillRow', () => {
 
   it('re-reads tasks when a task_event lands on the stream', async () => {
     renderRow();
-    await screen.findByText('No recent threads');
+    await act(async () => {});
     const before = vi.mocked(api.listProjectTasks).mock.calls.length;
 
     vi.mocked(api.listProjectTasks).mockResolvedValue({ tasks: [task('p1/9', 'New work')] });

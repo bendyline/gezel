@@ -44,7 +44,7 @@ export function BootScreen({ state, onRetry }: { state: BootState; onRetry: () =
             </div>
           )}
           <p className="muted small">
-            If no approval request appears in Gezel, open Settings, then Connected Apps.
+            If no approval request appears in Gezel, open Settings, then Integrations.
           </p>
           <p className="muted small" aria-live="polite">
             Waiting for approval…
@@ -57,7 +57,7 @@ export function BootScreen({ state, onRetry }: { state: BootState; onRetry: () =
           <h1 className="office-boot-title">Office is already connected</h1>
           <p>
             Gezel has a connection for Microsoft Office that this pane no longer holds. In Gezel,
-            open Settings, then Connected Apps, and remove Microsoft Office. Then try again.
+            open Settings, then Integrations, and remove Microsoft Office. Then try again.
           </p>
           {retry}
         </div>

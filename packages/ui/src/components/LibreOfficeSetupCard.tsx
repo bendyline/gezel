@@ -20,7 +20,7 @@ function errorText(err: unknown): string {
 }
 
 /**
- * Settings → Connected Apps: install Gezel's extension into LibreOffice
+ * Settings → Integrations: install Gezel's extension into LibreOffice
  * Writer, Calc, and Impress for this account. The desktop app runs
  * LibreOffice's own installer; the extension then connects by trading the
  * owner credential (ADR 0018), and asks for a connection code only when it
@@ -145,7 +145,7 @@ export function LibreOfficeSetupCard({
             <p className="muted small">
               In Writer, Calc, or Impress, choose <strong>Tools &gt; Gezel</strong> or open the
               Gezel panel in the sidebar. It connects on its own. If it ever shows a connection code
-              instead, approve it here under Connected Apps.
+              instead, approve it here under Integrations.
             </p>
           )}
           {installLabel && <p className="muted small">Close LibreOffice before installing.</p>}

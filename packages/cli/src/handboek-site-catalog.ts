@@ -13,6 +13,7 @@ import type {
   HandboekTocEntry,
   HandboekTocSubcategory,
   ImageModelManifest,
+  PageImportTarget,
   ProjectTypeManifest,
   ToolsetManifest,
   VideoModelManifest,
@@ -64,6 +65,7 @@ export interface SiteDemo {
   /** Demo entry path relative to the demo folder, e.g. `dashboard/index.html`. */
   entry: string;
   files: Array<{ path: string; bytes: Buffer }>;
+  imports?: PageImportTarget[];
 }
 
 export interface SiteCatalog {
@@ -520,7 +522,7 @@ async function projectTypeDemo(
     const bytes = await catalog.readItemFile('project-type', pt.id, `${prefix}${path}`);
     if (bytes) files.push({ path, bytes });
   }
-  return { projectTypeId: pt.id, entry, files };
+  return { projectTypeId: pt.id, entry, files, imports: pt.pages?.imports };
 }
 
 /**

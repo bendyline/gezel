@@ -107,7 +107,7 @@ export class KokoroFrontend {
           { cause },
         );
       }
-      return parseKokoroLexicon(gunzipSync(packed).toString('utf8'));
+      return parseKokoroLexicon(gunzipSync(packed).toString('utf8'), { language });
     })();
     // A failed read must not be cached as a permanent failure.
     void pending.catch(() => this.loaded.delete(language));

@@ -1,0 +1,235 @@
+/* The Timeline view of the project Views tab: a row of stacked activity
+   bars (one per week, month or year), a legend of lanes, and the chosen
+   stretch's commits and files below. The lane palette is a categorical one
+   that holds its contrast on both themes; "Everything else" is muted. */
+
+.timeline-view {
+  --timeline-lane-0: #4e79a7;
+  --timeline-lane-1: #f28e2b;
+  --timeline-lane-2: #59a14f;
+  --timeline-lane-3: #b07aa1;
+  --timeline-lane-4: #76b7b2;
+  --timeline-lane-5: #d4a72c;
+  --timeline-lane-6: #e15759;
+  --timeline-lane-7: #9c755f;
+  --timeline-lane-other: color-mix(in srgb, var(--text-muted) 55%, transparent);
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.timeline-view-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  min-height: 2.5rem;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline-view-source {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.timeline-view-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-md) var(--space-md) var(--space-xl);
+}
+
+.timeline-view-empty,
+.timeline-view-note {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.timeline-view-note {
+  font-size: var(--text-xs);
+}
+
+/* The body scrolls; its parts never shrink to fit it, or a long commit list
+   squeezes the chart (an overflow box) down to nothing. */
+.timeline-view-body > * {
+  flex-shrink: 0;
+}
+
+.timeline-chart {
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.timeline-chart-axis {
+  display: grid;
+  grid-auto-columns: minmax(10px, 48px);
+  grid-auto-flow: column;
+  gap: 2px;
+  width: max-content;
+  min-width: 100%;
+}
+
+.timeline-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.timeline-bar {
+  display: flex;
+  align-items: flex-end;
+  height: 8rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.timeline-bar:hover,
+.timeline-bar[aria-current="true"] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.timeline-bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.timeline-bar-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 2px 2px 0 0;
+}
+
+.timeline-bar[aria-current="true"] .timeline-bar-stack {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.timeline-bar-segment {
+  flex-basis: 0;
+  min-height: 1px;
+}
+
+.timeline-tick {
+  height: 1.1rem;
+  overflow: visible;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.timeline-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timeline-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.timeline-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border);
+}
+
+.timeline-detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.timeline-detail-header h3,
+.timeline-detail h4 {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.timeline-detail h4 {
+  margin-top: var(--space-sm);
+  font-size: var(--text-sm);
+}
+
+.timeline-detail-summary {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.timeline-commits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-commit {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr;
+  column-gap: var(--space-sm);
+  font-size: var(--text-sm);
+}
+
+.timeline-commit time {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+.timeline-commit-files {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 2;
+  gap: 2px var(--space-sm);
+  font-size: var(--text-xs);
+}
+
+.timeline-file-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.timeline-file-link:hover,
+.timeline-file-link:focus-visible,
+.timeline-file-link[aria-current="true"] {
+  color: var(--accent-text);
+}
+
+.timeline-commit-more {
+  color: var(--text-muted);
+}

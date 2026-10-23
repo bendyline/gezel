@@ -1,4 +1,5 @@
 import * as RadixTabs from '@radix-ui/react-tabs';
+import type { ComponentProps } from 'react';
 
 export function Root(props: RadixTabs.TabsProps) {
   const { className, ...rest } = props;
@@ -20,7 +21,7 @@ export function List(props: RadixTabs.TabsListProps) {
   );
 }
 
-export function Trigger(props: RadixTabs.TabsTriggerProps) {
+export function Trigger(props: ComponentProps<typeof RadixTabs.Trigger>) {
   const { className, ...rest } = props;
   return (
     <RadixTabs.Trigger

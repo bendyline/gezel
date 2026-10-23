@@ -4,7 +4,11 @@ import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
-import { resolveRecommendedImageSteps } from './image-gen.js';
+import {
+  renderedModelPromptGuide,
+  requestedImageSize,
+  resolveRecommendedImageSteps,
+} from './image-gen.js';
 
 let svc: RunningService;
 let baseUrl: string;
@@ -103,6 +107,28 @@ describe('POST /api/image-gen/generate', () => {
     expect(bytes.equals(artifactBytes)).toBe(true);
   });
 
+  it("holds an agent's steps at the model's recommendation and fits the size to its range", async () => {
+    const capped = await api('POST', '/api/image-gen/generate', {
+      prompt: 'a tiny compass',
+      model: 'sd-turbo',
+      steps: 50,
+      capStepsAtRecommended: true,
+      width: 128,
+      height: 128,
+    });
+    expect(capped.status).toBe(200);
+    const meta = ((await capped.json()) as { meta: { steps: number; widthPx: number } }).meta;
+    expect(meta.steps).toBe(4);
+    expect(meta.widthPx).toBe(256);
+
+    const uncapped = await api('POST', '/api/image-gen/generate', {
+      prompt: 'a tiny compass',
+      model: 'sd-turbo',
+      steps: 8,
+    });
+    expect(((await uncapped.json()) as { meta: { steps: number } }).meta.steps).toBe(8);
+  });
+
   it('rejects an empty prompt with 400', async () => {
     const res = await api('POST', '/api/image-gen/generate', { prompt: '' });
     expect(res.status).toBe(400);
@@ -185,6 +211,36 @@ describe('resolveRecommendedImageSteps', () => {
     expect(steps).toBe(4);
   });
 
+  it("uses the provider's configured default, not the first installed model", async () => {
+    const steps = await resolveRecommendedImageSteps(
+      {
+        catalog: {
+          get: async (_kind: string, id: string) => ({
+            manifest: {
+              kind: 'image-model',
+              id,
+              recommendedSteps: id === 'moss-image-sft-q4' ? 50 : 28,
+            },
+          }),
+        },
+      } as never,
+      {
+        listInstalledModels: async () => [
+          {
+            id: 'animagine-xl-4',
+            name: 'Animagine XL 4.0',
+            approxSizeBytes: 1,
+            installedAt: new Date().toISOString(),
+          },
+        ],
+        resolveDefaultModelId: async () => 'moss-image-sft-q4',
+      },
+      undefined,
+    );
+
+    expect(steps).toBe(50);
+  });
+
   it('uses the explicitly requested model without listing installed models', async () => {
     const steps = await resolveRecommendedImageSteps(
       {
@@ -206,9 +262,140 @@ describe('resolveRecommendedImageSteps', () => {
   });
 });
 
+describe('renderedModelPromptGuide', () => {
+  it("reads a local model's traits from its catalog entry and its engine guidance", () => {
+    expect(
+      renderedModelPromptGuide(
+        'local',
+        {
+          id: 'flux-2-klein-4b-q4',
+          name: 'FLUX.2 Klein',
+          promptStyle: 'sentences',
+          rendersText: true,
+        },
+        'flux-2-klein-4b-q4',
+      ),
+    ).toBe(
+      'FLUX.2 Klein reads plain descriptive sentences; can letter short text: put the exact words in quotes; ignores negative prompts, so leave unwanted things out of the prompt instead.',
+    );
+    expect(
+      renderedModelPromptGuide(
+        'local',
+        { id: 'animagine-xl-4', name: 'Animagine XL 4', promptStyle: 'tags', rendersText: false },
+        'animagine-xl-4',
+      ),
+    ).toMatch(/booru tags.*cannot letter text reliably, so leave words out of the image\.$/);
+  });
+
+  it('says nothing for a local model the catalog does not list', () => {
+    expect(renderedModelPromptGuide('local', undefined, 'mystery')).toBeUndefined();
+  });
+
+  it('describes a cloud model by its id', () => {
+    expect(renderedModelPromptGuide('cloud', undefined, 'gpt-image-2')).toMatch(
+      /^gpt-image-2 reads plain descriptive sentences/,
+    );
+  });
+});
+
+describe('requestedImageSize', () => {
+  const flux = {
+    id: 'flux-2-klein-4b-q4',
+    widthRange: { min: 512, max: 2048 },
+    heightRange: { min: 512, max: 2048 },
+  };
+  const ming = {
+    id: 'ming-image-0.1-design-bf16',
+    widthRange: { min: 1024, max: 2048 },
+    heightRange: { min: 1024, max: 2048 },
+  };
+
+  it('resolves a shape against the catalog model, inside its range', () => {
+    expect(requestedImageSize({ aspectRatio: '9:16' }, flux, 'local')).toEqual({
+      width: 768,
+      height: 1344,
+    });
+    expect(requestedImageSize({ aspectRatio: '9:16' }, ming, 'local')).toEqual({
+      width: 1024,
+      height: 1792,
+    });
+    expect(requestedImageSize({ width: 768, height: 768 }, ming, 'local')).toEqual({
+      width: 1024,
+      height: 1024,
+    });
+  });
+
+  it('renders the trained square when a catalog model is asked for nothing', () => {
+    expect(requestedImageSize({}, flux, 'local')).toEqual({ width: 1024, height: 1024 });
+  });
+
+  it('resolves a shape for a local model the catalog does not list, by its id', () => {
+    expect(
+      requestedImageSize(
+        { model: 'remote:studio/flux-2-klein-4b-q4', aspectRatio: '16:9' },
+        undefined,
+        'local',
+      ),
+    ).toEqual({ width: 1344, height: 768 });
+  });
+
+  it('hands a cloud provider only what was asked', () => {
+    expect(
+      requestedImageSize({ aspectRatio: '9:16', quality: 'high' }, undefined, 'cloud'),
+    ).toEqual({});
+    expect(requestedImageSize({ width: 800, height: 600 }, undefined, 'cloud')).toEqual({
+      width: 800,
+      height: 600,
+    });
+  });
+});
+
 describe('POST /api/image-gen/models/:id/pull', () => {
   it('returns 404 for an unknown catalog id', async () => {
     const res = await api('POST', '/api/image-gen/models/does-not-exist/pull');
     expect(res.status).toBe(404);
+  });
+});
+
+describe('image generation for an outside AI app', () => {
+  const harnessCall = (body: unknown) => {
+    const harness = svc.context.tokenStore.issueHarness({
+      client: 'codex',
+      projectId: 'default',
+      appName: 'Codex',
+    });
+    return httpFetch(`${baseUrl}/api/image-gen/generate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${harness.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  };
+
+  it('renders on this computer and never copies into the folder', async () => {
+    const res = await harnessCall({
+      prompt: 'a tiny compass',
+      width: 8,
+      height: 8,
+      projectId: 'default',
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { artifactPath: string; workspacePath: string | null };
+    expect(body.artifactPath.startsWith('generated/')).toBe(true);
+    expect(body.workspacePath).toBeNull();
+  });
+
+  it('refuses when the person turned image generation off for other apps', async () => {
+    await svc.context.store.writeConfig({ harnessTools: { images: 'off' } });
+    try {
+      const res = await harnessCall({
+        prompt: 'a tiny compass',
+        width: 8,
+        height: 8,
+        projectId: 'default',
+      });
+      expect(res.status).toBe(403);
+    } finally {
+      await svc.context.store.writeConfig({ harnessTools: {} });
+    }
   });
 });

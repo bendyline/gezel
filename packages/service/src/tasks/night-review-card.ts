@@ -98,6 +98,7 @@ export async function postNightShiftReviewCard(
     settledAt,
   );
   if (review.windowKey !== windowKey) return;
+  await store.cacheStartupNightReview(review).catch(() => {});
   const outcome = nightShift.windowOutcome(windowKey);
   // A paused review is resumed at the next window (releasePausedReview in
   // meester/night-shift-oversight.ts); the morning card tells the person it
@@ -151,6 +152,7 @@ export async function postNightShiftReviewCard(
     // action already fired or dismissed is not one the user still owes
     // a look. Same count Home's "Last night" panel names.
     const actionTotal = review.reports.reduce((n, r) => n + r.actionCounts.suggested, 0);
+    const newIssues = await countNewIssues(contentIndex, review).catch(() => 0);
     const card: Question = {
       id: randomUUID(),
       projectId: 'default',
@@ -165,6 +167,7 @@ export async function postNightShiftReviewCard(
         ...(quiet ? { quiet } : {}),
         ...(pausedReview ? { pausedReview: true } : {}),
         ...(swept && indexing ? { indexing } : {}),
+        ...(newIssues > 0 ? { newIssues } : {}),
       }),
       choices: ['Dismiss'],
       allowWriteIn: false,
@@ -225,6 +228,29 @@ export async function postNightShiftReviewCard(
       },
     })
     .catch((err) => log.warn(`[night-shift] settle history event failed: ${String(err)}`));
+}
+
+/**
+ * Suspected problems first flagged during the window, in the projects whose
+ * codebase report the night wrote. Repeats of earlier leads are not new.
+ */
+async function countNewIssues(
+  contentIndex: Pick<ContentIndex, 'listFileIssues'>,
+  review: NightShiftReviewResponse,
+): Promise<number> {
+  const since = Date.parse(review.windowStart);
+  const projects = new Set(
+    review.reports.filter((r) => r.path.startsWith('reports/codebase-')).map((r) => r.projectId),
+  );
+  let count = 0;
+  for (const projectId of projects) {
+    const listed = await contentIndex.listFileIssues(projectId, {
+      status: 'open',
+      maxResults: 1000,
+    });
+    count += listed.issues.filter((i) => !i.echoOf && Date.parse(i.createdAt) >= since).length;
+  }
+  return count;
 }
 
 /**

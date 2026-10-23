@@ -9,7 +9,11 @@ import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { CodexSetupManager } from '../codex-setup/manager.js';
 import type { ConnectorActionManager } from '../connectors/actions.js';
+import type { CameraService } from '../connectors/live/camera/service.js';
+import type { LiveConnectorHost } from '../connectors/live/host.js';
 import type { ConnectorManager } from '../connectors/manager.js';
+import type { HarnessToolsManager } from '../harness-tools/manager.js';
+import type { LookoutManager } from '../lookouts/manager.js';
 
 import type { DiffpackManager } from '../diffpack/manager.js';
 
@@ -144,6 +148,12 @@ export interface ServiceContext extends EngineContext {
   inputStaging: InputStagingManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;
+  /** Keeps device bindings (cameras) running; see docs/device-connectors.md. */
+  liveConnectors: LiveConnectorHost;
+  /** Camera discovery, test pictures, the live preview, and saved pictures. */
+  cameras: CameraService;
+  /** The person's lookouts ("keep a lookout for X, then do Y"). */
+  lookouts: LookoutManager;
   /**
    * The bundled DuckDB CLI, used to read observation corpora (the tabular
    * connector shape). Stateless — one short-lived child per statement — so it
@@ -178,6 +188,8 @@ export interface ServiceContext extends EngineContext {
   ollamaEmulation: OllamaEmulationController;
   /** Gezel-owned Codex profile, credential, and loopback bridge lifecycle. */
   codexSetup: CodexSetupManager;
+  /** Gezel's tools in other AI apps: each app's `gezel` MCP entry, the launcher, and the person's choices. */
+  harnessTools: HarnessToolsManager;
   /** Gezel-owned OpenCode config, credential, and loopback bridge lifecycle. */
   opencodeSetup: OpenCodeSetupManager;
   /** Gezel-owned pi extension, model list, credential, and loopback bridge lifecycle. */

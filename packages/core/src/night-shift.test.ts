@@ -184,6 +184,15 @@ describe('isPendingNightShiftTask', () => {
 });
 
 describe('formatNightShiftSummary', () => {
+  it('mentions suspected problems first flagged overnight', () => {
+    expect(formatNightShiftSummary({ tasks: 0, reports: 1, newIssues: 9 })).toBe(
+      'The night shift left 1 report for you. The reviewer flagged 9 new suspected problems; your codebase report lists them, and your coding app can check them.',
+    );
+    expect(formatNightShiftSummary({ tasks: 0, reports: 1, newIssues: 0 })).toBe(
+      'The night shift left 1 report for you.',
+    );
+  });
+
   it('reads as a sentence rather than a tally', () => {
     expect(formatNightShiftSummary({ tasks: 1, reports: 1 })).toBe(
       'The night shift finished 1 task and left 1 report for you.',

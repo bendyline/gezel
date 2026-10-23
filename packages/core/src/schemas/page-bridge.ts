@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { PageImportRequestSchema } from './page-imports.js';
+import { PageTableRequestSchema, PageTableResponseSchema } from './page-tables.js';
 
 /**
  * Output Pane API v1 — the versioned postMessage envelope between a served
@@ -61,6 +63,14 @@ export const PageWatchMessageSchema = z.object({
   path: z.string().min(1),
 });
 
+export const PageOpenMessageSchema = z.object({
+  ...envelopeBase,
+  kind: z.literal('open'),
+  id: z.string().min(1).max(64),
+  source: PageReadSourceSchema,
+  path: z.string().min(1),
+});
+
 export const PageUnwatchMessageSchema = z.object({
   ...envelopeBase,
   kind: z.literal('unwatch'),
@@ -72,10 +82,27 @@ export const PageRefreshMessageSchema = z.object({
   kind: z.literal('refresh'),
 });
 
+export const PageTableMessageSchema = z.object({
+  ...envelopeBase,
+  kind: z.literal('table'),
+  id: z.string().min(1).max(64),
+  request: PageTableRequestSchema,
+});
+
 export const PageToParentMessageSchema = z.discriminatedUnion('kind', [
+  z.object({ ...envelopeBase, kind: z.literal('import-targets'), id: z.string().min(1).max(64) }),
+  z.object({ ...envelopeBase, kind: z.literal('import-cancel'), id: z.string().min(1).max(64) }),
+  PageImportRequestSchema.extend({
+    ...envelopeBase,
+    kind: z.literal('import-file'),
+    id: z.string().min(1).max(64),
+    file: z.unknown(),
+  }),
   PageHelloMessageSchema,
   PageInvokeMessageSchema,
   PageReadMessageSchema,
+  PageTableMessageSchema,
+  PageOpenMessageSchema,
   PageWatchMessageSchema,
   PageUnwatchMessageSchema,
   PageRefreshMessageSchema,
@@ -159,16 +186,46 @@ export const ParentChangeMessageSchema = z.object({
   etag: z.string(),
 });
 
+export const ParentOpenResultMessageSchema = z.object({
+  ...envelopeBase,
+  kind: z.literal('open-result'),
+  id: z.string(),
+  ok: z.boolean(),
+  error: z.string().optional(),
+  errorCode: PageBridgeErrorCodeSchema.optional(),
+});
+
 export const ParentThemeMessageSchema = z.object({
   ...envelopeBase,
   kind: z.literal('theme'),
   theme: z.object({ mode: z.enum(['light', 'dark']) }),
 });
 
+export const ParentTableResultMessageSchema = z.object({
+  ...envelopeBase,
+  kind: z.literal('table-result'),
+  id: z.string(),
+  ok: z.boolean(),
+  result: PageTableResponseSchema.optional(),
+  error: z.string().optional(),
+  errorCode: PageBridgeErrorCodeSchema.optional(),
+});
+
 export const ParentToPageMessageSchema = z.discriminatedUnion('kind', [
+  z.object({
+    ...envelopeBase,
+    kind: z.literal('import-result'),
+    id: z.string(),
+    ok: z.boolean(),
+    result: z.unknown().optional(),
+    error: z.string().optional(),
+    errorCode: PageBridgeErrorCodeSchema.optional(),
+  }),
   ParentInitMessageSchema,
   ParentResultMessageSchema,
   ParentReadResultMessageSchema,
+  ParentTableResultMessageSchema,
+  ParentOpenResultMessageSchema,
   ParentChangeMessageSchema,
   ParentThemeMessageSchema,
 ]);
@@ -200,6 +257,8 @@ export type PageApiServeBootstrap = z.infer<typeof PageApiServeBootstrapSchema>;
  * derives identity from its own URL again.
  */
 export const PageApiBootstrapSchema = z.object({
+  /** Host implements first-party scoped uploads (desktop preview only). */
+  imports: z.boolean().optional(),
   api: z.literal(PAGE_BRIDGE_VERSION),
   projectId: z.string(),
   source: z.literal('type'),

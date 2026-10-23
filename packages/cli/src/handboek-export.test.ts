@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SCORECARD_DATA_ATTRS, SCORECARD_QUERY_PARAMS } from '@bendyline/gezel';
+import { SCORECARD, SCORECARD_DATA_ATTRS, SCORECARD_QUERY_PARAMS } from '@bendyline/gezel';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   type HandboekExportResult,
@@ -41,6 +41,13 @@ describe('rewriteSiteLinks', () => {
   it('leaves external and unresolved links alone', () => {
     const src = '[site](https://gezelgilde.com) [gone](no-such-page.md) [anchor](#here)';
     expect(rewriteSiteLinks(src, 'welcome', ids, byStem)).toBe(src);
+  });
+
+  it('preserves download extensions when rewriting asset paths', () => {
+    const src = '[notes](../assets/results/README.md) [data](../assets/results/data.json)';
+    const out = rewriteSiteLinks(src, 'model-scorecard', ids, byStem);
+    expect(out).toContain('](../assets/results/README.md)');
+    expect(out).toContain('](../assets/results/data.json)');
   });
 });
 
@@ -159,6 +166,27 @@ describe('runHandboekExport', () => {
     expect(page).toMatch(new RegExp(`${SCORECARD_DATA_ATTRS.model}="[^"]+"`));
     expect(page).toContain(`${SCORECARD_DATA_ATTRS.latest}="1"`);
     expect(page).toContain('class="hb-table-scroll"');
+    for (const run of SCORECARD.runs) {
+      expect(page).toContain(`${SCORECARD_DATA_ATTRS.round}="${run.id}"`);
+    }
+    const headline = SCORECARD.runs.find((run) => run.scope !== 'subset') ?? SCORECARD.runs[0]!;
+    const defaultRound = page.match(
+      new RegExp(`<div class="hb-scorecard-round"[^>]*${SCORECARD_DATA_ATTRS.latest}="1"[^>]*>`),
+    )?.[0];
+    expect(defaultRound).toContain(`${SCORECARD_DATA_ATTRS.round}="${headline.id}"`);
+  });
+
+  it('exports the scorecard downloads linked by the article', async () => {
+    const page = await readFile(join(out, 'model-scorecard', 'index.html'), 'utf8');
+    const links = [...page.matchAll(/href="(\.\.\/assets\/scorecards\/[^"#?]+)"/g)].map(
+      (match) => match[1]!,
+    );
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      const bytes = await readFile(join(out, 'model-scorecard', link));
+      expect(bytes.length).toBeGreaterThan(0);
+      if (link.endsWith('.json')) expect(() => JSON.parse(bytes.toString('utf8'))).not.toThrow();
+    }
   });
 
   it('leaves the scorecard filter off pages that have no scorecard', async () => {

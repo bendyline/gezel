@@ -159,7 +159,7 @@ publish their actual address through the user's runtime directory, where the
 next discovery finds them.
 
 Gezel's own desktop app and CLI use `authorizeLocalOwner()`, which connects
-as the user who owns the daemon without a Connected Apps consent request.
+as the user who owns the daemon without an app consent request.
 Third-party integrations must use `authorizeLocal()`; the owner surface is not
 an app-consent bypass. Likewise, `gezelAddIn: true` is reserved for Gezel's own
 add-ins (Office, LibreOffice, VS Code): the daemon refuses it for any other app
@@ -563,4 +563,8 @@ evidence within explicit `maxPromptCharacters` and `maxMessages` limits. Optiona
 context/output budgets use a conservative character estimate, not a tokenizer.
 It fails open on unavailable or malformed knowledge and propagates cancellation;
 plain `app.chat` does not enrich requests automatically. This helper is also
-available from `/browser`.
+available from `/browser`. `knowledgeContext(…)` takes the same options and also
+reports what it added (`status`, `reason`, `passages`). Pass `query` to search
+for what the person asked rather than the last user message, and
+`citations: 'numbered'` to have passages cited as `[n]`; check the result with
+`groundText()` from `@bendyline/gezel/grounding`.

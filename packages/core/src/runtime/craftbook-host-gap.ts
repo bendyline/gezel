@@ -71,13 +71,11 @@ export function portableCraftbookGap(book: Craftbook): string | null {
     if (step.branches?.length || step.advanceWhen?.requireChange) {
       return 'Uses steps this device cannot run yet.';
     }
+    // A rejection that routes to an earlier step (the verdict review loop) is
+    // fine: the portable runner moves the task there like the desktop does.
     if (step.gate) {
       const gate = normalizeStepGate(step.gate);
-      if (
-        gate.at !== 'completion' ||
-        gate.reviewer ||
-        (gate.onReject && gate.onReject !== step.id)
-      ) {
+      if (gate.at !== 'completion' || gate.reviewer) {
         return 'Has a review step this device cannot run yet.';
       }
     }

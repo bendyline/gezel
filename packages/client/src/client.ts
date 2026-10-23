@@ -102,6 +102,7 @@ import type {
   CleanupRequest,
   ClientPerfReport,
   CodeReviewResponse,
+  CodebaseMapResponse,
   CodexSetupStatusResponse,
   CompleteStepRequest,
   CompleteStepResponse,
@@ -157,6 +158,9 @@ import type {
   FetchUrlResponse,
   FileContextRequest,
   FileContextResponse,
+  FileGraphRequest,
+  FileGraphResponse,
+  FileInsightResponse,
   FileMapRequest,
   FileMapResponse,
   FileReviewRequest,
@@ -175,8 +179,13 @@ import type {
   FireReportActionResponse,
   FixBoekwachterIssueRequest,
   FixBoekwachterIssueResponse,
+  GalleryRequest,
+  GalleryResponse,
+  GalleryShelfRequest,
+  GalleryShelfResponse,
   GenerateGezelAboutRequest,
   GenerateGezelIconRequest,
+  GenerateProjectReportResponse,
   GetBoekwachterIssueRequest,
   GetBoekwachterIssueResponse,
   GetScriptSourceResponse,
@@ -227,7 +236,15 @@ import type {
   HandboekNarrationResponse,
   HandboekRenderMode,
   HandboekToc,
+  HarnessBlock,
+  HarnessClientId,
+  HarnessLaunchSpec,
+  HarnessToolsClientStatus,
+  HarnessToolsConfigUpdate,
+  HarnessToolsSetupRequest,
+  HarnessToolsStatusResponse,
   HealthResponse,
+  ImageQuality,
   ImportAiAppResult,
   ImportCustomMcpConfigRequest,
   ImportCustomMcpConfigResponse,
@@ -306,6 +323,8 @@ import type {
   PageCheckResponse,
   PageReadRequest,
   PageReadResponse,
+  PageTableRequest,
+  PageTableResponse,
   PatchPromptDraftRequest,
   PendingImports,
   PerfSnapshot,
@@ -323,11 +342,14 @@ import type {
   ProjectCompletionResponse,
   ProjectFolderPreviewResponse,
   ProjectIndexOverview,
+  ProjectReportsResponse,
   ProjectResponse,
   ProjectSearchRequest,
   ProjectSearchResponse,
   ProjectTypeApplyPlan,
   ProjectTypeStatusResponse,
+  PromptAssistRequest,
+  PromptAssistResponse,
   PromptDraft,
   PromptDraftStatus,
   PromptDraftSummary,
@@ -427,6 +449,10 @@ import type {
   TaskOutputsResponse,
   TaskStatus,
   TerminalThread,
+  TimelineBucketRequest,
+  TimelineBucketResponse,
+  TimelineRequest,
+  TimelineResponse,
   ToolsetsScope,
   TraceTaintRequest,
   TraceTaintResponse,
@@ -469,6 +495,7 @@ import type {
   WorkspaceIndexFilesDetailResponse,
   WorkspaceIndexStatus,
   WorkspaceSkillIndex,
+  WritableReportKind,
   WritePromptDraftContentResponse,
 } from '@bendyline/gezel';
 import { type ChatEvent, KnowledgeInstallEventSchema, parseTaskRef } from '@bendyline/gezel';
@@ -507,7 +534,21 @@ import {
   SystemToolsetInstallEventSchema,
   VideoModelPullEventSchema,
 } from '@bendyline/gezel/schemas';
-import { z } from 'zod';
+import {
+  EvalJobStreamWireSchema,
+  type EvalScenarioManifest,
+  type LlamaCppInstallEvent,
+  LlamaCppInstallEventSchema,
+  MODEL_DOWNLOAD_SSE_POLICY,
+  MlxInstallEventSchema,
+  type OllamaPullEvent,
+  OllamaPullEventSchema,
+  type RunEvalEvent,
+  RunEvalEventSchema,
+  TransformStreamEventSchema,
+  type TrialOutcome,
+  consumeApiSseJson,
+} from './api-streams.js';
 import type { ConfigResponse } from './config-response.js';
 import type {
   FolderMovePlan,
@@ -516,6 +557,7 @@ import type {
   FolderScope,
   FoldersStatusResponse,
 } from './folders.js';
+import { IssueTriageClient } from './issue-triage.js';
 import type { LlamaCppInstalledModel } from './llama-cpp-model.js';
 import type { MlxInstallEvent, MlxInstalledModel, MlxRuntimeInfo } from './mlx-model.js';
 import { OfficeIntegrationsClient } from './office-integrations.js';
@@ -534,15 +576,17 @@ import type {
   RemoteServerStatus,
 } from './remote-serving.js';
 import { RetrievalClient } from './retrieval.js';
-import {
-  type ConsumeSseJsonOptions,
-  SseResponseError,
-  SseStreamStaleError,
-  consumeSseJson,
-  streamChatEvents,
-} from './sse.js';
+import { streamChatEvents } from './sse.js';
 import { TaskInputsClient } from './task-inputs.js';
 
+export type {
+  EvalScenarioManifest,
+  LlamaCppInstallEvent,
+  OllamaPullChunk,
+  OllamaPullEvent,
+  RunEvalEvent,
+  TrialOutcome,
+} from './api-streams.js';
 export type { ConfigResponse } from './config-response.js';
 export type {
   FolderBackupSnapshot,
@@ -583,13 +627,6 @@ export interface SpeechSynthesisStreamCallbacks {
 }
 
 class ModelBundleScanError extends Error {}
-
-const MODEL_DOWNLOAD_STALL_TIMEOUT_MS = 40 * 60_000;
-const MODEL_DOWNLOAD_STALLED_MESSAGE = 'Download stopped: server has gone quiet.';
-const MODEL_DOWNLOAD_SSE_POLICY = {
-  keepaliveTimeoutMs: MODEL_DOWNLOAD_STALL_TIMEOUT_MS,
-  staleMessage: MODEL_DOWNLOAD_STALLED_MESSAGE,
-} as const;
 
 /** Success payload of the craftbook document write routes. */
 export interface CraftbookDocumentWriteResponse {
@@ -828,104 +865,6 @@ export type SendChannelResult =
   | { ok: false; error: string; channel?: 'webhook' };
 
 /**
- * Streaming progress event for `pullOllamaModel`. `progress.chunk` is the
- * raw NDJSON chunk straight from Ollama (`{status, digest?, total?,
- * completed?}`). `done` is terminal. `error` arrives right before `done`
- * on failure.
- */
-export type OllamaPullEvent =
-  | { type: 'progress'; chunk: OllamaPullChunk }
-  | { type: 'error'; error: string }
-  | { type: 'done' };
-
-export interface OllamaPullChunk {
-  status: string;
-  digest?: string;
-  total?: number;
-  completed?: number;
-}
-
-/**
- * Events emitted by the `/api/llama-cpp/models/:id/install` SSE
- * stream. Mirrors the `InstallEvent` shape on the service side.
- */
-export type LlamaCppInstallEvent =
-  | { type: 'progress'; bytesWritten: number; totalBytes: number }
-  /**
-   * Surfaced by the shared `downloadWithRetry` helper between
-   * attempts. Render "Connection dropped — retrying in 4s
-   * (attempt 3/5)…" instead of a fatal error banner.
-   */
-  | {
-      type: 'retrying';
-      attempt: number;
-      maxAttempts: number;
-      delayMs: number;
-      reason: string;
-    }
-  | { type: 'verifying' }
-  | { type: 'extracting-metadata' }
-  | {
-      type: 'companion';
-      kind: 'image-recognition';
-      id: string;
-      name: string;
-      bytesWritten: number;
-      totalBytes: number;
-      error?: string;
-    }
-  | { type: 'done'; id: string; warning?: string }
-  /**
-   * Terminal failure. When `mismatch` is present, the failure is a
-   * sha256 mismatch against the catalog — the UI can offer "Download
-   * anyway" which retries with `{skipSha: true}`.
-   */
-  | {
-      type: 'error';
-      error: string;
-      mismatch?: { file: string; expected: string; actual: string };
-    };
-
-// ── Evals (in-app Benchmarks panel) ──
-// The current contract lives in `@bendyline/gezel` (schemas/eval.ts):
-// `getEvalCatalog`, `listEvalTargets`, the job methods, and the trial index.
-// The three shapes below belong to the first in-app runner's endpoints, kept
-// working for existing callers.
-
-/** @deprecated Use `getEvalCatalog()` and `EvalCatalogScenario`. */
-export interface EvalScenarioManifest {
-  id: string;
-  name: string;
-  description: string;
-  capabilityAxis: string;
-  defaultModel: string;
-  defaultImageModel?: string;
-  timeoutMs: number;
-  anchored: boolean;
-}
-
-/** @deprecated Use `listEvalTrials()` and `EvalTrialSummary`. */
-export interface TrialOutcome {
-  trialId: string;
-  scenarioId: string;
-  modelId: string;
-  startedAt: string;
-  finishedAt: string;
-  durationMs: number;
-  success: boolean;
-  reason: string;
-  failureMode?: string;
-  runDir: string;
-}
-
-/** @deprecated Use `createEvalJob()` + `streamEvalJob()`. */
-export type RunEvalEvent =
-  | { type: 'spawned'; trialId?: string; runDir?: string }
-  | { type: 'log'; line: string }
-  | { type: 'done'; result: TrialOutcome }
-  | { type: 'error'; error: string };
-
-/**
  * Snapshot of an in-flight install reported by
  * `GET /api/llama-cpp/active-installs`. The Settings catalog UI
  * polls this endpoint so background-driven installs (the first-run
@@ -1090,145 +1029,6 @@ export interface RunWorkspaceCommandResult {
   declined?: string;
 }
 
-type ConsumeApiSseJsonOptions<T> = ConsumeSseJsonOptions<T> & {
-  staleMessage?: string;
-};
-
-async function consumeApiSseJson<T>(options: ConsumeApiSseJsonOptions<T>): Promise<void> {
-  const { staleMessage, ...streamOptions } = options;
-  try {
-    await consumeSseJson(streamOptions);
-  } catch (error) {
-    if (error instanceof GezelApiError) throw error;
-    const message =
-      error instanceof SseStreamStaleError && staleMessage
-        ? staleMessage
-        : error instanceof Error
-          ? error.message
-          : 'SSE stream failed';
-    const status = error instanceof SseResponseError ? error.status : 0;
-    throw new GezelApiError(message, status, {
-      cause: error instanceof Error ? error.name : 'unknown',
-    });
-  }
-}
-
-const mismatchSchema = z.object({ file: z.string(), expected: z.string(), actual: z.string() });
-const LlamaCppInstallEventSchema: z.ZodType<LlamaCppInstallEvent> = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('progress'), bytesWritten: z.number(), totalBytes: z.number() }),
-  z.object({
-    type: z.literal('retrying'),
-    attempt: z.number().int().positive(),
-    maxAttempts: z.number().int().positive(),
-    delayMs: z.number().nonnegative(),
-    reason: z.string(),
-  }),
-  z.object({ type: z.literal('verifying') }),
-  z.object({ type: z.literal('extracting-metadata') }),
-  z.object({
-    type: z.literal('companion'),
-    kind: z.literal('image-recognition'),
-    id: z.string(),
-    name: z.string(),
-    bytesWritten: z.number().nonnegative(),
-    totalBytes: z.number().nonnegative(),
-    error: z.string().optional(),
-  }),
-  z.object({ type: z.literal('done'), id: z.string(), warning: z.string().optional() }),
-  z.object({ type: z.literal('error'), error: z.string(), mismatch: mismatchSchema.optional() }),
-]);
-const MlxInstallEventSchema: z.ZodType<MlxInstallEvent> = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('progress'),
-    fileIndex: z.number().int().nonnegative(),
-    fileCount: z.number().int().positive(),
-    file: z.string(),
-    bytesWritten: z.number().nonnegative(),
-    totalBytes: z.number().nonnegative(),
-    bytesWrittenAll: z.number().nonnegative(),
-    totalBytesAll: z.number().nonnegative(),
-  }),
-  z.object({
-    type: z.literal('retrying'),
-    attempt: z.number().int().positive(),
-    maxAttempts: z.number().int().positive(),
-    delayMs: z.number().nonnegative(),
-    reason: z.string(),
-    file: z.string(),
-  }),
-  z.object({ type: z.literal('verifying'), file: z.string() }),
-  z.object({ type: z.literal('extracting-metadata') }),
-  z.object({ type: z.literal('done'), id: z.string(), warning: z.string().optional() }),
-  z.object({ type: z.literal('error'), error: z.string(), mismatch: mismatchSchema.optional() }),
-]);
-/**
- * The eval job stream, checked only as far as the stream loop reads it.
- *
- * Deliberately not core's `EvalJobStreamEventSchema`: importing it pulls the
- * whole eval-job schema graph into every client consumer's startup bundle —
- * the desktop UI's initial load paid for a Settings page most people never
- * open. The daemon's job record is the authority for the rest of the shape.
- */
-const EvalJobStreamWireSchema = z.union([
-  z.object({ type: z.literal('log'), line: z.string() }),
-  z
-    .object({
-      type: z.enum(['snapshot', 'job']),
-      job: z.object({ id: z.string(), status: z.string() }).passthrough(),
-      log: z.array(z.string()).optional(),
-    })
-    .passthrough(),
-]) as unknown as z.ZodType<EvalJobStreamEvent>;
-
-const RunEvalEventSchema: z.ZodType<RunEvalEvent> = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('spawned'),
-    trialId: z.string().optional(),
-    runDir: z.string().optional(),
-  }),
-  z.object({ type: z.literal('log'), line: z.string() }),
-  z.object({
-    type: z.literal('done'),
-    result: z.object({
-      trialId: z.string(),
-      scenarioId: z.string(),
-      modelId: z.string(),
-      startedAt: z.string(),
-      finishedAt: z.string(),
-      durationMs: z.number(),
-      success: z.boolean(),
-      reason: z.string(),
-      failureMode: z.string().optional(),
-      runDir: z.string(),
-    }),
-  }),
-  z.object({ type: z.literal('error'), error: z.string() }),
-]);
-const TransformStreamEventSchema: z.ZodType<TransformStreamEvent> = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('status'),
-    phase: z.enum(['queued', 'started']),
-    detail: z.string().optional(),
-  }),
-  z.object({ type: z.literal('thinking-delta'), text: z.string() }),
-  z.object({ type: z.literal('output-delta'), text: z.string() }),
-  z.object({ type: z.literal('done'), text: z.string() }),
-  z.object({ type: z.literal('error'), error: z.string() }),
-]);
-const OllamaPullEventSchema: z.ZodType<OllamaPullEvent> = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('progress'),
-    chunk: z.object({
-      status: z.string(),
-      digest: z.string().optional(),
-      total: z.number().optional(),
-      completed: z.number().optional(),
-    }),
-  }),
-  z.object({ type: z.literal('error'), error: z.string() }),
-  z.object({ type: z.literal('done') }),
-]);
-
 export type {
   IncompleteKnowledgeDownload,
   KnowledgeActiveInstall,
@@ -1265,6 +1065,7 @@ export class GezelClient {
   readonly taskInputs: TaskInputsClient;
   readonly officeIntegrations: OfficeIntegrationsClient;
   readonly retrieval: RetrievalClient;
+  readonly issueTriage: IssueTriageClient;
 
   constructor(opts: GezelClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '');
@@ -1279,6 +1080,7 @@ export class GezelClient {
     const json = <T>(m: string, p: string, b?: unknown) => this.request<T>(m, p, b);
     this.officeIntegrations = new OfficeIntegrationsClient(json);
     this.retrieval = new RetrievalClient(json);
+    this.issueTriage = new IssueTriageClient(json);
   }
 
   private async request<T>(
@@ -1469,6 +1271,45 @@ export class GezelClient {
 
   removeCodexSetup(): Promise<CodexSetupStatusResponse> {
     return this.request('DELETE', '/api/codex-setup');
+  }
+
+  // ---------- Gezel's tools in other AI apps ----------
+
+  /** Each app's setup, the person's choices, live connections, and stopped folders. */
+  getHarnessTools(): Promise<HarnessToolsStatusResponse> {
+    return this.request('GET', '/api/harness-tools');
+  }
+
+  updateHarnessToolsConfig(body: HarnessToolsConfigUpdate): Promise<HarnessToolsStatusResponse> {
+    return this.request('PUT', '/api/harness-tools/config', body);
+  }
+
+  /** Add (or repair) Gezel's `gezel` MCP entry in one app. */
+  configureHarnessTools(
+    client: HarnessClientId,
+    body: HarnessToolsSetupRequest = {},
+  ): Promise<HarnessToolsClientStatus> {
+    return this.request('PUT', `/api/harness-tools/clients/${encodeURIComponent(client)}`, body);
+  }
+
+  removeHarnessTools(client: HarnessClientId): Promise<HarnessToolsClientStatus> {
+    return this.request('DELETE', `/api/harness-tools/clients/${encodeURIComponent(client)}`);
+  }
+
+  /** "Stop for this folder": block that app in that project and sign it out. */
+  stopHarnessConnection(appId: string): Promise<HarnessToolsStatusResponse> {
+    return this.request('POST', `/api/harness-tools/connections/${encodeURIComponent(appId)}/stop`);
+  }
+
+  unblockHarness(block: HarnessBlock): Promise<HarnessToolsStatusResponse> {
+    return this.request('POST', '/api/harness-tools/blocked/remove', block);
+  }
+
+  /** The command an app's MCP config runs to reach Gezel's tools. */
+  getHarnessLaunchSpec(client: HarnessClientId, projectId?: string): Promise<HarnessLaunchSpec> {
+    const params = new URLSearchParams({ client });
+    if (projectId) params.set('projectId', projectId);
+    return this.request('GET', `/api/harness-tools/launcher?${params.toString()}`);
   }
 
   // ---------- OpenCode local-model setup ----------
@@ -3541,8 +3382,27 @@ export class GezelClient {
    * Whether this machine can run each catalog image model on the local
    * engine. Same contract as {@link getVideoModelFit}.
    */
-  getImageModelFit(): Promise<MediaModelFitResponse> {
-    return this.request('GET', '/api/image-gen/models/fit');
+  /**
+   * Rewrite or review a draft before it is sent (the composer's sparkle
+   * menu). Returns the rewritten text, or suggestions for `review`.
+   */
+  promptAssist(
+    projectId: string,
+    body: PromptAssistRequest,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<PromptAssistResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/prompt-assist`,
+      body,
+      undefined,
+      opts.signal,
+    );
+  }
+
+  getImageModelFit(opts: { quality?: ImageQuality } = {}): Promise<MediaModelFitResponse> {
+    const query = opts.quality ? `?quality=${encodeURIComponent(opts.quality)}` : '';
+    return this.request('GET', `/api/image-gen/models/fit${query}`);
   }
 
   /**
@@ -5172,6 +5032,14 @@ export class GezelClient {
       lastSyncedAt?: string;
       lastError?: string;
       disabled?: boolean;
+      /** Why a device binding is paused (`emergency-stop` needs the person to resume it). */
+      disabledReason?: 'user' | 'emergency-stop';
+      /** `device` for a binding the live host runs (a camera). */
+      driver?: string;
+      /** A device binding's settings (synced types omit theirs). */
+      config?: Record<string, unknown>;
+      /** A device binding's live status. */
+      live?: import('@bendyline/gezel').LiveBindingStatus;
       /** Rate-limit backoff expiry (ISO); autonomous sync skips until then. */
       backoffUntil?: string;
       /**
@@ -5218,11 +5086,234 @@ export class GezelClient {
     );
   }
 
-  /** Remove a binding + its stored credential. */
-  unbindConnector(id: string, bindingId: string): Promise<void> {
+  /**
+   * Remove a binding + its stored credential. A camera's saved pictures go
+   * with it unless `keepPictures` is set.
+   */
+  unbindConnector(id: string, bindingId: string, opts?: { keepPictures?: boolean }): Promise<void> {
     return this.request(
       'DELETE',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}${opts?.keepPictures ? '?keepPictures=1' : ''}`,
+    );
+  }
+
+  /** Rename, reconfigure, pause, or resume a binding. */
+  patchConnector(
+    id: string,
+    bindingId: string,
+    patch: { displayName?: string; config?: Record<string, unknown>; disabled?: boolean },
+  ): Promise<{ ok: boolean; binding: { id: string; type: string } }> {
+    return this.request(
+      'PATCH',
       `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}`,
+      patch,
+    );
+  }
+
+  // ── Cameras ─────────────────────────────────────────────────────────────
+
+  /** The cameras this computer has. `refresh` re-checks for ffmpeg first. */
+  listCameraDevices(opts?: { refresh?: boolean }): Promise<
+    import('@bendyline/gezel').CameraDiscoveryResponse
+  > {
+    return this.request('GET', `/api/devices/cameras${opts?.refresh ? '?refresh=1' : ''}`);
+  }
+
+  /** Every camera that is watching right now, across projects. */
+  listWatchingCameras(): Promise<{
+    cameras: Array<{ projectId: string; bindingId: string; name: string }>;
+  }> {
+    return this.request('GET', '/api/devices/cameras/watching');
+  }
+
+  /** One test picture from a camera, for the setup panel. */
+  async probeCamera(device: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await this.fetchImpl(`${this.baseUrl}/api/devices/cameras/probe`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device }),
+      ...(signal ? { signal } : {}),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new GezelApiError(body.error ?? `camera test failed: ${res.status}`, res.status);
+    }
+    return res.blob();
+  }
+
+  /** A running camera's newest picture (never written to disk). */
+  fetchCameraPreview(id: string, bindingId: string, signal?: AbortSignal): Promise<Blob> {
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/preview`,
+      'camera preview failed',
+      signal,
+    );
+  }
+
+  /** A camera's saved pictures, oldest first; one day's when `date` is given. */
+  listCameraCaptures(
+    id: string,
+    bindingId: string,
+    date?: string,
+  ): Promise<{ captures: import('@bendyline/gezel').CameraCapture[]; totalBytes: number }> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/captures${date ? `?date=${encodeURIComponent(date)}` : ''}`,
+    );
+  }
+
+  fetchCameraCapture(
+    id: string,
+    bindingId: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    return this.readBlob(
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/captures/file?path=${encodeURIComponent(path)}`,
+      'camera picture fetch failed',
+      signal,
+    );
+  }
+
+  /** Delete every picture a camera saved. */
+  clearCameraCaptures(id: string, bindingId: string): Promise<void> {
+    return this.request(
+      'DELETE',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/captures`,
+    );
+  }
+
+  // ── Lookouts ────────────────────────────────────────────────────────────
+
+  listLookouts(id: string): Promise<import('@bendyline/gezel').LookoutListResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/lookouts`);
+  }
+
+  createLookout(
+    id: string,
+    input: import('@bendyline/gezel').LookoutInput,
+  ): Promise<{ lookout: import('@bendyline/gezel').Lookout }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/lookouts`, input);
+  }
+
+  updateLookout(
+    id: string,
+    lookoutId: string,
+    patch: import('@bendyline/gezel').LookoutUpdate,
+  ): Promise<{ lookout: import('@bendyline/gezel').Lookout }> {
+    return this.request(
+      'PUT',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/${encodeURIComponent(lookoutId)}`,
+      patch,
+    );
+  }
+
+  deleteLookout(id: string, lookoutId: string): Promise<void> {
+    return this.request(
+      'DELETE',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/${encodeURIComponent(lookoutId)}`,
+    );
+  }
+
+  /** Approve a gezel's proposed lookout: it becomes the person's and starts. */
+  approveLookout(
+    id: string,
+    lookoutId: string,
+  ): Promise<{ lookout: import('@bendyline/gezel').Lookout }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/${encodeURIComponent(lookoutId)}/approve`,
+      {},
+    );
+  }
+
+  /** Rehearse a lookout's actions now (AI actions report what they would do). */
+  testLookout(
+    id: string,
+    lookoutId: string,
+  ): Promise<{ firing: import('@bendyline/gezel').LookoutFiring }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/${encodeURIComponent(lookoutId)}/test`,
+      {},
+    );
+  }
+
+  /** Snooze for `minutes`, or clear the snooze with null. */
+  snoozeLookout(
+    id: string,
+    lookoutId: string,
+    minutes: number | null,
+  ): Promise<{ lookout: import('@bendyline/gezel').Lookout }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/${encodeURIComponent(lookoutId)}/snooze`,
+      { minutes },
+    );
+  }
+
+  /** Mark a firing a false alarm (or clear the mark). */
+  lookoutFeedback(id: string, firingId: string, feedback: 'false-alarm' | null): Promise<void> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/firings/${encodeURIComponent(firingId)}/feedback`,
+      { feedback },
+    );
+  }
+
+  /**
+   * A gezel proposes a lookout; it waits, disabled, for the person to approve
+   * it. The daemon resolves the camera by name or id and maps the simple
+   * action words (`notify`, `chime`, `alarm`, `whistle`, `phone`).
+   */
+  proposeLookout(
+    id: string,
+    input: {
+      name: string;
+      camera?: string;
+      question?: string;
+      actions?: Array<'notify' | 'chime' | 'alarm' | 'whistle' | 'phone'>;
+      follow_up?: string;
+    },
+  ): Promise<{ lookout: import('@bendyline/gezel').Lookout }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/lookouts/proposals`,
+      input,
+    );
+  }
+
+  /**
+   * The newest frame from a watching camera: the picture when this caller
+   * may see it, otherwise a description made on this computer.
+   */
+  lookAtCamera(
+    id: string,
+    camera?: string,
+  ): Promise<{
+    camera: string;
+    at: string;
+    image?: { mimeType: string; base64: string };
+    description?: string;
+    note?: string;
+  }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/cameras/look`, {
+      ...(camera ? { camera } : {}),
+    });
+  }
+
+  /** Stop any sound a lookout is playing. */
+  stopLookoutSounds(): Promise<{ stopped: number }> {
+    return this.request('POST', '/api/lookouts/stop-sound', {});
+  }
+
+  /** Alerts fired since `since` (default: the last five minutes). */
+  recentLookoutAlerts(since?: string): Promise<{
+    alerts: Array<Extract<ChatEvent, { type: 'lookout_fired' }>>;
+  }> {
+    return this.request(
+      'GET',
+      `/api/lookouts/recent-alerts${since ? `?since=${encodeURIComponent(since)}` : ''}`,
     );
   }
 
@@ -5858,6 +5949,36 @@ export class GezelClient {
     return res.json() as Promise<{ ok: true; path: string }>;
   }
 
+  listProjectPageImportTargets(projectId: string): Promise<PageImportAvailability[]> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(projectId)}/page-imports`);
+  }
+
+  async importProjectPageFile(
+    projectId: string,
+    target: string,
+    name: string,
+    file: Blob,
+    signal?: AbortSignal,
+  ): Promise<PageImportedFile> {
+    const query = new URLSearchParams({ target, name });
+    const res = await this.fetchImpl(
+      `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/page-imports?${query}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'content-type': 'application/octet-stream',
+        },
+        body: file,
+        signal,
+      },
+    );
+    const result = (await res.json()) as PageImportedFile & { error?: string };
+    if (!res.ok)
+      throw Object.assign(new Error(result.error ?? 'Import failed.'), { status: res.status });
+    return result;
+  }
+
   copyArtifactToWorkspace(
     id: string,
     body: CopyArtifactToWorkspaceRequest,
@@ -6256,6 +6377,95 @@ export class GezelClient {
       `/api/projects/${encodeURIComponent(id)}/index/file-summary?path=${encodeURIComponent(path)}`,
     );
     return res.summary;
+  }
+
+  /** The project's reports, newest first, and which ones Gezel can write for it now. */
+  listProjectReports(id: string): Promise<ProjectReportsResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/reports`);
+  }
+
+  /** Write one model-free report now, replacing today's. */
+  generateProjectReport(
+    id: string,
+    kind: WritableReportKind,
+  ): Promise<GenerateProjectReportResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/reports/generate`, {
+      kind,
+    });
+  }
+
+  /** The project's dependency graph, for a Views diagram. */
+  getFileGraph(id: string, req: FileGraphRequest = {}): Promise<FileGraphResponse> {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(req)) {
+      if (value !== undefined) query.set(key, String(value));
+    }
+    const qs = query.toString();
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/index/graph${qs ? `?${qs}` : ''}`,
+    );
+  }
+
+  /** The project's files as shelves, for the Gallery view. */
+  getGallery(id: string, req: GalleryRequest = {}): Promise<GalleryResponse> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/index/gallery${queryString(req)}`,
+    );
+  }
+
+  /** The next page of one gallery shelf; null when the shelf no longer exists. */
+  async getGalleryShelf(
+    id: string,
+    req: GalleryShelfRequest,
+  ): Promise<GalleryShelfResponse | null> {
+    try {
+      return await this.request<GalleryShelfResponse>(
+        'GET',
+        `/api/projects/${encodeURIComponent(id)}/index/gallery/shelf${queryString(req)}`,
+      );
+    } catch (error) {
+      if (error instanceof GezelApiError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  /** What changed when in the project, for the Timeline view. */
+  getTimeline(id: string, req: TimelineRequest = {}): Promise<TimelineResponse> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/index/timeline${queryString(req)}`,
+    );
+  }
+
+  /** The commits and files in one stretch of the timeline; null before the first scan. */
+  async getTimelineBucket(
+    id: string,
+    req: TimelineBucketRequest,
+  ): Promise<TimelineBucketResponse | null> {
+    try {
+      return await this.request<TimelineBucketResponse>(
+        'GET',
+        `/api/projects/${encodeURIComponent(id)}/index/timeline/bucket${queryString(req)}`,
+      );
+    } catch (error) {
+      if (error instanceof GezelApiError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  /** Everything the index knows about one file; null when the file is not indexed. */
+  async getFileInsight(id: string, path: string): Promise<FileInsightResponse | null> {
+    try {
+      return await this.request<FileInsightResponse>(
+        'GET',
+        `/api/projects/${encodeURIComponent(id)}/index/file-insight?path=${encodeURIComponent(path)}`,
+      );
+    } catch (error) {
+      if (error instanceof GezelApiError && error.status === 404) return null;
+      throw error;
+    }
   }
 
   /** Photos taken on this calendar day in earlier years; null before the folder's first scan. */
@@ -6746,6 +6956,11 @@ export class GezelClient {
 
   getProjectIndexStatus(id: string): Promise<WorkspaceIndexStatus> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/status`);
+  }
+
+  /** Gezel's map of the codebase: folder purposes, key files and the most-imported files. */
+  getCodebaseMap(id: string): Promise<CodebaseMapResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/codebase-map`);
   }
 
   /**
@@ -7483,6 +7698,11 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/page-read`, body);
   }
 
+  /** Query only tables backed by files readable by this project's page. */
+  invokeProjectPageTables(projectId: string, body: PageTableRequest): Promise<PageTableResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/page-tables`, body);
+  }
+
   getProjectScriptRun(projectId: string, runId: string): Promise<ScriptRun> {
     return this.request(
       'GET',
@@ -7637,7 +7857,7 @@ export class GezelClient {
 
   /**
    * Daemon base URL. Surfaced for code paths that don't go through
-   * the typed client — currently the UI's Connected Apps panel,
+   * the typed client — currently the UI's Integrations panel,
    * which hits `/v1/apps/*` (the public app surface, deliberately
    * NOT wrapped by the internal client). Returned without a trailing
    * slash.
@@ -8198,6 +8418,16 @@ export class GezelClient {
   }
 }
 
+/** `?a=1&b=2` from a request's defined fields; empty when it has none. */
+function queryString(req: object): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(req)) {
+    if (value !== undefined && value !== '') query.set(key, String(value));
+  }
+  const qs = query.toString();
+  return qs ? `?${qs}` : '';
+}
+
 function toolsetsQueryString(scope: ToolsetsScope): string {
   if (scope.kind === 'shared') return 'scope=shared';
   if (scope.kind === 'system') return 'scope=system';
@@ -8205,3 +8435,4 @@ function toolsetsQueryString(scope: ToolsetsScope): string {
     return `scope=project&project=${encodeURIComponent(scope.projectId)}`;
   return `scope=gezel&gezel=${encodeURIComponent(scope.gezelId)}`;
 }
+import type { PageImportAvailability, PageImportedFile } from '@bendyline/gezel';

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isGitInstalled, runGit } from '../git/git.js';
 import { indexWorkspaceContent } from '../index-store/content-indexer.js';
 import { refreshGitStats, resetGitProbeForTests } from '../index-store/git-stats.js';
+import { IMPORT_FLAG } from '../index-store/index-store-types.js';
 import { IndexStore } from '../index-store/index-store.js';
 import { extractImportEdges } from '../index-store/symbols.js';
 import { resolveImportEdges, resolveImportEdgesDetailed } from './affinity.js';
@@ -112,6 +113,37 @@ describe('extractImportEdges', () => {
       { name: 'd', local: 'e', kind: 'named' },
     ]);
     expect(byRaw.get('f')).toEqual([{ name: '*', local: '*', kind: 'namespace' }]);
+  });
+
+  it('flags re-exports, type-only and dynamic imports, merged per specifier', async () => {
+    const code = [
+      "import type { Shape } from './types.js';",
+      "export type { Size } from './types.js';",
+      "export { run } from './run.js';",
+      "const lazy = await import('./heavy.js');",
+      "import { a } from './mixed.js';",
+      "const later = await import('./mixed.js');",
+      "import type from './type-default.js';",
+    ].join('\n');
+    const edges = await extractImportEdges('typescript', code);
+    const flags = new Map(edges!.map((e) => [e.raw, e.flags ?? 0]));
+    expect(flags.get('./types.js')).toBe(IMPORT_FLAG.typeOnly | IMPORT_FLAG.reexport);
+    expect(flags.get('./run.js')).toBe(IMPORT_FLAG.reexport);
+    expect(flags.get('./heavy.js')).toBe(IMPORT_FLAG.dynamic);
+    // One runtime import makes the dependency real.
+    expect(flags.get('./mixed.js')).toBe(0);
+    // A default import named `type` is not a type-only import.
+    expect(flags.get('./type-default.js')).toBe(0);
+  });
+
+  it('records Rust mod declarations and keeps C system includes bracketed', async () => {
+    const rust = await extractImportEdges(
+      'rust',
+      'mod cart;\nmod inline { fn x() {} }\nuse crate::money::Money;\n',
+    );
+    expect(rust!.map((e) => e.raw).sort()).toEqual(['crate::money::Money', 'mod cart']);
+    const c = await extractImportEdges('c', '#include <stdio.h>\n#include "util.h"\n');
+    expect(c!.map((e) => e.raw).sort()).toEqual(['<stdio.h>', 'util.h']);
   });
 
   it('leaves bindings unrecorded for languages we do not dissect', async () => {

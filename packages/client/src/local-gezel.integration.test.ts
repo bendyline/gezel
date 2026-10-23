@@ -144,3 +144,96 @@ describe('connectToLocalGezel', () => {
     );
   });
 });
+
+/**
+ * A stand-in service where the owner token may only trade itself for a
+ * narrower one, which every other request must carry.
+ */
+async function tradingService(cert: string, key: string, owner: string, seen: string[]) {
+  let minted = 0;
+  const live = new Set<string>();
+  const server = createServer({ cert, key }, (req, res) => {
+    const auth = req.headers.authorization ?? '';
+    const reply = (status: number, body: unknown) => {
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(body));
+    };
+    if (req.url === '/api/health') return reply(200, { ok: true, version: 'test' });
+    if (req.url === '/trade') {
+      if (auth !== `Bearer ${owner}`) return reply(401, { error: 'unauthorized' });
+      const narrow = `narrow-${owner}-${++minted}`;
+      live.add(narrow);
+      return reply(200, { token: narrow });
+    }
+    seen.push(auth);
+    if (!live.has(auth.replace(/^Bearer /, ''))) return reply(401, { error: 'unauthorized' });
+    return reply(200, { gezels: [] });
+  });
+  const port = await listen(server);
+  return { server, port, revokeAll: () => live.clear() };
+}
+
+describe('connectToLocalGezel with a traded credential', () => {
+  function trader() {
+    const trades: string[] = [];
+    let current: { key: string; token: string } | null = null;
+    return {
+      trades,
+      credential: {
+        async token(launch: import('./local-gezel.js').LocalGezelLaunch) {
+          if (current?.key === launch.key) return current.token;
+          const res = await launch.ownerFetch('/trade', { method: 'POST' });
+          const { token } = (await res.json()) as { token: string };
+          trades.push(token);
+          current = { key: launch.key, token };
+          return token;
+        },
+        async rejected() {
+          current = null;
+          return true;
+        },
+      },
+    };
+  }
+
+  it('sends only the traded token, never the owner token', async () => {
+    const [cert, key] = await Promise.all([fixture('server'), fixture('server-key')]);
+    const home = await tempHome();
+    const seen: string[] = [];
+    const { port } = await tradingService(cert, key, 'owner-1', seen);
+    await writeRuntime(home, { port, token: 'owner-1', cert });
+    const { credential, trades } = trader();
+    const local = await connectToLocalGezel({ home, credential });
+    cleanups.push(() => local.close());
+
+    await local.client.listGezels();
+    await local.client.listGezels();
+    expect(trades).toEqual(['narrow-owner-1-1']);
+    expect(seen).toEqual(['Bearer narrow-owner-1-1', 'Bearer narrow-owner-1-1']);
+  });
+
+  it('trades again when the token is refused, and after the service restarts', async () => {
+    const [cert, key] = await Promise.all([fixture('server'), fixture('server-key')]);
+    const home = await tempHome();
+    const seen: string[] = [];
+    const first = await tradingService(cert, key, 'owner-1', seen);
+    await writeRuntime(home, { port: first.port, token: 'owner-1', cert });
+    const { credential, trades } = trader();
+    const local = await connectToLocalGezel({ home, credential });
+    cleanups.push(() => local.close());
+    await local.client.listGezels();
+
+    first.revokeAll();
+    await local.client.listGezels();
+    expect(trades).toEqual(['narrow-owner-1-1', 'narrow-owner-1-2']);
+
+    const closed = new Promise<void>((resolve) => first.server.close(() => resolve()));
+    first.server.closeAllConnections();
+    await closed;
+    const second = await tradingService(cert, key, 'owner-2', seen);
+    await writeRuntime(home, { port: second.port, token: 'owner-2', cert });
+    await local.client.listGezels();
+    expect(trades.at(-1)).toBe('narrow-owner-2-1');
+    expect(seen.some((auth) => auth.includes('owner-') && !auth.includes('narrow'))).toBe(false);
+  });
+});

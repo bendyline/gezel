@@ -5,6 +5,8 @@ export interface ProvenanceToolCall {
   paths?: string[];
   argsFull?: string;
   argsSummary?: string;
+  /** The tool's response as the session recorded it; bounded for long results. */
+  resultText?: string;
 }
 
 const STRUCTURED_MUTATION_TOOLS = new Set([
@@ -118,4 +120,28 @@ export function provenanceShellReadPrecedesMutation(
   const readIndex = shellReadIndex(call, readPath);
   const mutationIndex = shellMutationIndex(call, mutationPath);
   return readIndex >= 0 && mutationIndex >= 0 && readIndex < mutationIndex;
+}
+
+/**
+ * Whether a provenance miss is only a turn that has not committed yet. The
+ * trace comes from committed session messages, so a turn still running shows
+ * none of its tool calls: judging it then fails a deliverable already on disk
+ * and sends a repair into that same turn, which keeps it open. DeepSeek V4.1's
+ * conflict-synthesis turn ran 25 minutes and was failed four times for writes
+ * it had made (2026-10-20). Missing or out-of-order reads are judged as before.
+ */
+export function provenanceAwaitsCommit(
+  provenance: {
+    missingReads: readonly string[];
+    outOfOrderReads: readonly string[];
+    missingRecordings: readonly string[];
+  },
+  turnInProgress: boolean,
+): boolean {
+  return (
+    turnInProgress &&
+    provenance.missingRecordings.length > 0 &&
+    provenance.missingReads.length === 0 &&
+    provenance.outOfOrderReads.length === 0
+  );
 }

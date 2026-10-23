@@ -620,7 +620,10 @@ export class IndexEnrichmentManager {
    * Fired by the workspace scan-complete hook and the roster-less fallback
    * of `POST /index/enrich`.
    */
-  drainEmbedOnly(projectId: string): { started: boolean; alreadyRunning: boolean } {
+  drainEmbedOnly(
+    projectId: string,
+    opts: { refreshFirst?: boolean } = {},
+  ): { started: boolean; alreadyRunning: boolean } {
     if (this.stopping) return { started: false, alreadyRunning: false };
     // A full drive already covers this work; don't double-open the index.
     if (this.drives.has(projectId) || this.embedDrains.has(projectId)) {
@@ -634,6 +637,15 @@ export class IndexEnrichmentManager {
           ? await this.store.projectIndexingEnabled(projectId).catch(() => true)
           : true;
       if (!indexingEnabled) return;
+      // An explicit "update the index" on a folder nobody has scanned had
+      // nothing to embed: the drain only embeds chunks a scan already wrote,
+      // and the route answered as if work were under way. The scan-complete
+      // hook passes no flag (it runs after a scan), and its own call while
+      // this refresh runs finds this drain in flight, so nothing loops.
+      if (opts.refreshFirst) {
+        if (this.refreshStatic) await this.refreshStatic(projectId).catch(() => {});
+        else await this.contentIndex.refresh(projectId).catch(() => {});
+      }
       await this.drainLocalEmbedTiers(projectId, { night: true, yieldToChat: true });
     })()
       .catch((err) => log.warn(`[enrich] embed drain ${projectId} failed: ${describe(err)}`))

@@ -87,8 +87,11 @@ const RECORD_FILE_RE = /^(\d{3})--.*--([0-9a-f]{8})\.md$/;
  * what triggers a refresh-in-place.
  */
 export function contentHash(record: NormalizedRecord): string {
+  const volatile = new Set(record.volatileKeys ?? []);
   const sortedFrontmatter = Object.fromEntries(
-    Object.entries(record.frontmatter).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+    Object.entries(record.frontmatter)
+      .filter(([key]) => !volatile.has(key))
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
   );
   const attachments = (record.attachments ?? []).map((attachment) => ({
     filename: attachment.filename,
@@ -274,19 +277,31 @@ export interface PruneResult {
   pruned: number;
 }
 
+export interface SweepInput {
+  /** Project artifacts root containing the corpus. */
+  storageDir: string;
+  /** Scope-level corpus dir to walk (the same dir records were written to). */
+  corpusDir: string;
+  /**
+   * Decide per record file. `relPath` is artifact-relative and uses `/`, in
+   * the same form `writeRecord` returns, so a caller can keep one copy of a
+   * record and drop the others.
+   */
+  remove: (recordHash8: string, relPath: string) => boolean;
+}
+
 /**
- * Remove records the source no longer returns — mirror-completeness sources
- * only, and only after a pass that enumerated the full scope with zero errors
- * (the engine enforces those gates). Walks the scope subtree, skipping
- * `_`-prefixed entries (the mutable surface) and `attachments/`; a pruned
+ * Remove record files a predicate selects. Walks the scope subtree, skipping
+ * `_`-prefixed entries (the mutable surface) and `attachments/`; a removed
  * record loses its file, its attachment dir, and its sidecar entry. Ordinals
  * go sparse by design — `writeRecord` allocates from the max, not the count.
  */
-export async function pruneRecords(input: PruneInput): Promise<PruneResult> {
-  const rootAbs = await resolveInside(input.storageDir, input.corpusDir);
-  let pruned = 0;
+export async function sweepRecords(input: SweepInput): Promise<{ removed: number }> {
+  const corpusRel = input.corpusDir.replace(/\/+$/, '');
+  const rootAbs = await resolveInside(input.storageDir, corpusRel);
+  let removed = 0;
 
-  async function walk(dirAbs: string): Promise<void> {
+  async function walk(dirAbs: string, dirRel: string): Promise<void> {
     let entries: Dirent[] = [];
     try {
       entries = await readdir(dirAbs, { withFileTypes: true });
@@ -298,11 +313,13 @@ export async function pruneRecords(input: PruneInput): Promise<PruneResult> {
     for (const entry of entries) {
       if (entry.name.startsWith('_')) continue;
       if (entry.isDirectory()) {
-        if (entry.name !== 'attachments') await walk(join(dirAbs, entry.name));
+        if (entry.name !== 'attachments') {
+          await walk(join(dirAbs, entry.name), `${dirRel}/${entry.name}`);
+        }
         continue;
       }
       const m = RECORD_FILE_RE.exec(entry.name);
-      if (!m || input.keepHashes.has(m[2]!)) continue;
+      if (!m || !input.remove(m[2]!, `${dirRel}/${entry.name}`)) continue;
       await rm(join(dirAbs, entry.name), { force: true });
       await rm(join(dirAbs, 'attachments', m[1]!), { recursive: true, force: true });
       sidecar ??= await readSidecar(dirAbs);
@@ -310,13 +327,27 @@ export async function pruneRecords(input: PruneInput): Promise<PruneResult> {
         delete sidecar[m[2]!];
         sidecarDirty = true;
       }
-      pruned++;
+      removed++;
     }
     if (sidecar && sidecarDirty) {
       await writeFileAtomic(join(dirAbs, '_flags.json'), JSON.stringify(sidecar, null, 2));
     }
   }
 
-  await walk(rootAbs);
-  return { pruned };
+  await walk(rootAbs, corpusRel);
+  return { removed };
+}
+
+/**
+ * Remove records the source no longer returns — mirror-completeness sources
+ * only, and only after a pass that enumerated the full scope with zero errors
+ * (the engine enforces those gates).
+ */
+export async function pruneRecords(input: PruneInput): Promise<PruneResult> {
+  const { removed } = await sweepRecords({
+    storageDir: input.storageDir,
+    corpusDir: input.corpusDir,
+    remove: (hash8) => !input.keepHashes.has(hash8),
+  });
+  return { pruned: removed };
 }

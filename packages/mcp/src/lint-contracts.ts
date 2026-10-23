@@ -39,6 +39,7 @@ async function loadBuiltinToolContracts(): Promise<BuiltinToolContract[]> {
     'GEZEL_MAIL_ENABLED',
     'GEZEL_SOCIAL_ENABLED',
     'GEZEL_CONNECTORS_ENABLED',
+    'GEZEL_CAMERAS_ENABLED',
     'GEZEL_PERMISSION_PROMPT',
   ] as const;
   const previous = new Map(envKeys.map((key) => [key, process.env[key]]));
@@ -57,6 +58,7 @@ async function loadBuiltinToolContracts(): Promise<BuiltinToolContract[]> {
   process.env.GEZEL_MAIL_ENABLED = '1';
   process.env.GEZEL_SOCIAL_ENABLED = '1';
   process.env.GEZEL_CONNECTORS_ENABLED = '1';
+  process.env.GEZEL_CAMERAS_ENABLED = '1';
   process.env.GEZEL_PERMISSION_PROMPT = '1';
 
   try {

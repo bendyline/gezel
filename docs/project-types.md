@@ -1,5 +1,10 @@
 # Custom project types
 
+**Building an app?** Start with [Building Gezel apps](building-gezel-apps.md),
+which links the public authoring guide, page APIs, style guide, and tested
+examples. This document is the composition and runtime reference; proposals
+and historical rollout notes are not additional authoring requirements.
+
 A **project type** outfits a project for a particular kind of work: it bundles a gezel
 role template, craftbooks, sandboxed scripts and script-backed tools, suggested toolsets,
 seed data, scheduled work, and an Output page (dashboard) into one installable,
@@ -18,9 +23,9 @@ App** names the complete customer-facing experience and its `.gezapp` package. A
 **connected app** remains the separate external-process surface (`/v1/apps`,
 `@bendyline/gezel-app-sdk`).
 
-This document is the spec. It records the manifest shape, instantiation semantics, the
+This document is the reference. It records the manifest shape, instantiation semantics, the
 copy-vs-reference rule, the security posture for sharing, and the `.gezapp` package
-format. Implementation lands in phases (see the end of this doc).
+format. The rollout history and remaining exclusions are recorded at the end.
 
 ## Relationship to what exists today
 
@@ -133,7 +138,7 @@ Version manifest (composition payload):
       "turn": { "say": "moveThought" } },              // a successful call ends the turn; `say` is the reply
     { "name": "get_board", "…": "…", "state": true },   // a person's message is answered from its output
   ],
-  "pages": { "entry": "dashboard/index.html",         // pinned Output page (new primitive)
+  "pages": { "entry": "dashboard/index.html", "api": 1, // pinned Output page
              "reads": [ { "source": "workspace", "path": "…" } ],
              "tools": ["user_move"] },                 // page-ONLY invokable subset of tools[]
   "schedules": [{ "cron": "0 18 * * *", "craftbook": "daily-lesson", "consent": "ask" }],
@@ -224,8 +229,10 @@ creation from the gallery, or applying a type to an existing project):
   drift is detectable.
 - Content that stays **type-owned** is **referenced** from the installed type version:
   pages, tool declarations, detection profile. Fixes ship by installing a new version.
-- Upgrades reuse the gezel-template refresh pattern (provenance `id` + `version`):
-  reinstall unmodified copies, flag modified ones for the user to reconcile.
+- Provenance supports upgrades, but preservation is not uniform across all
+  copied content: seed and craftbook drift checks exist, while script upgrades
+  can overwrite a local edit. There is no general three-way reconciliation or
+  app-data migration framework. See the public authoring guide's lifecycle gaps.
 
 ## New primitives
 
@@ -291,7 +298,53 @@ preference, so the page follows the operating system rather than the gezel
 setting. That is the honest ceiling of this mechanism, and the reason pages are
 asked to honour the ordinary media query rather than a gezel-specific hook.
 
+### Shared typography
+
+Gezel supplies project pages with its own local fonts: Hanken Grotesk for body
+text and controls, and PT Serif for headings. No font files, `@font-face` rules,
+imports, or API calls are needed in a page bundle. The host inserts the shared
+stylesheet before the page's CSS in desktop previews, app-serve, and offline
+mobile previews. Ordinary workspace/artifact HTML keeps its own typography.
+
+The CSS roles are `--font-body`, `--font-ui`, and `--font-heading` (with
+`--font-display` retained as the heading stack). Body text, form controls, and
+`h1`–`h6` use those roles automatically. A page can style another element with
+`font-family: var(--font-heading, Georgia, serif)` or override a role on `:root`.
+The host rules have low specificity, so authored CSS takes precedence. Raw
+standalone demos have no host; use system-font fallbacks in `var()` for those.
+Fonts and their licenses ship once with Gezel, not in every project type.
+
 ### The Output Pane API (`window.gezel`) — v1
+
+The **Media Library** type in Gilde connects an existing folder to a gallery of
+images, video, and audio. Its catalog-owned page uses `gezel.data.list/watch`
+to discover nested files, `gezel.data.url` for previews and playback, and
+`gezel.data.open` for the original file in Gezel's viewer. Search, folder and
+media-kind filters, sorting, and grid/list views work without importing files.
+The scan has the same 100-folder / 10,000-file bounds described below; playback
+depends on the browser's installed codecs. Unsupported formats remain listed.
+
+On desktop, catalog types without `workspaceSeed` can optionally choose an
+existing folder at creation. `POST /api/projects/typed` accepts `workingDir`;
+creation validates the folder, stages the type in isolation, then connects the
+folder without seeding or writing into it. Types with workspace starter files
+must use a new internal workspace. Portable hosts reject external folder paths.
+
+The **Data Analysis** type in Gilde uses this API for a live inventory of the
+project workspace. Its `pages/index.html`, JavaScript, and CSS
+are served from the type; adoption does not put dashboard files or sample data
+in the user's folder. The page lists datasets and reports recursively, watches
+the folders it visited, and opens files with `gezel.data.open()` in the existing
+file viewer. Hidden, dependency, and document-companion folders are omitted;
+scans beyond 100 folders or 10,000 files report a partial listing. No dataset
+contents are loaded merely to build the inventory.
+
+The same page uses `gezel.tables.list/describe/query` for indexed data: table
+selection, record counts, missing-value counts, numeric ranges and averages,
+column types, and grouped charts. These read-only queries inherit `pages.reads`
+from the original source file, without granting the page access to unrelated
+artifacts. Summaries describe the indexed snapshot; unindexed files remain in
+the inventory, and hosts without DuckDB keep file browsing available.
 
 New pages should be authored against the injected, versioned page API
 documented in [docs/output-pane-api.md](output-pane-api.md): the daemon
@@ -564,9 +617,10 @@ install fails while a required dependency is unavailable. Import does not execut
 content. Version 1 packages explicitly declare `signature.status: "unsigned"`; their
 hashes provide integrity, not publisher authenticity.
 
-The companion feature is the **exporter**: "package this project as a custom project
-type" — a Meester-assisted lift of a project's accumulated craftbooks, scripts, pages,
-and gezel into a multi-item bundle. Users grow a project organically, then share it.
+The current **exporter** packages the applied type's catalog definition and its
+referenced items. It does not automatically capture a project's edited scripts,
+new craftbooks, or redesigned page. Turning those local customizations into a
+reviewed new app version remains a separate authoring step.
 
 ### Source folders (the authoring format)
 
@@ -698,3 +752,12 @@ plus both gezapp manifests, rendered live from core Zod). The CLI surface is
   `clue-store`; two clue-givers with preset characters (the Woordsmid and the
   Puzzelaar, from their templates' `frontmatter.character`) alternate, each turn one
   `give_clue` call the script checks against the board.
+### File import destinations
+
+`pages.imports` declares named workspace destinations such as
+`{ "id": "library", "source": "workspace", "path": ".", "accept": [".png", ".mp4"] }`.
+Pages pass the id to `gezel.data.importFiles` or the shared file adder; they cannot
+choose another destination at call time. Optional `maxFileBytes` can lower the
+host's 256 MiB ceiling. This grant does not bypass workspace write policy or
+imply a `pages.reads` scope. See [shared file components and imports](handboek/technical/gezel-page-apis.md#file-cards-and-adding-files)
+for live-host support, standalone demos, cleanup and tests.

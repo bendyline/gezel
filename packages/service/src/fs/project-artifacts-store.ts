@@ -527,6 +527,11 @@ export class ProjectArtifactsStore {
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned) throw new Error('empty artifact path');
     assertNoTemplatePlaceholderPath(cleaned);
+    // The binary path is how a camera's keyframes or a mirrored file would be
+    // overwritten; it owes the corpus the same read-only rule as text.
+    if (options?.initiatedByGezel && isProtectedConnectorCorpusPath(cleaned)) {
+      throw new ConnectorCorpusWriteDeniedError();
+    }
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
     if (isReservedTabularArtifactPath(cleaned)) throw new TabularPathWriteDeniedError();
     if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
@@ -552,6 +557,10 @@ export class ProjectArtifactsStore {
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned || namesArtifactsRoot(base, cleaned, null)) {
       throw new ArtifactRootDeniedError('deleted');
+    }
+    // A deleted record is never fetched again — the cursor is past it.
+    if (opts?.initiatedByGezel && isProtectedConnectorCorpusPath(cleaned)) {
+      throw new ConnectorCorpusWriteDeniedError();
     }
     if (opts?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
       throw new PromptDraftPathWriteDeniedError();
@@ -695,4 +704,26 @@ function isProtectedConnectorCorpusPath(path: string): boolean {
   const collapsed = artifactSegments(path);
   if (collapsed[0]?.toLowerCase() !== 'data') return false;
   return !collapsed.slice(1).some((segment) => segment.startsWith('_'));
+}
+
+/**
+ * Why a gezel may not write `path` in the artifacts drawer, or null when it
+ * may: the denials `writeProjectArtifact*` apply to a gezel-initiated write,
+ * for writers that reach the drawer without this store. DocBlocks'
+ * `save_artifact` materializes files itself, so without this check a model
+ * could save into a diffpack's draft tree or a connector mirror.
+ */
+export function gezelArtifactWriteDenial(path: string): string | null {
+  const cleaned = normalizeArtifactPath(path);
+  if (isProtectedConnectorCorpusPath(cleaned)) return 'connector data under data/ is read-only';
+  if (isReservedShadowArtifactPath(cleaned))
+    return 'shadow/ holds document copies only gezel makes';
+  if (isReservedTabularArtifactPath(cleaned)) return 'tabular/ holds tables only gezel derives';
+  if (isReservedDiffpackArtifactPath(cleaned)) {
+    return "a change proposal's after/ and files/ folders are written only by the proposal itself";
+  }
+  if (isReservedPromptDraftArtifactPath(cleaned)) return "prompts/ holds the person's own drafts";
+  if (isTaskInputArtifactPath(cleaned))
+    return "a task's inputs/ folder is the source it works from";
+  return null;
 }

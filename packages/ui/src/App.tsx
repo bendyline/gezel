@@ -40,10 +40,13 @@ import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
 import { ActivityProvider, useActivity } from './components/activity-context.js';
+import { WatchingIndicator } from './components/cameras/WatchingIndicator.js';
 import { projectRecipientKey, writeChatThreadSelection } from './components/chat-thread-memory.js';
 import { ENGAGEMENT_MODES } from './components/engagement-modes.js';
 import { FirstRunProvider } from './components/first-run-context.js';
 import { HeaderDensityContext, useHeaderDensityMeasurement } from './components/header-density.js';
+import { LookoutAlertToast } from './components/lookouts/LookoutAlertToast.js';
+import { navigateToTab, openProjectFileActions, runNavActions } from './components/nav-actions.js';
 import { NIGHT_SHIFT_MOON_PATH, NightShiftMoonGlyph } from './components/night-shift-glyph.js';
 import {
   OUTPUT_PANE_MAXIMIZED_EVENT,
@@ -98,6 +101,7 @@ const SELECTION_STORAGE_KEY = 'gezel:nav:selection';
 
 /** Restore the last selection from localStorage; `null` = Meester home. */
 function readStoredSelection(): RecentTab | null {
+  if (window.__GEZEL__?.startupHome?.active) return null;
   try {
     const raw = window.localStorage.getItem(SELECTION_STORAGE_KEY);
     if (!raw) return null;
@@ -729,7 +733,7 @@ function FullApp() {
     <div className={`app${compact ? ' app-compact' : ''}${preview ? ' app-mobile-preview' : ''}`}>
       {/* Global consent dialog for /v1/apps/register. Mounts here so a
           pending grant can surface from any view without the user having
-          to navigate to Settings → Connected Apps. */}
+          to navigate to Settings → Integrations. */}
       {runtimeCapabilities().connections && <GrantConsentDialog />}
       {runtimeCapabilities().daemonSettings && <MacUninstallDialog />}
       {runtimeCapabilities().daemonSettings && <StorageCleanupDialog />}
@@ -788,6 +792,7 @@ function FullApp() {
               (runtimeCapabilities().engineStatus || runtimeCapabilities().structuredQuestions) && (
                 <ActivityControl />
               )}
+            {!firstRun && runtimeCapabilities().connections && <WatchingIndicator />}
             {!firstRun && runtimeCapabilities().daemonSettings && <BoekwachterPill />}
             {!firstRun && runtimeCapabilities().engineStatus && <EngineStatusPill />}
             {!firstRun && runtimeCapabilities().daemonSettings && (
@@ -872,6 +877,7 @@ function FullApp() {
           </Suspense>
         </ResponsiveAppShell>
       </FirstRunProvider>
+      {runtimeCapabilities().connections && <LookoutAlertToast />}
     </div>
   );
 }
@@ -1237,14 +1243,15 @@ function TaskSpeedMenu({
               <div className="app-nightshift-group">
                 <div className="app-nightshift-task-heading">{reviewHeading}</div>
                 {review.reports.map((r) => (
-                  <button
+                  <DropdownMenu.Item
                     key={`${r.projectId}:${r.path}`}
-                    type="button"
                     className="app-nightshift-task app-nightshift-report"
-                    onClick={() =>
-                      window.dispatchEvent(
-                        new CustomEvent('gezel:open-tab', {
-                          detail: { kind: 'project', id: r.projectId },
+                    onSelect={() =>
+                      runNavActions(
+                        openProjectFileActions({
+                          projectId: r.projectId,
+                          path: r.path,
+                          source: 'artifacts',
                         }),
                       )
                     }
@@ -1259,27 +1266,20 @@ function TaskSpeedMenu({
                           : ''}
                       </span>
                     </span>
-                  </button>
+                  </DropdownMenu.Item>
                 ))}
                 {review.tasksCompleted.slice(0, 5).map((t) => (
-                  <button
+                  <DropdownMenu.Item
                     key={t.ref}
-                    type="button"
                     className="app-nightshift-task app-nightshift-report"
-                    onClick={() =>
-                      window.dispatchEvent(
-                        new CustomEvent('gezel:open-tab', {
-                          detail: { kind: 'task', ref: t.ref },
-                        }),
-                      )
-                    }
+                    onSelect={() => navigateToTab({ kind: 'task', ref: t.ref })}
                   >
                     <span className="app-nightshift-task-dot is-done" aria-hidden="true" />
                     <span className="app-nightshift-task-text">
                       <span className="app-nightshift-task-title">{t.title}</span>
                       <span className="app-nightshift-task-meta">{t.projectName}</span>
                     </span>
-                  </button>
+                  </DropdownMenu.Item>
                 ))}
               </div>
             )}
@@ -1311,7 +1311,22 @@ function NightShiftTaskRow({
 }) {
   const base = task.stepName ? `${task.projectName} · ${task.stepName}` : task.projectName;
   const meta = task.quotaHeld ? `${base} · waiting for quota` : base;
-  return <NightShiftWorkRow title={task.title} meta={meta} active={active} />;
+  const report = task.latestReport;
+  return (
+    <DropdownMenu.Item
+      className="app-nightshift-report"
+      title={report ? 'Open latest report' : 'View task details'}
+      onSelect={() => {
+        if (report) {
+          runNavActions(openProjectFileActions({ ...report, source: 'artifacts' }));
+        } else {
+          navigateToTab({ kind: 'task', ref: task.ref });
+        }
+      }}
+    >
+      <NightShiftWorkRow title={task.title} meta={meta} active={active} />
+    </DropdownMenu.Item>
+  );
 }
 
 interface NightShiftSummary {

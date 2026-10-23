@@ -24,7 +24,15 @@
  *   attempt. A partner-shaped blob that does carry a refresh token is
  *   refreshed in place like x-posts.
  *
- * Construct-per-pass with an injectable runtime seam, mirroring x-posts.
+ * Commentary is LinkedIn's `little` text format, not plain text: reserved
+ * characters such as parentheses and brackets must be backslash-escaped or
+ * LinkedIn mangles the post (text from the first one onward goes missing).
+ * The adapter escapes them, keeping `#hashtags`, so a draft publishes as
+ * written.
+ *
+ * Construct-per-pass with an injectable runtime seam, mirroring x-posts. The
+ * default runtime rides `AdapterDeps.fetch`, so the provider simulator drives
+ * it end to end.
  */
 
 import { isRateLimitStatus } from '@bendyline/gezel';
@@ -50,10 +58,12 @@ const USERINFO_URL = 'https://api.linkedin.com/v2/userinfo';
 const POSTS_URL = 'https://api.linkedin.com/rest/posts';
 /**
  * LinkedIn's versioned REST API takes a YYYYMM `LinkedIn-Version` header and
- * SUNSETS old versions on a rolling window — a retired pin makes every
- * request fail outright. Bump deliberately and retest the publish payload.
+ * SUNSETS each version about a year after release — a retired pin makes every
+ * request fail with 426 NONEXISTENT_VERSION. 202610 is supported until about
+ * October 2027. Bump deliberately (at least yearly) and retest the publish
+ * payload: https://learn.microsoft.com/linkedin/marketing/versioning
  */
-const LINKEDIN_VERSION = '202508';
+const LINKEDIN_VERSION = '202610';
 /** LinkedIn's ceiling for post commentary, in characters. */
 const MAX_POST_CHARS = 3000;
 const LINKEDIN_ENDPOINTS: OAuthEndpoints = {
@@ -109,38 +119,41 @@ export interface LinkedInRuntime {
   now(): Date;
 }
 
-const defaultRuntime: LinkedInRuntime = {
-  getJson: async (url, accessToken) => {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
-      signal: AbortSignal.timeout(30_000),
-    });
-    const text = await res.text().catch(() => '');
-    if (!res.ok) throw new LinkedInApiError(res.status, text.slice(0, 300));
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      return {};
-    }
-  },
-  postJson: async (url, accessToken, headers, body) => {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        ...headers,
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30_000),
-    });
-    const text = await res.text().catch(() => '');
-    if (!res.ok) throw new LinkedInApiError(res.status, text.slice(0, 300));
-    return { urn: res.headers.get('x-restli-id') ?? '' };
-  },
-  refreshToken: (params) => refreshToken(params),
-  now: () => new Date(),
-};
+/** The production runtime over a transport (`AdapterDeps.fetch`, else global fetch). */
+export function createLinkedInRuntime(fetchImpl: typeof fetch = fetch): LinkedInRuntime {
+  return {
+    getJson: async (url, accessToken) => {
+      const res = await fetchImpl(url, {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+        signal: AbortSignal.timeout(30_000),
+      });
+      const text = await res.text().catch(() => '');
+      if (!res.ok) throw new LinkedInApiError(res.status, text.slice(0, 300));
+      try {
+        return JSON.parse(text) as unknown;
+      } catch {
+        return {};
+      }
+    },
+    postJson: async (url, accessToken, headers, body) => {
+      const res = await fetchImpl(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const text = await res.text().catch(() => '');
+      if (!res.ok) throw new LinkedInApiError(res.status, text.slice(0, 300));
+      return { urn: res.headers.get('x-restli-id') ?? '' };
+    },
+    refreshToken: (params) => refreshToken({ ...params, fetchImpl }),
+    now: () => new Date(),
+  };
+}
 
 interface PostsCursor {
   /** OpenID `sub` of the signed-in member — the `<sub>` of `urn:li:person:<sub>`. */
@@ -158,12 +171,15 @@ export class LinkedInPostsAdapter implements ConnectorAdapter {
   private token = '';
   /** Per-pass memo of the member id, so one pass never reads userinfo twice. */
   private sub?: string;
+  private readonly runtime: LinkedInRuntime;
 
   constructor(
     private readonly binding: ConnectorBindingRef,
     private readonly deps: AdapterDeps,
-    private readonly runtime: LinkedInRuntime = defaultRuntime,
-  ) {}
+    runtime?: LinkedInRuntime,
+  ) {
+    this.runtime = runtime ?? createLinkedInRuntime(deps.fetch);
+  }
 
   async ensureAuth(): Promise<void> {
     this.config = parseConfig(this.binding.config);
@@ -174,7 +190,14 @@ export class LinkedInPostsAdapter implements ConnectorAdapter {
         `No stored credential for LinkedIn connector ${this.binding.id}. Re-link the account from the connector's settings.`,
       );
     }
-    let cred = JSON.parse(blob) as LinkedInOAuthCred;
+    let cred: LinkedInOAuthCred;
+    try {
+      cred = JSON.parse(blob) as LinkedInOAuthCred;
+    } catch {
+      throw new Error(
+        `The stored LinkedIn credential for ${this.binding.id} is unreadable. Re-link the account.`,
+      );
+    }
     if (!cred.accessToken) {
       throw new Error(
         `The stored LinkedIn credential for ${this.binding.id} has no access token. Re-link the account.`,
@@ -186,12 +209,21 @@ export class LinkedInPostsAdapter implements ConnectorAdapter {
       }
       // Approved-partner blobs carry a refresh token in the standard shape;
       // refresh + re-persist like x-posts so a rotated token is never lost.
-      const t = await this.runtime.refreshToken({
-        endpoints: LINKEDIN_ENDPOINTS,
-        clientId: cred.clientId,
-        ...(cred.clientSecret ? { clientSecret: cred.clientSecret } : {}),
-        refreshToken: cred.refreshToken,
-      });
+      let t: OAuthTokens;
+      try {
+        t = await this.runtime.refreshToken({
+          endpoints: LINKEDIN_ENDPOINTS,
+          clientId: cred.clientId,
+          ...(cred.clientSecret ? { clientSecret: cred.clientSecret } : {}),
+          refreshToken: cred.refreshToken,
+        });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        if (/invalid_grant|invalid_request|revoked|expired|unauthorized_client/i.test(detail)) {
+          throw reconnectError();
+        }
+        throw err;
+      }
       cred = {
         ...cred,
         accessToken: t.accessToken,
@@ -231,7 +263,7 @@ export class LinkedInPostsAdapter implements ConnectorAdapter {
       return { records: [], cursor: { sub: await this.fetchSub() } };
     } catch (err) {
       if (err instanceof LinkedInApiError && isRateLimitStatus(err.status)) {
-        return { records: [], cursor: prior ?? {}, rateLimited: true };
+        return { records: [], cursor, rateLimited: true };
       }
       if (err instanceof LinkedInApiError && err.status === 401) throw reconnectError();
       throw err;
@@ -276,7 +308,7 @@ export class LinkedInPostsAdapter implements ConnectorAdapter {
         },
         {
           author: `urn:li:person:${sub}`,
-          commentary: text,
+          commentary: escapeLittleText(text),
           visibility: 'PUBLIC',
           distribution: {
             feedDistribution: 'MAIN_FEED',
@@ -298,6 +330,11 @@ export class LinkedInPostsAdapter implements ConnectorAdapter {
       if (err instanceof LinkedInApiError && isRateLimitStatus(err.status)) {
         throw new Error(
           'LinkedIn rate-limited this publish (member posting caps apply). The draft is unchanged — wait a while and commit it again.',
+        );
+      }
+      if (err instanceof LinkedInApiError && isRetiredVersion(err)) {
+        throw new Error(
+          `LinkedIn has retired the API version this build of Gezel uses (${LINKEDIN_VERSION}), so it refuses every post. The draft is unchanged — update Gezel, then commit it again.`,
         );
       }
       throw err;
@@ -331,8 +368,36 @@ export class LinkedInPostsAdapter implements ConnectorAdapter {
 /** The actionable expiry error — reconnecting is the only fix for ordinary apps. */
 function reconnectError(): Error {
   return new Error(
-    'The LinkedIn access token has expired, and LinkedIn issues no refresh token to ordinary apps — reconnect this LinkedIn account from the connector settings (tokens last about 60 days).',
+    'The LinkedIn access token has expired or was revoked, and LinkedIn issues no refresh token to ordinary apps — reconnect this LinkedIn account from the connector settings (tokens last about 60 days).',
   );
+}
+
+/** 426 NONEXISTENT_VERSION (or VERSION_MISSING): the pinned version header is not served. */
+function isRetiredVersion(err: LinkedInApiError): boolean {
+  return err.status === 426 || /NONEXISTENT_VERSION|VERSION_MISSING/.test(err.message);
+}
+
+/** Characters LinkedIn's `little` format reserves; each needs a backslash to stay literal. */
+const LITTLE_RESERVED = /[\\|{}@[\]()<>#*_~]/g;
+
+/**
+ * Escape plain text for a Posts API `commentary`. Unescaped reserved
+ * characters are parsed as markup, and LinkedIn drops what it cannot render
+ * (text after a stray `(` goes missing). A `#` that starts a word stays a
+ * hashtag, which is what a person typing one means; every other reserved
+ * character, including a `#` inside a word (`C#`), becomes literal.
+ * https://learn.microsoft.com/linkedin/marketing/community-management/shares/little-text-format
+ */
+export function escapeLittleText(text: string): string {
+  return text.replace(LITTLE_RESERVED, (ch, offset: number) => {
+    if (ch === '#') {
+      const before = offset > 0 ? text[offset - 1]! : '';
+      const after = text[offset + 1] ?? '';
+      const startsWord = !before || /\s/.test(before);
+      if (startsWord && /[\p{L}\p{N}]/u.test(after)) return ch;
+    }
+    return `\\${ch}`;
+  });
 }
 
 function parseConfig(raw: Record<string, unknown> | undefined): LinkedInConfig {

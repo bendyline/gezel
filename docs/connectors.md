@@ -166,7 +166,10 @@ manifest*, so a new source is a JSON file, not a compile. The registry dispatche
   > its uploaded assets are immutable-ish inbound files, not an editable working tree. The native
   > releases adapter mirrors both and can reuse the user's existing GitHub sign-in to see drafts.
 
-All four implement one `ConnectorAdapter`. What gezel provides across all of them is the
+All four implement one `ConnectorAdapter`. A fifth driver, `device`, is not a pass at all:
+local hardware such as a webcam runs continuously under its own host, never enters the sync
+loop, and writes only event records into its corpus — see
+[device-connectors.md](./device-connectors.md). What gezel provides across all of them is the
 part users never want to rebuild per source: the connect UX, credential management, the sync
 host, normalization, and the **fault-tolerance envelope** — retry/backoff (mail's `rateLimited`
 handling), per-binding `lastError` surfacing, timeouts, quarantine of malformed/hostile
@@ -490,6 +493,32 @@ they do not add a parallel one:
   in plaintext files is sensitive. Options — leave as plaintext (local-first, on the user's
   disk), or encrypt-at-rest with a key from the secrets backend. Flagged for [secrets-security.md](./secrets-security.md)
   to rule on.
+
+## Connector types today
+
+Every type below is a `native` adapter in
+[connectors/natives/](../packages/service/src/connectors/natives/) (mail in
+[mail/](../packages/service/src/mail/)), has a provider fake in
+[connectors/testing/](../packages/service/src/connectors/testing/), and passes the
+conformance suite ([connector-standards.md §8](./connector-standards.md#8-testing-a-connector)).
+Types sharing a family normalize to one record shape, so a craftbook reasoning over "my
+mail" or "my calendar" never needs to know the provider.
+
+| Family | Type ids | Auth | Completeness | Write-back |
+|---|---|---|---|---|
+| Mail | `mail-gmail`, `mail-microsoft365`, `mail-outlook`, `mail-imap` | Google / Microsoft OAuth; IMAP app password | window (`backfillDays`, then every new message) | `save-draft` into the account's own Drafts (`mailbox-draft`); `send` (`recipient-allowlist`) |
+| Calendar | `calendar-google`, `calendar-microsoft` | Google / Microsoft OAuth | window (`pastDays` / `futureDays`) | — |
+| Files | `files-google-drive`, `files-onedrive`, `files-sharepoint` | Google / Microsoft OAuth | mirror of the configured folder or library | — |
+| Feeds | `rss-feed` (RSS 2.0, RSS 1.0/RDF, Atom, JSON Feed) | none | window | — |
+| Video | `youtube-videos` | Google Cloud API key | window | — |
+| Social | `x-posts`, `bluesky-posts`, `instagram-media`, `linkedin-posts` | OAuth; Bluesky app password | window | `publish` (`social-publish`) |
+| Code | `github-pulls`, `github-releases`, `github-wiki`; `github-issues` (script) | optional token | window / mirror | — |
+| Data | `azure-monitor-logs`, `airtable-records` (spectral), `http-json-rows`, `linear-issues` | API keys | observation / window | — |
+| Cameras | `camera-local` (`device` driver) | none (local hardware) | window: one event record per episode; raw frames stay in a private folder | — (lookouts act on what it sees; see [lookouts.md](./lookouts.md)) |
+
+One Google Cloud OAuth client serves every Google type and one Entra app registration
+every Microsoft type (the manifests name the same `clientIdEnv`), so a person registers
+each provider once.
 
 ## Deliberate exclusions (v1)
 

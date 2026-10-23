@@ -1,15 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import {
+  type ImageAspectRatio,
   ImageGenerationRequestSchema,
   type ImageInputSource,
+  type ImageModelManifest,
+  type ImageQuality,
   type Question,
   type QuestionIntent,
   createLogger,
+  imageModelDefaultSide,
+  imagePromptGuide,
   nowIso,
+  resolveHarnessToolsConfig,
+  resolveImageSize,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 
+import { sdCppHonorsNegativePrompt } from '../../providers/image/sd-cpp.js';
 import type { ImageInputBytes, ImageProvider } from '../../providers/image/types.js';
+import { parseRemoteModelId } from '../../providers/remote/model-id.js';
 import type { ServiceContext } from '../context.js';
 import { imageModelRoutes, providerKind } from './image-models.js';
 
@@ -24,6 +33,9 @@ const log = createLogger('image-gen');
  * default; optionally Google AI Studio Nano Banana 2 or OpenAI GPT
  * Image 2 as cloud providers).
  */
+const HARNESS_LOCAL_IMAGES_ONLY =
+  'Gezel makes images for other apps on this computer only, and the selected image engine is a cloud service. Pick an on-device image model in Gezel, or allow any image engine in Settings → Integrations.';
+
 export function imageGenRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
@@ -64,6 +76,21 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
 
+    // An outside AI app (a `harness` token) runs only the engines the person
+    // allowed it in Settings → Integrations, never asks for a cloud credit
+    // (it has no chat to ask in; "any image engine" is that consent), and
+    // never writes into the folder it is working in.
+    const harness = c.get('auth')?.scopes.includes('harness') === true;
+    if (harness) {
+      const mode = resolveHarnessToolsConfig(await ctx.store.readConfig()).images;
+      if (mode === 'off') {
+        return c.json({ error: 'Image generation is turned off for other apps.' }, 403);
+      }
+      if (mode === 'local' && providerKind(provider.name) === 'cloud') {
+        return c.json({ error: HARNESS_LOCAL_IMAGES_ONLY }, 403);
+      }
+    }
+
     // Resolve any artifact-path entries in `inputImages` to raw bytes
     // before forwarding to the provider. base64 entries pass through
     // after a single decode. Done here (not in each provider) because
@@ -90,6 +117,8 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
           prompt: req.prompt,
           width: req.width,
           height: req.height,
+          aspectRatio: req.aspectRatio,
+          quality: req.quality,
           inputImageCount: resolvedInputs?.length ?? 0,
         });
         if (verdict === 'declined') {
@@ -145,14 +174,21 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
     }
 
     try {
+      const manifest = await resolveImageModelManifest(ctx, provider, req.model);
+      const recommended = manifest?.recommendedSteps;
       const resolvedSteps =
-        req.steps ?? (await resolveRecommendedImageSteps(ctx, provider, req.model));
+        req.steps !== undefined && req.capStepsAtRecommended && recommended
+          ? Math.min(req.steps, recommended)
+          : (req.steps ?? recommended);
+      const size = requestedImageSize(req, manifest, providerKind(provider.name));
       const out = await provider.generate({
         prompt: req.prompt,
         ...(req.negativePrompt ? { negativePrompt: req.negativePrompt } : {}),
         ...(req.model ? { model: req.model } : {}),
-        ...(req.width ? { width: req.width } : {}),
-        ...(req.height ? { height: req.height } : {}),
+        ...(size.width ? { width: size.width } : {}),
+        ...(size.height ? { height: size.height } : {}),
+        ...(req.aspectRatio ? { aspectRatio: req.aspectRatio } : {}),
+        ...(req.quality ? { quality: req.quality } : {}),
         ...(resolvedSteps ? { steps: resolvedSteps } : {}),
         ...(req.seed !== undefined ? { seed: req.seed } : {}),
         ...(resolvedInputs && resolvedInputs.length > 0 ? { inputImages: resolvedInputs } : {}),
@@ -199,8 +235,10 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
       const workspaceRel = saveAs ?? `assets/generated/image-${out.meta.seed}.png`;
       let workspacePath: string | null = null;
       try {
-        await ctx.store.writeProjectWorkspaceBinary(projectId, workspaceRel, out.png);
-        workspacePath = workspaceRel;
+        if (!harness) {
+          await ctx.store.writeProjectWorkspaceBinary(projectId, workspaceRel, out.png);
+          workspacePath = workspaceRel;
+        }
       } catch (err) {
         // Workspace writes can be denied for legitimate reasons (e.g.
         // an external workingDir the user hasn't approved). Don't fail
@@ -219,12 +257,19 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         workspacePath: string | null;
         meta: typeof out.meta;
         b64Png?: string;
+        promptGuide?: string;
       } = {
         artifactPath: writtenPath,
         workspacePath,
         meta: out.meta,
       };
       if (req.inline) respBody.b64Png = out.png.toString('base64');
+      const promptGuide = renderedModelPromptGuide(
+        providerKind(provider.name),
+        manifest,
+        out.meta.model,
+      );
+      if (promptGuide) respBody.promptGuide = promptGuide;
       return c.json(respBody);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
@@ -274,17 +319,23 @@ async function awaitImageApproval(
     provider: string;
     model: string;
     prompt: string;
-    width?: number;
-    height?: number;
+    width?: number | undefined;
+    height?: number | undefined;
+    aspectRatio?: ImageAspectRatio | undefined;
+    quality?: ImageQuality | undefined;
     inputImageCount: number;
   },
 ): Promise<'allow' | 'always' | 'declined' | 'timeout'> {
+  const size =
+    args.width && args.height
+      ? `${args.width}×${args.height}`
+      : [args.aspectRatio, args.quality].filter(Boolean).join(' · ');
   const intent: QuestionIntent = {
     kind: 'image-generation-approval',
     provider: args.provider,
     model: args.model,
     promptPreview: truncate(args.prompt, 200),
-    ...(args.width && args.height ? { estimatedSize: `${args.width}×${args.height}` } : {}),
+    ...(size ? { estimatedSize: size } : {}),
   };
   const question: Question = {
     id: randomUUID(),
@@ -374,14 +425,97 @@ function providerLabel(provider: string): string {
 
 export async function resolveRecommendedImageSteps(
   ctx: Pick<ServiceContext, 'catalog'>,
-  provider: Pick<ImageProvider, 'listInstalledModels'>,
+  provider: Pick<ImageProvider, 'listInstalledModels' | 'resolveDefaultModelId'>,
   requestedModel: string | undefined,
 ): Promise<number | undefined> {
-  const modelId = requestedModel ?? (await provider.listInstalledModels().catch(() => []))[0]?.id;
+  return (await resolveImageModelManifest(ctx, provider, requestedModel))?.recommendedSteps;
+}
+
+/** The catalog entry of the model this request will run, when the catalog lists it. */
+export async function resolveImageModelManifest(
+  ctx: Pick<ServiceContext, 'catalog'>,
+  provider: Pick<ImageProvider, 'listInstalledModels' | 'resolveDefaultModelId'>,
+  requestedModel: string | undefined,
+): Promise<ImageModelManifest | undefined> {
+  // The steps must be the ones of the model the provider will run. The first
+  // installed model is not that model once a default is configured: a MOSS
+  // default would render at Animagine's 28 steps whenever Animagine sorted
+  // first.
+  const requested = requestedModel
+    ? (parseRemoteModelId(requestedModel)?.modelId ?? requestedModel)
+    : undefined;
+  const modelId =
+    requested ??
+    (provider.resolveDefaultModelId
+      ? await provider.resolveDefaultModelId().catch(() => undefined)
+      : (await provider.listInstalledModels().catch(() => []))[0]?.id);
   if (!modelId) return undefined;
   const detail = await ctx.catalog.get('image-model', modelId).catch(() => null);
   if (!detail || detail.manifest.kind !== 'image-model') return undefined;
-  return detail.manifest.recommendedSteps;
+  return detail.manifest;
+}
+
+/**
+ * How the model that just rendered reads a prompt. A local model's traits
+ * come from its catalog entry, and the engine's guidance scale decides
+ * whether it reads a negative prompt. The cloud APIs read sentences, letter
+ * text, and take no negative prompt at all.
+ */
+export function renderedModelPromptGuide(
+  kind: 'local' | 'cloud',
+  manifest: Pick<ImageModelManifest, 'id' | 'name' | 'promptStyle' | 'rendersText'> | undefined,
+  renderedModel: string,
+): string | undefined {
+  if (kind === 'cloud') {
+    return imagePromptGuide({
+      name: renderedModel,
+      promptStyle: 'sentences',
+      rendersText: true,
+      negativePromptHonored: false,
+    });
+  }
+  if (!manifest) return undefined;
+  return imagePromptGuide({
+    name: manifest.name,
+    promptStyle: manifest.promptStyle,
+    rendersText: manifest.rendersText,
+    negativePromptHonored: sdCppHonorsNegativePrompt(manifest.id),
+  });
+}
+
+/**
+ * The pixels a local engine renders, resolved here so the machine broker and
+ * a paired server receive the same size the person's settings describe. With
+ * a catalog entry the size always resolves, inside the model's range. A cloud
+ * provider gets only what was asked: it maps `aspectRatio` and `quality` to
+ * its own sizes.
+ */
+export function requestedImageSize(
+  req: {
+    model?: string | undefined;
+    width?: number | undefined;
+    height?: number | undefined;
+    aspectRatio?: ImageAspectRatio | undefined;
+    quality?: ImageQuality | undefined;
+  },
+  manifest: Pick<ImageModelManifest, 'id' | 'widthRange' | 'heightRange'> | undefined,
+  kind: 'local' | 'cloud',
+): { width?: number; height?: number } {
+  if (manifest) {
+    return resolveImageSize(req, {
+      defaultSidePx: imageModelDefaultSide(manifest.id),
+      widthRange: manifest.widthRange,
+      heightRange: manifest.heightRange,
+    });
+  }
+  if (kind === 'local' && (req.aspectRatio || req.quality)) {
+    const modelId = req.model ? (parseRemoteModelId(req.model)?.modelId ?? req.model) : undefined;
+    return resolveImageSize(req, { defaultSidePx: imageModelDefaultSide(modelId) });
+  }
+  return {
+    ...(req.width ? { width: req.width } : {}),
+    ...(req.height ? { height: req.height } : {}),
+  };
 }
 
 function truncate(s: string, n: number): string {

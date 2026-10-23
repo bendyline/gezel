@@ -400,12 +400,20 @@ export const codeReviewMeesterEndToEndScenario: EvalScenario = {
   },
   successCheck: async ({ client, logChanged, recordSniff }): Promise<SuccessCheckResult> => {
     // A review that never names the file it reviewed is not grounded, which is
-    // the failure mode worth catching here.
-    const review = await findTextFile(client, /\.(?:md|markdown)$/i, /src\/pricing\.js/, 500);
+    // the failure mode worth catching here. Naming the path is not enough:
+    // a reviewer sent to the wrong project wrote 1301 bytes headed "BLOCKED —
+    // file not found" that cited src/pricing.js, and passed (2026-10-22). Only
+    // a reader of the real file can name its functions.
+    const review = await findTextFile(
+      client,
+      /\.(?:md|markdown)$/i,
+      /(?=[\s\S]*src\/pricing\.js)(?=[\s\S]*\b(?:applyDiscount|creditOrder)\b)/,
+      500,
+    );
     if (!review) {
       logChanged(
         'sniff',
-        '[scenario] code-review-meester-e2e: no written review citing the file yet',
+        '[scenario] code-review-meester-e2e: no written review of the real file yet',
       );
       recordSniff?.({ key: 'code-review-meester-e2e', score: 0, bytes: 0 });
       return { done: false };

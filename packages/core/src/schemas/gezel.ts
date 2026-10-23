@@ -4,6 +4,7 @@ import { GezelCharacterSchema } from './character.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema } from './codex.js';
 import { CrewIntroductionSchema } from './crew-introduction.js';
+import { LiveBindingStatusSchema } from './devices.js';
 import { EntityIdSchema } from './entity-id.js';
 import { FileTurnIntentSchema } from './file-turn-intent.js';
 import { GezelGrowthSummarySchema } from './growth.js';
@@ -1780,6 +1781,58 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     gezelId: z.string().optional(),
     /** Snapshot of their display name so transient progress remains human-readable. */
     gezelName: z.string().optional(),
+  }),
+  /**
+   * A device connector's live status changed (starting, watching, paused,
+   * held, error) or its episode moved. Project stream; never logged.
+   */
+  z.object({
+    type: z.literal('camera_status'),
+    projectId: z.string(),
+    bindingId: z.string(),
+    status: LiveBindingStatusSchema,
+  }),
+  /** A camera episode started, was reviewed, or ended. Project stream. */
+  z.object({
+    type: z.literal('camera_event'),
+    projectId: z.string(),
+    bindingId: z.string(),
+    episodeId: z.string(),
+    phase: z.enum(['started', 'reviewed', 'ended']),
+    /** Artifact-relative keyframe, once the episode has one. */
+    keyframe: z.string().optional(),
+  }),
+  /**
+   * Global: which cameras are watching right now, so the shell can show
+   * that a camera is on even with no project open.
+   */
+  z.object({
+    type: z.literal('cameras_watching'),
+    cameras: z.array(z.object({ projectId: z.string(), bindingId: z.string(), name: z.string() })),
+  }),
+  /**
+   * A lookout fired. Global so the desktop shell can alert with no window
+   * open. `alert` is present only when the lookout has a notify action; its
+   * text is built by the daemon so every host says the same thing.
+   */
+  z.object({
+    type: z.literal('lookout_fired'),
+    projectId: z.string(),
+    lookoutId: z.string(),
+    firingId: z.string(),
+    name: z.string(),
+    at: z.string(),
+    alert: z.object({ title: z.string(), body: z.string() }).optional(),
+    /** Artifact-relative keyframe. */
+    frame: z.string().optional(),
+    test: z.boolean().optional(),
+    /** A sound action is playing; the alert offers to stop it. */
+    sound: z.boolean().optional(),
+  }),
+  /** A project's lookouts or firing log changed. Project stream. */
+  z.object({
+    type: z.literal('lookouts_updated'),
+    projectId: z.string(),
   }),
 ]);
 export type ChatEvent = z.infer<typeof ChatEventSchema>;

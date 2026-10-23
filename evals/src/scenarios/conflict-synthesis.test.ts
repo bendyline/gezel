@@ -207,6 +207,28 @@ describe('conflict-synthesis numbered conflict entries', () => {
     expect(check.ok).toBe(true);
     expect(check.signals).toContain('conflict-budget-surfaced');
   });
+
+  // DeepSeek V4.1, 2026-10-20: the engineering memo quoted verbatim spans
+  // three sentences, so the clause holding 2026-09-01 lost its filename.
+  it('binds a multi-sentence verbatim quote to the file that labels it', () => {
+    const quoted = REFERENCE_SYNTHESIS.replace(
+      [
+        '1. Launch date: `memo-product.md` targets 2026-08-15, but `memo-engineering.md`',
+        '   states 2026-09-01 and explicitly supersedes product on timing. Engineering wins.',
+      ].join('\n'),
+      [
+        '### 1. Launch date',
+        '- `memo-product.md`: "We are targeting a launch on 2026-08-15." [1]',
+        '- `memo-engineering.md`: "The August date is not achievable: the migration alone takes six weeks. This memo SUPERSEDES the product memo on timing — the launch date is 2026-09-01." [2]',
+        '',
+        '**Winner: 2026-09-01.** The engineering memo supersedes product on timing by its own terms.',
+      ].join('\n'),
+    );
+    const check = evaluateSynthesis(quoted);
+
+    expect(check.failReason).toBeUndefined();
+    expect(check.signals).toContain('conflict-launch-date-surfaced');
+  });
 });
 
 describe('conflict-synthesis setup', () => {
@@ -284,6 +306,40 @@ describe('conflict-synthesis setup', () => {
     });
     expect(recordSniff).toHaveBeenCalledWith(
       expect.objectContaining({ key: 'conflict-synthesis', score: 13 }),
+    );
+  });
+
+  // DeepSeek V4.1, 2026-10-20: the file was written inside a 25-minute turn
+  // whose tool calls had not committed; four repairs into that same turn
+  // failed a correct synthesis. A running turn defers the verdict instead.
+  it('waits for a running turn to commit instead of failing its provenance', async () => {
+    const client = {
+      listProjects: vi.fn().mockResolvedValue({
+        projects: [{ id: 'skylark-launch-synthesis', name: 'Skylark Launch Synthesis' }],
+      }),
+      fetchProjectWorkspaceBlob: vi.fn().mockResolvedValue(new Blob([REFERENCE_SYNTHESIS])),
+      listChatSessions: vi.fn().mockResolvedValue({
+        sessions: [{ id: 'session-1', turnStartedAt: '2026-10-20T23:24:55.252Z' }],
+      }),
+      getChatSession: vi.fn().mockResolvedValue({ messages: [{ at: '2026-10-20T23:24:55Z' }] }),
+    } as unknown as GezelClient;
+    const recordSniff = vi.fn();
+    const ctx: EvalContext = {
+      client,
+      meesterId: 'bastien',
+      log: () => {},
+      logChanged: () => {},
+      recordSniff,
+    };
+
+    const result = await conflictSynthesisScenario.successCheck!(ctx);
+
+    expect(result).toEqual({ done: false });
+    expect(recordSniff).toHaveBeenCalledWith(
+      expect.not.objectContaining({ failReason: expect.anything() }),
+    );
+    expect(checkSynthesis(REFERENCE_SYNTHESIS, []).failReason).toMatch(
+      /cannot identify committed final claim recording/,
     );
   });
 });

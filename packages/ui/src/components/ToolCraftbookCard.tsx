@@ -1,5 +1,5 @@
 import type { ReferencedFile, ToolCallCard } from '@bendyline/gezel';
-import { parseTaskRef, resolveSecurityPolicy } from '@bendyline/gezel';
+import { catalogGroundFor, parseTaskRef, resolveSecurityPolicy } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { requestSettingsSection } from '../settings-nav.js';
@@ -145,6 +145,7 @@ export function ToolCraftbookCard({
         <CatalogArtwork
           {...(art?.item.iconSvg ? { iconSvg: art.item.iconSvg } : {})}
           {...(art?.item.logoUrl ? { logoUrl: art.item.logoUrl } : {})}
+          ground={art ? catalogGroundFor(art.manifest) : undefined}
           imageClassName="msg-tool-card-art-img"
           fallback={
             <ProjectGlyph

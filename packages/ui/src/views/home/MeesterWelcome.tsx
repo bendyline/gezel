@@ -22,7 +22,7 @@ import { useInterests } from '../../components/useInterests.js';
 import { useShowPoppetjes } from '../../components/useShowPoppetjes.js';
 import { socialHost } from '../../components/useSocialMode.js';
 import { runtimeCapabilities } from '../../runtime-capabilities.js';
-import { requestSettingsSection } from '../../settings-nav.js';
+import { openSettingsSection } from '../../settings-nav.js';
 import { IntroHandboekArticle } from './IntroHandboekArticle.js';
 import { MeesterFigure } from './MeesterFigure.js';
 import { greetingForHour } from './utils.js';
@@ -55,13 +55,6 @@ export interface WelcomeSetup {
 export interface WelcomeHelper {
   gezel: GezelSummary;
   does: string;
-}
-
-export function openSettingsSection(section: string): void {
-  requestSettingsSection(section);
-  window.dispatchEvent(
-    new CustomEvent('gezel:navigate', { detail: { view: 'settings', section } }),
-  );
 }
 
 /**

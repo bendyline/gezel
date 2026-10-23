@@ -353,7 +353,7 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
   );
 
   for (const dependencyFloor of [
-    /"dompurify@>=3 <4": "3\.4\.13"/,
+    /"dompurify@>=3 <4": "3\.4\.17"/,
     /"js-yaml@<4": "3\.15\.2"/,
     /"js-yaml@>=4 <5": "4\.3\.2"/,
     /"mermaid@>=11 <12": "11\.16\.1"/,
@@ -362,7 +362,7 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
   }
 
   for (const patchedResolution of [
-    /dompurify@3\.4\.13:/,
+    /dompurify@3\.4\.17:/,
     /js-yaml@3\.15\.2:/,
     /js-yaml@4\.3\.2:/,
     /mermaid@11\.16\.1:/,
@@ -371,7 +371,7 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
   }
   assert.doesNotMatch(
     lockfile,
-    /(?:dompurify@3\.4\.12|js-yaml@(?:3\.15\.[01]|4\.3\.[01])|mermaid@11\.16\.0):/,
+    /(?:dompurify@3\.4\.1[2-6]|js-yaml@(?:3\.15\.[01]|4\.3\.[01])|mermaid@11\.16\.0):/,
     'the lockfile must not reintroduce a B3-vulnerable resolution',
   );
 });

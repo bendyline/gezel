@@ -30,7 +30,7 @@ export function openAiErrorEnvelope(): MiddlewareHandler {
 
     const message =
       c.res.status === 401
-        ? 'Missing or invalid API key. Connect this app through gezel (Settings → Connected Apps) to get one.'
+        ? 'Missing or invalid API key. Connect this app through gezel (Settings → Integrations) to get one.'
         : `This API key is not authorized for this endpoint (${flat}). Re-connect the app with the right permissions in gezel.`;
     const replacement = new Response(
       JSON.stringify({

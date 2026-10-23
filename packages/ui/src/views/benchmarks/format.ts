@@ -114,7 +114,7 @@ export function requirementGap(requirement: EvalRequirement, count: number): str
     case 'embeddings':
       return `${one ? 'needs' : 'need'} the embedding engine`;
     case 'docblocks':
-      return `${one ? 'needs' : 'need'} the DocBlocks command-line tools, which only a developer setup has`;
+      return `${one ? 'needs' : 'need'} DocBlocks, which this install is missing`;
     case 'chromium':
       return `${one ? 'is' : 'are'} graded in a browser that is not installed yet, so ${one ? 'it' : 'they'} will finish as not counted`;
     case 'vitest':

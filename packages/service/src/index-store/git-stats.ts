@@ -1,5 +1,6 @@
 import { createLogger } from '@bendyline/gezel';
 import { isGitInstalled, runGit } from '../git/git.js';
+import type { GitCommitRecord } from './git-history-table.js';
 import type { IndexStore } from './index-store.js';
 
 /**
@@ -8,6 +9,8 @@ import type { IndexStore } from './index-store.js';
  * pass over the whole workspace — never per-file invocations — parsed here
  * and written into the index's per-file metadata table under the reserved
  * `git:` key prefix (which `setMetadata` is contractually unable to clobber).
+ * The same pass stores the commits themselves (time, subject, indexed files;
+ * never the author) for the Timeline view.
  *
  * Runs on indexer ticks, not on the map-build request path. Every failure
  * mode (git missing, not a repo, empty repo, timeout) degrades to
@@ -23,6 +26,9 @@ const META_HEAD = 'git_stats:head';
 const META_COMPUTED_AT = 'git_stats:computed_at';
 const META_STATE = 'git_stats:state';
 const META_WINDOW_DAYS = 'git_stats:window_days';
+/** Which shape of stored history the last ingest wrote; an older one re-ingests at once. */
+const META_HISTORY = 'git_stats:history';
+const HISTORY_VERSION = '1';
 
 export const GIT_CHURN_WINDOW_DAYS = 365;
 /** History cap: bounds stdout (~4 MB at 5 files/commit) on huge monorepos. */
@@ -38,38 +44,65 @@ export interface GitFileStats {
 }
 
 /**
- * Parse `git log --pretty=format:%x01%ct --name-only` output. Robust to blank
- * lines landing anywhere: SOH-prefixed lines are commit headers, empty lines
- * are separators, everything else is a path. First sighting of a path wins
- * for last-commit (log order is reverse-chronological); window filtering
- * happens here, not in git, so one pass yields both signals.
+ * Parse `git log --pretty=format:%x01%H%x02%ct%x02%s --name-only` output
+ * into commits, newest first. Robust to blank lines landing anywhere:
+ * SOH-prefixed lines are commit headers, empty lines are separators,
+ * everything else is a path. A header of the bare `%x01%ct` form (no hash or
+ * subject) still parses, with an empty sha. A commit whose time does not
+ * parse is skipped with its files.
  */
+export function parseGitLog(stdout: string): GitCommitRecord[] {
+  const out: GitCommitRecord[] = [];
+  let current: GitCommitRecord | null = null;
+  for (const line of stdout.split(/\r?\n/)) {
+    if (line.length === 0) continue;
+    if (line.charCodeAt(0) === 1) {
+      const parts = line.slice(1).split('\x02');
+      const [sha, ct, ...subject] = parts.length >= 2 ? parts : ['', parts[0]];
+      const at = Number(ct) * 1000;
+      current = Number.isNaN(at)
+        ? null
+        : { sha: sha ?? '', at, subject: subject.join(' '), files: [] };
+      if (current) out.push(current);
+      continue;
+    }
+    // A quoted path means control characters in the filename despite
+    // quotepath=off — skip rather than unquote; cost is one file with
+    // neutral defaults.
+    if (!current || line.startsWith('"')) continue;
+    current.files.push(line);
+  }
+  return out;
+}
+
+/**
+ * Per-file churn from parsed commits: commits inside the window, and the
+ * newest commit touching each path (log order is reverse-chronological, so
+ * the first sighting wins). Window filtering happens here, not in git, so
+ * one pass yields both signals.
+ */
+export function fileStatsFromCommits(
+  commits: readonly GitCommitRecord[],
+  windowStartMs: number,
+): Map<string, GitFileStats> {
+  const out = new Map<string, GitFileStats>();
+  for (const commit of commits) {
+    const inWindow = commit.at >= windowStartMs ? 1 : 0;
+    for (const path of commit.files) {
+      const prev = out.get(path);
+      if (prev) prev.commitsInWindow += inWindow;
+      else out.set(path, { commitsInWindow: inWindow, lastCommitAtMs: commit.at });
+    }
+  }
+  return out;
+}
+
+/** {@link parseGitLog} then {@link fileStatsFromCommits}. */
 export function parseGitLogNameOnly(
   stdout: string,
   windowStartMs: number,
 ): Map<string, GitFileStats> {
-  const out = new Map<string, GitFileStats>();
-  let currentCt = Number.NaN;
-  for (const line of stdout.split(/\r?\n/)) {
-    if (line.length === 0) continue;
-    if (line.charCodeAt(0) === 1) {
-      currentCt = Number(line.slice(1)) * 1000;
-      continue;
-    }
-    if (Number.isNaN(currentCt)) continue;
-    // A quoted path means control characters in the filename despite
-    // quotepath=off — skip rather than unquote; cost is one file with
-    // neutral defaults.
-    if (line.startsWith('"')) continue;
-    const inWindow = currentCt >= windowStartMs ? 1 : 0;
-    const prev = out.get(line);
-    if (prev) {
-      prev.commitsInWindow += inWindow;
-    } else {
-      out.set(line, { commitsInWindow: inWindow, lastCommitAtMs: currentCt });
-    }
-  }
-  return out;
+  return fileStatsFromCommits(parseGitLog(stdout), windowStartMs);
 }
 
 let gitProbe: Promise<boolean> | null = null;
@@ -129,6 +162,7 @@ export async function refreshGitStats(
       index.getMeta(META_HEAD) === head &&
       index.getMeta(META_WINDOW_DAYS) === String(GIT_CHURN_WINDOW_DAYS) &&
       index.getMeta(META_STATE) === 'ok' &&
+      index.getMeta(META_HISTORY) === HISTORY_VERSION &&
       computedAt !== undefined &&
       now() - Date.parse(computedAt) < ttlMs;
     if (fresh) return { state: 'fresh' };
@@ -140,7 +174,7 @@ export async function refreshGitStats(
         'log',
         '--no-renames',
         `--max-count=${MAX_COMMITS}`,
-        '--pretty=format:%x01%ct',
+        '--pretty=format:%x01%H%x02%ct%x02%s',
         '--name-only',
         '--relative',
         '--',
@@ -150,11 +184,15 @@ export async function refreshGitStats(
     );
 
     const windowStartMs = now() - GIT_CHURN_WINDOW_DAYS * 86_400_000;
-    const stats = parseGitLogNameOnly(logOut.stdout, windowStartMs);
+    const commits = parseGitLog(logOut.stdout);
+    const stats = fileStatsFromCommits(commits, windowStartMs);
 
     // Only store rows for files the index tracks — keeps the table tight and
     // self-prunes on the next ingest after deletions.
     const indexed = new Set(index.allFiles().map((f) => f.path));
+    index.gitHistory.replace(
+      commits.map((c) => ({ ...c, files: c.files.filter((p) => indexed.has(p)) })),
+    );
     const rows: Array<{ path: string; key: string; value: string }> = [];
     let fileCount = 0;
     for (const [path, s] of stats) {
@@ -172,6 +210,7 @@ export async function refreshGitStats(
     index.setMeta(META_COMPUTED_AT, new Date(now()).toISOString());
     index.setMeta(META_STATE, 'ok');
     index.setMeta(META_WINDOW_DAYS, String(GIT_CHURN_WINDOW_DAYS));
+    index.setMeta(META_HISTORY, HISTORY_VERSION);
     return { state: 'ok', files: fileCount };
   } catch (err) {
     log.warn(`git stats ingest failed: ${err instanceof Error ? err.message : String(err)}`);

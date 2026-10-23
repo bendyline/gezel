@@ -5,12 +5,12 @@ import {
   ApplyPatchToProjectWorkspaceFileRequestSchema,
   ApplyProjectTypeRequestSchema,
   CopyArtifactToWorkspaceRequestSchema,
-  type CreateProjectRequest,
   CreateProjectRequestSchema,
   CreateTypedProjectRequestSchema,
   DriveIndexEnrichmentRequestSchema,
   FetchDiffRequestSchema,
   FetchRepoRequestSchema,
+  FileGraphRequestSchema,
   InferProjectForPathRequestSchema,
   InsertAtMarkerInProjectWorkspaceFileRequestSchema,
   InstallPackageRequestSchema,
@@ -90,13 +90,13 @@ import {
 import { TypedProjectCreateError, createTypedProject } from '../../project-type/create.js';
 import { GEZAPP_MAX_ARCHIVE_BYTES, importGezapp, packGezapp } from '../../project-type/gezapp.js';
 import { createProjectWithLead } from '../../projects/create-project.js';
+import { buildInferDeps } from '../../projects/infer-deps.js';
 import {
   InferProjectError,
   checkNewProjectFolder,
   inferProjectForPath,
   listWellKnownFolders,
 } from '../../projects/infer-project.js';
-import { setUpAddedFolder } from '../../projects/recruit-crew.js';
 import { browserScriptEnv } from '../../sandbox/runner.js';
 import { setFolderNightWork } from '../../suggested-work/arm.js';
 import { readCommandApprovals } from '../../workspace/command-approvals.js';
@@ -176,22 +176,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     return c.json(project, 201);
   });
 
-  const inferDeps = (opts: { nightWork?: boolean } = {}) => ({
-    store: ctx.store,
-    home: ctx.home,
-    history: ctx.history,
-    createProject: (body: CreateProjectRequest) => createProjectWithLead(ctx, body),
-    recruitCrew: async (projectId: string) => {
-      const { crew } = await setUpAddedFolder(ctx, projectId, opts);
-      for (const gezel of crew.createdGezels) {
-        ctx.chatEvents.publishGlobalEvent({
-          type: 'gezel_created',
-          gezelId: gezel.id,
-          name: gezel.name,
-        });
-      }
-    },
-  });
+  const inferDeps = (opts: { nightWork?: boolean } = {}) => buildInferDeps(ctx, opts);
 
   /** The folder's "Work on this folder overnight" switch. */
   app.post('/:id/night-work', async (c) => {
@@ -810,6 +795,25 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     return c.json({ paths });
   });
 
+  /**
+   * The project's dependency graph for a Views diagram: files, who depends on
+   * whom, and what the folders are for. A read; it writes nothing.
+   */
+  app.get('/:id/index/graph', async (c) => {
+    const parsed = FileGraphRequestSchema.safeParse(c.req.query());
+    if (!parsed.success)
+      return c.json({ error: parsed.error.issues[0]?.message ?? 'bad request' }, 400);
+    return c.json(await ctx.contentIndex.fileGraph(c.req.param('id'), parsed.data));
+  });
+
+  /** Everything the index knows about one file, for the Views inspector. */
+  app.get('/:id/index/file-insight', async (c) => {
+    const path = c.req.query('path') ?? '';
+    if (!path) return c.json({ error: 'path is required' }, 400);
+    const insight = await ctx.contentIndex.fileInsight(c.req.param('id'), path);
+    return insight ? c.json(insight) : c.json({ error: 'not indexed' }, 404);
+  });
+
   /** The Boekwachter's summary of one file; `summary` is null until it has read it. */
   app.get('/:id/index/file-summary', async (c) => {
     const path = c.req.query('path') ?? '';
@@ -916,6 +920,14 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     return c.json(aiDrive ? { ...status, aiDrive } : status);
   });
 
+  // Gezel's map of the codebase (folder purposes, key files, most-imported
+  // files) for views and reports; no model runs on read.
+  app.get('/:id/index/codebase-map', async (c) => {
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'not found' }, 404);
+    return c.json(await ctx.contentIndex.codebaseMap(id));
+  });
+
   app.post('/:id/index/refresh', async (c) => {
     const id = c.req.param('id');
     const status = await ctx.workspaceIndex.refresh(id);
@@ -957,7 +969,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const engagement = getEngagementMode(await ctx.store.readConfig());
     if (!isTaskWorkAllowed({ aiEngagementMode: engagement })) {
       if (!(await ctx.indexingJob.isPaused())) {
-        ctx.indexEnrichment.drainEmbedOnly(id);
+        ctx.indexEnrichment.drainEmbedOnly(id, { refreshFirst: true });
       }
       const pending = await ctx.contentIndex.countNeedingEnrichment(id);
       return c.json({
@@ -983,7 +995,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       // index" from an unstaffed project should still deliver what it can.
       // Run the embed drain and answer honestly instead of a bare 409.
       if (!(await ctx.indexingJob.isPaused())) {
-        ctx.indexEnrichment.drainEmbedOnly(id);
+        ctx.indexEnrichment.drainEmbedOnly(id, { refreshFirst: true });
       }
       const pending = await ctx.contentIndex.countNeedingEnrichment(id);
       return c.json({

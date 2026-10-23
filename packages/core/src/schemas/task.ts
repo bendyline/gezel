@@ -606,6 +606,17 @@ export const TaskSchema = z.object({
         templateId: z.string(),
         suggestionKey: z.string(),
       }),
+      z.object({
+        /**
+         * A run a person's lookout started when its camera saw what it was
+         * told to watch for. Unattended by definition: it never asks
+         * questions, and at most one live run per lookout exists.
+         */
+        kind: z.literal('lookout'),
+        lookoutId: z.string(),
+        firingId: z.string(),
+        episodeId: z.string(),
+      }),
     ])
     .optional(),
   cron: TaskCronSchema.optional(),

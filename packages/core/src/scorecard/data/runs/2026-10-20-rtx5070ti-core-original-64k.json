@@ -1,0 +1,938 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "2026-10-20-rtx5070ti-core-original-64k",
+      "provenance": {
+        "startedAt": "2026-10-20T02:24:29.314Z",
+        "device": {
+          "label": "Windows laptop (RTX 5070 Ti, Ryzen AI 9 HX 370)",
+          "platform": "win32",
+          "arch": "x64",
+          "memoryGb": 31,
+          "osRelease": "win32 10.0.26300",
+          "cpuModel": "AMD Ryzen AI 9 HX 370 w/ Radeon 890M",
+          "gpuModel": "NVIDIA GeForce RTX 5070 Ti Laptop GPU"
+        },
+        "harnessCommit": "dee6f3e3aea8",
+        "sourceHash": "98763c648f021292339838e264ab775024d6049bbfde0093d4f258df8cb1cde7",
+        "serviceBuildHash": "a1ac336f2a669ac2e11ae528fe69e5bfaf91b5446a20364e3002de14aa6201f9",
+        "catalogHash": "23ab3cfa5bde3d0753341e4572c7b3a8730debc9c171929344c49710a9a25784",
+        "gildeVersion": "0.2.5",
+        "count": 3,
+        "judgeModelId": null,
+        "engineBuilds": {
+          "llama-cpp": "CUDA build 11669 / 620d2225cc436ab0b001e3200e590e3b286ef9ab"
+        }
+      },
+      "scope": "subset",
+      "memoryCoverage": "system-only",
+      "suites": [
+        "core"
+      ],
+      "scenariosBySuite": {
+        "core": [
+          "tictactoe",
+          "petshop",
+          "tankcombat",
+          "schema-migration",
+          "failing-tests-spec",
+          "symptom-debug",
+          "data-wrangle"
+        ]
+      },
+      "note": "Original runtime, 65,536 tokens and one slot. Seven scenarios ran once per model (49 trials); the remaining requested cells are in the separate continuation. The runtime floor raised the two 27B models from a requested 32K to an observed 64K. Counts only; this is not a full-suite ranking. Runtime content: 399efbfea8a2. Task performance and advisory reviews appear below by journal and rubric; exact trial scores, axes and evidence are in the October Windows data download."
+    }
+  ],
+  "results": [
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "quantization": "UD-Q4_K_XL",
+      "grantedContextTokens": 65536,
+      "runId": "2026-10-20-rtx5070ti-core-original-64k",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 15841,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "A",
+          "label": "A · 10-20 02:24–10-20 14:02 UTC",
+          "trials": 7,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 7,
+            "median": 122.18,
+            "min": 114.61,
+            "max": 140.11
+          },
+          "prefillTokensPerSec": {
+            "samples": 7,
+            "median": 1911.42,
+            "min": 1679.56,
+            "max": 2047.18
+          },
+          "durationMs": {
+            "samples": 7,
+            "median": 111559,
+            "min": 42806,
+            "max": 452034
+          },
+          "peakRssMb": {
+            "samples": 7,
+            "median": 15841,
+            "min": 11505,
+            "max": 20590
+          },
+          "peakGpuMemMb": {
+            "samples": 7,
+            "median": 8620,
+            "min": 8620,
+            "max": 8620
+          },
+          "judgments": [
+            {
+              "meanScore": 4,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 4.5,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 3.25,
+              "artifacts": 1,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 68546
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 227955
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 81861
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 150969
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 42806
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 111559
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 452034
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-e4b-q4",
+      "label": "Gemma 4 (E4B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "8B",
+      "quantization": "UD-Q4_K_XL",
+      "grantedContextTokens": 65536,
+      "runId": "2026-10-20-rtx5070ti-core-original-64k",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 6204,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "A",
+          "label": "A · 10-20 02:27–10-20 14:06 UTC",
+          "trials": 7,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 7,
+            "median": 204.29,
+            "min": 176.93,
+            "max": 218.54
+          },
+          "prefillTokensPerSec": {
+            "samples": 7,
+            "median": 4444.35,
+            "min": 4317.25,
+            "max": 4759.98
+          },
+          "durationMs": {
+            "samples": 7,
+            "median": 123091,
+            "min": 34832,
+            "max": 177201
+          },
+          "peakRssMb": {
+            "samples": 7,
+            "median": 6204,
+            "min": 4593,
+            "max": 7481
+          },
+          "peakGpuMemMb": {
+            "samples": 7,
+            "median": 4058,
+            "min": 4058,
+            "max": 6838
+          },
+          "judgments": [
+            {
+              "meanScore": 4.25,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 3.75,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 2.75,
+              "artifacts": 1,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 54554
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 135613
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 177201
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 123091
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 35220
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 34832
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 152926
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.5-9b-q4",
+      "label": "Qwen 3.5 (9B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "9B",
+      "quantization": "Q4_K_M",
+      "grantedContextTokens": 65536,
+      "runId": "2026-10-20-rtx5070ti-core-original-64k",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 13330,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "A",
+          "label": "A · 10-20 02:30–10-20 14:14 UTC",
+          "trials": 7,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 7,
+            "median": 83.87,
+            "min": 65.36,
+            "max": 95.53
+          },
+          "prefillTokensPerSec": {
+            "samples": 7,
+            "median": 2428.44,
+            "min": 2291.21,
+            "max": 2635.94
+          },
+          "durationMs": {
+            "samples": 7,
+            "median": 171032,
+            "min": 69629,
+            "max": 416410
+          },
+          "peakRssMb": {
+            "samples": 7,
+            "median": 13330,
+            "min": 7479,
+            "max": 15098
+          },
+          "peakGpuMemMb": {
+            "samples": 7,
+            "median": 8100,
+            "min": 8100,
+            "max": 8104
+          },
+          "judgments": [
+            {
+              "meanScore": 3.5,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 4.083333333333333,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 4.25,
+              "artifacts": 1,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 203168
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 359162
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 112458
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 171032
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 153142
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 69629
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 416410
+        }
+      ]
+    },
+    {
+      "modelId": "ornith1.5-9b-q4",
+      "label": "Ornith 1.5 (9B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "9B",
+      "quantization": "Q4_K_M",
+      "grantedContextTokens": 65536,
+      "runId": "2026-10-20-rtx5070ti-core-original-64k",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 9281,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "A",
+          "label": "A · 10-20 03:31–10-20 16:10 UTC",
+          "trials": 7,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 7,
+            "median": 57.2,
+            "min": 52.7,
+            "max": 60.94
+          },
+          "prefillTokensPerSec": {
+            "samples": 7,
+            "median": 2664.78,
+            "min": 2246.34,
+            "max": 2762.87
+          },
+          "durationMs": {
+            "samples": 7,
+            "median": 218609,
+            "min": 119723,
+            "max": 3641312
+          },
+          "peakRssMb": {
+            "samples": 7,
+            "median": 9281,
+            "min": 6748,
+            "max": 15426
+          },
+          "peakGpuMemMb": {
+            "samples": 7,
+            "median": 7254,
+            "min": 7254,
+            "max": 7256
+          },
+          "judgments": [
+            {
+              "meanScore": 4.416666666666667,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 4.333333333333333,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 2.75,
+              "artifacts": 1,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 189821
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 218609
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 811602
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 119723
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 385547
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 158250
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3641312
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.5-4b-q4",
+      "label": "Qwen 3.5 (4B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "tiny",
+      "parameterSize": "4B",
+      "quantization": "Q4_K_M",
+      "grantedContextTokens": 65536,
+      "runId": "2026-10-20-rtx5070ti-core-original-64k",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 10225,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "A",
+          "label": "A · 10-20 03:36–10-20 16:17 UTC",
+          "trials": 7,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 7,
+            "median": 126.21,
+            "min": 95.45,
+            "max": 143.13
+          },
+          "prefillTokensPerSec": {
+            "samples": 7,
+            "median": 3645.02,
+            "min": 3360.1,
+            "max": 3991.95
+          },
+          "durationMs": {
+            "samples": 7,
+            "median": 133367,
+            "min": 67038,
+            "max": 553477
+          },
+          "peakRssMb": {
+            "samples": 7,
+            "median": 10225,
+            "min": 5226,
+            "max": 15224
+          },
+          "peakGpuMemMb": {
+            "samples": 7,
+            "median": 5722,
+            "min": 5720,
+            "max": 5724
+          },
+          "judgments": [
+            {
+              "meanScore": 3.25,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 3.25,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 3.25,
+              "artifacts": 1,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 133367
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 553477
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 67038
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 73989
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 202187
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 74199
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 348891
+        }
+      ]
+    },
+    {
+      "modelId": "underdog-saluki-27b-iq2-mix",
+      "label": "Underdog Saluki 1.0 (27B, IQ2 mix)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "IQ2-mix",
+      "grantedContextTokens": 65536,
+      "runId": "2026-10-20-rtx5070ti-core-original-64k",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 13508,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "A",
+          "label": "A · 10-20 03:40–10-20 12:53 UTC",
+          "trials": 7,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 7,
+            "median": 12.89,
+            "min": 12.31,
+            "max": 13.09
+          },
+          "prefillTokensPerSec": {
+            "samples": 7,
+            "median": 669.43,
+            "min": 548.21,
+            "max": 691.39
+          },
+          "durationMs": {
+            "samples": 7,
+            "median": 386273,
+            "min": 142015,
+            "max": 3315829
+          },
+          "peakRssMb": {
+            "samples": 7,
+            "median": 13508,
+            "min": 9853,
+            "max": 18590
+          },
+          "peakGpuMemMb": {
+            "samples": 7,
+            "median": 10626,
+            "min": 10626,
+            "max": 10628
+          },
+          "judgments": [
+            {
+              "meanScore": 4.25,
+              "artifacts": 2,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 4.666666666666667,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 4.25,
+              "artifacts": 1,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 1
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 308011
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2097539
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 439924
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 386273
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 145847
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 142015
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3315829
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q2",
+      "label": "Qwen 3.8 (27B, Q2)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "UD-Q2_K_XL",
+      "grantedContextTokens": 65536,
+      "runId": "2026-10-20-rtx5070ti-core-original-64k",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 15666,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "A",
+          "label": "A · 10-20 03:48–10-20 13:54 UTC",
+          "trials": 7,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 7,
+            "median": 6.26,
+            "min": 4.85,
+            "max": 7.8
+          },
+          "prefillTokensPerSec": {
+            "samples": 7,
+            "median": 482.18,
+            "min": 417.44,
+            "max": 514.28
+          },
+          "durationMs": {
+            "samples": 7,
+            "median": 633793,
+            "min": 215527,
+            "max": 3556090
+          },
+          "peakRssMb": {
+            "samples": 7,
+            "median": 15666,
+            "min": 11914,
+            "max": 18728
+          },
+          "peakGpuMemMb": {
+            "samples": 7,
+            "median": 11604,
+            "min": 11600,
+            "max": 11606
+          },
+          "judgments": [
+            {
+              "meanScore": 4.5,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 5.083333333333333,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 4.75,
+              "artifacts": 1,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 633793
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3074152
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1942818
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 609559
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 215527
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 269862
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3556090
+        }
+      ]
+    }
+  ]
+}

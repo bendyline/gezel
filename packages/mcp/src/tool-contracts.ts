@@ -299,10 +299,13 @@ const TOOL_OUTPUT_SCHEMAS = {
   draft_email: ActionToolOutputSchema,
   queue_email: ActionToolOutputSchema,
   send_email: ActionToolOutputSchema,
+  save_email_draft: ActionToolOutputSchema,
   draft_post: ActionToolOutputSchema,
   queue_post: ActionToolOutputSchema,
   publish_post: ActionToolOutputSchema,
   draft_connector_action: ActionToolOutputSchema,
+  list_lookouts: ListToolOutputSchema,
+  propose_lookout: ActionToolOutputSchema,
 } as const satisfies Partial<Record<CanonicalToolName, ToolOutputSchema>>;
 
 /** Output schema advertised for tools migrated to the structured contract. */
@@ -363,6 +366,8 @@ export function errorResult(message: string, options: ToolErrorOptions = {}): Ca
  * hints, never an authorization boundary.
  */
 const READ_ONLY_TOOLS = new Set<CanonicalToolName>([
+  'look_at_camera',
+  'list_lookouts',
   'list_tables',
   'describe_table',
   'query_table',
@@ -502,6 +507,7 @@ const NON_DESTRUCTIVE_MUTATIONS = new Set<CanonicalToolName>([
   'github_pr_create',
   'draft_email',
   'queue_email',
+  'save_email_draft',
   'draft_post',
   'queue_post',
   'draft_connector_action',
@@ -563,6 +569,7 @@ const OPEN_WORLD_TOOLS = new Set<CanonicalToolName>([
   'draft_email',
   'queue_email',
   'send_email',
+  'save_email_draft',
   'draft_post',
   'queue_post',
   'publish_post',

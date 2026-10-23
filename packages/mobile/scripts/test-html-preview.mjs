@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { projectPageTypographyPlugin } from '../../../scripts/project-page-typography.mjs';
 const require = createRequire(new URL('../../ui/package.json', import.meta.url));
 const { chromium, webkit } = require('playwright');
-const { createServer } = await import(require.resolve('vite'));
+const { createServer } = await import(pathToFileURL(require.resolve('vite')).href);
 const root = fileURLToPath(new URL('..', import.meta.url));
 const policy = (await readFile(new URL('../index.html', import.meta.url), 'utf8')).match(
   /content="([^"]*default-src[^"]*)"/,
@@ -19,6 +20,7 @@ const server = await createServer({
   optimizeDeps: { noDiscovery: true, entries: [] },
   server: { host: '127.0.0.1', port: 0 },
   plugins: [
+    projectPageTypographyPlugin(fileURLToPath(new URL('../../ui', import.meta.url))),
     {
       name: 'offline-html-preview-test',
       configureServer(server) {
@@ -430,7 +432,7 @@ async function checkTypeMedia(type, port) {
   // A 2x3 red PNG.
   const png =
     'iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAIAAAA2iEnWAAAAEUlEQVR4nGP4z8DwnwGMERQARNAF+7BYSawAAAAASUVORK5CYII=';
-  const page = `<!doctype html><body><div id="grid"></div><div id="hero"></div><script>
+  const page = `<!doctype html><head><style>.custom { font-family: monospace; }</style></head><body><h1>Page title</h1><p>Body text</p><button>Action</button><input aria-label="Name"><h2 class="custom">Custom title</h2><div id="grid"></div><div id="hero"></div><script>
 var grid = document.getElementById('grid');
 grid.innerHTML = '<img id="cover" alt="cover" src="' + gezel.data.url('posts/a/media/cover.png', { source: 'artifacts' }) + '">';
 document.getElementById('hero').style.backgroundImage = 'url(' + gezel.data.url('posts/a/media/cover.png', { source: 'artifacts' }) + ')';
@@ -505,6 +507,40 @@ document.getElementById('hero').style.backgroundImage = 'url(' + gezel.data.url(
     );
     const frame = tab.frames().find((candidate) => candidate.url() === url);
     assert.ok(frame, 'media page snapshot loaded');
+    const typography = await frame.evaluate(async () => {
+      await Promise.all([
+        document.fonts.load('16px "Hanken Grotesk"'),
+        document.fonts.load('600 16px "Hanken Grotesk"'),
+        document.fonts.load('italic 16px "Hanken Grotesk"'),
+        document.fonts.load('700 24px "PT Serif"'),
+        document.fonts.load('italic 24px "PT Serif"'),
+      ]);
+      const family = (selector) => getComputedStyle(document.querySelector(selector)).fontFamily;
+      const defaults = {
+        body: family('p'),
+        heading: family('h1'),
+        button: family('button'),
+        input: family('input'),
+        custom: family('.custom'),
+      };
+      document.documentElement.style.setProperty('--font-body', 'monospace');
+      document.documentElement.style.setProperty('--font-heading', 'sans-serif');
+      return {
+        defaults,
+        body: family('p'),
+        heading: family('h1'),
+        button: family('button'),
+        loaded: [...document.fonts].filter((font) => font.status === 'loaded').length,
+      };
+    });
+    for (const role of ['body', 'button', 'input'])
+      assert.match(typography.defaults[role], /Hanken Grotesk/);
+    assert.match(typography.defaults.heading, /PT Serif/);
+    assert.equal(typography.defaults.custom, 'monospace', 'authored CSS overrides defaults');
+    assert.equal(typography.body, 'monospace', 'body role can be changed');
+    assert.equal(typography.heading, 'sans-serif', 'heading role can be changed');
+    assert.match(typography.button, /Hanken Grotesk/, 'UI role stays independent of body');
+    assert.ok(typography.loaded >= 5, 'font bytes load under the offline sandbox CSP');
     await frame.waitForFunction(
       () => {
         const img = document.getElementById('cover');

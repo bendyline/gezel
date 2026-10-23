@@ -152,6 +152,36 @@ describe('classifyDeliverableReachability', () => {
     expect(classifyDeliverableReachability(workflowSpec, genericWorkflow)).toBeNull();
   });
 
+  it('still accepts user-directed outputs when the only gated file is a review verdict', () => {
+    const reviewGate = {
+      at: 'completion',
+      checks: [{ kind: 'contains', file: '{{task.dir}}/verdict.md', pattern: 'PASS' }],
+    };
+    const workflowSpec = spec([{ path: 'brief.md' }]);
+    workflowSpec.mode = 'workflow';
+    workflowSpec.success.taskGraph = {
+      requireCraftbookTask: true,
+      requireTerminalStep: true,
+    };
+    const reviewLoop = template([
+      { id: 'draft' },
+      {
+        id: 'evaluate',
+        advanceWhen: { file: '{{task.dir}}/verdict.md' },
+        gate: { ...reviewGate, onReject: 'draft' },
+      },
+      { id: 'publish', terminal: true },
+    ]);
+    expect(classifyDeliverableReachability(workflowSpec, reviewLoop)).toBeNull();
+
+    // A gate that loops back to its own step checks the work it just wrote.
+    const selfGated = template([
+      { id: 'draft', gate: { ...reviewGate, onReject: 'draft' } },
+      { id: 'publish', terminal: true },
+    ]);
+    expect(classifyDeliverableReachability(workflowSpec, selfGated)?.verdict).toBe('unreachable');
+  });
+
   it('does not excuse user-directed outputs without workflow attribution and terminal proof', () => {
     const genericWorkflow = template([{ id: 'active', terminal: true }]);
     const finding = classifyDeliverableReachability(spec([{ path: 'brief.md' }]), genericWorkflow);

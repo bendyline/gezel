@@ -1,3 +1,9 @@
+/**
+ * Project footer for workspace indexing, lifecycle status, and provider access.
+ * ProjectControlsOverflow shares the status labels and lights with its menu;
+ * the parent owns persistence and write-access confirmation. Git actions use
+ * the API and useGitSync, with layout in styles/settings-and-status.css.
+ */
 import type {
   ClaudePermissionMode,
   CodexPermissionMode,
@@ -238,9 +244,9 @@ function AiScanSpinner() {
 }
 
 /**
- * Secondary project controls moved behind an ellipsis by the status bar's
- * container query. The trigger stays mounted so CSS—not viewport guessing—
- * decides when the bar is genuinely too narrow for its inline controls.
+ * The current project status labels the compact menu for lifecycle and access
+ * controls. Container queries fold inline exceptions into the same menu when
+ * the bar is narrow; its status remains visible at every width.
  */
 function ProjectControlsOverflow({
   projectStatus,
@@ -264,6 +270,10 @@ function ProjectControlsOverflow({
   onClaudeModeChange?: (mode: ClaudePermissionMode) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const statusLabel = PROJECT_STATUS_OPTIONS.find(
+    (option) => option.value === projectStatus,
+  )?.label;
+  const triggerLabel = `Project status: ${statusLabel}. Open project controls`;
 
   if (
     !onStatusChange &&
@@ -280,11 +290,12 @@ function ProjectControlsOverflow({
         <Popover.Trigger asChild>
           <button
             type="button"
-            className="project-controls-overflow-trigger"
-            title="More project controls"
-            aria-label="More project controls"
+            className={`project-controls-overflow-trigger project-status-select-${projectStatus}`}
+            title={triggerLabel}
+            aria-label={triggerLabel}
           >
-            …
+            <span>{statusLabel}</span>
+            <span className="project-status-select-dot" aria-hidden />
           </button>
         </Popover.Trigger>
         <Popover.Content className="project-controls-overflow-popover" side="top" align="end">

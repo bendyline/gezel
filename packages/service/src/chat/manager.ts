@@ -45,6 +45,12 @@ import {
   withCharacterChatCap,
   withCurrentDateTimeLine,
 } from '@bendyline/gezel';
+import {
+  imageSizeSettingsFrom,
+  mergeImageSizeSettings,
+  parseImageSettingsFromText,
+  withoutImageSizeKeys,
+} from '@bendyline/gezel';
 import type {
   FileTurnIntent,
   MapRepoResponse,
@@ -72,6 +78,8 @@ import {
   type GezelDetail,
   type GezelGender,
   type HookSpec,
+  type ImageSettings,
+  type ImageSizeSettings,
   type InstalledToolset,
   KeyedLock,
   type ModelTier,
@@ -380,6 +388,7 @@ import {
 } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
 import type { RecognitionMode } from '@bendyline/gezel-inference/internal/chat/vision-capability';
 import { nativeVisionEnabledFor } from '@bendyline/gezel-inference/internal/chat/vision-capability';
+import { cameraPixelsWithheld } from '../connectors/live/camera/frame-access.js';
 import { extractReferencedTasks } from '../references/task-references.js';
 import { readTaskWithEffectiveStatus } from '../tasks/effective-status.js';
 import { artifactReadSlices } from './artifact-read-evidence.js';
@@ -422,12 +431,17 @@ import {
   turnWaitsForEngineSwap,
 } from './engine-swap-wait.js';
 import type { ChatEventBus, PublishScope } from './events.js';
-import { EvidenceLedger } from './evidence-ledger.js';
+import { EvidenceLedger, personGivenText } from './evidence-ledger.js';
 import {
   deriveRepairClampNudge,
   formatExpectedDeliverableAnnotation,
   normalizeExpectedDeliverablePath,
 } from './expected-deliverable.js';
+import {
+  fileHandoffIntentKey,
+  isSubstantiveExistingWorkspaceFile,
+  messageExpressesModifyIntent,
+} from './file-handoff-intent.js';
 import {
   cleanGenerativePrompt,
   expandVideoPrompt,
@@ -450,6 +464,7 @@ import {
   extractGeneratedImageArtifactPath,
   extractGeneratedImageModel,
   extractGeneratedImageSeed,
+  extractGeneratedImageSize,
 } from './image-refinement.js';
 import {
   type PromptSectionSize,
@@ -1284,6 +1299,11 @@ export {
   deriveRepairClampEnabled,
   deriveRepairClampNudge,
 } from './expected-deliverable.js';
+export {
+  fileHandoffIntentKey,
+  isSubstantiveExistingWorkspaceFile,
+  messageExpressesModifyIntent,
+} from './file-handoff-intent.js';
 
 function isManagedSystemPlaywright(toolset: InstalledToolset): boolean {
   return (
@@ -6931,6 +6951,9 @@ export class ChatManager extends LocalEngineRuntime {
        * the person dismissed the suggested task for this very text.
        */
       turnIntent?: TurnIntentMode;
+      /** Settings for a direct image gezel's render; other gezels ignore them. */
+      imageSettings?: ImageSettings;
+      imageCues?: 'auto' | 'off';
     },
   ): Promise<ChatMessage> {
     if (this.shuttingDown) {
@@ -6987,6 +7010,9 @@ export class ChatManager extends LocalEngineRuntime {
       draftId?: string;
       messageOrigin?: TurnMessageOrigin;
       turnIntent?: TurnIntentMode;
+      /** Settings for a direct image gezel's render; other gezels ignore them. */
+      imageSettings?: ImageSettings;
+      imageCues?: 'auto' | 'off';
     },
   ): Promise<ChatMessage> {
     const inflightTurn: InflightTurn = {
@@ -7106,6 +7132,9 @@ export class ChatManager extends LocalEngineRuntime {
       draftId?: string;
       messageOrigin?: TurnMessageOrigin;
       turnIntent?: TurnIntentMode;
+      /** Settings for a direct image gezel's render; other gezels ignore them. */
+      imageSettings?: ImageSettings;
+      imageCues?: 'auto' | 'off';
     },
   ): Promise<ChatMessage> {
     // Fixed-function gezels skip the LLM entirely — dispatch BEFORE
@@ -7615,12 +7644,19 @@ export class ChatManager extends LocalEngineRuntime {
     let pendingDigests: MessageImageDigest[] = [];
     let pendingImageWarnings: string[] = [];
     try {
+      const turnProject = await this.store.getProject(state.record.projectId).catch(() => null);
       const resolved = await resolveTurnImages({
         store: this.store,
         projectId: state.record.projectId,
         sessionId,
         markdown: userText,
         provider: state.record.providerName,
+        ...(turnProject?.connectors?.some((b) => b.driver === 'device')
+          ? {
+              withholdPixels: (ref: string) =>
+                cameraPixelsWithheld(turnProject, state.record.providerName, ref),
+            }
+          : {}),
         ...(await this.resolveTurnVisionContext(state)),
         ...(this.recognition ? { recognition: this.recognition } : {}),
         mode: await this.resolveRecognitionMode(state),
@@ -7744,12 +7780,8 @@ export class ChatManager extends LocalEngineRuntime {
         }
       }
       // A factual-mode turn starts here: what the person has said counts as
-      // evidence, and refusal counts reset. Nudges continue the turn they
-      // belong to rather than starting one. Today's date counts too: the
-      // turn's own clock line tells the model, and "past the current date
-      // (2026-10-07)" was refused as an invented number. So do the writer's
-      // own name and the project's: a report signed "Rafiq" was refused for
-      // naming a person no source mentions (2026-10-10 coverage run).
+      // evidence (see personGivenText), and refusal counts reset. Nudges
+      // continue the turn they belong to rather than starting one.
       const evidenceLedger = this.evidenceLedgers.get(sessionId);
       if (
         evidenceLedger &&
@@ -7762,16 +7794,16 @@ export class ChatManager extends LocalEngineRuntime {
           this.store.getProject(state.record.projectId).catch(() => null),
         ]);
         evidenceLedger.beginTurn(
-          [
-            ...state.record.messages.filter((m) => m.role === 'user').map((m) => m.content),
-            userText,
-            renderCurrentDateTimeLine(),
-            todayIso(),
-            self?.name ?? '',
-            project?.name ?? '',
-            // The person's own selected text: rewriting it is not inventing it.
-            subjectStateLine ?? '',
-          ].join('\n'),
+          personGivenText({
+            messages: [
+              ...state.record.messages.filter((m) => m.role === 'user').map((m) => m.content),
+              userText,
+            ],
+            clockLines: [renderCurrentDateTimeLine(), todayIso()],
+            gezelName: self?.name,
+            project,
+            subjectStateLine,
+          }),
         );
       }
       const projectRetrieval = await this.resolveTurnProjectRetrieval(
@@ -9788,6 +9820,8 @@ export class ChatManager extends LocalEngineRuntime {
       hidden?: boolean;
       draftId?: string;
       messageOrigin?: TurnMessageOrigin;
+      imageSettings?: ImageSettings;
+      imageCues?: 'auto' | 'off';
     },
   ): Promise<ChatMessage> {
     const tag = sessionId.slice(0, 8);
@@ -9923,6 +9957,25 @@ export class ChatManager extends LocalEngineRuntime {
         ? await this.resolveFixedFunctionTaskImageArgs(record, userText)
         : null;
     let promptValue = taskImageArgs?.prompt ?? stripGezelMentions(userText);
+    // Settings stated in the message ("9:16", "as a phone wallpaper", "hi-res")
+    // become render settings and leave the prompt: an image model draws the
+    // words it is given, so a phone would appear beside the lighthouse. The
+    // composer shows what it read and sends `imageCues: 'off'` when the
+    // person dismissed it. A task's prompt is its brief, never parsed.
+    let cueSettings: ImageSizeSettings = {};
+    let settingsOnly = false;
+    if (ff.tool === 'generate_image' && !record.taskRef && opts?.imageCues !== 'off') {
+      const cues = parseImageSettingsFromText(promptValue);
+      if (cues.cues.length > 0) {
+        cueSettings = cues.settings;
+        settingsOnly = cues.prompt.length === 0;
+        if (!settingsOnly) promptValue = cues.prompt;
+        log.info(
+          `fixed-function#${tag} read image settings from the message: ${cues.cues.map((c) => c.text).join(', ')}`,
+        );
+      }
+    }
+    let followUpSize: ImageSizeSettings | undefined;
     // Follow-up threading for interactive image sessions. Without an LLM
     // in the loop, "no lettering at the bottom" would otherwise become
     // the ENTIRE prompt of an unrelated fresh generation. When the
@@ -9934,9 +9987,29 @@ export class ChatManager extends LocalEngineRuntime {
     const refinementArgs: Record<string, unknown> = {};
     if (ff.tool === 'generate_image' && !record.taskRef) {
       const prev = record.lastImageGeneration;
-      const plan = classifyImageFollowUp(promptValue, Boolean(prev));
+      // "Make it 9:16" alone redraws the last picture, same seed, new shape.
+      const plan =
+        settingsOnly && prev ? 'reshape' : classifyImageFollowUp(promptValue, Boolean(prev));
       if (prev && plan !== 'fresh') {
-        if (plan === 'variation') {
+        // The shape it was asked for, not its pixels: the tool holds explicit
+        // pixels to the agent cap, which turned a 768x1344 wallpaper's
+        // "another one" into 576x1024.
+        followUpSize = {
+          ...(prev.aspectRatio || prev.quality
+            ? {
+                ...(prev.aspectRatio ? { aspectRatio: prev.aspectRatio } : {}),
+                ...(prev.quality ? { quality: prev.quality } : {}),
+              }
+            : prev.width && prev.height
+              ? { width: prev.width, height: prev.height }
+              : {}),
+          ...(prev.model ? { model: prev.model } : {}),
+        };
+        if (plan === 'reshape') {
+          promptValue = prev.prompt;
+          if (prev.negativePrompt) refinementArgs.negativePrompt = prev.negativePrompt;
+          if (prev.seed !== undefined) refinementArgs.seed = prev.seed;
+        } else if (plan === 'variation') {
           // Same prompt, fresh seed — "another one" wants a sibling, not a copy.
           promptValue = prev.prompt;
           if (prev.negativePrompt) refinementArgs.negativePrompt = prev.negativePrompt;
@@ -9991,12 +10064,29 @@ export class ChatManager extends LocalEngineRuntime {
         }),
       );
     }
-    const callArgs: Record<string, unknown> = {
-      ...(ff.defaults ?? {}),
-      ...refinementArgs,
-      [promptKey]: promptValue,
-      ...(taskImageArgs?.saveAs ? { saveAs: taskImageArgs.saveAs } : {}),
-    };
+    const callArgs: Record<string, unknown> =
+      ff.tool === 'generate_image'
+        ? {
+            ...withoutImageSizeKeys(ff.defaults),
+            ...refinementArgs,
+            // Least to most specific: the gezel's defaults, the picture a
+            // follow-up continues, the strip's picks, then what this message
+            // said. Each shape replaces the pixels below it.
+            ...mergeImageSizeSettings(
+              imageSizeSettingsFrom(ff.defaults),
+              followUpSize,
+              opts?.imageSettings,
+              cueSettings,
+            ),
+            [promptKey]: promptValue,
+            ...(taskImageArgs?.saveAs ? { saveAs: taskImageArgs.saveAs } : {}),
+          }
+        : {
+            ...(ff.defaults ?? {}),
+            ...refinementArgs,
+            [promptKey]: promptValue,
+            ...(taskImageArgs?.saveAs ? { saveAs: taskImageArgs.saveAs } : {}),
+          };
 
     let assistantText: string;
     let success = true;
@@ -10079,12 +10169,17 @@ export class ChatManager extends LocalEngineRuntime {
         : undefined;
     const seed = extractGeneratedImageSeed(rawText);
     const model = extractGeneratedImageModel(rawText);
+    const size = extractGeneratedImageSize(rawText);
+    const asked = imageSizeSettingsFrom(callArgs);
     record.lastImageGeneration = {
       prompt: promptArg,
       ...(negativePrompt ? { negativePrompt } : {}),
       artifactPath,
       ...(seed !== undefined ? { seed } : {}),
       ...(model ? { model } : {}),
+      ...(size ?? {}),
+      ...(asked.aspectRatio ? { aspectRatio: asked.aspectRatio } : {}),
+      ...(asked.quality ? { quality: asked.quality } : {}),
       at: nowIso(),
     };
   }
@@ -15033,7 +15128,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(record.craftbookRef ? ['craftbook_update_step'] : []),
       ...(project?.connectors?.some((binding) => binding.type.startsWith('mail-')) &&
       securityPolicy.allowMail
-        ? ['draft_email', 'queue_email', 'send_email']
+        ? ['draft_email', 'queue_email', 'send_email', 'save_email_draft']
         : []),
       ...(hasSocialConnectorBinding(project?.connectors) && securityPolicy.allowExternalServices
         ? ['draft_post', 'queue_post', 'publish_post']
@@ -16194,6 +16289,10 @@ export class ChatManager extends LocalEngineRuntime {
           : {}),
         // Only projects with bound connectors expose draft_connector_action.
         ...(project?.connectors?.length ? { GEZEL_CONNECTORS_ENABLED: '1' } : {}),
+        // Only projects with a camera expose look_at_camera and the lookout tools.
+        ...(project?.connectors?.some((b) => b.driver === 'device')
+          ? { GEZEL_CAMERAS_ENABLED: '1' }
+          : {}),
         // Same pattern again for the observation-table tools. A project with
         // no tabular corpus would otherwise carry list_tables/describe_table/
         // query_table in every system prompt's tool listing for nothing, and
@@ -16502,6 +16601,10 @@ export class ChatManager extends LocalEngineRuntime {
         if (!t.runtime.args.includes('--allow-write')) {
           extraArgs.push('--allow-write', artifactsDir);
         }
+        // Previews launch Playwright's headless shell; the system bootstrap
+        // installs DocBlocks' revision here (toolsets/docblocks-browser.ts).
+        const { playwrightBrowsersDir } = await import('@bendyline/gezel/paths');
+        env.PLAYWRIGHT_BROWSERS_PATH = playwrightBrowsersDir(this.home);
       }
 
       // Re-resolve at every spawn: the install directory is user-writable and
@@ -17189,74 +17292,6 @@ export function buildContinuationNudge(
     `Discard that fragment and emit one complete tool call now: \`${example}\`.`,
     'Do not narrate, assign a task, advance a task step, or summarize status unless the concrete tool call has already succeeded in this turn.',
   ].join(' ');
-}
-
-/**
- * Does this inbound message ask the recipient to MODIFY / change existing
- * content, as opposed to create a file from scratch? Used by
- * {@link ChatManager.staleWorkspaceFileRequest} to refuse to short-circuit
- * a real change request just because it names an already-existing file.
- *
- * The bias is deliberate and asymmetric: a false positive here only costs a
- * short-circuit optimization (the developer's LLM runs and the downstream
- * no-op / workspace-collision guards absorb a genuinely redundant create),
- * whereas a false negative silently DROPS real work — the exact failure this
- * guards against. So ambiguous create/modify verbs ("add", "implement",
- * "include") count as modify, and any behavioral-delta phrasing ("so that
- * …", "instead of …", "when an alien reaches …") trips it. The cost is that
- * a verbose create spec that happens to say "add a Play Again button" or
- * "spawn a wave when the timer fires" also bails to the LLM — acceptable,
- * since that path is safe and the loop-breaking the short-circuit existed
- * for is now also covered by the scheduler's busy-assignee skip and task
- * status. Wild-caught (qwen3.6 "Space Shooter Arcade").
- */
-export function messageExpressesModifyIntent(text: string): boolean {
-  return (
-    // Verbs that act on something that already exists. Includes the
-    // ambiguous create/modify set (add|implement|include|introduce|support)
-    // on purpose — see the bias note above.
-    /\b(updat\w*|modif\w*|chang\w*|edit\w*|adjust\w*|tweak\w*|fix\w*|patch\w*|refactor\w*|renam\w*|replac\w*|remov\w*|delet\w*|subtract\w*|deduct\w*|decrement\w*|increment\w*|increas\w*|decreas\w*|reduc\w*|penali[sz]\w*|add(?:s|ed|ing)?|implement\w*|includ\w*|introduc\w*|support\w*)\b/i.test(
-      text,
-    ) ||
-    // Behavioral-delta phrasing — changing how something already behaves
-    // rather than describing a whole new artifact.
-    /\bso\s+(?:that|when)\b/i.test(text) ||
-    /\bmake\s+it\s+so\b/i.test(text) ||
-    /\b(?:instead\s+of|rather\s+than)\b/i.test(text) ||
-    /\bshould\s+(?:now|instead|also)\b/i.test(text) ||
-    /\bcurrently\b/i.test(text) ||
-    // An event trigger on existing gameplay/behavior ("when an alien reaches
-    // the bottom", "when the ship hits an enemy") is a change, not a create.
-    /\bwhen\s+(?:a|an|the|each|any|every)?\s*[\w-]+\s+(?:reach\w*|hit\w*|land\w*|cross\w*|touch\w*|press\w*|click\w*|collid\w*|die\w*|spawn\w*|enter\w*|leav\w*|escap\w*|destroy\w*)\b/i.test(
-      text,
-    )
-  );
-}
-
-/**
- * Preserve create-request deduplication while keeping concrete repairs from
- * being swallowed by an older in-flight create for the same path. Distinct
- * repair verdicts get distinct keys; byte-identical/reformatted retries still
- * join one live handoff.
- */
-export function fileHandoffIntentKey(text: string): string {
-  const repair =
-    messageExpressesModifyIntent(text) ||
-    /\[scenario check\]|\b(?:specific failure|signals? that (?:didn't|did not) fire|success criteria (?:aren't|are not) met|repeat miss|gate_full_rewrite|rejected)\b/i.test(
-      text,
-    );
-  if (!repair) return 'create';
-  const normalized = text.toLowerCase().replace(/\s+/g, ' ').trim();
-  return `repair:${createHash('sha256').update(normalized).digest('hex').slice(0, 16)}`;
-}
-
-export function isSubstantiveExistingWorkspaceFile(filePath: string, content: string): boolean {
-  const trimmed = content.trim();
-  if (!trimmed) return false;
-  if (/\.html?$/i.test(filePath)) {
-    return trimmed.length >= 500 && /<script\b/i.test(trimmed) && /<(?:html|body)\b/i.test(trimmed);
-  }
-  return true;
 }
 
 function incompleteToolCallPrefix(content: string): string | null {

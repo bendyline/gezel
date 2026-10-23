@@ -1,34 +1,64 @@
 ---
 id: connected-apps
-title: "Connected apps: let other tools use your gezels"
+title: "Integrations: let other tools use your gezels"
 order: 9
 summary: Editors and other programs can talk to your crew through standard AI endpoints — with your approval, on your terms.
 ---
 
-# Connected apps
+# Integrations
 
 Gezel isn't only a place you visit — it can also serve your models and gezellen to *other* programs on your computer. A code editor, a writing tool, or a browser extension that knows how to talk to an AI service can talk to gezel instead, and get your local models with all of gezel's know-how applied.
 
-Everything described here lives in **Settings → Connected Apps**.
+Everything described here lives in **Settings → Integrations**.
 
 ## How an app connects
 
 Apps speak to gezel using the same "OpenAI-style" language most AI tools already know. Two things make it work:
 
-1. **An address.** The address panel in **Settings → Connected Apps** shows where gezel is listening on your machine. On most personal installs that is `https://127.0.0.1:6228/v1`; when the Gezel machine service is installed, the app API moves to a per-launch port (shown in the panel) because the machine service holds 6228. For apps that need an address that never changes, turn on **Ollama emulation** — it always answers at `http://127.0.0.1:11434`.
+1. **An address.** The address panel in **Settings → Integrations** shows where gezel is listening on your machine. On most personal installs that is `https://127.0.0.1:6228/v1`; when the Gezel machine service is installed, the app API moves to a per-launch port (shown in the panel) because the machine service holds 6228. For apps that need an address that never changes, turn on **Ollama emulation** — it always answers at `http://127.0.0.1:11434`.
 2. **Permission.** The first time an app asks for access, gezel shows you an approval request — who is asking, and for what. Nothing gets through until you approve, and you can revoke any app later from the same panel. Gezel's own add-ins for Word, Excel, PowerPoint, LibreOffice, and VS Code are the exception: they can prove they run as you on this computer, so they connect without asking. Revoking one of them only resets it; to disconnect it for good, remove the add-in.
+
+## Gezel's tools in other AI apps
+
+The rest of this page is about other apps using your gezels and models. This part is the reverse: AI apps that already have their own model — **Claude Code**, **Claude Desktop**, **Codex**, **Cursor** and **VS Code** — can use what Gezel knows and does:
+
+- **Search** the folder they are working in (its files, and the text inside its Word, PDF, PowerPoint and Excel files), your shared document library, your saved memories, and the knowledge catalogs you installed.
+- **Read** Word, PDF, PowerPoint and Excel files as text.
+- **Describe** an image on this computer, or read the text in it.
+- **Make an image** with the image engine you chose in Gezel.
+- **Remember** a decision or a preference, so Gezel and every other app see it later.
+- **Check the issues** Gezel's night shift found: say which are real, and fix them if you ask.
+
+Set an app up on its own tab: **Gezel's tools in Claude Code**, and so on. Gezel adds a server called `gezel` to that app's own settings and changes nothing else there. Claude Code and Codex are set up through their own commands; when Gezel cannot find the command, the tab shows the line to run yourself. If you use the Gezel extension for VS Code, it adds the tools to each workspace on its own.
+
+**Getting the app to use it.** An app with Gezel's tools still reaches for its own search first. Once it's set up, its tab shows one line to add to the instructions file in a folder you work in: *CLAUDE.md* for Claude Code, *AGENTS.md* for Codex, Cursor and VS Code. With that line, Claude Code used Gezel's search almost every time, and on a large, little-documented codebase it answered questions about the code in about half the time. In a codebase that's already well described, it makes little difference. Gezel shows the line for you to copy; it never changes your files.
+
+**Which folder.** An app works with the Gezel project for the folder it was started in. A folder Gezel does not know yet becomes a read-only project the first time the app uses Gezel's tools there, so Gezel can index it; Gezel never writes into it. If you would rather not, choose **Only folders already in Gezel**: in other folders the app still reaches your library, memories and knowledge. Claude Desktop has no folder, so you pick its project on its tab.
+
+**What they may do.** On the Overview tab, under **Gezel's tools in other apps**:
+
+- **Let other apps use Gezel's tools** turns all of it off or on.
+- **Memory**: *Off*, *Read*, or *Save to the project*. A saved memory goes to the project the app is working in, labeled with the app's name, and every gezel in that project sees it. Apps never save to your own "About you" memories.
+- **Images**: *Off*, *On this computer* (the default), or *Any image engine*. With *Any image engine* an app can use a cloud engine you set up, which may charge for each image without asking you first. Images are saved in Gezel; the app copies one into its folder when it needs it there.
+- **Issues**: *Off*, *List them*, or *List and judge them* (the default). See below.
+
+**Checking the night shift's issues.** Overnight, a small model on this computer reads your code and flags things that look wrong. Many of them aren't, and a stronger model like the one in Claude Code is good at telling which. Once Claude Code is set up, run `/mcp__gezel__triage_issues` in a folder Gezel knows (add a number for how many), or `/mcp__gezel__fix_issues` to have it fix the real ones too; in VS Code it's `/mcp.gezel.triage_issues`. The app reads the code at each issue and tells Gezel what it found: fixed, real, not a bug, true but not worth fixing, and so on. Each issue then shows the answer and which app gave it, and you can reopen any of them. Gezel also learns from the answers: a lead judged not a bug stops coming back the next night in different words. For an app without Gezel's tools, open **Reports → Issues for review**, copy or save the list, let the app fill in the answer under each issue, and use **Import answers**.
+
+The same section lists the apps using Gezel's tools right now and the folder each is working in. **Stop for this folder** stops that app there until you turn it back on. Under the strictest security level, Super Lockdown, no app can use Gezel's tools: Gezel cannot see whether an outside app's model runs on this computer.
+
+The tools work only while Gezel is running. From a terminal, `gezel mcp status`, `gezel mcp install <app>` and `gezel mcp remove <app>` do the same as these tabs.
 
 ## Codex and other agent harnesses
 
 The authenticated address also serves the OpenAI **Responses API** at `/v1/responses`. That lets a harness such as Codex keep ownership of its coding tools, sandbox, approvals, and conversation loop while a model installed in gezel supplies the inference. VS Code, OpenCode, and [pi](https://pi.dev) connect the same way through the chat endpoint — see [VS Code](#vs-code), [OpenCode](#opencode), and [pi](#pi) below. Word, Excel, PowerPoint, and LibreOffice connect differently: they open real conversations in a project rather than borrowing a model — see [Word, Excel, and PowerPoint](#word-excel-and-powerpoint) and [LibreOffice](#libreoffice).
 
-For Codex, use **Use Gezel in Codex** in this Settings screen. Gezel creates an isolated `gezel-local` Codex profile, a model catalog, and a dedicated revocable credential. It does not edit Codex's main configuration, authentication, conversations, sandbox rules, or approval settings. Start Codex with the command shown on the card (`codex --profile gezel-local`).
+For Codex, use **Gezel's models in Codex** on the Codex tab. Gezel creates an isolated `gezel-local` Codex profile, a model catalog, and a dedicated revocable credential. It does not edit Codex's main configuration, authentication, conversations, sandbox rules, or approval settings. Start Codex with the command shown on the card (`codex --profile gezel-local`).
 
 If the card says **Needs attention**, the `gezel-local` profile on disk was hand-edited or was written by a different Gezel installation, so gezel will not touch it. **Repair Codex setup** writes a fresh profile pointed at this copy of gezel and keeps the old file beside it as `gezel-local.config.toml.backup`. The one conflict repair cannot resolve is another connected app holding the Codex credential identity — revoke that app first.
 
 Keep Gezel running while Codex uses the local model. If you want the model bridge available without keeping the desktop window open, turn on Gezel's daemon autostart setting.
 
-The managed profile talks to a narrow, authenticated loopback bridge. Operationally it provides the stable address that an Ollama-style integration needs, but it keeps bearer authentication: only the Responses and model-discovery routes are present, and the credential grants no access to Gezel projects, files, terminals, or settings. The token is read by Codex through a command-backed provider credential rather than copied into a project or shell profile. Revoking the Codex entry under Connected Apps immediately stops it from using the bridge.
+The managed profile talks to a narrow, authenticated loopback bridge. Operationally it provides the stable address that an Ollama-style integration needs, but it keeps bearer authentication: only the Responses and model-discovery routes are present, and the credential grants no access to Gezel projects, files, terminals, or settings. The token is read by Codex through a command-backed provider credential rather than copied into a project or shell profile. Revoking the Codex entry under Integrations immediately stops it from using the bridge.
 
 One-click setup is available only when the desktop and the Gezel service are on the same computer. In remote-service mode the card stays read-only, because writing a profile on the service host would not configure Codex on the computer in front of you.
 
@@ -38,11 +68,11 @@ The setup card puts eligible gezels first. Choosing one gives Codex that gezel's
 
 The gezel you choose on the card is the profile's *default*, not its only option: gezel writes a model catalog listing every eligible gezel and local model, so Codex's own model picker shows the whole crew and you can switch between them inside a Codex session.
 
-A gezel appears here only when its effective local model is installed and can participate in Codex's caller-executed tool loop. The facade does not attach Gezel chat sessions, memories, project context, or MCP tools, and it does not silently route unknown aliases through the fallback gezel. It also refuses `codex-cli:` / `anthropic-cli:` targets because those are full nested agent harnesses rather than inference providers.
+A gezel appears here only when its effective local model is installed and can participate in Codex's caller-executed tool loop. The facade does not attach Gezel chat sessions, memories, project context, or MCP tools, and it does not silently route unknown aliases through the fallback gezel. It also refuses `codex-cli:` / `anthropic-cli:` targets because those are full nested agent harnesses rather than inference providers. Gezel's search, memories, Office reading and images come to Codex the other way, through **Gezel's tools in Codex** on the same tab; see [Gezel's tools in other AI apps](#gezels-tools-in-other-ai-apps).
 
 ## VS Code
 
-**Use Gezel in VS Code** uses VS Code's built-in custom-endpoint support, so it does not install or require the Gezel VSIX. Gezel adds one provider named `Gezel` to the selected VS Code profile's `chatLanguageModels.json`. Every eligible gezel and raw local model then appears in VS Code's native model picker while VS Code keeps control of its agent tools, permissions, and conversations.
+**Gezel's models in VS Code** uses VS Code's built-in custom-endpoint support, so it does not install or require the Gezel VSIX. Gezel adds one provider named `Gezel` to the selected VS Code profile's `chatLanguageModels.json`. Every eligible gezel and raw local model then appears in VS Code's native model picker while VS Code keeps control of its agent tools, permissions, and conversations.
 
 This is a shared profile file, so setup uses a narrow merge: entries belonging to other providers are preserved, and **Remove setup** removes only Gezel's entry. Named VS Code profiles have separate files; choose the profile you want before setup. To move the integration later, clear it and set up the other profile.
 
@@ -74,7 +104,7 @@ It deliberately does not change which model OpenCode starts with: that stays you
 
 If the card says **Needs attention**, the managed file was hand-edited or was written by a different Gezel installation, so gezel will not touch it. **Repair OpenCode setup** writes a fresh file and keeps the old one beside it as `opencode.json.backup`. The one conflict repair cannot resolve is another connected app holding the OpenCode credential identity — revoke that app first.
 
-Because the credential lives in its own file and the config references it by path, revoking the OpenCode entry under Connected Apps immediately stops it from using the bridge, and no secret is ever copied into a project or shell profile.
+Because the credential lives in its own file and the config references it by path, revoking the OpenCode entry under Integrations immediately stops it from using the bridge, and no secret is ever copied into a project or shell profile.
 
 As with Codex, a gezel appears here only when its effective local model is installed and can take part in a caller-executed tool loop, one-click setup needs the desktop and the Gezel service on the same computer, and Gezel must stay running while OpenCode uses the model. The bridge carries only inference: the credential grants no access to Gezel projects, files, terminals, or settings.
 
@@ -134,7 +164,7 @@ LibreOffice needs no certificate setup, because the extension runs inside LibreO
 
 Gezel presents your crew to connected apps as model choices, including each gezel's name and role. When an app chooses one, that gezel answers with their character, model, and settings.
 
-Some apps cannot choose from that list and ask for a hardcoded model such as `gpt-4o`. The **fallback gezel** answers those requests. It defaults to your Meester, so there is always a useful front door; you can choose another gezel from **Settings → Connected Apps**.
+Some apps cannot choose from that list and ask for a hardcoded model such as `gpt-4o`. The **fallback gezel** answers those requests. It defaults to your Meester, so there is always a useful front door; you can choose another gezel from **Settings → Integrations**.
 
 ## Supporting behaviors
 

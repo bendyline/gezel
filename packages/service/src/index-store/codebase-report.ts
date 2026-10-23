@@ -1,17 +1,31 @@
 import {
+  type BoekwachterIssue,
   FOLDER_KIND_PROPERTY,
   type FileMapResponse,
+  ISSUE_VERDICT_LABELS,
+  type IssueVerdictEntry,
+  type IssueVerdictLogKind,
   type ListFileIssuesResponse,
   type MapBlock,
   createLogger,
   isCodingProject,
 } from '@bendyline/gezel';
+import {
+  type VerdictTally,
+  isLowConfidence,
+  issueVerdictStats,
+} from '../issue-triage/calibration.js';
 
 const log = createLogger('index');
 
 const MAX_HOTSPOTS = 8;
 const MAX_LOAD_BEARING = 5;
-const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'] as const;
+const MAX_NEW_ISSUES = 10;
+/** Below this many verdicts a percentage says more about chance than about the reviewer. */
+const MIN_DECIDED_FOR_RATE = 20;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Boekwachter review severities (`FileReviewIssueSeveritySchema`), worst first — not the security scale. */
+const SEVERITY_ORDER = ['major', 'minor', 'info'] as const;
 
 export interface CodebaseReportDeps {
   store: {
@@ -23,9 +37,12 @@ export interface CodebaseReportDeps {
     >;
     readProjectArtifact(id: string, path: string): Promise<string | null>;
     writeProjectArtifact(id: string, path: string, content: string): Promise<unknown>;
+    /** The verdict log, for the triage tally; absent in older test fakes. */
+    boekwachterIssues?: { readIssueVerdicts(id: string): Promise<IssueVerdictEntry[]> };
   };
   contentIndex: {
-    fileMap(projectId: string): Promise<FileMapResponse>;
+    /** Read-only: a background report must never found a village. */
+    fileMapSnapshot(projectId: string): Promise<FileMapResponse>;
     listFileIssues(
       projectId: string,
       req: { maxResults?: number },
@@ -57,6 +74,8 @@ export async function writeNightlyCodebaseReport(
   now: Date,
   /** The night's day key, so one night files one report whichever side of midnight it lands. */
   day = localDay(now),
+  /** Replace the day's report instead of keeping it: a person asked for one now. */
+  opts: { force?: boolean } = {},
 ): Promise<string | null> {
   const project = await deps.store.getProject(projectId).catch(() => null);
   if (!project) return null;
@@ -64,16 +83,26 @@ export async function writeNightlyCodebaseReport(
   if (kind !== 'code' && !(kind === undefined && isCodingProject(project))) return null;
 
   const path = `reports/codebase-${day}.md`;
-  if ((await deps.store.readProjectArtifact(projectId, path).catch(() => null)) !== null) {
+  if (
+    !opts.force &&
+    (await deps.store.readProjectArtifact(projectId, path).catch(() => null)) !== null
+  ) {
     return null;
   }
-  const map = await deps.contentIndex.fileMap(projectId);
+  const map = await deps.contentIndex.fileMapSnapshot(projectId);
   if (!map.indexed) return null;
   const files = rankable(map.blocks);
   if (files.length === 0) return null;
   const issues = await deps.contentIndex
-    .listFileIssues(projectId, { maxResults: 1 })
+    .listFileIssues(projectId, { maxResults: 1000 })
     .catch(() => null);
+  const verdicts =
+    (await deps.store.boekwachterIssues?.readIssueVerdicts(projectId).catch(() => [])) ?? [];
+  const stats = issueVerdictStats(verdicts);
+  // A category the verdicts say is almost never real is not news.
+  const newIssues = newSince(issues?.issues ?? [], now.getTime() - DAY_MS).filter(
+    (i) => !isLowConfidence(stats, i),
+  );
 
   const hotspots = files
     .filter((f) => f.churn > 0 && (f.findings > 0 || f.fanIn > 0))
@@ -89,12 +118,37 @@ export async function writeNightlyCodebaseReport(
     .sort((a, b) => b.importance - a.importance || a.path.localeCompare(b.path))
     .slice(0, MAX_LOAD_BEARING);
   const openIssues = issues?.counts.total ?? 0;
-  if (hotspots.length === 0 && loadBearing.length === 0 && openIssues === 0) return null;
+  if (
+    hotspots.length === 0 &&
+    loadBearing.length === 0 &&
+    openIssues === 0 &&
+    newIssues.length === 0
+  ) {
+    return null;
+  }
 
   const lines = [`# Your codebase · ${day}`, ''];
   lines.push(
     `${files.length.toLocaleString('en-US')} source files · ${openIssues.toLocaleString('en-US')} open issue${openIssues === 1 ? '' : 's'}${severityTail(issues)}.`,
   );
+  if (newIssues.length > 0) {
+    lines.push(
+      '',
+      '## New tonight',
+      '',
+      `The reviewer flagged ${newIssues.length} new suspected problem${newIssues.length === 1 ? '' : 's'}. They are leads from a smaller model, often wrong; your coding app can check them through Gezel's tools (Settings → Integrations), or hand it \`reports/issue-handoff.md\`.`,
+      '',
+    );
+    for (const issue of newIssues.slice(0, MAX_NEW_ISSUES)) {
+      const where = `${issue.path}${issue.line ? `:${issue.line}` : ''}`;
+      lines.push(`- ${issue.ref} · ${issue.severity} · \`${where}\` · ${issue.message}`);
+    }
+    if (newIssues.length > MAX_NEW_ISSUES) {
+      lines.push(`- …and ${newIssues.length - MAX_NEW_ISSUES} more.`);
+    }
+  }
+  const tally = triageTally(verdicts, stats.overall);
+  if (tally) lines.push('', '## Triage so far', '', tally);
   if (hotspots.length > 0) {
     lines.push(
       '',
@@ -138,6 +192,35 @@ function rankable(blocks: MapBlock[]): Ranked[] {
       importance: b.health!.importance ?? 0,
       weight: b.weight,
     }));
+}
+
+/** Open issues first reported since `since`, worst first; repeats of earlier ones are not new. */
+function newSince(issues: readonly BoekwachterIssue[], since: number): BoekwachterIssue[] {
+  return issues
+    .filter((i) => i.status === 'open' && !i.echoOf && Date.parse(i.createdAt) >= since)
+    .sort(
+      (a, b) =>
+        SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) ||
+        a.createdAt.localeCompare(b.createdAt),
+    );
+}
+
+/** One line of verdict counts: "12 verdicts so far: 7 not a bug, 3 fixed, 2 confirmed real." */
+function triageTally(verdicts: readonly IssueVerdictEntry[], overall: VerdictTally): string | null {
+  const counts = new Map<IssueVerdictLogKind, number>();
+  for (const v of verdicts) {
+    if (v.by.kind === 'system' || v.kind === 'reopened') continue;
+    counts.set(v.kind, (counts.get(v.kind) ?? 0) + 1);
+  }
+  const total = [...counts.values()].reduce((a, b) => a + b, 0);
+  if (total === 0) return null;
+  const parts = [...counts]
+    .sort((a, b) => b[1] - a[1])
+    .map(([kind, n]) => `${n} ${ISSUE_VERDICT_LABELS[kind].toLowerCase()}`);
+  const line = `${total} verdict${total === 1 ? '' : 's'} so far: ${parts.join(', ')}.`;
+  if (overall.decided < MIN_DECIDED_FOR_RATE) return line;
+  const pct = (n: number) => `${Math.round((100 * n) / overall.decided)}%`;
+  return `${line} Of the leads checked, ${pct(overall.valid)} were true (${pct(overall.actionable)} worth fixing) and ${pct(overall.wrong)} were wrong.`;
 }
 
 function severityTail(issues: ListFileIssuesResponse | null): string {

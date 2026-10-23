@@ -111,9 +111,12 @@ const SCOPED_DEFAULT_BEHAVIORS: ReadonlyArray<{
   // suggest_work / start_work in place of its older routing tools. Route
   // correct +29 / +22 points on Gemma 4 E4B / Qwen 3.5 9B over 41 probes
   // (p ≤ 0.002) and +30 / +23 points on whole first projects (2026-10-18).
-  // Measured on `small` only.
-  { id: 'tools.work-routing', tiers: ['small'] },
-  { id: 'prompt.work-options-prelude', tiers: ['small'] },
+  // On the larger local tiers the pair took route correct from 24/41 to
+  // 36/41 on Qwen 3.8 27B (medium) and from 21/41 to 38/41 on Nemotron 3.5
+  // Super VL (large), with no rise in self over-routing, exact-format misses
+  // or fabrication (2026-10-21). Never measured on `tiny` or `cloud`.
+  { id: 'tools.work-routing', tiers: ['small', 'medium', 'large'] },
+  { id: 'prompt.work-options-prelude', tiers: ['small', 'medium', 'large'] },
   // Qwen hands some questions to another gezel instead of answering; the
   // note took that from 6/30 to 2/30. On Gemma every wording tried cost it
   // correct status answers or doubled its answer time, so it stays off there.

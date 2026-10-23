@@ -6,7 +6,7 @@ chats with the project's gezels about the open document, and offers them
 document tools so they can read it and make the edits the user asks for.
 
 It ships inside the Gezel service bundle (`dist/libreoffice/gezel.oxt`) and is
-installed for the current user by the desktop app: Settings, Connected Apps,
+installed for the current user by the desktop app: Settings, Integrations,
 **Use Gezel in LibreOffice**. That runs LibreOffice's own installer,
 `unopkg add -f -s gezel.oxt` (per user; never `--shared`).
 
@@ -75,7 +75,7 @@ The UNO layer can only be exercised inside LibreOffice. With Gezel running:
    Gezel** otherwise); no connection code appears. The panel shows the
    project and a gezel picker. To see the fallback, run with a `GEZEL_HOME`
    whose `runtime/auth-token` is unreadable: a code appears, to approve in
-   Gezel under Connected Apps.
+   Gezel under Integrations.
 4. Select a paragraph and send "Summarize my selection". The transcript shows
    a `[doc_read_selection]` line, then the reply.
 5. Ask for an insertion ("Add a heading 'Next steps' at the end"). The text

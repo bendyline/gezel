@@ -169,3 +169,30 @@ describe('ToolsetsEditor custom MCP import', () => {
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
   });
 });
+
+it('shows the shipped DocBlocks runtime as included instead of offering installation', async () => {
+  const runtime = { kind: 'npm-package', package: '@bendyline/docblocks-cli' };
+  vi.mocked(api.listInstalledToolsets).mockImplementation(
+    async (scope) =>
+      ({
+        toolsets:
+          scope.kind === 'system' ? [{ toolsetId: 'docblocks', sourceId: 'bundled', runtime }] : [],
+      }) as never,
+  );
+  vi.mocked(api.listCatalogItems).mockResolvedValue({
+    items: [
+      {
+        sourceId: 'bundled',
+        kind: 'toolset',
+        manifest: { kind: 'toolset', id: 'docblocks', name: 'DocBlocks', runtime },
+      },
+    ],
+  } as never);
+  render(<ToolsetsEditor scope={{ kind: 'shared' }} subject="everyone" />);
+  expect(await screen.findByText('DocBlocks')).toBeVisible();
+  expect(screen.getByText('Included with Gezel')).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '+ Add toolset' }));
+  expect(await screen.findByRole('button', { name: 'Included with Gezel' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
+});

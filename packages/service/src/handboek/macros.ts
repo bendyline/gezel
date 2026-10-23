@@ -37,6 +37,7 @@ import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { computeToolAllowlist, expandToolsetGroups } from '../chat/role-tool-filter.js';
 import type { ReleaseNoteEntry } from './content.js';
 import type { HandboekDeviceInfo, HandboekGezelInfo, HandboekModelInfo } from './device.js';
+import { taskMeasurementsHtml, taskMeasurementsMarkdown } from './scorecard-measurements.js';
 import { unwrapSoftBreaks } from './unwrap.js';
 
 const log = createLogger('handboek');
@@ -645,13 +646,16 @@ export function renderScorecardMarkdown(
   if (headlineNote) lines.push('', headlineNote);
   lines.push('');
   lines.push(...scoreTable(publishable, opts.breakLabels ?? false, headlineCoverage));
+  lines.push(...taskMeasurementsMarkdown(board.scores));
 
   if (withheld.length > 0) {
     lines.push('');
     lines.push('Not published — some tasks could not be measured on this round:');
     lines.push('');
     for (const score of withheld) {
-      lines.push(`- ${score.result.label}: ${score.unmeasuredScenarios.length} task(s) unmeasured`);
+      lines.push(
+        `- ${esc(score.result.label)}: ${score.unmeasuredScenarios.length} task(s) unmeasured`,
+      );
     }
   }
 
@@ -665,7 +669,6 @@ export function renderScorecardMarkdown(
     const scores = dataset.results
       .filter((result) => result.runId === run.id && result.suiteId === suiteId)
       .map((result) => scoreModel(result, run.provenance.count))
-      .filter((score) => score.unmeasuredScenarios.length === 0)
       .sort((a, b) => b.successes / b.attributableTrials - a.successes / a.attributableTrials);
     if (scores.length === 0) continue;
     const why = provenanceDifferences(board.run, run);
@@ -683,7 +686,14 @@ export function renderScorecardMarkdown(
     const note = memoryCoverageNote(coverage, scores);
     if (note) lines.push('', note);
     lines.push('');
-    lines.push(...scoreTable(scores, opts.breakLabels ?? false, coverage));
+    lines.push(
+      ...scoreTable(
+        scores.filter((score) => score.unmeasuredScenarios.length === 0),
+        opts.breakLabels ?? false,
+        coverage,
+      ),
+    );
+    lines.push(...taskMeasurementsMarkdown(scores));
   }
 
   if (opts.includeTaskCount) {
@@ -769,17 +779,17 @@ export function renderScorecardRunsMarkdown(
   }
 
   const lines: string[] = [];
-  const headline = runs[0]!.run;
+  const headline = (runs.find((entry) => entry.run.scope !== 'subset') ?? runs[0]!).run;
   for (const [index, entry] of runs.entries()) {
     if (index > 0) lines.push('');
     lines.push(
-      `### ${index === 0 ? 'Latest round' : 'Earlier round'} — ${entry.run.provenance.startedAt.slice(0, 10)}`,
+      `### ${entry.run.id === headline.id ? 'Latest round' : entry.run.scope === 'subset' ? 'Partial round' : 'Earlier round'} — ${entry.run.provenance.startedAt.slice(0, 10)}`,
     );
     lines.push('');
     const engines = entry.suites.flatMap((suite) =>
       suite.scores.map((score) => score.result.engine),
     );
-    const why = index === 0 ? [] : provenanceDifferences(headline, entry.run);
+    const why = entry.run.id === headline.id ? [] : provenanceDifferences(headline, entry.run);
     lines.push(
       `**${describeProvenance(entry.run, engines)}**${why.length > 0 ? ` — ${why.join(', ')}` : ''}`,
     );
@@ -798,6 +808,7 @@ export function renderScorecardRunsMarkdown(
       lines.push(`#### ${SCORECARD_SUITE_HEADINGS[suite.suiteId] ?? suite.suiteId}`);
       lines.push('');
       lines.push(...scoreTable(publishable, opts.breakLabels ?? false, coverage));
+      lines.push(...taskMeasurementsMarkdown(suite.scores));
 
       if (withheld.length > 0) {
         lines.push('');
@@ -805,7 +816,7 @@ export function renderScorecardRunsMarkdown(
         lines.push('');
         for (const score of withheld) {
           lines.push(
-            `- ${score.result.label}: ${score.unmeasuredScenarios.length} task(s) unmeasured`,
+            `- ${esc(score.result.label)}: ${score.unmeasuredScenarios.length} task(s) unmeasured`,
           );
         }
       }
@@ -859,20 +870,21 @@ export function renderScorecardFilterHtml(
   }
 
   const attr = SCORECARD_DATA_ATTRS;
-  const headline = rounds[0]!.run;
+  const headline = (rounds.find((entry) => entry.run.scope !== 'subset') ?? rounds[0]!).run;
   const labels = roundLabels(rounds.map((entry) => entry.run));
   const parts: string[] = [
     `<div class="hb-scorecard" ${attr.root}="1">`,
     `<div class="hb-scorecard-controls" ${attr.controls}="1"></div>`,
   ];
 
-  for (const [index, entry] of rounds.entries()) {
+  for (const entry of rounds) {
     const { run } = entry;
     const date = run.provenance.startedAt.slice(0, 10);
     const engines = entry.suites.flatMap((suite) =>
       suite.scores.map((score) => score.result.engine),
     );
-    const why = index === 0 ? [] : provenanceDifferences(headline, run);
+    const isHeadline = run.id === headline.id;
+    const why = isHeadline ? [] : provenanceDifferences(headline, run);
     const models = [
       ...new Set(
         entry.suites.flatMap((suite) =>
@@ -894,9 +906,9 @@ export function renderScorecardFilterHtml(
         `${attr.hardwareLabel}="${esc(scorecardHardwareLabel(run.provenance.device))}"`,
         `${attr.models}="${esc(models.join(' '))}"`,
         `${attr.tiers}="${esc(tiers.join(' '))}"`,
-        ...(index === 0 ? [`${attr.latest}="1"`] : []),
+        ...(isHeadline ? [`${attr.latest}="1"`] : []),
       ].join(' ')}>`,
-      `<h4 class="hb-scorecard-round-title">${index === 0 ? 'Latest round' : 'Earlier round'} — ${esc(date)}</h4>`,
+      `<h4 class="hb-scorecard-round-title">${isHeadline ? 'Latest round' : run.scope === 'subset' ? 'Partial round' : 'Earlier round'} — ${esc(date)}</h4>`,
       `<p class="hb-scorecard-stamp"><strong>${esc(describeProvenance(run, engines))}</strong>${
         why.length > 0 ? ` — ${esc(why.join(', '))}` : ''
       }</p>`,
@@ -918,7 +930,9 @@ export function renderScorecardFilterHtml(
           SCORECARD_SUITE_HEADINGS[suite.suiteId] ?? suite.suiteId,
         )}</h5>`,
       );
-      parts.push(scoreTableHtml(publishable, coverage));
+      if (publishable.length > 0) parts.push(scoreTableHtml(publishable, coverage));
+      const measurements = taskMeasurementsHtml(suite.scores);
+      if (measurements) parts.push(measurements);
       if (withheld.length > 0) {
         const names = withheld
           .map(
@@ -982,14 +996,18 @@ function roundLabels(runs: readonly ScorecardRun[]): Map<string, string> {
  * without knowing anything about what it says.
  */
 function scoreTableHtml(scores: ModelScore[], coverage: ScorecardMemoryCoverage): string {
+  if (scores.length === 0) return '';
   const attr = SCORECARD_DATA_ATTRS;
   const anyRuntime = scores.some((score) => !!score.result.runtime);
   const anyJudge = scores.some((score) => !!score.result.judge);
+  const showProbes =
+    scores.some((score) => !!score.result.performance) ||
+    !scores.some((score) => !!score.result.taskMeasurements);
   const memoryHeading = MEMORY_COLUMN_HEADINGS[coverage];
 
   const cols = ['Model', 'Size', 'Tasks passed'];
   if (anyJudge) cols.push('Quality');
-  cols.push('Performance');
+  if (showProbes) cols.push('Performance');
   if (anyRuntime) cols.push('Context', ...(memoryHeading ? [memoryHeading] : []));
 
   const rows = scores.map((score) => {
@@ -1004,13 +1022,14 @@ function scoreTableHtml(scores: ModelScore[], coverage: ScorecardMemoryCoverage)
       cells.push(judge ? esc(`${judge.meanScore}/10 (${judge.artifacts}${NB}pieces)`) : '—');
     }
     const perf = score.result.performance;
-    cells.push(
-      perf
-        ? `${esc(`${perf.decodeTokensPerSec}${NB}tok/s output`)}<br />${esc(
-            `${perf.prefillTokensPerSec.toLocaleString()}${NB}tok/s prefill`,
-          )}`
-        : '—',
-    );
+    if (showProbes)
+      cells.push(
+        perf
+          ? `${esc(`${perf.decodeTokensPerSec}${NB}tok/s output`)}<br />${esc(
+              `${perf.prefillTokensPerSec.toLocaleString()}${NB}tok/s prefill`,
+            )}`
+          : '—',
+      );
     if (anyRuntime) {
       const runtime = score.result.runtime;
       cells.push(runtime ? `${Math.round(runtime.contextTokens / 1024)}K` : '—');
@@ -1095,22 +1114,26 @@ export function breakModelLabel(label: string): string {
  * One results table.
  *
  * Judge and runtime columns are omitted when no model in the table carries
- * the measurement. Performance is the deliberate exception: it is a standard
- * scorecard dimension, and keeping its column visible lets an older round say
- * honestly that its throughput probe was not recorded.
+ * the measurement. Older rounds retain a blank Performance column when no
+ * probe was recorded. Rounds with task measurements use the separate tables
+ * below instead of displaying an empty probe column.
  */
 function scoreTable(
   scores: ReturnType<typeof scoreModel>[],
   breakLabels: boolean,
   coverage: ScorecardMemoryCoverage,
 ): string[] {
+  if (scores.length === 0) return [];
   const anyRuntime = scores.some((score) => !!score.result.runtime);
   const anyJudge = scores.some((score) => !!score.result.judge);
+  const showProbes =
+    scores.some((score) => !!score.result.performance) ||
+    !scores.some((score) => !!score.result.taskMeasurements);
   const memoryHeading = MEMORY_COLUMN_HEADINGS[coverage];
 
   const cols = ['Model', 'Size', 'Tasks passed'];
   if (anyJudge) cols.push('Quality');
-  cols.push('Performance');
+  if (showProbes) cols.push('Performance');
   if (anyRuntime) cols.push('Context', ...(memoryHeading ? [memoryHeading] : []));
 
   const rows = scores.map((score) => {
@@ -1129,11 +1152,12 @@ function scoreTable(
       cells.push(judge ? `${judge.meanScore}/10 (${judge.artifacts}${NB}pieces)` : '—');
     }
     const perf = score.result.performance;
-    cells.push(
-      perf
-        ? `${perf.decodeTokensPerSec}${NB}tok/s output${breakLabels ? '<br>' : ' · '}${perf.prefillTokensPerSec.toLocaleString()}${NB}tok/s prefill`
-        : '—',
-    );
+    if (showProbes)
+      cells.push(
+        perf
+          ? `${perf.decodeTokensPerSec}${NB}tok/s output${breakLabels ? '<br>' : ' · '}${perf.prefillTokensPerSec.toLocaleString()}${NB}tok/s prefill`
+          : '—',
+      );
     if (anyRuntime) {
       const runtime = score.result.runtime;
       cells.push(runtime ? `${Math.round(runtime.contextTokens / 1024)}K` : '—');

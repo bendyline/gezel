@@ -241,7 +241,7 @@ describe('buildPiBridgeApp', () => {
     expect(finish).toHaveBeenCalledWith({ content: 'Mirrored reply.', finishReason: 'stop' });
   });
 
-  it('applies the Connected Apps master switch before inference', async () => {
+  it('applies the Integrations master switch before inference', async () => {
     const app = buildPiBridgeApp(context({ enabled: false }));
 
     const response = await app.request('http://127.0.0.1/v1/chat/completions', {

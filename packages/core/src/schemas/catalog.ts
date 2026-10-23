@@ -27,6 +27,7 @@ import { KNOWLEDGE_EMBEDDING_PROFILE_IDS, KnowledgeIdSchema } from './knowledge.
 import { BehaviorEntrySchema, ModelStyleSchema } from './model-profile.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { ObservationTableManifestSchema } from './observations.js';
+import { PageImportTargetSchema } from './page-imports.js';
 import { PreviewSourceSchema } from './preview.js';
 import { ProjectTabVisibilitySchema } from './project.js';
 import { ScriptOutputPredicateSchema } from './script.js';
@@ -1044,6 +1045,8 @@ export const ProjectTypePreviewReadSchema = z.object({
 export type ProjectTypePreviewRead = z.infer<typeof ProjectTypePreviewReadSchema>;
 
 export const ProjectTypePagesSchema = z.object({
+  /** Explicit upload destinations. Never bypass the project's workspace write policy. */
+  imports: z.array(PageImportTargetSchema).max(16).optional(),
   /** Entry HTML relative to the version's `pages/` folder, e.g. `dashboard/index.html`. */
   entry: z.string(),
   /**
@@ -1242,7 +1245,12 @@ export type ProjectTypeManifest = z.infer<typeof ProjectTypeManifestSchema>;
 // AI-readable corpus. The manifest is mostly configuration over a generic
 // `driver`; `native` adapters (mail, calendar) map to service code.
 
-const ConnectorDriverSchema = z.enum(['mcp', 'script', 'spectral', 'native']);
+/**
+ * `device` drives local hardware (a webcam today) through the daemon's live
+ * host instead of a sync pass: its `source` names `{adapterId, family}` and
+ * the connector sync loop never touches it. See docs/device-connectors.md.
+ */
+const ConnectorDriverSchema = z.enum(['mcp', 'script', 'spectral', 'native', 'device']);
 
 const ConnectorNormalizeSchema = z.union([
   z.object({ kind: z.literal('mapping'), map: z.record(z.string(), z.unknown()) }),
@@ -2181,6 +2189,9 @@ export const ImageModelAuxiliaryFileSchema = z.object({
 });
 export type ImageModelAuxiliaryFile = z.infer<typeof ImageModelAuxiliaryFileSchema>;
 
+export const ImagePromptStyleSchema = z.enum(['sentences', 'tags']);
+export type ImagePromptStyle = z.infer<typeof ImagePromptStyleSchema>;
+
 export const ImageModelIdentitySchema = IdentityCommonSchema.extend({
   kind: z.literal('image-model'),
   /** Recommended sampler steps; the generate endpoint falls back to this. */
@@ -2209,6 +2220,15 @@ export const ImageModelIdentitySchema = IdentityCommonSchema.extend({
    * See `resolveImg2ImgSupport` in the service's image provider layer.
    */
   supportsImg2Img: z.boolean().optional(),
+  /**
+   * How the model reads a prompt: plain `sentences` (Flux, Krea, MOSS) or
+   * comma-separated booru `tags` (Animagine). Told to the gezel that writes
+   * the prompt, through `generate_image`'s result and the composer's image
+   * shaping. Absent means sentences.
+   */
+  promptStyle: ImagePromptStyleSchema.optional(),
+  /** Whether the model renders short quoted text legibly (signs, posters). */
+  rendersText: z.boolean().optional(),
   /**
    * @deprecated Hand-authored, and no longer read: the daemon prices every
    * media model from its weight files (core `media-memory.ts`). Optional so
@@ -2285,6 +2305,10 @@ export const ImageModelManifestSchema = z.object({
   weightsKind: z.enum(['checkpoint', 'diffusion-model']).default('checkpoint'),
   /** Mirrors {@link ImageModelIdentitySchema.supportsImg2Img}. */
   supportsImg2Img: z.boolean().optional(),
+  /** Mirrors {@link ImageModelIdentitySchema.promptStyle}. */
+  promptStyle: ImagePromptStyleSchema.optional(),
+  /** Mirrors {@link ImageModelIdentitySchema.rendersText}. */
+  rendersText: z.boolean().optional(),
   auxiliaryFiles: z.array(ImageModelAuxiliaryFileSchema).default([]),
   /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
   hardwareTier: ImageModelHardwareTierSchema.optional(),

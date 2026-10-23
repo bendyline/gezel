@@ -1,4 +1,4 @@
-import type { ImageModelAuxiliaryRole } from '@bendyline/gezel';
+import type { ImageAspectRatio, ImageModelAuxiliaryRole, ImageQuality } from '@bendyline/gezel';
 
 export type { ImageModelAuxiliaryRole } from '@bendyline/gezel';
 
@@ -49,6 +49,14 @@ export interface ImageGenerationInput {
   model?: string;
   width?: number;
   height?: number;
+  /**
+   * The shape and size tier the caller asked for. Local engines render the
+   * pixels the route already resolved from these; cloud providers map them
+   * to their own aspect ratios and size tiers, which explicit pixels
+   * override.
+   */
+  aspectRatio?: ImageAspectRatio;
+  quality?: ImageQuality;
   steps?: number;
   seed?: number;
   /**
@@ -172,6 +180,13 @@ export interface ImageProvider {
   readonly name: string;
   generate(input: ImageGenerationInput): Promise<ImageGenerationOutput>;
   listInstalledModels(): Promise<InstalledImageModelInfo[]>;
+  /**
+   * The model a generate that names none will use. Callers that look up
+   * per-model defaults (the route's recommended steps) must ask this rather
+   * than guess, or the defaults of one model are applied to another.
+   * Providers without a local default omit it.
+   */
+  resolveDefaultModelId?(): Promise<string | undefined>;
   /**
    * Stream the install of one catalog model. When `signal` is supplied
    * and aborts mid-download, providers should leave any `.partial` file

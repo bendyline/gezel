@@ -105,6 +105,12 @@ export interface FileBrowserPaneProps {
   customList?: FileBrowserCustomList | null;
   /** Extra class on the layout root, e.g. `project-files-layout-workspace`. */
   layoutClassName?: string;
+  /**
+   * Folds the tree away without touching the stored preference. Each new id
+   * is one ask; expanding the tree answers it. Ids must only grow, so an ask
+   * already answered never folds the tree again.
+   */
+  collapseTreeRequest?: number | null;
 }
 
 /**
@@ -142,9 +148,11 @@ export function FileBrowserPane({
   actionsForEntry,
   customList,
   layoutClassName,
+  collapseTreeRequest,
 }: FileBrowserPaneProps) {
   const [width, setWidth] = useState<number>(() => readStoredFileTreeWidth());
   const [collapsed, setCollapsed] = useState<boolean>(() => readStoredFileTreeCollapsed());
+  const [answeredCollapseRequest, setAnsweredCollapseRequest] = useState<number | null>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const narrow = useCompactLayout(layoutRef, 520);
   const [viewerOpen, setViewerOpen] = useState(Boolean(selectedPath));
@@ -172,9 +180,12 @@ export function FileBrowserPane({
     });
   };
 
+  const hostCollapsed =
+    collapseTreeRequest != null && collapseTreeRequest !== answeredCollapseRequest;
+  const effectiveCollapsed = collapsed || hostCollapsed;
   // Phone navigation is temporary; it must never overwrite the desktop
   // split preference or unmount an editor holding an unsaved draft.
-  const treeCollapsed = !narrow && collapsed;
+  const treeCollapsed = !narrow && effectiveCollapsed;
 
   const commitWidth = useCallback((next: number) => {
     const clamped = clampFileTreeWidth(next);
@@ -185,21 +196,25 @@ export function FileBrowserPane({
       /* quota / private mode — state still in memory */
     }
   }, []);
-  const commitCollapsed = useCallback((next: boolean) => {
-    setCollapsed(next);
-    try {
-      window.localStorage.setItem(FILE_TREE_COLLAPSED_STORAGE_KEY, next ? '1' : '0');
-    } catch {
-      /* quota / private mode — state still in memory */
-    }
-  }, []);
+  const commitCollapsed = useCallback(
+    (next: boolean) => {
+      setCollapsed(next);
+      if (!next) setAnsweredCollapseRequest(collapseTreeRequest ?? null);
+      try {
+        window.localStorage.setItem(FILE_TREE_COLLAPSED_STORAGE_KEY, next ? '1' : '0');
+      } catch {
+        /* quota / private mode — state still in memory */
+      }
+    },
+    [collapseTreeRequest],
+  );
 
   const onGripMouseDown = useCallback(
     (e: ReactMouseEvent<HTMLDivElement>) => {
       e.preventDefault();
       dragState.current = {
         startX: e.clientX,
-        startWidth: collapsed ? FILE_TREE_RAIL_WIDTH : width,
+        startWidth: effectiveCollapsed ? FILE_TREE_RAIL_WIDTH : width,
       };
       document.body.classList.add('chat-rail-resizing');
       document.body.style.cursor = 'col-resize';
@@ -224,7 +239,7 @@ export function FileBrowserPane({
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
     },
-    [collapsed, commitCollapsed, commitWidth, width],
+    [effectiveCollapsed, commitCollapsed, commitWidth, width],
   );
 
   const onGripKeyDown = useCallback(
@@ -233,7 +248,7 @@ export function FileBrowserPane({
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
         const delta = e.key === 'ArrowLeft' ? -step : step;
-        if (collapsed) {
+        if (effectiveCollapsed) {
           if (delta < 0) return;
           commitCollapsed(false);
           return;
@@ -253,7 +268,7 @@ export function FileBrowserPane({
         commitCollapsed(true);
       }
     },
-    [collapsed, commitCollapsed, commitWidth, width],
+    [effectiveCollapsed, commitCollapsed, commitWidth, width],
   );
 
   const treeMode = viewMode === 'tree-alpha' || viewMode === 'tree-modified';
@@ -342,6 +357,29 @@ export function FileBrowserPane({
                       <i className="fa-solid fa-file-circle-plus" aria-hidden="true" />
                     </button>
                   )}
+                </div>
+              )}
+              {!narrow && (
+                <div className="gz-tray file-tree-collapse-tray">
+                  <button
+                    type="button"
+                    className="gz-key gz-key--icon"
+                    onClick={() => commitCollapsed(true)}
+                    aria-expanded={true}
+                    aria-label={`Hide ${source.title} files`}
+                    title={`Hide ${source.title} files`}
+                  >
+                    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                      <path
+                        d="M10 3.5 5.5 8 10 12.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
                 </div>
               )}
             </div>
@@ -437,7 +475,7 @@ export function FileBrowserPane({
         className="chat-rail-grip file-tree-grip"
         onMouseDown={onGripMouseDown}
         onKeyDown={onGripKeyDown}
-        onDoubleClick={() => commitCollapsed(!collapsed)}
+        onDoubleClick={() => commitCollapsed(!effectiveCollapsed)}
       />
 
       <div

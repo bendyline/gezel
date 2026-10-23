@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { writeRecord } from '../connectors/writer.js';
-import { messageToRecord } from './storage.js';
+import { messageToRecord, threadSubjectSlug } from './storage.js';
 import type { MailMessage } from './types.js';
 
 let ws: string;
@@ -63,9 +63,7 @@ describe('messageToRecord + writeRecord', () => {
   it('writes a message into a thread folder with trust frontmatter', async () => {
     const r = await writer(makeMessage());
     expect(r.status).toBe('written');
-    expect(r.relPath).toMatch(
-      /^data\/work-mail\/inbox\/2026-06-18--q2-roadmap--[0-9a-f]{8}\/001--.*\.md$/,
-    );
+    expect(r.relPath).toMatch(/^data\/work-mail\/inbox\/q2-roadmap--[0-9a-f]{8}\/001--.*\.md$/);
     const file = await findMessageFile();
     expect(file).not.toBeNull();
     const content = await readFile(file!, 'utf8');
@@ -140,5 +138,39 @@ describe('messageToRecord + writeRecord', () => {
     expect(r.relPath).not.toContain('..');
     const file = await findMessageFile();
     expect(file!.startsWith(join(ws, 'data', 'work-mail'))).toBe(true);
+  });
+
+  it('files a reply sent on a later day in the same thread folder', async () => {
+    const first = await writer(makeMessage({ subject: 'Q2 roadmap' }));
+    const reply = await writer(
+      makeMessage({
+        messageId: '<m2@example.com>',
+        subject: 'AW: [EXT] Re: Q2 roadmap',
+        date: '2026-06-21T09:30:00.000Z',
+      }),
+    );
+    const dir = (p?: string) => p!.slice(0, p!.lastIndexOf('/'));
+    expect(dir(reply.relPath)).toBe(dir(first.relPath));
+    expect(reply.relPath).toMatch(/\/002--2026-06-21T09-30--from-alice--/);
+  });
+
+  it('names the quarantine namespace the adapter asks for', () => {
+    const rec = messageToRecord('a', makeMessage(), { quarantineNamespace: 'mail-gmail' });
+    expect(rec.quarantineNamespace).toBe('mail-gmail');
+    expect(messageToRecord('a', makeMessage()).quarantineNamespace).toBe('mail');
+  });
+});
+
+describe('threadSubjectSlug', () => {
+  it.each([
+    ['Re: Re: Fwd: Budget', 'budget'],
+    ['RE[2]: Budget', 'budget'],
+    ['SV: VS: Budget', 'budget'],
+    ['[EXT] Re: Budget', 'budget'],
+    ['', 'no-subject'],
+    ['Re: ', 'no-subject'],
+    ['Read me first', 'read-me-first'],
+  ])('%j -> %s', (subject, expected) => {
+    expect(threadSubjectSlug(subject)).toBe(expected);
   });
 });

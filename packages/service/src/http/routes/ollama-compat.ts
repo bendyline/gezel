@@ -724,7 +724,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
 
     // Same session defaults as /v1/chat/completions: tuning always
     // (with the request's options/format overlaid on top), behavior
-    // profile gated by the Connected Apps switch. Caller-owned inference
+    // profile gated by the Integrations switch. Caller-owned inference
     // keeps compatibility behaviors without Gezel action-loop enforcement.
     const defaults = await ctx.chat
       .resolveModelSessionDefaults(target.provider, target.model, target.tuningOverrides ?? {})

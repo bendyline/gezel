@@ -66,6 +66,7 @@ import {
   summarizeInflightTurnsForLog,
   summarizeSilentRecoveries,
   taskGraphPoisonedSessionRecoveryLine,
+  throughputScale,
   throughputScaledMaxDurationMs,
   totalWorkspaceFileCount,
   trialHardProgressTimeoutMs,
@@ -1727,6 +1728,21 @@ describe('recovery nudge wording', () => {
 });
 
 describe('llamaCppEvalLaunchOverridesForModel', () => {
+  it('applies an explicit slot cap without changing small-model tuning or context', () => {
+    expect(
+      llamaCppEvalLaunchOverridesForModel('qwen3.8-27b-q2', { GEZEL_EVAL_LLAMA_SLOTS: '1' }),
+    ).toEqual({
+      config: { providerConcurrency: { 'llama-cpp': 1 } },
+      summary: 'llama-cpp eval override: concurrency=1, tuning=catalog',
+    });
+  });
+
+  it.each(['0', '-1', '1.5', '17', 'bad'])('rejects invalid slot cap %s', (value) => {
+    expect(() =>
+      llamaCppEvalLaunchOverridesForModel('qwen3.8-27b-q2', { GEZEL_EVAL_LLAMA_SLOTS: value }),
+    ).toThrow('GEZEL_EVAL_LLAMA_SLOTS');
+  });
+
   it('does not override ordinary runnable local models', () => {
     expect(llamaCppEvalLaunchOverridesForModel('qwen3.6-35b-a3b-q4')).toBeUndefined();
     expect(llamaCppEvalLaunchOverridesForModel('imaginary-119b-q4')).toBeUndefined();
@@ -2234,6 +2250,36 @@ describe('trialHardProgressTimeoutMs', () => {
         envProgressFloorMs: 45 * MINUTE,
       }),
     ).toBe(45 * MINUTE);
+  });
+});
+
+describe('the STALL path at a slow decode rate', () => {
+  it('stretches its in-flight grace with the throughput scale', () => {
+    // petshop / deepseek-v4.1 at 8.36 tok/s, 2026-10-21: the image generator
+    // had queued 28 minutes for the one engine slot and was 3 minutes into
+    // its turn when an unscaled 15-minute grace ended the trial.
+    const queued = [
+      { sessionId: '908046a9', gezelId: 'niklas', projectId: 'pet-shop', elapsedMs: 31 * 60_000 },
+    ];
+    const tripped = {
+      fastPathTripped: false,
+      longPathTripped: false,
+      stallPathTripped: true,
+      chatterPathTripped: false,
+      inflightTurns: queued,
+    };
+    expect(shouldDeferRetryLoopForInflight(tripped)).toBe(false);
+    expect(
+      shouldDeferRetryLoopForInflight({ ...tripped, throughputScale: throughputScale(8.36) }),
+    ).toBe(true);
+  });
+
+  it('scales from the reference rate, never below 1 and never past the cap', () => {
+    expect(throughputScale(20)).toBe(1);
+    expect(throughputScale(40)).toBe(1);
+    expect(throughputScale(10)).toBe(2);
+    expect(throughputScale(0.5)).toBe(8);
+    expect(throughputScale(undefined)).toBe(1);
   });
 });
 

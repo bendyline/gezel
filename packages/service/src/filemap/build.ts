@@ -19,20 +19,15 @@ import {
   nowIso,
 } from '@bendyline/gezel';
 import { gitIgnoredPaths } from '../git/ignore.js';
-import {
-  GIT_CHURN_WINDOW_DAYS,
-  GIT_META_COMMITS,
-  GIT_META_LAST_COMMIT,
-  gitStatsAvailable,
-} from '../index-store/git-stats.js';
+import { fileEdgesAvailable } from '../index-store/edges/refresh.js';
+import { GIT_CHURN_WINDOW_DAYS } from '../index-store/git-stats.js';
 import type { IndexStore } from '../index-store/index-store.js';
 import { importRoads } from './affinity.js';
-import { computeImportance } from './centrality.js';
 import { composeFileMapScopes } from './compose.js';
-import { computeLevels, landmarkLevels, selectLandmarks } from './elevation.js';
-import { civicThreshold, computeHealth, normalizeSeverity } from './health.js';
+import { computeLevels, landmarkLevels } from './elevation.js';
 import { collectCodeMap } from './providers/code.js';
 import { isExcludedFromCodeMap } from './sections.js';
+import { computeFileSignals } from './signals.js';
 import { computeStreetTraffic } from './traffic.js';
 import { computeUrbanity, settlementFor } from './urbanity.js';
 import type { VillageFileStore } from './village-file.js';
@@ -83,7 +78,12 @@ export interface BuildFileMapOptions {
   /** True when a user asked for this map (the HTTP path). Gates village-file
    *  CREATION — background ticks only update an existing file. */
   userFacing?: boolean;
+  /** The person asked to move the village onto the resolved import graph. */
+  edgePolicy?: 2;
 }
+
+/** A policy-1 village is offered the resolved graph once it adds this share of roads. */
+const EDGE_UPGRADE_GAIN = 1.1;
 
 /** Hydrate engine prior rows from a village-file journal (index-loss recovery). */
 function journalToPrior(
@@ -176,70 +176,36 @@ async function buildFileMapWithIgnores(
 
   // Code and Tests are independently persisted, stable cities.
   const domain = scope === 'core' ? 'code' : `code:${scope}`;
-  const provider = collectCodeMap(index, scope, ignoredPaths);
   const now = nowIso();
   const cutoff = new Date(Date.now() - TOMBSTONE_TTL_MS).toISOString();
 
   const city = options.villageFile ? await options.villageFile.read() : null;
   const dom: VillageDomainState | undefined = city?.domains[domain];
+  const sqliteRows = index.layoutNodes(domain);
+
+  // Which import graph the roads follow. An existing village keeps the one it
+  // was founded on until its person asks for the richer graph; a new one is
+  // founded on the richer graph. Recorded so every machine draws the same town.
+  const policyKey = `map_edge_policy:${domain}`;
+  const storedPolicy = dom ? dom.edgePolicy : positiveInt(index.getMeta(policyKey));
+  const founded = dom !== undefined || sqliteRows.length > 0;
+  const edgePolicy = options.edgePolicy ?? storedPolicy ?? (founded ? 1 : 2);
+  const provider = collectCodeMap(index, scope, ignoredPaths, edgePolicy);
 
   // ── signals (pre-layout: the engine consumes importance + landmark) ───────
-  const findingsByFile = index.securityFindingCountsByFile();
-  const fanIn = new Map<string, number>();
-  const fanOut = new Map<string, number>();
-  for (const e of provider.edges) {
-    fanOut.set(e.src, (fanOut.get(e.src) ?? 0) + 1);
-    fanIn.set(e.dst, (fanIn.get(e.dst) ?? 0) + 1);
-  }
-  const civicFanIn = civicThreshold(provider.files.map((f) => fanIn.get(f.path) ?? 0));
-
-  const hasEdges = provider.edges.length > 0;
-  const importanceByPath = computeImportance(
-    provider.files.map((f) => f.path),
-    provider.edges,
-  );
-  const gitAvailable = gitStatsAvailable(index);
-  const gitMeta = gitAvailable
-    ? index.metadataValuesForKeys([GIT_META_COMMITS, GIT_META_LAST_COMMIT])
-    : new Map<string, Record<string, string>>();
-  const churnOf = (path: string): number => {
-    const raw = gitMeta.get(path)?.[GIT_META_COMMITS];
-    const n = raw === undefined ? Number.NaN : Number(raw);
-    return Number.isFinite(n) ? n : 0;
-  };
-
-  // Health first (zones are pre-layout facts), then landmarks — the
-  // centrality-ranked head of the civic zone.
-  const healthByPath = new Map<string, ReturnType<typeof computeHealth>>();
-  for (const f of provider.files) {
-    const syms = provider.symbolsByFile.get(f.path) ?? [];
-    const findings = findingsByFile.get(f.path);
-    healthByPath.set(
-      f.path,
-      computeHealth(
-        {
-          loc: f.weight,
-          symbolCount: syms.length,
-          findings: findings?.count ?? 0,
-          maxSeverity: normalizeSeverity(findings?.maxSeverity),
-          fanIn: fanIn.get(f.path) ?? 0,
-          fanOut: fanOut.get(f.path) ?? 0,
-          ...(hasEdges ? { importance: importanceByPath.get(f.path) ?? 0 } : {}),
-          ...(gitAvailable ? { churnCommits: churnOf(f.path) } : {}),
-        },
-        civicFanIn,
-      ),
-    );
-  }
-  const landmarks = selectLandmarks(
-    [...healthByPath.entries()].map(([path, h]) => ({
-      path,
-      zone: h.zone,
-      importance: importanceByPath.get(path) ?? 0,
-      churnCommits: churnOf(path),
-    })),
-    provider.files.length,
-  );
+  const signals = computeFileSignals(index, {
+    files: provider.files,
+    edges: provider.edges,
+    symbolCount: (path) => provider.symbolsByFile.get(path)?.length ?? 0,
+  });
+  const {
+    hasEdges,
+    importance: importanceByPath,
+    health: healthByPath,
+    landmarks,
+    gitAvailable,
+    churnOf,
+  } = signals;
 
   const layoutFiles: LayoutFileInput[] = provider.files.map((f) => ({
     ...f,
@@ -252,7 +218,6 @@ async function buildFileMapWithIgnores(
   // by an older engine are discarded so the current packing takes over. After
   // that, the per-domain version matches and builds are incremental/stable.
   const versionKey = `map_layout_version:${domain}`;
-  const sqliteRows = index.layoutNodes(domain);
   const sqliteVersionOk = index.getMeta(versionKey) === String(LAYOUT_VERSION);
   const journalUsable = dom !== undefined && dom.layoutVersion === LAYOUT_VERSION;
 
@@ -385,6 +350,9 @@ async function buildFileMapWithIgnores(
       })),
     );
     if (!sqliteVersionOk) index.setMeta(versionKey, String(LAYOUT_VERSION));
+    if (edgePolicy >= 2 && index.getMeta(policyKey) !== String(edgePolicy)) {
+      index.setMeta(policyKey, String(edgePolicy));
+    }
 
     if (options.villageFile) {
       const journal = persistToJournal(result.persist);
@@ -401,6 +369,8 @@ async function buildFileMapWithIgnores(
             anchors,
             journal,
             downtown: urbanity.downtown,
+            // Absent means 1, so a village that never moved writes nothing new.
+            ...(edgePolicy >= 2 ? { edgePolicy } : {}),
           },
         },
       }));
@@ -433,7 +403,7 @@ async function buildFileMapWithIgnores(
       rawLevels !== undefined && fileUseOf(path, m?.lang) === 'config'
         ? Math.max(3, rawLevels)
         : rawLevels;
-    const lastTouchedAt = gitMeta.get(path)?.[GIT_META_LAST_COMMIT];
+    const lastTouchedAt = signals.lastCommitAt(path);
     const u = urbanity.byPath.get(path);
     blocks.push({
       id: path,
@@ -462,6 +432,14 @@ async function buildFileMapWithIgnores(
   }
 
   const roads = importRoads(provider.edges);
+  // Offer the richer graph only where it would visibly change the roads.
+  let upgrade: { roadsNow: number; roadsAfter: number } | undefined;
+  if (edgePolicy < 2 && fileEdgesAvailable(index)) {
+    const roadsAfter = importRoads(provider.edgesForPolicy(2)).length;
+    if (roadsAfter > roads.length && roadsAfter >= roads.length * EDGE_UPGRADE_GAIN) {
+      upgrade = { roadsNow: roads.length, roadsAfter };
+    }
+  }
   const mapSettlement = settlementFor(urbanity.peak);
   // Traffic is post-roads by necessity: it credits each road's import degree
   // to the parcels' frontage and each cross-folder road to the streets that
@@ -507,7 +485,13 @@ async function buildFileMapWithIgnores(
       fileCount: urbanity.fileCount,
     },
     signals: { gitAvailable, churnWindowDays: GIT_CHURN_WINDOW_DAYS },
+    edgePolicy: { current: edgePolicy, ...(upgrade ? { upgrade } : {}) },
   };
+}
+
+function positiveInt(raw: string | undefined): number | undefined {
+  const n = raw === undefined ? Number.NaN : Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 function computeBounds(

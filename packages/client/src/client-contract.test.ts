@@ -38,6 +38,69 @@ const cases: ContractCase[] = [
     body: {},
     invoke: (c) => c.toolListTables('p/1'),
   },
+  {
+    name: 'project dependency graph',
+    method: 'GET',
+    path: '/api/projects/p1/index/graph?kind=code&max=200&focus=src%2Fa.ts',
+    invoke: (c) => c.getFileGraph('p1', { kind: 'code', max: 200, focus: 'src/a.ts' }),
+  },
+  {
+    name: 'project dependency graph with defaults',
+    method: 'GET',
+    path: '/api/projects/p1/index/graph',
+    invoke: (c) => c.getFileGraph('p1'),
+  },
+  {
+    name: 'one file insight',
+    method: 'GET',
+    path: '/api/projects/p1/index/file-insight?path=src%2Fa%20b.ts',
+    invoke: (c) => c.getFileInsight('p1', 'src/a b.ts'),
+  },
+  {
+    name: 'project reports',
+    method: 'GET',
+    path: '/api/projects/p%2F1/reports',
+    invoke: (c) => c.listProjectReports('p/1'),
+  },
+  {
+    name: 'write a project report now',
+    method: 'POST',
+    path: '/api/projects/p1/reports/generate',
+    body: { kind: 'codebase' },
+    invoke: (c) => c.generateProjectReport('p1', 'codebase'),
+  },
+  {
+    name: 'project gallery',
+    method: 'GET',
+    path: '/api/projects/p1/index/gallery?group=folder&filter=photos&q=beach+day',
+    invoke: (c) => c.getGallery('p1', { group: 'folder', filter: 'photos', q: 'beach day' }),
+  },
+  {
+    name: 'project gallery with defaults',
+    method: 'GET',
+    path: '/api/projects/p1/index/gallery',
+    invoke: (c) => c.getGallery('p1'),
+  },
+  {
+    name: 'one gallery shelf page',
+    method: 'GET',
+    path: '/api/projects/p1/index/gallery/shelf?group=type&shelf=type%3Aphoto&offset=24&limit=24',
+    invoke: (c) =>
+      c.getGalleryShelf('p1', { group: 'type', shelf: 'type:photo', offset: 24, limit: 24 }),
+  },
+  {
+    name: 'project timeline',
+    method: 'GET',
+    path: '/api/projects/p1/index/timeline?bucket=week',
+    invoke: (c) => c.getTimeline('p1', { bucket: 'week' }),
+  },
+  {
+    name: 'one stretch of the timeline',
+    method: 'GET',
+    path: '/api/projects/p1/index/timeline/bucket?start=2026-10-12&end=2026-10-19&source=git',
+    invoke: (c) =>
+      c.getTimelineBucket('p1', { start: '2026-10-12', end: '2026-10-19', source: 'git' }),
+  },
   { name: 'health', method: 'GET', path: '/api/health', invoke: (c) => c.health() },
   {
     name: 'system diagnostics',

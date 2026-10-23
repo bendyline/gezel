@@ -18,6 +18,7 @@ const OVERRIDES = {
   '@bendyline/squisq-editor-react': 'link:../squisq/packages/editor-react',
   '@bendyline/squisq-react': 'link:../squisq/packages/react',
   '@bendyline/squisq-formats': 'link:../squisq/packages/formats',
+  '@bendyline/squisq-graph': 'link:../squisq/packages/graph',
 };
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
@@ -44,7 +45,13 @@ if (mode === 'link') {
   // against a missing or half-written dist tree. This is especially important
   // for tsup's multi-entry output: an entry can briefly reference a chunk that
   // has not been emitted yet while a clean build is in progress.
-  const buildScripts = ['build:core', 'build:formats', 'build:react', 'build:editor'];
+  const buildScripts = [
+    'build:graph',
+    'build:core',
+    'build:formats',
+    'build:react',
+    'build:editor',
+  ];
   console.log('[squisq] building linked packages before activating local resolution');
   for (const script of buildScripts) {
     const build = spawnSync('npm', ['run', script], {

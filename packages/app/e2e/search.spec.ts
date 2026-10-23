@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
@@ -30,8 +31,7 @@ test('titlebar search: shortcut focuses the box and typing opens the palette', a
   try {
     const page = await app.firstWindow();
     await page.waitForLoadState('domcontentloaded');
-    // The first document is the splash; cold embedded-service startup can take longer.
-    await expect(page.locator('[data-testid="app-sidebar"]')).toBeVisible({ timeout: 60_000 });
+    await waitForAppReady(page);
 
     const input = page.locator('[data-testid="titlebar-search-input"]');
     await expect(input).toBeVisible();

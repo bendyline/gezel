@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import * as Tabs from '../primitives/Tabs.js';
-import { FittedTabsList } from './FittedTabsList.js';
+import { type FittedTabMenu, FittedTabsList } from './FittedTabsList.js';
 import type { SectionIconName } from './SectionIcon.js';
 import '../styles/project-section-tabs.css';
 
@@ -9,6 +9,8 @@ export interface ProjectSectionTab {
   label: string;
   icon: SectionIconName;
   disabled?: boolean;
+  /** A tab holding several choices of its own (the Views tab). */
+  menu?: FittedTabMenu;
 }
 
 /** The same section names and navigation on desktop and narrow project surfaces. */

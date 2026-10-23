@@ -57,6 +57,22 @@ describe('OpenAIImageProvider.generate', () => {
     }
   });
 
+  it('maps an asked ratio to the nearest supported size and quality to its tier', async () => {
+    const { client, generate } = fakeClient();
+    const provider = new OpenAIImageProvider({
+      apiKey: 'sk-test',
+      clientFactory: async () => client,
+    });
+    await provider.generate({ prompt: 'p', aspectRatio: '9:16', quality: 'draft' });
+    expect(generate).toHaveBeenCalledWith(
+      expect.objectContaining({ size: '1024x1536', quality: 'low' }),
+    );
+    await provider.generate({ prompt: 'p', aspectRatio: '16:9', quality: 'high' });
+    expect(generate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ size: '1536x1024', quality: 'high' }),
+    );
+  });
+
   it('omits `size` when no width/height provided (lets OpenAI auto-pick)', async () => {
     const { client, generate } = fakeClient();
     const provider = new OpenAIImageProvider({

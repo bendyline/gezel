@@ -94,6 +94,8 @@ export const WorkGuidanceSchema = z.discriminatedUnion('kind', [
     kind: z.literal('specialist'),
     role: z.string().min(1),
     tool: z.string().min(1),
+    /** Asked from Default about code in another project: the hand-off names that project. */
+    otherProject: z.boolean().optional(),
   }),
   z.object({
     kind: z.literal('author'),

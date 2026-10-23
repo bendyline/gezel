@@ -181,7 +181,21 @@ already advanced past it — so a gezel write here would be silent permanent los
 residual gap: script-dispatch artifact mutations bypass the model-facing artifact write
 route; closing that fully is a sandbox/fs-policy conversation, not a connector one. A gezel
 can also technically write into `_sent/` (receipt spoofing) — receipts are informational;
-the commit itself is server-side.
+the commit itself is server-side. Binary writes and deletes from a gezel follow the same
+rule (a camera's keyframes are a corpus too).
+
+### 1.8 Device connectors keep raw samples out of the corpus
+
+A `device` connector ([device-connectors.md](./device-connectors.md)) produces samples far
+faster than one record per sample can carry: a camera at one frame a second would overrun
+the 3-digit ordinal, rewrite `_flags.json` on every frame, and swamp the artifacts index.
+So raw samples (saved camera frames) go to the project's private sidecar
+(`projectCapturesDir`), never under `artifacts/`, and only what *happened* becomes a record:
+one document per episode under `<corpus>/events/YYYY-MM-DD/HH/`, through the ordinary
+writer, with a handful of attachments. Hourly folders keep ordinals small; a per-hour cap
+and a retention sweep keep the index walk bounded. A camera's pictures stay on the
+computer: sessions on a cloud model receive a local description of a keyframe, not its
+pixels, unless the person allowed cloud AI for that camera.
 
 ## 2. The adapter contract
 
@@ -270,6 +284,7 @@ set `rateLimited` — documented limitation.
 | `script` | No server, but a REST API or CLI you can drive from a sandboxed SDK script. | You write and maintain the fetch loop and its pagination. |
 | `spectral` | No server, and a Prismatic component covers the source. | A pinned third-party SDK in the sync host. |
 | `native` | A cornerstone corpus the user lives in, whose fidelity resists declarative expression. | Bespoke service code, forever. |
+| `device` | Local hardware (a webcam) that must run continuously rather than sync. | A live adapter under the device host; never enters the sync loop. See [device-connectors.md](./device-connectors.md). |
 
 The decision rule from [connectors.md](./connectors.md) stands: **own the sources users live
 in, rent the long tail.** Reach for `native` when a source needs real parsing (MIME,
@@ -359,6 +374,15 @@ Two gates, both load-bearing against a prompt-injected turn:
 - **Night-shift deferral.** A commit during night shift stages to `_outbox/` instead of
   transmitting, for daytime approval. This is the morning-briefing model.
 
+**Mailbox drafts are the low-risk write.** Mail types also declare `save-draft`, scoped
+`mailbox-draft`: the message is saved into the account's own Drafts folder (Gmail drafts,
+Graph `POST /me/messages`, IMAP `APPEND` to `\Drafts`) and nothing is sent. The person is
+the approval step — they review and press Send in their mail app — so the `save_email_draft`
+tool drafts and commits in one call, and `mailbox-draft` is exempt from night-shift deferral
+(`NON_TRANSMITTING_SCOPES` in [actions.ts](../packages/service/src/connectors/actions.ts)):
+an overnight "draft my replies" run should leave the Drafts folder full by morning. Prefer
+this shape for any future write whose effect stays inside the person's own account.
+
 Draft/queue/commit and discard are serialized per project through the same
 `ProjectLocks` instance the sync engine uses, so a commit can't race a sync or a concurrent
 discard.
@@ -399,20 +423,91 @@ Never traded away, for any driver:
    `gezel.http.authed` by *name*), not into the model's context.
 5. **Ingest-bound MCP servers stay off the model's tool surface.**
 6. **Autonomous sync rides `allowExternalServices`.** Lockdown stops the loop. A
-   user-initiated sync is a separate route with its own gate.
+   user-initiated sync is a separate route with its own gate. Device connectors are not
+   synced: a local device runs at any security level, a network device needs
+   `allowConnectorData`, and only the person binds, pauses, or edits one.
 
 ## 8. Testing a connector
 
-- **Adapter unit tests** drive the adapter against a faked transport, asserting the
-  scope/cursor/record shape — [github-wiki.test.ts](../packages/service/src/connectors/natives/github-wiki.test.ts)
-  is the model.
-- **Golden normalize tests** pin a real raw payload to its `NormalizedRecord` —
-  `normalize-github.golden.test.ts`, `normalize-airtable.golden.test.ts`. Every `mapping`
-  type should have one; a source that changes a field name under you is otherwise invisible.
-- **Engine tests** use the injectable `write` seam on `syncWithAdapter` — no disk, no source.
-- **Cursor resumption** deserves an explicit test per adapter: sync, advance, sync again,
-  assert the second pass fetched only what was new. For multi-scope adapters, assert scope
-  isolation.
+Connector testing has four tiers. The first three run in CI with no network and no
+accounts; the fourth is the last-mile check against real services.
+
+1. **Provider fakes + the conformance suite** (every adapter). The kit lives in
+   [connectors/testing/](../packages/service/src/connectors/testing/):
+   - `FakeHttp` ([fake-http.ts](../packages/service/src/connectors/testing/fake-http.ts)) is
+     a route-table `fetch`. Every native adapter takes its transport from
+     `AdapterDeps.fetch` (the REST adapters through `transport(deps)` in
+     [oauth-session.ts](../packages/service/src/connectors/natives/oauth-session.ts)), so a
+     test hands it a stateful fake of the provider: a mailbox that gains messages, a delta
+     token that expires, a token endpoint that rotates or revokes refresh tokens
+     (`FakeTokenEndpoint`). Unrouted requests throw, so an adapter calling an endpoint its
+     fake does not model fails the test instead of syncing nothing. `failNext` queues
+     429/503/401/410 faults.
+   - `describeConnectorConformance`
+     ([conformance.ts](../packages/service/src/connectors/testing/conformance.ts)) runs the
+     contract against any adapter + fake through real `syncWithAdapter` passes and the real
+     writer: first pass writes every seeded record inside the corpus with trust
+     frontmatter; an unchanged source makes a quiet second pass; a new record is the only
+     write; an edit refreshes in place; a deletion leaves the corpus; a move leaves no stale
+     copy; an expired cursor recovers; a throttle reports `rateLimited` and keeps the
+     cursor; a revoked grant fails with an actionable message; hostile names stay inside the
+     corpus and an injection body is quarantined. A source supplies only the hooks it can
+     model; the rest skip visibly.
+   - `assertCorpusInvariants` ([harness.ts](../packages/service/src/connectors/testing/harness.ts))
+     checks the §1/§7 rules on any written corpus, and `createConnectorTestEnv` gives a temp
+     artifacts tree, an in-memory SecretStore, and a fake Store.
+   - `buildMime` ([mime.ts](../packages/service/src/connectors/testing/mime.ts)) builds real
+     RFC 822 so mail fakes exercise the production MIME parser.
+
+   A fake must model the real API's shapes faithfully (field names, paging tokens, where
+   the sync token appears, error bodies). That is the whole bet: an adapter that passes
+   against the fake behaves the same against the service. Tier 4 is how the bet is checked.
+2. **Golden normalize tests** pin a realistic raw payload to its `NormalizedRecord` —
+   `normalize-github.golden.test.ts`, `normalize-airtable.golden.test.ts`, and the social
+   and calendar goldens. Every `mapping` type and every native normalizer should have one;
+   a source that changes a field name under you is otherwise invisible.
+3. **Engine, route, and catalog tests.** `syncWithAdapter` has injectable `write`, `prune`,
+   and `sweep` seams ([manager.test.ts](../packages/service/src/connectors/manager.test.ts),
+   [kit.test.ts](../packages/service/src/connectors/testing/kit.test.ts)).
+   [routes/connectors.test.ts](../packages/service/src/http/routes/connectors.test.ts)
+   drives the HTTP surface on a real daemon (bind validation, credential custody, sync,
+   partial-failure surfacing, draft → queue → commit through consent, unbind, the OAuth
+   source-trust refusal). [catalog-agreement.test.ts](../packages/service/src/connectors/catalog-agreement.test.ts)
+   fails CI when the pinned gilde catalog names a native adapter this build does not
+   register, or ships an OAuth type a person could not link.
+   The **simulated world** ([world.ts](../packages/service/src/connectors/testing/world.ts))
+   puts every provider fake behind one `fetch`, with shared Google and Microsoft token
+   endpoints and a seeded week of mail, calendars, files, a blog feed, and a channel.
+   [simulated-world.test.ts](../packages/service/src/connectors/simulated-world.test.ts)
+   drives the real `ConnectorManager` and `ConnectorActionManager` through it: OAuth link
+   (PKCE, code exchange, credential custody), sync, consent-gated write-back including
+   night shift, token refresh and Microsoft refresh-token rotation, and a check that Google
+   and Microsoft calendars produce the same frontmatter. A daemon started with
+   `GEZEL_CONNECTOR_SIMULATOR=1` routes all native connector traffic to the same world
+   (the connector counterpart of `GEZEL_MOCK_PROVIDER`): bind any type with a placeholder
+   credential and it syncs simulated data, which is what E2E and eval runs should use —
+   [routes/connectors-simulator.test.ts](../packages/service/src/http/routes/connectors-simulator.test.ts)
+   covers it. The binding configs that reach the seeded data are listed at the top of
+   world.ts.
+4. **Live acceptance** ([live-acceptance.test.ts](../packages/service/src/connectors/testing/live-acceptance.test.ts),
+   skipped unless `GEZEL_CONNECTOR_LIVE=1`). Link real test accounts in a running app's
+   Connections tab, then point the check at that daemon and project: every binding syncs,
+   its corpus passes `assertCorpusInvariants`, `_meta.json` is right, the type's expected
+   frontmatter is present, and a second sync is quiet. The file header has the commands;
+   [connector-live-testing.md](./connector-live-testing.md) lists the test accounts and
+   apps to set up, what to seed, and the API assumptions only a live run can confirm.
+
+The engine guarantees an adapter can lean on, each covered by kit.test.ts:
+`ChangeBatch.removed` tombstones are swept from the scope; an adapter that sets
+`recordsMayMove` gets the stale copy of a moved record removed; `RecordGoneError` from
+`fetchRecord` (deleted between list and fetch) counts as skipped rather than holding the
+cursor; a scope whose listing throws fails alone — the other scopes sync and the binding's
+`lastError` names the one that failed (a throttle anywhere in the pass is still
+backpressure); a scope longer than 48 slug characters gets a hashed directory name so
+similar long scopes never share a folder; and a record that fails in
+`POISON_RECORD_PASSES` separate passes while the rest of its batch lands is given up on, so one unparseable message cannot freeze a scope's cursor
+forever. Given-up records are listed in `_meta.json` as `skippedRecords`, and a pass that
+lands most of its records but not all writes a `lastError` naming how many failed.
 
 ## Conformance: current state
 
@@ -426,7 +521,7 @@ Never traded away, for any driver:
 | 6 | Corpus read-only to gezels | Met at the artifact write boundary; script-dispatch artifact mutations remain a documented gap | fs/project-artifacts-store.ts, mcp/server.ts |
 | 7 | `_`-prefix marks the mutable surface | Met — stated here, enforced by the artifact corpus gate | fs/project-artifacts-store.ts |
 | 8 | `_meta.json` provenance | Met — written after every sync pass | manager.ts |
-| 9 | Cursor advances only on a clean batch | Met | manager.ts |
+| 9 | Cursor advances only on a clean batch | Met — "clean" excludes records gone upstream (`RecordGoneError`) and records given up after `POISON_RECORD_PASSES` (§8) | manager.ts |
 | 10 | Bounded pass without silent loss | Met — `limit` + `partial` paging; over-return windowing counted and logged; `ordinalKey` from timestamps in generic drivers | manager.ts, drivers/ |
 | 11 | Backpressure on `rateLimited` | Met for native HTTP adapters — pass stops, binding backs off (jittered ladder), status shows `backoffUntil`; mcp/script/spectral have no throttle signal | manager.ts, mail/adapter.ts |
 | 12 | `completeness` surfaced per binding | Met — status + `_meta.json` | manager.ts |
@@ -436,6 +531,9 @@ Never traded away, for any driver:
 | 16 | Credentials never leave the daemon | Met | registry.ts, drivers/ |
 | 17 | Autonomous sync posture-gated | Met | sync-manager.ts |
 | 18 | Corpora named in the system prompt | Met — "Connected data" block, absent when no bindings (cache-stable) | chat/instructions.ts |
+| 19 | Source deletions and moves reach the corpus | Met — `ChangeBatch.removed` tombstones swept per scope; the stale copy of a moved record is removed for adapters that set `recordsMayMove` | manager.ts, writer.ts |
+| 20 | One bad record cannot freeze a scope | Met — `RecordGoneError` skips; poison records given up after 3 passes and listed in `_meta.json` `skippedRecords`; partial passes surface in `lastError` | manager.ts |
+| 21 | The catalog and the adapter registry agree | Met — CI fails when a pinned native manifest names an unregistered adapter or an OAuth type lacks a usable `clientSetup` | catalog-agreement.test.ts |
 
 **Mail now runs on one stack.** `project.mail` is gone: a mailbox is an ordinary
 `mail-*` connector binding (identity in the binding config, credential in the SecretStore,

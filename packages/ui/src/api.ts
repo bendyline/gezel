@@ -77,6 +77,7 @@ export type ModelBundleImportProgress = {
 declare global {
   interface Window {
     __GEZEL__?: {
+      startupHome?: import('./startup/types.js').StartupHomeBridge;
       token: string;
       /** Runtime operations, not viewport-dependent product variants. */
       capabilities?: Readonly<RuntimeCapabilities>;
@@ -157,7 +158,7 @@ declare global {
         uninstall(): Promise<{ ok: true } | { ok: false; error: string }>;
       };
       /**
-       * Word / Excel / PowerPoint add-ins (Settings -> Connected Apps).
+       * Word / Excel / PowerPoint add-ins (Settings -> Integrations).
        * Absent outside Electron: the web UI shows status only. Each action
        * performs the per-user OS steps and returns the daemon's status.
        */

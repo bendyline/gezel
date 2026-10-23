@@ -344,17 +344,19 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     defaultBooks: ['hero-image', 'landing-page', 'moodboard', 'svg-animation', 'logo-set'],
     capabilityFloor: 'small',
   },
-  // Image generation specialists — built around `generate_image`. No
-  // `workspace-fs-write`: the image route already drops a workspace copy
-  // at assets/generated/, so a generator has no business calling write_file
-  // (the petshop "wrote prose into logo.png" fabrication).
+  // Image generation specialists — built around `generate_image`. They keep
+  // `workspace-fs-write` because the image books ask for SVG marks and icons
+  // and for JSON manifests of seeds and prompts. The petshop fabrication this
+  // role once lost file writes over (prose written into logo.png) is refused
+  // at the tool: `write_file` will not write a raster image path.
   'image-generator': {
     id: 'image-generator',
     label: 'Image Generator',
-    summary: 'Produces images via generate_image; no direct file writes.',
+    summary: 'Produces images via generate_image, and SVG or manifest files beside them.',
     toolsetGroups: [
       'images',
       'image-intel',
+      'workspace-fs-write',
       'tasks',
       'artifacts',
       'documents',
@@ -366,10 +368,9 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     defaultBooks: ['logo-set', 'icon-pack', 'hero-image', 'thumbnail-generator'],
     capabilityFloor: 'tiny',
   },
-  // Video generation specialists — built around `generate_video`. Same
-  // no-`workspace-fs-write` rationale as image-generator: the video route
-  // already drops a workspace copy at assets/generated/, so a generator
-  // has no business calling write_file.
+  // Video generation specialists — built around `generate_video`. No
+  // `workspace-fs-write`: the video route already drops a workspace copy
+  // at assets/generated/, so a generator has no business calling write_file.
   'video-generator': {
     id: 'video-generator',
     label: 'Video Generator',
@@ -622,6 +623,7 @@ export const ROLE_ALIASES: ReadonlyArray<{ contains: string; canonical: RoleId }
   { contains: 'image-generator', canonical: 'image-generator' },
   { contains: 'image generation', canonical: 'image-generator' },
   { contains: 'image-generation', canonical: 'image-generator' },
+  { contains: 'illustrator', canonical: 'image-generator' },
   { contains: 'video generator', canonical: 'video-generator' },
   { contains: 'video-generator', canonical: 'video-generator' },
   { contains: 'video generation', canonical: 'video-generator' },

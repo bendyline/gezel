@@ -129,6 +129,7 @@ import {
   ProviderNameSchema,
 } from './gezel.js';
 import { GezelGrowthStateSchema } from './growth.js';
+import { HarnessToolsConfigSchema } from './harness-tools.js';
 import { ProjectKnowledgeCatalogsSchema } from './knowledge.js';
 import { LlamaCppV4ConfigResetSchema, LlamaCppV4ConfigSchema } from './llama-cpp-config.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
@@ -141,6 +142,7 @@ import {
 } from './npm-package.js';
 import {
   HttpsOriginSchema,
+  PROJECT_VIEW_ID_PATTERN,
   ProjectDetailSchema,
   ProjectGitHubSchema,
   ProjectManagedWorkspaceWritePolicySchema,
@@ -165,7 +167,9 @@ import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 export * from './api/code-intel.js';
 export * from './api/completions.js';
 export * from './api/file-map.js';
+export * from './api/project-views.js';
 export * from './api/git.js';
+export * from './api/issue-triage.js';
 export * from './api/security-intel.js';
 
 /**
@@ -1037,6 +1041,12 @@ export const GezelConfigSchema = z.object({
    */
   notifications: NotificationsConfigSchema.optional(),
   /**
+   * Lookouts ("keep a lookout for X, then do Y"). `paused` holds every
+   * lookout's actions on the install without changing any of them; cameras
+   * keep watching and recording. See docs/lookouts.md.
+   */
+  lookouts: z.object({ paused: z.boolean().optional() }).optional(),
+  /**
    * When true, the chat UI calls `/api/audio/synthesize` for each
    * completed assistant message and plays the resulting WAV using the
    * speaking gezel's per-character voice (see `GezelFrontmatter.voice`).
@@ -1407,10 +1417,18 @@ export const GezelConfigSchema = z.object({
    */
   keurmeesterGezelId: z.string().optional(),
   /**
+   * Gezel's tools in other AI apps (Settings → Integrations): whether
+   * outside harnesses may trade the owner credential for a project-bound
+   * `harness` token, what they may do with memory and images, whether a
+   * folder Gezel does not know yet becomes a project, and the harness and
+   * project pairs the person stopped. Read through `resolveHarnessToolsConfig`.
+   */
+  harnessTools: HarnessToolsConfigSchema.optional().catch(undefined),
+  /**
    * The public OpenAI-compatible facade (`/v1/responses`, `/v1/chat/*`,
    * the rest of `/v1/*`, and `/ollama/v1/*`) that third-party apps
    * (Codex, VS Code, browser tools) call. Managed from
-   * Settings → Connected Apps.
+   * Settings → Integrations.
    *
    *   - `enabled` — master switch. `false` gates the inference routes
    *     AND new app registrations with `403 openai_endpoints_disabled`;
@@ -1433,7 +1451,7 @@ export const GezelConfigSchema = z.object({
    *     Ollama find gezel. Default OFF and deliberately opt-in: the
    *     Ollama ecosystem's contract is no-auth plain HTTP, so any
    *     local process can run inference through it without the
-   *     Connected Apps consent flow. The daemon refuses to bind when
+   *     app consent flow. The daemon refuses to bind when
    *     something (usually real Ollama) already owns the port.
    */
   openaiEndpoints: z
@@ -4368,6 +4386,11 @@ export const UpdateProjectRequestSchema = z.object({
    */
   outputPaneVisible: z.boolean().nullable().optional(),
   /**
+   * The view the Views tab shows for this project. `null` clears the choice
+   * and returns the tab to the project's default view.
+   */
+  selectedView: z.string().regex(PROJECT_VIEW_ID_PATTERN).nullable().optional(),
+  /**
    * Enable or disable structural and content indexing for this workspace.
    * Chat history, memories, and shared-document indexing are unaffected.
    */
@@ -4554,6 +4577,7 @@ export const CreateTypedProjectRequestSchema = CreateProjectRequestSchema.pick({
   description: true,
   mode: true,
   icon: true,
+  workingDir: true,
 }).extend({
   projectType: ApplyProjectTypeRequestSchema,
 });
@@ -6218,6 +6242,8 @@ export const NightShiftTaskBriefSchema = z.object({
   stepName: z.string().optional(),
   /** True when this task's next handoff is held by the cloud quota reserve. */
   quotaHeld: z.boolean().optional(),
+  /** Latest existing report belonging to this task, including an archived nightly review. */
+  latestReport: z.object({ projectId: z.string(), path: z.string() }).optional(),
 });
 export type NightShiftTaskBrief = z.infer<typeof NightShiftTaskBriefSchema>;
 

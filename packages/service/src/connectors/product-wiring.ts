@@ -8,18 +8,24 @@ import type { ConnectorManager } from './manager.js';
 import { registerAzureMonitorLogsAdapters } from './natives/azure-monitor-logs.js';
 import { registerBlueskyAdapters } from './natives/bluesky-posts.js';
 import { registerCalendarAdapters } from './natives/calendar-google.js';
+import { registerFilesAdapters } from './natives/files-shared.js';
 import { registerGitHubPullsAdapters } from './natives/github-pulls.js';
 import { registerGitHubReleasesAdapters } from './natives/github-releases.js';
 import { registerGitHubWikiAdapters } from './natives/github-wiki.js';
 import { registerInstagramAdapters } from './natives/instagram-media.js';
 import { registerLinkedInAdapters } from './natives/linkedin-posts.js';
+import { registerRssFeedAdapters } from './natives/rss-feed.js';
 import { registerXAdapters } from './natives/x-posts.js';
+import { registerYouTubeAdapters } from './natives/youtube-videos.js';
 import { runConnectorTaskPrep } from './task-prep.js';
 
 /** Register the native connector catalog before the connector managers start. */
 export function registerProductConnectorAdapters(): void {
   registerMailAdapters();
   registerCalendarAdapters();
+  registerFilesAdapters();
+  registerRssFeedAdapters();
+  registerYouTubeAdapters();
   registerBlueskyAdapters();
   registerXAdapters();
   registerInstagramAdapters();

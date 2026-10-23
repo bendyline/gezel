@@ -602,4 +602,32 @@ describe('tankCombatContentSniff', () => {
     expect(result.signals).not.toContain('tank-vocab');
     expect(result.ok).toBe(false);
   });
+
+  it('says in words that the subject is missing once the code itself is sound', () => {
+    const html = `
+      <html><body><canvas id="g"></canvas><script>
+        document.addEventListener('keydown', () => {});
+        function tick() { requestAnimationFrame(tick); } tick();
+        const bullets = []; let score = 0;
+        ${'// gameplay code\n'.repeat(160)}
+      </script></body></html>${' '.repeat(4200)}
+    `;
+    const result = tankCombatContentSniff(html);
+    expect(result.signals).toEqual(expect.arrayContaining(['js-parses', 'js-size-ok']));
+    expect(result.failReason).toMatch(/the word "tank" appears nowhere/);
+  });
+
+  // tankcombat on GLM 5.3, 2026-10-20: a canvas tank game whose only mention
+  // of tanks was its camelCase drawing code, refused through four repairs.
+  it('reads camelCase identifiers as words for the subject', () => {
+    const html = `
+      <html><body><canvas id="g"></canvas><script>
+        document.addEventListener('keydown', () => {});
+        function drawTankBody(x, y) {}
+        function tick() { drawTankBody(0, 0); requestAnimationFrame(tick); } tick();
+        const bullets = []; let score = 0;
+      </script></body></html>
+    `;
+    expect(tankCombatContentSniff(html).signals).toContain('tank-vocab');
+  });
 });

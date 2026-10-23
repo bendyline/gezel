@@ -1,6 +1,7 @@
 import {
   FOLDER_KIND_PROPERTY,
   type ProjectFileEntry,
+  summaryLead as coreSummaryLead,
   createLogger,
   isSharedLibraryProject,
 } from '@bendyline/gezel';
@@ -49,6 +50,8 @@ export async function writeNightlyDocumentsReport(
   now: Date,
   /** The night's day key, so one night files one report whichever side of midnight it lands. */
   day = localDay(now),
+  /** Replace the day's report instead of keeping it: a person asked for one now. */
+  opts: { force?: boolean } = {},
 ): Promise<string | null> {
   const project = await deps.store.getProject(projectId).catch(() => null);
   const kind = project?.properties?.[FOLDER_KIND_PROPERTY];
@@ -56,10 +59,14 @@ export async function writeNightlyDocumentsReport(
   if (isSharedLibraryProject(project)) return null;
 
   const path = `reports/documents-${day}.md`;
-  if ((await deps.store.readProjectArtifact(projectId, path).catch(() => null)) !== null) {
+  if (
+    !opts.force &&
+    (await deps.store.readProjectArtifact(projectId, path).catch(() => null)) !== null
+  ) {
     return null;
   }
-  const since = await lookbackStart(deps, projectId, now);
+  // A rewrite reaches back as far as the report it replaces did.
+  const since = await lookbackStart(deps, projectId, now, opts.force ? day : undefined);
   const recent = await deps.contentIndex.recentDocuments(projectId, since);
   if (!recent || recent.length === 0) return null;
 
@@ -87,11 +94,12 @@ async function lookbackStart(
   deps: DocumentsReportDeps,
   projectId: string,
   now: Date,
+  skipDay?: string,
 ): Promise<number> {
   const entries = await deps.store.listProjectArtifacts(projectId, 'reports').catch(() => []);
   const days = entries
     .map((e) => REPORT_NAME.exec(e.name)?.[1])
-    .filter((d): d is string => Boolean(d))
+    .filter((d): d is string => Boolean(d) && d !== skipDay)
     .sort();
   const last = days[days.length - 1];
   const floor = now.getTime() - MAX_LOOKBACK_MS;
@@ -101,15 +109,9 @@ async function lookbackStart(
 }
 
 /** The first prose paragraph of a summary, as one short plain line. */
+/** A report line's worth of a document's summary. */
 export function summaryLead(summary: string): string {
-  const paragraphs = summary
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-  const first =
-    paragraphs.find((p) => !/^#+\s/.test(p)) ?? paragraphs[0]?.replace(/^#+\s+/, '') ?? '';
-  const plain = first.replace(/[*_`]/g, '').replace(/\s+/g, ' ');
-  return plain.length > 200 ? `${plain.slice(0, 197).trimEnd()}…` : plain;
+  return coreSummaryLead(summary, 200);
 }
 
 function localDay(d: Date): string {

@@ -122,3 +122,52 @@ describe('EarnedNotifier', () => {
     notifier.dispose();
   });
 });
+
+describe('EarnedNotifier lookout alerts', () => {
+  function fired(firingId: string, alert = true): ChatEventEnvelope {
+    return {
+      sessionId: '',
+      gezelId: '',
+      projectId: 'home',
+      event: {
+        type: 'lookout_fired',
+        projectId: 'home',
+        lookoutId: 'lk1',
+        firingId,
+        name: 'Cat in the mud room',
+        at: NOW.toISOString(),
+        ...(alert ? { alert: { title: 'Cat in the mud room', body: 'Mud room, 6:00 AM' } } : {}),
+      },
+    } as ChatEventEnvelope;
+  }
+
+  it('says a lookout alert at once, ungrouped, and past the daily cap', async () => {
+    vi.useFakeTimers();
+    const { notifier, delivered } = fixture({ config: { notifications: { dailyCap: 0 } } });
+    await notifier.handle(fired('f1'));
+    await notifier.handle(fired('f2'));
+    expect(delivered).toEqual([
+      {
+        title: 'Cat in the mud room',
+        body: 'Mud room, 6:00 AM',
+        view: 'projects',
+        kinds: ['lookout'],
+      },
+      {
+        title: 'Cat in the mud room',
+        body: 'Mud room, 6:00 AM',
+        view: 'projects',
+        kinds: ['lookout'],
+      },
+    ]);
+  });
+
+  it('says each firing once, and nothing for a lookout without a notify action', async () => {
+    vi.useFakeTimers();
+    const { notifier, delivered } = fixture();
+    await notifier.handle(fired('f1'));
+    await notifier.handle(fired('f1'));
+    await notifier.handle(fired('f3', false));
+    expect(delivered).toHaveLength(1);
+  });
+});

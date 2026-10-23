@@ -6,6 +6,7 @@ import {
   estimateWindowedKvLinearization,
   planDenseFfnOffload,
   planMoeOffload,
+  shedSlotsForGpuResidency,
 } from '@bendyline/gezel-inference/internal/providers/llama-cpp/offload-planner';
 import { describe, expect, it } from 'vitest';
 
@@ -276,6 +277,51 @@ describe('degradeDenseFfnOffloadDecision — the OOM ladder', () => {
     expect(engineFit).toMatchObject({ nCpuFfn: 32 });
     expect(engineFit?.nGpuLayers).toBeUndefined();
     expect(degradeDenseFfnOffloadDecision(engineFit ?? undefined, 32)).toBeNull();
+  });
+});
+
+describe('shedSlotsForGpuResidency — fewer slots before system RAM', () => {
+  // 20 GiB of weights, 2 GiB of KV per slot, 1 GiB margin + 0.5 GiB compute:
+  // two slots need 25.5 GiB of the card, one slot 23.5 GiB.
+  const plan = (slots: number, vramBytes: number) =>
+    planDenseFfnOffload({
+      isMoE: false,
+      vramBytes,
+      split: { nonFfnBytes: 4 * GiB, ffnBytesByLayer: Array.from({ length: 32 }, () => 0.5 * GiB) },
+      blockCount: 32,
+      kvReserveBytes: 2 * GiB * slots,
+      marginBytes: 1 * GiB,
+      ramBudgetBytes: 20 * GiB,
+      freeSystemRamBytes: 20 * GiB,
+    });
+
+  it('keeps both slots when they leave room to spare', () => {
+    const placed = shedSlotsForGpuResidency({ slots: 2, vramBytes: 28 * GiB, plan });
+    expect(placed).toMatchObject({ slots: 2, shed: false });
+    expect(placed.decision.fullGpuResidency).toBe(true);
+  });
+
+  it('drops to one slot when two would only just fit', () => {
+    const placed = shedSlotsForGpuResidency({ slots: 2, vramBytes: 26.5 * GiB, plan });
+    expect(placed).toMatchObject({ slots: 1, shed: true });
+    expect(placed.decision.fullGpuResidency).toBe(true);
+  });
+
+  it('drops to one slot rather than move weights to system RAM', () => {
+    const placed = shedSlotsForGpuResidency({ slots: 2, vramBytes: 24 * GiB, plan });
+    expect(placed).toMatchObject({ slots: 1, shed: true });
+    expect(placed.decision.nCpuFfn).toBeUndefined();
+  });
+
+  it('keeps the slots and the split when one slot needs system RAM too', () => {
+    const placed = shedSlotsForGpuResidency({ slots: 2, vramBytes: 22 * GiB, plan });
+    expect(placed).toMatchObject({ slots: 2, shed: false });
+    expect(placed.decision.nCpuFfn).toBeGreaterThan(0);
+  });
+
+  it('has nothing to shed at one slot or without a GPU', () => {
+    expect(shedSlotsForGpuResidency({ slots: 1, vramBytes: 22 * GiB, plan }).shed).toBe(false);
+    expect(shedSlotsForGpuResidency({ slots: 2, vramBytes: 0, plan }).shed).toBe(false);
   });
 });
 

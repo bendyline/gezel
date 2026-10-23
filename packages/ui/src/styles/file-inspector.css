@@ -1,0 +1,187 @@
+/* The shared file inspector and the layout that hangs it beside a project
+   view (docs/ux.md "Every view shares one inspector"). The inspector reuses
+   the Village pane's section recipes (`filemap-fileview-*`, `filemap-findings`,
+   `filemap-review`); only its frame and the sections it added live here. */
+
+.inspector-layout {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inspector-layout-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.inspector-layout-side {
+  flex: 0 0 var(--inspector-fraction, 46%);
+  min-width: 320px;
+  max-width: 72%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  background: var(--panel);
+}
+
+/* The Village pane's own sizing assumed it sat inside the map's body row. */
+.inspector-layout-side > .file-inspector {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: none;
+  min-width: 0;
+  min-height: 0;
+}
+
+.inspector-layout.is-compact {
+  position: relative;
+}
+
+.inspector-layout.is-compact .inspector-layout-side {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  min-width: 0;
+  max-width: none;
+  border-left: none;
+}
+
+.inspector-layout.is-compact.has-inspector .inspector-layout-main {
+  visibility: hidden;
+}
+
+.inspector-layout-back {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0 14px;
+  border: none;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+
+.file-inspector {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  font-size: 13px;
+}
+
+.file-inspector-summary {
+  flex: 0 0 auto;
+  max-height: min(24vh, 200px);
+  overflow: auto;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.file-inspector-summary p {
+  margin: 0;
+}
+
+.workspace-index-issues.file-inspector-tracked-issues {
+  margin-top: 6px;
+}
+
+.file-inspector-show-closed {
+  margin-top: 4px;
+  font-size: var(--text-xs);
+}
+
+.file-inspector-image {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: 100%;
+  overflow: auto;
+  padding: 14px;
+}
+
+.file-inspector-image img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm, 4px);
+}
+
+.file-inspector-summary p + p {
+  margin-top: 4px;
+}
+
+.file-inspector-folder {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.file-inspector-folder-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.file-inspector-connections {
+  flex: 0 0 auto;
+  max-height: min(28vh, 240px);
+  overflow: auto;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-inspector-connection-keys.gz-tray {
+  flex-wrap: wrap;
+}
+
+.file-inspector-connection-keys .gz-key {
+  font-size: var(--text-xs);
+}
+
+.file-inspector-count {
+  margin-left: 4px;
+  opacity: 0.7;
+}
+
+.file-inspector-connection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-xs);
+}
+
+/* The path is what a person scans for; the names it takes sit under it. */
+.file-inspector-connection-list li {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.file-inspector-connection-list .link-button {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-inspector-names {
+  min-width: 0;
+  padding-left: 1ch;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -51,12 +51,12 @@ describe('WorkspaceIndexPane Boekwachter lifecycle', () => {
     expect(onSelectLine).toHaveBeenCalledWith(26);
     await waitFor(() => expect(onUpdateIssue).toHaveBeenCalledWith(openIssue, { seen: true }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Not an issue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Give a verdict' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save verdict' }));
     await waitFor(() =>
       expect(onUpdateIssue).toHaveBeenCalledWith(openIssue, {
-        status: 'dismissed',
+        verdict: { kind: 'not_a_bug', reason: 'incorrect' },
         seen: true,
-        dismissalReason: 'not_an_issue',
       }),
     );
 
@@ -102,8 +102,8 @@ describe('WorkspaceIndexPane Boekwachter lifecycle', () => {
     expect(screen.getByRole('button', { name: 'Mark read' }).querySelector('i')).toHaveClass(
       'fa-envelope-open',
     );
-    expect(screen.getByRole('button', { name: 'Not an issue' }).querySelector('i')).toHaveClass(
-      'fa-ban',
+    expect(screen.getByRole('button', { name: 'Give a verdict' }).querySelector('i')).toHaveClass(
+      'fa-scale-balanced',
     );
 
     const fix = screen.getByRole('button', { name: 'Fix' });

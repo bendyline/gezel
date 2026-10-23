@@ -69,6 +69,30 @@ describe('CatalogArtwork', () => {
     expect(onImageLoad).toHaveBeenCalledWith(image);
   });
 
+  it('paints the category ground behind a logo', () => {
+    const { container } = render(
+      <CatalogArtwork logoUrl="blob:catalog-logo" ground="ochre" fallback={<span>mark</span>} />,
+    );
+    const image = container.querySelector('img')!;
+
+    expect(image.dataset.ground).toBe('ochre');
+    expect(image.style.backgroundColor).toBe('var(--gezel-ground-ochre)');
+  });
+
+  it('never paints a ground behind an svg icon', () => {
+    const { container } = render(
+      <CatalogArtwork
+        iconSvg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>'
+        ground="ochre"
+        fallback={<span>mark</span>}
+      />,
+    );
+    const image = container.querySelector('img')!;
+
+    expect(image.dataset.ground).toBeUndefined();
+    expect(image.style.backgroundColor).toBe('');
+  });
+
   it('retains the fallback after an image fails and tries a new URL', () => {
     const { container, rerender } = render(
       <CatalogArtwork logoUrl="blob:first" fallback={<span>fallback</span>} />,

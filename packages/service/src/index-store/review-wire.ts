@@ -55,6 +55,13 @@ export function toBoekwachterIssueWire(
     ...(record.seenAt ? { seenAt: record.seenAt } : {}),
     ...(record.resolvedAt ? { resolvedAt: record.resolvedAt } : {}),
     ...(record.dismissedAt ? { dismissedAt: record.dismissedAt } : {}),
+    ...(record.latestVerdict ? { latestVerdict: record.latestVerdict } : {}),
+    ...(record.lastReviewModel ? { reviewModel: record.lastReviewModel } : {}),
+    ...(record.echoOf ? { echoOf: record.echoOf } : {}),
+    ...(record.supersededBy ? { supersededBy: record.supersededBy } : {}),
+    ...(record.handoffLease && record.handoffLease.until > new Date().toISOString()
+      ? { handoff: record.handoffLease }
+      : {}),
   };
 }
 
@@ -102,6 +109,8 @@ export function filterAndSortBoekwachterIssues(
       if (!req.includeClosed && issue.status !== 'open' && issue.status !== 'in_progress') {
         return false;
       }
+      // Replaced by its own rewording: the newer issue stands for it.
+      if (!req.includeClosed && issue.supersededBy) return false;
       if (req.status && issue.status !== req.status) return false;
       if (req.severity && issue.severity !== req.severity) return false;
       if (req.category && issue.category !== req.category) return false;

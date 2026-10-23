@@ -3,6 +3,7 @@ import {
   isDirectCreateSourceWritePrompt,
   isFileRepairPrompt,
   isImmediateFileWritePrompt,
+  isWrittenReviewRequest,
 } from '../local-loop/constrained-turn.js';
 import {
   extractExplicitFileEditTools,
@@ -1098,6 +1099,8 @@ export function shouldConstrainToImmediateFileWrite(opts: {
   // the message mentions write_file. Preserve the requested tool surface.
   if (extractExplicitFileEditTools(text).length > 0) return false;
   if (isFileRepairPrompt(text)) return false;
+  // A review needs the code read first, whatever the deliverable line says.
+  if (isWrittenReviewRequest(text)) return false;
   // Message-matching regexes accept BOTH the canonical snake_case names
   // and the pre-rename spellings (`write_?file` matches `write_file` and,
   // case-insensitively, `writeFile`) — handoffs replayed from old
@@ -1132,6 +1135,7 @@ export function shouldConstrainToScenarioFileRepair(opts: {
   if (opts.hasToolsetOverride) return false;
   if (!roleActsAsUrgentFileWriter(opts.role)) return false;
   const text = (opts.latestUserMessage ?? '').trim();
+  if (isWrittenReviewRequest(text)) return false;
   return isFileRepairPrompt(text) || isSingleFileSourceRepairRequest(text);
 }
 
@@ -1297,6 +1301,9 @@ export const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
   'draft_email',
   'queue_email',
   'send_email',
+  // Writes into the person's own mailbox: nothing reaches another person,
+  // but it is still a write to an external account.
+  'save_email_draft',
   // Social post draft/publish are the same class of outbound agency.
   'draft_post',
   'queue_post',

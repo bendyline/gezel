@@ -104,6 +104,44 @@ describe('KnowledgeManager', () => {
     }
   });
 
+  it("returns an article's other passages when asked, after its best one", async () => {
+    const path = join(dir, 'sections.gezk');
+    await buildTestCatalog({
+      outputPath: path,
+      workDir: join(dir, 'sections-work'),
+      id: 'sections',
+      withSections: true,
+    });
+    const local = new KnowledgeManager({
+      home: join(dir, 'sections-home'),
+      host: await createInProcessCatalogHost(),
+    });
+    await local.start();
+    try {
+      const events = await runInstall(local, path);
+      expect(
+        events.some((e) => e.type === 'done'),
+        JSON.stringify(events),
+      ).toBe(true);
+      const passagesOf = (results: { documentId?: string; uri?: string }[]) =>
+        results.filter((r) => r.documentId === 'hand-cut').map((r) => r.uri);
+      const one = await local.searchUnified('dovetail', { vector: null, maxResults: 10 });
+      expect(passagesOf(one)).toHaveLength(1);
+      const several = await local.searchUnified('dovetail', {
+        vector: null,
+        maxResults: 10,
+        chunksPerDocument: 3,
+      });
+      const uris = passagesOf(several);
+      expect(uris.length).toBeGreaterThan(1);
+      expect(uris.length).toBeLessThanOrEqual(3);
+      expect(new Set(uris).size).toBe(uris.length);
+      expect(uris.every((uri) => /#chunk=[0-9a-f]{32}$/.test(uri ?? ''))).toBe(true);
+    } finally {
+      await local.stop();
+    }
+  });
+
   it('fills a search scoped to one catalog past the per-catalog cap', async () => {
     const path = join(dir, 'variants.gezk');
     await buildTestCatalog({

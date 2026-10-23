@@ -1410,6 +1410,62 @@
   white-space: nowrap;
 }
 
+/* The image strip — shape, size and model for a direct image gezel's next
+   render, in the task strip's frame. Dashed while the shape comes from the
+   message, like a suggested task. Compact keys: it shares the composer's
+   width with the To line. See docs/ux.md. */
+.chat-composer-image-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  margin: 0 0 0.25rem 0.25rem;
+  padding: 0.3rem 0.4rem 0.3rem 0.5rem;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-1));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-radius: var(--radius-md);
+}
+
+.chat-composer-image-bar[data-origin="suggested"] {
+  border-style: dashed;
+}
+
+.chat-composer-image-bar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.chat-composer-image-bar-tray {
+  gap: 0.15rem;
+  padding: 0.15rem;
+}
+
+.chat-composer-image-bar-key {
+  gap: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  font-size: var(--text-xs);
+}
+
+.chat-composer-image-bar-more,
+.chat-composer-image-bar-model {
+  max-inline-size: 12rem;
+  font-size: var(--text-xs);
+}
+
+.chat-composer-image-bar-astyped {
+  margin-inline-start: auto;
+  padding: 0.15rem 0.5rem;
+  font-size: var(--text-xs);
+}
+
+.chat-composer-image-bar-readout {
+  padding-inline-start: 0.1rem;
+}
+
 .chat-composer-task-bar-note {
   align-self: center;
   flex: 0 0 auto;
@@ -2263,62 +2319,60 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   opacity: 0.7;
 }
 
-/* Voice input is a quiet tool key beside the primary Send key. It records in
-   independently-decodable takes, so the small live dot is the persistent cue
-   that the microphone remains open while earlier speech is being transcribed. */
-.chat-narrate-btn {
+/* The tools beside Send (narrate, the sparkle menu and its Undo, and Task)
+   wear Squisq's flat toolbar face, `.squisq-toolbar-button`, like the image
+   and attach keys at the row's other end, so Send is the one raised key on
+   the row. These rules add what that face lacks: a held state, room for a
+   word, and the narrate key's recording state. */
+.chat-composer-tool-btn {
   position: relative;
-  display: inline-grid;
-  place-items: center;
-  box-sizing: border-box;
-  width: 2rem;
-  height: 1.75rem;
-  margin: 2px;
-  padding: 0;
-  border: 1px solid var(--key-border);
-  border-radius: var(--radius-md);
-  background: var(--key-bg);
-  color: var(--text-muted);
-  box-shadow: var(--key-shadow);
-  transition:
-    background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out,
-    box-shadow 120ms ease-out, transform 120ms ease-out, width 160ms ease-out,
-    padding 160ms ease-out;
+  gap: 0.4rem;
+  transition: background 120ms ease-out, color 120ms ease-out, width 160ms ease-out, padding 160ms
+    ease-out;
 }
 
-.chat-narrate-btn svg {
+.chat-composer-tool-btn > svg {
+  display: block;
   flex: 0 0 auto;
-  width: 1rem;
-  height: 1rem;
+  width: 16px;
+  height: 16px;
+}
+
+/* A key busy with its own work keeps its face, as Send does. Specific enough
+   to beat the dark editor theme's hover wash. */
+.chat-editor-wrap .squisq-toolbar-button.chat-composer-tool-btn:disabled:not([aria-busy="true"]) {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: transparent;
+}
+
+/* Undo, and the sparkle key while its busy label replaces the glyph. */
+.squisq-toolbar-button.chat-composer-tool-btn-word {
+  width: auto;
+  min-width: 32px;
+  padding: 0 0.5rem;
+  font-size: var(--text-2xs);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Voice input records in independently-decodable takes, so the small live
+   dot is the persistent cue that the microphone remains open while earlier
+   speech is being transcribed. */
+.chat-narrate-btn svg {
   stroke-width: 1.35;
 }
 
-.chat-narrate-btn:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--key-border));
-  background: var(--key-bg-hover);
-  color: var(--text);
-}
-
-.chat-narrate-btn:active:not(:disabled) {
-  transform: translateY(1px);
-  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--text) 22%, transparent);
-}
-
-.chat-narrate-btn-recording {
-  display: inline-flex;
+.chat-editor-wrap .chat-narrate-btn.chat-narrate-btn-recording {
   justify-content: flex-start;
   width: 6.25rem;
   padding: 0 0.55rem;
-  gap: 0.4rem;
-  border-color: color-mix(in srgb, var(--danger) 72%, var(--border));
-  background: color-mix(in srgb, var(--danger) 13%, var(--surface));
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
   color: var(--danger-text);
-  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--danger) 14%, transparent);
 }
 
-.chat-narrate-btn-recording:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--danger) 82%, var(--border));
-  background: color-mix(in srgb, var(--danger) 17%, var(--surface));
+.chat-editor-wrap .chat-narrate-btn.chat-narrate-btn-recording:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
   color: var(--danger-text);
 }
 
@@ -2361,8 +2415,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
    secondary recipe (Stop previously inherited the filled global button
    default and read as a second primary next to Send). */
 .chat-stop-btn,
-.chat-interrupt-btn,
-.chat-task-btn {
+.chat-interrupt-btn {
   margin: 1px 2px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -2372,20 +2425,45 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .chat-stop-btn:hover,
-.chat-interrupt-btn:hover,
-.chat-task-btn:hover {
+.chat-interrupt-btn:hover {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   color: var(--text);
 }
 
-/* The Task key: a word key beside Send that attaches a craftbook to the
-   message. Secondary on purpose — Send stays the one terracotta primary. */
-.chat-task-btn {
-  height: 1.65rem;
-  padding: 0 0.5rem;
+.chat-sparkle-notice {
+  align-self: center;
+  color: var(--text-muted);
   font-size: var(--text-2xs);
-  font-weight: 600;
-  line-height: 1;
+}
+
+/* "Review my message" suggestions, in the task strip's frame. */
+.chat-composer-review {
+  align-items: center;
+}
+
+.chat-composer-review-text {
+  flex: 1 1 auto;
+  padding: 0.1rem 0.25rem;
+}
+
+.chat-composer-review-list {
+  margin: 0.15rem 0 0;
+  padding-inline-start: 1.1rem;
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+.chat-composer-review-apply {
+  align-self: center;
+  padding: 0.15rem 0.5rem;
+  font-size: var(--text-xs);
+}
+
+/* The Task key's checklist is the Tasks area glyph, drawn on a 24-unit grid;
+   this matches its stroke to the 16-unit toolbar glyphs beside it. */
+.chat-task-btn svg {
+  stroke-width: 2.05;
 }
 
 .chat-nudge-btn {

@@ -356,6 +356,28 @@ async function isSessionRouteAllowed(
     if (/^\/report-actions\/(?:fire|dismiss)\/?$/.test(rest)) {
       return sessionDeny('report actions are fired from a first-party client');
     }
+    // Connecting a source, pausing or editing one, and a camera's live feed
+    // are the person's: a prompt-injected gezel must never bind or arm a
+    // camera, read its pictures past the cloud-model rule, or change what a
+    // lookout does. Gezels draft connector actions, read event records as
+    // files, and propose lookouts for the person to approve.
+    if (
+      (method === 'POST' && /^\/connectors\/(?:bind|oauth\/[^/]+)\/?$/.test(rest)) ||
+      (method === 'POST' && /^\/connectors\/[^/]+\/sync\/?$/.test(rest)) ||
+      ((method === 'PATCH' || method === 'DELETE') &&
+        /^\/connectors\/[^/]+\/?$/.test(rest) &&
+        !/^\/connectors\/actions\//.test(rest)) ||
+      /^\/connectors\/[^/]+\/(?:preview|captures)(?:\/|$)/.test(rest)
+    ) {
+      return sessionDeny('connector setup and camera pictures require a first-party client');
+    }
+    if (
+      /^\/lookouts(?:\/|$)/.test(rest) &&
+      !(method === 'GET' && /^\/lookouts\/?$/.test(rest)) &&
+      !(method === 'POST' && /^\/lookouts\/proposals\/?$/.test(rest))
+    ) {
+      return sessionDeny('lookouts are set up by the person; propose one with propose_lookout');
+    }
     if (rest === '/preview-capability' || rest === '/preview-capability/') {
       return sessionDeny('preview capabilities require a first-party client');
     }
@@ -375,6 +397,10 @@ async function isSessionRouteAllowed(
     // Any model on any provider, outside the session's tool kit and budget.
     if (rest === '/completions' || rest === '/completions/') {
       return sessionDeny('workflow completions require a first-party client');
+    }
+    // The composer's rewrite of a person's own draft; a model has no draft.
+    if (rest === '/prompt-assist' || rest === '/prompt-assist/') {
+      return sessionDeny('prompt assist is for the person writing a message');
     }
     if (rest === '/timeline' || rest === '/timeline/') {
       return sessionDeny('project timelines contain other sessions');
@@ -710,6 +736,21 @@ async function isSessionRouteAllowed(
   // (gemma4-12b, 2026-09-23). Catalog install/admin routes stay first-party.
   if (method === 'GET' && /^\/api\/knowledge\/catalogs\/[^/]+\/(?:document|passage)$/.test(path)) {
     return SESSION_ALLOW;
+  }
+
+  // `describe_image` and `read_image_metadata` are in the image kits, but the
+  // recognition router binds its project through `?project=` (defaulting to
+  // Default), so both read routes were refused with "not part of the session
+  // MCP API" on every call. Bind the query to the token; the model, cache and
+  // health routes stay first-party. Location in `/metadata` is gated at the
+  // route by `callerMaySeeLocation`.
+  if (
+    method === 'POST' &&
+    (path === '/api/recognition/describe' || path === '/api/recognition/metadata')
+  ) {
+    return (c.req.query('project') ?? 'default') === auth.projectId
+      ? SESSION_ALLOW
+      : sessionDeny('image recognition must target the session project');
   }
 
   // Media/render tools are model-facing, but their project binding is in the

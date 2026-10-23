@@ -17,16 +17,22 @@ describe('normalizeGenerateImageToolArgs', () => {
       steps: 30,
     });
 
-    expect(actual.args).toMatchObject({ width: 768, height: 448, steps: 4 });
+    expect(actual.args).toMatchObject({ width: 1024, height: 576, steps: 30 });
     expect(actual.note).toBe(
-      'Request normalized for agent image generation (size 1600x900 -> 768x448, steps 30 -> 4).',
+      'Request normalized for agent image generation (size 1600x900 -> 1024x576).',
     );
+  });
+
+  it("leaves steps to the daemon, which holds them at the model's recommendation", () => {
+    const actual = normalizeGenerateImageToolArgs({ prompt: 'poster', steps: 50 });
+
+    expect(actual).toEqual({ args: { prompt: 'poster', steps: 50 } });
   });
 
   it('caps a single oversized dimension', () => {
     const actual = normalizeGenerateImageToolArgs({ prompt: 'banner', width: 2048 });
 
-    expect(actual.args).toMatchObject({ width: 768 });
-    expect(actual.note).toBe('Request normalized for agent image generation (width 2048 -> 768).');
+    expect(actual.args).toMatchObject({ width: 1024 });
+    expect(actual.note).toBe('Request normalized for agent image generation (width 2048 -> 1024).');
   });
 });

@@ -272,6 +272,17 @@ export function extractGeneratedImageSeed(rawToolText: string): number | undefin
   return Number.isSafeInteger(n) ? n : undefined;
 }
 
+/** Extract the rendered size from the summary's `Generated WxH image` opening. */
+export function extractGeneratedImageSize(
+  rawToolText: string,
+): { width: number; height: number } | undefined {
+  const m = /Generated\s+(\d+)\s*[×x]\s*(\d+)\s+image/i.exec(rawToolText);
+  if (!m) return undefined;
+  const width = Number(m[1]);
+  const height = Number(m[2]);
+  return width > 0 && height > 0 ? { width, height } : undefined;
+}
+
 /** Extract the model id from the same summary line; informational only. */
 export function extractGeneratedImageModel(rawToolText: string): string | undefined {
   const m = /image with\s+(\S+)\s+\(seed/.exec(rawToolText);

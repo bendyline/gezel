@@ -12,8 +12,7 @@ export default defineConfig({
     // Bundled as a sibling to main.js so every installer has a stable path.
     'extract-service-bundle': 'src/extract-service-bundle.ts',
     'migrate-legacy-shared': 'src/migrate-legacy-shared.ts',
-    // Windows-only: run by the NSIS hook before each elevated recursive ACL
-    // sweep to remove links that lead out of the swept tree.
+    // Windows-only: link policy for the private tree after handle-based ACL repair.
     'neutralize-reparse-points': 'src/neutralize-reparse-points.ts',
     // Forked by the supervisor when GEZEL_SERVICE_HOST=utility, so the service
     // runs in an Electron utility process instead of the browser process.

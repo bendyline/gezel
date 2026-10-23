@@ -10,7 +10,7 @@ const GREETING_TAB = /^Good (morning|afternoon|evening)$/;
  * band against that auto-collapse, so a second press settles it.
  */
 export async function openGreetingTab(page: Page): Promise<void> {
-  const tab = page.getByRole('tab', { name: GREETING_TAB });
+  const tab = page.getByTestId('greeting-band').getByRole('tab', { name: GREETING_TAB });
   await tab.click();
   if ((await tab.getAttribute('aria-expanded')) !== 'true') await tab.click();
   await expect(tab).toHaveAttribute('aria-expanded', 'true');

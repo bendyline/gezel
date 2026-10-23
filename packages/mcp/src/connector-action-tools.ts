@@ -132,6 +132,74 @@ export function registerEmailTools(dependencies: ConnectorActionToolDependencies
     },
   );
 
+  // The low-risk write: the message lands in the person's own Drafts folder
+  // (Gmail, Outlook, or IMAP) and nothing is sent. The person is the approval
+  // step — they review and press Send in their mail app — so this drafts and
+  // commits in one call instead of the three-step send path.
+  server.tool(
+    'save_email_draft',
+    "Save an email as a draft in the user's own mailbox (their Drafts folder in Gmail, Outlook, or their mail server). Nothing is sent: the user reviews and sends it from their mail app. Prefer this over send_email unless the user explicitly asked you to send.",
+    {
+      to: z.array(z.string()).describe('Recipient email addresses'),
+      cc: z.array(z.string()).optional().describe('CC recipients'),
+      bcc: z.array(z.string()).optional().describe('BCC recipients'),
+      subject: z.string().describe('Subject line'),
+      body: z.string().describe('Email body (markdown; saved as plain text)'),
+      inReplyTo: z
+        .string()
+        .optional()
+        .describe(
+          'Message-ID being replied to (the message_id field of a synced email), to thread the reply',
+        ),
+      accountId: z
+        .string()
+        .optional()
+        .describe('Which mail connector binding to save into (defaults to the first)'),
+    },
+    async (args) => {
+      try {
+        const bindingId = await resolveMailBinding(dependencies, args.accountId);
+        if (!bindingId) return errorResult('This project has no linked mail connector.');
+        const { accountId: _drop, ...input } = args;
+        const drafted = await connectorActionApi(
+          dependencies,
+          `${encodeURIComponent(bindingId)}/actions`,
+          'POST',
+          { action: 'save-draft', input },
+        );
+        if (!drafted.ok) {
+          const message = String(drafted.data.error ?? 'Saving the draft failed.');
+          const hint = /declares no action 'save-draft'/.test(message)
+            ? 'This mail connection does not support mailbox drafts yet. Use draft_email instead, or ask the user to update Gezel and re-link the account.'
+            : undefined;
+          return errorResult(message, { ...(hint ? { hint } : {}) });
+        }
+        const draftId = typeof drafted.data.draftId === 'string' ? drafted.data.draftId : '';
+        const { ok, data } = await connectorActionApi(
+          dependencies,
+          `actions/${encodeURIComponent(draftId)}/commit`,
+          'POST',
+        );
+        if (!ok) {
+          const message = String(data.error ?? 'Saving the draft failed.');
+          const hint = /403|Mail\.ReadWrite|insufficient|permission/i.test(message)
+            ? 'The mail connection was linked before drafts were supported. Ask the user to re-link the account so Gezel can save drafts.'
+            : undefined;
+          return errorResult(message, { ...(hint ? { hint } : {}) });
+        }
+        const result = (data.result ?? {}) as { webLink?: string };
+        const summary = `Saved to the Drafts folder. Nothing was sent — the user can review and send it from their mail app.${result.webLink ? ` ${result.webLink}` : ''}`;
+        return okResult(
+          ActionToolOutputSchema,
+          { summary, status: 'saved-to-mailbox', draftId },
+          { text: summary },
+        );
+      } catch (err) {
+        return errorResult(`save_email_draft failed: ${unwrapApiError(err)}`);
+      }
+    },
+  );
+
   server.tool(
     'send_email',
     'Transmit a drafted/queued email. The daemon enforces the recipient allowlist on the mail connector (sending to a non-allowlisted address is refused) and will NOT send during night shift (the message is staged for daytime approval instead).',

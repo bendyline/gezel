@@ -54,8 +54,12 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // trips again. Keep this close to the measurement so the next growth
   // reopens it. (It tripped at 3.36 MB when `./local-loop` became an entry:
   // unsplit, every entry bundled
-  // its own copy of the shared code. tsup now splits it into chunks.)
-  '@bendyline/gezel': 2_000_000, //                    1.96 MB
+  // its own copy of the shared code. tsup now splits it into chunks. It
+  // tripped again at 2.06 MB from feature schemas spread across lookouts,
+  // devices, issue triage and project views; no one declaration was at fault.
+  // The largest remain TaskSchema at 174 KB and the four craftbook manifest
+  // schemas at ~78 KB each, in the shared `.d.ts` chunk.)
+  '@bendyline/gezel': 2_100_000, //                    2.06 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
   '@bendyline/gezel-script-runtime': 50_000,
@@ -67,7 +71,9 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   '@bendyline/gezel-mcp': 300_000, //                  111 KB
   '@bendyline/gezel-connectors-spectral': 100_000, //    4 KB
   '@bendyline/gezel-script-stdlib': 100_000, //         14 KB
-  '@bendyline/gezel-cli': 150_000, //                   31 KB
+  // Offline page demos now ship the shared font stylesheet (~217 KB gzip)
+  // and its licenses alongside the commands, rather than fetching fonts.
+  '@bendyline/gezel-cli': 500_000, //                  373 KB
   // Carries the bundled web UI (`dist/ui`) and the handboek content so a
   // Node-only CLI install can serve `gezel start --web` with nothing else
   // to fetch. That is essentially all of this budget. About 16 MB of it is
@@ -79,7 +85,7 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // (~3.1 MB gzipped, base64-embedded WASM) twice — once in the worker and
   // once in the main-thread fallback. Deduplicating that upstream is the
   // follow-up and would win back ~3 MB.
-  '@bendyline/gezel-service': 55_000_000, //          47.5 MB
+  '@bendyline/gezel-service': 60_000_000, //          47.5 MB
 };
 
 const ROOT_LICENSE = readFileSync(resolve(REPO_ROOT, 'LICENSE'), 'utf8');

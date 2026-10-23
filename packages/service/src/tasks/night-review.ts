@@ -3,6 +3,7 @@ import {
   type NightShiftCompletedTask,
   type NightShiftReport,
   type NightShiftReviewResponse,
+  type NightShiftTaskBrief,
   type NightShiftWindow,
   type Question,
   type Task,
@@ -18,6 +19,7 @@ import {
   isNightShiftReportArchive,
 } from '../meester/night-shift-oversight.js';
 import type { ReportActionManager } from '../report-actions/report-action-manager.js';
+import { isReportShaped } from '../reports/report-paths.js';
 import type { TaskManager } from '../tasks/manager.js';
 
 /**
@@ -235,20 +237,33 @@ function declaredArtifacts(task: Task): string[] {
   return out;
 }
 
+/** Resolve this task's own report, even when the last run predates last night's window. */
+export async function latestNightShiftTaskReport(
+  store: Pick<Store, 'statProjectArtifactPath' | 'listProjectArtifacts'>,
+  task: Task,
+): Promise<NightShiftTaskBrief['latestReport']> {
+  const paths = new Set(declaredArtifacts(task).reverse());
+  if (isNightShiftOversightTask(task)) {
+    // Starting a new review dates the previous report aside before its replacement exists.
+    const files = await store.listProjectArtifacts(task.projectId).catch(() => []);
+    for (const file of files) {
+      if (!file.isDirectory && isNightShiftReportArchive(task.projectId, file.path)) {
+        paths.add(file.path);
+      }
+    }
+  }
+  let latest: { path: string; modifiedAt: number } | undefined;
+  for (const path of paths) {
+    const stat = await store.statProjectArtifactPath(task.projectId, path).catch(() => null);
+    if (stat?.kind !== 'file') continue;
+    const modifiedAt = Date.parse(stat.mtime ?? '') || 0;
+    if (!latest || modifiedAt > latest.modifiedAt) latest = { path, modifiedAt };
+  }
+  return latest ? { projectId: task.projectId, path: latest.path } : undefined;
+}
+
 /** Markdown — the only shape a night report is ever read in. */
 function isProseArtifact(path: string): boolean {
   const lower = path.toLowerCase();
   return lower.endsWith('.md') || lower.endsWith('.markdown');
-}
-
-/** Markdown that reads as a report: under reports/, or *report*.md, or digest. */
-function isReportShaped(path: string): boolean {
-  const lower = path.toLowerCase();
-  if (!lower.endsWith('.md')) return false;
-  return (
-    lower.startsWith('reports/') ||
-    lower.includes('/reports/') ||
-    lower.includes('report') ||
-    lower.includes('digest')
-  );
 }

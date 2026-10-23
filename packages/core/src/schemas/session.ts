@@ -13,6 +13,7 @@ import {
   ReferencedFileSchema,
   TaskDeliverableSchema,
 } from './gezel.js';
+import { ImageAspectRatioSchema, ImageQualitySchema, ImageSettingsSchema } from './image.js';
 import { SessionLinkSchema, SessionParentSchema } from './session-lineage.js';
 import { TaskLaunchSpecSchema } from './task-launch.js';
 import { TaskSchema } from './task.js';
@@ -296,6 +297,12 @@ export const ChatSessionSchema = z.object({
       /** Engine seed reported for the generation, for composition-stable revisions. */
       seed: z.number().int().optional(),
       model: z.string().optional(),
+      /** Rendered size, so a follow-up keeps the picture's shape. */
+      width: z.number().int().positive().optional(),
+      height: z.number().int().positive().optional(),
+      /** The shape and tier the person asked for, when they named one. */
+      aspectRatio: ImageAspectRatioSchema.optional(),
+      quality: ImageQualitySchema.optional(),
       at: z.string(),
     })
     .optional(),
@@ -645,6 +652,18 @@ export const SendToSessionRequestSchema = z.object({
    * `'auto'`: today's behavior.
    */
   turnIntent: z.enum(['auto', 'off']).optional(),
+  /**
+   * Settings for a direct image gezel's render, picked on the composer's
+   * image strip. Other gezels ignore them.
+   */
+  imageSettings: ImageSettingsSchema.optional(),
+  /**
+   * `'off'` renders the message as written: the direct image gezel does not
+   * read "9:16" or "phone wallpaper" out of it as settings. The composer
+   * sends it after the person dismissed the settings it had read from this
+   * text. Absent means `'auto'`.
+   */
+  imageCues: z.enum(['auto', 'off']).optional(),
 });
 export type SendToSessionRequest = z.infer<typeof SendToSessionRequestSchema>;
 

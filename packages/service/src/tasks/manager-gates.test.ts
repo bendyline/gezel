@@ -1306,6 +1306,63 @@ describe('completion gates — plateau escalation ladder', () => {
     expect(notes.some((n) => n.text.includes('content unchanged (frozen resubmit)'))).toBe(true);
   });
 
+  // week-plan, qwen3.8-27b, 2026-10-22: each review pass found a different,
+  // real gap in the report, but "verdict.md contains FAIL" is the same check
+  // every time, so the ladder told the next reader to rewrite the verdict.
+  it('a review gate routes every failed verdict back and pauses on the fourth, never directing a verdict edit', async () => {
+    const task = await tasks.create('default', {
+      title: 'Review loop',
+      description: 'a failing review sends the work back instead of asking for a new verdict.',
+      assignee: { kind: 'user' },
+      steps: [
+        { name: 'Write the report', id: 'report', assignee: { kind: 'user' } },
+        {
+          name: 'Evaluate',
+          id: 'evaluate',
+          assignee: { kind: 'user' },
+          advanceWhen: { file: 'verdict.md', artifact: true },
+          gate: {
+            at: 'completion',
+            checks: [
+              { kind: 'notContains', file: 'verdict.md', pattern: '\\bFAIL\\b', artifact: true },
+            ],
+            onReject: 'report',
+            maxAttempts: 3,
+          },
+        },
+        { name: 'Finish', id: 'finish', assignee: { kind: 'user' } },
+      ] as never,
+    });
+    // The same verdict every pass: an unchanged FAIL must still route back.
+    await writeArtifactFile('verdict.md', 'Every event appears PASS\nLoad picture honest FAIL\n');
+    await tasks.activateStep('default', task.num, 'evaluate');
+
+    for (let pass = 1; pass <= 3; pass++) {
+      const held = holdOf(
+        await tasks.completeStepChecked('default', task.num, 'evaluate', undefined, {
+          cause: 'model',
+        }),
+      );
+      expect(held.cached).toBe(false);
+      expect(held.escalationStage).toBeUndefined();
+      expect(held.message).not.toContain('GATE_');
+      expect((await tasks.get('default', task.num))!.activeStepId).toBe('report');
+      await tasks.completeStep('default', task.num, 'report', 'evaluate');
+    }
+
+    const fourth = holdOf(
+      await tasks.completeStepChecked('default', task.num, 'evaluate', undefined, {
+        cause: 'model',
+      }),
+    );
+    expect(fourth.paused).toBe(true);
+    expect((await tasks.get('default', task.num))!.status).toBe('paused');
+    const notes = await tasks.listNotes('default', task.num);
+    expect(notes.some((n) => n.text.includes('goes back to "Write the report"'))).toBe(true);
+    expect(notes.some((n) => /GATE_TARGETED_EDIT|GATE_FULL_REWRITE/.test(n.text))).toBe(false);
+    expect(notes.some((n) => n.text.includes('# Gate plateau — paused for help'))).toBe(true);
+  });
+
   // A bounded batch loop fails the SAME check every pass by design. Before
   // `remaining` entered the signature the ladder read that as a plateau: on
   // the real Pull Request Review run of squisq PR #46 the reviewer went

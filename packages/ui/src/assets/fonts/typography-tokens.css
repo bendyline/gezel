@@ -1,0 +1,9 @@
+/* Shared by the Gezel shell and hosted project pages. */
+:where(:root) {
+  --font-ui: "Hanken Grotesk", "OpenMoji Color", "Apple Color Emoji", "Segoe UI Emoji",
+    "Noto Color Emoji", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "PT Serif", "OpenMoji Color", "Apple Color Emoji", "Segoe UI Emoji",
+    "Noto Color Emoji", Georgia, "Times New Roman", serif;
+  --font-body: var(--font-ui);
+  --font-heading: var(--font-display);
+}

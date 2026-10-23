@@ -311,6 +311,22 @@ describe('catalog project types on the portable host', () => {
     });
   });
 
+  it('refuses an external folder instead of silently creating an empty workspace', async () => {
+    const { client } = await setup();
+    await expect(
+      client.createTypedProject({
+        name: 'Local media',
+        workingDir: '/photos',
+        projectType: { typeId: 'checkers' },
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      details: {
+        error: 'This device does not support external project folders.',
+      },
+    });
+  });
+
   it("serves the page bridge from the type's manifest, never wider", async () => {
     const { client, runs } = await setup();
     const { project } = await client.createTypedProject({
@@ -353,6 +369,17 @@ describe('catalog project types on the portable host', () => {
       client.invokeProjectPageTool(project.id, { tool: 'user_move', input: { from: 'c3' } }),
     ).rejects.toMatchObject({ status: 400 });
     expect(runs).toHaveLength(0);
+  });
+
+  it('reports the missing portable query engine instead of returning demo tables', async () => {
+    const { client } = await setup();
+    const { project } = await client.createTypedProject({
+      name: 'Game',
+      projectType: { typeId: 'checkers' },
+    });
+    await expect(client.invokeProjectPageTables(project.id, { op: 'list' })).rejects.toMatchObject({
+      status: 503,
+    });
   });
 
   it('runs a page tool with the bound action and summons the opponent with a hidden seed', async () => {

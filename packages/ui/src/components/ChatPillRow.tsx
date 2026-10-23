@@ -31,7 +31,8 @@ function timestampMs(iso: string): number {
  * The status band across the top of a project chat: one pill per active
  * task, enriched with its latest chat, and the newest independent thread
  * plus other recent/attention-worthy threads. Starting a task lives in the
- * composer (the Task key beside Send), not here.
+ * composer (the Task key beside Send), not here. The band stays blank when
+ * there is no recent work; the timeline supplies the new-project guidance.
  *
  * Purely presentational apart from the two data hooks — it owns no dialog
  * and performs no navigation. The parent decides what focusing a thread or
@@ -66,14 +67,9 @@ export function ChatPillRow({
   refreshKey?: number | undefined;
   terminalRefreshKey?: number | undefined;
 }) {
-  const { tasks, loading: tasksLoading } = useProjectActiveTasks({ projectId, refreshKey });
+  const { tasks } = useProjectActiveTasks({ projectId, refreshKey });
   const taskRefs = useMemo(() => new Set(tasks.map((t) => t.ref)), [tasks]);
-  const {
-    pills,
-    overflow,
-    taskPills,
-    loading: threadsLoading,
-  } = useChatThreadPills({
+  const { pills, overflow, taskPills } = useChatThreadPills({
     projectId,
     gezelId,
     pinnedSessionId: activeSessionId,
@@ -135,15 +131,7 @@ export function ChatPillRow({
     .filter(Boolean)
     .join(', ');
 
-  // Both hooks start with empty arrays, so without their loading flags the
-  // strip asserted "No recent threads" for the whole first round trip — while
-  // the timeline directly below it still said "Loading…". Two adjacent
-  // elements claiming opposite things is worse than a beat of nothing.
-  const loading = tasksLoading || threadsLoading;
-  const empty =
-    !loading && pills.length === 0 && visibleTerminalThreads.length === 0 && tasks.length === 0;
-  const cardCount =
-    pills.length + overflow.length + visibleTerminalThreads.length + tasks.length + (empty ? 1 : 0);
+  const cardCount = pills.length + overflow.length + visibleTerminalThreads.length + tasks.length;
   const { scrollRef, overflowBar } = useOverflowBar(cardCount);
 
   return (
@@ -151,8 +139,6 @@ export function ChatPillRow({
       <output className="sr-only">{announcement}</output>
       <div className="chat-pill-row-scroller">
         <div className="chat-pill-row-scroll" ref={scrollRef} onScroll={overflowBar.onScroll}>
-          {empty && <span className="chat-pill-row-empty muted small">No recent threads</span>}
-
           {/* Active work leads the strip. Task files are returned newest-first,
               so a task created through Do+ remains visible at the left edge
               even when recent chat and terminal cards overflow horizontally. */}

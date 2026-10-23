@@ -1,4 +1,5 @@
 import type { PageApiBootstrap } from '../schemas/page-bridge.js';
+import { pageComponentsSource } from './page-components.js';
 
 /**
  * Output Pane API v1 — the `window.gezel` shim injected into served
@@ -82,7 +83,7 @@ const MEDIA_TYPES: Record<string, string> = {
 
 /** The shim's JavaScript, for hosts that embed scripts by URL rather than inline. */
 export function pageApiShimSource(bootstrap: PageApiBootstrap): string {
-  return `(function(){
+  return `${pageComponentsSource()}\n(function(){
 if (window.gezel) return;
 var B=${JSON.stringify(bootstrap)};
 var D=${JSON.stringify(DEFAULTS)};
@@ -91,6 +92,20 @@ var S=B.serve||null;
 var mode=S?'serve':(embedded?'embedded':'browser');
 var seq=0;var sid=Math.random().toString(36).slice(2,8);
 var pending={};var inflight=0;var queue=[];
+var uploads={};
+function importCall(kind,fields,signal){
+  if(!embedded||S||!B.imports)return Promise.reject(err('unavailable','Add files is available in the Gezel desktop app.'));
+  if(Object.keys(uploads).length>=2)return Promise.reject(err('rate-limited','Too many imports.'));
+  return new Promise(function(resolve,reject){
+    var id=mintId(), timer;
+    function finish(error,value){if(!uploads[id])return;delete uploads[id];clearTimeout(timer);if(signal)signal.removeEventListener('abort',cancel);if(error)reject(error);else resolve(value);}
+    function cancel(){post({__gezelPage:1,kind:'import-cancel',id:id});finish(err('unavailable','Import cancelled.'));}
+    uploads[id]=finish;
+    timer=setTimeout(function(){post({__gezelPage:1,kind:'import-cancel',id:id});finish(err('timeout','Import timed out.'));},310000);
+    if(signal){signal.addEventListener('abort',cancel,{once:true});if(signal.aborted){cancel();return;}}
+    post(Object.assign({__gezelPage:1,kind:kind,id:id},fields));
+  });
+}
 var watches={};var themeSubs=[];
 var theme={mode:(matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'};
 var limits={maxInflight:D.maxInflight,maxReadBytes:2*1024*1024};
@@ -142,6 +157,8 @@ function serveSend(m){
   if(m.kind==='invoke'){
     url=S.apiBase+'/invoke';payload={tool:m.tool};
     if(m.input)payload.input=m.input;
+  }else if(m.kind==='table'){
+    url=S.apiBase+'/tables';payload=m.request;
   }else{
     url=S.apiBase+'/read';payload={op:m.op,source:m.source,path:m.path};
     if(m.as)payload.as=m.as;
@@ -191,6 +208,7 @@ addEventListener('message',function(event){
   if(event.source!==window.parent)return;
   var d=event.data;
   if(!d||d.__gezelPage!==1||typeof d.kind!=='string')return;
+  if(d.kind==='import-result'){if(uploads[d.id])uploads[d.id](d.ok?null:err(d.errorCode||'unavailable',d.error),d.result);return;}
   if(d.kind==='init'){
     if(d.theme&&d.theme.mode)setTheme(d.theme.mode);
     if(d.limits&&typeof d.limits.maxInflight==='number')limits.maxInflight=d.limits.maxInflight;
@@ -208,6 +226,20 @@ addEventListener('message',function(event){
     settle(d.id,function(job){
       if(d.ok)job.resolve({output:d.output,runId:d.runId,reaction:d.reaction});
       else job.reject(err(d.errorCode||'script-error',d.error||'tool invoke failed',d.runId));
+    });
+    return;
+  }
+  if(d.kind==='open-result'){
+    settle(d.id,function(job){
+      if(d.ok)job.resolve();
+      else job.reject(err(d.errorCode||'unavailable',d.error||'open failed'));
+    });
+    return;
+  }
+  if(d.kind==='table-result'){
+    settle(d.id,function(job){
+      if(d.ok)job.resolve(d.result);
+      else job.reject(err(d.errorCode||'unavailable',d.error||'table request failed'));
     });
     return;
   }
@@ -288,6 +320,10 @@ function swapTree(root){
   if(!root||!root.querySelectorAll)return;
   var found=root.querySelectorAll('[src*="gezel-data="],[poster*="gezel-data="],[href*="gezel-data="],[style*="gezel-data="]');
   for(var i=0;i<found.length;i++)swapMedia(found[i]);
+  // Shared file cards keep their media in shadow roots. Snapshot hosts must
+  // replace relayed placeholders there as well as in the page's own DOM.
+  var hosts=root.querySelectorAll('*');
+  for(var j=0;j<hosts.length;j++)if(hosts[j].shadowRoot)swapTree(hosts[j].shadowRoot);
 }
 function observeMedia(){
   if(mediaObserver||typeof MutationObserver!=='function'||typeof document==='undefined')return;
@@ -333,6 +369,9 @@ function readOp(op,path,opts){
   return browserRead(op,source,String(path),opts.as);
 }
 
+function tableOp(request){
+  return enqueue('table request',{__gezelPage:1,kind:'table',id:mintId(),request:request},D.invokeTimeoutMs);
+}
 var api={
   page:{api:1,projectId:B.projectId,source:'type',entry:B.entry,typeName:B.typeName,params:B.params,mode:mode},
   tools:{
@@ -345,6 +384,10 @@ var api={
     },
   },
   data:{
+    open:function(path,opts){
+      if(!embedded||S)return Promise.reject(err('unavailable','gezel: file viewers require the Gezel app'));
+      return enqueue('open',{__gezelPage:1,kind:'open',id:mintId(),source:(opts&&opts.source)||'workspace',path:String(path)},D.readTimeoutMs);
+    },
     read:function(path,opts){
       var as=defaultAs(path,(opts||{}).as);
       return readOp('read',path,Object.assign({},opts,{as:as})).then(function(d){return decodeRead(d,as,path);});
@@ -392,6 +435,16 @@ var api={
       throw err('unavailable','gezel: no capability in document URL');
     },
   },
+  tables:{
+    list:function(){return tableOp({op:'list'}).then(function(result){return result.tables;});},
+    describe:function(table){return tableOp({op:'describe',table:String(table)});},
+    query:function(sql,opts){
+      var request={op:'query',sql:String(sql)};
+      if(opts&&opts.tables!==undefined)request.tables=opts.tables;
+      if(opts&&opts.limit!==undefined)request.limit=opts.limit;
+      return tableOp(request);
+    },
+  },
   ui:{
     get theme(){return theme;},
     onTheme:function(cb){themeSubs.push(cb);return function(){var i=themeSubs.indexOf(cb);if(i>=0)themeSubs.splice(i,1);};},
@@ -406,6 +459,10 @@ if(S&&typeof matchMedia==='function'){
   try{matchMedia('(prefers-color-scheme: dark)').addEventListener('change',function(e){setTheme(e.matches?'dark':'light');});}catch(_){}
 }
 Object.defineProperty(window,'gezel',{value:api,writable:false,configurable:false});
+window.installGezelComponents(api,{
+  targets:function(){return importCall('import-targets',{});},
+  file:function(file,target,signal){return importCall('import-file',{target:target,name:file.name,file:file},signal);}
+});
 if(embedded)post({__gezelPage:1,kind:'hello'});
 })();`;
 }

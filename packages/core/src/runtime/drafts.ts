@@ -292,6 +292,7 @@ export async function createPromptDraft(
     ...(input.craftbookRef ? { craftbookRef: input.craftbookRef } : {}),
     ...(input.scope ? { scope: input.scope } : {}),
     ...(input.taskLaunch ? { taskLaunch: input.taskLaunch } : {}),
+    ...(input.imageSettings ? { imageSettings: input.imageSettings } : {}),
     createdAt: at,
     updatedAt: at,
     status: 'draft',
@@ -363,6 +364,10 @@ export async function patchPromptDraft(
   if (patch.taskLaunch !== undefined) {
     if (patch.taskLaunch === null) delete next.taskLaunch;
     else next.taskLaunch = patch.taskLaunch;
+  }
+  if (patch.imageSettings !== undefined) {
+    if (patch.imageSettings === null) delete next.imageSettings;
+    else next.imageSettings = patch.imageSettings;
   }
   await host.validateRecipient?.(projectId, next);
   await files.apply({ writes: new Map([[metaPath(id), metaBytes(next)]]) });
@@ -458,6 +463,7 @@ export async function duplicatePromptDraft(
     ...(source.craftbookRef ? { craftbookRef: source.craftbookRef } : {}),
     ...(source.scope ? { scope: source.scope } : {}),
     ...(source.taskLaunch ? { taskLaunch: duplicatedTaskLaunch(source.taskLaunch) } : {}),
+    ...(source.imageSettings ? { imageSettings: source.imageSettings } : {}),
     createdAt: at,
     updatedAt: at,
     status: 'draft',

@@ -98,12 +98,14 @@ describe('resolveProfile — skeleton path (no behaviors registered yet)', () =>
       tier: 'medium',
       providerName: 'mlx',
     });
-    // The two unknown ids are dropped; the universal default
-    // (`tools.gezels-as-roles`) is appended to every profile.
+    // The two unknown ids are dropped; the universal defaults are appended to
+    // every profile, then the medium tier's scoped defaults.
     expect(profile.behaviors.map((e) => e.id)).toEqual([
       'tools.gezels-as-roles',
       'prompt.meester-craftbook-prelude',
       'prompt.library-recall-prelude',
+      'tools.work-routing',
+      'prompt.work-options-prelude',
     ]);
   });
 
@@ -152,9 +154,19 @@ describe('resolveProfile — scoped defaults', () => {
     );
   });
 
-  it('leaves every other tier alone', () => {
-    for (const tier of ['tiny', 'medium', 'large', 'cloud'] as const) {
+  it('turns the pair on for the larger local tiers, without the question note', () => {
+    for (const tier of ['medium', 'large'] as const) {
+      const qwen = ids(tier, 'qwen');
+      expect(qwen).toContain('tools.work-routing');
+      expect(qwen).toContain('prompt.work-options-prelude');
+      expect(qwen).not.toContain('prompt.work-options-question-note');
+    }
+  });
+
+  it('leaves the unmeasured tiers alone', () => {
+    for (const tier of ['tiny', 'cloud'] as const) {
       expect(ids(tier, 'qwen')).not.toContain('tools.work-routing');
+      expect(ids(tier, 'qwen')).not.toContain('prompt.work-options-prelude');
       expect(ids(tier, 'qwen')).not.toContain('prompt.work-options-question-note');
     }
   });

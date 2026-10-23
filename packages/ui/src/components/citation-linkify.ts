@@ -48,7 +48,9 @@ export function linkifyCitations(
       return cited
         .map((n) => {
           const title = evidenceTitle(byNumber.get(n)!).replace(/["\\]/g, '');
-          return `[[${n}]](${CITE_HREF}${n} "${title}")`;
+          // Escaped: squisq parses `[[3]]` as a wiki link, which would eat the
+          // link it opens and leave `(#cite:3 …)` as text.
+          return `[\\[${n}\\]](${CITE_HREF}${n} "${title}")`;
         })
         .join('');
     },

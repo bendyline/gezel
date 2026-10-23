@@ -1,5 +1,5 @@
 import type { CatalogItemSummary } from '@bendyline/gezel';
-import { initialPoppetjeForGezel } from '@bendyline/gezel';
+import { catalogGroundFor, initialPoppetjeForGezel } from '@bendyline/gezel';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { Poppetje } from '../../poppetje/index.js';
 import { runtimeCapabilities } from '../../runtime-capabilities.js';
@@ -70,9 +70,9 @@ export function selectionIdentity(selection: PaneSelection): {
 }
 
 /**
- * The selection's artwork, sized by the tile it sits in. A catalog type that
- * declares its own `icon` glyph wins over the item's shipped art, matching
- * the gallery card.
+ * The selection's artwork, sized by the tile it sits in. A catalog type's
+ * shipped mark wins, painted on its category ground; its `icon` glyph is the
+ * fallback, matching the gallery card.
  */
 export function SelectionArt({
   selection,
@@ -81,17 +81,17 @@ export function SelectionArt({
   selection: PaneSelection;
   size: number;
 }) {
-  const isCatalog = selection.source === 'catalog';
-  const catalogType = catalogTypeOf(selection);
-  const useItemArt = isCatalog && !catalogType?.icon;
   return (
     <CatalogArtwork
-      {...(useItemArt && selection.source === 'catalog' && selection.item.iconSvg
+      {...(selection.source === 'catalog' && selection.item.iconSvg
         ? { iconSvg: selection.item.iconSvg }
         : {})}
-      {...(useItemArt && selection.source === 'catalog' && selection.item.logoUrl
+      {...(selection.source === 'catalog' && selection.item.logoUrl
         ? { logoUrl: selection.item.logoUrl }
         : {})}
+      ground={
+        selection.source === 'catalog' ? catalogGroundFor(selection.item.manifest) : undefined
+      }
       svgClassName="gz-npd-hero-art-svg"
       fallback={
         <ProjectGlyph

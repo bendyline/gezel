@@ -20,7 +20,6 @@
 import {
   type ChatMessage,
   DOCUMENT_WRITE_TOOLS,
-  EVIDENCE_TOOLS,
   type EvidenceItem,
   type FactualLookupPreference,
   type GroundingEvidence,
@@ -35,6 +34,7 @@ import {
   factualLookupTools,
   groundText,
   groundingProblems,
+  isEvidenceTool,
   isProseFile,
   parseCitationNumbers,
 } from '@bendyline/gezel';
@@ -42,8 +42,32 @@ import type { ToolGroundingHooks } from '../providers/mcp-bridge.js';
 
 const log = createLogger('grounding');
 
-/** Refusals per write tool per turn before a write goes through with a warning. */
-export const MAX_WRITE_REFUSALS = 2;
+/**
+ * Refusals per write target per turn before a write goes through with a
+ * warning. Each refusal costs a whole rewrite, minutes on a local model; after
+ * one the writer has seen every problem, and a second mostly cost time.
+ */
+export const MAX_WRITE_REFUSALS = 1;
+
+/**
+ * Name-only problems refuse a write only when there are this many of them.
+ * Capitalized-word heuristics are the noisiest part of the check ("Report",
+ * "Status", a dashboard called Grafana), so a few become a warning instead.
+ */
+const NAME_ONLY_REFUSAL_THRESHOLD = 3;
+
+/**
+ * Whether a problem sentence is worth a rewrite on its own: a citation to
+ * evidence that does not exist, or an unsupported year, number, month or
+ * quotation, or a year set beside the wrong person. A sentence missing only
+ * names, or a plain number away from a name (a PR number, a count), is noted
+ * rather than refused.
+ */
+export function blocksWrite(sentence: SentenceGrounding): boolean {
+  if (sentence.status === 'bad-citation') return true;
+  if (sentence.checks.some((check) => !check.found && check.kind !== 'name')) return true;
+  return sentence.missing.some((detail) => /^(?:1\d{3}|20\d{2}) next to /.test(detail));
+}
 
 const EXCERPT_CHARS = 600;
 
@@ -76,6 +100,34 @@ export function removeCitationMarkers(text: string): string {
       return stripped.startsWith(indent) ? stripped : `${indent}${stripped.trimStart()}`;
     })
     .join('\n');
+}
+
+/**
+ * What counts as the person's own words for a factual turn: restating them
+ * needs no citation. Today's date counts, because the turn's own clock line
+ * tells the model ("past the current date (2026-10-07)" was refused as an
+ * invented number). So do the writer's own name and the project's (a report
+ * signed "Rafiq" was refused, 2026-10-10), and the project's about and
+ * mission, which every session reads as its standing brief (a postmortem
+ * restating the about's "500-rate spike" was refused, 2026-10-20).
+ */
+export function personGivenText(parts: {
+  messages: readonly string[];
+  clockLines: readonly string[];
+  gezelName?: string | undefined;
+  project?: { name?: string; about?: string; missionObjectives?: string } | null | undefined;
+  /** The person's own selected text: rewriting it is not inventing it. */
+  subjectStateLine?: string | null | undefined;
+}): string {
+  return [
+    ...parts.messages,
+    ...parts.clockLines,
+    parts.gezelName ?? '',
+    parts.project?.name ?? '',
+    parts.project?.about ?? '',
+    parts.project?.missionObjectives ?? '',
+    parts.subjectStateLine ?? '',
+  ].join('\n');
 }
 
 const str = (v: unknown): string | undefined =>
@@ -327,8 +379,13 @@ export class EvidenceLedger {
   }
 
   /** The `[n]` header for an evidence tool's result, or null for any other tool. */
-  labelToolResult(tool: string, args: Record<string, unknown>, text: string): string | null {
-    if (!EVIDENCE_TOOLS.has(tool) || !text.trim()) return null;
+  labelToolResult(
+    tool: string,
+    args: Record<string, unknown>,
+    text: string,
+    source?: { thirdParty: boolean },
+  ): string | null {
+    if (!isEvidenceTool(tool, source) || !text.trim()) return null;
     const structured = structuredToolEvidence(tool, text);
     if (structured.length > 0) {
       return structured
@@ -551,6 +608,7 @@ export class EvidenceLedger {
       return null;
     }
     const refused = this.refusals.get(refusalKey) ?? 0;
+    const blocking = problems.filter(blocksWrite);
     // At zero evidence, a detailed sentence-by-sentence critique invites a
     // model to redraft from memory. Give the only productive next action on
     // the first rejection. Keep counting these attempts so that once evidence
@@ -563,6 +621,15 @@ export class EvidenceLedger {
       this.refusals.set(refusalKey, Math.min(MAX_WRITE_REFUSALS, refused + 1));
       log.warn(`${tool} blocked: no evidence collected`);
       return { kind: 'reject', error: this.researchFirstRemedy(tool, words.place) };
+    }
+    if (blocking.length === 0 && problems.length < NAME_ONLY_REFUSAL_THRESHOLD) {
+      log.info(
+        `${tool} wrote ${problems.length} sentence(s) with unsourced names; noted, not refused`,
+      );
+      this.refusals.delete(refusalKey);
+      this.unverifiedWrites.push(...problems);
+      this.unverifiedPlaces.add(words.place);
+      return null;
     }
     if (refused < MAX_WRITE_REFUSALS) {
       this.refusals.set(refusalKey, refused + 1);
@@ -593,7 +660,7 @@ export class EvidenceLedger {
     return {
       checkWrite: (tool, args) =>
         this.checkDocumentWrite(tool, args) ?? this.checkProseFileWrite(tool, args),
-      labelEvidence: (tool, args, text) => this.labelToolResult(tool, args, text),
+      labelEvidence: (tool, args, text, source) => this.labelToolResult(tool, args, text, source),
     };
   }
 

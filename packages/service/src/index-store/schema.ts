@@ -80,6 +80,8 @@ CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols (collection_id, file_path
 -- dst_path is the resolved repo-relative target, NULL when external/unresolved.
 -- file_hash gates incremental recompute: re-extract a file's imports only when
 -- its content hash changes (same discipline as symbols/chunks).
+-- dst_path is never written: one specifier can name several files, so the
+-- resolved graph lives in file_edges. flags holds IMPORT_FLAG bits.
 CREATE TABLE IF NOT EXISTS imports (
   collection_id TEXT NOT NULL,
   src_path TEXT NOT NULL,
@@ -87,10 +89,47 @@ CREATE TABLE IF NOT EXISTS imports (
   dst_path TEXT,
   file_hash TEXT,
   bindings TEXT,
+  flags INTEGER,
   PRIMARY KEY (collection_id, src_path, raw_specifier)
 );
 CREATE INDEX IF NOT EXISTS idx_imports_src ON imports (collection_id, src_path);
 CREATE INDEX IF NOT EXISTS idx_imports_dst ON imports (collection_id, dst_path);
+
+-- The resolved file-to-file graph: every import row the resolvers could map to
+-- a file in the project. Rebuilt wholesale when the file set or a resolver
+-- changes (meta edges_fingerprint / edges_resolver_version), because one new
+-- file can satisfy a specifier nothing resolved before.
+CREATE TABLE IF NOT EXISTS file_edges (
+  collection_id TEXT NOT NULL,
+  src_path TEXT NOT NULL,
+  dst_path TEXT NOT NULL,
+  raw_specifier TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  resolver TEXT NOT NULL,
+  bindings TEXT,
+  flags INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (collection_id, src_path, dst_path, raw_specifier)
+);
+CREATE INDEX IF NOT EXISTS idx_file_edges_dst ON file_edges (collection_id, dst_path);
+
+-- The workspace's git history, for the Timeline view: each commit's time and
+-- subject (never its author), and the indexed files it touched. Replaced
+-- wholesale by the git-stats ingest, which reads the same capped log.
+CREATE TABLE IF NOT EXISTS git_commits (
+  collection_id TEXT NOT NULL,
+  sha TEXT NOT NULL,
+  committed_at INTEGER NOT NULL,
+  subject TEXT NOT NULL,
+  PRIMARY KEY (collection_id, sha)
+);
+CREATE INDEX IF NOT EXISTS idx_git_commits_at ON git_commits (collection_id, committed_at);
+CREATE TABLE IF NOT EXISTS git_commit_files (
+  collection_id TEXT NOT NULL,
+  sha TEXT NOT NULL,
+  path TEXT NOT NULL,
+  PRIMARY KEY (collection_id, sha, path)
+);
+CREATE INDEX IF NOT EXISTS idx_git_commit_files_path ON git_commit_files (collection_id, path);
 
 -- Persisted, stable city-map layout. Districts (folders) and blocks (files)
 -- keep their coordinates build-over-build so the map stays familiar; buildings
@@ -473,7 +512,12 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_history
 // (EmbeddingGemma 2, images plus audio/video windows). The old vectors live
 // in another space, so they are dropped, not migrated; the media tier
 // re-embeds lazily.
-const SCHEMA_VERSION = 14;
+// v15: imports.flags (re-export / type-only / dynamic) and file_edges, the
+// resolved dependency graph as a stored artifact. Additive; the first static
+// pass after the upgrade fills file_edges.
+// v16: git_commits and git_commit_files, the history the Timeline view reads.
+// Additive; the next git-stats ingest fills them.
+const SCHEMA_VERSION = 16;
 
 /**
  * Add a column to an existing table if it isn't already present. SQLite has no
@@ -530,6 +574,8 @@ export function applySchema(
   addColumnIfMissing(db, 'symbols', 'parent', 'TEXT');
   // v6 → v7: named import bindings (JSON ImportBinding[]) on dependency edges.
   addColumnIfMissing(db, 'imports', 'bindings', 'TEXT');
+  // v14 → v15: import flags; NULL on rows extracted before the bump.
+  addColumnIfMissing(db, 'imports', 'flags', 'INTEGER');
   // v7 → v8: capped summarize retries on the enrichment gate.
   addColumnIfMissing(db, 'enrichments', 'attempts', 'INTEGER DEFAULT 0');
   // v12 → v13: the last failure reason behind a capped-out hash. No backfill —

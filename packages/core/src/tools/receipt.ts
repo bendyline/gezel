@@ -116,6 +116,17 @@ export function humanizeToolCall(
       return 'Listed the tasks';
     case 'list_gezels':
       return 'Listed the team';
+    case 'generate_image': {
+      const size =
+        typeof a.width === 'number' && typeof a.height === 'number'
+          ? `${a.width}×${a.height}`
+          : undefined;
+      return join(
+        `Drew ${oneLine(str('prompt'), 70) ?? 'an image'}`,
+        str('aspectRatio') ?? size,
+        str('quality') && str('quality') !== 'standard' ? str('quality') : undefined,
+      );
+    }
     case 'write_file':
       return `Wrote ${str('path') ?? 'a file'}`;
     case 'append_to_file':

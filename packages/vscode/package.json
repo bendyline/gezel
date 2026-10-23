@@ -104,6 +104,12 @@
         "displayName": "Gezel",
         "managementCommand": "gezel.openChat"
       }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "gezel.tools",
+        "label": "Gezel"
+      }
     ]
   },
   "scripts": {

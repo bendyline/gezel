@@ -13,8 +13,14 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { api } from '../../api.js';
 import { useActivity } from '../../components/activity-context.js';
 import { navigateToTab, openUpdates } from '../../components/nav-actions.js';
+import { queueOpenKnowledge } from '../../components/pending-open-knowledge.js';
 import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../../shared-chat-events.js';
+import {
+  connectStartupHome,
+  restoreStartupFocus,
+  saveStartupDraft,
+} from '../../startup/handoff.js';
 import { FolderOnboardingStep, shouldOfferFolderStep } from './FolderOnboardingStep.js';
 import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
 import { MakeSomething } from './MakeSomething.js';
@@ -165,7 +171,53 @@ export function HomeWorkshop({
   const offerFolderStep =
     setup === null && !folderStepDone && shouldOfferFolderStep(config, projects);
   const [tab, setTab] = useState<HomeGreetingTab>('greeting');
+  const [startupReading, setStartupReading] = useState<{
+    tab: HomeGreetingTab;
+    node: HTMLElement;
+  }>();
+  const [startupDraftId, setStartupDraftId] = useState<string>();
+  const startupTransferred = useRef(false);
+  const startupDraftReady = useRef<(() => void) | undefined>(undefined);
+  useEffect(
+    () =>
+      connectStartupHome(async (view, node) => {
+        const draftId = await saveStartupDraft(view, meesterGezelId);
+        const restored = draftId
+          ? new Promise<void>((resolve, reject) => {
+              const timeout = window.setTimeout(
+                () => reject(new Error('The draft editor is still opening')),
+                10_000,
+              );
+              startupDraftReady.current = () => {
+                window.clearTimeout(timeout);
+                resolve();
+              };
+            })
+          : Promise.resolve();
+        const keepReading =
+          view.tab !== 'greeting' ||
+          view.scroll > 0 ||
+          !!window.__GEZEL__?.startupHome?.snapshot?.status;
+        if (keepReading || draftId || view.focused) {
+          startupTransferred.current = true;
+          userToggledCollapse.current = true;
+          reconciledCollapse.current = true;
+          homeVisit.greeted = true;
+          const nextTab = view.tab === 'chat' ? 'greeting' : view.tab;
+          setTab(nextTab);
+          setCollapsed(view.tab === 'chat' || view.focused);
+          if (keepReading) setStartupReading({ tab: nextTab, node });
+        }
+        setStartupDraftId(draftId);
+        await restored;
+        window.addEventListener('gezel:startup-finished', () => restoreStartupFocus(view), {
+          once: true,
+        });
+      }),
+    [meesterGezelId],
+  );
   const selectTab = (next: HomeGreetingTab) => {
+    setStartupReading(undefined);
     setTab(next);
     userToggledCollapse.current = true;
     if (collapsed) {
@@ -317,15 +369,21 @@ export function HomeWorkshop({
     [questions],
   );
   useEffect(() => {
-    if (!morningQuestion || welcoming || homeVisit.openedMorningFor === morningQuestion.id) return;
+    if (
+      !morningQuestion ||
+      welcoming ||
+      startupTransferred.current ||
+      homeVisit.openedMorningFor === morningQuestion.id
+    )
+      return;
     homeVisit.openedMorningFor = morningQuestion.id;
     reconciledCollapse.current = true;
     setCollapsed(false);
     setTab('night');
   }, [morningQuestion, welcoming]);
   useEffect(() => {
-    if (!morningQuestion && !nightReview && tab === 'night') setTab('greeting');
-  }, [morningQuestion, nightReview, tab]);
+    if (!morningQuestion && !nightReview && tab === 'night' && !startupReading) setTab('greeting');
+  }, [morningQuestion, nightReview, tab, startupReading]);
   const morningReview =
     morningQuestion?.intent?.kind === 'night-shift-review' &&
     latestReview?.windowKey === morningQuestion.intent.windowKey
@@ -388,6 +446,7 @@ export function HomeWorkshop({
     });
   }
 
+  const showGreeting = !welcoming || startupReading !== undefined;
   return (
     <div className="home-workshop" data-testid="home-workshop">
       {banner}
@@ -396,7 +455,7 @@ export function HomeWorkshop({
         onKeyDown={(event) => {
           if (
             event.key === 'Escape' &&
-            !welcoming &&
+            showGreeting &&
             !collapsed &&
             !event.defaultPrevented &&
             event.currentTarget.contains(event.target as Node)
@@ -406,7 +465,7 @@ export function HomeWorkshop({
           }
         }}
       >
-        {!welcoming && (
+        {showGreeting && (
           <GreetingBand
             chips={chips}
             meesterName={meesterName}
@@ -416,6 +475,21 @@ export function HomeWorkshop({
             collapsed={collapsed}
             onToggleCollapse={toggleCollapse}
             tab={tab}
+            startupReading={startupReading}
+            onLeaveStartupReading={() => {
+              if (startupReading?.tab === 'tour') {
+                const intent = {
+                  catalogId: 'handboek',
+                  documentId: startupReading.node.dataset.articleId || 'welcome',
+                };
+                queueOpenKnowledge(intent);
+                navigateToTab({ kind: 'area', area: 'knowledge' });
+                window.dispatchEvent(
+                  new CustomEvent('gezel:open-knowledge-document', { detail: intent }),
+                );
+              }
+              setStartupReading(undefined);
+            }}
             onTabChange={selectTab}
             statusReport={statusReport}
             statusRunning={statusRunning}
@@ -442,12 +516,14 @@ export function HomeWorkshop({
           ref={conversationRef}
           aria-label="Meester chat"
           tabIndex={-1}
-          inert={!welcoming && !collapsed}
+          inert={showGreeting && !collapsed}
         >
           <div className="home-workshop-main">
             {meesterGezelId ? (
               <MeesterConversation
                 meesterGezelId={meesterGezelId}
+                startupDraftId={startupDraftId}
+                onStartupDraftReady={() => startupDraftReady.current?.()}
                 meesterName={meesterName}
                 meesterIcon={meesterIcon}
                 meesterPoppetje={meesterPoppetje}
@@ -494,7 +570,7 @@ export function HomeWorkshop({
             )}
           </div>
         </section>
-        {!welcoming && !collapsed && (
+        {showGreeting && !collapsed && (
           <button
             type="button"
             className="home-workshop-chat-shade"

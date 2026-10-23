@@ -56,6 +56,21 @@ import run_2026_10_12_dgx_spark_class from './runs/2026-10-12-dgx-spark-class.js
 import run_2026_10_12_m5max_cli_integration from './runs/2026-10-12-m5max-cli-integration.json' with {
   type: 'json',
 };
+import run_2026_10_16_m5max_local_seven_completed_arms from './runs/2026-10-16-m5max-local-seven-completed-arms.json' with {
+  type: 'json',
+};
+import run_2026_10_20_rtx5070ti_core_continuation_64k from './runs/2026-10-20-rtx5070ti-core-continuation-64k.json' with {
+  type: 'json',
+};
+import run_2026_10_20_rtx5070ti_core_original_64k from './runs/2026-10-20-rtx5070ti-core-original-64k.json' with {
+  type: 'json',
+};
+import run_2026_10_20_rtx5070ti_nanbeige_core_32k from './runs/2026-10-20-rtx5070ti-nanbeige-core-32k.json' with {
+  type: 'json',
+};
+import run_2026_10_21_m5max_ornith_observed_subset from './runs/2026-10-21-m5max-ornith-observed-subset.json' with {
+  type: 'json',
+};
 
 /** Every recorded sweep. Merged (and ordered by recency) by ../index.ts. */
 export const RUN_SHARDS: ScorecardDataset[] = [
@@ -78,4 +93,9 @@ export const RUN_SHARDS: ScorecardDataset[] = [
   run_2026_10_11_m5max_six_providers as unknown as ScorecardDataset,
   run_2026_10_12_dgx_spark_class as unknown as ScorecardDataset,
   run_2026_10_12_m5max_cli_integration as unknown as ScorecardDataset,
+  run_2026_10_16_m5max_local_seven_completed_arms as unknown as ScorecardDataset,
+  run_2026_10_20_rtx5070ti_core_continuation_64k as unknown as ScorecardDataset,
+  run_2026_10_20_rtx5070ti_core_original_64k as unknown as ScorecardDataset,
+  run_2026_10_20_rtx5070ti_nanbeige_core_32k as unknown as ScorecardDataset,
+  run_2026_10_21_m5max_ornith_observed_subset as unknown as ScorecardDataset,
 ];

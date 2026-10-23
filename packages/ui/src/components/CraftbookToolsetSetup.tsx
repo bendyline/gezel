@@ -1,12 +1,15 @@
+/** Displays actionable setup requirements with readable, fully wrapped descriptions. */
 import type { CatalogItemDetail, CraftbookToolsetNeed, ToolsetManifest } from '@bendyline/gezel';
 import { useState } from 'react';
 import { api } from '../api.js';
 import { ToolsetConfigForm, type ToolsetConfigFormValue } from './ToolsetConfigForm.js';
 import { COMMUNITY_SECRETS_WARNING, isCommunityCatalogItem } from './catalog-provenance.js';
+import { craftbookDescription } from './craftbook-description.js';
 
 interface Props {
   /** The required toolsets a craftbook declares that aren't installed yet. */
   missing: CraftbookToolsetNeed[];
+  paramSchema?: Record<string, unknown>;
   /** Called once every listed toolset has been installed. */
   onAllInstalled: () => void;
   onCancel: () => void;
@@ -21,7 +24,7 @@ interface Props {
  * click. When the last one lands, `onAllInstalled` fires so the caller
  * can re-fetch and proceed to invoke the craftbook.
  */
-export function CraftbookToolsetSetup({ missing, onAllInstalled, onCancel }: Props) {
+export function CraftbookToolsetSetup({ missing, paramSchema, onAllInstalled, onCancel }: Props) {
   const [installed, setInstalled] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -106,12 +109,13 @@ export function CraftbookToolsetSetup({ missing, onAllInstalled, onCancel }: Pro
       <ul className="commands-panel-list">
         {missing.map((m) => {
           const done = installed.has(m.toolsetId);
+          const description = m.reason ? craftbookDescription(m.reason, paramSchema) : undefined;
           return (
             <li key={`need:${m.toolsetId}`}>
-              <div className="commands-panel-item" title={m.reason ?? m.toolsetId}>
+              <div className="commands-panel-item" title={description ?? m.toolsetId}>
                 <span className="commands-panel-item-name">{m.toolsetId}</span>
                 {m.reason && (
-                  <span className="commands-panel-item-desc muted small">{m.reason}</span>
+                  <span className="commands-panel-item-desc muted small">{description}</span>
                 )}
                 <span className="commands-panel-item-actions">
                   {done ? (

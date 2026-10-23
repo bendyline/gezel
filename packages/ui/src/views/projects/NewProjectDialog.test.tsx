@@ -37,6 +37,96 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+it('passes an optional existing folder when creating a seedless catalog type', async () => {
+  vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock' } as never);
+  vi.mocked(api.listCatalogItems).mockImplementation(
+    async (kind) =>
+      ({
+        items:
+          kind === 'project-type'
+            ? [
+                catalogItem({
+                  kind: 'project-type',
+                  id: 'media-library',
+                  name: 'Media Library',
+                  category: 'creative',
+                  workspaceSeed: [],
+                }),
+              ]
+            : [],
+      }) as never,
+  );
+  vi.mocked(api.createTypedProject).mockResolvedValue({
+    project: { id: 'my-media' },
+    applied: { gezelsCreated: [], warnings: [] },
+  } as never);
+  render(
+    <NewProjectDialog open mode="crew" onClose={() => undefined} onCreated={() => undefined} />,
+  );
+  fireEvent.click(await screen.findByRole('radio', { name: 'Media Library' }));
+  fireEvent.change(screen.getByRole('textbox', { name: /Folder \(optional\)/ }), {
+    target: { value: 'D:\\Pictures' },
+  });
+  fireEvent.change(screen.getByRole('textbox', { name: /^Name/ }), {
+    target: { value: 'My media' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /^Create/ }));
+  await waitFor(() =>
+    expect(api.createTypedProject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'My media',
+        workingDir: 'D:\\Pictures',
+        projectType: expect.objectContaining({ typeId: 'media-library' }),
+      }),
+    ),
+  );
+});
+
+it('opens straight on a named type’s form, and on the gallery once the type is gone', async () => {
+  vi.mocked(api.listCatalogItems).mockImplementation(
+    async (kind) =>
+      ({
+        items:
+          kind === 'project-type'
+            ? [
+                catalogItem({
+                  kind: 'project-type',
+                  id: 'media-library',
+                  name: 'Media Library',
+                  category: 'creative',
+                }),
+              ]
+            : [],
+      }) as never,
+  );
+  const named = render(
+    <NewProjectDialog
+      open
+      mode="crew"
+      initialTypeId="media-library"
+      onClose={() => undefined}
+      onCreated={() => undefined}
+    />,
+  );
+  // Nothing shows until the catalog answers, so the gallery never flashes.
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Project types' })).toBeInTheDocument();
+  expect(screen.queryByRole('radio', { name: 'Media Library' })).not.toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: /^Name/ })).toHaveValue('Media Library');
+  named.unmount();
+
+  render(
+    <NewProjectDialog
+      open
+      mode="crew"
+      initialTypeId="retired-type"
+      onClose={() => undefined}
+      onCreated={() => undefined}
+    />,
+  );
+  expect(await screen.findByRole('radio', { name: 'Media Library' })).toBeInTheDocument();
+});
+
 const repos = [
   {
     name: 'first',

@@ -7,6 +7,8 @@
  * in sync with the format.
  */
 
+import { dashboardHtml } from './app-scaffold-page.js';
+
 /** Stricter than the catalog id rule: ids become folder names on every OS. */
 export const SCAFFOLD_ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,63}$/;
 
@@ -47,91 +49,21 @@ export const meta = defineScript({
 } as const);
 
 const input = gezel.input as InferredInput<typeof meta>;
-const raw = await gezel.fs.read('data.json').catch(() => '{"records":[]}');
+// The installer seeds this file. A missing/unreadable file is an error, not an empty store.
+const raw = await gezel.fs.read('data.json');
 const data = JSON.parse(raw) as { records: Array<{ title: string; at: string }> };
-if (input.action === 'add' && input.title) {
-  data.records.push({ title: input.title, at: new Date().toISOString() });
+if (!Array.isArray(data.records) || data.records.some(record =>
+  !record || typeof record.title !== 'string' || typeof record.at !== 'string')) {
+  throw new Error('data.json must contain a records array with title and at strings.');
+}
+if (input.action === 'add') {
+  const title = input.title.trim();
+  if (!title) throw new Error('Enter a title for the record.');
+  data.records.push({ title, at: new Date().toISOString() });
   await gezel.fs.write('data.json', JSON.stringify(data, null, 2));
 }
 gezel.output({ records: data.records });
 `;
-
-function dashboardHtml(name: string): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>
-  :root {
-    color-scheme: light dark;
-    --bg: #f7f4ee;
-    --ink: #2c2925;
-    --card: #fffdf9;
-    --line: #d9d2c6;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #211e1a;
-      --ink: #e8e2d8;
-      --card: #2b2723;
-      --line: #47413a;
-    }
-  }
-  body {
-    margin: 0;
-    padding: 1.5rem;
-    background: var(--bg);
-    color: var(--ink);
-    font: 15px/1.5 system-ui, sans-serif;
-  }
-  h1 { font-size: 1.2rem; margin: 0 0 1rem; }
-  ul { list-style: none; margin: 0; padding: 0; }
-  li {
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    padding: 0.5rem 0.75rem;
-    margin-bottom: 0.5rem;
-  }
-  button {
-    background: var(--card);
-    color: var(--ink);
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    padding: 0.4rem 0.9rem;
-    cursor: pointer;
-  }
-</style>
-</head>
-<body>
-<h1>${name}</h1>
-<ul id="records"></ul>
-<button id="add">Add a record</button>
-<script>
-  const list = document.querySelector('#records');
-  function render(data) {
-    list.replaceChildren();
-    for (const record of data.records) {
-      const item = document.createElement('li');
-      item.textContent = record.title + ' — ' + record.at.slice(0, 10);
-      list.append(item);
-    }
-  }
-  async function refresh() {
-    render(await gezel.data.read('data.json', { as: 'json' }));
-  }
-  gezel.data.watch('data.json', refresh);
-  document.querySelector('#add').addEventListener('click', async () => {
-    await gezel.tools.invoke('add_record', { title: 'Added from the page' });
-    await refresh();
-  });
-  refresh();
-</script>
-</body>
-</html>
-`;
-}
 
 /**
  * Render the scaffold as `[source-root-relative path, content]` pairs.
@@ -150,6 +82,18 @@ export function scaffoldGezappSource(
   const roleId = `${id}-lead`;
   const typeDir = `items/project-types/${shard(id)}/${id}`;
   const roleDir = `items/gezel-templates/${shard(roleId)}/${roleId}`;
+  // A name in pages.tools is deliberately excluded from the model roster.
+  // Both audiences use the same implementation through separate aliases.
+  const addRecord = {
+    description: 'Add one record to data.json.',
+    script: 'records-store',
+    inputs: {
+      type: 'object',
+      properties: { title: { type: 'string', minLength: 1 } },
+      required: ['title'],
+    },
+    bind: { action: 'add' },
+  };
 
   const files: Array<[string, string]> = [
     [
@@ -171,6 +115,33 @@ The loop:
 2. \`gezel app validate .\`
 3. \`gezel app pack .\`
 4. \`gezel app add ${id}-1.0.0.gezapp --yes\` then \`gezel app apply ${id}\` in a project folder.
+
+The keeper uses \`add_record\` to update the seeded \`data.json\` through
+\`records-store\`. Read failures are errors; they never reset existing data.
+${
+  opts?.withPage
+    ? `
+Run \`gezel app demo . --out ../${id}-demo\`, then open its
+\`pages/dashboard/index.html\` to try the standalone demo. Sample records stay in memory; **Reset demo** restores them.
+Inside Gezel the same page uses real project data and the page-only
+\`page_add_record\` alias. Names in \`pages.tools\` are excluded from the gezel's
+tool roster, so keep its \`add_record\` alias separate. Both call \`records-store\`.
+The browser preview is read-only; embedded and shared-site modes can run actions
+when the host permits them. A host error never switches the page to demo data.
+
+Fonts come from Gezel's injected \`--font-body\`, \`--font-ui\`, and
+\`--font-heading\` variables. The demo exporter supplies the same fonts and components.
+Keep platform assets out of the authored page. The page owns its layout/colors, follows host theme updates, and
+unsubscribes from theme/file watches on teardown. Use explicit button/keyboard
+handlers: the embedded sandbox blocks native form submissions.
+`
+    : ''
+}
+Authoring references:
+
+- [Building Gezel apps](https://github.com/bendyline/gezel/blob/main/docs/building-gezel-apps.md)
+- [Page APIs](https://github.com/bendyline/gezel/blob/main/docs/output-pane-api.md)
+- [Page style guide](https://github.com/bendyline/gezel/blob/main/docs/handboek/technical/gezel-app-page-style-guide.md)
 `,
     ],
     [
@@ -210,17 +181,8 @@ The loop:
         missionTemplate: 'mission.md',
         gezels: [{ templateId: roleId, voorman: true }],
         tools: [
-          {
-            name: 'add_record',
-            description: 'Add one record to data.json.',
-            script: 'records-store',
-            inputs: {
-              type: 'object',
-              properties: { title: { type: 'string' } },
-              required: ['title'],
-            },
-            bind: { action: 'add' },
-          },
+          { name: 'add_record', ...addRecord },
+          ...(opts?.withPage ? [{ name: 'page_add_record', ...addRecord }] : []),
         ],
         workspaceSeed: ['data.json'],
         ...(opts?.withPage
@@ -229,7 +191,7 @@ The loop:
                 entry: 'dashboard/index.html',
                 api: 1,
                 reads: [{ source: 'workspace', path: 'data.json' }],
-                tools: ['add_record'],
+                tools: ['page_add_record'],
               },
             }
           : {}),

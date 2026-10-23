@@ -1,4 +1,6 @@
+import { copyFile, writeFile } from 'node:fs/promises';
 import { defineConfig } from 'tsup';
+import { buildProjectPageTypography } from '../../scripts/project-page-typography.mjs';
 import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
 
 export default defineConfig({
@@ -35,5 +37,11 @@ export default defineConfig({
     options.jsx = 'automatic';
   },
   banner: { js: '#!/usr/bin/env node' },
-  onSuccess: () => stripSourcemapCommentsFromBuild(),
+  onSuccess: async () => {
+    await stripSourcemapCommentsFromBuild();
+    await writeFile('dist/page-typography.css', buildProjectPageTypography('../ui'));
+    for (const name of ['LICENSE-HankenGrotesk-OFL-1.1.txt', 'LICENSE-PTSerif-OFL-1.1.txt']) {
+      await copyFile(`../ui/src/assets/fonts/${name}`, `dist/${name}`);
+    }
+  },
 });

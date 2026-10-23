@@ -301,13 +301,24 @@ export function partitionModelToolNameFindings(findings: ModelToolNameContractFi
   return { errors, catalogFindings };
 }
 
+/**
+ * Sources that speak for one catalog toolset only: they run, or prompt, when
+ * that toolset is wired, so they declare its exact roster rather than every
+ * catalog tool.
+ */
+const TOOLSET_SCOPED_SOURCES: ReadonlyMap<string, string> = new Map([
+  ['packages/service/src/providers/mcp-wrappers/docblocks-save-artifact.ts', 'docblocks'],
+  ['evals/src/scenarios/docblocks-theme-roundtrip.ts', 'docblocks'],
+]);
+
 async function sourceEntries(
   rootDir: string,
-  catalogToolNames: readonly string[],
+  catalogToolsets: ReadonlyMap<string, readonly string[]>,
 ): Promise<{
   entries: ModelToolNameCorpusEntry[];
   files: Set<string>;
 }> {
+  const catalogToolNames = Array.from(new Set([...catalogToolsets.values()].flat()));
   const entries: ModelToolNameCorpusEntry[] = [];
   const files = new Set<string>();
   for (const group of SOURCE_PATTERN_GROUPS) {
@@ -342,6 +353,10 @@ async function sourceEntries(
         source === 'packages/service/src/chat/instructions.ts'
       ) {
         for (const tool of catalogToolNames) declaredTools.add(tool);
+      }
+      const scopedToolset = TOOLSET_SCOPED_SOURCES.get(source);
+      if (scopedToolset) {
+        for (const tool of catalogToolsets.get(scopedToolset) ?? []) declaredTools.add(tool);
       }
       if (source === 'evals/src/scenarios/tool-routing-browser.ts') {
         for (const tool of LOCAL_PREVIEW_BROWSER_TOOLS) declaredTools.add(tool);
@@ -625,7 +640,6 @@ export async function buildModelToolNameContract(args?: {
   const dataDir = args?.dataDir ?? gildeDataDir();
   const toolContracts = await loadBuiltinToolContractsForLint();
   const catalogToolsets = await readCatalogToolsets(dataDir);
-  const catalogToolNames = Array.from(new Set([...catalogToolsets.values()].flat()));
   const allowedTools = new Set<string>(
     Object.values(TOOL_REGISTRY)
       .filter((entry) => entry.modelFacing)
@@ -639,7 +653,7 @@ export async function buildModelToolNameContract(args?: {
     declaredTools: [...LOCAL_PREVIEW_BROWSER_TOOLS],
   }));
   const files = new Set<string>();
-  const source = await sourceEntries(rootDir, catalogToolNames);
+  const source = await sourceEntries(rootDir, catalogToolsets);
   entries.push(...source.entries);
   for (const file of source.files) files.add(file);
   const generated = await generatedCatalogEntries(rootDir, dataDir, catalogToolsets);

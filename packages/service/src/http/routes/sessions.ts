@@ -151,6 +151,17 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
   // unwind, preventing autonomous work from racing back in.
   app.post('/emergency-stop', async (c) => {
     const stopPromise = ctx.chat.emergencyStop();
+    // Cameras stop watching and stay paused until the person resumes each
+    // one; a sound a lookout is playing stops now.
+    ctx.lookouts?.stopSounds();
+    const camerasStopped = (ctx.liveConnectors?.emergencyStop() ?? Promise.resolve(0)).catch(
+      (err) => {
+        log.warn(
+          `[sessions] emergency-stop could not pause cameras: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return 0;
+      },
+    );
     try {
       const previous = await ctx.store.readConfig();
       if (previous.aiEngagementMode !== 'reactive') {
@@ -173,6 +184,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       // persisting the new one.
       ctx.chat.setEngagementMode('reactive');
       const stopped = await stopPromise;
+      await camerasStopped;
       return c.json({
         ok: true,
         engagementMode: 'reactive' as const,
@@ -290,6 +302,8 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
             ...(body.nudge ? { nudge: true } : {}),
             ...(body.draftId ? { draftId: body.draftId } : {}),
             ...(body.turnIntent ? { turnIntent: body.turnIntent } : {}),
+            ...(body.imageSettings ? { imageSettings: body.imageSettings } : {}),
+            ...(body.imageCues ? { imageCues: body.imageCues } : {}),
           })
           .catch((err) => {
             const message = err instanceof Error ? err.message : String(err);

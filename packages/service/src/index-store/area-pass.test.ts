@@ -141,6 +141,128 @@ describe('area pass (deep-pass tier 2)', () => {
     expect(await ci.architectureNote('p1')).toBe('The architecture note.');
   });
 
+  it('maps a large folder through its subfolders, children first', async () => {
+    await mkdir(join(dir, 'lib', 'parse'), { recursive: true });
+    await mkdir(join(dir, 'lib', 'render'), { recursive: true });
+    for (let i = 0; i < 20; i++) {
+      await writeFile(join(dir, 'lib', 'parse', `p${i}.ts`), `export const p${i} = ${i};\n`);
+    }
+    for (let i = 0; i < 15; i++) {
+      await writeFile(join(dir, 'lib', 'render', `r${i}.ts`), `export const r${i} = ${i};\n`);
+    }
+    await writeFile(join(dir, 'lib', 'index.ts'), 'export * from "./parse/p0";\n');
+    // A second importer: the map lists only files more than one file leans on.
+    await writeFile(
+      join(dir, 'lib', 'render', 'r0.ts'),
+      'import { p0 } from "../parse/p0";\nexport const r0 = p0;\n',
+    );
+    await runWorkspaceContentIndex(dir, 'p1', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'p1', dir),
+    });
+    await ci.enrich(
+      'p1',
+      deps(async () => 'File summary.'),
+      100,
+    );
+
+    const prompts = new Map<string, string>();
+    const summarize = vi.fn(async (prompt: string, activity?: string) => {
+      prompts.set(activity ?? '', prompt);
+      if (prompt.includes('top-level folder')) return 'Architecture note.';
+      return `Handles ${activity}.\n\n- lib/index.ts — the entry`;
+    });
+    await ci.enrichAreas('p1', deps(summarize));
+
+    expect(summarize.mock.calls.map((call) => call[1])).toEqual([
+      'Mapping lib/parse',
+      'Mapping lib/render',
+      'Mapping lib',
+      'Mapping the project',
+    ]);
+    const rollup = prompts.get('Mapping lib') ?? '';
+    expect(rollup).toContain('directly inside the "lib/" folder');
+    expect(rollup).toContain('- lib/parse/: Handles Mapping lib/parse.');
+    expect(rollup).toContain('- lib/index.ts:');
+    // map_repo carries the purpose, not the key-file list beneath it.
+    const map = await ci.mapRepo('p1');
+    expect(map.areas.find((a) => a.path === 'lib')?.purpose).toBe('Handles Mapping lib.');
+
+    const codebase = await ci.codebaseMap('p1');
+    expect(codebase.indexed).toBe(true);
+    expect(codebase.architecture).toBe('Architecture note.');
+    expect(codebase.areas.map((a) => [a.path, a.depth])).toEqual([
+      ['lib', 0],
+      ['lib/parse', 1],
+      ['lib/render', 1],
+    ]);
+    expect(codebase.areas[0]?.keyFiles).toEqual([{ path: 'lib/index.ts', purpose: 'the entry' }]);
+    expect(codebase.loadBearing.map((f) => f.path)).toContain('lib/parse/p0.ts');
+  });
+
+  it('keeps a large test or fixture folder as one area', async () => {
+    for (const sub of ['alpha', 'beta']) {
+      await mkdir(join(dir, 'test', sub), { recursive: true });
+      for (let i = 0; i < 20; i++) {
+        await writeFile(join(dir, 'test', sub, `t${i}.ts`), `export const t${i} = ${i};\n`);
+      }
+    }
+    await runWorkspaceContentIndex(dir, 'p1', artifacts, {
+      dbPath: projectContentIndexDbFile(home, 'p1', dir),
+    });
+    await ci.enrich(
+      'p1',
+      deps(async () => 'File summary.'),
+      100,
+    );
+    const summarize = vi.fn(async (_prompt: string, _activity?: string) => 'Holds tests.');
+    await ci.enrichAreas('p1', deps(summarize));
+    expect(summarize.mock.calls.map((call) => call[1])).toEqual([
+      'Mapping test',
+      'Mapping the project',
+    ]);
+  });
+
+  it('drops the summaries of folders that are no longer areas', async () => {
+    await mkdir(join(dir, 'lib', 'parse'), { recursive: true });
+    await mkdir(join(dir, 'lib', 'render'), { recursive: true });
+    for (let i = 0; i < 20; i++) {
+      await writeFile(join(dir, 'lib', 'parse', `p${i}.ts`), `export const p${i} = ${i};\n`);
+      await writeFile(join(dir, 'lib', 'render', `r${i}.ts`), `export const r${i} = ${i};\n`);
+    }
+    const reindex = async () => {
+      await runWorkspaceContentIndex(dir, 'p1', artifacts, {
+        dbPath: projectContentIndexDbFile(home, 'p1', dir),
+      });
+      await ci.enrich(
+        'p1',
+        deps(async () => 'File summary.'),
+        100,
+      );
+    };
+    await reindex();
+    await ci.enrichAreas(
+      'p1',
+      deps(async () => 'Folder summary.'),
+    );
+    const before = await ci.searchAreaSummaries('p1', 'folder summary', 20);
+    const folders = (rows: Array<{ areaPath: string }>) =>
+      rows
+        .map((a) => a.areaPath)
+        .filter((p) => p !== '::project')
+        .sort();
+    expect(folders(before)).toEqual(['lib', 'lib/parse', 'lib/render']);
+
+    // 20 files left: lib is one area again and its subfolders' rows go.
+    await rm(join(dir, 'lib', 'render'), { recursive: true, force: true });
+    await reindex();
+    await ci.enrichAreas(
+      'p1',
+      deps(async () => 'Folder summary.'),
+    );
+    const after = await ci.searchAreaSummaries('p1', 'folder summary', 20);
+    expect(folders(after)).toEqual(['lib']);
+  });
+
   it('does nothing when the summarizer yields nothing (no local model)', async () => {
     await seedWorkspace();
     await ci.enrich(

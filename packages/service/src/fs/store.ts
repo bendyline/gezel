@@ -7,7 +7,7 @@ import {
 export { pickRoleBasedName } from '@bendyline/gezel/runtime';
 import { ConfigStore } from '@bendyline/gezel-inference/internal/fs/config-store';
 export { ConfigCorruptionError } from '@bendyline/gezel-inference/internal/fs/config-store';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import {
   appendFile,
   chmod,
@@ -24,15 +24,12 @@ import {
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
-  type BoekwachterIssueDismissalReason,
-  type BoekwachterIssueStatus,
   type ChatModelTuning,
   type ChatSession,
   ChatSessionSchema,
   type ChatSessionSummary,
   type Craftbook,
   type CraftbookSummary,
-  type FileReviewIssue,
   type GezelCharacter,
   type GezelConfig,
   type GezelDetail,
@@ -49,6 +46,11 @@ import {
   type InstalledToolset,
   InstalledToolsetSchema,
   KeyedLock,
+  type Lookout,
+  LookoutSchema,
+  type LookoutStateFile,
+  LookoutStateFileSchema,
+  type LookoutsFile,
   type MeesterStatusReport,
   MeesterStatusReportSchema,
   type MeesterStatusState,
@@ -117,7 +119,7 @@ import {
   seedCharacter,
   serializeGezelMarkdown,
 } from '@bendyline/gezel';
-import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
+import { copyFileAtomic, writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
 import {
   assertNoTemplatePlaceholderPath,
@@ -146,7 +148,6 @@ import {
   pendingHandoffsFile,
   projectActivityFile,
   projectArtifactsDir,
-  projectBoekwachterIssuesFile,
   projectDir,
   projectDocsDir,
   projectFindingLifecycleFile,
@@ -158,6 +159,8 @@ import {
   projectLocalImportsFile,
   projectLocalPendingImportsFile,
   projectLocalRoot,
+  projectLookoutStateFile,
+  projectLookoutsFile,
   projectMetaFile,
   projectPrivateDir,
   projectQuestionsFile,
@@ -210,6 +213,11 @@ import {
 import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../workspace/errors.js';
 import { type JournalContext, appendJournalEntry } from '../workspace/journal.js';
 import { bootstrapWorkspace } from '../workspace/template.js';
+import {
+  BoekwachterIssueStore,
+  type BoekwachterReviewObservation,
+  type ProjectBoekwachterIssueRecord,
+} from './boekwachter-issue-store.js';
 import { CraftbookStore } from './craftbook-store.js';
 import {
   DEFAULT_PROJECT_ABOUT_MD,
@@ -234,6 +242,8 @@ import {
   parseProjectHistory,
   rebuildProjectFromHistory,
 } from './project-meta-recovery.js';
+import { isViewStateOnlyPatch } from './project-view-state.js';
+import { StartupHomeCache } from './startup-home.js';
 import { TaskFilesStore } from './task-files-store.js';
 import {
   type WalkDirResult,
@@ -266,49 +276,16 @@ interface ProjectFindingLifecycleFile {
   findings: ProjectFindingLifecycle;
 }
 
-export interface ProjectBoekwachterIssueRecord extends FileReviewIssue {
-  id: string;
-  ref: string;
-  fingerprint: string;
-  path: string;
-  status: BoekwachterIssueStatus;
-  taskRef?: string;
-  dismissalReason?: BoekwachterIssueDismissalReason;
-  createdAt: string;
-  lastSeenAt: string;
-  lastSeenContentHash: string;
-  lastCheckedAt?: string;
-  lastCheckedContentHash?: string;
-  seenAt?: string;
-  resolvedAt?: string;
-  dismissedAt?: string;
-}
-
-interface ProjectBoekwachterIssuesFile {
-  version: 1;
-  nextNumber: number;
-  issues: Record<string, ProjectBoekwachterIssueRecord>;
-}
-
-export interface BoekwachterReviewObservation {
-  path: string;
-  contentHash: string;
-  issues: FileReviewIssue[];
-}
-
-/** Stable across line movement; the content hash tracks the exact occurrence separately. */
-export function boekwachterIssueFingerprint(path: string, issue: FileReviewIssue): string {
-  const normalized = [
-    'boekwachter-v1',
-    path.replaceAll('\\', '/').trim(),
-    issue.category.trim().toLocaleLowerCase(),
-    issue.message.trim().toLocaleLowerCase().replace(/\s+/g, ' '),
-  ].join('\0');
-  return createHash('sha256').update(normalized).digest('hex');
-}
+export {
+  type BoekwachterReviewObservation,
+  type ProjectBoekwachterIssueRecord,
+  boekwachterIssueFingerprint,
+} from './boekwachter-issue-store.js';
 
 export interface StoreOptions {
   home: string;
+  /** Product-shipped runtimes, overlaid on system toolsets without persisting paths. */
+  bundledToolsets?: readonly InstalledToolset[];
   /**
    * Whether `home` is private to one OS user. On Unix these homes are created
    * and repaired as 0700 so ordinary 0644 state files remain unreachable to
@@ -398,7 +375,26 @@ export class Store {
     return this.config.readConfig();
   }
   writeConfig(config: Partial<Record<keyof GezelConfig, unknown>>): Promise<GezelConfig> {
-    return this.config.writeConfig(config);
+    return this.config.writeConfig(config).then(async (saved) => {
+      if (['meesterGezelId', 'themePref', 'sidebarSide'].some((key) => key in config)) {
+        await this.refreshStartupHome().catch(() => {});
+      }
+      return saved;
+    });
+  }
+
+  private readonly startupHome: StartupHomeCache;
+
+  async refreshStartupHome(): Promise<void> {
+    if (this.engineOnly) return;
+    await this.startupHome.refresh(this);
+  }
+
+  async cacheStartupNightReview(
+    review: import('@bendyline/gezel').NightShiftReviewResponse,
+  ): Promise<void> {
+    if (this.engineOnly) return;
+    await this.startupHome.cacheNightReview(this, review);
   }
 
   private readonly home: string;
@@ -416,7 +412,8 @@ export class Store {
   private readonly craftbooks: CraftbookStore;
   private projectCreationTail: Promise<void> = Promise.resolve();
   private readonly findingLifecycleLocks = new KeyedLock();
-  private readonly boekwachterIssueLocks = new KeyedLock();
+  /** The BW issue registry (`boekwachter-issues.json`) and its verdict log. */
+  readonly boekwachterIssues: BoekwachterIssueStore;
   /**
    * Summary of every session file the listings have read, trusted only while
    * the file's mtime, size and inode are unchanged. `listSessions`, the
@@ -448,9 +445,14 @@ export class Store {
    *  enter this stream. */
   private readonly gezelListeners = new Set<(ev: GezelChangeEvent) => void>();
 
+  private readonly bundledToolsets: readonly InstalledToolset[];
+
   constructor(opts: StoreOptions) {
+    this.bundledToolsets =
+      opts.serviceRole === 'machine-engine' ? [] : (opts.bundledToolsets ?? []);
     this.config = new ConfigStore(opts.home);
     this.home = opts.home;
+    this.startupHome = new StartupHomeCache(opts.home);
     this.history = opts.history;
     this.external = opts.external;
     this.engineOnly = opts.serviceRole === 'machine-engine';
@@ -483,6 +485,7 @@ export class Store {
       touchProject: (id) => this.touchProject(id),
     });
     this.memories = new MemoryStore({ home: this.home, external: this.external });
+    this.boekwachterIssues = new BoekwachterIssueStore(this.home);
     this.taskFiles = new TaskFilesStore({ home: this.home, external: this.external });
     this.craftbooks = new CraftbookStore({
       home: this.home,
@@ -3071,329 +3074,40 @@ export class Store {
     });
   }
 
-  /**
-   * Materialize current review output into durable BW records. Review rows are
-   * disposable and content-hash keyed; these records intentionally are not.
-   *
-   * The path and fingerprint lookups are built once up front. Scanning
-   * `Object.values(state.issues)` per observation *and* per issue was
-   * quadratic, and both factors grow with the same thing — a repo with 2.4k
-   * reviewed paths and 7.7k open findings spent ~10s of blocked event loop
-   * here, on every workspace file the UI opened (`file-review` reconciles
-   * before it reads).
-   */
-  async observeProjectBoekwachterReviews(
+  observeProjectBoekwachterReviews(
     id: string,
     observations: readonly BoekwachterReviewObservation[],
   ): Promise<void> {
-    if (observations.length === 0) return;
-    await this.withBoekwachterIssueLock(id, async () => {
-      const state = await this.readProjectBoekwachterIssuesFile(id);
-      let changed = false;
-      const at = nowIso();
-
-      const recordsByPath = new Map<string, ProjectBoekwachterIssueRecord[]>();
-      const recordByFingerprint = new Map<string, ProjectBoekwachterIssueRecord>();
-      const fingerprintKey = (path: string, fingerprint: string) => `${path}\0${fingerprint}`;
-      for (const record of Object.values(state.issues)) {
-        const forPath = recordsByPath.get(record.path);
-        if (forPath) forPath.push(record);
-        else recordsByPath.set(record.path, [record]);
-        // First writer wins, matching the `.find()` this replaced.
-        const key = fingerprintKey(record.path, record.fingerprint);
-        if (!recordByFingerprint.has(key)) recordByFingerprint.set(key, record);
-      }
-
-      for (const observation of observations) {
-        const path = observation.path.replaceAll('\\', '/');
-        const pathRecords = recordsByPath.get(path) ?? [];
-        for (const record of pathRecords) {
-          if (record.lastCheckedContentHash === observation.contentHash) continue;
-          record.lastCheckedContentHash = observation.contentHash;
-          record.lastCheckedAt = at;
-          changed = true;
-        }
-
-        for (const issue of observation.issues) {
-          const fingerprint = boekwachterIssueFingerprint(path, issue);
-          const record = recordByFingerprint.get(fingerprintKey(path, fingerprint));
-          if (!record) {
-            const ref = `BW-${state.nextNumber++}`;
-            const created: ProjectBoekwachterIssueRecord = {
-              id: randomUUID(),
-              ref,
-              fingerprint,
-              path,
-              severity: issue.severity,
-              category: issue.category,
-              message: issue.message,
-              ...(issue.line !== undefined ? { line: issue.line } : {}),
-              status: 'open',
-              createdAt: at,
-              lastSeenAt: at,
-              lastSeenContentHash: observation.contentHash,
-              lastCheckedAt: at,
-              lastCheckedContentHash: observation.contentHash,
-            };
-            state.issues[created.id] = created;
-            // Keep the lookups live: a later observation of the same path must
-            // see this record, exactly as the old full scan of `state.issues` did.
-            pathRecords.push(created);
-            if (!recordsByPath.has(path)) recordsByPath.set(path, pathRecords);
-            recordByFingerprint.set(fingerprintKey(path, fingerprint), created);
-            changed = true;
-            continue;
-          }
-
-          const seenOnNewContent = record.lastSeenContentHash !== observation.contentHash;
-          if (record.severity !== issue.severity) {
-            record.severity = issue.severity;
-            changed = true;
-          }
-          if (record.category !== issue.category) {
-            record.category = issue.category;
-            changed = true;
-          }
-          if (record.message !== issue.message) {
-            record.message = issue.message;
-            changed = true;
-          }
-          if (record.line !== issue.line) {
-            if (issue.line === undefined) delete record.line;
-            else record.line = issue.line;
-            changed = true;
-          }
-          if (seenOnNewContent) {
-            record.lastSeenContentHash = observation.contentHash;
-            record.lastSeenAt = at;
-            changed = true;
-            // A resolved lead reported again by a genuinely fresh review is a
-            // recurrence. A user dismissal is an explicit opinion and stays
-            // dismissed until they reopen it.
-            if (record.status === 'resolved') {
-              record.status = 'open';
-              delete record.taskRef;
-              delete record.resolvedAt;
-            }
-          }
-          if (record.lastCheckedContentHash !== observation.contentHash) {
-            record.lastCheckedContentHash = observation.contentHash;
-            record.lastCheckedAt = at;
-            changed = true;
-          }
-        }
-      }
-
-      if (changed) await this.writeProjectBoekwachterIssuesFile(id, state);
-    });
+    return this.boekwachterIssues.observeProjectBoekwachterReviews(id, observations);
   }
 
-  async listProjectBoekwachterIssues(id: string): Promise<ProjectBoekwachterIssueRecord[]> {
-    const state = await this.readProjectBoekwachterIssuesFile(id);
-    return Object.values(state.issues).sort(
-      (a, b) => Number(a.ref.slice(3)) - Number(b.ref.slice(3)),
-    );
+  listProjectBoekwachterIssues(id: string): Promise<ProjectBoekwachterIssueRecord[]> {
+    return this.boekwachterIssues.listProjectBoekwachterIssues(id);
   }
 
-  async getProjectBoekwachterIssue(
+  getProjectBoekwachterIssue(
     id: string,
     ref: string,
   ): Promise<ProjectBoekwachterIssueRecord | null> {
-    return (await this.listProjectBoekwachterIssues(id)).find((issue) => issue.ref === ref) ?? null;
+    return this.boekwachterIssues.getProjectBoekwachterIssue(id, ref);
   }
 
-  async updateProjectBoekwachterIssue(
-    id: string,
-    ref: string,
-    patch: {
-      status?: BoekwachterIssueStatus;
-      seen?: boolean;
-      taskRef?: string;
-      dismissalReason?: BoekwachterIssueDismissalReason;
-    },
+  updateProjectBoekwachterIssue(
+    ...args: Parameters<BoekwachterIssueStore['updateProjectBoekwachterIssue']>
   ): Promise<ProjectBoekwachterIssueRecord | null> {
-    return this.withBoekwachterIssueLock(id, async () => {
-      const state = await this.readProjectBoekwachterIssuesFile(id);
-      const record = Object.values(state.issues).find((issue) => issue.ref === ref);
-      if (!record) return null;
-      const at = nowIso();
-
-      if (patch.seen !== undefined) {
-        if (patch.seen) record.seenAt = at;
-        else delete record.seenAt;
-      }
-      if (patch.status !== undefined) {
-        record.status = patch.status;
-        if (patch.status === 'resolved') {
-          record.resolvedAt = at;
-          delete record.dismissedAt;
-          delete record.dismissalReason;
-        } else if (patch.status === 'dismissed') {
-          record.dismissedAt = at;
-          record.dismissalReason = patch.dismissalReason ?? 'not_an_issue';
-          delete record.resolvedAt;
-          delete record.taskRef;
-        } else {
-          delete record.resolvedAt;
-          delete record.dismissedAt;
-          delete record.dismissalReason;
-          if (patch.status === 'open') delete record.taskRef;
-        }
-      }
-      if (patch.taskRef) record.taskRef = patch.taskRef;
-      await this.writeProjectBoekwachterIssuesFile(id, state);
-      return record;
-    });
+    return this.boekwachterIssues.updateProjectBoekwachterIssue(...args);
   }
 
-  async settleProjectBoekwachterIssuesForTask(
-    id: string,
-    taskRef: string,
-    outcome: 'complete' | 'canceled',
+  settleProjectBoekwachterIssuesForTask(
+    ...args: Parameters<BoekwachterIssueStore['settleProjectBoekwachterIssuesForTask']>
   ): Promise<number> {
-    return this.withBoekwachterIssueLock(id, async () => {
-      const state = await this.readProjectBoekwachterIssuesFile(id);
-      let changed = 0;
-      const at = nowIso();
-      for (const record of Object.values(state.issues)) {
-        if (record.taskRef !== taskRef || record.status !== 'in_progress') continue;
-        if (outcome === 'complete') {
-          record.status = 'resolved';
-          record.resolvedAt = at;
-        } else {
-          record.status = 'open';
-          delete record.taskRef;
-        }
-        changed++;
-      }
-      if (changed > 0) await this.writeProjectBoekwachterIssuesFile(id, state);
-      return changed;
-    });
+    return this.boekwachterIssues.settleProjectBoekwachterIssuesForTask(...args);
   }
 
-  /**
-   * Proposal lifecycle for Boekwachter issues. A drafted fix is not a fix, so
-   * issues claimed by a drafting task stay in progress until the person acts
-   * on the proposal: applying a file resolves the issues on that file, and an
-   * issue no live proposal touches goes back to open. `taskRefs` is the
-   * drafting family — the task that claimed the issues and its shards.
-   */
-  async settleProjectBoekwachterIssuesForProposal(
-    id: string,
-    taskRefs: readonly string[],
-    change: { resolvePaths?: readonly string[]; reopenUnless?: ReadonlySet<string> },
+  settleProjectBoekwachterIssuesForProposal(
+    ...args: Parameters<BoekwachterIssueStore['settleProjectBoekwachterIssuesForProposal']>
   ): Promise<{ resolved: number; reopened: number }> {
-    return this.withBoekwachterIssueLock(id, async () => {
-      const state = await this.readProjectBoekwachterIssuesFile(id);
-      const family = new Set(taskRefs);
-      const resolve = new Set(change.resolvePaths ?? []);
-      const at = nowIso();
-      let resolved = 0;
-      let reopened = 0;
-      for (const record of Object.values(state.issues)) {
-        if (record.status !== 'in_progress' || !record.taskRef || !family.has(record.taskRef)) {
-          continue;
-        }
-        if (resolve.has(record.path)) {
-          record.status = 'resolved';
-          record.resolvedAt = at;
-          resolved++;
-        } else if (change.reopenUnless && !change.reopenUnless.has(record.path)) {
-          record.status = 'open';
-          delete record.taskRef;
-          reopened++;
-        }
-      }
-      if (resolved + reopened > 0) await this.writeProjectBoekwachterIssuesFile(id, state);
-      return { resolved, reopened };
-    });
-  }
-
-  private async readProjectBoekwachterIssuesFile(
-    id: string,
-  ): Promise<ProjectBoekwachterIssuesFile> {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(await readFile(projectBoekwachterIssuesFile(this.home, id), 'utf8'));
-    } catch {
-      return { version: 1, nextNumber: 1, issues: {} };
-    }
-    const root = parsed as { nextNumber?: unknown; issues?: unknown } | null;
-    const raw = root?.issues;
-    const issues: Record<string, ProjectBoekwachterIssueRecord> = {};
-    let maxNumber = 0;
-    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-      for (const [id, value] of Object.entries(raw)) {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-        const row = value as Record<string, unknown>;
-        if (
-          typeof row.ref !== 'string' ||
-          !/^BW-[1-9]\d*$/.test(row.ref) ||
-          typeof row.fingerprint !== 'string' ||
-          typeof row.path !== 'string' ||
-          typeof row.category !== 'string' ||
-          typeof row.message !== 'string' ||
-          (row.severity !== 'info' && row.severity !== 'minor' && row.severity !== 'major') ||
-          (row.status !== 'open' &&
-            row.status !== 'in_progress' &&
-            row.status !== 'resolved' &&
-            row.status !== 'dismissed') ||
-          typeof row.createdAt !== 'string' ||
-          typeof row.lastSeenAt !== 'string' ||
-          typeof row.lastSeenContentHash !== 'string'
-        ) {
-          continue;
-        }
-        const stableId = typeof row.id === 'string' && row.id ? row.id : id;
-        issues[stableId] = {
-          id: stableId,
-          ref: row.ref,
-          fingerprint: row.fingerprint,
-          path: row.path,
-          severity: row.severity,
-          category: row.category,
-          message: row.message,
-          ...(typeof row.line === 'number' && row.line >= 1 ? { line: Math.round(row.line) } : {}),
-          status: row.status,
-          ...(typeof row.taskRef === 'string' ? { taskRef: row.taskRef } : {}),
-          ...(row.dismissalReason === 'not_an_issue' ||
-          row.dismissalReason === 'duplicate' ||
-          row.dismissalReason === 'wont_fix'
-            ? { dismissalReason: row.dismissalReason }
-            : {}),
-          createdAt: row.createdAt,
-          lastSeenAt: row.lastSeenAt,
-          lastSeenContentHash: row.lastSeenContentHash,
-          ...(typeof row.lastCheckedAt === 'string' ? { lastCheckedAt: row.lastCheckedAt } : {}),
-          ...(typeof row.lastCheckedContentHash === 'string'
-            ? { lastCheckedContentHash: row.lastCheckedContentHash }
-            : {}),
-          ...(typeof row.seenAt === 'string' ? { seenAt: row.seenAt } : {}),
-          ...(typeof row.resolvedAt === 'string' ? { resolvedAt: row.resolvedAt } : {}),
-          ...(typeof row.dismissedAt === 'string' ? { dismissedAt: row.dismissedAt } : {}),
-        };
-        maxNumber = Math.max(maxNumber, Number(row.ref.slice(3)) || 0);
-      }
-    }
-    const requestedNext =
-      typeof root?.nextNumber === 'number' && Number.isInteger(root.nextNumber)
-        ? root.nextNumber
-        : 1;
-    return { version: 1, nextNumber: Math.max(maxNumber + 1, requestedNext, 1), issues };
-  }
-
-  private async writeProjectBoekwachterIssuesFile(
-    id: string,
-    state: ProjectBoekwachterIssuesFile,
-  ): Promise<void> {
-    await writeFileAtomic(
-      projectBoekwachterIssuesFile(this.home, id),
-      `${JSON.stringify(state, null, 2)}\n`,
-    );
-  }
-
-  private async withBoekwachterIssueLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
-    return this.boekwachterIssueLocks.run(id, fn);
+    return this.boekwachterIssues.settleProjectBoekwachterIssuesForProposal(...args);
   }
 
   private async withFindingLifecycleLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
@@ -3550,6 +3264,8 @@ export class Store {
        * view in noise.
        */
       outputPaneVisible?: boolean | null;
+      /** The Views tab's view; `null` resets it. View state, like the above. */
+      selectedView?: string | null;
       /** Project shape — `solo` (a single-gezel job/game) vs `crew`. */
       mode?: 'crew' | 'solo';
       /** Custom project-lead label (e.g. checkers → "Opponent"); `null` clears it. */
@@ -3655,7 +3371,7 @@ export class Store {
           : undefined);
     const updated: Project = {
       ...meta,
-      updatedAt: nowIso(),
+      updatedAt: isViewStateOnlyPatch(patch) ? meta.updatedAt : nowIso(),
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
       ...(patch.icon === null
@@ -3705,6 +3421,9 @@ export class Store {
         : patch.outputPaneVisible !== undefined
           ? { outputPaneVisible: patch.outputPaneVisible }
           : {}),
+      ...(patch.selectedView !== undefined
+        ? { selectedView: patch.selectedView ?? undefined }
+        : {}),
       ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
       ...(patch.leadLabel === null
         ? { leadLabel: undefined }
@@ -4245,6 +3964,7 @@ export class Store {
   async writeMeesterStatus(report: MeesterStatusReport): Promise<void> {
     await mkdir(meesterStatusDir(this.home), { recursive: true });
     await writeFileAtomic(meesterStatusFile(this.home), `${JSON.stringify(report, null, 2)}\n`);
+    if (!this.engineOnly) await this.startupHome.cacheStatus(report).catch(() => {});
   }
 
   async readMeesterStatusState(): Promise<MeesterStatusState> {
@@ -5439,6 +5159,28 @@ export class Store {
    * journal (which is text-shaped) but still emits a history event so
    * postmortems can see what was written and when.
    */
+  /** Publish a host-owned staged upload. Never accepts a page-supplied source path. */
+  async importProjectWorkspaceFile(
+    id: string,
+    filePath: string,
+    stagedPath: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: true, path: filePath });
+    if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
+    const full = await resolveInside(gate.workspaceDir, filePath, { allowRoot: false });
+    await mkdir(dirname(full), { recursive: true });
+    signal?.throwIfAborted();
+    await copyFileAtomic(stagedPath, full, { noReplace: true, signal });
+    await this.history?.log({
+      kind: 'workspace.write',
+      projectId: id,
+      summary: `Imported ${filePath}`,
+      details: { path: filePath, binary: true, origin: 'page' },
+    });
+    await this.touchProject(id);
+  }
+
   async writeProjectWorkspaceBinary(
     id: string,
     filePath: string,
@@ -5709,6 +5451,7 @@ export class Store {
     // new one is at the target path, never an in-between zeroed file.
     await writeFileAtomic(path, `${JSON.stringify(session, null, 2)}\n`);
     this.notifySessionChange({ type: 'write', gezelId: session.gezelId, sessionId: session.id });
+    if (!this.engineOnly) await this.startupHome.cacheSession(session).catch(() => {});
   }
 
   /** Per-session lock serializing {@link mutateSession}'s read-modify-writes. */
@@ -6736,6 +6479,70 @@ export class Store {
     return out;
   }
 
+  /* ─── Lookouts (the person's standing instructions to a project) ────── */
+
+  /**
+   * A project's lookouts. A lookout that no longer parses (a hand edit, a
+   * newer build's field this one rejects) is dropped with a warning rather
+   * than hiding the rest. Never touches the project's `updatedAt`.
+   */
+  async listLookouts(projectId: string): Promise<Lookout[]> {
+    let raw: string;
+    try {
+      raw = await readFile(projectLookoutsFile(this.home, projectId), 'utf8');
+    } catch {
+      return [];
+    }
+    let file: unknown;
+    try {
+      file = JSON.parse(raw);
+    } catch {
+      log.warn(`[lookouts] ignoring an unreadable lookouts.json for ${projectId}`);
+      return [];
+    }
+    const entries = Array.isArray((file as { lookouts?: unknown })?.lookouts)
+      ? (file as { lookouts: unknown[] }).lookouts
+      : [];
+    const out: Lookout[] = [];
+    for (const entry of entries) {
+      const parsed = LookoutSchema.safeParse(entry);
+      if (parsed.success) out.push(parsed.data);
+      else log.warn(`[lookouts] dropping an unreadable lookout in ${projectId}`);
+    }
+    return out;
+  }
+
+  async writeLookouts(projectId: string, lookouts: Lookout[]): Promise<void> {
+    const path = projectLookoutsFile(this.home, projectId);
+    await mkdir(dirname(path), { recursive: true });
+    const file: LookoutsFile = {
+      version: 1,
+      lookouts: lookouts.map((l) => LookoutSchema.parse(l)),
+    };
+    await writeFileAtomic(path, `${JSON.stringify(file, null, 2)}\n`);
+  }
+
+  async readLookoutState(projectId: string): Promise<LookoutStateFile> {
+    try {
+      const raw = await readFile(projectLookoutStateFile(this.home, projectId), 'utf8');
+      const parsed = LookoutStateFileSchema.safeParse(JSON.parse(raw));
+      if (parsed.success) return parsed.data;
+      log.warn(`[lookouts] resetting an unreadable lookout-state.json for ${projectId}`);
+    } catch {
+      /* first firing */
+    }
+    return { version: 1, counters: {}, firings: [] };
+  }
+
+  async writeLookoutState(projectId: string, state: LookoutStateFile): Promise<void> {
+    const path = projectLookoutStateFile(this.home, projectId);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFileAtomic(
+      path,
+      `${JSON.stringify(LookoutStateFileSchema.parse(state), null, 2)}\n`,
+    );
+  }
+
   /* ─── Growth (per-gezel leveling state) ─────────────────────────────── */
 
   /**
@@ -7070,7 +6877,18 @@ export class Store {
 
   // ── Installed toolsets ──
 
+  isBundledToolset(id: string): boolean {
+    return this.bundledToolsets.some((entry) => entry.toolsetId === id);
+  }
+
   async listInstalledToolsets(scope: ToolsetsScope): Promise<InstalledToolset[]> {
+    const stored = await this.listStoredToolsets(scope);
+    if (scope.kind !== 'system') return stored;
+    const bundledIds = new Set(this.bundledToolsets.map((entry) => entry.toolsetId));
+    return [...stored.filter((entry) => !bundledIds.has(entry.toolsetId)), ...this.bundledToolsets];
+  }
+
+  private async listStoredToolsets(scope: ToolsetsScope): Promise<InstalledToolset[]> {
     const primary = this.toolsetsFile(scope);
     try {
       const raw = await readFile(primary, 'utf8');
@@ -7100,9 +6918,14 @@ export class Store {
   }
 
   async writeInstalledToolsets(scope: ToolsetsScope, toolsets: InstalledToolset[]): Promise<void> {
+    // Shipped paths belong to this process's installation, never to user state.
+    const stored =
+      scope.kind === 'system'
+        ? toolsets.filter((entry) => !this.isBundledToolset(entry.toolsetId))
+        : toolsets;
     const file = this.toolsetsFile(scope);
     await mkdir(dirname(file), { recursive: true });
-    await writeFileAtomic(file, `${JSON.stringify(toolsets, null, 2)}\n`);
+    await writeFileAtomic(file, `${JSON.stringify(stored, null, 2)}\n`);
   }
 
   /** Directory a toolset install pipeline can extract into for this scope. */

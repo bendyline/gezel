@@ -8,6 +8,9 @@ import {
 import { imageEmbedModelId } from '../memory/image-embed-core.js';
 import { reconcileEmbedModel, reconcileImageEmbedModel } from './embed-model-reconcile.js';
 import { FACE_WIPED_AT_META_KEY } from './face/constants.js';
+import { FileEdgeTable } from './file-edge-table.js';
+import { GitHistoryTable } from './git-history-table.js';
+import { HybridFusion, type HybridHit } from './hybrid-fusion.js';
 import type {
   ChunkInput,
   CurrentFileReviewIssues,
@@ -16,7 +19,6 @@ import type {
   DocHit,
   FileRecord,
   FileReviewRow,
-  ImportBinding,
   ImportEdgeInput,
   IndexProvenance,
   LayoutRow,
@@ -203,6 +205,20 @@ export class IndexStore {
     }
   }
 
+  private edgeTable?: FileEdgeTable;
+  /** The resolved dependency graph (`file_edges`). */
+  get fileEdges(): FileEdgeTable {
+    this.edgeTable ??= new FileEdgeTable(this.db, this.collectionId);
+    return this.edgeTable;
+  }
+
+  private historyTable?: GitHistoryTable;
+  /** The workspace's git history (`git_commits`), for the Timeline view. */
+  get gitHistory(): GitHistoryTable {
+    this.historyTable ??= new GitHistoryTable(this.db, this.collectionId);
+    return this.historyTable;
+  }
+
   get vecAvailable(): boolean {
     return this.caps.vec;
   }
@@ -383,6 +399,7 @@ export class IndexStore {
           .prepare(`DELETE FROM ${table} WHERE collection_id = ? AND ${pathCol(table)} = ?`)
           .run(this.collectionId, path);
       }
+      this.fileEdges.deleteForPath(path);
       this.pruneFtsForFile(path);
     });
   }
@@ -458,6 +475,17 @@ export class IndexStore {
         signature: r.signature,
         ...(r.parent ? { parent: r.parent } : {}),
       }));
+  }
+
+  /** Each markdown document's first top-level heading, in one query (path → heading). */
+  firstHeadings(): Map<string, string> {
+    const rows = this.db
+      .prepare(
+        `SELECT file_path, name, MIN(line_start) AS line FROM symbols
+          WHERE collection_id = ? AND kind = 'h1' GROUP BY file_path`,
+      )
+      .all<{ file_path: string; name: string }>(this.collectionId);
+    return new Map(rows.map((r) => [r.file_path, r.name]));
   }
 
   /** Every symbol in the collection, ordered by file then line — bulk read for
@@ -1085,51 +1113,11 @@ export class IndexStore {
     queryVector: number[] | Float32Array | null,
     queryText: string | null,
     limit: number,
-  ): Array<{
-    path: string;
-    lineStart: number;
-    lineEnd: number;
-    kind: string;
-    name?: string;
-    snippet: string;
-    score: number;
-    source: 'vector' | 'fts';
-  }> {
-    type RankedHit = {
-      path: string;
-      lineStart: number;
-      lineEnd: number;
-      kind: string;
-      name?: string;
-      snippet: string;
-      score: number;
-      source: 'vector' | 'fts';
-    };
-    const candidates = new Map<string, RankedHit>();
-    const key = (p: string, l: number) => `${p}:${l}`;
-    const addArm = (hits: Omit<RankedHit, 'score'>[], weight: number) => {
-      const rrfK = 10;
-      for (let rank = 0; rank < hits.length; rank++) {
-        const hit = hits[rank]!;
-        const k = key(hit.path, hit.lineStart);
-        const contribution = (weight * (rrfK + 1)) / (rrfK + rank + 1);
-        const prior = candidates.get(k);
-        if (!prior) {
-          candidates.set(k, { ...hit, score: contribution });
-          continue;
-        }
-        // Preserve the richer vector excerpt when one arm found it, but let
-        // corroboration from independent arms lift the candidate's rank.
-        const preferred = hit.source === 'vector' && prior.source !== 'vector' ? hit : prior;
-        candidates.set(k, {
-          ...preferred,
-          score: Math.min(1, prior.score + contribution),
-        });
-      }
-    };
+  ): HybridHit[] {
+    const fusion = new HybridFusion();
 
     if (queryVector && this.caps.vec) {
-      addArm(
+      fusion.addArm(
         this.searchTextVectors(queryVector, limit, {
           minSimilarity: VECTOR_ARM_MIN_SIMILARITY,
         }).map((v) => ({
@@ -1145,7 +1133,7 @@ export class IndexStore {
     }
 
     if (queryText) {
-      addArm(
+      fusion.addArm(
         this.ftsSymbols(queryText, limit).map((s) => ({
           path: s.filePath,
           lineStart: s.lineStart,
@@ -1157,18 +1145,7 @@ export class IndexStore {
         })),
         0.95,
       );
-      addArm(
-        this.ftsSummaries(queryText, limit).map((s) => ({
-          path: s.filePath,
-          lineStart: 1,
-          lineEnd: 1,
-          kind: 'summary',
-          snippet: s.snippet,
-          source: 'fts' as const,
-        })),
-        0.82,
-      );
-      addArm(
+      fusion.addArm(
         this.searchDocs(queryText, limit).map((d) => ({
           path: d.filePath,
           lineStart: d.lineStart,
@@ -1179,18 +1156,20 @@ export class IndexStore {
         })),
         0.9,
       );
+      fusion.addSummaryArm(
+        this.ftsSummaries(queryText, limit).map((s) => ({
+          path: s.filePath,
+          lineStart: 1,
+          lineEnd: 1,
+          kind: 'summary',
+          snippet: s.snippet,
+          source: 'fts' as const,
+        })),
+        0.82,
+      );
     }
 
-    const ranked = [...candidates.values()].sort((a, b) => b.score - a.score);
-    const selected: RankedHit[] = [];
-    const perPath = new Map<string, number>();
-    for (const hit of ranked) {
-      if ((perPath.get(hit.path) ?? 0) >= 3) continue;
-      selected.push(hit);
-      perPath.set(hit.path, (perPath.get(hit.path) ?? 0) + 1);
-      if (selected.length >= limit) break;
-    }
-    return selected;
+    return fusion.take(limit);
   }
 
   // ── chunks + fts_docs ──────────────────────────────────────────────────
@@ -1687,17 +1666,20 @@ export class IndexStore {
   currentFileReviewIssues(): CurrentFileReviewIssues[] {
     return this.db
       .prepare(
-        `SELECT f.path, f.hash AS content_hash, r.issues
+        `SELECT f.path, f.hash AS content_hash, r.issues, r.model
          FROM files f
          JOIN file_reviews r ON r.content_hash = f.hash
          WHERE f.collection_id = ? AND f.hash IS NOT NULL AND r.notes_md IS NOT NULL
          ORDER BY f.path`,
       )
-      .all<{ path: string; content_hash: string; issues: string | null }>(this.collectionId)
+      .all<{ path: string; content_hash: string; issues: string | null; model: string | null }>(
+        this.collectionId,
+      )
       .map((row) => ({
         path: row.path,
         contentHash: row.content_hash,
         issues: parseIssuesJson(row.issues),
+        ...(row.model ? { model: row.model } : {}),
       }));
   }
 
@@ -1709,17 +1691,21 @@ export class IndexStore {
   currentFileReviewIssuesForPath(path: string): CurrentFileReviewIssues[] {
     return this.db
       .prepare(
-        `SELECT f.path, f.hash AS content_hash, r.issues
+        `SELECT f.path, f.hash AS content_hash, r.issues, r.model
          FROM files f
          JOIN file_reviews r ON r.content_hash = f.hash
          WHERE f.collection_id = ? AND f.path = ? AND f.hash IS NOT NULL
            AND r.notes_md IS NOT NULL`,
       )
-      .all<{ path: string; content_hash: string; issues: string | null }>(this.collectionId, path)
+      .all<{ path: string; content_hash: string; issues: string | null; model: string | null }>(
+        this.collectionId,
+        path,
+      )
       .map((row) => ({
         path: row.path,
         contentHash: row.content_hash,
         issues: parseIssuesJson(row.issues),
+        ...(row.model ? { model: row.model } : {}),
       }));
   }
 
@@ -2099,6 +2085,20 @@ export class IndexStore {
       )
       .all<{ area_path: string; summary_md: string; input_hash: string }>(this.collectionId)
       .map((r) => ({ areaPath: r.area_path, summaryMd: r.summary_md, inputHash: r.input_hash }));
+  }
+
+  /** Drop area summaries for folders that are no longer areas. Returns how many went. */
+  deleteAreaSummaries(areaPaths: readonly string[]): number {
+    if (areaPaths.length === 0) return 0;
+    const stmt = this.db.prepare(
+      'DELETE FROM area_summaries WHERE collection_id = ? AND area_path = ?',
+    );
+    let removed = 0;
+    this.db.transaction(() => {
+      for (const path of areaPaths)
+        removed += Number(stmt.run(this.collectionId, path).changes ?? 0);
+    });
+    return removed;
   }
 
   // ── metadata ───────────────────────────────────────────────────────────
@@ -2903,8 +2903,8 @@ export class IndexStore {
         .prepare('DELETE FROM imports WHERE collection_id = ? AND src_path = ?')
         .run(this.collectionId, srcPath);
       const ins = this.db.prepare(
-        `INSERT OR IGNORE INTO imports (collection_id, src_path, raw_specifier, dst_path, file_hash, bindings)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO imports (collection_id, src_path, raw_specifier, dst_path, file_hash, bindings, flags)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       );
       // '[]' (recorded, takes no names — side-effect import) is distinct from
       // NULL (not recorded — legacy row or undissected language, counts as a
@@ -2917,6 +2917,7 @@ export class IndexStore {
           null,
           fileHash,
           e.bindings ? JSON.stringify(e.bindings) : null,
+          e.flags ?? 0,
         );
       }
     });
@@ -2931,29 +2932,13 @@ export class IndexStore {
   }
 
   /** Every raw import edge including parsed bindings (null = never recorded). */
-  allImportsWithBindings(): Array<{
-    srcPath: string;
-    raw: string;
-    bindings: ImportBinding[] | null;
-  }> {
-    return this.db
-      .prepare('SELECT src_path, raw_specifier, bindings FROM imports WHERE collection_id = ?')
-      .all<{ src_path: string; raw_specifier: string; bindings: string | null }>(this.collectionId)
-      .map((r) => ({
-        srcPath: r.src_path,
-        raw: r.raw_specifier,
-        bindings: parseBindings(r.bindings),
-      }));
+  allImportsWithBindings(): ReturnType<FileEdgeTable['importRows']> {
+    return this.fileEdges.importRows();
   }
 
   /** One file's outbound raw imports including bindings. */
-  importsForFile(srcPath: string): Array<{ raw: string; bindings: ImportBinding[] | null }> {
-    return this.db
-      .prepare(
-        'SELECT raw_specifier, bindings FROM imports WHERE collection_id = ? AND src_path = ?',
-      )
-      .all<{ raw_specifier: string; bindings: string | null }>(this.collectionId, srcPath)
-      .map((r) => ({ raw: r.raw_specifier, bindings: parseBindings(r.bindings) }));
+  importsForFile(srcPath: string): ReturnType<FileEdgeTable['importRows']> {
+    return this.fileEdges.importRows(srcPath);
   }
 
   /** Every indexed path — the probe set for import resolution. */
@@ -3631,14 +3616,4 @@ function rowToFinding(r: SecurityFindingDbRow): SecurityFindingRow {
     status: (r.finding_status as SecurityFindingStatus) ?? 'open',
     ...(r.task_ref ? { taskRef: r.task_ref } : {}),
   };
-}
-
-function parseBindings(raw: string | null): ImportBinding[] | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as ImportBinding[]) : null;
-  } catch {
-    return null;
-  }
 }

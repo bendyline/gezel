@@ -17,6 +17,7 @@ import { readFile as fsReadFile, mkdir, stat, writeFile } from 'node:fs/promises
 import { join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import {
+  ApplyIssueVerdictsRequestSchema,
   ArchiveExtractRequestSchema,
   type ArchiveExtractResponse,
   ArchiveListRequestSchema,
@@ -40,10 +41,14 @@ import {
   FindSymbolRequestSchema,
   FixBoekwachterIssueRequestSchema,
   GetBoekwachterIssueRequestSchema,
+  ImportIssueVerdictsRequestSchema,
+  IssueHandoffRequestSchema,
   KnowledgeNearbyRequestSchema,
   ListEntityMentionsRequestSchema,
   ListFileIssuesRequestSchema,
   ListPhotosRequestSchema,
+  MAX_APP_ISSUE_VERDICTS_PER_CALL,
+  MAX_ISSUE_VERDICTS_PER_CALL,
   MapRepoRequestSchema,
   OutlineFileRequestSchema,
   PhotoGroupsRequestSchema,
@@ -72,7 +77,8 @@ import {
   type WikipediaReadResponse,
   WikipediaSearchRequestSchema,
   createLogger,
-  isLocalProvider,
+  isHarnessHiddenCatalog,
+  parseIssueHandoffResponses,
   projectManagedWorkspaceWritable,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
@@ -90,6 +96,11 @@ import { suggestCraftbooks, usefulCraftbooksForSearch } from '../../craftbook/su
 import { buildPrOverlay } from '../../filemap/pr-overlay.js';
 import { ensureGezel } from '../../gezels/ensure.js';
 import { restrictedGitArgv, restrictedGitEnv } from '../../git/restricted-args.js';
+import { issueVerdictActorFor } from '../../issue-triage/actor.js';
+import { issueVerdictStats, issueVerdictStatsResponse } from '../../issue-triage/calibration.js';
+import { buildIssueHandoffDocument } from '../../issue-triage/handoff-report.js';
+import { buildIssueHandoffQueue } from '../../issue-triage/queue.js';
+import { applyIssueVerdicts } from '../../issue-triage/verdicts.js';
 import { DuckQueryError, DuckUnavailableError } from '../../observations/duck.js';
 import {
   NoTablesError,
@@ -109,12 +120,18 @@ import {
   fetchWikipediaArticle,
 } from '../../providers/search/wikipedia.js';
 import { DEFAULT_ARCHIVE_LIMITS, guardZipArchive } from '../../safety/archive-guard.js';
+import { untouchedStarterFiles } from '../../search/project-retrieval.js';
 import { collectProviderSecretValues } from '../../secrets/registry.js';
 import { dispatchTaskEntry } from '../../tasks/entry-dispatch.js';
 import { isAllowedHermeticEvalFetchUrl } from '../../utils/eval-fetch-url.js';
 import { SsrfError, assertPublicUrl } from '../../utils/ssrf.js';
 import { WorkspaceGrepError, grepWorkspace } from '../../workspace/grep-files.js';
 import { readWorkspaceFiles } from '../../workspace/read-files.js';
+import { isFirstPartyCaller } from '../auth.js';
+import {
+  callerMaySeeArtifactPixels,
+  callerMaySeeLocation as sharedCallerMaySeeLocation,
+} from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
 import { classifyUpstreamFetchError, describeError } from '../upstream-fetch-error.js';
 
@@ -740,6 +757,33 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
     const body = UpdateBoekwachterIssueRequestSchema.parse(await c.req.json());
+    // Closing or reopening an issue is a verdict: it goes through the one
+    // owner, so the log records who decided. Read state, `in_progress` and a
+    // duplicate with no target keep the plain update.
+    const kind =
+      body.status === 'resolved'
+        ? 'fixed'
+        : body.status === 'dismissed' && body.dismissalReason !== 'duplicate'
+          ? body.dismissalReason === 'wont_fix'
+            ? 'wont_fix'
+            : 'not_a_bug'
+          : null;
+    if (kind || body.status === 'open') {
+      const by = issueVerdictActorFor(c);
+      if (!by) return c.json({ error: 'this caller may not judge issues' }, 403);
+      if (body.seen !== undefined) {
+        await ctx.contentIndex.updateBoekwachterIssue(id, body.ref, { seen: body.seen });
+      }
+      if (kind) {
+        const [result] = (await applyIssueVerdicts(ctx, id, [{ ref: body.ref, kind }], by)).results;
+        if (result?.outcome === 'refused') return c.json({ error: result.message }, 409);
+      } else if (!(await ctx.store.boekwachterIssues.reopenIssue(id, body.ref, by))) {
+        return c.json({ error: 'Boekwachter issue not found' }, 404);
+      }
+      const issue = await ctx.contentIndex.getBoekwachterIssue(id, body.ref);
+      if (!issue) return c.json({ error: 'Boekwachter issue not found' }, 404);
+      return c.json({ issue });
+    }
     const issue = await ctx.contentIndex.updateBoekwachterIssue(id, body.ref, {
       ...(body.status ? { status: body.status } : {}),
       ...(body.seen !== undefined ? { seen: body.seen } : {}),
@@ -747,6 +791,73 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     });
     if (!issue) return c.json({ error: 'Boekwachter issue not found' }, 404);
     return c.json({ issue });
+  });
+
+  app.post('/:id/tools/issue-handoff', async (c) => {
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    const body = IssueHandoffRequestSchema.parse(await c.req.json().catch(() => ({})));
+    // An outside app that is handed issues holds them for a while, so the
+    // night shift doesn't start fixing what the app is still judging.
+    const by = issueVerdictActorFor(c);
+    const lease = by?.kind === 'app' ? { client: by.client } : undefined;
+    return c.json(await buildIssueHandoffQueue(ctx, id, body, lease));
+  });
+
+  app.post('/:id/tools/issue-handoff/document', async (c) => {
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    const body = IssueHandoffRequestSchema.parse(await c.req.json().catch(() => ({})));
+    return c.json(await buildIssueHandoffDocument(ctx, id, body));
+  });
+
+  // A filled-in handoff document, picked by the person. Never an app's or a
+  // gezel's: the verdicts are recorded as imported, not as anyone's own.
+  app.post('/:id/tools/issue-verdicts/import', async (c) => {
+    const id = c.req.param('id');
+    if (!isFirstPartyCaller(c)) return c.json({ error: 'only Gezel itself imports answers' }, 403);
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    const body = ImportIssueVerdictsRequestSchema.parse(await c.req.json());
+    const parsed = parseIssueHandoffResponses(body.markdown);
+    if (parsed.projectId && parsed.projectId !== id) {
+      return c.json({ error: 'That document was made for another project.' }, 409);
+    }
+    if (parsed.verdicts.length === 0) {
+      return c.json({ results: [], applied: 0, refused: 0, skipped: parsed.skipped });
+    }
+    const by = {
+      kind: 'import' as const,
+      ...(body.declaredApp ? { declaredApp: body.declaredApp } : {}),
+    };
+    const res = await applyIssueVerdicts(
+      ctx,
+      id,
+      parsed.verdicts.slice(0, MAX_ISSUE_VERDICTS_PER_CALL),
+      by,
+    );
+    return c.json({ ...res, skipped: parsed.skipped });
+  });
+
+  app.get('/:id/index/issue-stats', async (c) => {
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    const verdicts = await ctx.store.boekwachterIssues.readIssueVerdicts(id);
+    return c.json(issueVerdictStatsResponse(issueVerdictStats(verdicts)));
+  });
+
+  app.post('/:id/tools/issue-verdicts', async (c) => {
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    const by = issueVerdictActorFor(c);
+    if (!by) return c.json({ error: 'this caller may not judge issues' }, 403);
+    const body = ApplyIssueVerdictsRequestSchema.parse(await c.req.json());
+    if (by.kind !== 'person' && body.verdicts.length > MAX_APP_ISSUE_VERDICTS_PER_CALL) {
+      return c.json(
+        { error: `send at most ${MAX_APP_ISSUE_VERDICTS_PER_CALL} verdicts per call` },
+        400,
+      );
+    }
+    return c.json(await applyIssueVerdicts(ctx, id, body.verdicts, by));
   });
 
   app.post('/:id/tools/fix-file-issue', async (c) => {
@@ -888,7 +999,11 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const project = await ctx.store.getProject(id);
     if (!project) return c.json({ error: 'project not found' }, 404);
-    const body = FileMapRequestSchema.parse(await c.req.json());
+    const parsed = FileMapRequestSchema.parse(await c.req.json());
+    // Moving a village onto the richer graph reshapes it, so only the person's
+    // own app may ask; a gezel's request is served without it.
+    const { edgePolicy, ...rest } = parsed;
+    const body = edgePolicy && isFirstPartyCaller(c) ? parsed : rest;
     const map = await ctx.contentIndex.fileMap(id, body);
     // Optional PR overlay: mark which blocks this pull request changes. Best-
     // effort — a GitHub hiccup or unlinked project just returns the base map.
@@ -985,11 +1100,15 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       // Craftbooks are an optional execution hint, never a reason for indexed
       // knowledge search to fail. Project-local, user-local, and Gilde books
       // are all gathered by the shared resolver; linked projects' local books
-      // are excluded because they are not invokable from this project.
-      suggestCraftbooks(
-        { catalog: ctx.catalog, store: ctx.store, git: ctx.git },
-        { projectId: id, query: body.query, topK: 5 },
-      ).catch(() => []),
+      // are excluded because they are not invokable from this project. An
+      // outside AI app gets none: each one names `invoke_craftbook`, a tool
+      // that app does not have.
+      c.get('auth')?.scopes.includes('harness')
+        ? Promise.resolve([])
+        : suggestCraftbooks(
+            { catalog: ctx.catalog, store: ctx.store, git: ctx.git },
+            { projectId: id, query: body.query, topK: 5 },
+          ).catch(() => []),
     ]);
     const craftbooks = usefulCraftbooksForSearch(rankedCraftbooks).map((suggestion) => ({
       id: suggestion.id,
@@ -1006,6 +1125,20 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     }));
     const { relevance, ...found } = searchResult;
     const hidden = relevance?.hidden.length ?? 0;
+    // An outside AI app never sees Gezel's own documentation, nor the starter
+    // files Gezel wrote and the person never touched: the library's welcome
+    // document matched nearly every code question in the squisq experiment.
+    if (c.get('auth')?.scopes.includes('harness')) {
+      const starter = await untouchedStarterFiles(ctx.store, id, found.results).catch(
+        () => new Set<string>(),
+      );
+      found.results = found.results.filter(
+        (r) =>
+          !starter.has(r.id) &&
+          !isHarnessHiddenCatalog(r.catalogId) &&
+          !isHarnessHiddenCatalog(r.uri),
+      );
+    }
     return c.json({
       ...found,
       craftbooks,
@@ -1202,16 +1335,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     return c.json(await ctx.contentIndex.findSimilarImages(id, body.path, body.maxResults));
   });
 
-  // A photo's coordinates say where someone lives: the person's own app and
-  // an on-device session see them; a session on a cloud model does not.
-  const callerMaySeeLocation = async (c: Context): Promise<boolean> => {
-    const auth = c.get('auth');
-    if (!auth?.appId.startsWith('session:')) return true;
-    const session = await ctx.chat
-      .getSessionRecord(auth.appId.slice('session:'.length))
-      .catch(() => null);
-    return session?.providerName ? isLocalProvider(session.providerName) : false;
-  };
+  const callerMaySeeLocation = (c: Context): Promise<boolean> => sharedCallerMaySeeLocation(ctx, c);
 
   app.post('/:id/tools/list-photos', async (c) => {
     const id = c.req.param('id');
@@ -1330,6 +1454,15 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const project = await ctx.store.getProject(id);
     if (!project) return c.json({ error: 'project not found' }, 404);
     const body = ReadImageBase64RequestSchema.parse(await c.req.json());
+    if (body.artifact && !(await callerMaySeeArtifactPixels(ctx, c, project, body.path))) {
+      return c.json(
+        {
+          error:
+            "This camera's pictures stay on this computer: only gezels running on an on-device model may see them. Read the event record's description instead.",
+        },
+        403,
+      );
+    }
     const baseDir = body.artifact
       ? ctx.store.projectArtifactsDir(id)
       : await ctx.store.projectWorkspaceDir(id);

@@ -114,10 +114,20 @@ export async function writeFileAtomic(
  * private staging file by their adapter, then copied to a sibling temporary
  * path and renamed into place.
  */
-export async function copyFileAtomic(sourcePath: string, absPath: string): Promise<void> {
+export async function copyFileAtomic(
+  sourcePath: string,
+  absPath: string,
+  opts?: { noReplace?: boolean; signal?: AbortSignal },
+): Promise<void> {
   const tmp = `${absPath}.tmp-${process.pid}-${randomUUID()}`;
   try {
     await copyFile(sourcePath, tmp);
+    opts?.signal?.throwIfAborted();
+    if (opts?.noReplace) {
+      await link(tmp, absPath);
+      await rm(tmp, { force: true }).catch(() => undefined);
+      return;
+    }
     await renameWithWindowsRetry(tmp, absPath);
   } catch (err) {
     try {

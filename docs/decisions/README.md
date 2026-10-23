@@ -29,3 +29,8 @@ regression surface when an anecdote is carrying architectural weight.
 | [0020](0020-phone-photo-reading.md) | Accepted | Phones read chat photos with the OS first and a small vision model second |
 | [0021](0021-read-only-folders.md) | Accepted | Added folders: read-only, indexed home-side, crewed only by the person's act |
 | [0022](0022-windows-mxc-sandbox.md) | Accepted | Windows scripts run in Microsoft's MXC process container |
+| [0023](0023-harness-tools.md) | Accepted | Gezel's tools in other AI apps: a project-bound, ephemeral `harness` token and a nine-tool profile |
+| [0024](0024-resolved-file-edges.md) | Accepted | Resolved file edges are an index artifact; villages keep the graph they were founded on |
+| [0025](0025-device-connectors.md) | Accepted | Device connectors: local hardware as a live, private connector (cameras first) |
+| [0026](0026-lookouts.md) | Accepted | Lookouts: a person's standing instruction to a project, acted on structured answers only |
+| [0027](0027-issue-triage.md) | Accepted | Issue triage: outside coding apps judge the night shift's leads, and the verdicts teach the reviewer |

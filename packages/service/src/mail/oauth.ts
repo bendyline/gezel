@@ -1,37 +1,43 @@
 /**
- * Mail credential lifecycle — the stored `OAuthCredential` blob shape and the
- * refresh path the Gmail/Graph providers use mid-sync. The interactive link
+ * Mail credential lifecycle — the stored OAuth credential blob and the session
+ * the Gmail/Graph providers refresh it through mid-sync. The interactive link
  * flow (authorize URL, PKCE, code exchange) lives in the generic connector
  * OAuth core (`connectors/oauth.ts` + the mail connector-type manifests, which
  * carry the endpoints, scopes, and install-level client env names).
+ *
+ * Refresh goes through the shared `OAuthSession`: it prefers the token URL the
+ * grant was issued by (a Microsoft tenant), passes the injected transport,
+ * re-persists a rotated refresh token before the pass continues, and turns a
+ * refused refresh (`invalid_grant`) into a "Re-link the account" message.
  */
 
-import { type OAuthTokens, isExpired, refreshToken } from '../connectors/oauth.js';
+import {
+  GOOGLE_OAUTH,
+  MICROSOFT_OAUTH,
+  OAuthSession,
+  type StoredOAuthCredential,
+} from '../connectors/natives/oauth-session.js';
+import { isExpired } from '../connectors/oauth.js';
+import type { OAuthTokens } from '../connectors/oauth.js';
+import type { AdapterDeps, ConnectorBindingRef } from '../connectors/types.js';
 import type { MailProviderKind } from './types.js';
 
 export { isExpired };
 export type { OAuthTokens };
 
 /** Stored credential blob for an OAuth mail account (in the SecretStore). */
-export interface OAuthCredential {
-  provider: Exclude<MailProviderKind, 'imap'>;
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: string;
-  clientId: string;
-  /** Google "desktop app" clients carry a (non-confidential) secret. */
-  clientSecret?: string;
-  /** Microsoft directory tenant (`organizations` / `consumers` / `common`). */
-  tenant?: string;
+export interface OAuthCredential extends StoredOAuthCredential {
+  /** Written by older link flows; the binding's type is authoritative now. */
+  provider?: Exclude<MailProviderKind, 'imap'>;
 }
 
 /** Token endpoint + scopes for a provider (Microsoft is tenant-parameterized). */
-export function providerEndpoints(provider: OAuthCredential['provider'], tenant = 'common') {
+export function providerEndpoints(provider: Exclude<MailProviderKind, 'imap'>, tenant = 'common') {
   if (provider === 'gmail') {
     return {
       authEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
       tokenEndpoint: 'https://oauth2.googleapis.com/token',
-      // Full mailbox access — read, send, and modify (mark read/labels).
+      // Full mailbox access — read, send, save drafts, modify labels.
       scopes: ['https://mail.google.com/'],
     };
   }
@@ -42,17 +48,32 @@ export function providerEndpoints(provider: OAuthCredential['provider'], tenant 
     scopes: [
       'offline_access',
       'https://graph.microsoft.com/Mail.Read',
+      // Saving a draft creates a message in the mailbox.
+      'https://graph.microsoft.com/Mail.ReadWrite',
       'https://graph.microsoft.com/Mail.Send',
     ],
   };
 }
 
-/** Trade a refresh token for a fresh access token. */
-export function refreshAccessToken(cred: OAuthCredential): Promise<OAuthTokens> {
-  return refreshToken({
-    endpoints: providerEndpoints(cred.provider, cred.tenant),
-    clientId: cred.clientId,
-    ...(cred.clientSecret ? { clientSecret: cred.clientSecret } : {}),
-    refreshToken: cred.refreshToken,
+/** The per-pass OAuth session for a Gmail or Microsoft mail binding. */
+export function createMailOAuthSession(
+  binding: ConnectorBindingRef,
+  deps: AdapterDeps,
+  provider: Exclude<MailProviderKind, 'imap'>,
+): OAuthSession {
+  if (provider === 'gmail') return new OAuthSession(binding, deps, GOOGLE_OAUTH);
+  // A credential from before the token URL was stored names its tenant; the
+  // binding config pins it for the newer types. Either beats `common`, which
+  // a consumers-only or organizations-only app registration refuses.
+  const configTenant = (binding.config as { tenant?: unknown } | undefined)?.tenant;
+  return new OAuthSession(binding, deps, {
+    ...MICROSOFT_OAUTH,
+    defaultTokenUrl: (cred) =>
+      providerEndpoints(
+        provider,
+        encodeURIComponent(
+          cred.tenant || (typeof configTenant === 'string' && configTenant) || 'common',
+        ),
+      ).tokenEndpoint,
   });
 }

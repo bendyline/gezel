@@ -59,3 +59,7 @@ your crew just leaves it alone at night.
 
 Work that would send anything off this computer (a cloud model, a web
 search) is never switched on for you: it waits for your OK.
+
+To look through what your crew found, open the project's
+[Views](project-views.md) tab: the files on shelves, a timeline of what
+changed when, and the reports written about them.

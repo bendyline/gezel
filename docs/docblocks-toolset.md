@@ -20,14 +20,15 @@ pre-authorized tool set from `tools[].name`
 the server when bumping versions (`docblocks mcp` publishes exactly 19 tools, no
 aliases; verify with a `tools/list` against the new tarball).
 
-The current authored release is **`@bendyline/docblocks-cli@2.7.0`**, pinned to
-tarball SHA-256
-`51b3568929b305f60b52e6d407d5e9e05742e886e2301d6c5589dde5479b5f40`.
-The CLI and MCP server come from this same package; its 19-tool inventory was
-verified against the npm release. Gezel's current `@bendyline/gilde@0.1.95`
-pin still ships DocBlocks 2.6.2. Shipping the authored update requires a new
-Gilde release and then a Gezel Gilde pin update. The catalog contract test
-verifies both releases and their exact hashes during this transition.
+Since 2.7.3 the daemon ships DocBlocks itself: `@bendyline/docblocks-cli` is an
+exact-pinned dependency of `packages/service`, currently **2.7.5** (tarball
+SHA-256 `d51a9db085298eb6ecb39f8de8cf1032497a86f7420c0650ec00006c285744f8`).
+[bundled-docblocks.ts](../packages/service/src/toolsets/bundled-docblocks.ts)
+resolves it as an immutable system toolset, so it works on first launch and
+offline with no catalog download, and an install request returns it instead of
+fetching Gilde's copy. The Gilde manifest still supplies the tool inventory that
+craftbook `autoAllow` reads, so its `tools[]` must match what the bundled
+server publishes; the catalog contract test pins that list.
 Compared with the old 2.0.0 inventory,
 `validate_document` is gone and `get_authoring_context` is present. Plain
 Markdown needs no validation preflight; conversion reports and previews carry
@@ -44,10 +45,12 @@ Gezel's own ambient dashboard (see [ADR 0007](decisions/0007-ambient-display-app
 renders through `@bendyline/squisq-cli` directly and does not depend on this
 toolset — the `png` target is the agentic, on-demand surface.
 
-To bump: add a new `versions/<ver>/manifest.json` in Gilde with the new npm
-tarball's SHA-256 and verified MCP tool inventory. Run Gilde's validation and
-`npm run build` to regenerate its indexes. Once the Gilde release is published,
-run `pnpm gilde:update` in Gezel to update the package pins and lockfile.
+To bump: set the new version in `packages/service/package.json` and in
+`bundled-docblocks.ts` (`VERSION`, plus `SHA256` = `sha256sum` of the
+`npm pack` tarball), refresh the lockfile under the install lock, and confirm a
+`tools/list` against the new package still returns the 19 tools above. When the
+inventory changes, update Gilde's `versions/<ver>/manifest.json` too and bump
+Gezel's Gilde pin once that release is published.
 
 ## 2. Project-scoped filesystem authority (ChatManager)
 

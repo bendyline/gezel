@@ -16,9 +16,16 @@
 const ADVICE_CUE_RE =
   /\b(?:should\s+(?:i|we)|would\s+you\s+(?:lean|recommend|suggest|pick|choose|go\s+with)|which\s+(?:is|one|would|should|do\s+you)|is\s+it\s+(?:better|worth)|what(?:'s|\s+is)\s+the\s+difference|pros\s+and\s+cons|what\s+do\s+you\s+(?:think|recommend|suggest)|what\s+can\s+you\s+do|who\s+are\s+you|how\s+do\s+(?:i|you|we)|how\s+does|why\s+(?:is|does|do|did))\b/i;
 
-/** Said outright, this settles it whatever else the sentence asks for. */
+/**
+ * Said outright, this settles it whatever else the sentence asks for. The
+ * no-action notes ("Heads up: Theo is debugging accept.mjs … You don't need
+ * to do anything — just confirm you've seen this note") read as work on their
+ * verbs, so the work-options prelude handed the coordinator a list of
+ * debugging and migration recipes to start (2026-10-22). A bare "heads up" or
+ * "FYI" is not a cue: "FYI the build is failing, can you fix it?" is work.
+ */
 const NO_WORK_CUE_RE =
-  /\b(?:quick\s+question|no\s+need\s+to\s+(?:start|create|make|build|set\s+up)|just\s+curious)\b/i;
+  /\b(?:quick\s+question|no\s+need\s+to\s+(?:start|create|make|build|set\s+up)|just\s+curious|(?:(?:you\s+)?(?:don['’]?t|do\s+not)|no)\s+need\s+to\s+do\s+anything|no\s+action\s+(?:is\s+)?(?:needed|required)|just\s+confirm\s+(?:that\s+)?(?:you(?:['’]ve|\s+have)\s+)?(?:seen|read|received|got)\b|just\s+(?:fyi|so\s+you\s+know|letting\s+you\s+know))\b/i;
 
 /**
  * Words that make a question-shaped sentence a request for work. "What should

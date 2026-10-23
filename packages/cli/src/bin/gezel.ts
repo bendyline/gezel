@@ -7,6 +7,10 @@ import { basename, isAbsolute as isAbsolutePath, join as joinPath } from 'node:p
 import {
   type ApiCompatVerdict,
   GEZEL_VERSION,
+  IMAGE_ASPECT_RATIOS,
+  IMAGE_QUALITIES,
+  ImageAspectRatioSchema,
+  ImageQualitySchema,
   type StorageJob,
   evaluateApiCompat,
   getLogLevel,
@@ -69,8 +73,9 @@ import {
   cliEngagementModeOption,
   parseCliEngagementMode,
 } from '../engagement-mode.js';
-import { floatOpt, intOpt, resolvePromptText, saveArtifact } from '../generate.js';
+import { enumOpt, floatOpt, intOpt, resolvePromptText, saveArtifact } from '../generate.js';
 import { resolveKnowledgeInstallSource } from '../knowledge-install.js';
+import { registerMcpCommands } from '../mcp-command.js';
 import {
   availableChatModels,
   formatAvailableChatModels,
@@ -138,6 +143,7 @@ program
 const cliGlobals = (): CliGlobals => program.opts() as CliGlobals;
 
 registerSecretCommands(program, () => connectOwned(cliGlobals()));
+registerMcpCommands(program, () => connectOwned(cliGlobals()));
 registerSecurityCommands(program, () => connectOwned(cliGlobals()));
 
 // Apply --home before any command runs so the daemon spawn env, readRuntime,
@@ -1739,6 +1745,15 @@ appCmd
   });
 
 appCmd
+  .command('demo <folder>')
+  .description('Export an offline page demo with shared components and fonts (no daemon needed)')
+  .requiredOption('-o, --out <directory>', 'new output directory for the generated demo')
+  .action(async (folder: string, opts: { out: string }) => {
+    const { runAppDemo } = await loadAppAuthorCommand();
+    await runAppDemo(folder, opts);
+  });
+
+appCmd
   .command('schemas')
   .description('The JSON Schemas an AI App author codes against, rendered from this build')
   .option('--out <dir>', 'write the schema files into a directory')
@@ -1911,6 +1926,8 @@ program
   .option('-n, --negative <text>', 'negative prompt')
   .option('-W, --width <px>', 'width in pixels')
   .option('-H, --height <px>', 'height in pixels')
+  .option('-a, --aspect <ratio>', `aspect ratio: ${IMAGE_ASPECT_RATIOS.join(', ')}`)
+  .option('-q, --quality <tier>', `size tier: ${IMAGE_QUALITIES.join(', ')} (default: standard)`)
   .option('-s, --steps <n>', 'sampler steps (default: the model recommendation)')
   .option('--seed <n>', 'seed for reproducible output')
   .option('-p, --project <id>', 'project to write the artifact under', 'default')
@@ -1922,10 +1939,14 @@ program
         negative?: string;
         width?: string;
         height?: string;
+        aspect?: string;
+        quality?: string;
         steps?: string;
         seed?: string;
       },
     ) => {
+      const aspect = enumOpt('aspect', opts.aspect, ImageAspectRatioSchema);
+      const quality = enumOpt('quality', opts.quality, ImageQualitySchema);
       const prompt = await resolvePromptText(promptParts, opts.file, 'prompt');
       const client = await connectOwned(cliGlobals());
       const projectId = opts.project ?? 'default';
@@ -1943,6 +1964,8 @@ program
           ...(opts.negative ? { negativePrompt: opts.negative } : {}),
           ...(width !== undefined ? { width } : {}),
           ...(height !== undefined ? { height } : {}),
+          ...(aspect ? { aspectRatio: aspect } : {}),
+          ...(quality ? { quality } : {}),
           ...(steps !== undefined ? { steps } : {}),
           ...(seed !== undefined ? { seed } : {}),
         });

@@ -11,6 +11,7 @@ import type {
   AudioModelPullSpec,
 } from '@bendyline/gezel-inference/internal/providers/audio/types';
 import { WHISPER_MODEL_CATALOG } from '@bendyline/gezel-inference/internal/providers/audio/whisper-cpp';
+import { catalogEntry, downloadBytes } from '@bendyline/gezel/speech-models';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import {
@@ -20,6 +21,9 @@ import {
 } from '../../providers/audio/kokoro.js';
 import type { EngineContext } from '../engine-context.js';
 import { subscribeToInstallSse } from './install-sse.js';
+
+/** The pinned Kokoro weights and voices, as the catalog lists them. */
+const KOKORO_DOWNLOAD_BYTES = downloadBytes(catalogEntry(KOKORO_DEFAULT_MODEL_ID)!);
 
 export function audioModelRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
@@ -134,7 +138,7 @@ export function audioModelRoutes(ctx: EngineContext): Hono {
           // these — it delegates to `KokoroTTS.from_pretrained`.
           downloadUrl: 'https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX',
           sha256: ''.padEnd(64, '0'),
-          approxSizeBytes: 95_000_000,
+          approxSizeBytes: KOKORO_DOWNLOAD_BYTES,
         },
       ],
     };
@@ -200,8 +204,8 @@ export function buildAudioCatalog(options: { kokoroRuntimeAvailable?: boolean } 
             id: KOKORO_DEFAULT_MODEL_ID,
             name: 'Kokoro 82M v1.0',
             description:
-              'Apache 2.0 TTS — 54+ voices, ~80MB quantized, near-realtime on M1 / modern desktop CPUs.',
-            approxSizeBytes: 95_000_000,
+              'Apache 2.0 TTS — 54+ voices, ~330 MB, faster than realtime on M1 / modern desktop CPUs.',
+            approxSizeBytes: KOKORO_DOWNLOAD_BYTES,
             kind: 'tts' as const,
             license: 'Apache 2.0',
             licenseClass: 'open' as const,

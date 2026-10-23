@@ -63,7 +63,7 @@ export function VSCodeSetupCard({
   return (
     <HarnessSetupShell
       headingId="vscode-setup-heading"
-      title="Use Gezel in VS Code"
+      title="Gezel's models in VS Code"
       status={status}
       remoteMode={card.remoteMode}
       localDesktopMode={card.localDesktopMode}

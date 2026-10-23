@@ -126,7 +126,7 @@ export async function registerPane(deps: HttpDeps): Promise<RegisterResult> {
       kind: 'refused',
       message:
         body.error === 'browser_registration_not_allowed'
-          ? 'Gezel did not recognize this page. Open the Gezel desktop app and set up Office again under Settings, Connected Apps.'
+          ? 'Gezel did not recognize this page. Open the Gezel desktop app and set up Office again under Settings, Integrations.'
           : paneErrorMessage(res.status, body),
     };
   }

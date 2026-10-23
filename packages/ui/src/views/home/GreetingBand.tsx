@@ -7,6 +7,7 @@ import type {
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useShowPoppetjes } from '../../components/useShowPoppetjes.js';
 import * as Tabs from '../../primitives/Tabs.js';
+import { HomeHeadline, HomeIntroDate } from './HomeIntroHeading.js';
 import { IntroHandboekArticle } from './IntroHandboekArticle.js';
 import { MeesterFigure } from './MeesterFigure.js';
 import { MorningPanel } from './MorningPanel.js';
@@ -68,39 +69,6 @@ function Chips({ chips }: { chips: HomeChip[] }) {
 }
 
 /**
- * The meester-written status headline when a fresh report exists (the
- * parent already applied the staleness decay), falling back to the
- * time-of-day greeting. With a CTA the headline itself is the click
- * target — one big affordance, not a separate link.
- */
-function Headline({
-  statusReport,
-  greeting,
-  onCtaClick,
-}: {
-  statusReport: MeesterStatusReport | null;
-  greeting: string;
-  onCtaClick?: () => void;
-}) {
-  if (!statusReport) return <h1 className="home-workshop-headline">{greeting}.</h1>;
-  if (statusReport.cta && onCtaClick) {
-    return (
-      <h1 className="home-workshop-headline">
-        <button
-          type="button"
-          className="home-workshop-headline-cta"
-          onClick={onCtaClick}
-          title={statusReport.cta.label}
-        >
-          {statusReport.headline}
-        </button>
-      </h1>
-    );
-  }
-  return <h1 className="home-workshop-headline">{statusReport.headline}</h1>;
-}
-
-/**
  * The intro keeps its destinations visible when collapsed. Selecting a tab
  * opens that panel; the parent owns the persisted collapse preference.
  * There is no stored user name, so the fallback headline is the
@@ -115,6 +83,8 @@ export function GreetingBand({
   collapsed,
   onToggleCollapse,
   tab,
+  startupReading,
+  onLeaveStartupReading,
   onTabChange,
   statusReport,
   statusRunning,
@@ -132,6 +102,8 @@ export function GreetingBand({
   collapsed: boolean;
   onToggleCollapse: () => void;
   tab: HomeGreetingTab;
+  startupReading?: { tab: HomeGreetingTab; node: HTMLElement };
+  onLeaveStartupReading?: () => void;
   onTabChange: (tab: HomeGreetingTab) => void;
   statusReport?: MeesterStatusReport | null;
   statusRunning?: boolean;
@@ -182,18 +154,11 @@ export function GreetingBand({
       );
     }
   };
-  const weekday = now.toLocaleDateString(undefined, { weekday: 'long' });
-  const partOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-  const time = now.toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-  const dateLabel = `${weekday} ${partOfDay} · ${time}`;
   const panels: { value: HomeGreetingTab; label: string }[] = [
     { value: 'greeting', label: greeting },
   ];
-  if (morning || nightReview) panels.push({ value: 'night', label: 'Night shift' });
+  if (morning || nightReview || startupReading?.tab === 'night')
+    panels.push({ value: 'night', label: 'Night shift' });
   if (makeSomething) panels.push({ value: 'make', label: 'Make something' });
   panels.push({ value: 'tour', label: 'Handboek' });
   const activeTab = panels.some((panel) => panel.value === tab) ? tab : 'greeting';
@@ -274,56 +239,90 @@ export function GreetingBand({
         {(!collapsed || contentMounted) && (
           <Tabs.Content
             value={activeTab}
-            className={`home-workshop-greeting-cols${activeTab === 'tour' ? ' home-workshop-greeting-cols-fill' : ''}`}
+            className={`home-workshop-greeting-cols${activeTab === 'tour' || startupReading?.tab === activeTab ? ' home-workshop-greeting-cols-fill' : ''}`}
           >
-            <div className="home-workshop-greeting-left">
-              {activeTab === 'night' && morning ? (
-                <MorningPanel
-                  question={morning.question}
-                  review={morning.review}
-                  {...(morning.onAnswered ? { onAnswered: morning.onAnswered } : {})}
-                />
-              ) : activeTab === 'night' && nightReview ? (
-                <NightReviewPanel review={nightReview} />
-              ) : activeTab === 'make' ? (
-                makeSomething
-              ) : activeTab === 'tour' ? (
-                <div className="home-workshop-tour-inline">
-                  <IntroHandboekArticle />
+            {startupReading?.tab === activeTab ? (
+              <div className="startup-reading-live-frame">
+                <div className="startup-reading-live-toolbar">
+                  <span>Your workshop is ready.</span>
+                  <button type="button" className="gz-link-button" onClick={onLeaveStartupReading}>
+                    {activeTab === 'tour' ? 'Open in Handboek' : 'Show latest'}
+                  </button>
                 </div>
-              ) : (
-                <>
-                  <div className="home-workshop-eyebrow">{dateLabel}</div>
-                  <Headline statusReport={report} greeting={greeting} onCtaClick={handleCta} />
-                  {report ? (
-                    <StatusReportPanel
-                      report={report}
-                      running={statusRunning ?? false}
-                      {...(onRunStatusReport ? { onRefresh: onRunStatusReport } : {})}
-                    />
-                  ) : (
-                    <TipOfDay onNavigate={onNavigate} />
-                  )}
-                </>
-              )}
-              <div className="home-workshop-chips">
-                <Chips chips={chips} />
+                <div
+                  className="startup-reading-live-host"
+                  ref={(host) => {
+                    if (host && startupReading.node.parentElement !== host) {
+                      host.append(startupReading.node);
+                      const reader =
+                        startupReading.node.querySelector('.home-intro-doc') ?? startupReading.node;
+                      reader.scrollTop = Number(startupReading.node.dataset.startupScroll || 0);
+                      return () => {
+                        queueMicrotask(() => {
+                          if (!startupReading.node.isConnected)
+                            startupReading.node.dispatchEvent(new Event('startup-reading-dispose'));
+                        });
+                      };
+                    }
+                  }}
+                />
               </div>
-            </div>
+            ) : (
+              <>
+                <div className="home-workshop-greeting-left">
+                  {activeTab === 'night' && morning ? (
+                    <MorningPanel
+                      question={morning.question}
+                      review={morning.review}
+                      {...(morning.onAnswered ? { onAnswered: morning.onAnswered } : {})}
+                    />
+                  ) : activeTab === 'night' && nightReview ? (
+                    <NightReviewPanel review={nightReview} />
+                  ) : activeTab === 'make' ? (
+                    makeSomething
+                  ) : activeTab === 'tour' ? (
+                    <div className="home-workshop-tour-inline">
+                      <IntroHandboekArticle />
+                    </div>
+                  ) : (
+                    <>
+                      <HomeIntroDate now={now} />
+                      <HomeHeadline
+                        statusReport={report}
+                        greeting={greeting}
+                        onCtaClick={handleCta}
+                      />
+                      {report ? (
+                        <StatusReportPanel
+                          report={report}
+                          running={statusRunning ?? false}
+                          {...(onRunStatusReport ? { onRefresh: onRunStatusReport } : {})}
+                        />
+                      ) : (
+                        <TipOfDay onNavigate={onNavigate} />
+                      )}
+                    </>
+                  )}
+                  <div className="home-workshop-chips">
+                    <Chips chips={chips} />
+                  </div>
+                </div>
 
-            {/* The whole standing figure + shelf + label is a poppetje showcase;
+                {/* The whole standing figure + shelf + label is a poppetje showcase;
             when poppetjes are off (e.g. boring mode) hide it entirely rather
             than fall back to a letter tile on a shelf. Make something and the
             Handboek reader take the sheet's full width instead. */}
-            {showPoppetjes && activeTab !== 'make' && activeTab !== 'tour' && (
-              <div className="home-workshop-greeting-right">
-                <MeesterFigure
-                  meesterName={meesterName}
-                  meesterPoppetje={meesterPoppetje}
-                  meesterIcon={meesterIcon}
-                  meesterIconOverride={meesterIconOverride}
-                />
-              </div>
+                {showPoppetjes && activeTab !== 'make' && activeTab !== 'tour' && (
+                  <div className="home-workshop-greeting-right">
+                    <MeesterFigure
+                      meesterName={meesterName}
+                      meesterPoppetje={meesterPoppetje}
+                      meesterIcon={meesterIcon}
+                      meesterIconOverride={meesterIconOverride}
+                    />
+                  </div>
+                )}
+              </>
             )}
           </Tabs.Content>
         )}

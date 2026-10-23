@@ -25,6 +25,12 @@ export interface RemoteImageProviderOpts {
   baseUrl: string;
   token: string;
   fetch: typeof fetch;
+  /**
+   * The person's configured local default (`config.defaultImageModel['sd-cpp']`).
+   * The machine broker serves the same catalog ids, so a request that names
+   * no model runs this one there instead of the broker's alphabetically first.
+   */
+  defaultModelId?: () => Promise<string | undefined>;
 }
 
 export class RemoteImageProvider implements ImageProvider {
@@ -41,7 +47,9 @@ export class RemoteImageProvider implements ImageProvider {
   async generate(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
     const model = input.model
       ? (parseRemoteModelId(input.model)?.modelId ?? input.model)
-      : undefined;
+      : this.opts.defaultModelId
+        ? await this.resolveDefaultModelId()
+        : undefined;
     const res = await this.opts.fetch(`${this.opts.baseUrl}/v1/remote/image/generate`, {
       method: 'POST',
       headers: this.headers(),
@@ -71,6 +79,13 @@ export class RemoteImageProvider implements ImageProvider {
     }
     const body = (await res.json()) as { meta: ImageGenerationOutput['meta']; png: string };
     return { png: Buffer.from(body.png, 'base64'), meta: body.meta };
+  }
+
+  /** The configured default when the server has it installed, else its first model. */
+  async resolveDefaultModelId(): Promise<string | undefined> {
+    const models = await this.listInstalledModels();
+    const configured = await this.opts.defaultModelId?.();
+    return configured && models.some((m) => m.id === configured) ? configured : models[0]?.id;
   }
 
   async listInstalledModels(): Promise<InstalledImageModelInfo[]> {

@@ -38,6 +38,19 @@ export function intOpt(name: string, v: string | undefined): number | undefined 
   return n;
 }
 
+/** Parse a CLI option that must be one of a schema's values. */
+export function enumOpt<T extends string>(
+  name: string,
+  v: string | undefined,
+  schema: { options: readonly T[] },
+): T | undefined {
+  if (v === undefined) return undefined;
+  const value = schema.options.find((o) => o === v.trim());
+  if (!value)
+    throw new CliError(`--${name} must be one of ${schema.options.join(', ')} (got "${v}").`);
+  return value;
+}
+
 /** Parse a floating-point CLI option. Undefined passes through; NaN throws. */
 export function floatOpt(name: string, v: string | undefined): number | undefined {
   if (v === undefined) return undefined;

@@ -1,0 +1,92 @@
+/* The Diagram view of the project Views tab: the toolbar, a muted status
+   line, and the canvas filling the rest. The canvas is squisq's
+   DiagramViewer; this file themes it through its custom properties so the
+   boxes take the app's paper, ink and accent. */
+
+.diagram-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  --squisq-graph-bg: var(--bg);
+  --squisq-graph-node-bg: var(--surface);
+  --squisq-graph-node-border: color-mix(in srgb, var(--text-muted) 55%, transparent);
+  --squisq-graph-text: var(--text);
+  --squisq-graph-muted: var(--text-muted);
+  --squisq-graph-edge: color-mix(in srgb, var(--text-muted) 85%, transparent);
+  --squisq-graph-container-bg: color-mix(in srgb, var(--text-muted) 6%, transparent);
+  --squisq-graph-container-border: var(--border);
+  --squisq-graph-badge-bg: color-mix(in srgb, var(--text-muted) 16%, transparent);
+  --squisq-graph-controls-bg: var(--panel);
+  --squisq-graph-focus: var(--accent);
+  --squisq-graph-selected: var(--accent);
+  --squisq-graph-tone-accent: var(--accent);
+  --squisq-graph-tone-positive: var(--success);
+  --squisq-graph-tone-notice: color-mix(in srgb, var(--warning) 60%, var(--text-muted));
+  --squisq-graph-tone-warning: var(--warning);
+  --squisq-graph-tone-danger: var(--danger);
+  --squisq-graph-tone-muted: var(--text-muted);
+}
+
+.diagram-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border);
+}
+
+.diagram-toolbar-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.diagram-toolbar-find {
+  min-width: 10rem;
+  flex: 0 1 14rem;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+.diagram-status {
+  margin: 0;
+  padding: 4px var(--space-md);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.diagram-status-busy {
+  color: var(--text-muted);
+}
+
+.diagram-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.diagram-stage > .diagram-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.diagram-empty {
+  flex: 1;
+  padding: var(--space-lg);
+  color: var(--text-muted);
+}
+
+.diagram-empty p {
+  max-width: 40rem;
+  margin: 0 0 var(--space-sm);
+}
+
+.diagram-view--compact .diagram-toolbar {
+  padding: var(--space-sm);
+}

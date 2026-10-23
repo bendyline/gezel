@@ -3,6 +3,11 @@ import { type OpenFileIntent, queueOpenFile } from './pending-open-file.js';
 import { type OpenHandboekIntent, queueOpenHandboek } from './pending-open-handboek.js';
 import { type OpenKnowledgeIntent, queueOpenKnowledge } from './pending-open-knowledge.js';
 import { type OpenSessionIntent, queueOpenSession } from './pending-open-session.js';
+import {
+  OPEN_PROJECT_VIEW_EVENT,
+  type OpenProjectViewDetail,
+  requestProjectSection,
+} from './pending-project-section.js';
 import type { RecentTabInput } from './recent-tabs.js';
 
 /**
@@ -17,7 +22,8 @@ export type NavAction =
   | { kind: 'open-file'; intent: OpenFileIntent }
   | { kind: 'open-session'; intent: OpenSessionIntent }
   | { kind: 'open-handboek'; intent: OpenHandboekIntent }
-  | { kind: 'open-knowledge'; intent: OpenKnowledgeIntent };
+  | { kind: 'open-knowledge'; intent: OpenKnowledgeIntent }
+  | { kind: 'open-project-view'; intent: OpenProjectViewDetail };
 
 export function openTabAction(detail: RecentTabInput): NavAction {
   return { kind: 'event', type: 'gezel:open-tab', detail };
@@ -60,6 +66,19 @@ export function openProjectFileActions(intent: OpenFileIntent): NavAction[] {
 }
 
 /**
+ * Open a project on its Views tab, optionally on one view with one file
+ * selected — where a report's file link leads. Same queue-then-dispatch order
+ * as {@link openProjectFileActions}.
+ */
+export function openProjectViewActions(intent: OpenProjectViewDetail): NavAction[] {
+  return [
+    { kind: 'open-project-view', intent },
+    openTabAction({ kind: 'project', id: intent.projectId }),
+    { kind: 'event', type: OPEN_PROJECT_VIEW_EVENT, detail: intent },
+  ];
+}
+
+/**
  * Fire a single tab navigation — the common one-liner case. Going through
  * `RecentTabInput` is the point: a hand-built `gezel:open-tab` detail with a
  * wrong shape fails silently (App's listener just returns), so the type is
@@ -97,6 +116,13 @@ export function runNavActions(actions: NavAction[]): void {
       queueOpenHandboek(action.intent);
     } else if (action.kind === 'open-knowledge') {
       queueOpenKnowledge(action.intent);
+    } else if (action.kind === 'open-project-view') {
+      const { projectId, view, path } = action.intent;
+      requestProjectSection(projectId, {
+        section: 'views',
+        ...(view ? { view } : {}),
+        ...(path ? { path } : {}),
+      });
     } else {
       window.dispatchEvent(new CustomEvent(action.type, { detail: action.detail }));
     }

@@ -129,7 +129,7 @@ describe('Output Pane API v1 relay', () => {
   });
 
   async function mountFrame(pageTools?: string[]) {
-    render(
+    const { unmount } = render(
       <HtmlPreviewFrame
         projectId="checkers"
         path="board/index.html"
@@ -153,7 +153,7 @@ describe('Output Pane API v1 relay', () => {
       posted.filter((m) => (m as { kind?: string }).kind === kind) as Array<
         Record<string, unknown>
       >;
-    return { frame, posted, send, postedOf };
+    return { frame, posted, send, postedOf, unmount };
   }
 
   it('answers hello with init (api, theme, limits)', async () => {
@@ -230,6 +230,187 @@ describe('Output Pane API v1 relay', () => {
       source: 'workspace',
       path: 'game.json',
     });
+  });
+
+  it('relays table calls for the host project and rejects extra request authority', async () => {
+    const h = await mountFrame();
+    vi.mocked(api.invokeProjectPageTables).mockResolvedValue({ op: 'list', tables: [] });
+    h.send({
+      __gezelPage: 1,
+      kind: 'table',
+      id: 't1',
+      projectId: 'other',
+      request: { op: 'list' },
+    });
+    await waitFor(() => expect(h.postedOf('table-result')).toHaveLength(1));
+    expect(api.invokeProjectPageTables).toHaveBeenCalledWith('checkers', { op: 'list' });
+    expect(h.postedOf('table-result')[0]).toMatchObject({
+      id: 't1',
+      ok: true,
+      result: { op: 'list', tables: [] },
+    });
+    h.send({
+      __gezelPage: 1,
+      kind: 'table',
+      id: 't2',
+      request: { op: 'query', sql: 'SELECT 1', projectId: 'other' },
+    });
+    expect(h.postedOf('table-result')[1]).toMatchObject({
+      id: 't2',
+      ok: false,
+      errorCode: 'invalid-input',
+    });
+    expect(api.invokeProjectPageTables).toHaveBeenCalledOnce();
+  });
+
+  it('bounds concurrent table calls and drops replies after unmount', async () => {
+    const h = await mountFrame();
+    const finishes: Array<(value: { op: 'list'; tables: [] }) => void> = [];
+    vi.mocked(api.invokeProjectPageTables).mockImplementation(
+      () => new Promise((resolve) => finishes.push(resolve)),
+    );
+    for (const id of ['a', 'b', 'c'])
+      h.send({ __gezelPage: 1, kind: 'table', id, request: { op: 'list' } });
+    expect(api.invokeProjectPageTables).toHaveBeenCalledTimes(2);
+    expect(h.postedOf('table-result')).toEqual([
+      expect.objectContaining({ id: 'c', ok: false, errorCode: 'rate-limited' }),
+    ]);
+    h.unmount();
+    for (const finish of finishes) finish({ op: 'list', tables: [] });
+    await Promise.resolve();
+    expect(h.postedOf('table-result')).toHaveLength(1);
+  });
+
+  it('opens large files through the existing viewer only after a scoped stat', async () => {
+    const h = await mountFrame();
+    vi.mocked(api.invokeProjectPageRead).mockResolvedValue({
+      op: 'stat',
+      etag: 'file',
+      size: 12_000_000,
+      mtime: 1,
+    });
+    const opened = vi.fn();
+    window.addEventListener('gezel:open-file', opened);
+    try {
+      h.send({
+        __gezelPage: 1,
+        kind: 'open',
+        id: 'o1',
+        source: 'workspace',
+        path: 'sales/Q1 #2.csv',
+      });
+      await waitFor(() => expect(opened).toHaveBeenCalledOnce());
+      expect(api.invokeProjectPageRead).toHaveBeenCalledWith('checkers', {
+        op: 'stat',
+        source: 'workspace',
+        path: 'sales/Q1 #2.csv',
+      });
+      expect((opened.mock.calls[0]![0] as CustomEvent).detail).toEqual({
+        projectId: 'checkers',
+        source: 'workspace',
+        path: 'sales/Q1 #2.csv',
+      });
+      expect(h.postedOf('open-result')[0]).toMatchObject({ id: 'o1', ok: true });
+    } finally {
+      window.removeEventListener('gezel:open-file', opened);
+    }
+  });
+
+  it('rejects traversal, missing files, directories, and server-denied scopes', async () => {
+    const h = await mountFrame();
+    const opened = vi.fn();
+    window.addEventListener('gezel:open-file', opened);
+    try {
+      h.send({
+        __gezelPage: 1,
+        kind: 'open',
+        id: 'traversal',
+        source: 'workspace',
+        path: '../outside.csv',
+      });
+      expect(api.invokeProjectPageRead).not.toHaveBeenCalled();
+      vi.mocked(api.invokeProjectPageRead)
+        .mockResolvedValueOnce({ op: 'stat', etag: 'absent', exists: false })
+        .mockResolvedValueOnce({ op: 'stat', etag: 'directory', mtime: 1 })
+        .mockRejectedValueOnce(Object.assign(new Error('not declared'), { status: 403 }));
+      for (const path of ['missing.csv', 'folder', 'secret.csv']) {
+        h.send({ __gezelPage: 1, kind: 'open', id: path, source: 'workspace', path });
+      }
+      await waitFor(() => expect(h.postedOf('open-result')).toHaveLength(4));
+      expect(h.postedOf('open-result').every((reply) => reply.ok === false)).toBe(true);
+      expect(opened).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('gezel:open-file', opened);
+    }
+  });
+
+  it('does not open a file after its requesting page unmounts', async () => {
+    const h = await mountFrame();
+    let finish!: (value: { op: 'stat'; etag: string; size: number }) => void;
+    vi.mocked(api.invokeProjectPageRead).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const opened = vi.fn();
+    window.addEventListener('gezel:open-file', opened);
+    try {
+      h.send({
+        __gezelPage: 1,
+        kind: 'open',
+        id: 'pending',
+        source: 'workspace',
+        path: 'sales.csv',
+      });
+      h.unmount();
+      finish({ op: 'stat', etag: 'file', size: 100 });
+      await Promise.resolve();
+      expect(opened).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('gezel:open-file', opened);
+    }
+  });
+
+  it('refuses file navigation from workspace HTML', async () => {
+    vi.mocked(api.createProjectWorkspacePreviewUrl).mockResolvedValue({
+      url: 'https://127.0.0.1/preview/cap/workspace/checkers/index.html',
+      expiresAt: '2026-07-29T22:00:00.000Z',
+      scopePath: '',
+    });
+    render(
+      <HtmlPreviewFrame
+        projectId="checkers"
+        path="index.html"
+        source="workspace"
+        title="Untrusted page"
+      />,
+    );
+    await waitFor(() => expect(screen.getByTitle('Untrusted page')).toHaveAttribute('src'));
+    const frame = screen.getByTitle('Untrusted page') as HTMLIFrameElement;
+    const post = vi.spyOn(frame.contentWindow as Window, 'postMessage');
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source: frame.contentWindow as Window,
+        data: { __gezelPage: 1, kind: 'open', id: 'open', source: 'workspace', path: 'sales.csv' },
+      }),
+    );
+    expect(api.invokeProjectPageRead).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'open-result', ok: false, errorCode: 'not-allowed' }),
+      '*',
+    );
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source: frame.contentWindow as Window,
+        data: { __gezelPage: 1, kind: 'table', id: 'tables', request: { op: 'list' } },
+      }),
+    );
+    expect(api.invokeProjectPageTables).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'table-result', ok: false, errorCode: 'not-allowed' }),
+      '*',
+    );
   });
 
   it('watch seeds an etag and posts change on the post-invoke sweep when it flips', async () => {

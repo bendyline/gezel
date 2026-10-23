@@ -166,6 +166,13 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     tools: ['list_artifacts', 'read_artifact', 'read_artifacts', 'write_artifact', 'grep_artifact'],
   },
   {
+    id: 'cameras',
+    name: 'Cameras and Lookouts',
+    description:
+      "See what a project camera sees right now, list the person's lookouts, and propose a new lookout for them to approve. What a camera recorded earlier is in its event records, read as files.",
+    tools: ['look_at_camera', 'list_lookouts', 'propose_lookout'],
+  },
+  {
     id: 'data-tables',
     name: 'Data Tables',
     description:

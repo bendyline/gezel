@@ -10,6 +10,7 @@
 
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
+import { ProjectTypeVersionManifestSchema } from '@bendyline/gezel';
 import {
   GezappSourceError,
   type GezappSourceFinding,
@@ -21,6 +22,7 @@ import {
 } from '@bendyline/gezel-service/gezapp';
 import { SCAFFOLD_ID_PATTERN, scaffoldGezappSource } from './app-scaffold.js';
 import { CliError } from './connection.js';
+import { writePageDemo, writePageDemoAssets } from './page-demo-export.js';
 
 function resolvePath(input: string): string {
   return isAbsolute(input) ? input : join(process.cwd(), input);
@@ -142,6 +144,37 @@ export async function runAppPack(
     }
     process.exitCode = 1;
   }
+}
+
+export async function runAppDemo(folder: string, opts: { out: string }): Promise<void> {
+  const source = resolvePath(folder);
+  const packed = await packGezappFromSource(source);
+  const parsed = readGezapp(packed.buffer);
+  const { projectType, version } = parsed.manifest.entry;
+  const prefix = `items/project-types/${projectType.slice(0, 2)}/${projectType}/versions/${version}/`;
+  const manifest = ProjectTypeVersionManifestSchema.parse(
+    JSON.parse(parsed.files.get(`${prefix}manifest.json`)!.toString('utf8')),
+  );
+  if (!manifest.pages) throw new CliError('This app does not have a page to preview.');
+  const pagePrefix = `${prefix}pages/`;
+  const files = [...parsed.files]
+    .filter(([path]) => path.startsWith(pagePrefix))
+    .map(([path, bytes]) => ({ path: path.slice(pagePrefix.length), bytes }));
+  if (!files.some((file) => file.path === manifest.pages!.entry))
+    throw new CliError('The page entry is missing.');
+  const out = resolvePath(opts.out);
+  // Exclusive creation prevents accidental source edits or an export over user files.
+  await mkdir(dirname(out), { recursive: true });
+  await mkdir(out);
+  const directory = join(out, '_gezel-demo');
+  const assets = await writePageDemoAssets(directory);
+  await writePageDemo(
+    join(out, 'pages'),
+    files,
+    { imports: manifest.pages.imports },
+    { directory, assets },
+  );
+  console.log(`Demo exported. Open ${join(out, 'pages', manifest.pages.entry)}`);
 }
 
 export async function runAppNew(

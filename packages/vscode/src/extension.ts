@@ -8,6 +8,7 @@ import { readConfig } from './config.js';
 import { type AppConnection, type Connection, acquireAppConnection } from './daemon.js';
 import { GezelLanguageModelProvider } from './lm-provider.js';
 import { createLogger } from './log.js';
+import { type GezelToolsProvider, registerGezelToolsProvider } from './mcp-provider.js';
 import { WebviewRpc } from './webview-rpc.js';
 import { ensureDevGezel, ensureProjectForWorkspace } from './workspace.js';
 
@@ -38,6 +39,8 @@ interface ExtensionState {
    * available — readers must null-check.
    */
   reconnect: (() => Promise<void>) | null;
+  /** Gezel's tools for VS Code's agent mode; null when this VS Code cannot host them. */
+  toolsProvider: GezelToolsProvider | null;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -65,7 +68,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // closes over `state`, so we can't construct it before the
     // state object exists.
     reconnect: null,
+    toolsProvider: null,
   };
+
+  state.toolsProvider = registerGezelToolsProvider({
+    getClient: () => state.connection?.client ?? null,
+    getProjectId: () => state.activeProjectId,
+    version: String(context.extension.packageJSON.version ?? '0.0.0'),
+    logger,
+  });
+  context.subscriptions.push({ dispose: () => state.toolsProvider?.dispose() });
 
   // Bridge for the webview's postMessage-RPC fetch. The chat bundle
   // routes every daemon call through here so it can ride the
@@ -233,13 +245,13 @@ async function connect(
         // `already_connected` means the daemon has a token for the
         // `vscode` appId but VS Code's secrets store doesn't have the
         // matching string. A third-party client cannot revoke an unknown
-        // token; the user must remove it in Gezel's Connected Apps settings.
+        // token; the user must remove it in Gezel's Integrations settings.
         const alreadyConnected = /already_connected/i.test(message);
         const actions = ['Show Logs', 'Show Status'] as const;
         void vscode.window
           .showWarningMessage(
             alreadyConnected
-              ? 'Gezel: Visual Studio Code is already authorized, but its local token is missing. Revoke Visual Studio Code in Gezel Settings → Connected Apps, then reconnect.'
+              ? 'Gezel: Visual Studio Code is already authorized, but its local token is missing. Revoke Visual Studio Code in Gezel Settings → Integrations, then reconnect.'
               : `Gezel: language models not registered — ${message}`,
             ...actions,
           )
@@ -266,7 +278,7 @@ async function connect(
     void vscode.window
       .showErrorMessage(
         alreadyConnected
-          ? 'Gezel: Visual Studio Code is already authorized, but its local token is missing. Revoke Visual Studio Code in Gezel Settings → Connected Apps, then reconnect.'
+          ? 'Gezel: Visual Studio Code is already authorized, but its local token is missing. Revoke Visual Studio Code in Gezel Settings → Integrations, then reconnect.'
           : `Gezel: couldn't connect — ${message}`,
         ...actions,
       )
@@ -394,6 +406,18 @@ function buildStatusReport(state: ExtensionState): string {
 }
 
 async function rewireProject(
+  state: ExtensionState,
+  client: GezelClient,
+  logger: ReturnType<typeof createLogger>,
+): Promise<void> {
+  try {
+    await resolveActiveProject(state, client, logger);
+  } finally {
+    state.toolsProvider?.refresh();
+  }
+}
+
+async function resolveActiveProject(
   state: ExtensionState,
   client: GezelClient,
   logger: ReturnType<typeof createLogger>,

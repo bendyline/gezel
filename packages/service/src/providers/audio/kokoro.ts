@@ -10,13 +10,14 @@
  * Model layout on disk:
  *
  *   <home>/engines/kokoro/models/<id>/
- *   ├── manifest.json          (id, name, modelRepo, dtype, installedAt)
- *   ├── onnx/model_quantized.onnx (hard link into the shared speech cache)
- *   ├── voices/*.bin              (verified shared English voice vectors)
- *   └── *.json                    (bundled model/tokenizer metadata)
+ *   ├── manifest.json     (id, name, modelRepo, dtype, installedAt)
+ *   ├── onnx/model.onnx   (hard link into the shared speech cache)
+ *   ├── voices/*.bin      (verified shared English voice vectors)
+ *   └── *.json            (bundled model/tokenizer metadata)
  *
- * Production q8 loads this complete pinned local directory without network.
- * Explicit alternative quantizations retain the Transformers.js cache path.
+ * The production dtype (the catalog's, fp32) loads this complete pinned local
+ * directory without network. Explicit alternative quantizations retain the
+ * Transformers.js cache path.
  */
 
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -40,6 +41,7 @@ import type {
 } from '@bendyline/gezel-inference/internal/providers/audio/types';
 import type { LoadTransformersEnv } from '@bendyline/gezel-inference/internal/transformers-cache';
 import {
+  KOKORO_MODEL_DTYPE,
   KOKORO_MODEL_ID,
   KOKORO_TRANSFORMERS_METADATA,
   type SpeechAssetOptions,
@@ -70,7 +72,7 @@ export {
 export interface KokoroProviderOptions {
   /** Absolute path to `~/.gezel/engines/kokoro/models`. */
   modelsRoot: string;
-  /** Shared pinned q8 model storage. Other quantizations retain their existing loader. */
+  /** Shared pinned model storage for the catalog dtype. Other dtypes keep their own loader. */
   assets?: SpeechAssetOptions;
   /**
    * Writable directory to pin `@huggingface/transformers`'s `env.cacheDir`
@@ -104,9 +106,10 @@ export interface KokoroProviderOptions {
    */
   loadTransformersEnv?: LoadTransformersEnv;
   /**
-   * `'q4'` (smaller, faster) or `'q8'` (larger, higher quality).
-   * Defaults to `q8` — Kokoro is small enough that quantization
-   * differences are minor and quality matters for narration.
+   * Defaults to the catalog's pinned dtype (`fp32`), the only one served
+   * from shared, verified local files. ONNX Runtime's CPU kernels run it
+   * faster than the int8 export, which keeps streamed narration ahead of
+   * playback. Any other dtype loads through the Transformers.js cache.
    */
   defaultDtype?: 'q4' | 'q8' | 'fp16' | 'fp32';
   /**
@@ -122,7 +125,7 @@ export interface KokoroProviderOptions {
   /**
    * Watchdog for `from_pretrained`. Separate and far larger than
    * {@link inferenceTimeoutMs} because a cleared transformers cache
-   * makes this re-download ~88 MB of ONNX weights. Defaults to 5min.
+   * makes this re-download the ONNX weights. Defaults to 5min.
    */
   loadTimeoutMs?: number;
 }
@@ -238,8 +241,10 @@ export class KokoroProvider implements TextToSpeechProvider {
     // `<engines>/hf-cache` (sibling of the per-engine `kokoro/` dir) so a
     // future in-process transformers.js user shares one managed HF cache.
     this.cacheDir = opts.cacheDir ?? join(dirname(dirname(opts.modelsRoot)), 'hf-cache');
-    this.defaultDtype = opts.defaultDtype ?? 'q8';
-    if (opts.assets && this.defaultDtype === 'q8') this.assets = new SpeechAssetStore(opts.assets);
+    this.defaultDtype = opts.defaultDtype ?? KOKORO_MODEL_DTYPE;
+    if (opts.assets && this.defaultDtype === KOKORO_MODEL_DTYPE) {
+      this.assets = new SpeechAssetStore(opts.assets);
+    }
     const config: KokoroEngineConfig = {
       cacheDir: this.cacheDir,
       ...(this.assets ? { modelDirectory: join(this.modelsRoot, KOKORO_MODEL_ID) } : {}),

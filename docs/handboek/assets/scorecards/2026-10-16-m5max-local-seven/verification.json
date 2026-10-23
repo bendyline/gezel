@@ -1,0 +1,40 @@
+{
+  "verifiedAt": "2026-10-22T13:20:29.016Z",
+  "schemaV1Validated": true,
+  "companionValidated": true,
+  "roundTripShardsValidated": true,
+  "headlineModelsPerSuite": 4,
+  "partialOrnithNotInHeadline": true,
+  "partialPercentagesSuppressed": true,
+  "rawTrialsReconciled": 601,
+  "canonicalTrialsReconciled": 600,
+  "quarantinedTrialCount": 1,
+  "inlineReviewsPreserved": 601,
+  "scoredArtifacts": 248,
+  "rubricGroups": 18,
+  "preflightProbes": 9,
+  "allProbeConfidenceWarningsRetained": true,
+  "originalInputFilesUnchanged": 3028,
+  "rawResultScoreFactsMetricsFilesUnchanged": 2404,
+  "machineHomePathsIncluded": false,
+  "manifestSha256": "5e54f92e1d02bf215d4dd2182d3478b3d637ff85bd3b878016f5ff17d4862dcf",
+  "integration": {
+    "sourceFilesAdded": true,
+    "originalTrialEvidenceChanged": false,
+    "published": false,
+    "committed": false
+  },
+  "verificationScope": "Original export validation and preservation checks, core source registration, current-source Handboek rendering, linked asset export and default round selection.",
+  "integrationVerifiedAt": "2026-10-22T14:11:19.654963+00:00",
+  "websiteSourceChecks": {
+    "coreScorecardTests": 44,
+    "handboekMacroTests": 31,
+    "handboekExportTests": 37,
+    "generatedBarrelCurrent": true,
+    "allRegisteredRoundsRendered": true,
+    "downloadsExported": true,
+    "completedRoundDefault": true,
+    "testedCurrentHandboekSource": true,
+    "liveSiteDeployed": false
+  }
+}

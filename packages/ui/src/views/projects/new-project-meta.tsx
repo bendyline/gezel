@@ -1,8 +1,10 @@
 import {
   type CatalogItemSummary,
+  type InterestAreaId,
   PROJECT_CATEGORY_ICONS,
   type ProjectIconId,
   type ProjectTypeCategory,
+  interestAreasForProjectType,
   projectTypeIcon,
 } from '@bendyline/gezel';
 import type { JSX } from 'react';
@@ -345,12 +347,13 @@ export function catalogProjectTypeGlyph(item: CatalogItemSummary): ProjectGlyphI
  * configuration section shows. `general` is the plain project; `github` reveals
  * the repo field; `email` stamps the `email` project type (the mailbox is linked
  * from the project's Mail tab after creation). Future kinds (calendar, group
- * messaging, data analysis) are shown disabled until their rails land.
+ * messaging) are shown disabled until their rails land. Data Analysis is a
+ * catalog project type.
  */
 export type ProjectKindId = 'general' | 'email' | 'github' | 'folder';
 
 export interface ProjectKindMeta {
-  id: ProjectKindId | 'calendar' | 'messaging' | 'data';
+  id: ProjectKindId | 'calendar' | 'messaging';
   label: string;
   description: string;
   soon?: boolean;
@@ -417,15 +420,6 @@ export const PROJECT_KINDS: ProjectKindMeta[] = [
     glyph: 'bubbles',
     give: [],
   },
-  {
-    id: 'data',
-    label: 'Data analysis',
-    description: 'Explore and report on a dataset.',
-    soon: true,
-    category: 'data',
-    glyph: 'chart',
-    give: [],
-  },
 ];
 
 /**
@@ -447,4 +441,13 @@ export function categorizeCatalogType(item: CatalogItemSummary): ProjectTypeCate
   if (/code|web-app|api|cli|library|site/.test(haystack)) return 'code';
   if (/mail|email|calendar|chat|messag/.test(haystack)) return 'communication';
   return 'other';
+}
+
+/** The interest areas a catalog project type serves, for ordering only. */
+export function catalogProjectTypeAreas(item: CatalogItemSummary): readonly InterestAreaId[] {
+  if (item.manifest.kind !== 'project-type') return [];
+  return interestAreasForProjectType({
+    ...(item.manifest.interests ? { interests: item.manifest.interests } : {}),
+    category: categorizeCatalogType(item),
+  });
 }

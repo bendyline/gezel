@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { captureScreenshot } from './helpers/screenshot.js';
@@ -41,8 +42,7 @@ test.beforeAll(async () => {
   });
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
-  // The first document is the splash; wait for the daemon-served UI.
-  await expect(page.locator('.app-header')).toBeVisible({ timeout: 60_000 });
+  await waitForAppReady(page);
 });
 
 test.afterAll(async () => {
@@ -55,10 +55,13 @@ test('Home renders the workshop once configured', async () => {
   // resolves ok (mock provider) and the meester is auto-provisioned.
   await expect(page.getByTestId('home-workshop')).toBeVisible({ timeout: 20000 });
 
-  // Greeting band (time-of-day headline, no stored user name). The welcome
-  // opens on the same words, so look inside the band.
+  // Greeting band (time-of-day greeting, no stored user name). A fresh home's
+  // meester welcome collapses the band, which hides the headline but keeps the
+  // greeting's tab, so assert the tab whichever arrived first.
   await expect(
-    page.getByTestId('greeting-band').getByText(/Good (morning|afternoon|evening)\./),
+    page
+      .getByTestId('greeting-band')
+      .getByRole('tab', { name: /^Good (morning|afternoon|evening)$/ }),
   ).toBeVisible();
 
   // The meester conversation fills the workshop body; there is no side rail.

@@ -242,6 +242,30 @@ describe('looksLikeNewBuildRequest — positive matches', () => {
   });
 });
 
+describe('looksLikeNewBuildRequest — a wish with no build verb', () => {
+  it('matches the thing to build named after a wish', () => {
+    for (const text of [
+      "I'd like a little browser game where you guess a country's capital from a map.",
+      'I want a simple website for my bakery.',
+      'I need an app that tracks my runs.',
+      'Could I get a dashboard for our support queue?',
+    ]) {
+      expect(looksLikeNewBuildRequest(text), text).toBe(true);
+    }
+  });
+
+  it('leaves work on an existing thing, recommendations and non-software wishes alone', () => {
+    for (const text of [
+      'I need the page to load faster.',
+      "I'd like an app recommendation for budgeting.",
+      'I want a status report for my team.',
+      "I'd like a summary of yesterday's meeting.",
+    ]) {
+      expect(looksLikeNewBuildRequest(text), text).toBe(false);
+    }
+  });
+});
+
 describe('looksLikeNewBuildRequest — negative matches', () => {
   it('does NOT match "create a task"', () => {
     expect(looksLikeNewBuildRequest('create a task to update the README')).toBe(false);

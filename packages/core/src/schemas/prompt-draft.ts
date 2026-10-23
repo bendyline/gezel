@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ImageSettingsSchema } from './image.js';
 import { PromptDraftTaskLaunchSchema } from './task-launch.js';
 
 /**
@@ -52,6 +53,12 @@ export const PromptDraftMetaSchema = z.object({
    * keep a draft alive.
    */
   taskLaunch: PromptDraftTaskLaunchSchema.optional(),
+  /**
+   * The image strip's picks for a direct image gezel. Unlike a task, they do
+   * not keep an empty draft alive: settings with nothing to render are not a
+   * draft.
+   */
+  imageSettings: ImageSettingsSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   status: PromptDraftStatusSchema,
@@ -87,6 +94,7 @@ export const CreatePromptDraftRequestSchema = z.object({
   craftbookRef: z.string().optional(),
   scope: z.string().optional(),
   taskLaunch: PromptDraftTaskLaunchSchema.optional(),
+  imageSettings: ImageSettingsSchema.optional(),
 });
 export type CreatePromptDraftRequest = z.infer<typeof CreatePromptDraftRequestSchema>;
 
@@ -114,6 +122,7 @@ export const PatchPromptDraftRequestSchema = z.object({
   craftbookRef: z.string().nullable().optional(),
   scope: z.string().nullable().optional(),
   taskLaunch: PromptDraftTaskLaunchSchema.nullable().optional(),
+  imageSettings: ImageSettingsSchema.nullable().optional(),
 });
 export type PatchPromptDraftRequest = z.infer<typeof PatchPromptDraftRequestSchema>;
 

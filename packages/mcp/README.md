@@ -9,16 +9,50 @@ operations, project artifacts, the shared document library, script and
 Playwright execution, task management, team and project management, image
 rendering, and history search.
 
-Gezel runs this server for every gezel's chat. You can also run it from any
-other MCP client, so that client works with your gezels' memories, projects,
-and tasks.
+Gezel runs this server for every gezel's chat. It also gives other AI apps
+(Claude Code, Codex, Cursor, Claude Desktop, VS Code) a small set of Gezel's
+tools; see [For other AI apps](#for-other-ai-apps).
 
 ```bash
 npm install @bendyline/gezel-mcp
 ```
 
-It speaks stdio, so any MCP client can run it. With Gezel running on the same
-computer:
+## For other AI apps
+
+`gezel-mcp --harness <client>` (`claude-code`, `claude-desktop`, `codex`,
+`cursor` or `vscode`) gives an app that already has its own file, shell and
+web tools what only Gezel has: search over the folder it works in (including
+the text of its Office documents), the person's shared library, memories and
+knowledge catalogs, Office documents read as markdown, image description and
+generation, and memory. Nine tools in all, with absolute paths throughout.
+
+Set it up from Gezel (Settings → Integrations, or `gezel mcp install <app>`),
+which writes the app's entry for you. By hand, run the server under Node 24 or
+later from the folder you work in:
+
+```json
+{
+  "mcpServers": {
+    "gezel": {
+      "command": "npx",
+      "args": ["-y", "@bendyline/gezel-mcp", "--harness", "claude-code"]
+    }
+  }
+}
+```
+
+The server binds the Gezel project for the folder the app reports (MCP roots),
+or `--folder <path>`, or its working directory; `--project <id>` names one
+outright. It reads the owner credential from `~/.gezel/runtime/` once and
+trades it for a token confined to that project and to the choices the person
+made in Gezel, so the app's model never acts with the person's full access. If
+Gezel is not running, every tool says so instead of the server exiting.
+
+## The full surface, with your own access
+
+Without `--harness` the server offers every tool a gezel has, acting with your
+own access, as the `gezel` command does. It speaks stdio, so any MCP client can
+run it. With Gezel running on the same computer:
 
 ```json
 {

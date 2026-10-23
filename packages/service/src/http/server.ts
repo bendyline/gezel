@@ -34,7 +34,9 @@ import {
 } from './auth.js';
 import type { ServiceContext } from './context.js';
 import { v1Cors } from './cors.js';
+import { harnessRouteGuard } from './harness-route-guard.js';
 import { hostGuard } from './host-guard.js';
+import { classifyMalformedJsonBody } from './json-body.js';
 
 import { enginesRoutes } from '@bendyline/gezel-inference/internal/http/routes/engines';
 import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
@@ -63,6 +65,7 @@ import { configRoutes } from './routes/config.js';
 import { connectorRoutes } from './routes/connectors.js';
 import { craftbookRoutes } from './routes/craftbooks.js';
 import { credentialRoutes } from './routes/credentials.js';
+import { deviceRoutes } from './routes/devices.js';
 import { diffpackRoutes } from './routes/diffpacks.js';
 import { documentMediaExportRoutes } from './routes/document-media-export.js';
 import { documentRoutes } from './routes/documents.js';
@@ -75,11 +78,14 @@ import { gitRoutes } from './routes/git.js';
 import { githubRoutes } from './routes/github.js';
 import { growthRoutes } from './routes/growth.js';
 import { handboekRoutes } from './routes/handboek.js';
+import { harnessConnectRoutes } from './routes/harness-connect.js';
+import { harnessToolsRoutes } from './routes/harness-tools.js';
 import { historyRoutes } from './routes/history.js';
 import { imageGenRoutes } from './routes/image-gen.js';
 import { imagesRoutes } from './routes/images.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { llamaCppRoutes } from './routes/llama-cpp.js';
+import { lookoutRoutes, projectLookoutRoutes } from './routes/lookouts.js';
 import { machineServingRoutes } from './routes/machine-serving.js';
 import { mcpToolRoutes } from './routes/mcp-tools.js';
 import { meesterStatusRoutes } from './routes/meester-status.js';
@@ -94,8 +100,10 @@ import { ollamaCompatRoutes } from './routes/ollama-compat.js';
 import { ollamaRoutes } from './routes/ollama.js';
 import { opencodeSetupRoutes } from './routes/opencode-setup.js';
 import { pageCheckRoutes } from './routes/page-check.js';
+import { pageImportRoutes } from './routes/page-imports.js';
 import { pageInvokeRoutes } from './routes/page-invoke.js';
 import { pageReadRoutes } from './routes/page-read.js';
+import { pageTableRoutes } from './routes/page-tables.js';
 import { peopleWipeRoutes, projectPeopleRoutes } from './routes/people.js';
 import { permissionRoutes } from './routes/permissions.js';
 import { piSetupRoutes } from './routes/pi-setup.js';
@@ -104,8 +112,11 @@ import { previewLogRoutes } from './routes/preview-log.js';
 import { previewRoutes } from './routes/preview.js';
 import { projectContinuationRoutes } from './routes/project-continuation.js';
 import { projectGezelRoutes } from './routes/project-gezels.js';
+import { projectIndexViewRoutes } from './routes/project-index-views.js';
+import { projectReportRoutes } from './routes/project-reports.js';
 import { globalTaskRoutes, projectTaskRoutes } from './routes/project-tasks.js';
 import { projectRoutes } from './routes/projects.js';
+import { promptAssistRoutes } from './routes/prompt-assist.js';
 import { promptDraftRoutes } from './routes/prompt-drafts.js';
 import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
@@ -284,6 +295,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // surface. Loopback Host literals only; see host-guard.ts for why this
   // doesn't break legitimate cross-origin /v1 apps.
   app.use('*', hostGuard());
+  app.use('*', classifyMalformedJsonBody());
 
   // Gate only the API and event stream. The static UI bundle is public —
   // it's just HTML/JS/CSS, and the token needs to be injected by the UI
@@ -344,6 +356,16 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   });
   app.use('/api/*', scopedSessionRoutes);
   app.use('/events/*', scopedSessionRoutes);
+  // An outside AI app's `harness` token (Gezel's tools in Claude Code, Codex,
+  // …): its own, smaller deny-by-default allowlist. Root/UI/session callers
+  // bypass it.
+  const harnessRouteLog = createLogger('harness-route');
+  const scopedHarnessRoutes = harnessRouteGuard({
+    readConfig: () => ctx.store.readConfig(),
+    log: (m) => harnessRouteLog.warn(m),
+  });
+  app.use('/api/*', scopedHarnessRoutes);
+  app.use('/events/*', scopedHarnessRoutes);
   // Per-session token scope (#10): confine a session-scoped MCP token to
   // `/api/projects/<its project>/*`. Runs after bearerAuth (which populates
   // `c.var.auth`) and before the project routers below. Mode is set by
@@ -523,6 +545,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/projects', pageInvokeRoutes(ctx));
   // The read half of the same bridge at /api/projects/:id/page-read.
   app.route('/api/projects', pageReadRoutes(ctx));
+  app.route('/api/projects', pageTableRoutes(ctx));
+  app.route('/api/projects', pageImportRoutes(ctx));
   app.route('/api/projects', referencePreviewRoutes(ctx));
   app.route('/api/projects', retrievalPreviewRoutes(ctx));
   app.route('/api/projects', projectRoutes(ctx));
@@ -535,6 +559,9 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Report-embedded action requests at /api/projects/:id/report-actions/*
   app.route('/api/projects', reportActionRoutes(ctx));
   app.route('/api/projects', diffpackRoutes(ctx));
+  // The Reports view's list and write-now at /api/projects/:id/reports*
+  app.route('/api/projects', projectReportRoutes(ctx));
+  app.route('/api/projects', projectIndexViewRoutes(ctx));
   app.route('/api/projects', promptDraftRoutes(ctx));
   // Per-project GitHub operations live at /api/projects/:id/github/*
   app.route('/api/projects', gitRoutes(ctx, 'git'));
@@ -547,6 +574,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Per-project mail operations live at /api/projects/:id/mail/*
   // Per-project connector operations live at /api/projects/:id/connectors/*
   app.route('/api/projects', connectorRoutes(ctx));
+  // Per-project lookouts live at /api/projects/:id/lookouts/*
+  app.route('/api/projects', projectLookoutRoutes(ctx));
   // Per-project tasks live at /api/projects/:id/tasks/*
   // Before the task routes: `/tasks/input-preview` must not read as a task number.
   app.route('/api/projects', taskInputRoutes(ctx));
@@ -564,6 +593,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/projects', toolRoutes(ctx));
   // Bounded one-shot model calls for repository workflow drivers.
   app.route('/api/projects', completionRoutes(ctx));
+  app.route('/api/projects', promptAssistRoutes(ctx));
   // Per-project terminal threads live at /api/projects/:id/terminals/*
   app.route('/api/projects', terminalRoutes(ctx));
   // People (face lane): /api/projects/:id/people[...] + the global
@@ -603,6 +633,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/video-gen', videoGenRoutes(ctx));
   app.route('/api/audio', audioRoutes(ctx));
   app.route('/api/recognition', recognitionRoutes(ctx));
+  app.route('/api/devices', deviceRoutes(ctx));
+  app.route('/api/lookouts', lookoutRoutes(ctx));
   app.route('/api/catalog', catalogRoutes(ctx));
   app.route('/api/toolset', toolsetConfigRoutes(ctx));
   app.route('/api/sessions', sessionRoutes(ctx));
@@ -626,6 +658,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/app-tools', appToolRoutes(ctx));
   app.route('/api/app-serve', appServeRoutes(ctx));
   app.route('/api/codex-setup', codexSetupRoutes(ctx));
+  app.route('/api/harness-tools', harnessToolsRoutes(ctx));
   app.route('/api/opencode-setup', opencodeSetupRoutes(ctx));
   app.route('/api/pi-setup', piSetupRoutes(ctx));
   app.route('/api/vscode-setup', vscodeSetupRoutes(ctx));
@@ -639,7 +672,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/events/chat', chatEventsRoutes(ctx));
 
   // Master switch for the OpenAI-compatible facade (Settings →
-  // Connected Apps). Registration remains reachable because non-OpenAI
+  // Integrations). Registration remains reachable because non-OpenAI
   // first-party clients (notably the CLI) use the same consent router; the
   // register route itself rejects only requests that include `openai`.
   const openaiEndpointsGate = requireOpenAiEndpointsEnabled(ctx);
@@ -647,6 +680,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // `/v1/apps/*` is the public registration + consent surface. Routes
   // inside declare their own auth (some unauth, some root-only, some
   // per-app); see `routes/v1-apps.ts` for the per-endpoint matrix.
+  // Gezel's tools in other AI apps: the owner credential, read from this
+  // account's `runtime/`, is traded for a project-bound `harness` token.
+  // Registered before the consent router, which owns the rest of `/v1/apps`.
+  app.route('/v1/apps/harness-connect', harnessConnectRoutes(ctx));
   app.route('/v1/apps', v1AppsRoutes(ctx));
   app.use('/v1/knowledge/*', openaiEndpointsGate);
   app.use('/v1/knowledge/*', bearerAuth(ctx.tokenStore));

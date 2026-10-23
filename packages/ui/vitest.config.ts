@@ -1,6 +1,7 @@
 import react from '@vitejs/plugin-react';
 import { searchForWorkspaceRoot } from 'vite';
 import { configDefaults, defineConfig } from 'vitest/config';
+import { projectPageTypographyPlugin } from '../../scripts/project-page-typography.mjs';
 
 const workspaceRoot = searchForWorkspaceRoot(import.meta.dirname);
 
@@ -16,7 +17,7 @@ const workspaceRoot = searchForWorkspaceRoot(import.meta.dirname);
  * mock of `../api.js` so view tests don't accidentally hit fetch.
  */
 export default defineConfig({
-  plugins: [react()],
+  plugins: [projectPageTypographyPlugin(import.meta.dirname), react()],
   // Mirrors vite.config.ts: with `pnpm link:squisq` active the linked
   // checkout would otherwise load its own react 18, whose context
   // objects react-dom 19 refuses to render (React error #130).
