@@ -1583,6 +1583,13 @@ export class KnowledgeManager {
        * their own. Explicit search asks; proactive injection does not.
        */
       media?: boolean;
+      /**
+       * Also return up to this many of a document's other passages that the
+       * search found, after its best one. Fusion otherwise keeps one passage
+       * per document, chosen by vector similarity alone, so an article's name-
+       * dense infobox can stand in for the section a reranker would choose.
+       */
+      chunksPerDocument?: number;
     },
   ): Promise<UnifiedSearchResult[]> {
     const active = (await this.activeCatalogKeys(opts.projectId, Boolean(opts.spatial))).filter(
@@ -1690,6 +1697,20 @@ export class KnowledgeManager {
       }
       fused.set(key, entry);
     };
+
+    // Every text passage the arms found, per document, best vector match first,
+    // for `chunksPerDocument`. Fusion still ranks documents, not passages.
+    const passagesByDocument = new Map<string, GlobalSearchHit[]>();
+    if ((opts.chunksPerDocument ?? 1) > 1) {
+      for (const hit of response.chunks
+        .filter((h) => !h.media)
+        .sort((a, b) => (b.cosine ?? -1) - (a.cosine ?? -1))) {
+        const key = `${hit.catalogKey}\u0000${hit.documentId}`;
+        const passages = passagesByDocument.get(key) ?? [];
+        if (!passages.some((known) => known.chunkUid === hit.chunkUid)) passages.push(hit);
+        passagesByDocument.set(key, passages);
+      }
+    }
 
     // Vector arm: one rank per document, in rerank-cosine order. A hit under
     // its profile's floor is not evidence at all — KNN always returns its
@@ -1823,7 +1844,23 @@ export class KnowledgeManager {
       if (!result) continue;
       perCatalogCount.set(entry.catalogKey, count + 1);
       seenSpatial.add(spatialIdentity);
-      out.push({ ...result, ...matches.get(`${entry.catalogKey}\u0000${entry.documentId}`) });
+      const docKey = `${entry.catalogKey}\u0000${entry.documentId}`;
+      out.push({ ...result, ...matches.get(docKey) });
+      if (out.length >= Math.max(10, opts.maxResults)) break;
+      // The document's other passages, each labelled by its own evidence: a
+      // sibling is vector evidence only if it clears the floor by itself.
+      const siblings = (passagesByDocument.get(docKey) ?? [])
+        .filter((hit) => hit.chunkUid !== entry.chunk?.chunkUid)
+        .slice(0, Math.max(0, (opts.chunksPerDocument ?? 1) - 1));
+      const floor = this.vectorFloorFor(entry.catalogKey);
+      for (const sibling of siblings) {
+        const own: KnowledgeEvidence =
+          floor !== null && sibling.cosine !== undefined && sibling.cosine >= floor
+            ? { arm: 'vector', similarity: sibling.cosine }
+            : { arm: 'fts' };
+        out.push(this.toResult(info, sibling, fusedRankRelevance(out.length), own));
+        if (out.length >= Math.max(10, opts.maxResults)) break;
+      }
       if (out.length >= Math.max(10, opts.maxResults)) break;
     }
     return out;

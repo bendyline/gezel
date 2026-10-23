@@ -68,6 +68,8 @@ export async function buildTestCatalog(opts: {
   withArticleIds?: boolean;
   /** Add this many more joinery documents titled "Dovetail Variant N". */
   dovetailVariants?: number;
+  /** Add a joinery article in several sections, each its own passage. */
+  withSections?: boolean;
 }): Promise<void> {
   const extras = opts.withExtras ?? false;
   await compileKnowledgeCatalog({
@@ -125,6 +127,32 @@ export async function buildTestCatalog(opts: {
           topicPath: ['joinery', 'joinery-variants'],
           markdown: '# Half-blind Dovetails\n\nThe tails stop short of the show face.\n',
           ordinal: 1,
+        };
+      }
+      if (opts.withSections) {
+        yield {
+          id: 'hand-cut',
+          title: 'Hand-cut Dovetails',
+          slug: 'hand-cut',
+          summary: 'Cutting dovetails by hand.',
+          language: 'en',
+          topicPath: ['joinery'],
+          markdown: [
+            '# Hand-cut Dovetails',
+            '',
+            '## Key facts',
+            '',
+            '- **Joint:** dovetail',
+            '',
+            '## Layout',
+            '',
+            'Mark the dovetail tails with a bevel gauge before sawing.',
+            '',
+            '## Sawing',
+            '',
+            'Saw the dovetail pins to the waste side of the line.',
+            '',
+          ].join('\n'),
         };
       }
       for (let i = 1; i <= (opts.dovetailVariants ?? 0); i++) {

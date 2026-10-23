@@ -169,7 +169,8 @@ describe('app knowledge boundary', () => {
     expect(f.install).not.toHaveBeenCalled();
     expect(f.search).toHaveBeenCalledWith(
       'science',
-      expect.objectContaining({ localModelsOnly: true, vector: null }),
+      // Several passages per article, so the reranker picks the section.
+      expect.objectContaining({ localModelsOnly: true, vector: null, chunksPerDocument: 3 }),
     );
     expect(f.ctx.relevance.install).not.toHaveBeenCalled();
   });

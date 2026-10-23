@@ -198,6 +198,13 @@ to 20 problem sentences, worst first. In the chat the markers become links
 and a Sources row lists the evidence and the unsourced statements (see
 [ux.md](ux.md)).
 
+**Apps run the same check.** The citation checker is published on its own as
+`@bendyline/gezel/grounding`: model-free, dependency-free and small enough to
+run on every draft. An app asks the SDK for numbered passages
+(`knowledgeContext({ citations: 'numbered' })`) and checks the model's text
+with `groundText()`. DocBlocks does this for Add content and Rewrite; see
+[DocBlocks text AI with Gezel](handboek/technical/docblocks-text-ai-with-gezel.md).
+
 ## What the check cannot do
 
 It checks the text, not the world:

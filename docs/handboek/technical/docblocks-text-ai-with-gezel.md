@@ -193,13 +193,15 @@ Study aids run their requests one at a time with `purpose: 'study'`. A summary i
 
 ## Add reference knowledge without making it a prerequisite
 
-Before desktop chat completion, the small `withGezelKnowledge()` adapter calls the SDK's `withKnowledgeContext()` using the latest user message as its query. It caps retrieval at four passages and 12,000 passage characters, reduces the allowance for prompt and context limits, and skips retrieval when there is no room. These are conservative character estimates, not model-token accounting.
+Before desktop chat completion, the small `withGezelKnowledge()` adapter calls the SDK's `knowledgeContext()`. It caps retrieval at four passages and 12,000 passage characters, reduces the allowance for prompt and context limits, and skips retrieval when there is no room. These are conservative character estimates, not model-token accounting.
 
-Gezel owns retrieval, ranking negotiation, passage-envelope validation, citation serialization, and the evidence budget. The helper keeps each `knowledge://` citation and serializes passages as untrusted reference material in a system message ahead of the task. A missing client, failed retrieval, malformed response, or oversized serialized result leaves the original request intact. Cancellation still cancels the request. The normal failure policy means an unavailable knowledge catalog does not disable writing.
+The search query is the request, not the prompt. A drafting prompt wraps the person's instructions around the whole document, so searching with the last user message mostly searched the document. DocBlocks' Add content and Rewrite requests carry a `knowledgeQuery` (the instructions plus the document title, or plus the selection), which the adapter passes as `query`. A continuation repeats it rather than searching with its own "continue the draft" text.
+
+Gezel owns retrieval, ranking negotiation, passage-envelope validation, citation serialization, and the evidence budget. The helper keeps each `knowledge://` citation and serializes passages as untrusted reference material in a system message ahead of the task. `knowledgeContext()` also reports what happened: `used` with the passages it added, `none` when the catalogs had nothing relevant, or `skipped` with a reason. DocBlocks shows that beside the request as a small knowledge indicator. A missing client, failed retrieval, malformed response, or oversized serialized result leaves the original request intact. Cancellation still cancels the request. The normal failure policy means an unavailable knowledge catalog does not disable writing.
 
 ```ts
 import {
-  withKnowledgeContext,
+  knowledgeContext,
   type ChatMessage,
   type GezelApp,
 } from '@bendyline/gezel-app-sdk';
@@ -209,18 +211,24 @@ export function enrichEditorRequest(
   messages: ChatMessage[],
   signal: AbortSignal,
   contextWindow: number | null,
-  maxOutputTokens?: number,
+  query?: string,
 ) {
-  return withKnowledgeContext(app.knowledge, messages, {
+  return knowledgeContext(app.knowledge, messages, {
     signal,
     maxPromptCharacters: 256 * 1024,
     maxMessages: 64,
     contextWindow,
-    maxOutputTokens,
+    ...(query ? { query } : {}),
+    // Only for drafts, whose dialog checks and renders the citations.
+    citations: 'numbered',
     onUnavailable: (reason) => console.warn(`Sending without knowledge: ${reason}`),
   });
 }
 ```
+
+### Check drafts against their sources
+
+Drafts follow Gezel's [factual-writing](../../factual-writing.md) contract in three parts. The Add content and Rewrite prompts carry the factual rule: state a name, date, number, place or quotation only when the instructions, the document or a passage shows it. Passages arrive numbered (`citations: 'numbered'`), and the model cites them as `[n]`. When a draft finishes, and after each pause while the person edits it, DocBlocks runs `groundText()` from `@bendyline/gezel/grounding` over it. Each sentence's details must appear in the passage it cites, in another passage, or in the person's instructions and document. The dialog lists the sentences that fail, with the missing details marked, and asks before inserting them at Gezel's own bar for refusing a document write. On insert, new content keeps each cited passage as a Markdown footnote naming the article and its catalog. A rewritten selection drops the markers instead. Other requests (review, study aids, diagrams) leave `citations` off, so no markers reach their output.
 
 Those limits come from DocBlocks' host wire contract. DocBlocks logs each `onUnavailable` reason once, so a missing relevance model or catalog never fails the request. The helper returns new messages without editing the caller's array, applies the serialized evidence limit as well as the passage-text limit, and skips enrichment for content it cannot safely budget. It does not claim exact tokenizer accounting or truncate the user's task to fit.
 

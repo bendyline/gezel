@@ -563,4 +563,8 @@ evidence within explicit `maxPromptCharacters` and `maxMessages` limits. Optiona
 context/output budgets use a conservative character estimate, not a tokenizer.
 It fails open on unavailable or malformed knowledge and propagates cancellation;
 plain `app.chat` does not enrich requests automatically. This helper is also
-available from `/browser`.
+available from `/browser`. `knowledgeContext(…)` takes the same options and also
+reports what it added (`status`, `reason`, `passages`). Pass `query` to search
+for what the person asked rather than the last user message, and
+`citations: 'numbered'` to have passages cited as `[n]`; check the result with
+`groundText()` from `@bendyline/gezel/grounding`.
