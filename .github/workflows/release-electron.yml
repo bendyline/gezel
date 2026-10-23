@@ -173,9 +173,10 @@ jobs:
   quality:
     needs: release-preflight
     runs-on: ubuntu-latest
-    # ~21 min observed green (Test alone is 12.4). Room for the suite to
-    # grow without the ceiling becoming the thing that fails.
-    timeout-minutes: 60
+    # Test alone took 29-41 min through 2026-10-19 and 52 on a slow runner on
+    # 2026-10-23, when the E2E suites still ran here and the job hit its 60 min
+    # cap. They now run in `e2e` beside it; this job is ~38-62 min.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -195,31 +196,14 @@ jobs:
         # Must precede the unit suites, not just the E2E steps: the evals
         # runtime-validation scenarios (petshop, tictactoe, codebase-evolution)
         # launch a real headless chromium inside `pnpm test:ci`. Installing it
-        # afterwards left them failing against an absent browser. Same
-        # playwright version as the app package, so this one install populates
-        # the shared ~/.cache/ms-playwright for the E2E steps below too.
-        run: pnpm --filter @bendyline/gezel-app exec playwright install --with-deps chromium
+        # afterwards left them failing against an absent browser.
+        uses: ./.github/actions/install-chromium
+        with:
+          filter: '@bendyline/gezel-app'
       - name: Test
         # test:ci, not test — same 4-vCPU runner as the Quality workflow, and
         # the same contention that starved fixed test timeouts there.
         run: pnpm test:ci
-      - name: Full browser E2E
-        run: pnpm test:e2e:web:run
-      - name: Full Electron E2E
-        run: xvfb-run -a pnpm test:e2e:run
-      - name: Preserve E2E failure diagnostics
-        # Traces, failure screenshots, and browser diagnostics. Without them a
-        # red release run leaves only the line reporter's summary to debug from.
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-e2e-diagnostics
-          path: |
-            packages/app/test-results/
-            packages/app/playwright-report/
-            packages/app/screenshots/
-          if-no-files-found: ignore
-          retention-days: 14
       - name: Generate production SBOM
         run: pnpm audit:sbom
       - name: Verify release version propagation
@@ -246,9 +230,49 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # Runs beside `quality` rather than after its unit suites, so an E2E flake
+  # can be re-run alone and the slower job does not carry both.
+  e2e:
+    needs: release-preflight
+    runs-on: ubuntu-latest
+    # ~12-22 min: build, then the browser (3-8) and Electron (4-9) suites.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          check-local-links: 'false'
+      - name: Stamp release version
+        run: node scripts/stamp-version.mjs --version "${{ needs.release-preflight.outputs.version }}"
+      - name: Build workspace
+        run: pnpm build
+      - name: Install Chromium
+        uses: ./.github/actions/install-chromium
+        with:
+          filter: '@bendyline/gezel-app'
+      - name: Full browser E2E
+        run: pnpm test:e2e:web:run
+      - name: Full Electron E2E
+        run: xvfb-run -a pnpm test:e2e:run
+      - name: Preserve E2E failure diagnostics
+        # Traces, failure screenshots, and browser diagnostics. Without them a
+        # red release run leaves only the line reporter's summary to debug from.
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-e2e-diagnostics
+          path: |
+            packages/app/test-results/
+            packages/app/playwright-report/
+            packages/app/screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
+
   # ── Windows ───────────────────────────────────────────────────────────
   build-windows:
-    needs: [quality, release-preflight]
+    needs: [quality, e2e, release-preflight]
     runs-on: windows-latest
     # Unproven end-to-end: the signing sweep plus NSIS and installer
     # signing have never both completed. Sized off the Linux build, plus
@@ -974,7 +998,7 @@ jobs:
   # for it either (see native/build-native.yml's matrix). One arch =
   # one PKG, with no cross-architecture manifest merge step.
   build-macos:
-    needs: [quality, release-preflight]
+    needs: [quality, e2e, release-preflight]
     runs-on: macos-latest
     # Widest of the six. electron-builder notarizes the .app and the .pkg
     # separately, and one rejected submission alone took 13.5 min — two
@@ -1461,7 +1485,7 @@ jobs:
   # the macOS job uses with `--mac --arm64`. Without the arch-scoped
   # target, both matrix entries would try to build both archs each.
   build-linux:
-    needs: [quality, release-preflight]
+    needs: [quality, e2e, release-preflight]
     strategy:
       fail-fast: false
       matrix:
@@ -1664,7 +1688,7 @@ jobs:
 
   # ── Release ───────────────────────────────────────────────────────────
   release:
-    needs: [quality, release-preflight, build-windows, build-macos, build-linux]
+    needs: [quality, e2e, release-preflight, build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
     # Downloads every platform's installers to draft the release; bounded
     # by artifact transfer, not compute.

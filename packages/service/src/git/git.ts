@@ -52,8 +52,8 @@ export interface RunGitOptions {
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
- * Relocate any `-c http.extraheader=...` arg (the auth header carrying
- * the PAT) out of argv into env-based git config. Process argv is visible
+ * Relocate any `-c http[.<url>].extraheader=...` arg (the auth header
+ * carrying the PAT) out of argv into env-based git config. Process argv is visible
  * via `ps` / `/proc/<pid>/cmdline`, so a token on the command line leaks
  * to co-located local users during any clone/fetch/push. Env config via
  * GIT_CONFIG_COUNT (git >= 2.31) keeps it off argv.
@@ -66,7 +66,7 @@ function relocateSecretGitConfig(args: string[]): {
   const pairs: Array<[string, string]> = [];
   for (let i = 0; i < args.length; i++) {
     const next = args[i + 1];
-    if (args[i] === '-c' && next !== undefined && /^http\.extraheader=/i.test(next)) {
+    if (args[i] === '-c' && next !== undefined && /^http\.(?:[^=]*\.)?extraheader=/i.test(next)) {
       const eq = next.indexOf('=');
       pairs.push([next.slice(0, eq), next.slice(eq + 1)]);
       i++; // consume the value token too

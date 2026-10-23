@@ -1049,7 +1049,9 @@ async function resolveGitHubToken(): Promise<string | null> {
   if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
   try {
     const { execFileSync } = await import('node:child_process');
-    const out = execFileSync('gh', ['auth', 'token'], {
+    // Named host: a bare `gh auth token` answers for gh's default host, which
+    // can be a GitHub Enterprise server whose token must not go to github.com.
+    const out = execFileSync('gh', ['auth', 'token', '--hostname', 'github.com'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       ...windowsHeadlessSpawnOptions(),

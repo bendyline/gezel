@@ -95,6 +95,15 @@ export function renderIssueBatch(
 
 const VERDICT_LINES = ISSUE_VERDICT_KINDS.map((k) => `   - ${k}: ${ISSUE_VERDICT_DEFINITIONS[k]}`);
 
+/**
+ * The prompt when there is nothing to hand over. The full procedure with an
+ * empty batch sent Claude Code looking anyway: two more listings and a status
+ * check, 7 turns and $1.25 to say "nothing to triage" (2026-10-23).
+ */
+export function renderEmptyIssuePrompt(batchText: string): string {
+  return `${batchText} Tell the person that in one sentence and stop: there is nothing to check.`;
+}
+
 /** The whole prompt, with the batch Gezel handed over embedded at the end. */
 export function renderHarnessIssuePrompt(name: HarnessPromptName, batchText: string): string {
   const fixing = name === 'fix_issues';

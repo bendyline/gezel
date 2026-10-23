@@ -44,7 +44,9 @@ jobs:
         # The default tictactoe scenario has browser checks. Without a browser
         # the eval degrades to static sniffing, so a green weekly smoke can
         # otherwise promote HTML whose interactions never ran.
-        run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
+        uses: ./.github/actions/install-chromium
+        with:
+          filter: '@bendyline/gezel-evals'
       - name: Require the selected provider credential
         shell: bash
         run: |

@@ -81,6 +81,14 @@ export interface HostOptions {
    */
   mode?: 'child' | 'in-process';
   /**
+   * Where an `in-process` daemon writes its log records. Defaults to
+   * `'stderr'`, so your app's stdout carries only what your app writes.
+   * `'split'` is Node's convention: info and debug on stdout, warnings and
+   * errors on stderr. Restored when the daemon closes. `GEZEL_LOG_LEVEL`
+   * still sets how much is written (`'silent'` for nothing).
+   */
+  logOutput?: 'stderr' | 'split';
+  /**
    * Host only the inference surface, owned by `@bendyline/gezel-inference`:
    * on-device model listing and installation, OpenAI-compatible chat and
    * Responses, embeddings (`gezel:embeddings`) and knowledge search. No

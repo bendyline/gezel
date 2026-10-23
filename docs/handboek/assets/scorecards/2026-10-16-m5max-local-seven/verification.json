@@ -17,24 +17,6 @@
   "originalInputFilesUnchanged": 3028,
   "rawResultScoreFactsMetricsFilesUnchanged": 2404,
   "machineHomePathsIncluded": false,
-  "manifestSha256": "5e54f92e1d02bf215d4dd2182d3478b3d637ff85bd3b878016f5ff17d4862dcf",
-  "integration": {
-    "sourceFilesAdded": true,
-    "originalTrialEvidenceChanged": false,
-    "published": false,
-    "committed": false
-  },
-  "verificationScope": "Original export validation and preservation checks, core source registration, current-source Handboek rendering, linked asset export and default round selection.",
-  "integrationVerifiedAt": "2026-10-22T14:11:19.654963+00:00",
-  "websiteSourceChecks": {
-    "coreScorecardTests": 44,
-    "handboekMacroTests": 31,
-    "handboekExportTests": 37,
-    "generatedBarrelCurrent": true,
-    "allRegisteredRoundsRendered": true,
-    "downloadsExported": true,
-    "completedRoundDefault": true,
-    "testedCurrentHandboekSource": true,
-    "liveSiteDeployed": false
-  }
+  "manifestSha256": "0d5e9fffc7b9b56fbc38315940c311da221ecbd2c8e0d75b62fd0b2f9ce844a1",
+  "verificationScope": "Original export validation and preservation checks."
 }

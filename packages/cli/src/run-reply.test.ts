@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ReplyPrinter, visibleReply } from './run-reply.js';
+import { ReplyPrinter, RunOutput, visibleReply } from './run-reply.js';
 
 /** Stream `chunks` through a printer and return exactly what reached stdout. */
 function print(chunks: string[]): string {
@@ -182,5 +182,41 @@ describe('visibleReply', () => {
     // Withheld while it might still close; afterwards it is what the model said.
     expect(visibleReply('Done. <tool_call>{"name":', true)).toBe('Done.');
     expect(visibleReply('Done. <tool_call>{"name":', false)).toBe('Done. <tool_call>{"name":');
+  });
+});
+
+describe('RunOutput', () => {
+  it('puts a continuation reply on its own paragraph instead of running into the first', () => {
+    // gemma4-e4b-q4 on MLX, 2026-10-22: a continuation nudge after a complete
+    // answer printed "...press release.The launch is scheduled for..."
+    let out = '';
+    const output = new RunOutput((text) => {
+      out += text;
+    });
+    output.push('The launch is on Friday.');
+    output.complete('The launch is on Friday.');
+    output.push('The launch is scheduled for Friday.');
+    output.complete('The launch is scheduled for Friday.');
+    expect(output.finish()).toBe(true);
+    expect(out).toBe('The launch is on Friday.\n\nThe launch is scheduled for Friday.');
+  });
+
+  it('adds no break around a message that printed nothing', () => {
+    let out = '';
+    const output = new RunOutput((text) => {
+      out += text;
+    });
+    output.push('<tool_call>{"name":"read_file"}</tool_call>');
+    output.complete('');
+    output.push('Revenue is up 12%.');
+    output.complete('Revenue is up 12%.');
+    expect(output.finish()).toBe(true);
+    expect(out).toBe('Revenue is up 12%.');
+  });
+
+  it('reports nothing printed when no message had a reply', () => {
+    const output = new RunOutput(() => {});
+    output.complete('');
+    expect(output.finish()).toBe(false);
   });
 });

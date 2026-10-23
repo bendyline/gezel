@@ -13,7 +13,7 @@ subcategory:
 
 The desktop app is the simplest way to use gezel, but the same system is also available as a family of npm packages. You can install the `gezel` command, write a repeatable script, connect another app to local models, embed the daemon, or reuse the schemas and clients that Gezel itself uses.
 
-Every package published from the Gezel repository exposes a public, semver-versioned contract and, on Node.js, needs version 24 or newer. You normally install only the package at the top of your use case; npm brings in its required Gezel dependencies for you.
+Every package published from the Gezel repository exposes a public, semver-versioned contract and, on Node.js, needs version 24 or newer. The one exception is `@bendyline/gezel-inference`'s `./internal/*` entry, which only `@bendyline/gezel-service` uses and which is not covered by semver. You normally install only the package at the top of your use case; npm brings in its required Gezel dependencies for you.
 
 ## Choose your starting point
 
@@ -22,6 +22,7 @@ Every package published from the Gezel repository exposes a public, semver-versi
 | Use gezel from a terminal or server | [`@bendyline/gezel-cli`](cli-reference.md) |
 | Write an automation that runs inside Gezel | [`@bendyline/gezel-sdk`](writing-scripts-with-gezel-sdk.md) |
 | Let a desktop or Node app use the user's Gezel models | [`@bendyline/gezel-app-sdk`](building-connected-apps-with-gezel-app-sdk.md) |
+| Run on-device models inside your own app, with or without Gezel installed | `@bendyline/gezel-app-sdk` together with `@bendyline/gezel-inference` |
 | Call the full daemon API from TypeScript | `@bendyline/gezel-client` |
 | Run or embed a daemon yourself | `@bendyline/gezel-service` together with `@bendyline/gezel-client` |
 | Give an MCP client Gezel's tools | `@bendyline/gezel-mcp` |
@@ -31,9 +32,11 @@ Every package published from the Gezel repository exposes a public, semver-versi
 For example, the command-line install is:
 
 ```bash
-npm install @bendyline/gezel-cli
-npx gezel
+npm install -g @bendyline/gezel-cli
+gezel
 ```
+
+To try it without installing, name the package: `npx -p @bendyline/gezel-cli gezel`. Always name the `@bendyline/` package with `npx`. A bare `npx gezel` outside a folder where the CLI is installed asks npm for an unrelated package called `gezel`.
 
 A library belongs in the application that uses it:
 
@@ -57,6 +60,7 @@ npm install @bendyline/gezel-app-sdk
 | `@bendyline/gezel-connectors-spectral` | An isolated subprocess host for compatible Prismatic components. Keeping it out of the daemon process isolates its SDK and vendored connectors. | Usually nobody directly; `@bendyline/gezel-service` resolves and spawns it. |
 | `@bendyline/gezel-script-stdlib` | The trusted, read-only standard library of gate scripts that ships with Gezel. Its plain TypeScript sources run in place under the `standard` script scope. | Usually the daemon; craftbook authors may inspect it for reusable standard checks. |
 | `@bendyline/gezel-mcp` | The stdio Model Context Protocol server that exposes workspace, memory, artifact, document, task, team, execution, history, and media tools. It calls back into a running daemon. | MCP hosts and custom agent harnesses that need Gezel's tool surface. |
+| `@bendyline/gezel-inference` | The on-device inference runtime: native engines such as llama.cpp and MLX, model download and verification, the on-device embedder, knowledge search, and the OpenAI-compatible routes. It holds no product state: no gezels, projects, chats, or tools. | Applications that host on-device models in their own process through `@bendyline/gezel-app-sdk` (`host: { inferenceOnly: true }`). Everyone else receives it through `@bendyline/gezel-service`. |
 | `@bendyline/gezel-service` | `gezeld`, the local daemon. It owns state, provider routing, chat sessions, tools, tasks, engines, and the HTTP API, and includes the browser UI and Handboek. | Headless operators and applications deliberately embedding or managing a Gezel daemon. |
 | `@bendyline/gezel-cli` | The `gezel` terminal interface, one-shot runner, service manager, model and engine manager, media commands, and Handboek exporter. It does not expose a supported JavaScript API. | People using [the gezel command line](cli-reference.md). |
 
@@ -70,6 +74,6 @@ npm install @bendyline/gezel-app-sdk
 
 ## The companion Gilde package
 
-`@bendyline/gilde` contains the catalog data: model entries, toolsets, roles, craftbooks, connector types, and project types. It is released from the separate Gilde repository and consumed at an exact version by `@bendyline/gezel-catalog`. Install it directly only when you are working with the catalog content itself; ordinary Gezel consumers receive it through the catalog package.
+`@bendyline/gilde` contains the catalog data: model entries, toolsets, roles, craftbooks, connector types, and project types. It is released from the separate Gilde repository. `@bendyline/gezel-service` pins an exact version, so installing the CLI or the service brings it in. `@bendyline/gezel-catalog` declares it only as an optional peer: when you use the catalog package on its own, install `@bendyline/gilde` beside it.
 
 The Electron app, React UI, VS Code extension, evaluation viewer, and deployment-only ML runtime are private workspaces rather than public npm packages. The desktop app and extension have their own distribution paths, the React UI is bundled into `@bendyline/gezel-service`, and the evaluation and ML workspaces support development and complete application builds.

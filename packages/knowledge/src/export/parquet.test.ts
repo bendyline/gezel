@@ -54,11 +54,14 @@ async function compileFixture(
   outputPath: string,
   embeddingProfile: KnowledgeEmbeddingProfile,
   count: number,
+  { withLocation = true }: { withLocation?: boolean } = {},
 ): Promise<void> {
   const docs = generateFixtureCorpus(count, 7);
-  docs[0]!.locations = [
-    { id: 'subject', latitude: 47.6062, longitude: -122.3321, role: 'subject' },
-  ];
+  if (withLocation) {
+    docs[0]!.locations = [
+      { id: 'subject', latitude: 47.6062, longitude: -122.3321, role: 'subject' },
+    ];
+  }
   await compileKnowledgeCatalog({
     catalog: {
       id: 'fixture-en',
@@ -277,6 +280,33 @@ describe.skipIf(!binaryPath)('exportCatalogParquet', () => {
       duckdb: { binaryPath },
     });
     expect(report.files.map((f) => f.sha256)).toEqual(fromArchive.files.map((f) => f.sha256));
+  }, 120_000);
+
+  it('exports a catalog with no geolocated documents', async () => {
+    if (!binaryPath) return;
+    const unlocatedPath = join(dir, 'unlocated', 'fixture-en-1.0.0.gezk');
+    await compileFixture(unlocatedPath, FIXTURE_EMBEDDING_PROFILE, 20, { withLocation: false });
+    const report = await exportCatalogParquet({
+      source: { archivePath: unlocatedPath },
+      outDir: join(dir, 'out-unlocated'),
+      duckdb: { binaryPath },
+    });
+    expect(report.files.map((f) => f.path)).toContain('document-locations.parquet');
+    const rows = await query(
+      `SELECT count(*)::INTEGER AS n FROM read_parquet('${join(dir, 'out-unlocated', 'document-locations.parquet')}')`,
+    );
+    expect(rows[0]?.n).toBe(0);
+    const columns = await query(
+      `DESCRIBE SELECT * FROM read_parquet('${join(dir, 'out-unlocated', 'document-locations.parquet')}')`,
+    );
+    expect(columns.map((c) => c.column_name)).toEqual([
+      'document_id',
+      'location_id',
+      'latitude',
+      'longitude',
+      'role',
+      'provenance_json',
+    ]);
   }, 120_000);
 });
 

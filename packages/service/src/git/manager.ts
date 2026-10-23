@@ -88,6 +88,14 @@ export interface CheckoutResolution {
 /** Where GitHub API/auth credentials come from, in precedence order. */
 export type GitHubCredentialSource = 'pat' | 'env' | 'gh' | 'none';
 
+/** One-shot `-c` auth args for a git command, and the secrets to redact from its errors. */
+interface GitCredentialArgs {
+  baseArgs: string[];
+  redact: string[];
+}
+
+const NO_CREDENTIALS: GitCredentialArgs = { baseArgs: [], redact: [] };
+
 export interface GitStatus {
   github?: ProjectGitHub;
   exists: boolean;
@@ -103,6 +111,7 @@ export interface GitStatus {
   syncStale?: boolean;
   syncStaleReason?: 'never-synced' | 'branch-changed' | 'no-upstream' | 'git-activity';
   hasPat: boolean;
+  /** For a project with no GitHub link, only a stored PAT is reported (`gh` is never run). */
   credentialSource: GitHubCredentialSource;
 }
 
@@ -279,7 +288,7 @@ export class GitManager {
       // Non-github URLs (local paths, ssh-elsewhere, gitlab/gitea) just
       // get a vanilla `git clone --bare` — the schema accepts them and
       // the worktree mechanics work identically.
-      const { baseArgs, redact } = parsed ? await this.patArgs() : { baseArgs: [], redact: [] };
+      const { baseArgs, redact } = await this.credentialArgs(url);
       const cloneUrl = parsed ? parsed.cloneUrl : url;
       await mkdir(dir, { recursive: true });
       await runGit([...baseArgs, 'clone', '--bare', '--filter=blob:none', cloneUrl, dir], {
@@ -554,7 +563,7 @@ export class GitManager {
       if (!(await isGitInstalled())) throw new GitNotInstalledError();
       const parsed = parseGitHubUrl(project.github!.url);
       if (!parsed) throw new Error(`Could not parse GitHub URL: ${project.github!.url}`);
-      const { baseArgs, redact } = await this.patArgs();
+      const { baseArgs, redact } = await this.credentialArgs(project.github!.url);
       await mkdir(resolved.dir, { recursive: true });
       const args = [...baseArgs, 'clone'];
       if (project.github!.branch) args.push('--branch', project.github!.branch);
@@ -578,7 +587,7 @@ export class GitManager {
         throw new Error(`No checkout exists for project ${project.id}; clone first.`);
       }
       if (!(await isGitInstalled())) throw new GitNotInstalledError();
-      const { baseArgs, redact } = await this.patArgs();
+      const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
       const before = await this.headSha(resolved.dir);
       await runGit([...baseArgs, 'pull', '--ff-only'], {
         cwd: resolved.dir,
@@ -613,7 +622,7 @@ export class GitManager {
         await this.persistCheckoutState(project, resolved.dir, { branch: current });
         return { branch: current };
       }
-      const { baseArgs, redact } = await this.patArgs();
+      const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
       // Fetch quietly so a remote-only branch is reachable.
       await runGit([...baseArgs, 'fetch', '--quiet', 'origin'], {
         cwd: resolved.dir,
@@ -688,7 +697,7 @@ export class GitManager {
         throw new Error(`No checkout exists for project ${project.id}; clone first.`);
       }
       if (!(await isGitInstalled())) throw new GitNotInstalledError();
-      const { baseArgs, redact } = await this.patArgs();
+      const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
       await this.ensureFetchRefspec(resolved.dir);
       let result: Awaited<ReturnType<typeof runGit>>;
       try {
@@ -773,7 +782,7 @@ export class GitManager {
         throw new Error(`No checkout exists for project ${project.id}; clone first.`);
       }
       if (!(await isGitInstalled())) throw new GitNotInstalledError();
-      return this.pushDir(resolved.dir);
+      return this.pushDir(resolved.dir, await this.checkoutCredentialArgs(project, resolved));
     });
   }
 
@@ -784,12 +793,13 @@ export class GitManager {
    */
   private async pushDir(
     dir: string,
+    credentials: GitCredentialArgs,
   ): Promise<{ pushed: boolean; rejected?: 'non-fast-forward' | 'auth' | 'unknown' }> {
     const branch = await this.currentBranch(dir);
     if (!branch) {
       throw new Error('Detached HEAD — check out a branch before pushing.');
     }
-    const { baseArgs, redact } = await this.patArgs();
+    const { baseArgs, redact } = credentials;
     try {
       await runGit([...baseArgs, 'push', '--set-upstream', 'origin', branch], {
         cwd: dir,
@@ -836,7 +846,7 @@ export class GitManager {
     let stats = new Map<string, NumstatEntry>();
     try {
       const head = (await this.headExists(dir)) ? 'HEAD' : EMPTY_TREE_SHA;
-      const { baseArgs, redact } = await this.patArgs();
+      const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
       const numstat = await runGit([...baseArgs, 'diff', head, '--numstat', '-z', '-M'], {
         cwd: dir,
         redact,
@@ -901,7 +911,7 @@ export class GitManager {
       };
     }
     const head = (await this.headExists(dir)) ? 'HEAD' : EMPTY_TREE_SHA;
-    const { baseArgs, redact } = await this.patArgs();
+    const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
     // Include the old path in the pathspec so rename detection still has
     // both sides to pair up.
     const pathspec = ['--', relPath, ...(entry.oldPath ? [entry.oldPath] : [])];
@@ -953,7 +963,7 @@ export class GitManager {
     let diff = '';
     try {
       const head = (await this.headExists(dir)) ? 'HEAD' : EMPTY_TREE_SHA;
-      const { baseArgs, redact } = await this.patArgs();
+      const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
       ({ stdout: diff } = await runGit([...baseArgs, 'diff', head, '-M'], { cwd: dir, redact }));
     } catch {
       // Offline against a partial clone — paths alone still help.
@@ -1002,7 +1012,7 @@ export class GitManager {
     }
     if (!name) {
       try {
-        const { baseArgs, redact } = await this.patArgs();
+        const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
         const { stdout } = await runGit([...baseArgs, 'ls-remote', '--symref', 'origin', 'HEAD'], {
           cwd: dir,
           redact,
@@ -1057,7 +1067,7 @@ export class GitManager {
       const total = entries.length;
       const capped = entries.slice(0, MAX_CHANGE_ENTRIES);
       const head = (await this.headExists(dir)) ? 'HEAD' : EMPTY_TREE_SHA;
-      const { baseArgs, redact } = await this.patArgs();
+      const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
       let stats = new Map<string, NumstatEntry>();
       try {
         const numstat = await runGit([...baseArgs, 'diff', head, '--numstat', '-z', '-M'], {
@@ -1153,7 +1163,7 @@ export class GitManager {
         );
       }
       const notes: string[] = [];
-      const { baseArgs, redact } = await this.patArgs();
+      const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
       await this.ensureFetchRefspec(dir);
       try {
         await runGit([...baseArgs, 'fetch', '--quiet', 'origin', defaultBranch], {
@@ -1311,7 +1321,7 @@ export class GitManager {
     if (!resolved.exists) return { commits: [], hasMore: false };
     const limit = Math.max(1, Math.min(200, opts.limit ?? 50));
     const skip = Math.max(0, opts.skip ?? 0);
-    const { baseArgs, redact } = await this.patArgs();
+    const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
     let stdout = '';
     try {
       ({ stdout } = await runGit(
@@ -1354,7 +1364,7 @@ export class GitManager {
     }
     if (!/^[0-9a-f]{4,40}$/i.test(sha)) throw new Error('Invalid commit id.');
     const dir = resolved.dir;
-    const { baseArgs, redact } = await this.patArgs();
+    const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
     const headerOut = await runGit(
       [...baseArgs, 'show', sha, '--numstat', `--format=${LOG_FORMAT}`],
       { cwd: dir, redact },
@@ -1423,7 +1433,7 @@ export class GitManager {
           message: 'Not on a branch — switch to a branch to sync.',
         };
       }
-      const { baseArgs, redact } = await this.patArgs();
+      const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
       const { name, email } = await this.resolveCommitIdentity();
       const idArgs = ['-c', `user.name=${name}`, '-c', `user.email=${email}`];
       await this.ensureFetchRefspec(dir);
@@ -1443,7 +1453,7 @@ export class GitManager {
         if (!upstream) {
           // Brand-new branch: nothing to receive — publish it.
           const toPush = await this.unpushedCount(dir);
-          const res = await this.pushDir(dir);
+          const res = await this.pushDir(dir, { baseArgs, redact });
           if (!res.pushed) return this.pushFailureToSync(res, { pulled, pushed, branch });
           pushed += toPush;
           await this.persistCheckoutState(project, dir, { branch, synced: true });
@@ -1491,7 +1501,7 @@ export class GitManager {
           pulled += counts.behind;
         }
         if (counts.ahead > 0 || merged) {
-          const res = await this.pushDir(dir);
+          const res = await this.pushDir(dir, { baseArgs, redact });
           if (!res.pushed) {
             if (res.rejected === 'non-fast-forward' && attempt === 0) continue;
             return this.pushFailureToSync(res, { pulled, pushed, branch });
@@ -1541,7 +1551,7 @@ export class GitManager {
     const dir = resolved.dir;
     if (!(await this.isMergeInProgress(dir))) throw new NotInMergeError();
     this.assertSafeRelPath(dir, relPath);
-    const { baseArgs, redact } = await this.patArgs();
+    const { baseArgs, redact } = await this.checkoutCredentialArgs(project, resolved);
     const readStage = async (stage: number): Promise<string | undefined> => {
       try {
         const { stdout } = await runGit([...baseArgs, 'show', `:${stage}:${relPath}`], {
@@ -1676,9 +1686,14 @@ export class GitManager {
   }
 
   async status(project: ProjectDetail): Promise<GitStatus> {
+    // A project with no GitHub link never asks the GitHub CLI for its token:
+    // craftbook listings and searches call this for every project.
+    if (!project.github) {
+      const hasPat = await this.hasPat();
+      return { exists: false, hasPat, credentialSource: hasPat ? 'pat' : 'none' };
+    }
     const credentialSource = await this.credentialSource();
     const hasPat = credentialSource === 'pat';
-    if (!project.github) return { exists: false, hasPat, credentialSource };
     const resolved = await this.resolveCheckout(project);
     if (!resolved.exists) {
       return {
@@ -1772,20 +1787,39 @@ export class GitManager {
   }
 
   /**
-   * Token auth (stored PAT or ambient gh/env credential) as one-shot
-   * `-c http.extraheader` args + the matching redact list. Applied to
-   * every command that can talk to origin — including clone and
+   * Token auth (stored PAT or ambient gh/env credential) for git commands
+   * against `repoUrl`, as one-shot `-c` args + the matching redact list.
+   * Applied to every command that can talk to origin — including clone and
    * diff/log/show/merge, which can lazily fetch blobs in partial clones.
+   *
+   * The header is scoped to the repo's host (`http.https://<host>/.extraheader`):
+   * an unscoped header rides along to every URL git contacts, so a submodule,
+   * LFS or redirect target on another host would receive the GitHub token.
    */
-  private async patArgs(): Promise<{ baseArgs: string[]; redact: string[] }> {
+  private async credentialArgs(repoUrl: string): Promise<GitCredentialArgs> {
+    const parsed = parseGitHubUrl(repoUrl);
+    if (!parsed) return NO_CREDENTIALS;
     const pat = await this.getToken();
-    if (!pat) return { baseArgs: [], redact: [] };
+    if (!pat) return NO_CREDENTIALS;
     // GitHub recommends `Bearer <token>`; extraheader keeps the token out
     // of remote URLs persisted in `.git/config` and off process args.
     return {
-      baseArgs: ['-c', `http.extraheader=AUTHORIZATION: Bearer ${pat}`],
+      baseArgs: ['-c', `http.https://${parsed.host}/.extraheader=AUTHORIZATION: Bearer ${pat}`],
       redact: [pat],
     };
+  }
+
+  /**
+   * Credentials for git commands in a project's existing checkout. A checkout
+   * whose `origin` is not the linked repo gets none: that remote may be any
+   * host (a gezel could have rewritten it), and the token is GitHub's.
+   */
+  private async checkoutCredentialArgs(
+    project: ProjectDetail,
+    resolved: CheckoutResolution,
+  ): Promise<GitCredentialArgs> {
+    if (!project.github || !resolved.originMatches) return NO_CREDENTIALS;
+    return this.credentialArgs(project.github.url);
   }
 
   /**

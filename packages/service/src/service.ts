@@ -1,3 +1,4 @@
+import { type LogOutput, getLogOutput, setLogOutput } from '@bendyline/gezel';
 import { gezelHome } from '@bendyline/gezel/paths';
 import type { EngineContext } from './http/engine-context.js';
 import type { RunningInferenceOnlyService } from './inference-host.js';
@@ -28,6 +29,32 @@ export function startService(
  * inference-only profile is neither: the inference package owns it. */
 export async function startService(
   opts: StartServiceOptions = {},
+): Promise<RunningService<EngineContext> | RunningInferenceOnlyService> {
+  const previousLogOutput = getLogOutput();
+  if (opts.logOutput) setLogOutput(opts.logOutput);
+  try {
+    const running = await startForRole(opts);
+    if (opts.logOutput) restoreLogOutputOnStop(running, previousLogOutput);
+    return running;
+  } catch (error) {
+    setLogOutput(previousLogOutput);
+    throw error;
+  }
+}
+
+function restoreLogOutputOnStop(running: { stop(): Promise<void> }, previous: LogOutput): void {
+  const stop = running.stop.bind(running);
+  running.stop = async () => {
+    try {
+      await stop();
+    } finally {
+      setLogOutput(previous);
+    }
+  };
+}
+
+async function startForRole(
+  opts: StartServiceOptions,
 ): Promise<RunningService<EngineContext> | RunningInferenceOnlyService> {
   const home = opts.home ?? gezelHome();
   if (opts.embeddedInferenceOnly) {

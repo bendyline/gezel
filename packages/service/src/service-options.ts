@@ -1,4 +1,4 @@
-import type { ServiceRole } from '@bendyline/gezel';
+import type { LogOutput, ServiceRole } from '@bendyline/gezel';
 import type { ServerType } from '@hono/node-server';
 import type { LoopbackCert } from './http/cert.js';
 import type { ServiceContext } from './http/context.js';
@@ -99,6 +99,12 @@ export interface StartServiceOptions {
    * failing health signal instead of relying on log scraping.
    */
   onUnexpectedHttpError?: UnexpectedHttpErrorHandler;
+  /**
+   * Where log records go while this service runs; restored on `stop()`. An
+   * app hosting the service in its own process passes `'stderr'` so its
+   * stdout stays its own. Unset keeps the process setting.
+   */
+  logOutput?: LogOutput;
   /**
    * Test seam: bind the opt-in Ollama emulation listener to this port
    * instead of the well-known 11434 (`0` = ephemeral). Production

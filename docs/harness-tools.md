@@ -26,10 +26,16 @@ the Handboek's [Connected apps](handboek/conceptual/connected-apps.md).
 
 1. The app starts `<node> ~/.gezel/integrations/mcp/launch.mjs --harness <client> [--folder ${workspaceFolder} | --project <id>]`.
    The launcher imports the entry `current.json` names; the daemon rewrites
-   that file at every start from its own `require.resolve`.
+   that file at every start from its own `require.resolve`. It also sets
+   `GEZEL_HOME` to its own home (two folders up) unless the app set one: no
+   app config carries it, and without it the server finds only a daemon on
+   `~/.gezel`.
 2. On the first tool call the harness picks a folder, in this order:
    `--project`, then `--folder`, then the client's MCP roots, then its working
-   directory. Claude Desktop never infers one. A tool given an absolute path
+   directory. Checked 2026-10-23: Claude Code 2.1.246 starts the server in the
+   folder it was launched in and reports that folder as its root (a subfolder,
+   not the repository root); Codex 0.162.1 starts it there too and sends no
+   roots. Claude Desktop never infers one. A tool given an absolute path
    binds the root that contains it, so a multi-root VS Code window holds one
    token per project.
 3. It reads `runtime/auth-token` and posts `{client, folder | projectId}` to
@@ -141,7 +147,7 @@ project.
 | Claude Code | `claude mcp add --scope user gezel -- …` | read from `~/.claude.json` `mcpServers.gezel` |
 | Codex | `codex mcp add gezel -- …` | read from `$CODEX_HOME/config.toml` `[mcp_servers.gezel]` |
 | Cursor | JSONC splice | `~/.cursor/mcp.json` `mcpServers.gezel`, with `--folder ${workspaceFolder}` |
-| Claude Desktop | JSONC splice | `claude_desktop_config.json` `mcpServers.gezel`, with `--project <id>` (Windows and macOS) |
+| Claude Desktop | JSONC splice | `claude_desktop_config.json` `mcpServers.gezel`, with `--project <id>` (Windows and macOS; on Windows the Store-style build's `%LOCALAPPDATA%\Claude-Data\claude_<id>\` or `Packages\Claude_<id>\LocalCache\Roaming\Claude\` comes before the classic `%APPDATA%\Claude\`) |
 | VS Code | JSONC splice, or the extension's MCP provider | the profile's `mcp.json` `servers.gezel` (`type: stdio`, `--folder ${workspaceFolder}`) |
 
 **How an entry is judged** (`integrations/<client>/tools-setup.json` records

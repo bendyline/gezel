@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProjectDetail } from '@bendyline/gezel';
@@ -7,6 +7,7 @@ import type {
   SecretStore,
   SecretStoreBackend,
 } from '@bendyline/gezel-inference/internal/secrets/types';
+import { projectStorageDir } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { AmbientGitHubAuth } from '../github/ambient.js';
@@ -61,7 +62,7 @@ const REPO_URL = 'https://github.com/octocat/Hello-World';
 const REPO_URL_WITH_STALE_CREDENTIALS =
   'https://stale-user:stale-token@github.com/octocat/Hello-World';
 const CLEAN_CLONE_URL = `${REPO_URL}.git`;
-const AUTH_CONFIG = `http.extraheader=AUTHORIZATION: Bearer ${SENTINEL}`;
+const AUTH_CONFIG = `http.https://github.com/.extraheader=AUTHORIZATION: Bearer ${SENTINEL}`;
 
 let home: string;
 let store: Store;
@@ -129,5 +130,60 @@ describe('GitManager clone authentication', () => {
     expectHeaderAuthWithCleanUrl(args);
     expect(args.join(' ')).not.toContain('stale-user');
     expect(args.join(' ')).not.toContain('stale-token');
+  });
+});
+
+describe('GitManager credential scope', () => {
+  /** A project whose workspace is already a git checkout with this `origin`. */
+  async function projectWithCheckout(origin: string): Promise<ProjectDetail> {
+    const created = await store.createProject({ name: 'checkout', github: { url: REPO_URL } });
+    await mkdir(join(projectStorageDir(home, created.id), 'workspace', '.git'), {
+      recursive: true,
+    });
+    runGitMock.mockImplementation(async (args: string[]) => ({
+      stdout: args.includes('get-url') ? `${origin}\n` : args.includes('rev-parse') ? 'main\n' : '',
+      stderr: '',
+    }));
+    return (await store.getProject(created.id)) as ProjectDetail;
+  }
+
+  function pullCall(): string[] {
+    const call = runGitMock.mock.calls.find(([args]) => (args as string[]).includes('pull'));
+    expect(call, 'expected GitManager to invoke git pull').toBeDefined();
+    return call![0] as string[];
+  }
+
+  it("sends the token, scoped to GitHub, when the checkout's origin is the linked repo", async () => {
+    const project = await projectWithCheckout(CLEAN_CLONE_URL);
+
+    await manager.pull(project);
+
+    expect(pullCall().slice(0, 2)).toEqual(['-c', AUTH_CONFIG]);
+  });
+
+  it("sends no token when the checkout's origin is another host", async () => {
+    const project = await projectWithCheckout('https://gitlab.example.com/someone/else.git');
+
+    await manager.pull(project);
+
+    expect(pullCall().join(' ')).not.toContain(SENTINEL);
+    expect(pullCall().join(' ')).not.toContain('extraheader');
+  });
+
+  it('never asks the GitHub CLI for a token for a project with no GitHub link', async () => {
+    const ghToken = vi.fn(async () => 'gh-token');
+    const ambientManager = new GitManager(
+      home,
+      store,
+      new InMemorySecrets(),
+      new AmbientGitHubAuth({ env: {}, ghToken }),
+    );
+    const created = await store.createProject({ name: 'no link' });
+    const project = (await store.getProject(created.id)) as ProjectDetail;
+
+    const status = await ambientManager.status(project);
+
+    expect(status).toMatchObject({ exists: false, hasPat: false, credentialSource: 'none' });
+    expect(ghToken).not.toHaveBeenCalled();
   });
 });

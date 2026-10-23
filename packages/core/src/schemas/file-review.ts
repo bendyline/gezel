@@ -173,6 +173,11 @@ export const BoekwachterIssueSchema = FileReviewIssueSchema.extend({
   supersededBy: z.string().optional(),
   /** An outside app is checking this issue until `until`; the night shift leaves it alone. */
   handoff: z.object({ client: z.string(), until: z.string() }).optional().catch(undefined),
+  /**
+   * Its category is almost never worth fixing, on the project's verdicts.
+   * Left out of counts and badges; still listed, never for a major issue.
+   */
+  lowConfidence: z.boolean().optional(),
 });
 export type BoekwachterIssue = z.infer<typeof BoekwachterIssueSchema>;
 

@@ -143,3 +143,44 @@ export class ReplyPrinter {
     this.printed = visible;
   }
 }
+
+/**
+ * Everything `gezel run` prints: one {@link ReplyPrinter} per committed
+ * assistant message, with a blank line between them. A continuation the
+ * runtime asks for streams as a second message, and one shared printer ran it
+ * straight into the first reply: "…owns the press release.The launch is…".
+ */
+export class RunOutput {
+  private current: ReplyPrinter;
+  private printedAny = false;
+
+  constructor(private readonly write: (text: string) => void) {
+    this.current = this.nextReply();
+  }
+
+  push(chunk: string): void {
+    this.current.push(chunk);
+  }
+
+  /** One assistant message was saved; later deltas belong to the next one. */
+  complete(committed?: string): void {
+    this.current.finish(committed);
+    this.current = this.nextReply();
+  }
+
+  /** The stream ended. Returns whether anything was printed. */
+  finish(): boolean {
+    this.current.finish();
+    return this.printedAny;
+  }
+
+  private nextReply(): ReplyPrinter {
+    let started = false;
+    return new ReplyPrinter((text) => {
+      if (!started && this.printedAny) this.write('\n\n');
+      started = true;
+      this.printedAny = true;
+      this.write(text);
+    });
+  }
+}

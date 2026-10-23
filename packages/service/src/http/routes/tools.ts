@@ -97,7 +97,12 @@ import { buildPrOverlay } from '../../filemap/pr-overlay.js';
 import { ensureGezel } from '../../gezels/ensure.js';
 import { restrictedGitArgv, restrictedGitEnv } from '../../git/restricted-args.js';
 import { issueVerdictActorFor } from '../../issue-triage/actor.js';
-import { issueVerdictStats, issueVerdictStatsResponse } from '../../issue-triage/calibration.js';
+import {
+  annotateLowConfidence,
+  isLowConfidence,
+  issueVerdictStats,
+  issueVerdictStatsResponse,
+} from '../../issue-triage/calibration.js';
 import { buildIssueHandoffDocument } from '../../issue-triage/handoff-report.js';
 import { buildIssueHandoffQueue } from '../../issue-triage/queue.js';
 import { applyIssueVerdicts } from '../../issue-triage/verdicts.js';
@@ -734,14 +739,20 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
     const body = FileReviewRequestSchema.parse(await c.req.json());
-    return c.json(await ctx.contentIndex.fileReview(id, body.path));
+    const res = await ctx.contentIndex.fileReview(id, body.path);
+    if (!res.trackedIssues?.length) return c.json(res);
+    const stats = issueVerdictStats(await ctx.store.boekwachterIssues.readIssueVerdicts(id));
+    return c.json({ ...res, trackedIssues: annotateLowConfidence(res.trackedIssues, stats) });
   });
 
   app.post('/:id/tools/list-file-issues', async (c) => {
     const id = c.req.param('id');
     if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
     const body = ListFileIssuesRequestSchema.parse(await c.req.json().catch(() => ({})));
-    return c.json(await ctx.contentIndex.listFileIssues(id, body));
+    const stats = issueVerdictStats(await ctx.store.boekwachterIssues.readIssueVerdicts(id));
+    return c.json(
+      await ctx.contentIndex.listFileIssues(id, body, (issue) => isLowConfidence(stats, issue)),
+    );
   });
 
   app.post('/:id/tools/get-file-issue', async (c) => {

@@ -40,10 +40,11 @@ jobs:
     runs-on: ubuntu-latest
     # Runtime coverage used to tail this job; it is now the separate
     # `coverage` job below, for the reasons recorded there. What remains is
-    # build/typecheck/lint plus stability pass 1 — ~25 min before coverage was
-    # folded in. 60 stays as headroom for suite growth rather than because the
-    # ceiling is close.
-    timeout-minutes: 60
+    # build/typecheck/lint plus stability pass 1: 30-60 min from 2026-10-19 to
+    # 10-23 (unit suites 24-52, slowed ~44% on a slow runner), with three runs
+    # cut off at the old 60 min cap. Shard the service suite before raising
+    # this again.
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -59,7 +60,9 @@ jobs:
         # chromium for its runtime-validation scenarios (petshop, tictactoe,
         # codebase-evolution). Same playwright version as the app package, so
         # this populates the shared ~/.cache/ms-playwright the evals import uses.
-        run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
+        uses: ./.github/actions/install-chromium
+        with:
+          filter: '@bendyline/gezel-evals'
       - name: Run all unit suites (stability pass 1 of 3)
         # test:ci, not test — the CI runner has 4 vCPUs, and pnpm otherwise
         # runs several package suites at once, each with its own worker pool.
@@ -113,8 +116,9 @@ jobs:
     # 60 min ceiling between 2026-08-19 and 2026-08-22, having already forced
     # that ceiling from 45 to 60, and it blew the npm release gate outright
     # (see publish-npm.yml). Adding a suite is cheap here and expensive there;
-    # keep it that way.
-    timeout-minutes: 60
+    # keep it that way. The service shard peaked at 50 min (2026-10-23), too
+    # close to the old 60 min cap for a slow runner.
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -129,7 +133,9 @@ jobs:
         # launch a real headless chromium, and the service suite, whose
         # page-check tests gate on the shared ~/.cache/ms-playwright existing.
         # Without it those tests silently skip and the report under-counts.
-        run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
+        uses: ./.github/actions/install-chromium
+        with:
+          filter: '@bendyline/gezel-evals'
       - name: Measure executable V8 coverage
         run: pnpm test:coverage -- ${{ matrix.shard.args }}
       - name: Preserve executable coverage reports
@@ -243,7 +249,8 @@ jobs:
       fail-fast: false
       matrix:
         pass: [2, 3]
-    timeout-minutes: 60
+    # Peaked at 50 and 54 min (2026-10-23) under the old 60 min cap.
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -257,7 +264,9 @@ jobs:
         # the shared ~/.cache/ms-playwright existing (see runner.test.ts).
         # Without this the repeat passes would silently skip tests that pass 1
         # runs, which is precisely the flake this job exists to catch.
-        run: pnpm --filter @bendyline/gezel-app exec playwright install --with-deps chromium
+        uses: ./.github/actions/install-chromium
+        with:
+          filter: '@bendyline/gezel-app'
       - name: Repeat UI, service, and CLI TUI suites (stability pass ${{ matrix.pass }} of 3)
         run: pnpm test:stability:pass
 
@@ -384,7 +393,9 @@ jobs:
           pnpm-version: ${{ env.PNPM_VERSION }}
       - run: pnpm build
       - name: Install Chromium
-        run: pnpm --filter @bendyline/gezel-app exec playwright install --with-deps chromium
+        uses: ./.github/actions/install-chromium
+        with:
+          filter: '@bendyline/gezel-app'
       - name: Run the full browser suite
         # Every spec, not a subset. The Electron release gates on this same
         # suite, and a spec left out here first fails on a release candidate:

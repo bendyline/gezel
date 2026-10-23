@@ -154,7 +154,8 @@ export async function exportCatalogParquet(
           "{document_id:'VARCHAR',location_id:'VARCHAR',latitude:'DOUBLE',longitude:'DOUBLE',role:'VARCHAR',provenance_json:'VARCHAR'}";
         const source = locations.length
           ? `read_ndjson(${sqlString(path)}, columns=${columns})`
-          : '(SELECT NULL::VARCHAR document_id, NULL::VARCHAR location_id, NULL::DOUBLE latitude, NULL::DOUBLE longitude, NULL::VARCHAR role, NULL::VARCHAR provenance_json WHERE false)';
+          : // `role` is a DuckDB keyword: a bare alias is a parser error.
+            '(SELECT NULL::VARCHAR AS "document_id", NULL::VARCHAR AS "location_id", NULL::DOUBLE AS "latitude", NULL::DOUBLE AS "longitude", NULL::VARCHAR AS "role", NULL::VARCHAR AS "provenance_json" WHERE false)';
         files.push(
           await writeParquet(opts.duckdb, {
             outDir,

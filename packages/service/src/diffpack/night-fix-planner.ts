@@ -16,6 +16,7 @@ import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter, resolveProjectDeveloper } from '../gezels/autonomous-roles.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { ContentIndex } from '../index-store/content-index.js';
+import { isLowConfidence, issueVerdictStats } from '../issue-triage/calibration.js';
 import { dispatchTaskEntry } from '../tasks/entry-dispatch.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { TaskRunner } from '../tasks/runner.js';
@@ -268,14 +269,23 @@ function verdictRank(issue: BoekwachterIssue): number {
  * describe a version of the file that no longer exists, so a fix drafted from
  * them is guesswork. The Boekwachter re-reviews changed files anyway, which
  * is the honest way for them to come back.
+ *
+ * Low-confidence issues (a category this project's verdicts found almost
+ * never worth fixing) are left out too, unless someone confirmed that one:
+ * a proposal for each of them is the noise the hold-back exists to remove.
  */
 async function openIssuesForFixing(
   deps: NightFixPlannerDeps,
   projectId: string,
   claimedPaths: ReadonlySet<string>,
 ): Promise<{ selected: BoekwachterIssue[]; deferred: number }> {
+  const stats = issueVerdictStats(
+    await deps.store.boekwachterIssues.readIssueVerdicts(projectId).catch(() => []),
+  );
   const listed = await deps.contentIndex
-    .listFileIssues(projectId, { status: 'open', maxResults: 1000 })
+    .listFileIssues(projectId, { status: 'open', maxResults: 1000 }, (issue) =>
+      isLowConfidence(stats, issue),
+    )
     .catch(() => null);
   const now = new Date().toISOString();
   const eligible = (listed?.issues ?? [])
@@ -284,6 +294,7 @@ async function openIssuesForFixing(
         !issue.stale &&
         !issue.taskRef &&
         !claimedPaths.has(issue.path) &&
+        !(issue.lowConfidence && issue.latestVerdict?.kind !== 'confirmed') &&
         // An outside app is checking it right now; don't race it.
         !(issue.handoff && issue.handoff.until > now),
     )

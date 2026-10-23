@@ -12,7 +12,8 @@
  *    token into localStorage (api.ts reads it synchronously at module load),
  *    freezes the clock, and kills animations/caret for stable screenshots.
  */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -242,6 +243,22 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   // opting in.
   browserDiagnostics: [
     async ({ page, daemon, browserName }, use, testInfo) => {
+      const hangMarker = join(
+        testInfo.project.outputDir,
+        '.renderer-hangs',
+        `${testInfo.testId}-${testInfo.repeatEachIndex}`,
+      );
+      if (
+        testInfo.retry > 0 &&
+        !(await stat(hangMarker).then(
+          () => true,
+          () => false,
+        ))
+      ) {
+        throw new Error(
+          'Not retried: retries are only for the known renderer hang, and the previous attempt failed for another reason. Read that attempt.',
+        );
+      }
       const lines: string[] = [];
       const push = (line: string) => {
         if (lines.length < MAX_DIAGNOSTIC_LINES) lines.push(line);
@@ -259,9 +276,22 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
           `[requestfailed] ${req.method()} ${req.url()} — ${req.failure()?.errorText ?? 'unknown'}`,
         );
       });
+      page.on('crash', () => push('[renderer] crashed'));
       // Enabled before the page runs: a renderer already spinning in JS never
       // services Debugger.enable, but an enabled debugger's pause interrupts it.
       const cdp = browserName === 'chromium' ? await page.context().newCDPSession(page) : null;
+      // A page already paused answers neither evaluate nor a second pause, which
+      // the probe below cannot tell from a blocked thread. An enabled debugger
+      // also pauses near the heap limit (reason OOM) instead of crashing.
+      let probing = false;
+      let pausedBeforeProbe = false;
+      cdp?.on('Debugger.paused', (event) => {
+        if (probing) return;
+        pausedBeforeProbe = true;
+        push(`[debugger] page paused (reason ${event.reason}) before the probe:`);
+        for (const frame of event.callFrames.slice(0, 15))
+          push(`[debugger]   ${formatFrame(frame)}`);
+      });
       await cdp?.send('Debugger.enable');
       await use(undefined);
       if (testInfo.status !== testInfo.expectedStatus) {
@@ -271,8 +301,25 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         // reports responses from the renderer) or daemon requests that never
         // answer, holding Chrome's six connections per origin so the lazy
         // chunks behind `load` never go out. Ask each side directly.
-        if (cdp) for (const line of await probeRenderer(page, cdp)) push(line);
-        for (const line of await probeDaemon(daemon)) push(line);
+        probing = true;
+        const renderer = cdp ? await probeRenderer(page, cdp) : [];
+        const daemonLines = await probeDaemon(daemon);
+        for (const line of [...renderer, ...daemonLines]) push(line);
+        if (!pausedBeforeProbe && isRendererHang(renderer, daemonLines)) {
+          await mkdir(dirname(hangMarker), { recursive: true });
+          await writeFile(hangMarker, `${testInfo.title}\n`, 'utf8');
+          testInfo.annotations.push({
+            type: 'renderer-hang',
+            description: "Chromium's renderer blocked before the page loaded; retried once",
+          });
+          push('[retry] the known renderer hang; Playwright retries this test once');
+          const stacks = await nativeStacks();
+          if (stacks) {
+            const stacksPath = testInfo.outputPath('native-stacks.txt');
+            await writeFile(stacksPath, stacks, 'utf8');
+            await testInfo.attach('native-stacks', { path: stacksPath, contentType: 'text/plain' });
+          }
+        }
       }
       if (testInfo.status !== testInfo.expectedStatus && lines.length > 0) {
         // Attach by path (not body) so the text survives in
@@ -332,25 +379,293 @@ async function probeRenderer(page: Page, cdp: CDPSession): Promise<string[]> {
       `[renderer] responsive: readyState=${state.readyState}, ${state.resources} resource(s) finished`,
     ];
   }
-  // The paused stack names the loop; no pause means it is stuck outside JS.
+  // Six CI hangs through 2026-10-23 stopped at the Home chunk's import() with
+  // an idle daemon and a page that answered nothing. Sample processes before
+  // the pause below, which would stop a spinning loop and hide it.
+  const processes = await probeProcesses(page);
+  // The paused stack names the loop; no pause means it is stuck outside JS,
+  // unless a `[debugger] page paused` line shows it was already paused.
   const paused = new Promise<string[]>((resolvePaused) => {
     cdp.once('Debugger.paused', (event) => {
-      resolvePaused(
-        event.callFrames
-          .slice(0, 15)
-          .map(
-            (f) =>
-              `[renderer]   at ${f.functionName || '<anonymous>'} (${f.url}:${f.location.lineNumber + 1}:${(f.location.columnNumber ?? 0) + 1})`,
-          ),
-      );
+      resolvePaused(event.callFrames.slice(0, 15).map((f) => `[renderer]   ${formatFrame(f)}`));
     });
   });
   void cdp.send('Debugger.pause').catch(() => {});
   const frames = await withTimeout(paused);
   if (!frames) {
-    return [`[renderer] did not answer evaluate or a debugger pause within ${PROBE_TIMEOUT_MS}ms`];
+    return [
+      `[renderer] did not answer evaluate or a debugger pause within ${PROBE_TIMEOUT_MS}ms`,
+      ...processes,
+    ];
   }
-  return ['[renderer] unresponsive; main thread paused in:', ...frames];
+  return ['[renderer] unresponsive; main thread paused in:', ...frames, ...processes];
+}
+
+function formatFrame(frame: {
+  functionName: string;
+  url: string;
+  location: { lineNumber: number; columnNumber?: number };
+}): string {
+  const { lineNumber, columnNumber } = frame.location;
+  return `at ${frame.functionName || '<anonymous>'} (${frame.url}:${lineNumber + 1}:${(columnNumber ?? 0) + 1})`;
+}
+
+const CPU_SAMPLE_MS = 1_000;
+const MAX_RENDERERS = 3;
+// A renderer runs about 20 threads. List them all: the stuck one can be idle on
+// CPU, and the I/O thread that wakes the main thread showed nothing when only
+// busy threads were listed (2026-10-23).
+const MAX_THREADS = 40;
+// /proc counts CPU in clock ticks, 100 per second on Linux.
+const MS_PER_TICK = 10;
+
+interface ThreadSample {
+  tid: number;
+  name: string;
+  state: string;
+  ticks: number;
+  wchan: string;
+}
+
+interface RendererThreads {
+  at: number;
+  renderers: Map<number, ThreadSample[]>;
+}
+
+/**
+ * A page that answers nothing fits three causes with different fixes: the
+ * browser process is hung (CDP goes silent), the page's main thread spins (its
+ * CPU climbs), or it is blocked on a lock or IPC (its CPU stays flat). Sample
+ * the browser's view and, on Linux, the renderer's threads over one second.
+ */
+async function probeProcesses(page: Page): Promise<string[]> {
+  const browser = page.context().browser();
+  const session = browser ? await withTimeout(browser.newBrowserCDPSession()) : null;
+  const readCpu = async () => {
+    if (!session) return null;
+    const info = await withTimeout(session.send('SystemInfo.getProcessInfo'));
+    return info?.processInfo ?? null;
+  };
+  try {
+    const cpuBefore = await readCpu();
+    const pids = await rendererPids(cpuBefore);
+    const threadsBefore = await readRendererThreads(pids);
+    await new Promise((resolveSample) => setTimeout(resolveSample, CPU_SAMPLE_MS));
+    const [cpuAfter, threadsAfter] = await Promise.all([readCpu(), readRendererThreads(pids)]);
+    return [
+      formatBrowserCpu(session !== null, cpuBefore, cpuAfter),
+      ...formatRendererThreads(threadsBefore, threadsAfter),
+    ];
+  } finally {
+    await session?.detach().catch(() => {});
+  }
+}
+
+type ProcessCpu = { type: string; id: number; cpuTime: number };
+
+function formatBrowserCpu(
+  opened: boolean,
+  before: ProcessCpu[] | null,
+  after: ProcessCpu[] | null,
+): string {
+  if (!opened) {
+    return `[browser] did not open a CDP session within ${PROBE_TIMEOUT_MS}ms; the browser process is not answering`;
+  }
+  if (!before || !after) {
+    return `[browser] SystemInfo.getProcessInfo did not answer within ${PROBE_TIMEOUT_MS}ms; the browser process is not answering`;
+  }
+  const start = new Map(before.map((p) => [`${p.type}:${p.id}`, p.cpuTime]));
+  const busy = after
+    .map((p) => ({
+      label: `${p.type} ${p.id}`,
+      ms: Math.round((p.cpuTime - (start.get(`${p.type}:${p.id}`) ?? p.cpuTime)) * 1000),
+    }))
+    .sort((a, b) => b.ms - a.ms)
+    .map((p) => `${p.label} ${p.ms}ms`);
+  return `[browser] responsive; CPU over ${CPU_SAMPLE_MS}ms: ${busy.join(', ')}`;
+}
+
+async function readRendererThreads(pids: number[]): Promise<RendererThreads | null> {
+  if (process.platform !== 'linux') return null;
+  try {
+    const renderers = new Map<number, ThreadSample[]>();
+    for (const pid of pids) {
+      const threads: ThreadSample[] = [];
+      for (const tid of await readdir(`/proc/${pid}/task`).catch(() => [])) {
+        const stat = await readFile(`/proc/${pid}/task/${tid}/stat`, 'utf8').catch(() => null);
+        const parsed = stat ? parseStat(stat) : null;
+        if (!parsed) continue;
+        const wchan = (
+          await readFile(`/proc/${pid}/task/${tid}/wchan`, 'utf8').catch(() => '')
+        ).trim();
+        threads.push({
+          tid: Number(tid),
+          name: parsed.name,
+          state: parsed.state,
+          ticks: parsed.ticks,
+          wchan: wchan === '0' ? '' : wchan,
+        });
+      }
+      renderers.set(pid, threads);
+    }
+    return { at: performance.now(), renderers };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The browser's renderers, newest first: the stuck page's renderer started after
+ * any spare one. The browser names them; walking this worker's process tree
+ * covers a browser that did not answer.
+ */
+async function rendererPids(processes: ProcessCpu[] | null): Promise<number[]> {
+  if (process.platform !== 'linux') return [];
+  const named: number[] = [];
+  for (const { type, id } of processes ?? []) {
+    if (type === 'renderer' && (await isRenderer(id))) named.push(id);
+  }
+  const pids = named.length > 0 ? named : await descendantRenderers();
+  return pids.sort((a, b) => b - a).slice(0, MAX_RENDERERS);
+}
+
+/**
+ * A zygote-forked renderer rewrites its title into one space-separated string,
+ * so `--type=renderer` is never a NUL-separated argument of its own. Matching
+ * it as one found no renderer on the first CI hang (2026-10-23).
+ */
+async function isRenderer(pid: number): Promise<boolean> {
+  const cmdline = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
+  return cmdline.includes('--type=renderer');
+}
+
+/**
+ * This worker's own renderers: each worker launches its own browser, so they
+ * descend from this process, and `--type=renderer` excludes the daemon's children.
+ */
+async function descendantRenderers(): Promise<number[]> {
+  const parents = new Map<number, number>();
+  for (const entry of await readdir('/proc')) {
+    if (!/^\d+$/.test(entry)) continue;
+    const stat = await readFile(`/proc/${entry}/stat`, 'utf8').catch(() => null);
+    const parsed = stat ? parseStat(stat) : null;
+    if (parsed) parents.set(Number(entry), parsed.ppid);
+  }
+  const isDescendant = (pid: number) => {
+    for (let at = parents.get(pid); at !== undefined && at > 1; at = parents.get(at)) {
+      if (at === process.pid) return true;
+    }
+    return false;
+  };
+  const pids: number[] = [];
+  for (const pid of parents.keys()) {
+    if (isDescendant(pid) && (await isRenderer(pid))) pids.push(pid);
+  }
+  return pids;
+}
+
+/**
+ * Every thread's native stack in the hung renderer and its browser process, for
+ * a local Linux repro with gdb installed (GEZEL_E2E_NATIVE_STACKS=1). Off in CI.
+ */
+async function nativeStacks(): Promise<string | null> {
+  if (process.platform !== 'linux' || !process.env.GEZEL_E2E_NATIVE_STACKS) return null;
+  const [renderer] = await rendererPids(null);
+  if (!renderer) return 'no renderer process to attach to\n';
+  // The browser is the nearest ancestor without a --type (the zygote has one).
+  let browser = renderer;
+  for (let hops = 0; hops < 4; hops++) {
+    const stat = await readFile(`/proc/${browser}/stat`, 'utf8').catch(() => null);
+    const parent = stat ? parseStat(stat)?.ppid : undefined;
+    if (!parent) break;
+    browser = parent;
+    const cmdline = await readFile(`/proc/${browser}/cmdline`, 'utf8').catch(() => '');
+    if (!cmdline.includes('--type=')) break;
+  }
+  const sections: string[] = [];
+  for (const [label, pid] of [
+    ['renderer', renderer],
+    ['browser', browser],
+  ] as const) {
+    const result = await new Promise<string>((resolveStacks) => {
+      execFile(
+        'gdb',
+        ['-batch', '-p', String(pid), '-ex', 'set pagination off', '-ex', 'thread apply all bt 30'],
+        { timeout: 120_000, maxBuffer: 32 * 1024 * 1024 },
+        (error, stdout, stderr) =>
+          resolveStacks(error && !stdout ? `gdb failed: ${error.message}\n${stderr}` : stdout),
+      );
+    });
+    sections.push(`===== ${label} ${pid} =====\n${result}`);
+  }
+  return sections.join('\n');
+}
+
+/** Parse /proc/<pid>/stat, whose name field may itself hold spaces and parentheses. */
+function parseStat(
+  stat: string,
+): { name: string; state: string; ppid: number; ticks: number } | null {
+  const open = stat.indexOf('(');
+  const close = stat.lastIndexOf(')');
+  if (open < 0 || close < open) return null;
+  const fields = stat.slice(close + 2).split(' ');
+  const ppid = Number(fields[1]);
+  const ticks = Number(fields[11]) + Number(fields[12]);
+  if (!fields[0] || Number.isNaN(ppid) || Number.isNaN(ticks)) return null;
+  return { name: stat.slice(open + 1, close), state: fields[0], ppid, ticks };
+}
+
+function formatRendererThreads(
+  before: RendererThreads | null,
+  after: RendererThreads | null,
+): string[] {
+  if (!before || !after) return [];
+  if (after.renderers.size === 0) return ['[renderer] no renderer process found in /proc'];
+  const elapsed = Math.round(after.at - before.at);
+  const lines: string[] = [];
+  for (const [pid, threads] of after.renderers) {
+    const start = new Map((before.renderers.get(pid) ?? []).map((t) => [t.tid, t.ticks]));
+    const sampled = threads.map((t) => ({
+      ...t,
+      ms: (t.ticks - (start.get(t.tid) ?? t.ticks)) * MS_PER_TICK,
+    }));
+    const main = sampled.find((t) => t.tid === pid);
+    if (main) {
+      // An idle main thread also sleeps on a futex while it waits for tasks, so
+      // "asleep" alone cannot tell idle from stuck; the threads below can.
+      const share = elapsed > 0 ? main.ms / elapsed : 0;
+      const verdict =
+        share >= 0.5 ? 'spinning' : share < 0.05 && main.state !== 'R' ? 'asleep' : 'partly busy';
+      const wchan = main.wchan ? `, wchan ${main.wchan}` : '';
+      lines.push(
+        `[renderer ${pid}] main thread ${verdict}: state ${main.state}, ${main.ms}ms CPU in ${elapsed}ms${wchan}`,
+      );
+    }
+    const others = sampled
+      .filter((t) => t.tid !== pid)
+      .sort((a, b) => b.ms - a.ms || a.name.localeCompare(b.name))
+      .slice(0, MAX_THREADS);
+    for (const t of others) {
+      const wchan = t.wchan ? ` wchan ${t.wchan}` : '';
+      lines.push(`[renderer ${pid}]   ${t.name} ${t.state} ${t.ms}ms${wchan}`);
+    }
+  }
+  return lines;
+}
+
+/**
+ * Chromium's renderer sometimes stops answering while booting the page, with no
+ * JS running (2026-10: nine CI hits across six spec files, never locally). The
+ * browser and the daemon still answer. Nothing in the page can cause or clear
+ * it, so only this exact signature earns a retry; any other failure, including
+ * a renderer paused or spinning in our own code, still fails the run.
+ */
+function isRendererHang(renderer: string[], daemon: string[]): boolean {
+  return (
+    renderer[0]?.startsWith('[renderer] did not answer evaluate') === true &&
+    renderer.some((line) => line.startsWith('[browser] responsive')) &&
+    daemon[0]?.startsWith('[daemon] responsive; 0 item(s)') === true
+  );
 }
 
 async function probeDaemon(daemon: DaemonInfo): Promise<string[]> {

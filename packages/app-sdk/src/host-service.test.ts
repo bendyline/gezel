@@ -77,6 +77,28 @@ describe('hostInProcess', () => {
     });
   });
 
+  it("keeps the daemon's log records off the app's stdout by default", async () => {
+    const home = join(root, 'app-home');
+    const service = stubService();
+    const connection = await hostInProcess('qualla', { home, serviceModule: service });
+    cleanup.push(() => connection.close());
+
+    expect(service.calls[0]).toMatchObject({ logOutput: 'stderr' });
+  });
+
+  it('passes an explicit log output through', async () => {
+    const home = join(root, 'app-home');
+    const service = stubService();
+    const connection = await hostInProcess('qualla', {
+      home,
+      logOutput: 'split',
+      serviceModule: service,
+    });
+    cleanup.push(() => connection.close());
+
+    expect(service.calls[0]).toMatchObject({ logOutput: 'split' });
+  });
+
   it('passes the inference-only embedding profile to the service', async () => {
     const home = join(root, 'app-home');
     const service = stubService();

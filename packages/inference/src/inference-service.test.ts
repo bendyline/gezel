@@ -3,6 +3,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getLogOutput } from '@bendyline/gezel';
 import { StreamingSessionBase } from '@bendyline/gezel/local-loop';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type RunningInferenceService, startService } from './inference-service.js';
@@ -123,6 +124,17 @@ describe('in-process inference host', () => {
     await running.stop();
     await expect(request('/v1/models')).rejects.toThrow('stopped');
   });
+  it('writes logs where the embedding app asks while running, then restores the setting', async () => {
+    home = await mkdtemp(join(tmpdir(), 'gezel-inference-'));
+    const before = getLogOutput();
+    const requested = before === 'stderr' ? 'split' : 'stderr';
+    running = await startService({ home, providers: new Map(), logOutput: requested });
+    expect(getLogOutput()).toBe(requested);
+    await running.stop();
+    running = undefined;
+    expect(getLogOutput()).toBe(before);
+  });
+
   it('answers the bare id ensureModel pins, and names the qualified form otherwise', async () => {
     home = await mkdtemp(join(tmpdir(), 'gezel-inference-'));
     const models: Array<string | undefined> = [];

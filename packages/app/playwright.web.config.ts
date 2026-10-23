@@ -18,9 +18,11 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   fullyParallel: true,
   workers: process.env.CI ? 2 : 4,
-  // A smoke failure must fail the quality gate on its first occurrence.
-  // The fixtures retain diagnostics and traces for postmortem inspection.
-  retries: 0,
+  // A smoke failure must fail the quality gate on its first occurrence. The one
+  // exception is Chromium's renderer hang (isRendererHang in fixtures/test.ts):
+  // its retry is refused unless the probe found exactly that signature, and the
+  // test is reported flaky with its diagnostics and trace kept.
+  retries: 1,
   reporter: process.env.CI ? 'line' : 'list',
   use: {
     // Overridden per-worker by the daemon fixture; a valid placeholder so

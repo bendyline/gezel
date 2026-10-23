@@ -7,11 +7,18 @@ import {
 import { normalizeIssueCategory } from './echo.js';
 
 /**
- * How often the reviewer's leads turn out real, from the verdict log. Used to
- * put the likeliest-real issues first and, only with plenty of evidence, to
- * set aside a category that is almost never real. It never deletes anything:
- * set-aside issues stay listed under "Low-confidence", and every batch still
- * samples one so a change in the reviewer shows up. See docs/issue-triage.md.
+ * How often the reviewer's leads turn out worth fixing, from the verdict log.
+ * Used to put the likeliest-real issues first and, only with plenty of
+ * evidence, to set aside a category that is almost never worth fixing. It
+ * never deletes anything: set-aside issues stay listed as low-confidence, and
+ * every batch still samples one so a change in the reviewer shows up. See
+ * docs/issue-triage.md.
+ *
+ * The signal is "worth fixing", not "true". In the 2026-10-22 evaluation the
+ * true rate sat at 50-72% in every category and never separated them, and it
+ * is the soft one: Opus called a quarter of the leads a person judged true
+ * "not a bug". The worth-fixing rate split bugs (56%) from smells (5%) and
+ * held across random halves of the data (correlation 0.95).
  */
 
 export interface VerdictTally {
@@ -35,8 +42,8 @@ export interface IssueVerdictStats {
 
 /** Demotion needs this many verdicts in a category... */
 export const DEMOTE_MIN_VERDICTS = 40;
-/** ...and the upper end of its valid rate's 95% interval below this. */
-export const DEMOTE_MAX_VALID_UPPER = 0.25;
+/** ...and the upper end of its worth-fixing rate's 95% interval below this. */
+export const DEMOTE_MAX_ACTIONABLE_UPPER = 0.15;
 /** A category's prior actionable rate, before verdicts say otherwise. */
 const DEFAULT_PRIOR = 0.3;
 const PRIOR_WEIGHT = 5;
@@ -147,26 +154,34 @@ export function expectedRealScore(
   return ((t?.actionable ?? 0) + prior * PRIOR_WEIGHT) / ((t?.decided ?? 0) + PRIOR_WEIGHT);
 }
 
-/**
- * Set aside: the reviewer's leads in this category are almost never true, on
- * enough verdicts that chance cannot explain it. Major issues never are.
- */
+/** Almost never worth fixing, on enough verdicts that chance cannot explain it. */
+function rarelyWorthFixing(t: VerdictTally | undefined): boolean {
+  if (!t || t.decided < DEMOTE_MIN_VERDICTS) return false;
+  return wilsonInterval(t.actionable, t.decided)[1] < DEMOTE_MAX_ACTIONABLE_UPPER;
+}
+
+/** Set aside: the reviewer's leads in this category are almost never worth fixing. Major issues never are. */
 export function isLowConfidence(stats: IssueVerdictStats, issue: BoekwachterIssue): boolean {
   if (issue.severity === 'major') return false;
-  const t = tallyFor(stats, issue);
-  if (!t || t.decided < DEMOTE_MIN_VERDICTS) return false;
-  return wilsonInterval(t.valid, t.decided)[1] < DEMOTE_MAX_VALID_UPPER;
+  return rarelyWorthFixing(tallyFor(stats, issue));
+}
+
+/** Mark each set-aside issue, for counts and badges that should leave them out. */
+export function annotateLowConfidence(
+  issues: readonly BoekwachterIssue[],
+  stats: IssueVerdictStats,
+): BoekwachterIssue[] {
+  return issues.map((issue) =>
+    isLowConfidence(stats, issue) ? { ...issue, lowConfidence: true } : issue,
+  );
 }
 
 /** The stats for the wire. */
 export function issueVerdictStatsResponse(stats: IssueVerdictStats): IssueVerdictStatsResponse {
-  const lowConfidence = (t: VerdictTally) =>
-    t.decided >= DEMOTE_MIN_VERDICTS &&
-    wilsonInterval(t.valid, t.decided)[1] < DEMOTE_MAX_VALID_UPPER;
   return {
     overall: stats.overall,
     categories: [...stats.byCategory]
-      .map(([category, t]) => ({ category, ...t, lowConfidence: lowConfidence(t) }))
+      .map(([category, t]) => ({ category, ...t, lowConfidence: rarelyWorthFixing(t) }))
       .sort((a, b) => b.decided - a.decided),
     models: [...stats.byModelCategory].map(([key, t]) => {
       const [model = 'unknown', category = ''] = key.split('\0');

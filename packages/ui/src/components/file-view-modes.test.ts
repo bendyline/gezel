@@ -122,6 +122,17 @@ describe('aggregateIssuesByFile + sortAggregates', () => {
     expect(sortAggregates(aggs, 'score').map((a) => a.path)).toEqual(['b.ts', 'a.ts', 'c.ts']);
   });
 
+  it('leaves low-confidence issues out of the badges', () => {
+    const aggs = aggregateIssuesByFile([
+      issue('a.ts', 'minor'),
+      { ...issue('a.ts', 'minor'), lowConfidence: true },
+      { ...issue('b.ts', 'info'), lowConfidence: true },
+    ]);
+    expect(aggs).toEqual([
+      { path: 'a.ts', total: 1, bySeverity: { major: 0, minor: 1, info: 0 }, score: 3 },
+    ]);
+  });
+
   it('breaks ties by path alphabetically', () => {
     const aggs = aggregateIssuesByFile([issue('z.ts', 'info'), issue('a.ts', 'info')]);
     expect(sortAggregates(aggs, 'score').map((a) => a.path)).toEqual(['a.ts', 'z.ts']);

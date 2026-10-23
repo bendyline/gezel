@@ -1,6 +1,7 @@
 import type { BoekwachterIssue, IssueVerdictEntry } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
+  annotateLowConfidence,
   expectedRealScore,
   isLowConfidence,
   issueVerdictStats,
@@ -95,6 +96,33 @@ describe('how often the reviewer is right', () => {
       decided: 45,
       lowConfidence: true,
     });
+  });
+
+  it('sets aside leads that are true but rarely worth fixing', () => {
+    // The evaluation's smells: 4 of 80 worth fixing, most of the rest true nits.
+    const smells = issueVerdictStats([
+      ...Array.from({ length: 4 }, () => verdict({ kind: 'confirmed' })),
+      ...Array.from({ length: 60 }, () => verdict({ kind: 'nit' })),
+      ...Array.from({ length: 16 }, () => verdict({ kind: 'not_a_bug' })),
+    ]);
+    expect(isLowConfidence(smells, issue())).toBe(true);
+    // A category worth fixing about a third of the time stays in.
+    const mixed = issueVerdictStats([
+      ...Array.from({ length: 14 }, () => verdict({ kind: 'fixed' })),
+      ...Array.from({ length: 31 }, () => verdict({ kind: 'not_a_bug' })),
+    ]);
+    expect(isLowConfidence(mixed, issue())).toBe(false);
+  });
+
+  it('marks set-aside issues and leaves the rest untouched', () => {
+    const stats = issueVerdictStats(Array.from({ length: 45 }, () => verdict({ kind: 'nit' })));
+    const [smell, bug, major] = annotateLowConfidence(
+      [issue(), issue({ category: 'bug' }), issue({ severity: 'major' })],
+      stats,
+    );
+    expect(smell?.lowConfidence).toBe(true);
+    expect(bug).not.toHaveProperty('lowConfidence');
+    expect(major).not.toHaveProperty('lowConfidence');
   });
 
   it('computes a Wilson interval that is honest about small samples', () => {

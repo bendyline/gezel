@@ -4,6 +4,7 @@ import type {
   FileReviewIssueSeverity,
   FileReviewWire,
   ListFileIssuesRequest,
+  ListFileIssuesResponse,
 } from '@bendyline/gezel';
 import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { ProjectBoekwachterIssueRecord } from '../fs/store.js';
@@ -122,4 +123,31 @@ export function filterAndSortBoekwachterIssues(
         issueSeverityRank(a.severity) - issueSeverityRank(b.severity) ||
         a.ref.localeCompare(b.ref, undefined, { numeric: true }),
     );
+}
+
+/**
+ * The first `limit` issues with counts over all of them. `isLowConfidence`
+ * marks set-aside issues before the page is cut, so the count is not limited
+ * to the page.
+ */
+export function boekwachterIssuePage(
+  matching: readonly BoekwachterIssue[],
+  limit: number,
+  isLowConfidence?: (issue: BoekwachterIssue) => boolean,
+): Pick<ListFileIssuesResponse, 'issues' | 'counts' | 'truncated'> {
+  const issues = isLowConfidence
+    ? matching.map((issue) => (isLowConfidence(issue) ? { ...issue, lowConfidence: true } : issue))
+    : [...matching];
+  return {
+    issues: issues.slice(0, limit),
+    counts: {
+      total: issues.length,
+      bySeverity: tallyBoekwachterIssues(issues, (issue) => issue.severity),
+      byCategory: tallyBoekwachterIssues(issues, (issue) => issue.category),
+      ...(isLowConfidence
+        ? { lowConfidence: issues.filter((issue) => issue.lowConfidence).length }
+        : {}),
+    },
+    truncated: issues.length > limit,
+  };
 }

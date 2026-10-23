@@ -28,7 +28,7 @@ Building a catalog and adding `--semantic` to file search need the optional embe
 npm install -g @huggingface/transformers@^4.3.1
 ```
 
-For a project-local CLI installation, install both packages in that project and run commands with `npx gezel`. Plain keyword search, inspection, validation, and location discovery do not need the embedding model. Building and semantic search can download the profile's pinned model on first use; later runs can work offline from its cache. By default, the CLI cache is `<GEZEL_HOME>/engines/hf-cache`, or `~/.gezel/engines/hf-cache`; `GEZEL_HF_CACHE_DIR` overrides it.
+For a project-local CLI installation, install both packages in that project and run commands with `npx -p @bendyline/gezel-cli gezel`. Plain keyword search, inspection, validation, and location discovery do not need the embedding model. Building and semantic search can download the profile's pinned model on first use; later runs can work offline from its cache. By default, the CLI cache is `<GEZEL_HOME>/engines/hf-cache`, or `~/.gezel/engines/hf-cache`; `GEZEL_HF_CACHE_DIR` overrides it.
 
 There are two command groups:
 

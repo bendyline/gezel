@@ -1777,6 +1777,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     () => aggregateIssuesByFile(workspaceIssues?.issues ?? []),
     [workspaceIssues],
   );
+  const workspaceIssueCount = workspaceIssues
+    ? workspaceIssues.counts.total - (workspaceIssues.counts.lowConfidence ?? 0)
+    : 0;
   const issueAggByPath = useMemo(
     () => new Map(issueAggregates.map((agg) => [agg.path, agg])),
     [issueAggregates],
@@ -3173,10 +3176,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 ? 'Index unavailable'
                                 : workspaceIndexLabel(workspaceIndexStatus)}
                             </span>
-                            {workspaceIssues && workspaceIssues.counts.total > 0 && (
+                            {workspaceIssueCount > 0 && (
                               <span className="workspace-tree-issue-total">
-                                {workspaceIssues.counts.total} issue
-                                {workspaceIssues.counts.total === 1 ? '' : 's'}
+                                {workspaceIssueCount} issue
+                                {workspaceIssueCount === 1 ? '' : 's'}
                               </span>
                             )}
                           </div>

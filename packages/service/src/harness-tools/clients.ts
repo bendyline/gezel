@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
@@ -288,13 +288,39 @@ export function cursorAdapter(): HarnessClientAdapter {
   });
 }
 
+/**
+ * The Windows Store-style (MSIX) build of Claude Desktop does not use
+ * %APPDATA%\Claude: current releases keep their data in
+ * %LOCALAPPDATA%\Claude-Data\claude_<package id>\, earlier ones in the
+ * package's own %APPDATA% under %LOCALAPPDATA%\Packages. Only the classic
+ * installer still uses %APPDATA%\Claude, so it is checked last.
+ */
 export function claudeDesktopConfigDir(ctx: HarnessClientContext): string | null {
   if (ctx.platform === 'win32') {
-    return join(ctx.env.APPDATA ?? join(ctx.userHome, 'AppData', 'Roaming'), 'Claude');
+    const classic = join(ctx.env.APPDATA ?? join(ctx.userHome, 'AppData', 'Roaming'), 'Claude');
+    const local = ctx.env.LOCALAPPDATA ?? join(ctx.userHome, 'AppData', 'Local');
+    const packaged = [
+      ...claudeChildDirs(join(local, 'Claude-Data')),
+      ...claudeChildDirs(join(local, 'Packages')).map((dir) =>
+        join(dir, 'LocalCache', 'Roaming', 'Claude'),
+      ),
+    ];
+    return packaged.find((dir) => existsSync(dir)) ?? classic;
   }
   if (ctx.platform === 'darwin')
     return join(ctx.userHome, 'Library', 'Application Support', 'Claude');
   return null;
+}
+
+function claudeChildDirs(parent: string): string[] {
+  try {
+    return readdirSync(parent, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.toLowerCase().startsWith('claude_'))
+      .map((entry) => join(parent, entry.name))
+      .sort();
+  } catch {
+    return [];
+  }
 }
 
 export function claudeDesktopAdapter(): HarnessClientAdapter {

@@ -54,6 +54,18 @@ async function buildEvalHarness(): Promise<void> {
       'playwright',
       'vitest',
     ],
+    esbuildPlugins: [
+      {
+        // Scenarios that drive Bendyline's private repositories never ship:
+        // the in-app Benchmarks list shows every bundled scenario's text.
+        name: 'omit-private-scenarios',
+        setup(pluginBuild) {
+          pluginBuild.onResolve({ filter: /[\\/]private-scenarios\.ts$/ }, () => ({
+            path: resolve(evalsSrc, 'scenarios', 'private-scenarios.published.ts'),
+          }));
+        },
+      },
+    ],
   });
   cpSync(
     resolve(evalsSrc, 'scenarios', 'failing-tests-spec.vitest.config.mjs'),

@@ -9,11 +9,13 @@ only if you are embedding Gezel or running the service standalone.
 
 ```bash
 npm install @bendyline/gezel-service
-npx gezeld
+npx -p @bendyline/gezel-service gezeld
 ```
 
 `gezeld` runs in the foreground and is configured through environment
-variables (see [Environment](#environment)); `npx gezeld --help` lists them.
+variables (see [Environment](#environment)); `npx -p @bendyline/gezel-service gezeld --help`
+lists them. Always name the `@bendyline/` package with `npx`: a bare `npx gezeld`
+outside the folder where you installed it asks npm for an unrelated package.
 
 ## What it contains
 

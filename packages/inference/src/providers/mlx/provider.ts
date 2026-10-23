@@ -138,6 +138,7 @@ import {
   StreamingReasoningSplit,
   type TemplateReasoningOpen,
   engineOpensReasoning,
+  reopenTemplateReasoning,
   requestOpensReasoning,
 } from './reasoning-stream.js';
 import { applyMlxRequestShape } from './request-shape.js';
@@ -2597,7 +2598,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // accumulated into `lastTurnReasoning` so the chat bubble can
         // render it behind a collapsed expander.
         {
-          const split = extractReasoningWithProfile(turnContent, this.deps.profile);
+          const split = extractReasoningWithProfile(
+            reopenTemplateReasoning(turnContent, opensInReasoning),
+            this.deps.profile,
+          );
           turnContent = split.visible;
           if (split.reasoning) {
             this.lastTurnReasoning =

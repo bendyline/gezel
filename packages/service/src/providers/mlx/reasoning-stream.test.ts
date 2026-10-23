@@ -1,6 +1,8 @@
+import { extractReasoning } from '@bendyline/gezel';
 import {
   StreamingReasoningSplit,
   engineOpensReasoning,
+  reopenTemplateReasoning,
   requestOpensReasoning,
   templateTextOpensReasoning,
 } from '@bendyline/gezel-inference/internal/providers/mlx/reasoning-stream';
@@ -232,5 +234,46 @@ describe('StreamingReasoningSplit', () => {
       visible: 'Answer. More.',
       reasoning: '',
     });
+  });
+});
+
+describe('reopenTemplateReasoning', () => {
+  /** The end-of-turn pass: restore the template's opener, then split. */
+  const endOfTurn = (text: string, opensInReasoning: boolean) =>
+    extractReasoning(reopenTemplateReasoning(text, opensInReasoning));
+
+  it("keeps Gemma 4's post-tool thoughts out of the reply when the template opened the channel", () => {
+    // Raw text Gemma 4 E4B streamed after a tool response: the template ended
+    // the prompt with `<|channel>thought\n`, so only the closer appears.
+    const raw =
+      'The user wants the launch day.\n\nI need to combine this into a single sentence as requested.<channel|>The launch is on Friday, October 24.';
+    expect(endOfTurn(raw, true)).toEqual({
+      visible: 'The launch is on Friday, October 24.',
+      reasoning:
+        'The user wants the launch day.\n\nI need to combine this into a single sentence as requested.',
+    });
+  });
+
+  it('pairs a template-opened think block the same way', () => {
+    expect(endOfTurn('Short plan.</think>Answer.', true)).toEqual({
+      visible: 'Answer.',
+      reasoning: 'Short plan.',
+    });
+  });
+
+  it('leaves text alone when the turn did not open in reasoning', () => {
+    const raw = 'Answer.<channel|>';
+    expect(reopenTemplateReasoning(raw, false)).toBe(raw);
+  });
+
+  it('leaves a block the model opened itself alone', () => {
+    const raw = '<|channel>thought\nPlan.<channel|>Answer.';
+    expect(reopenTemplateReasoning(raw, true)).toBe(raw);
+    expect(endOfTurn(raw, true)).toEqual({ visible: 'Answer.', reasoning: 'Plan.' });
+  });
+
+  it('leaves text with no closer alone rather than hiding a reply', () => {
+    const raw = 'The launch is on Friday.';
+    expect(reopenTemplateReasoning(raw, true)).toBe(raw);
   });
 });

@@ -73,6 +73,9 @@ export async function hostInProcess(
         home,
         role: 'user',
         embeddedInferenceOnly: opts.inferenceOnly === true,
+        // The daemon shares this process's stdout; an app that prints its own
+        // results there (a CLI, a stdio MCP server) must not get log lines.
+        logOutput: opts.logOutput ?? 'stderr',
         // Ephemeral: the canonical 6228 belongs to the user's own Gezel, and
         // an app that claimed it would answer for the whole machine.
         port: 0,

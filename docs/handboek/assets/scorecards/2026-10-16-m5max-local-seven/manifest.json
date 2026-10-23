@@ -2,7 +2,6 @@
   "schemaVersion": 1,
   "kind": "gezel-scorecard-publication-package",
   "generatedAt": "2026-10-22T13:20:28.824Z",
-  "status": "integrated-in-website-source-not-deployed",
   "recordedObservations": 601,
   "scorecardObservations": 600,
   "quarantinedObservations": 1,
@@ -33,16 +32,16 @@
       "bytes": 59981
     },
     "scorecard-details.json": {
-      "sha256": "44a2e795afb2469f26755d89700b96e97deb0a74239dbc1190ca9b3367b65123",
-      "bytes": 4320269
+      "sha256": "ca815455d20cff03a2a7a6fc06447c407dd61d046e7f9c398d18c12910f913e8",
+      "bytes": 4320092
     },
     "scorecard-details.schema.json": {
       "sha256": "db1ca49cd3b5342c79226b250cddb25de491bc33d1d5f9c962f4bea499afd98c",
       "bytes": 57571
     },
     "README.md": {
-      "sha256": "ec63a14fcaa2b9d80f56b871cd2cd661a32d42c7bb44bac17eeb59be66c0aa85",
-      "bytes": 5119
+      "sha256": "4f1ff5685da5310e488821f31557ad207bdedd15fcf0ba8ab8c16b4bddc7345c",
+      "bytes": 4179
     },
     "runs/2026-10-21-m5max-ornith-observed-subset.json": {
       "sha256": "8e30ba8696ac986b30067a6c1b42c75f2dafd5bc3e8a0f03236e6e0b377ff407",
@@ -61,14 +60,5 @@
   "schemaSourceSha256": "f87ceb07ae3ccc2973df12c62988f7c8d6aca304d06059251f729cf60da34589",
   "newInferenceCalls": 0,
   "newJudgeCalls": 0,
-  "originalScoresChanged": false,
-  "published": false,
-  "integration": {
-    "assetsSource": "docs/handboek/assets/scorecards/2026-10-16-m5max-local-seven",
-    "scorecardSource": "packages/core/src/scorecard/data/runs",
-    "barrel": "packages/core/src/scorecard/data/index.ts",
-    "article": "docs/handboek/technical/model-scorecard.md",
-    "exportedAssetPath": "assets/scorecards/2026-10-16-m5max-local-seven",
-    "deployed": false
-  }
+  "originalScoresChanged": false
 }

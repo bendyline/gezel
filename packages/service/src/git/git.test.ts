@@ -135,6 +135,29 @@ describe('runGit process safety', () => {
     },
   );
 
+  it('keeps a host-scoped auth header out of spawned argv too', async () => {
+    const child = fakeChild();
+    spawnMock.mockReturnValue(child);
+    const sentinel = 'GEZEL_SCOPED_AUTH_SENTINEL';
+    const key = 'http.https://github.com/.extraheader';
+
+    const pending = runGit(['-c', `${key}=AUTHORIZATION: Bearer ${sentinel}`, 'fetch', 'origin'], {
+      redact: [sentinel],
+    });
+    queueMicrotask(() => child.emit('close', 0));
+    await pending;
+
+    const [, spawnedArgs, options] = spawnMock.mock.calls[0]!;
+    expect(spawnedArgs.join(' ')).not.toContain(sentinel);
+    expect(options.env).toEqual(
+      expect.objectContaining({
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: key,
+        GIT_CONFIG_VALUE_0: `AUTHORIZATION: Bearer ${sentinel}`,
+      }),
+    );
+  });
+
   it('redacts an authenticated clone token from a failing git error', async () => {
     const child = fakeChild();
     spawnMock.mockReturnValue(child);

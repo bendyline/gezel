@@ -7,6 +7,7 @@ import {
   type IssueHandoffRequest,
   MAX_APP_ISSUE_VERDICTS_PER_CALL,
   harnessPromptCount,
+  renderEmptyIssuePrompt,
   renderHarnessIssuePrompt,
   renderIssueBatch,
 } from '@bendyline/gezel';
@@ -37,11 +38,14 @@ async function fetchBatch(
   session: HarnessSession,
   binding: HarnessBinding,
   req: IssueHandoffRequest,
-): Promise<string> {
+): Promise<{ text: string; empty: boolean }> {
   const id = boundProjectId(binding) as string;
   const queue = await session.run(binding, (api) => api.issueTriage.handoffQueue(id, req));
   const workingDir = binding.info?.project?.workingDir;
-  return renderIssueBatch(queue, (rel) => (workingDir ? join(workingDir, rel) : rel));
+  return {
+    text: renderIssueBatch(queue, (rel) => (workingDir ? join(workingDir, rel) : rel)),
+    empty: queue.count === 0,
+  };
 }
 
 /** `list_issues` and `report_issue_verdicts`: the night shift's BW issues, for an outside app to judge. */
@@ -79,14 +83,13 @@ export function registerHarnessIssueTools(server: McpServer, session: HarnessSes
             return failure(`pathPrefix must be inside ${whereFilesMayBe(binding)}.`);
           if (rel) pathPrefix = rel;
         }
-        return text(
-          await fetchBatch(session, binding, {
-            ...(args.limit ? { limit: args.limit } : {}),
-            ...(args.severity ? { severity: args.severity } : {}),
-            ...(pathPrefix ? { pathPrefix } : {}),
-            ...(args.includeInfo ? { includeInfo: true } : {}),
-          }),
-        );
+        const batch = await fetchBatch(session, binding, {
+          ...(args.limit ? { limit: args.limit } : {}),
+          ...(args.severity ? { severity: args.severity } : {}),
+          ...(pathPrefix ? { pathPrefix } : {}),
+          ...(args.includeInfo ? { includeInfo: true } : {}),
+        });
+        return text(batch.text);
       }),
   );
 
@@ -181,15 +184,17 @@ export function registerHarnessPrompts(server: McpServer, session: HarnessSessio
         try {
           const binding = await session.bind();
           const blocked = issuesBlocked(binding, name === 'fix_issues' ? 'triage' : 'read');
-          body = blocked
-            ? blocked
-            : renderHarnessIssuePrompt(
-                name,
-                await fetchBatch(session, binding, {
-                  limit: harnessPromptCount(name, args.count),
-                  ...(name === 'fix_issues' ? { mode: 'fix' as const } : {}),
-                }),
-              );
+          if (blocked) {
+            body = blocked;
+          } else {
+            const batch = await fetchBatch(session, binding, {
+              limit: harnessPromptCount(name, args.count),
+              ...(name === 'fix_issues' ? { mode: 'fix' as const } : {}),
+            });
+            body = batch.empty
+              ? renderEmptyIssuePrompt(batch.text)
+              : renderHarnessIssuePrompt(name, batch.text);
+          }
         } catch (err) {
           body = err instanceof Error ? err.message : String(err);
         }

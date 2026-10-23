@@ -1,39 +1,85 @@
-# Local scorecard publication package
+# October 2026 M5 Max local-model evaluation
 
-Prepared from the closed 601-observation campaign. This maintained copy is shipped by the Handboek website exporter. No new inference, judging or environment restoration occurred; deployment and committing remain separate steps.
+The campaign recorded **601 observations: 476 passes, 119 task failures and
+6 infrastructure exclusions**. No score, failure class or exclusion was
+changed for publication.
+
+The scorecard compares **600** of them: 476 passes, 118 task failures and 6
+infrastructure exclusions. One failed observation's comparison identity
+changed after the trial ran. It stays in the details file, marked
+`includedInScorecard: false`, rather than being dropped or reclassified.
+
+## Rounds
+
+- `2026-10-16-m5max-local-seven-completed-arms`: four models, each with all
+  129 cells (516 observations); `scope: suite`. This is the headline table.
+- `2026-10-21-m5max-ornith-observed-subset`: 84 Ornith observations with a
+  stable comparison identity, out of 85 recorded and 129 planned;
+  `scope: subset`. Its tasks ran fewer than three times each, so it reports
+  raw counts, not percentages.
+- Nemotron and MiniCPM were not run, so they have no result rows.
 
 ## Files
 
-- `scorecard.json`: validates against the current Gezel `ScorecardDatasetSchema` v1. It contains **600 comparison observations** in two explicitly separate rounds.
-- `runs/*.json`: the same dataset split into the two existing-reader shard files; import the combined file OR the shards, not both.
-- `scorecard-details.json`: companion preserving **all 601 original observations**, all **248 scored artifacts**, the 18 distinct scored rubrics and exact axes, all missing/mismatched/ungraded dispositions, per-trial and aggregate performance, provenance references and caveats.
-- `scorecard-details.schema.json`: JSON Schema for the companion, generated from the validator used here.
-- `manifest.json` and `verification.json`: file hashes, reconciliation and validation receipts.
-
-## Accounting and comparison scope
-
-The recorded evidence remains **476 passes + 119 task failures + 6 infrastructure exclusions = 601**. Original failure classes and fixed scores were not changed.
-
-The comparable scorecard contains **476 passes + 118 task failures + 6 infrastructure exclusions = 600**. One additional failed observation had post-trial comparison-identity drift; it is retained in the companion with `includedInScorecard: false`, not silently discarded or reclassified.
-
-- `2026-10-16-m5max-local-seven-completed-arms`: four fully recorded 129-cell arms (516 observations); `scope: suite`.
-- `2026-10-21-m5max-ornith-observed-subset`: 84 stable-identity Ornith observations out of 85 recorded and 129 planned; `scope: subset`. The reader's headline table remains the completed four-model round. Ornith's claims are raw counts, not percentages, because its tasks ran fewer than three repetitions.
-- Nemotron and MiniCPM were not run. MiniCPM's separate experimental engine pin is documented only; there is no MiniCPM result row.
+- [scorecard.json](scorecard.json): the dataset behind the Handboek's model
+  scorecard (`ScorecardDatasetSchema` v1), with 600 observations in the two
+  rounds above.
+- `runs/*.json`: the same data split by round. Use the combined file or the
+  round files, not both.
+- [scorecard-details.json](scorecard-details.json): all 601 observations, the
+  248 scored artifacts, the 18 rubrics with their exact axes, every missing or
+  ungraded disposition, per-trial and aggregate performance, provenance and
+  caveats. [scorecard-details.schema.json](scorecard-details.schema.json) is
+  its JSON Schema.
+- [manifest.json](manifest.json) lists each file's size and SHA-256.
+  [verification.json](verification.json) records the reconciliation and
+  validation checks.
 
 ## Judging
 
-The current v1 reader only has a single judge mean per model/suite. That field and `judgeModelId` are intentionally absent/null: averaging different task rubrics would manufacture a misleading quality score. A consumer must read the companion's `judging.rubricAggregates` (keyed by suite/scenario/model) and `trials[].judge` to display quality. **Existing v1 readers do not automatically show companion judging.** No global source/schema or UI extension is part of this data package.
+Quality is reported per rubric, never as one number. Averaging scores from
+different rubrics would produce a misleading quality score, so the
+scorecard's single judge mean and `judgeModelId` are deliberately empty. Read
+`judging.rubricAggregates` (by suite, scenario and model) and `trials[].judge`
+in the details file instead.
 
-Coverage: 248 scored artifacts; 4 `noArtifact`; 14 `judgeSpecMismatch` (A/B readout); 335 without an applicable declared rubric; zero pending. Produced declared artifacts were judged after deterministic failure as well as success. Provider/model: `codex-inline/current-session`; 20 KiB cap, original integer axes and justifications preserved.
+Coverage: 248 scored artifacts, 4 trials with no artifact, 14 rubric
+mismatches (the A/B readout), 335 trials with no applicable rubric, and none
+pending. Artifacts were scored after deterministic failures as well as
+successes.
+
+An AI reviewer working in an interactive Codex session wrote the reviews,
+with a 20 KiB input limit per review. They are recorded as
+`codex-inline/current-session`; the reviewer's exact model version was not
+recorded. The reviewer could see which model produced each artifact, so the
+reviews are not blind: treat them as advisory. Their original integer axes
+and justifications are preserved.
 
 ## Performance
 
-The standard scorecard `performance` fields follow the existing contract: arithmetic means of recorded paired admission-probe rates, with `samples` counting probes (nine total across five models). **Every probe generated fewer than 256 decode tokens**, so these short, preliminary rates should not be presented as sustained throughput. Ornith's lone probe generated only 84 tokens. Run notes and companion probe records preserve these warnings. The model probe set is reused across suite rows; suite rows do not constitute additional probes.
+The scorecard's `performance` fields are means of short admission probes:
+nine probes across five models. **Every probe generated fewer than 256
+tokens**, and Ornith's only probe generated 84, so treat these rates as
+preliminary, not as sustained throughput. Suite rows reuse the same probes;
+they are not additional samples.
 
-For sustained comparisons use companion `performance.models[modelId].comparisonObservations` or `bySuite`: median/min/max engine-derived decode and prefill rates, row counts and wall durations including startup/copy/tool work. `allRecorded` retains the original population including the flagged observation. Runtime context and f16 KV are observed launch settings; memory is the median peak RSS among selected trials that actually launched an engine. GPU-utilization telemetry was unavailable. Sequential runs, cross-volume copies, selected foreign-engine overlaps and the pre-inference memory-admission failure remain caveats.
+For sustained comparisons, use `performance.models[modelId].comparisonObservations`
+or `bySuite` in the details file: median, minimum and maximum decode and
+prefill rates from the engine logs, with row counts and wall times. Wall times
+include startup, file copies and tool work. `allRecorded` keeps the full
+population, including the flagged observation.
 
-## Integration
+Context size and f16 KV cache are the settings each engine actually launched
+with. Memory is the median peak RSS of the trials that launched an engine. GPU
+utilization was not available. Trials ran one at a time, some copied models
+across volumes, and another app's engine sometimes ran at the same time; one
+trial failed memory admission before inference. The details file records
+each of these.
 
-This checkout's existing publication consumer loads round shards from `packages/core/src/scorecard/data/runs`, with the generated barrel in that directory; Gilde does not currently own this scorecard schema. The two round shards are registered in that core dataset and its generated barrel. This package lives in `docs/handboek/assets/scorecards/2026-10-16-m5max-local-seven/`; the Handboek exporter copies it to the site's assets directory. The Model scorecard article links to the combined data and companion. The separate Gilde catalog does not need an edit. No release, commit or live-site deployment has occurred.
+## Provenance
 
-When wiring a publisher, retain both round scopes, notes, the 600/601 accounting difference, low-confidence probe labels and per-rubric quality sample counts. The companion paths are repository-relative references to retained evidence, not links to raw artifacts bundled here. No credentials, raw chat transcripts or machine-home paths are included.
+These files were prepared from the closed campaign with no new inference,
+judging or score changes. Evidence paths in the details file refer to
+Bendyline's retained evaluation archive, which is not included. The files
+contain no credentials, raw chat transcripts or home-folder paths; temporary
+folders in failure messages are shown as `<tmp>`.

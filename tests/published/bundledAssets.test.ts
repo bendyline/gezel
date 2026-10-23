@@ -155,6 +155,19 @@ describe('service bundled assets', () => {
     expect(rendererPayloadContainsLame(resolve(service.dist, 'ui'))).toBe(false);
   });
 
+  it('does not ship eval scenarios that drive private repositories', () => {
+    // The in-app Benchmarks list shows every compiled scenario's id and
+    // description, so a private scenario in dist/evals publishes the private
+    // repository's name and layout (evals/src/scenarios/private-scenarios.ts).
+    const evalsDir = resolve(service.dist, 'evals');
+    expect(existsSync(evalsDir)).toBe(true);
+    const leaking = readdirSync(evalsDir)
+      .filter((name) => name.endsWith('.js'))
+      // `molen` but not a surname such as Molenaar in a fixture roster.
+      .filter((name) => /\bmolen(?![a-z])/i.test(readFileSync(resolve(evalsDir, name), 'utf8')));
+    expect(leaking).toEqual([]);
+  });
+
   it('stages the MLX sidecar python tree, including its hard imports', () => {
     // gezel_mlx_server.py does `import spec_decode` (and cache_seed etc.)
     // at module top, so a dropped sibling kills the whole MLX engine at
