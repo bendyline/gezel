@@ -363,8 +363,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          runtime=$(xcrun simctl list runtimes --json | python3 -c 'import json,sys; items=[r for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-") and int(r["version"].split(".")[0]) >= 26]; assert items, "An installed iOS 26+ simulator runtime is required"; print(sorted(items,key=lambda r:tuple(map(int,r["version"].split("."))))[-1]["identifier"])')
-          device=$(xcrun simctl create 'Gezel Mobile CI' com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$runtime")
+          # Pick only a runtime that supports the device: image 20261022.0305.3 added an
+          # iOS 27.1 runtime for iPhone Duo alone, and `simctl create` refused it.
+          device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-16
+          runtime=$(xcrun simctl list runtimes --json | DEVICE_TYPE="$device_type" python3 -c 'import json,os,sys; items=[r for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-") and int(r["version"].split(".")[0]) >= 26 and any(t.get("identifier") == os.environ["DEVICE_TYPE"] for t in r.get("supportedDeviceTypes", []))]; assert items, "An installed iOS 26+ simulator runtime that supports " + os.environ["DEVICE_TYPE"] + " is required"; print(sorted(items,key=lambda r:tuple(map(int,r["version"].split("."))))[-1]["identifier"])')
+          echo "Simulator runtime: $runtime"
+          device=$(xcrun simctl create 'Gezel Mobile CI' "$device_type" "$runtime")
           echo "GEZEL_CI_SIMULATOR=$device" >> "$GITHUB_ENV"
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
