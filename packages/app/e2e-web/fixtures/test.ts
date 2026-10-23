@@ -259,9 +259,20 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
           `[requestfailed] ${req.method()} ${req.url()} — ${req.failure()?.errorText ?? 'unknown'}`,
         );
       });
+      page.on('crash', () => push('[renderer] crashed'));
       // Enabled before the page runs: a renderer already spinning in JS never
       // services Debugger.enable, but an enabled debugger's pause interrupts it.
       const cdp = browserName === 'chromium' ? await page.context().newCDPSession(page) : null;
+      // A page already paused answers neither evaluate nor a second pause, which
+      // the probe below cannot tell from a blocked thread. An enabled debugger
+      // also pauses near the heap limit (reason OOM) instead of crashing.
+      let probing = false;
+      cdp?.on('Debugger.paused', (event) => {
+        if (probing) return;
+        push(`[debugger] page paused (reason ${event.reason}) before the probe:`);
+        for (const frame of event.callFrames.slice(0, 15))
+          push(`[debugger]   ${formatFrame(frame)}`);
+      });
       await cdp?.send('Debugger.enable');
       await use(undefined);
       if (testInfo.status !== testInfo.expectedStatus) {
@@ -271,6 +282,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         // reports responses from the renderer) or daemon requests that never
         // answer, holding Chrome's six connections per origin so the lazy
         // chunks behind `load` never go out. Ask each side directly.
+        probing = true;
         if (cdp) for (const line of await probeRenderer(page, cdp)) push(line);
         for (const line of await probeDaemon(daemon)) push(line);
       }
@@ -336,17 +348,11 @@ async function probeRenderer(page: Page, cdp: CDPSession): Promise<string[]> {
   // an idle daemon and a page that answered nothing. Sample processes before
   // the pause below, which would stop a spinning loop and hide it.
   const processes = await probeProcesses(page);
-  // The paused stack names the loop; no pause means it is stuck outside JS.
+  // The paused stack names the loop; no pause means it is stuck outside JS,
+  // unless a `[debugger] page paused` line shows it was already paused.
   const paused = new Promise<string[]>((resolvePaused) => {
     cdp.once('Debugger.paused', (event) => {
-      resolvePaused(
-        event.callFrames
-          .slice(0, 15)
-          .map(
-            (f) =>
-              `[renderer]   at ${f.functionName || '<anonymous>'} (${f.url}:${f.location.lineNumber + 1}:${(f.location.columnNumber ?? 0) + 1})`,
-          ),
-      );
+      resolvePaused(event.callFrames.slice(0, 15).map((f) => `[renderer]   ${formatFrame(f)}`));
     });
   });
   void cdp.send('Debugger.pause').catch(() => {});
@@ -358,6 +364,15 @@ async function probeRenderer(page: Page, cdp: CDPSession): Promise<string[]> {
     ];
   }
   return ['[renderer] unresponsive; main thread paused in:', ...frames, ...processes];
+}
+
+function formatFrame(frame: {
+  functionName: string;
+  url: string;
+  location: { lineNumber: number; columnNumber?: number };
+}): string {
+  const { lineNumber, columnNumber } = frame.location;
+  return `at ${frame.functionName || '<anonymous>'} (${frame.url}:${lineNumber + 1}:${(columnNumber ?? 0) + 1})`;
 }
 
 const CPU_SAMPLE_MS = 1_000;
