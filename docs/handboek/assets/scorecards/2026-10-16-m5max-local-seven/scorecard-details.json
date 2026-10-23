@@ -9571,7 +9571,7 @@
       "scorecardRunId": "2026-10-16-m5max-local-seven-completed-arms",
       "outcome": {
         "success": false,
-        "reason": "repair-exhausted: bounded scenario feedback exhausted after 4 delivered-and-completed attempts on lib/paginate.mjs; missing signals stayed unchanged: accept-passes. Last failure: node accept.mjs crashed (exit 1): file:///private/var/folders/kc/8ls1j5_d70n047zh0ss571280000gn/T/gezel-eval-symptom-debug-3Kybb3/lib/paginate.mjs:13",
+        "reason": "repair-exhausted: bounded scenario feedback exhausted after 4 delivered-and-completed attempts on lib/paginate.mjs; missing signals stayed unchanged: accept-passes. Last failure: node accept.mjs crashed (exit 1): file://<tmp>/gezel-eval-symptom-debug-3Kybb3/lib/paginate.mjs:13",
         "failureMode": "model-stuck",
         "failureClass": "model",
         "includedInFixedModelAggregate": true,
@@ -13998,7 +13998,7 @@
       "scorecardRunId": "2026-10-16-m5max-local-seven-completed-arms",
       "outcome": {
         "success": false,
-        "reason": "repair-exhausted (score plateau): 6 completed repairs with the scenario score frozen at 6 while the failing detail kept changing; latest checked file src/types.ts. Last failure: tsc-clean failed: ../../../../../../../var/folders/kc/8ls1j5_d70n047zh0ss571280000gn/T/gezel-eval-tsc-fIbBep/tsconfig.json(13,6): error TS1005: ':' expected.",
+        "reason": "repair-exhausted (score plateau): 6 completed repairs with the scenario score frozen at 6 while the failing detail kept changing; latest checked file src/types.ts. Last failure: tsc-clean failed: <tmp>/gezel-eval-tsc-fIbBep/tsconfig.json(13,6): error TS1005: ':' expected.",
         "failureMode": "model-stuck",
         "failureClass": "model",
         "includedInFixedModelAggregate": true,
@@ -51118,7 +51118,7 @@
       "scorecardRunId": "2026-10-16-m5max-local-seven-completed-arms",
       "outcome": {
         "success": false,
-        "reason": "repair-exhausted: bounded scenario feedback exhausted after 4 delivered-and-completed attempts on src/migrate.ts; missing signals stayed unchanged: migrate-function, tests-present, migration-doc, tsc-clean. Last failure: migrate.ts harness-owned preservation gate failed at typecheck: ../../../../../../../var/folders/kc/8ls1j5_d70n047zh0ss571280000gn/T/gezel-eval-schema-migration-function-znH0Ml/src/migrate.ts(7,5): error TS2322: Type 'string' is not assignable to type 'number'.",
+        "reason": "repair-exhausted: bounded scenario feedback exhausted after 4 delivered-and-completed attempts on src/migrate.ts; missing signals stayed unchanged: migrate-function, tests-present, migration-doc, tsc-clean. Last failure: migrate.ts harness-owned preservation gate failed at typecheck: <tmp>/gezel-eval-schema-migration-function-znH0Ml/src/migrate.ts(7,5): error TS2322: Type 'string' is not assignable to type 'number'.",
         "failureMode": "model-stuck",
         "failureClass": "model",
         "includedInFixedModelAggregate": true,

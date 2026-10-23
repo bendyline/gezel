@@ -12,7 +12,7 @@
  *    token into localStorage (api.ts reads it synchronously at module load),
  *    freezes the clock, and kills animations/caret for stable screenshots.
  */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -332,6 +332,10 @@ async function probeRenderer(page: Page, cdp: CDPSession): Promise<string[]> {
       `[renderer] responsive: readyState=${state.readyState}, ${state.resources} resource(s) finished`,
     ];
   }
+  // Six CI hangs through 2026-10-23 stopped at the Home chunk's import() with
+  // an idle daemon and a page that answered nothing. Sample processes before
+  // the pause below, which would stop a spinning loop and hide it.
+  const processes = await probeProcesses(page);
   // The paused stack names the loop; no pause means it is stuck outside JS.
   const paused = new Promise<string[]>((resolvePaused) => {
     cdp.once('Debugger.paused', (event) => {
@@ -348,9 +352,194 @@ async function probeRenderer(page: Page, cdp: CDPSession): Promise<string[]> {
   void cdp.send('Debugger.pause').catch(() => {});
   const frames = await withTimeout(paused);
   if (!frames) {
-    return [`[renderer] did not answer evaluate or a debugger pause within ${PROBE_TIMEOUT_MS}ms`];
+    return [
+      `[renderer] did not answer evaluate or a debugger pause within ${PROBE_TIMEOUT_MS}ms`,
+      ...processes,
+    ];
   }
-  return ['[renderer] unresponsive; main thread paused in:', ...frames];
+  return ['[renderer] unresponsive; main thread paused in:', ...frames, ...processes];
+}
+
+const CPU_SAMPLE_MS = 1_000;
+const MAX_RENDERERS = 3;
+const MAX_THREADS = 6;
+// /proc counts CPU in clock ticks, 100 per second on Linux.
+const MS_PER_TICK = 10;
+
+interface ThreadSample {
+  tid: number;
+  name: string;
+  state: string;
+  ticks: number;
+  wchan: string;
+}
+
+interface RendererThreads {
+  at: number;
+  renderers: Map<number, ThreadSample[]>;
+}
+
+/**
+ * A page that answers nothing fits three causes with different fixes: the
+ * browser process is hung (CDP goes silent), the page's main thread spins (its
+ * CPU climbs), or it is blocked on a lock or IPC (its CPU stays flat). Sample
+ * the browser's view and, on Linux, the renderer's threads over one second.
+ */
+async function probeProcesses(page: Page): Promise<string[]> {
+  const browser = page.context().browser();
+  const session = browser ? await withTimeout(browser.newBrowserCDPSession()) : null;
+  const readCpu = async () => {
+    if (!session) return null;
+    const info = await withTimeout(session.send('SystemInfo.getProcessInfo'));
+    return info?.processInfo ?? null;
+  };
+  try {
+    const [cpuBefore, threadsBefore] = await Promise.all([readCpu(), readRendererThreads()]);
+    await new Promise((resolveSample) => setTimeout(resolveSample, CPU_SAMPLE_MS));
+    const [cpuAfter, threadsAfter] = await Promise.all([readCpu(), readRendererThreads()]);
+    return [
+      formatBrowserCpu(session !== null, cpuBefore, cpuAfter),
+      ...formatRendererThreads(threadsBefore, threadsAfter),
+    ];
+  } finally {
+    await session?.detach().catch(() => {});
+  }
+}
+
+type ProcessCpu = { type: string; id: number; cpuTime: number };
+
+function formatBrowserCpu(
+  opened: boolean,
+  before: ProcessCpu[] | null,
+  after: ProcessCpu[] | null,
+): string {
+  if (!opened) {
+    return `[browser] did not open a CDP session within ${PROBE_TIMEOUT_MS}ms; the browser process is not answering`;
+  }
+  if (!before || !after) {
+    return `[browser] SystemInfo.getProcessInfo did not answer within ${PROBE_TIMEOUT_MS}ms; the browser process is not answering`;
+  }
+  const start = new Map(before.map((p) => [`${p.type}:${p.id}`, p.cpuTime]));
+  const busy = after
+    .map((p) => ({
+      label: `${p.type} ${p.id}`,
+      ms: Math.round((p.cpuTime - (start.get(`${p.type}:${p.id}`) ?? p.cpuTime)) * 1000),
+    }))
+    .sort((a, b) => b.ms - a.ms)
+    .map((p) => `${p.label} ${p.ms}ms`);
+  return `[browser] responsive; CPU over ${CPU_SAMPLE_MS}ms: ${busy.join(', ')}`;
+}
+
+async function readRendererThreads(): Promise<RendererThreads | null> {
+  if (process.platform !== 'linux') return null;
+  try {
+    const renderers = new Map<number, ThreadSample[]>();
+    // Newest first: the stuck page's renderer started after any spare one.
+    const pids = (await rendererPids()).sort((a, b) => b - a).slice(0, MAX_RENDERERS);
+    for (const pid of pids) {
+      const threads: ThreadSample[] = [];
+      for (const tid of await readdir(`/proc/${pid}/task`).catch(() => [])) {
+        const stat = await readFile(`/proc/${pid}/task/${tid}/stat`, 'utf8').catch(() => null);
+        const parsed = stat ? parseStat(stat) : null;
+        if (!parsed) continue;
+        const wchan = (
+          await readFile(`/proc/${pid}/task/${tid}/wchan`, 'utf8').catch(() => '')
+        ).trim();
+        threads.push({
+          tid: Number(tid),
+          name: parsed.name,
+          state: parsed.state,
+          ticks: parsed.ticks,
+          wchan: wchan === '0' ? '' : wchan,
+        });
+      }
+      renderers.set(pid, threads);
+    }
+    return { at: performance.now(), renderers };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * This worker's own renderers: each worker launches its own browser, so they
+ * descend from this process, and `--type=renderer` excludes the daemon's children.
+ */
+async function rendererPids(): Promise<number[]> {
+  const parents = new Map<number, number>();
+  for (const entry of await readdir('/proc')) {
+    if (!/^\d+$/.test(entry)) continue;
+    const stat = await readFile(`/proc/${entry}/stat`, 'utf8').catch(() => null);
+    const parsed = stat ? parseStat(stat) : null;
+    if (parsed) parents.set(Number(entry), parsed.ppid);
+  }
+  const isDescendant = (pid: number) => {
+    for (let at = parents.get(pid); at !== undefined && at > 1; at = parents.get(at)) {
+      if (at === process.pid) return true;
+    }
+    return false;
+  };
+  const pids: number[] = [];
+  for (const pid of parents.keys()) {
+    if (!isDescendant(pid)) continue;
+    const cmdline = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
+    if (cmdline.split('\0').includes('--type=renderer')) pids.push(pid);
+  }
+  return pids;
+}
+
+/** Parse /proc/<pid>/stat, whose name field may itself hold spaces and parentheses. */
+function parseStat(
+  stat: string,
+): { name: string; state: string; ppid: number; ticks: number } | null {
+  const open = stat.indexOf('(');
+  const close = stat.lastIndexOf(')');
+  if (open < 0 || close < open) return null;
+  const fields = stat.slice(close + 2).split(' ');
+  const ppid = Number(fields[1]);
+  const ticks = Number(fields[11]) + Number(fields[12]);
+  if (!fields[0] || Number.isNaN(ppid) || Number.isNaN(ticks)) return null;
+  return { name: stat.slice(open + 1, close), state: fields[0], ppid, ticks };
+}
+
+function formatRendererThreads(
+  before: RendererThreads | null,
+  after: RendererThreads | null,
+): string[] {
+  if (!before || !after) return [];
+  if (after.renderers.size === 0) return ['[renderer] no renderer process found under this worker'];
+  const elapsed = Math.round(after.at - before.at);
+  const lines: string[] = [];
+  for (const [pid, threads] of after.renderers) {
+    const start = new Map((before.renderers.get(pid) ?? []).map((t) => [t.tid, t.ticks]));
+    const sampled = threads.map((t) => ({
+      ...t,
+      ms: (t.ticks - (start.get(t.tid) ?? t.ticks)) * MS_PER_TICK,
+    }));
+    const main = sampled.find((t) => t.tid === pid);
+    if (main) {
+      const share = elapsed > 0 ? main.ms / elapsed : 0;
+      const verdict =
+        share >= 0.5
+          ? 'spinning'
+          : share < 0.05 && main.state !== 'R'
+            ? 'blocked waiting'
+            : 'partly busy';
+      const wchan = main.wchan ? `, wchan ${main.wchan}` : '';
+      lines.push(
+        `[renderer ${pid}] main thread ${verdict}: state ${main.state}, ${main.ms}ms CPU in ${elapsed}ms${wchan}`,
+      );
+    }
+    const others = sampled
+      .filter((t) => t.tid !== pid && (t.ms > 0 || t.state === 'R' || t.state === 'D'))
+      .sort((a, b) => b.ms - a.ms)
+      .slice(0, MAX_THREADS);
+    for (const t of others) {
+      const wchan = t.wchan ? ` wchan ${t.wchan}` : '';
+      lines.push(`[renderer ${pid}]   ${t.name} ${t.state} ${t.ms}ms${wchan}`);
+    }
+  }
+  return lines;
 }
 
 async function probeDaemon(daemon: DaemonInfo): Promise<string[]> {

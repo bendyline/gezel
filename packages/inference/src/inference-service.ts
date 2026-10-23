@@ -5,9 +5,12 @@ import {
   GEZEL_API_GENERATION_FLOOR,
   GEZEL_VERSION,
   GezelConfigSchema,
+  type LogOutput,
   type ProviderName,
   createLogger,
+  getLogOutput,
   nowIso,
+  setLogOutput,
   startSuspendMonitor,
   stopSuspendMonitor,
 } from '@bendyline/gezel';
@@ -58,6 +61,11 @@ export interface InferenceServiceOptions {
   /** Host-provided local providers, useful for testing without downloading weights. */
   providers?: ReadonlyMap<ProviderName, LLMProvider>;
   onUnexpectedHttpError?: (event: InferenceHttpErrorEvent) => void;
+  /**
+   * Where log records go while this host runs; restored on `stop()`. An app
+   * embedding the host passes `'stderr'` so its own stdout stays its own.
+   */
+  logOutput?: LogOutput;
 }
 export interface RunningInferenceService {
   readonly profile: 'embedded-inference';
@@ -71,16 +79,25 @@ export interface RunningInferenceService {
 export async function startService(
   options: InferenceServiceOptions = {},
 ): Promise<RunningInferenceService> {
+  const previousLogOutput = getLogOutput();
+  const restoreLogOutput = () => setLogOutput(previousLogOutput);
+  if (options.logOutput) setLogOutput(options.logOutput);
   const home = options.home ?? gezelHome();
-  await ensurePrivateUserHome(home);
-  // Model files must land in this home's managed cache: unset, transformers.js
-  // falls back to a module-relative cache that is read-only inside a packaged
-  // app, and the embed worker (which reads this env) has no other view of home.
-  process.env[HF_CACHE_DIR_ENV] ??= transformersCacheDir(home);
-  const startedAt = nowIso();
   const runtimeDir = join(home, 'runtime');
-  const lock = await acquireSingleInstanceLock({ runtimeDir, lockPath: join(runtimeDir, 'lock') });
-  const cleanup: Array<() => void | Promise<void>> = [() => lock.release()];
+  let lock: Awaited<ReturnType<typeof acquireSingleInstanceLock>>;
+  try {
+    await ensurePrivateUserHome(home);
+    // Model files must land in this home's managed cache: unset, transformers.js
+    // falls back to a module-relative cache that is read-only inside a packaged
+    // app, and the embed worker (which reads this env) has no other view of home.
+    process.env[HF_CACHE_DIR_ENV] ??= transformersCacheDir(home);
+    lock = await acquireSingleInstanceLock({ runtimeDir, lockPath: join(runtimeDir, 'lock') });
+  } catch (error) {
+    restoreLogOutput();
+    throw error;
+  }
+  const startedAt = nowIso();
+  const cleanup: Array<() => void | Promise<void>> = [restoreLogOutput, () => lock.release()];
   const requests = new InFlightRequests();
   let stopping: Promise<void> | undefined;
   let closed = false;

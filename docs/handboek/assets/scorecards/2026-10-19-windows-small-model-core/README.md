@@ -5,23 +5,17 @@ and 12 infrastructure exclusions**. Eight models each attempted the 11 core
 scenarios three times. Every trial was reviewed; no judging remains pending.
 The campaign ran October 20–22 UTC (its original local run date was October 19).
 
-## Files and consumers
+## Files
 
-- [scorecard.json](scorecard.json) is a `ScorecardDatasetSchema` v1 dataset
-  containing three explicit runtime rounds. The matching files in `runs/`
-  are registered in `packages/core/src/scorecard/data/runs/`. Import the
-  combined file or the shards, never both.
+- [scorecard.json](scorecard.json) is the dataset behind the Handboek's model
+  scorecard (`ScorecardDatasetSchema` v1), with three runtime rounds. The
+  files in `runs/` are the same data split by round. Use the combined file or
+  the round files, not both.
 - [scorecard-details.json](scorecard-details.json) contains the 264 unique
   trial records, exact advisory axes and justifications, per-journal quality
   and performance summaries, provenance, and evidence hashes.
 - [verification.json](verification.json) reconciles the counts and exclusions.
-  [manifest.json](manifest.json) records publication-file hashes and the
-  reproducible import/check commands.
-
-Gezel's Handboek and public-site exporter read the same registered dataset.
-The exporter copies this download directory into the site's assets. The
-separate Gilde catalog is not the scorecard's data owner. These files prepare
-the results for the next app build and site export; they do not deploy either.
+  [manifest.json](manifest.json) lists each file's size and SHA-256.
 
 ## Comparison boundaries
 
@@ -54,8 +48,10 @@ excluded; its deterministic pass is unchanged.
 
 The four frozen rubrics cover HTML, code, data and documents. Each retains
 its original integer axes, mean, justification, input size and limitations.
-The judge identity is `codex-inline/current-session`; model identity was
-known during review. `judging.aggregatesByJournalModelRubric` preserves
+An AI reviewer working in an interactive Codex session wrote the reviews.
+They are recorded as `codex-inline/current-session`; the reviewer's exact
+model version was not recorded. The reviewer could see which model produced
+each artifact, so the reviews are not blind: treat them as advisory. `judging.aggregatesByJournalModelRubric` preserves
 sample counts and exact rubric boundaries. The scorecard's **Artifact reviews**
 table shows separate HTML, code, data and document means with sample counts
 for each journal. Missing artifacts and excluded reviews have separate counts.
@@ -65,8 +61,9 @@ score is calculated across rubrics.
 Some early reviews did not record contemporaneous artifact hashes. The
 publication audit verifies the retained files today; it cannot establish
 historical bytes where no earlier hash exists. `verifiedAgainstRecorded`
-preserves that distinction. Evidence paths are repository-relative archive
-references, not downloadable raw transcripts or artifacts in this package.
+preserves that distinction. Evidence paths refer to Bendyline's retained
+evaluation archive, which is not included; this package holds no raw
+transcripts or artifacts.
 
 ## Performance and memory
 
@@ -95,17 +92,10 @@ suggests. Allow roughly 10 GiB of free GPU memory for this 32K single-chat
 configuration; this is headroom guidance from this device, not a guarantee.
 Its context-overflow failures were not GPU out-of-memory failures.
 
-## Reproducing publication
+## Provenance
 
-From the Gezel checkout containing the retained evaluation archive:
-
-```sh
-node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-small-model-core-scorecard.mjs
-node scripts/run-with-dependency-lease.mjs --direct-node scripts/gen-scorecard-barrel.mjs
-node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-small-model-core-scorecard.mjs --check
-```
-
-The importer pins the final report's SHA-256, checks its evidence hashes and
-original result/score classifications, validates the normal scorecard schema,
-and rejects duplicate cells or machine-local paths. It makes no inference
-calls, edits no original evidence and changes no scores or gates.
+These files were generated from the campaign's final report, whose SHA-256
+is pinned in [manifest.json](manifest.json), with no new inference calls, no
+rescoring and no edits to the original evidence. The generator checked the
+evidence hashes and the original result classifications, validated the
+scorecard schema, and rejected duplicate cells and machine-local paths.

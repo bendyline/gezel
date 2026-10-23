@@ -92,7 +92,7 @@ describe('GitHubWikiAdapter', () => {
 
     const clone = calls.find((call) => call.args.includes('clone'))!;
     expect(clone.args).toContain('https://github.com/octocat/Hello-World.wiki.git');
-    expect(clone.args.join(' ')).not.toContain('http.extraheader');
+    expect(clone.args.join(' ')).not.toContain('extraheader');
 
     const guideRef = batch.records.find((record) => record.id.startsWith('guides/'))!;
     const guide = await adapter.fetchRecord('', guideRef);
@@ -138,7 +138,8 @@ describe('GitHubWikiAdapter', () => {
     await adapter.ensureAuth();
     const clone = calls.find((call) => call.args.includes('clone'))!;
     const joined = clone.args.join(' ');
-    expect(joined).toContain('http.extraheader=AUTHORIZATION: Basic ');
+    // Scoped to the wiki's host: a redirect elsewhere never receives it.
+    expect(joined).toContain('http.https://github.example.test/.extraheader=AUTHORIZATION: Basic ');
     expect(joined).toContain('https://github.example.test/octocat/Hello-World.wiki.git');
     expect(joined).not.toContain(token);
     expect(clone.opts?.redact).toContain(token);

@@ -128,6 +128,42 @@ export function requestOpensReasoning(
   return (kwargs as Record<string, unknown>).enable_thinking !== false;
 }
 
+/** The opener `extractReasoning` pairs with each closer a template-opened turn emits. */
+const OPENER_FOR_CLOSER: ReadonlyArray<readonly [closer: string, opener: string]> = [
+  ['</think>', '<think>'],
+  ['</reasoning>', '<reasoning>'],
+  ['[/THINK]', '[THINK]'],
+  ['<channel|>', '<|channel>thought\n'],
+  ['<|end|>', '<|channel|>analysis<|message|>'],
+];
+
+/**
+ * Restore the reasoning opener the chat template supplied, before the
+ * end-of-turn reasoning pass.
+ *
+ * When the rendered prompt left generation inside a reasoning block, the
+ * model's text starts mid-thought and carries only the closer. The live split
+ * knows that, but `extractReasoning` reads a lone `<channel|>` as stray and
+ * keeps the thoughts as the reply: Gemma 4 E4B, after a tool response, saved
+ * "The user wants to know…I need to answer in one sentence.The launch is on
+ * Friday…", and the stall check then asked it to answer again.
+ *
+ * Unchanged when the turn did not open in reasoning, when the model opened a
+ * block itself, or when no closer arrived.
+ */
+export function reopenTemplateReasoning(text: string, opensInReasoning: boolean): string {
+  if (!opensInReasoning || /^\s*(?:<think>|<reasoning>|\[THINK\]|<\|?channel\|?>)/i.test(text)) {
+    return text;
+  }
+  const lower = text.toLowerCase();
+  let first: { index: number; opener: string } | null = null;
+  for (const [closer, opener] of OPENER_FOR_CLOSER) {
+    const index = lower.indexOf(closer.toLowerCase());
+    if (index !== -1 && (first === null || index < first.index)) first = { index, opener };
+  }
+  return first ? `${first.opener}${text}` : text;
+}
+
 export interface ReasoningSplitChunk {
   visible: string;
   reasoning: string;

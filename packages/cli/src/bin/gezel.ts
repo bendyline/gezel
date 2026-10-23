@@ -96,7 +96,7 @@ import { resolveRunGezel } from '../run-gezel.js';
 import { RunProgress } from '../run-progress.js';
 import { resolveRunPrompt } from '../run-prompt.js';
 import { checkRunReadiness } from '../run-readiness.js';
-import { ReplyPrinter } from '../run-reply.js';
+import { RunOutput } from '../run-reply.js';
 import { registerSecretCommands } from '../secrets-command.js';
 import { registerProjectSettingsCommands, registerSecurityCommands } from '../settings-command.js';
 import { installSignalCleanup } from '../signal-cleanup.js';
@@ -728,9 +728,8 @@ program
       }
       const session = await client.createChatSession({ gezelId, projectId, oneShot: true });
       await client.sendToChatSession(session.id, prompt);
-      const reply = new ReplyPrinter((text) => process.stdout.write(text));
+      const reply = new RunOutput((text) => process.stdout.write(text));
       const progress = new RunProgress((text) => process.stderr.write(text));
-      let printed = false;
       let errored = false;
       for await (const ev of streamChatEvents({
         url: client.sessionEventsUrl(session.id),
@@ -745,7 +744,7 @@ program
         } else if (ev.type === 'complete') {
           progress.settle();
           // The saved message stands in for providers that send it whole.
-          printed = reply.finish(ev.message.content);
+          reply.complete(ev.message.content);
         } else if (ev.type === 'error') {
           progress.settle();
           console.error(`\n${ev.error}`);
@@ -753,8 +752,7 @@ program
         }
       }
       progress.settle();
-      printed = reply.finish() || printed;
-      if (printed) process.stdout.write('\n');
+      if (reply.finish()) process.stdout.write('\n');
       if (errored) process.exitCode = 1;
     } finally {
       removeSignalCleanup?.();

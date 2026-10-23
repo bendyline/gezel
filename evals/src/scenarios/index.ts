@@ -35,12 +35,6 @@ import { largePrReviewScenario } from './large-pr-review.ts';
 import { meesterEndToEndScenarios } from './meester-e2e.ts';
 import { meetingFollowupScenario } from './meeting-followup.ts';
 import { memoryTutorFreshScenario, memoryTutorRememberedScenario } from './memory-tutor.ts';
-import {
-  molenFootballStadiumScenario,
-  molenSpaceNeedleScenario,
-  molenStructureAssetsScenario,
-  molenStructureWorkshopScenario,
-} from './molen-structure-workshop.ts';
 import { nightInTheLifeScenario } from './night-in-the-life.ts';
 import { opsRunbookScenario } from './ops-runbook.ts';
 import { perfBudgetScenario } from './perf-budget.ts';
@@ -48,6 +42,7 @@ import { petShopScenario } from './petshop.ts';
 import { photoAlbumScenarios } from './photo-albums.ts';
 import { planAndEstimateScenario, plannerFileHandoffScenario } from './plan-and-estimate.ts';
 import { powerpointSourceScenarios } from './powerpoint-sources.ts';
+import { PRIVATE_SCENARIOS } from './private-scenarios.ts';
 import { pullRequestReviewWorkflowScenario } from './pull-request-review-workflow.ts';
 import { recordsIntakeScenario } from './records-intake.ts';
 import { redlineRevisionScenario } from './redline-revision.ts';
@@ -76,10 +71,7 @@ const CRAFTBOOK_SCENARIOS = Object.fromEntries(
 ) as Record<string, EvalScenario>;
 
 export const SCENARIOS: Record<string, EvalScenario> = {
-  [molenSpaceNeedleScenario.id]: molenSpaceNeedleScenario,
-  [molenFootballStadiumScenario.id]: molenFootballStadiumScenario,
-  [molenStructureWorkshopScenario.id]: molenStructureWorkshopScenario,
-  [molenStructureAssetsScenario.id]: molenStructureAssetsScenario,
+  ...Object.fromEntries(PRIVATE_SCENARIOS.map((scenario) => [scenario.id, scenario])),
   ...Object.fromEntries(docblocksIntegrationScenarios().map((scenario) => [scenario.id, scenario])),
   ...Object.fromEntries(powerpointSourceScenarios().map((scenario) => [scenario.id, scenario])),
   ...Object.fromEntries(photoAlbumScenarios().map((scenario) => [scenario.id, scenario])),

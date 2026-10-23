@@ -107,7 +107,8 @@ export class GitHubWikiAdapter implements ConnectorAdapter {
     if (token) {
       const basic = Buffer.from(`x-access-token:${token}`, 'utf8').toString('base64');
       const authHeader = `AUTHORIZATION: Basic ${basic}`;
-      args.push('-c', `http.extraheader=${authHeader}`);
+      // Scoped to the wiki's host, so a redirect elsewhere never receives it.
+      args.push('-c', `http.https://${this.config.host}/.extraheader=${authHeader}`);
       redact.push(token, basic, authHeader);
     }
     args.push(

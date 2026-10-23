@@ -16,9 +16,11 @@ The `gezel` command drives the same service the desktop app uses — handy on se
 Install the command-line package with Node.js 24 or newer:
 
 ```bash
-npm install @bendyline/gezel-cli
-npx gezel
+npm install -g @bendyline/gezel-cli
+gezel
 ```
+
+To try it without installing, run `npx -p @bendyline/gezel-cli gezel`. Name the `@bendyline/` package whenever you use `npx`: a bare `npx gezel` outside a folder where the CLI is installed asks npm for an unrelated package.
 
 The CLI is one of Gezel's public JavaScript packages. See [Gezel on npm](npm-packages.md) for the complete package map and the SDKs to use when a shell command is not the right integration boundary.
 
