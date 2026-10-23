@@ -12,7 +12,7 @@
  *    token into localStorage (api.ts reads it synchronously at module load),
  *    freezes the clock, and kills animations/caret for stable screenshots.
  */
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -242,6 +242,22 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   // opting in.
   browserDiagnostics: [
     async ({ page, daemon, browserName }, use, testInfo) => {
+      const hangMarker = join(
+        testInfo.project.outputDir,
+        '.renderer-hangs',
+        `${testInfo.testId}-${testInfo.repeatEachIndex}`,
+      );
+      if (
+        testInfo.retry > 0 &&
+        !(await stat(hangMarker).then(
+          () => true,
+          () => false,
+        ))
+      ) {
+        throw new Error(
+          'Not retried: retries are only for the known renderer hang, and the previous attempt failed for another reason. Read that attempt.',
+        );
+      }
       const lines: string[] = [];
       const push = (line: string) => {
         if (lines.length < MAX_DIAGNOSTIC_LINES) lines.push(line);
@@ -267,8 +283,10 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       // the probe below cannot tell from a blocked thread. An enabled debugger
       // also pauses near the heap limit (reason OOM) instead of crashing.
       let probing = false;
+      let pausedBeforeProbe = false;
       cdp?.on('Debugger.paused', (event) => {
         if (probing) return;
+        pausedBeforeProbe = true;
         push(`[debugger] page paused (reason ${event.reason}) before the probe:`);
         for (const frame of event.callFrames.slice(0, 15))
           push(`[debugger]   ${formatFrame(frame)}`);
@@ -283,8 +301,18 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         // answer, holding Chrome's six connections per origin so the lazy
         // chunks behind `load` never go out. Ask each side directly.
         probing = true;
-        if (cdp) for (const line of await probeRenderer(page, cdp)) push(line);
-        for (const line of await probeDaemon(daemon)) push(line);
+        const renderer = cdp ? await probeRenderer(page, cdp) : [];
+        const daemonLines = await probeDaemon(daemon);
+        for (const line of [...renderer, ...daemonLines]) push(line);
+        if (!pausedBeforeProbe && isRendererHang(renderer, daemonLines)) {
+          await mkdir(dirname(hangMarker), { recursive: true });
+          await writeFile(hangMarker, `${testInfo.title}\n`, 'utf8');
+          testInfo.annotations.push({
+            type: 'renderer-hang',
+            description: "Chromium's renderer blocked before the page loaded; retried once",
+          });
+          push('[retry] the known renderer hang; Playwright retries this test once');
+        }
       }
       if (testInfo.status !== testInfo.expectedStatus && lines.length > 0) {
         // Attach by path (not body) so the text survives in
@@ -578,6 +606,21 @@ function formatRendererThreads(
     }
   }
   return lines;
+}
+
+/**
+ * Chromium's renderer sometimes blocks on a futex while booting the page, with
+ * no JS running (2026-10: nine CI hits across six spec files, never locally). The
+ * browser and the daemon still answer. Nothing in the page can cause or clear
+ * it, so only this exact signature earns a retry; any other failure, including
+ * a renderer paused or spinning in our own code, still fails the run.
+ */
+function isRendererHang(renderer: string[], daemon: string[]): boolean {
+  return (
+    renderer[0]?.startsWith('[renderer] did not answer evaluate') === true &&
+    renderer.some((line) => line.startsWith('[browser] responsive')) &&
+    daemon[0]?.startsWith('[daemon] responsive; 0 item(s)') === true
+  );
 }
 
 async function probeDaemon(daemon: DaemonInfo): Promise<string[]> {

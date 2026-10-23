@@ -90,7 +90,7 @@
     "test:e2e:visual:unleased": "pnpm --filter @bendyline/gezel-app run test:e2e:visual",
     "test:e2e:web:run:unleased": "pnpm --filter @bendyline/gezel-app run test:e2e:web",
     "test:e2e:web:smoke": "node scripts/run-with-dependency-lease.mjs test:e2e:web:smoke:unleased",
-    "test:e2e:web:smoke:unleased": "pnpm --filter @bendyline/gezel-app exec playwright test --config playwright.web.config.ts shell.spec.ts write-flow.spec.ts --reporter=line --retries=0 --repeat-each=3 --workers=1",
+    "test:e2e:web:smoke:unleased": "pnpm --filter @bendyline/gezel-app exec playwright test --config playwright.web.config.ts shell.spec.ts write-flow.spec.ts --reporter=line --repeat-each=3 --workers=1",
     "pretest:e2e:web": "node scripts/run-with-dependency-lease.mjs pw:install:unleased",
     "test:e2e:web": "node scripts/run-with-dependency-lease.mjs test:e2e:web:unleased",
     "test:e2e:web:unleased": "pnpm build && pnpm test:e2e:web:run",
