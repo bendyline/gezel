@@ -409,9 +409,11 @@ async function probeProcesses(page: Page): Promise<string[]> {
     return info?.processInfo ?? null;
   };
   try {
-    const [cpuBefore, threadsBefore] = await Promise.all([readCpu(), readRendererThreads()]);
+    const cpuBefore = await readCpu();
+    const pids = await rendererPids(cpuBefore);
+    const threadsBefore = await readRendererThreads(pids);
     await new Promise((resolveSample) => setTimeout(resolveSample, CPU_SAMPLE_MS));
-    const [cpuAfter, threadsAfter] = await Promise.all([readCpu(), readRendererThreads()]);
+    const [cpuAfter, threadsAfter] = await Promise.all([readCpu(), readRendererThreads(pids)]);
     return [
       formatBrowserCpu(session !== null, cpuBefore, cpuAfter),
       ...formatRendererThreads(threadsBefore, threadsAfter),
@@ -445,12 +447,10 @@ function formatBrowserCpu(
   return `[browser] responsive; CPU over ${CPU_SAMPLE_MS}ms: ${busy.join(', ')}`;
 }
 
-async function readRendererThreads(): Promise<RendererThreads | null> {
+async function readRendererThreads(pids: number[]): Promise<RendererThreads | null> {
   if (process.platform !== 'linux') return null;
   try {
     const renderers = new Map<number, ThreadSample[]>();
-    // Newest first: the stuck page's renderer started after any spare one.
-    const pids = (await rendererPids()).sort((a, b) => b - a).slice(0, MAX_RENDERERS);
     for (const pid of pids) {
       const threads: ThreadSample[] = [];
       for (const tid of await readdir(`/proc/${pid}/task`).catch(() => [])) {
@@ -477,10 +477,35 @@ async function readRendererThreads(): Promise<RendererThreads | null> {
 }
 
 /**
+ * The browser's renderers, newest first: the stuck page's renderer started after
+ * any spare one. The browser names them; walking this worker's process tree
+ * covers a browser that did not answer.
+ */
+async function rendererPids(processes: ProcessCpu[] | null): Promise<number[]> {
+  if (process.platform !== 'linux') return [];
+  const named: number[] = [];
+  for (const { type, id } of processes ?? []) {
+    if (type === 'renderer' && (await isRenderer(id))) named.push(id);
+  }
+  const pids = named.length > 0 ? named : await descendantRenderers();
+  return pids.sort((a, b) => b - a).slice(0, MAX_RENDERERS);
+}
+
+/**
+ * A zygote-forked renderer rewrites its title into one space-separated string,
+ * so `--type=renderer` is never a NUL-separated argument of its own. Matching
+ * it as one found no renderer on the first CI hang (2026-10-23).
+ */
+async function isRenderer(pid: number): Promise<boolean> {
+  const cmdline = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
+  return cmdline.includes('--type=renderer');
+}
+
+/**
  * This worker's own renderers: each worker launches its own browser, so they
  * descend from this process, and `--type=renderer` excludes the daemon's children.
  */
-async function rendererPids(): Promise<number[]> {
+async function descendantRenderers(): Promise<number[]> {
   const parents = new Map<number, number>();
   for (const entry of await readdir('/proc')) {
     if (!/^\d+$/.test(entry)) continue;
@@ -496,9 +521,7 @@ async function rendererPids(): Promise<number[]> {
   };
   const pids: number[] = [];
   for (const pid of parents.keys()) {
-    if (!isDescendant(pid)) continue;
-    const cmdline = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
-    if (cmdline.split('\0').includes('--type=renderer')) pids.push(pid);
+    if (isDescendant(pid) && (await isRenderer(pid))) pids.push(pid);
   }
   return pids;
 }
@@ -522,7 +545,7 @@ function formatRendererThreads(
   after: RendererThreads | null,
 ): string[] {
   if (!before || !after) return [];
-  if (after.renderers.size === 0) return ['[renderer] no renderer process found under this worker'];
+  if (after.renderers.size === 0) return ['[renderer] no renderer process found in /proc'];
   const elapsed = Math.round(after.at - before.at);
   const lines: string[] = [];
   for (const [pid, threads] of after.renderers) {

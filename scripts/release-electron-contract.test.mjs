@@ -557,21 +557,34 @@ test('PR CI runs the full browser and Electron suites the release gates on', asy
   assert.doesNotMatch(desktop, /continue-on-error: true/);
   assert.match(desktop, /if: failure\(\)[\s\S]*packages\/app\/test-results\//);
 
-  const releaseQualityStart = release.indexOf('  quality:');
-  const releaseQualityEnd = release.indexOf('\n  build-windows:', releaseQualityStart);
-  const releaseQuality = release.slice(releaseQualityStart, releaseQualityEnd);
-  assert.match(releaseQuality, /run: pnpm test:e2e:web:run/);
-  const electronIndex = releaseQuality.indexOf('run: xvfb-run -a pnpm test:e2e:run');
-  const diagnosticsIndex = releaseQuality.indexOf('name: release-e2e-diagnostics', electronIndex);
+  const releaseE2eStart = release.indexOf('\n  e2e:');
+  const releaseE2eEnd = release.indexOf('\n  build-windows:', releaseE2eStart);
+  assert.notEqual(releaseE2eStart, -1, 'the release must keep its E2E suites in their own job');
+  const releaseE2e = release.slice(releaseE2eStart, releaseE2eEnd);
+  assert.match(releaseE2e, /run: pnpm build/, 'the E2E suites run against a built tree');
+  assert.match(releaseE2e, /run: pnpm test:e2e:web:run/);
+  const electronIndex = releaseE2e.indexOf('run: xvfb-run -a pnpm test:e2e:run');
+  const diagnosticsIndex = releaseE2e.indexOf('name: release-e2e-diagnostics', electronIndex);
   assert.ok(electronIndex >= 0, 'the release must run the full Electron suite');
   assert.ok(
     diagnosticsIndex > electronIndex,
     'a failed release E2E run must upload its traces and screenshots',
   );
   assert.match(
-    releaseQuality.slice(electronIndex, diagnosticsIndex + 400),
+    releaseE2e.slice(electronIndex, diagnosticsIndex + 400),
     /if: failure\(\)[\s\S]*packages\/app\/test-results\//,
   );
+
+  // No installer is built or signed unless both suites passed.
+  for (const job of ['build-windows', 'build-macos', 'build-linux', 'release']) {
+    const needs = release.slice(release.indexOf(`\n  ${job}:`)).match(/\n {4}needs: \[([^\]]*)\]/);
+    assert.ok(needs, `${job} must declare its needs`);
+    const deps = needs[1].split(',').map((dep) => dep.trim());
+    assert.ok(
+      deps.includes('quality') && deps.includes('e2e'),
+      `${job} must wait for quality and e2e`,
+    );
+  }
 });
 
 test('PR artifact checks compile the same release-stamped source shape as Electron release', async () => {

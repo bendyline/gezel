@@ -167,8 +167,11 @@ test('local Home matches the live chrome and preserves reading across service na
     const startupReader = await readerMetrics('#startup-reading');
     await page.screenshot({ path: join(screenshots, 'startup-home-reading.png') });
     await expect(page).toHaveURL(/^https?:\/\//, { timeout: 60_000 });
-    await expect(page.locator('#startup-home')).toHaveCount(0, { timeout: 30_000 });
+    // The startup screen mounts again on the service page to hand its reader
+    // over, then leaves. Checked before the live reader, its absence passed in
+    // the instant before that remount, and both Homes' tabs were then present.
     await expect(page.locator('.startup-reading-live')).toBeVisible();
+    await expect(page.locator('#startup-home')).toHaveCount(0, { timeout: 30_000 });
     await expect(page.getByRole('tab', { name: 'Handboek', exact: true })).toHaveAttribute(
       'aria-selected',
       'true',
