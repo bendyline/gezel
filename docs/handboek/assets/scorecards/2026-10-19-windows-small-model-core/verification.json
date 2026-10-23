@@ -1,0 +1,23 @@
+{
+  "sourceReportSha256": "b30dd40c3aeb6715502f24cc84ad22b0a7fe5697134a697455467c5d6e4a6aa1",
+  "uniqueCells": 264,
+  "totals": {
+    "trials": 264,
+    "passed": 182,
+    "modelFailures": 70,
+    "infrastructureExclusions": 12,
+    "artifactReviews": 254,
+    "noArtifact": 10,
+    "eligibleReviews": 247
+  },
+  "originalEvidenceModified": false,
+  "evidenceHashesVerified": 4584,
+  "duplicateImports": 0,
+  "classificationCorrections": 0,
+  "newInferenceCalls": 0,
+  "schemas": [
+    "ScorecardDatasetSchema v1"
+  ],
+  "standardTableQuality": "rubric-specific advisory means and sample counts by journal; missing and excluded reviews reported separately",
+  "standardTablePerformance": "per-trial engine-log medians, ranges and sample counts by journal; no admission probes inferred"
+}

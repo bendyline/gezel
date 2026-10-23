@@ -479,14 +479,6 @@ export async function buildLlamaCppProvider(opts: {
   // path still clamps to the native train context.
   const explicitCtx = envNumCtx ?? perModelCtxOverride ?? config.llamaCppNumCtx;
   const hostFloorTokens = minViableLocalContextTokens();
-  // A per-model override below the host floor is deliberate user intent —
-  // lower the admission floor to the override instead of silently raising
-  // the request back to 64K. Env / machine-wide values keep their
-  // historical floor semantics.
-  const minViableTokens =
-    perModelCtxOverride !== undefined && explicitCtx === perModelCtxOverride
-      ? Math.min(hostFloorTokens, perModelCtxOverride)
-      : hostFloorTokens;
   const contextRequirement = resolveLlamaCppContextRequirement({
     modelContextWindow: modelCatalogInfo?.contextWindow,
     ...(explicitCtx !== undefined ? { explicitContextWindow: explicitCtx } : {}),
@@ -495,7 +487,7 @@ export async function buildLlamaCppProvider(opts: {
       ? { manifestContextSize: manifestEngineConfig.contextSize }
       : {}),
     contextSizing: config.llamaCppContextSizing ?? 'adaptive',
-    minViableContextTokens: minViableTokens,
+    minViableContextTokens: hostFloorTokens,
   });
   // `let`: RAM-aware admission below may lower this (but never below the
   // model-aware minimum) before anything launch-visible consumes it.

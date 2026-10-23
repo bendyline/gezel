@@ -37,6 +37,7 @@ import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { computeToolAllowlist, expandToolsetGroups } from '../chat/role-tool-filter.js';
 import type { ReleaseNoteEntry } from './content.js';
 import type { HandboekDeviceInfo, HandboekGezelInfo, HandboekModelInfo } from './device.js';
+import { taskMeasurementsHtml, taskMeasurementsMarkdown } from './scorecard-measurements.js';
 import { unwrapSoftBreaks } from './unwrap.js';
 
 const log = createLogger('handboek');
@@ -645,13 +646,16 @@ export function renderScorecardMarkdown(
   if (headlineNote) lines.push('', headlineNote);
   lines.push('');
   lines.push(...scoreTable(publishable, opts.breakLabels ?? false, headlineCoverage));
+  lines.push(...taskMeasurementsMarkdown(board.scores));
 
   if (withheld.length > 0) {
     lines.push('');
     lines.push('Not published — some tasks could not be measured on this round:');
     lines.push('');
     for (const score of withheld) {
-      lines.push(`- ${score.result.label}: ${score.unmeasuredScenarios.length} task(s) unmeasured`);
+      lines.push(
+        `- ${esc(score.result.label)}: ${score.unmeasuredScenarios.length} task(s) unmeasured`,
+      );
     }
   }
 
@@ -665,7 +669,6 @@ export function renderScorecardMarkdown(
     const scores = dataset.results
       .filter((result) => result.runId === run.id && result.suiteId === suiteId)
       .map((result) => scoreModel(result, run.provenance.count))
-      .filter((score) => score.unmeasuredScenarios.length === 0)
       .sort((a, b) => b.successes / b.attributableTrials - a.successes / a.attributableTrials);
     if (scores.length === 0) continue;
     const why = provenanceDifferences(board.run, run);
@@ -683,7 +686,14 @@ export function renderScorecardMarkdown(
     const note = memoryCoverageNote(coverage, scores);
     if (note) lines.push('', note);
     lines.push('');
-    lines.push(...scoreTable(scores, opts.breakLabels ?? false, coverage));
+    lines.push(
+      ...scoreTable(
+        scores.filter((score) => score.unmeasuredScenarios.length === 0),
+        opts.breakLabels ?? false,
+        coverage,
+      ),
+    );
+    lines.push(...taskMeasurementsMarkdown(scores));
   }
 
   if (opts.includeTaskCount) {
@@ -798,6 +808,7 @@ export function renderScorecardRunsMarkdown(
       lines.push(`#### ${SCORECARD_SUITE_HEADINGS[suite.suiteId] ?? suite.suiteId}`);
       lines.push('');
       lines.push(...scoreTable(publishable, opts.breakLabels ?? false, coverage));
+      lines.push(...taskMeasurementsMarkdown(suite.scores));
 
       if (withheld.length > 0) {
         lines.push('');
@@ -805,7 +816,7 @@ export function renderScorecardRunsMarkdown(
         lines.push('');
         for (const score of withheld) {
           lines.push(
-            `- ${score.result.label}: ${score.unmeasuredScenarios.length} task(s) unmeasured`,
+            `- ${esc(score.result.label)}: ${score.unmeasuredScenarios.length} task(s) unmeasured`,
           );
         }
       }
@@ -919,7 +930,9 @@ export function renderScorecardFilterHtml(
           SCORECARD_SUITE_HEADINGS[suite.suiteId] ?? suite.suiteId,
         )}</h5>`,
       );
-      parts.push(scoreTableHtml(publishable, coverage));
+      if (publishable.length > 0) parts.push(scoreTableHtml(publishable, coverage));
+      const measurements = taskMeasurementsHtml(suite.scores);
+      if (measurements) parts.push(measurements);
       if (withheld.length > 0) {
         const names = withheld
           .map(
@@ -983,14 +996,18 @@ function roundLabels(runs: readonly ScorecardRun[]): Map<string, string> {
  * without knowing anything about what it says.
  */
 function scoreTableHtml(scores: ModelScore[], coverage: ScorecardMemoryCoverage): string {
+  if (scores.length === 0) return '';
   const attr = SCORECARD_DATA_ATTRS;
   const anyRuntime = scores.some((score) => !!score.result.runtime);
   const anyJudge = scores.some((score) => !!score.result.judge);
+  const showProbes =
+    scores.some((score) => !!score.result.performance) ||
+    !scores.some((score) => !!score.result.taskMeasurements);
   const memoryHeading = MEMORY_COLUMN_HEADINGS[coverage];
 
   const cols = ['Model', 'Size', 'Tasks passed'];
   if (anyJudge) cols.push('Quality');
-  cols.push('Performance');
+  if (showProbes) cols.push('Performance');
   if (anyRuntime) cols.push('Context', ...(memoryHeading ? [memoryHeading] : []));
 
   const rows = scores.map((score) => {
@@ -1005,13 +1022,14 @@ function scoreTableHtml(scores: ModelScore[], coverage: ScorecardMemoryCoverage)
       cells.push(judge ? esc(`${judge.meanScore}/10 (${judge.artifacts}${NB}pieces)`) : '—');
     }
     const perf = score.result.performance;
-    cells.push(
-      perf
-        ? `${esc(`${perf.decodeTokensPerSec}${NB}tok/s output`)}<br />${esc(
-            `${perf.prefillTokensPerSec.toLocaleString()}${NB}tok/s prefill`,
-          )}`
-        : '—',
-    );
+    if (showProbes)
+      cells.push(
+        perf
+          ? `${esc(`${perf.decodeTokensPerSec}${NB}tok/s output`)}<br />${esc(
+              `${perf.prefillTokensPerSec.toLocaleString()}${NB}tok/s prefill`,
+            )}`
+          : '—',
+      );
     if (anyRuntime) {
       const runtime = score.result.runtime;
       cells.push(runtime ? `${Math.round(runtime.contextTokens / 1024)}K` : '—');
@@ -1096,22 +1114,26 @@ export function breakModelLabel(label: string): string {
  * One results table.
  *
  * Judge and runtime columns are omitted when no model in the table carries
- * the measurement. Performance is the deliberate exception: it is a standard
- * scorecard dimension, and keeping its column visible lets an older round say
- * honestly that its throughput probe was not recorded.
+ * the measurement. Older rounds retain a blank Performance column when no
+ * probe was recorded. Rounds with task measurements use the separate tables
+ * below instead of displaying an empty probe column.
  */
 function scoreTable(
   scores: ReturnType<typeof scoreModel>[],
   breakLabels: boolean,
   coverage: ScorecardMemoryCoverage,
 ): string[] {
+  if (scores.length === 0) return [];
   const anyRuntime = scores.some((score) => !!score.result.runtime);
   const anyJudge = scores.some((score) => !!score.result.judge);
+  const showProbes =
+    scores.some((score) => !!score.result.performance) ||
+    !scores.some((score) => !!score.result.taskMeasurements);
   const memoryHeading = MEMORY_COLUMN_HEADINGS[coverage];
 
   const cols = ['Model', 'Size', 'Tasks passed'];
   if (anyJudge) cols.push('Quality');
-  cols.push('Performance');
+  if (showProbes) cols.push('Performance');
   if (anyRuntime) cols.push('Context', ...(memoryHeading ? [memoryHeading] : []));
 
   const rows = scores.map((score) => {
@@ -1130,11 +1152,12 @@ function scoreTable(
       cells.push(judge ? `${judge.meanScore}/10 (${judge.artifacts}${NB}pieces)` : '—');
     }
     const perf = score.result.performance;
-    cells.push(
-      perf
-        ? `${perf.decodeTokensPerSec}${NB}tok/s output${breakLabels ? '<br>' : ' · '}${perf.prefillTokensPerSec.toLocaleString()}${NB}tok/s prefill`
-        : '—',
-    );
+    if (showProbes)
+      cells.push(
+        perf
+          ? `${perf.decodeTokensPerSec}${NB}tok/s output${breakLabels ? '<br>' : ' · '}${perf.prefillTokensPerSec.toLocaleString()}${NB}tok/s prefill`
+          : '—',
+      );
     if (anyRuntime) {
       const runtime = score.result.runtime;
       cells.push(runtime ? `${Math.round(runtime.contextTokens / 1024)}K` : '—');

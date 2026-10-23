@@ -235,6 +235,61 @@ export const ScorecardJudgeSchema = z
   .strict();
 export type ScorecardJudge = z.infer<typeof ScorecardJudgeSchema>;
 
+/** Per-trial observations, never interchangeable with averaged admission probes. */
+export const ScorecardObservationSchema = z
+  .object({
+    samples: z.number().int().positive(),
+    median: z.number().nonnegative(),
+    min: z.number().nonnegative(),
+    max: z.number().nonnegative(),
+  })
+  .strict()
+  .refine((value) => value.min <= value.median && value.median <= value.max, {
+    message: 'Observation median must lie within its range',
+  });
+export type ScorecardObservation = z.infer<typeof ScorecardObservationSchema>;
+
+/** Keep runtime/hardware periods and quality rubrics separate within a round. */
+export const ScorecardTaskMeasurementSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    trials: z.number().int().positive(),
+    source: z.literal('engine-log'),
+    outputTokensPerSec: ScorecardObservationSchema.optional(),
+    prefillTokensPerSec: ScorecardObservationSchema.optional(),
+    durationMs: ScorecardObservationSchema.optional(),
+    peakRssMb: ScorecardObservationSchema.optional(),
+    peakGpuMemMb: ScorecardObservationSchema.optional(),
+    /** Eligible artifact reviews only. Missing and excluded reviews have no invented score. */
+    judgments: z.array(ScorecardJudgeSchema.extend({ rubricId: z.string().min(1) }).strict()),
+    noArtifact: z.number().int().nonnegative(),
+    excludedReviews: z.number().int().nonnegative(),
+  })
+  .strict()
+  .superRefine((group, ctx) => {
+    const reviewed = group.judgments.reduce((sum, judge) => sum + judge.artifacts, 0);
+    if (reviewed + group.noArtifact + group.excludedReviews !== group.trials) {
+      ctx.addIssue({ code: 'custom', message: 'Review accounting must cover every trial' });
+    }
+    const rubricIds = group.judgments.map((judge) => judge.rubricId);
+    if (new Set(rubricIds).size !== rubricIds.length) {
+      ctx.addIssue({ code: 'custom', message: 'Duplicate rubric within measurement period' });
+    }
+    for (const key of [
+      'outputTokensPerSec',
+      'prefillTokensPerSec',
+      'durationMs',
+      'peakRssMb',
+      'peakGpuMemMb',
+    ] as const) {
+      if ((group[key]?.samples ?? 0) > group.trials) {
+        ctx.addIssue({ code: 'custom', path: [key], message: 'Samples exceed recorded trials' });
+      }
+    }
+  });
+export type ScorecardTaskMeasurement = z.infer<typeof ScorecardTaskMeasurementSchema>;
+
 export const ScorecardModelResultSchema = z
   .object({
     /** Catalog model id, e.g. "gemma4-e4b-q4". */
@@ -260,6 +315,8 @@ export const ScorecardModelResultSchema = z
     runtime: ScorecardRuntimeSchema.optional(),
     /** Advisory quality score; absent when no judge pass ran. */
     judge: ScorecardJudgeSchema.optional(),
+    /** Task measurements and rubric-specific reviews, independent of capability eligibility. */
+    taskMeasurements: z.array(ScorecardTaskMeasurementSchema).min(1).optional(),
     cells: z.array(ScorecardCellSchema),
   })
   .strict();
@@ -279,6 +336,21 @@ export const ScorecardDatasetSchema = z
   .superRefine((dataset, ctx) => {
     const runIds = new Set(dataset.runs.map((run) => run.id));
     for (const result of dataset.results) {
+      if (result.taskMeasurements) {
+        const groups = result.taskMeasurements;
+        if (new Set(groups.map((group) => group.id)).size !== groups.length) {
+          ctx.addIssue({ code: 'custom', message: 'Duplicate task measurement period' });
+        }
+        if (
+          groups.reduce((sum, group) => sum + group.trials, 0) !==
+          result.cells.reduce((sum, cell) => sum + cell.trials, 0)
+        ) {
+          ctx.addIssue({
+            code: 'custom',
+            message: 'Task measurements must account for all recorded trials',
+          });
+        }
+      }
       if (!runIds.has(result.runId)) {
         ctx.addIssue({
           code: 'custom',

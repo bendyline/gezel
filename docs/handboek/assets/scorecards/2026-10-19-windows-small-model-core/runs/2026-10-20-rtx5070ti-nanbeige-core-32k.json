@@ -1,0 +1,693 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "2026-10-20-rtx5070ti-nanbeige-core-32k",
+      "provenance": {
+        "startedAt": "2026-10-20T16:55:19.364Z",
+        "device": {
+          "label": "Windows laptop (RTX 5070 Ti, Ryzen AI 9 HX 370)",
+          "platform": "win32",
+          "arch": "x64",
+          "memoryGb": 31,
+          "osRelease": "win32 10.0.26300",
+          "cpuModel": "AMD Ryzen AI 9 HX 370 w/ Radeon 890M",
+          "gpuModel": "NVIDIA GeForce RTX 5070 Ti Laptop GPU"
+        },
+        "harnessCommit": "dee6f3e3aea8",
+        "sourceHash": "98763c648f021292339838e264ab775024d6049bbfde0093d4f258df8cb1cde7",
+        "serviceBuildHash": "a1ac336f2a669ac2e11ae528fe69e5bfaf91b5446a20364e3002de14aa6201f9",
+        "catalogHash": "23ab3cfa5bde3d0753341e4572c7b3a8730debc9c171929344c49710a9a25784",
+        "gildeVersion": "0.2.5",
+        "count": 3,
+        "judgeModelId": null,
+        "engineBuilds": {
+          "llama-cpp": "CUDA build 11669 / 620d2225cc436ab0b001e3200e590e3b286ef9ab"
+        }
+      },
+      "scope": "suite",
+      "memoryCoverage": "system-only",
+      "suites": [
+        "core"
+      ],
+      "scenariosBySuite": {
+        "core": [
+          "tictactoe",
+          "petshop",
+          "tankcombat",
+          "schema-migration",
+          "failing-tests-spec",
+          "symptom-debug",
+          "data-wrangle",
+          "incident-postmortem",
+          "ops-runbook-anomaly",
+          "plan-and-estimate",
+          "conflict-synthesis"
+        ]
+      },
+      "note": "Nanbeige rerun: all 33 requested cells recorded at 32,768 tokens, one slot and f16 KV across 12 preserved journals with verified identical runtime. 12 passed, nine were model failures and 12 exceeded context; the latter are infrastructure exclusions, not GPU OOM. Some scenarios have no attributable trials, so the reader withholds a full-suite score. GPU fit was verified. Oct 22 samples included a 33 W cap and 810 MHz memory; throughput later rose without operator changes. No uniform speed claim is made. Runtime content: c01c89e726cb. Task performance and advisory reviews appear below by journal and rubric; exact trial scores, axes and evidence are in the October Windows data download."
+    }
+  ],
+  "results": [
+    {
+      "modelId": "nanbeige4.2-3b-q4",
+      "label": "Nanbeige 4.2 (3B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "tiny",
+      "parameterSize": "3B",
+      "quantization": "Q4_K_M",
+      "grantedContextTokens": 32768,
+      "runId": "2026-10-20-rtx5070ti-nanbeige-core-32k",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 32768,
+        "peakMemoryMb": 9916,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "N1",
+          "label": "N1 · 10-20 16:55–10-20 17:59 UTC",
+          "trials": 3,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 3,
+            "median": 44.32,
+            "min": 44.29,
+            "max": 48.42
+          },
+          "prefillTokensPerSec": {
+            "samples": 3,
+            "median": 1481.48,
+            "min": 1297.46,
+            "max": 1548.52
+          },
+          "durationMs": {
+            "samples": 3,
+            "median": 1498201,
+            "min": 234456,
+            "max": 1857575
+          },
+          "peakRssMb": {
+            "samples": 3,
+            "median": 11730,
+            "min": 10353,
+            "max": 14782
+          },
+          "peakGpuMemMb": {
+            "samples": 3,
+            "median": 8212,
+            "min": 8208,
+            "max": 8212
+          },
+          "judgments": [
+            {
+              "meanScore": 3.625,
+              "artifacts": 2,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 1
+        },
+        {
+          "id": "N2",
+          "label": "N2 · 10-20 18:15–10-20 18:22 UTC",
+          "trials": 2,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 2,
+            "median": 51.34,
+            "min": 43.85,
+            "max": 58.83
+          },
+          "prefillTokensPerSec": {
+            "samples": 2,
+            "median": 1651.79,
+            "min": 1108.81,
+            "max": 2194.77
+          },
+          "durationMs": {
+            "samples": 2,
+            "median": 193930,
+            "min": 154171,
+            "max": 233689
+          },
+          "peakRssMb": {
+            "samples": 2,
+            "median": 10068,
+            "min": 9349,
+            "max": 10787
+          },
+          "peakGpuMemMb": {
+            "samples": 2,
+            "median": 8211,
+            "min": 8210,
+            "max": 8212
+          },
+          "judgments": [
+            {
+              "meanScore": 2.75,
+              "artifacts": 1,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 1
+        },
+        {
+          "id": "N3",
+          "label": "N3 · 10-22 05:57–10-22 07:09 UTC · restricted GPU period",
+          "trials": 2,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 2,
+            "median": 4.375,
+            "min": 2.99,
+            "max": 5.76
+          },
+          "prefillTokensPerSec": {
+            "samples": 2,
+            "median": 163.54500000000002,
+            "min": 94.12,
+            "max": 232.97
+          },
+          "durationMs": {
+            "samples": 2,
+            "median": 2144712,
+            "min": 540923,
+            "max": 3748501
+          },
+          "peakRssMb": {
+            "samples": 2,
+            "median": 3863.5,
+            "min": 3845,
+            "max": 3882
+          },
+          "peakGpuMemMb": {
+            "samples": 2,
+            "median": 8208,
+            "min": 8208,
+            "max": 8208
+          },
+          "judgments": [
+            {
+              "meanScore": 4.75,
+              "artifacts": 1,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            }
+          ],
+          "noArtifact": 1,
+          "excludedReviews": 0
+        },
+        {
+          "id": "N4",
+          "label": "N4 · 10-22 08:02–10-22 08:29 UTC · restricted GPU period",
+          "trials": 1,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 1,
+            "median": 2.95,
+            "min": 2.95,
+            "max": 2.95
+          },
+          "prefillTokensPerSec": {
+            "samples": 1,
+            "median": 91.61,
+            "min": 91.61,
+            "max": 91.61
+          },
+          "durationMs": {
+            "samples": 1,
+            "median": 1624482,
+            "min": 1624482,
+            "max": 1624482
+          },
+          "peakRssMb": {
+            "samples": 1,
+            "median": 4049,
+            "min": 4049,
+            "max": 4049
+          },
+          "peakGpuMemMb": {
+            "samples": 1,
+            "median": 8208,
+            "min": 8208,
+            "max": 8208
+          },
+          "judgments": [],
+          "noArtifact": 1,
+          "excludedReviews": 0
+        },
+        {
+          "id": "N5",
+          "label": "N5 · 10-22 09:03–10-22 14:15 UTC · spans speed change",
+          "trials": 6,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 6,
+            "median": 3.645,
+            "min": 3.18,
+            "max": 6.71
+          },
+          "prefillTokensPerSec": {
+            "samples": 6,
+            "median": 188.51999999999998,
+            "min": 124.4,
+            "max": 634.21
+          },
+          "durationMs": {
+            "samples": 6,
+            "median": 2657703,
+            "min": 711710,
+            "max": 6058455
+          },
+          "peakRssMb": {
+            "samples": 6,
+            "median": 10050,
+            "min": 3887,
+            "max": 11960
+          },
+          "peakGpuMemMb": {
+            "samples": 6,
+            "median": 8208,
+            "min": 8208,
+            "max": 8219
+          },
+          "judgments": [
+            {
+              "meanScore": 4.333333333333333,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-doc-v1"
+            },
+            {
+              "meanScore": 2.875,
+              "artifacts": 2,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            }
+          ],
+          "noArtifact": 1,
+          "excludedReviews": 0
+        },
+        {
+          "id": "N6",
+          "label": "N6 · 10-22 14:50–10-22 15:15 UTC",
+          "trials": 4,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 4,
+            "median": 48.67,
+            "min": 41.91,
+            "max": 58.05
+          },
+          "prefillTokensPerSec": {
+            "samples": 4,
+            "median": 1603.525,
+            "min": 1013.49,
+            "max": 2023.1
+          },
+          "durationMs": {
+            "samples": 4,
+            "median": 257431.5,
+            "min": 130773,
+            "max": 700815
+          },
+          "peakRssMb": {
+            "samples": 4,
+            "median": 10319.5,
+            "min": 3929,
+            "max": 11094
+          },
+          "peakGpuMemMb": {
+            "samples": 4,
+            "median": 8212,
+            "min": 8208,
+            "max": 8212
+          },
+          "judgments": [
+            {
+              "meanScore": 3.4166666666666665,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 1
+        },
+        {
+          "id": "N7",
+          "label": "N7 · 10-22 15:54–10-22 16:01 UTC",
+          "trials": 1,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 1,
+            "median": 41.24,
+            "min": 41.24,
+            "max": 41.24
+          },
+          "prefillTokensPerSec": {
+            "samples": 1,
+            "median": 1000.87,
+            "min": 1000.87,
+            "max": 1000.87
+          },
+          "durationMs": {
+            "samples": 1,
+            "median": 429098,
+            "min": 429098,
+            "max": 429098
+          },
+          "peakRssMb": {
+            "samples": 1,
+            "median": 9652,
+            "min": 9652,
+            "max": 9652
+          },
+          "peakGpuMemMb": {
+            "samples": 1,
+            "median": 8212,
+            "min": 8212,
+            "max": 8212
+          },
+          "judgments": [],
+          "noArtifact": 1,
+          "excludedReviews": 0
+        },
+        {
+          "id": "N8",
+          "label": "N8 · 10-22 16:08–10-22 16:34 UTC",
+          "trials": 3,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 3,
+            "median": 43.46,
+            "min": 41.1,
+            "max": 45.41
+          },
+          "prefillTokensPerSec": {
+            "samples": 3,
+            "median": 1297.88,
+            "min": 1214.47,
+            "max": 1519.03
+          },
+          "durationMs": {
+            "samples": 3,
+            "median": 136428,
+            "min": 87359,
+            "max": 1268882
+          },
+          "peakRssMb": {
+            "samples": 3,
+            "median": 3930,
+            "min": 3923,
+            "max": 11947
+          },
+          "peakGpuMemMb": {
+            "samples": 3,
+            "median": 8210,
+            "min": 8208,
+            "max": 8210
+          },
+          "judgments": [
+            {
+              "meanScore": 4.625,
+              "artifacts": 2,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-doc-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 1
+        },
+        {
+          "id": "N9",
+          "label": "N9 · 10-22 17:08–10-22 17:49 UTC",
+          "trials": 2,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 2,
+            "median": 46.379999999999995,
+            "min": 46.23,
+            "max": 46.53
+          },
+          "prefillTokensPerSec": {
+            "samples": 2,
+            "median": 1393.505,
+            "min": 1375.83,
+            "max": 1411.18
+          },
+          "durationMs": {
+            "samples": 2,
+            "median": 1163688.5,
+            "min": 1127637,
+            "max": 1199740
+          },
+          "peakRssMb": {
+            "samples": 2,
+            "median": 12626.5,
+            "min": 12415,
+            "max": 12838
+          },
+          "peakGpuMemMb": {
+            "samples": 2,
+            "median": 8209,
+            "min": 8208,
+            "max": 8210
+          },
+          "judgments": [
+            {
+              "meanScore": 1,
+              "artifacts": 1,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 1
+        },
+        {
+          "id": "N10",
+          "label": "N10 · 10-22 18:10–10-22 18:49 UTC",
+          "trials": 5,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 5,
+            "median": 44.95,
+            "min": 40.98,
+            "max": 55.6
+          },
+          "prefillTokensPerSec": {
+            "samples": 5,
+            "median": 1382.78,
+            "min": 909.22,
+            "max": 1781.28
+          },
+          "durationMs": {
+            "samples": 5,
+            "median": 607370,
+            "min": 70550,
+            "max": 670616
+          },
+          "peakRssMb": {
+            "samples": 5,
+            "median": 10488,
+            "min": 3925,
+            "max": 11853
+          },
+          "peakGpuMemMb": {
+            "samples": 5,
+            "median": 8210,
+            "min": 8208,
+            "max": 8212
+          },
+          "judgments": [
+            {
+              "meanScore": 2.5,
+              "artifacts": 1,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 3.1666666666666665,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            }
+          ],
+          "noArtifact": 1,
+          "excludedReviews": 0
+        },
+        {
+          "id": "N11",
+          "label": "N11 · 10-22 19:10–10-22 19:13 UTC",
+          "trials": 1,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 1,
+            "median": 40.45,
+            "min": 40.45,
+            "max": 40.45
+          },
+          "prefillTokensPerSec": {
+            "samples": 1,
+            "median": 952.71,
+            "min": 952.71,
+            "max": 952.71
+          },
+          "durationMs": {
+            "samples": 1,
+            "median": 138218,
+            "min": 138218,
+            "max": 138218
+          },
+          "peakRssMb": {
+            "samples": 1,
+            "median": 3950,
+            "min": 3950,
+            "max": 3950
+          },
+          "peakGpuMemMb": {
+            "samples": 1,
+            "median": 8210,
+            "min": 8210,
+            "max": 8210
+          },
+          "judgments": [],
+          "noArtifact": 1,
+          "excludedReviews": 0
+        },
+        {
+          "id": "N12",
+          "label": "N12 · 10-22 20:05–10-22 20:21 UTC",
+          "trials": 3,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 3,
+            "median": 42.39,
+            "min": 41.69,
+            "max": 43.41
+          },
+          "prefillTokensPerSec": {
+            "samples": 3,
+            "median": 1276.71,
+            "min": 1201.48,
+            "max": 1543.61
+          },
+          "durationMs": {
+            "samples": 3,
+            "median": 231445,
+            "min": 99385,
+            "max": 460312
+          },
+          "peakRssMb": {
+            "samples": 3,
+            "median": 9335,
+            "min": 3952,
+            "max": 11962
+          },
+          "peakGpuMemMb": {
+            "samples": 3,
+            "median": 8212,
+            "min": 8208,
+            "max": 8212
+          },
+          "judgments": [
+            {
+              "meanScore": 4.75,
+              "artifacts": 2,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-doc-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 1
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1199740
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 1498201
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 2,
+          "medianDurationMs": 1857575
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 270632
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 130773
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 244231
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 3,
+          "medianDurationMs": 700815
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 3,
+          "medianDurationMs": 429098
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 231445
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 99385
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 2,
+          "medianDurationMs": 1268882
+        }
+      ]
+    }
+  ]
+}

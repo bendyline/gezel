@@ -1473,18 +1473,13 @@ export class LocalEngineRuntime {
     const manifestEngineConfig = await resolveCatalogLlamaCppEngineConfig(this.catalog, modelId);
     const perModelCtxOverride = config.modelContextOverrides?.[`llama-cpp:${modelId}`];
     const explicitContextWindow = envNumCtx ?? perModelCtxOverride ?? config.llamaCppNumCtx;
-    // A per-model override below the host floor is deliberate user intent —
-    // lower the admission floor to the override instead of silently raising
-    // the request back to 64K. Env / machine-wide values keep their
-    // historical floor semantics. Mirrors buildLlamaCppProvider.
+    // The shared resolver honors every explicit numeric context below the
+    // host floor. Keep per-model override state for the Settings auto marker.
     const overrideActive =
       perModelCtxOverride !== undefined && explicitContextWindow === perModelCtxOverride;
-    const minViableTokens = overrideActive
-      ? Math.min(contextFloor, perModelCtxOverride)
-      : contextFloor;
     const contextRequirement = resolveLlamaCppContextRequirement({
       modelContextWindow: installed.contextWindow,
-      minViableContextTokens: minViableTokens,
+      minViableContextTokens: contextFloor,
       ...(explicitContextWindow !== undefined ? { explicitContextWindow } : {}),
       ...(manifestEngineConfig?.contextSize !== undefined
         ? {
@@ -1500,8 +1495,7 @@ export class LocalEngineRuntime {
     // per-model override deliberately does NOT short-circuit on a resident
     // engine: the full plan must run so a stale resident window surfaces as
     // restart-required instead of masquerading as the applied setting.
-    const shortCircuit =
-      (residentContextWindow !== undefined && !overrideActive) || envNumCtx !== undefined;
+    const shortCircuit = residentContextWindow !== undefined && !overrideActive;
 
     const {
       defaultLocalEngineSlots,
@@ -1973,7 +1967,7 @@ export class LocalEngineRuntime {
       return { grantedCtx, slots, kvCacheType: kv, plannedFieldsOk: true };
     };
 
-    const plan = llamaPlanPass(explicitContextWindow, minViableTokens);
+    const plan = llamaPlanPass(explicitContextWindow, contextFloor);
     let autoContextWindow: number | undefined;
     if (overrideActive) {
       try {

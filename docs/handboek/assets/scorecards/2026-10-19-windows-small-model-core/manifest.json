@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "sourceReportSha256": "b30dd40c3aeb6715502f24cc84ad22b0a7fe5697134a697455467c5d6e4a6aa1",
+  "regenerate": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-small-model-core-scorecard.mjs",
+  "check": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-small-model-core-scorecard.mjs --check",
+  "files": [
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-10-20-rtx5070ti-core-original-64k.json",
+      "bytes": 25445,
+      "sha256": "024b4715a39c71916656e25b25491071dc0d103d89e2be42c7d1a11ca5cfe0c8"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-19-windows-small-model-core/runs/2026-10-20-rtx5070ti-core-original-64k.json",
+      "bytes": 25445,
+      "sha256": "024b4715a39c71916656e25b25491071dc0d103d89e2be42c7d1a11ca5cfe0c8"
+    },
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-10-20-rtx5070ti-core-continuation-64k.json",
+      "bytes": 32545,
+      "sha256": "bb3dd38525a514ce707d11d62de336ae6955488f3f6342295bb8798593870422"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-19-windows-small-model-core/runs/2026-10-20-rtx5070ti-core-continuation-64k.json",
+      "bytes": 32545,
+      "sha256": "bb3dd38525a514ce707d11d62de336ae6955488f3f6342295bb8798593870422"
+    },
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-10-20-rtx5070ti-nanbeige-core-32k.json",
+      "bytes": 19063,
+      "sha256": "8c4df6f2c705263f0947c2eb42023f22ef85179baf715b7e694e34b25495a740"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-19-windows-small-model-core/runs/2026-10-20-rtx5070ti-nanbeige-core-32k.json",
+      "bytes": 19063,
+      "sha256": "8c4df6f2c705263f0947c2eb42023f22ef85179baf715b7e694e34b25495a740"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-19-windows-small-model-core/scorecard.json",
+      "bytes": 76933,
+      "sha256": "90b0e2808f56671e33c77f4c73e007e6515bd35a3e4ef22739ac1d3b23aa06f3"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-19-windows-small-model-core/scorecard-details.json",
+      "bytes": 2764978,
+      "sha256": "e8c9d0f0002c68f285e25d59ac12c26f379e2b0e1a8ca6f25852ed6b1caae769"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-19-windows-small-model-core/verification.json",
+      "bytes": 788,
+      "sha256": "f01d6444a821a205c69c99c774858102f7c1130b5d0195a5e421c0926df590e8"
+    }
+  ]
+}
