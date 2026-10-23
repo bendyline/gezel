@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-sdk",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "description": "SDK for scripts that run in the Gezel sandbox: the gezel object and the defineScript helper.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "sdk", "extensions"],
