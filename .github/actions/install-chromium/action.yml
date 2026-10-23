@@ -1,7 +1,7 @@
 name: 'Install Chromium'
 description: >-
-  Installs Playwright's Chromium and the system packages it needs, with apt
-  bounded so a stalled Ubuntu mirror cannot eat the job's time budget.
+  Installs Playwright's Chromium from its CDN, and its system packages from apt
+  only when the runner cannot launch it without them.
 
 inputs:
   filter:
@@ -11,21 +11,22 @@ inputs:
 runs:
   using: composite
   steps:
-    # apt waits 120 s on each dead mirror connection before it retries. Two
-    # font packages stalled that way for 10-13 min on 2026-10-22 and 10-23
-    # (3 of 45 runs), and once left the browser suite 4 min of a 20 min job.
-    - name: Bound apt's mirror waits
-      shell: bash
-      run: |
-        set -euo pipefail
-        printf '%s\n' \
-          'Acquire::http::Timeout "20";' \
-          'Acquire::https::Timeout "20";' \
-          'Acquire::Retries "5";' \
-          | sudo tee /etc/apt/apt.conf.d/80gezel-mirror-timeouts >/dev/null
-
-    - name: Install Chromium and its system packages
+    # GitHub's Ubuntu image already has every library Chromium loads. On it,
+    # `--with-deps` only added 9 font packages and 8 patch upgrades (26 MB),
+    # and Ubuntu's Azure mirror served them at 24 kB/s often enough to cancel
+    # jobs: 10-13 min installs on 2026-10-22 and 10-23. The browser suite
+    # passes without those fonts. apt timeouts did not help: the mirror
+    # trickles rather than drops.
+    - name: Install Chromium
       shell: bash
       env:
         FILTER: ${{ inputs.filter }}
-      run: pnpm --filter "$FILTER" exec playwright install --with-deps chromium
+      run: |
+        set -euo pipefail
+        pnpm --filter "$FILTER" exec playwright install chromium
+        launch="require('playwright').chromium.launch().then((browser) => browser.close())"
+        if ! pnpm --filter "$FILTER" exec node -e "$launch"; then
+          echo "::warning::Chromium cannot launch with this runner's libraries; installing its system packages from apt"
+          pnpm --filter "$FILTER" exec playwright install-deps chromium
+          pnpm --filter "$FILTER" exec node -e "$launch"
+        fi
