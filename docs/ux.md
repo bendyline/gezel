@@ -2981,8 +2981,10 @@ about the code · Handled elsewhere · On purpose), an optional note, and Save.
 "Not worth fixing" is a separate key on purpose: a true but minor lead is not
 the reviewer being wrong. A judged issue shows one muted line under its
 message naming the verdict and who gave it ("Not a bug · Claude Code — …"),
-with "(unconfirmed)" when "fixed" came with an unchanged file. Reopen is the
-one-click override. With project editing enabled, **Fix** opens a
+with "(unconfirmed)" when "fixed" came with an unchanged file. An issue in a
+category the project's verdicts have set aside carries a muted **Low
+confidence** item in its meta line; it stays in the list but out of the file
+tree's badges and issue total. Reopen is the one-click override. With project editing enabled, **Fix** opens a
 confirmation dialog and creates an assigned terminal task; the row stays in
 progress and links to that task until completion resolves it. Review severities
 (info / minor / major) are a deliberately separate vocabulary from security

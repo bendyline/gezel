@@ -684,4 +684,19 @@ describe("the night shift's issues", () => {
     );
     expect(fake.requests.at(-1)?.body).toEqual({ limit: 5, mode: 'fix' });
   });
+
+  it('says only that there is nothing to check when the batch is empty', async () => {
+    const fake = withIssues(fakeGezel(() => connectResponse({ issues: 'triage' })));
+    fake.routes.set('POST /api/projects/repo/tools/issue-handoff', () => ({
+      ...batch,
+      files: [],
+      count: 0,
+      remaining: 0,
+    }));
+    const client = await harness(fake);
+    const triage = await client.getPrompt({ name: 'triage_issues', arguments: {} });
+    const text = (triage.messages[0]?.content as { text: string }).text;
+    expect(text).toMatch(/^Gezel has no open issues/);
+    expect(text).not.toContain('report_issue_verdicts');
+  });
 });

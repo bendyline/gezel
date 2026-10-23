@@ -233,6 +233,8 @@ export const ListFileIssuesResponseSchema = z.object({
     total: z.number().int().nonnegative(),
     bySeverity: z.record(z.string(), z.number().int().nonnegative()),
     byCategory: z.record(z.string(), z.number().int().nonnegative()),
+    /** Of `total`, issues in categories the project's verdicts set aside. */
+    lowConfidence: z.number().int().nonnegative().optional(),
   }),
   truncated: z.boolean(),
   indexed: z.boolean(),

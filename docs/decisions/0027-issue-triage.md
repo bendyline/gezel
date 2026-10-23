@@ -49,8 +49,13 @@ Cursor, VS Code) and, since ADR 0023, a way to give it Gezel's tools.
    app's notes are untrusted model output.
 7. **Calibration orders and sets aside; it never deletes.** Verdict rates per
    reviewer model and category order the queue, and a category is set aside
-   only with at least 40 verdicts and a valid-rate 95% upper bound under 25%,
-   never for major issues, with one still sampled per batch.
+   only with at least 40 verdicts and a 95% upper bound under 15% on the
+   share worth fixing (fixed or confirmed), never for major issues, with one
+   still sampled per batch. A set-aside issue stays listed and leaves only
+   the counts and badges. The rule first used the share that was true (valid
+   under 25%); the evaluation showed that share at 50-72% in every category,
+   so it never fired, while the worth-fixing share separated bugs (56%) from
+   smells (5%) and held across random halves (correlation 0.95).
 
 ## Consequences
 

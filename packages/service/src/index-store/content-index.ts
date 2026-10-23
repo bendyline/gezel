@@ -137,9 +137,9 @@ import { erasePreservedFaceData } from './preserved-indexes.js';
 import { searchTokens } from './query-terms.js';
 import { type DecodableRaster, canNormalizeRaster, toDecodableRaster } from './raster-normalize.js';
 import {
+  boekwachterIssuePage,
   currentIndexedHash,
   filterAndSortBoekwachterIssues,
-  tallyBoekwachterIssues,
   toBoekwachterIssueWire,
   toReviewWire,
 } from './review-wire.js';
@@ -1886,10 +1886,14 @@ export class ContentIndex {
     }
   }
 
-  /** Flat issue query across current-hash reviews (`list_file_issues` tool). */
+  /**
+   * Flat issue query across current-hash reviews (`list_file_issues` tool).
+   * `isLowConfidence` marks issues the project's verdicts set aside.
+   */
   async listFileIssues(
     projectId: string,
     req: ListFileIssuesRequest,
+    isLowConfidence?: (issue: BoekwachterIssue) => boolean,
   ): Promise<ListFileIssuesResponse> {
     const empty: ListFileIssuesResponse = {
       issues: [],
@@ -1909,16 +1913,7 @@ export class ContentIndex {
         ),
         req,
       );
-      return {
-        ...empty,
-        issues: matching.slice(0, limit),
-        counts: {
-          total: matching.length,
-          bySeverity: tallyBoekwachterIssues(matching, (issue) => issue.severity),
-          byCategory: tallyBoekwachterIssues(matching, (issue) => issue.category),
-        },
-        truncated: matching.length > limit,
-      };
+      return { ...empty, ...boekwachterIssuePage(matching, limit, isLowConfidence) };
     }
     const { index } = opened;
     try {
@@ -1948,16 +1943,9 @@ export class ContentIndex {
         ),
         req,
       );
-      const counts = {
-        total: matching.length,
-        bySeverity: tallyBoekwachterIssues(matching, (issue) => issue.severity),
-        byCategory: tallyBoekwachterIssues(matching, (issue) => issue.category),
-      };
       const rc = index.reviewCounts(rubricKeys(rubrics), MAX_REVIEW_ATTEMPTS);
       return {
-        issues: matching.slice(0, limit),
-        counts,
-        truncated: matching.length > limit,
+        ...boekwachterIssuePage(matching, limit, isLowConfidence),
         indexed: index.fileCount() > 0,
         reviewedFiles: rc.reviewed,
         eligibleFiles: rc.eligible,

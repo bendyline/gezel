@@ -118,9 +118,17 @@ issues. No new notification source.
   issue, by reviewer model and category. Rates: valid (fixed, confirmed, nit,
   wont_fix), actionable (fixed, confirmed), wrong (not_a_bug). The queue orders
   by actionable rate smoothed toward a prior. A category is set aside
-  (`isLowConfidence`) only with 40 verdicts and a valid-rate Wilson upper
-  bound under 25%, never for major issues; one set-aside issue is still
-  sampled per batch. A person reopening an app's dismissal counts against
+  (`isLowConfidence`) only with 40 verdicts and an actionable-rate Wilson
+  upper bound under 15%, never for major issues; one set-aside issue is still
+  sampled per batch. The rule reads "worth fixing", not "true": in the
+  2026-10-22 evaluation the valid rate sat at 50-72% in every category and
+  never separated them, while the actionable rate split bugs (56%) from
+  smells (5%). A set-aside issue is still listed, marked `lowConfidence` on
+  the wire (`list-file-issues`, `file-review`); `counts.lowConfidence` says
+  how many of `counts.total` they are. The file tree's badges and total, the
+  morning card's new-issue line and the report's "New tonight" leave them
+  out, the night-fix planner skips them unless someone confirmed that one,
+  and the issue row says "Low confidence". A person reopening an app's dismissal counts against
   that app (`apps[].reopenedByPerson`). `GET /api/projects/:id/index/issue-stats`
   serves the numbers.
 

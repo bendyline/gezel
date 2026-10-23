@@ -114,10 +114,15 @@ export interface FileIssueAggregate {
   score: number;
 }
 
-/** Group live issues by file path, one pass. Input order does not matter. */
+/**
+ * Group live issues by file path, one pass. Input order does not matter.
+ * Low-confidence issues (a category the project's verdicts set aside) are
+ * left out: they would put noise back into the badges they were taken out of.
+ */
 export function aggregateIssuesByFile(issues: readonly BoekwachterIssue[]): FileIssueAggregate[] {
   const byPath = new Map<string, FileIssueAggregate>();
   for (const issue of issues) {
+    if (issue.lowConfidence) continue;
     let agg = byPath.get(issue.path);
     if (!agg) {
       agg = { path: issue.path, total: 0, bySeverity: { major: 0, minor: 0, info: 0 }, score: 0 };

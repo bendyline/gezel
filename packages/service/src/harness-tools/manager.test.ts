@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { type GezelConfig, HARNESS_TOOL_NAMES } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type TokenStore, createTokenStore } from '../http/token-store.js';
@@ -17,6 +19,7 @@ let tokenStore: TokenStore;
 let commands: Array<{ command: string; args: string[] }>;
 
 const NODE = '/opt/node/bin/node';
+const execFileAsync = promisify(execFile);
 const launcherPath = () => join(home, 'integrations', 'mcp', 'launch.mjs');
 
 beforeEach(async () => {
@@ -77,6 +80,17 @@ describe('the launcher', () => {
     expect(JSON.parse(await readFile(pointer, 'utf8'))).toEqual({ entry: '/a/harness.js' });
     await ensureHarnessLauncher({ home, entry: '/b/harness.js', node: NODE });
     expect(JSON.parse(await readFile(pointer, 'utf8'))).toEqual({ entry: '/b/harness.js' });
+  });
+
+  it('starts the server against the home that wrote it, unless the app names one', async () => {
+    const probe = join(root, 'probe.mjs');
+    await writeFile(probe, 'process.stdout.write(process.env.GEZEL_HOME ?? "unset");\n');
+    const { launcherPath: path } = await ensureHarnessLauncher({ home, entry: probe, node: NODE });
+    const run = (env: NodeJS.ProcessEnv) =>
+      execFileAsync(process.execPath, [path], { env }).then((r) => r.stdout);
+    const { GEZEL_HOME: _ignored, ...inherited } = process.env;
+    expect(await run(inherited)).toBe(home);
+    expect(await run({ ...inherited, GEZEL_HOME: join(root, 'other') })).toBe(join(root, 'other'));
   });
 
   it('never hands an app the Electron binary, or a pinned Node that is gone', () => {
@@ -170,6 +184,34 @@ describe('Claude Desktop', () => {
       'gezel',
     ]) as { args: string[] };
     expect(entry.args).toEqual([launcherPath(), '--harness', 'claude-desktop', '--project', 'p1']);
+  });
+
+  it('finds the Store-style Windows build, which keeps no %APPDATA%\\Claude folder', async () => {
+    const local = join(userHome, 'AppData', 'Local');
+    const virtualized = join(
+      local,
+      'Packages',
+      'Claude_pzs8sxrjxfjjc',
+      'LocalCache',
+      'Roaming',
+      'Claude',
+    );
+    await mkdir(virtualized, { recursive: true });
+    const m = manager();
+    expect(await statusOf(m, 'claude-desktop')).toMatchObject({
+      state: 'not-configured',
+      configPath: join(virtualized, 'claude_desktop_config.json'),
+    });
+
+    const current = join(local, 'Claude-Data', 'claude_pzs8sxrjxfjjc');
+    await mkdir(current, { recursive: true });
+    await writeFile(join(current, 'claude_desktop_config.json'), '{"preferences": {}}\n');
+    await m.configure('claude-desktop', { projectId: 'p1' });
+    const config = await readFile(join(current, 'claude_desktop_config.json'), 'utf8');
+    expect(readJsonMember(config, ['preferences'])).toEqual({});
+    expect(readJsonMember(config, ['mcpServers', 'gezel'])).toMatchObject({
+      args: [launcherPath(), '--harness', 'claude-desktop', '--project', 'p1'],
+    });
   });
 
   it('is unavailable on Linux', async () => {

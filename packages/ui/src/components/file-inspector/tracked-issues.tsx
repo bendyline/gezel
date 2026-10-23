@@ -130,6 +130,11 @@ export function TrackedIssueItem({
         <span>{issue.category}</span>
         {location && <span>{location}</span>}
         {issue.stale && <span>Needs recheck</span>}
+        {issue.lowConfidence && (
+          <span title="Issues like this have rarely been worth fixing in this project, so they are left out of the counts">
+            Low confidence
+          </span>
+        )}
         {issue.status !== 'open' && (
           <span>{issueStatusLabel(issue.status, issue.dismissalReason)}</span>
         )}

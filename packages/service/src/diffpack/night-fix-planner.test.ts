@@ -1,12 +1,13 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { BoekwachterIssue, Task } from '@bendyline/gezel';
 import {
   DEFAULT_NIGHT_SHIFT_WINDOW,
   FOLDER_KIND_PROPERTY,
   NIGHT_WORK_PROPERTY,
 } from '@bendyline/gezel';
+import { projectBoekwachterVerdictsFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
@@ -75,7 +76,15 @@ function makeDeps(): NightFixPlannerDeps {
   } as unknown as TaskManager;
 
   const contentIndex = {
-    listFileIssues: async () => ({ issues, counts: {}, truncated: false }),
+    listFileIssues: async (
+      _pid: string,
+      _req: unknown,
+      isLowConfidence?: (i: BoekwachterIssue) => boolean,
+    ) => ({
+      issues: issues.map((i) => (isLowConfidence?.(i) ? { ...i, lowConfidence: true } : i)),
+      counts: {},
+      truncated: false,
+    }),
     updateBoekwachterIssue: async (_pid: string, ref: string, patch: unknown) => {
       updated.push({ ref, patch });
       return issues.find((i) => i.ref === ref)!;
@@ -283,6 +292,43 @@ describe('issue selection', () => {
     ];
     await planProjectNightFixes(makeDeps(), projectId);
     expect(updated.map((u) => u.ref)).toEqual(['BW-2']);
+  });
+
+  it('leaves set-aside issues unless someone confirmed that one', async () => {
+    // 45 smells judged true but not worth fixing set the category aside.
+    const file = projectBoekwachterVerdictsFile(home, projectId);
+    await mkdir(dirname(file), { recursive: true });
+    const lines = Array.from({ length: 45 }, (_, n) =>
+      JSON.stringify({
+        id: `v${n}`,
+        issueId: `old-${n}`,
+        fingerprint: `old-${n}`,
+        ref: `BW-${100 + n}`,
+        path: 'src/old.ts',
+        kind: 'nit',
+        by: { kind: 'person' },
+        at: '2026-10-01T00:00:00.000Z',
+        severity: 'minor',
+        category: 'smell',
+        message: 'm',
+        reviewModel: 'qwen',
+      }),
+    );
+    await writeFile(file, `${lines.join('\n')}\n`);
+    const person = { kind: 'person' as const };
+    issues = [
+      issue('BW-1', { category: 'smell', reviewModel: 'qwen' }),
+      issue('BW-2', {
+        category: 'smell',
+        reviewModel: 'qwen',
+        latestVerdict: { kind: 'confirmed', by: person, at: 'x' },
+      }),
+      issue('BW-3', { category: 'smell', reviewModel: 'qwen', severity: 'major' }),
+      issue('BW-4', { category: 'bug', reviewModel: 'qwen' }),
+    ];
+    const result = await planProjectNightFixes(makeDeps(), projectId);
+    expect(updated.map((u) => u.ref)).toEqual(['BW-2', 'BW-3', 'BW-4']);
+    expect(result.deferred).toBe(0);
   });
 
   it('caps the night and reports what it deferred rather than truncating silently', async () => {

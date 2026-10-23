@@ -13,6 +13,11 @@ import { which } from '../providers/anthropic-cli/binary.js';
  * `current.json` names, and Gezel rewrites `current.json` at every start
  * from its own `require.resolve` — never from an assumed `~/.gezel/service`,
  * which an adopted machine-wide tree leaves stale (the autostart lesson).
+ *
+ * The launcher also names its own home. An app's config carries no
+ * GEZEL_HOME, and without it the server looks only in `~/.gezel`: an install
+ * on any other home was reported configured and connected while every tool
+ * call answered "Gezel isn't running" (setup check, 2026-10-23).
  */
 
 const LAUNCHER = `#!/usr/bin/env node
@@ -23,6 +28,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
+// This file lives in <home>/integrations/mcp. An app starts it without
+// GEZEL_HOME, so name the home that wrote it: otherwise only ~/.gezel is found.
+process.env.GEZEL_HOME ||= join(here, '..', '..');
 let entry;
 try {
   entry = JSON.parse(readFileSync(join(here, 'current.json'), 'utf8')).entry;

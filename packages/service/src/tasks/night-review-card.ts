@@ -17,6 +17,7 @@ import { writeWeeklyRecap } from '../digest/weekly-recap.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { ContentIndex } from '../index-store/content-index.js';
+import { isLowConfidence, issueVerdictStats } from '../issue-triage/calibration.js';
 import {
   findNightShiftOversightTask,
   isNightShiftOversightReport,
@@ -152,7 +153,7 @@ export async function postNightShiftReviewCard(
     // action already fired or dismissed is not one the user still owes
     // a look. Same count Home's "Last night" panel names.
     const actionTotal = review.reports.reduce((n, r) => n + r.actionCounts.suggested, 0);
-    const newIssues = await countNewIssues(contentIndex, review).catch(() => 0);
+    const newIssues = await countNewIssues(contentIndex, store, review).catch(() => 0);
     const card: Question = {
       id: randomUUID(),
       projectId: 'default',
@@ -232,10 +233,12 @@ export async function postNightShiftReviewCard(
 
 /**
  * Suspected problems first flagged during the window, in the projects whose
- * codebase report the night wrote. Repeats of earlier leads are not new.
+ * codebase report the night wrote. Repeats of earlier leads are not new, and
+ * low-confidence ones are left out as the report leaves them out.
  */
 async function countNewIssues(
   contentIndex: Pick<ContentIndex, 'listFileIssues'>,
+  store: Pick<Store, 'boekwachterIssues'>,
   review: NightShiftReviewResponse,
 ): Promise<number> {
   const since = Date.parse(review.windowStart);
@@ -244,11 +247,16 @@ async function countNewIssues(
   );
   let count = 0;
   for (const projectId of projects) {
+    const stats = issueVerdictStats(
+      await store.boekwachterIssues.readIssueVerdicts(projectId).catch(() => []),
+    );
     const listed = await contentIndex.listFileIssues(projectId, {
       status: 'open',
       maxResults: 1000,
     });
-    count += listed.issues.filter((i) => !i.echoOf && Date.parse(i.createdAt) >= since).length;
+    count += listed.issues.filter(
+      (i) => !i.echoOf && Date.parse(i.createdAt) >= since && !isLowConfidence(stats, i),
+    ).length;
   }
   return count;
 }

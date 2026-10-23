@@ -4,6 +4,7 @@ import { HARNESS_TOOL_NAMES } from './harness-profile.js';
 import {
   harnessPromptCount,
   harnessPromptInvocation,
+  renderEmptyIssuePrompt,
   renderHarnessIssuePrompt,
   renderIssueBatch,
 } from './harness-prompts.js';
@@ -68,6 +69,15 @@ describe('the issue prompts outside apps run', () => {
     expect(renderIssueBatch({ ...queue, files: [], count: 0, indexed: false }, (r) => r)).toMatch(
       /hasn't indexed/,
     );
+  });
+
+  it('says there is nothing to check, and only that, when the batch is empty', () => {
+    const empty = renderEmptyIssuePrompt(
+      'Gezel has no open issues for this folder that need checking.',
+    );
+    expect(empty).toMatch(/^Gezel has no open issues/);
+    expect(empty).toContain('stop');
+    expect(empty).not.toContain('report_issue_verdicts');
   });
 
   it('tells triage not to edit and fixing to run the tests, naming only profile tools', () => {

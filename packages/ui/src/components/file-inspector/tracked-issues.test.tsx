@@ -68,6 +68,11 @@ describe('a tracked issue row', () => {
     expect(screen.getByText(/The caller pads the list\./)).toBeTruthy();
   });
 
+  it('says when an issue is low confidence', () => {
+    row({ ...base, lowConfidence: true });
+    expect(screen.getByText('Low confidence')).toBeTruthy();
+  });
+
   it('gives a verdict with a reason and a note', async () => {
     const run = row(base);
     fireEvent.click(screen.getByRole('button', { name: 'Give a verdict' }));
