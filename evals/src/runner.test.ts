@@ -1728,6 +1728,21 @@ describe('recovery nudge wording', () => {
 });
 
 describe('llamaCppEvalLaunchOverridesForModel', () => {
+  it('applies an explicit slot cap without changing small-model tuning or context', () => {
+    expect(
+      llamaCppEvalLaunchOverridesForModel('qwen3.8-27b-q2', { GEZEL_EVAL_LLAMA_SLOTS: '1' }),
+    ).toEqual({
+      config: { providerConcurrency: { 'llama-cpp': 1 } },
+      summary: 'llama-cpp eval override: concurrency=1, tuning=catalog',
+    });
+  });
+
+  it.each(['0', '-1', '1.5', '17', 'bad'])('rejects invalid slot cap %s', (value) => {
+    expect(() =>
+      llamaCppEvalLaunchOverridesForModel('qwen3.8-27b-q2', { GEZEL_EVAL_LLAMA_SLOTS: value }),
+    ).toThrow('GEZEL_EVAL_LLAMA_SLOTS');
+  });
+
   it('does not override ordinary runnable local models', () => {
     expect(llamaCppEvalLaunchOverridesForModel('qwen3.6-35b-a3b-q4')).toBeUndefined();
     expect(llamaCppEvalLaunchOverridesForModel('imaginary-119b-q4')).toBeUndefined();

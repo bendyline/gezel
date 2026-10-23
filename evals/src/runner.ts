@@ -2218,9 +2218,22 @@ export function mergeLlamaCppEvalLaunchOverrides(
 
 export function llamaCppEvalLaunchOverridesForModel(
   modelId: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): LlamaCppEvalLaunchOverrides | undefined {
+  const rawSlots = env.GEZEL_EVAL_LLAMA_SLOTS?.trim();
+  const slots = rawSlots ? Number(rawSlots) : undefined;
+  if (slots !== undefined && (!Number.isSafeInteger(slots) || slots < 1 || slots > 16)) {
+    throw new Error('GEZEL_EVAL_LLAMA_SLOTS must be an integer from 1 to 16');
+  }
   const billions = modelBillionsForEval(modelId);
-  if (billions === undefined || billions < 120) return undefined;
+  if (billions === undefined || billions < 120) {
+    return slots === undefined
+      ? undefined
+      : {
+          config: { providerConcurrency: { 'llama-cpp': slots } },
+          summary: `llama-cpp eval override: concurrency=${slots}, tuning=catalog`,
+        };
+  }
 
   // Frontier-size local evals run one foreground trial at a time. The
   // production default of 2 llama-server slots × 65K context is useful
@@ -2244,13 +2257,13 @@ export function llamaCppEvalLaunchOverridesForModel(
       GEZEL_CAPACITY_BUDGET_GB: '110',
     },
     config: {
-      providerConcurrency: { 'llama-cpp': 1 },
+      providerConcurrency: { 'llama-cpp': slots ?? 1 },
     },
     fallbackKvCacheType: 'q4_0',
     minTrialTimeoutMs: 60 * 60_000,
     hardProgressTimeoutMs: 45 * 60_000,
     summary:
-      'llama-cpp large-model eval override: numCtx=65536, concurrency=1, kvCache=product plan (q4_0 when it cannot admit numCtx), capacityBudget=110GB, tuning=catalog, startup/pre-first-byte=900s, hardProgressTimeout=45m, minTrialTimeout=60m',
+      `llama-cpp large-model eval override: numCtx=65536, concurrency=${slots ?? 1}, kvCache=product plan (q4_0 when it cannot admit numCtx), capacityBudget=110GB, tuning=catalog, startup/pre-first-byte=900s, hardProgressTimeout=45m, minTrialTimeout=60m`,
   };
 }
 

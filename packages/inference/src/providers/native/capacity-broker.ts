@@ -1119,14 +1119,21 @@ export function resolveLlamaCppContextRequirement(opts: {
   const requestedContextWindow =
     opts.explicitContextWindow ??
     (strictModelMax ? opts.modelContextWindow : opts.adaptiveContextWindow);
+  // Env, per-model and machine-wide numeric settings all express deliberate
+  // operator intent. The automatic host floor must not silently turn a 32K
+  // memory-saving request back into 64K. Resolve this here so launch and
+  // preview cannot apply different floors to the same explicit request.
+  const hostFloor = opts.minViableContextTokens ?? minViableLocalContextTokens();
+  const minimum =
+    opts.explicitContextWindow !== undefined && opts.explicitContextWindow > 0
+      ? Math.min(hostFloor, opts.explicitContextWindow)
+      : hostFloor;
   const resolved = resolveLocalContextRequirement({
     ...(opts.modelContextWindow !== undefined
       ? { modelContextWindow: opts.modelContextWindow }
       : {}),
     ...(requestedContextWindow !== undefined ? { requestedContextWindow } : {}),
-    ...(opts.minViableContextTokens !== undefined
-      ? { minViableContextTokens: opts.minViableContextTokens }
-      : {}),
+    minViableContextTokens: minimum,
   });
   if (strictModelMax) {
     return {

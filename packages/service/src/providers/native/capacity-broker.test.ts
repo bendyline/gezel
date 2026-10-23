@@ -1242,22 +1242,38 @@ describe('model-aware context admission', () => {
     });
   });
 
-  it('a per-model override below the floor is honored via a reduced caller floor', () => {
-    const requirement = resolveLlamaCppContextRequirement({
-      modelContextWindow: 262_144,
-      explicitContextWindow: 32_768,
-      adaptiveContextWindow: 65_536,
-      contextSizing: 'adaptive',
-      // Callers pass min(hostFloor, override) so an explicit 32K survives
-      // the 64K floor's max() instead of being silently raised.
-      minViableContextTokens: 32_768,
+  it.each(['adaptive', 'model-max'] as const)(
+    'honors an explicit 32K request on a 64K host in %s mode',
+    (contextSizing) => {
+      const requirement = resolveLlamaCppContextRequirement({
+        modelContextWindow: 262_144,
+        explicitContextWindow: 32_768,
+        adaptiveContextWindow: 65_536,
+        contextSizing,
+        // Env, per-model and machine-wide overrides enter this shared resolver
+        // through explicitContextWindow; callers need not weaken the host floor.
+        minViableContextTokens: 65_536,
+      });
+      expect(requirement).toMatchObject({
+        minimumPerTurnCtxTokens: 32_768,
+        requestedPerTurnCtxTokens: 32_768,
+        strict: false,
+      });
+      expect(requirement.growthTargetTokens).toBeUndefined();
+    },
+  );
+
+  it('still clamps explicit context to the native window', () => {
+    expect(
+      resolveLlamaCppContextRequirement({
+        modelContextWindow: 16_384,
+        explicitContextWindow: 32_768,
+        minViableContextTokens: 65_536,
+      }),
+    ).toMatchObject({
+      minimumPerTurnCtxTokens: 16_384,
+      requestedPerTurnCtxTokens: 16_384,
     });
-    expect(requirement).toMatchObject({
-      minimumPerTurnCtxTokens: 32_768,
-      requestedPerTurnCtxTokens: 32_768,
-      strict: false,
-    });
-    expect(requirement.growthTargetTokens).toBeUndefined();
   });
 });
 

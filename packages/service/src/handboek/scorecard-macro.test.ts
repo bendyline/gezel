@@ -56,6 +56,64 @@ function dataset(
 }
 
 describe('::handboek-model-scorecard', () => {
+  it('publishes task observations and separate rubric means even when capability is withheld', () => {
+    const data = dataset();
+    const result = data.results[0]!;
+    result.label = 'Model <unsafe>|name';
+    result.cells = [
+      { scenarioId: 'petshop', trials: 2, successes: 0, nonModelFailures: 2 },
+      { scenarioId: 'tictactoe', trials: 2, successes: 2, nonModelFailures: 0 },
+    ];
+    result.taskMeasurements = [
+      {
+        id: 'slow',
+        label: 'Restricted period',
+        trials: 2,
+        source: 'engine-log',
+        outputTokensPerSec: { samples: 2, min: 3, median: 3.5, max: 4 },
+        judgments: [],
+        noArtifact: 1,
+        excludedReviews: 1,
+      },
+      {
+        id: 'fast',
+        label: 'Later period',
+        trials: 2,
+        source: 'engine-log',
+        outputTokensPerSec: { samples: 2, min: 40, median: 45, max: 50 },
+        judgments: [
+          { rubricId: 'campaign-code-v1', meanScore: 8, artifacts: 1, judgeModel: 'inline' },
+          { rubricId: 'campaign-doc-v1', meanScore: 6, artifacts: 1, judgeModel: 'inline' },
+        ],
+        noArtifact: 0,
+        excludedReviews: 0,
+      },
+    ];
+    for (const output of [
+      renderScorecardMarkdown(data, 'core', { includeTaskCount: true }),
+      renderScorecardRunsMarkdown(data, ['core'], { includeTaskCount: true }),
+      renderScorecardFilterHtml(data, ['core'], { includeTaskCount: true }),
+    ]) {
+      expect(output).toContain('Task performance');
+      expect(output).toContain('3.50 (3.00–4.00; n=2)');
+      expect(output).toContain('45.00 (40.00–50.00; n=2)');
+      expect(output).toContain('Code quality');
+      expect(output).toContain('Document quality');
+      expect(output).toContain('8.00/10 (1 pieces)');
+      expect(output).toContain('6.00/10 (1 pieces)');
+      expect(output).not.toContain('7.00/10');
+      expect(output).not.toContain('Tasks passed');
+      expect(output).toContain('No artifact');
+      expect(output).toContain('Excluded reviews');
+      expect(output).not.toContain('<unsafe>');
+    }
+    const html = renderScorecardFilterHtml(data, ['core'], { includeTaskCount: true });
+    const rendered = markdownDocToPlainHtml(parseMarkdown(html), { title: 'Scorecard' });
+    expect(rendered).toContain(`${SCORECARD_DATA_ATTRS.model}="big"`);
+    expect(rendered).toContain(`${SCORECARD_DATA_ATTRS.tier}="medium"`);
+    expect(rendered).toContain('45.00 (40.00–50.00; n=2)');
+    expect(html.split('\n').every((line) => line.startsWith('<'))).toBe(true);
+  });
   it('shows round caveats on every rendering surface and escapes HTML in notes', () => {
     const data = dataset();
     data.runs[0]!.note = 'Scope audit <script>example</script>';
