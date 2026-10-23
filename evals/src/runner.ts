@@ -2262,8 +2262,7 @@ export function llamaCppEvalLaunchOverridesForModel(
     fallbackKvCacheType: 'q4_0',
     minTrialTimeoutMs: 60 * 60_000,
     hardProgressTimeoutMs: 45 * 60_000,
-    summary:
-      `llama-cpp large-model eval override: numCtx=65536, concurrency=${slots ?? 1}, kvCache=product plan (q4_0 when it cannot admit numCtx), capacityBudget=110GB, tuning=catalog, startup/pre-first-byte=900s, hardProgressTimeout=45m, minTrialTimeout=60m`,
+    summary: `llama-cpp large-model eval override: numCtx=65536, concurrency=${slots ?? 1}, kvCache=product plan (q4_0 when it cannot admit numCtx), capacityBudget=110GB, tuning=catalog, startup/pre-first-byte=900s, hardProgressTimeout=45m, minTrialTimeout=60m`,
   };
 }
 
