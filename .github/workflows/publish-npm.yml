@@ -119,7 +119,9 @@ jobs:
       - uses: ./.github/actions/setup-test-embedder
 
       - name: Install Chromium
-        run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
+        uses: ./.github/actions/install-chromium
+        with:
+          filter: '@bendyline/gezel-evals'
 
       # The canonical gate, less the steps the other verify jobs take. Keep
       # local, CI and release assurance identical: add mandatory checks to the
@@ -178,7 +180,9 @@ jobs:
       # when the shared ~/.cache/ms-playwright is empty, which would let a
       # repeat pass skip tests the first pass ran.
       - name: Install Chromium
-        run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
+        uses: ./.github/actions/install-chromium
+        with:
+          filter: '@bendyline/gezel-evals'
 
       - name: Canonical gate (stability)
         run: xvfb-run -a pnpm validate --phase=stability
@@ -198,7 +202,9 @@ jobs:
       # The phase's `pnpm pw:install` fetches the browser; this adds the
       # system libraries it needs on a fresh runner.
       - name: Install Chromium
-        run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
+        uses: ./.github/actions/install-chromium
+        with:
+          filter: '@bendyline/gezel-evals'
 
       - name: Canonical gate (E2E)
         run: xvfb-run -a pnpm validate --phase=e2e

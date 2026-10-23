@@ -1,0 +1,31 @@
+name: 'Install Chromium'
+description: >-
+  Installs Playwright's Chromium and the system packages it needs, with apt
+  bounded so a stalled Ubuntu mirror cannot eat the job's time budget.
+
+inputs:
+  filter:
+    description: 'pnpm filter for the package whose Playwright version to install.'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # apt waits 120 s on each dead mirror connection before it retries. Two
+    # font packages stalled that way for 10-13 min on 2026-10-22 and 10-23
+    # (3 of 45 runs), and once left the browser suite 4 min of a 20 min job.
+    - name: Bound apt's mirror waits
+      shell: bash
+      run: |
+        set -euo pipefail
+        printf '%s\n' \
+          'Acquire::http::Timeout "20";' \
+          'Acquire::https::Timeout "20";' \
+          'Acquire::Retries "5";' \
+          | sudo tee /etc/apt/apt.conf.d/80gezel-mirror-timeouts >/dev/null
+
+    - name: Install Chromium and its system packages
+      shell: bash
+      env:
+        FILTER: ${{ inputs.filter }}
+      run: pnpm --filter "$FILTER" exec playwright install --with-deps chromium

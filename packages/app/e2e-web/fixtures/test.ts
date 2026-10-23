@@ -12,6 +12,7 @@
  *    token into localStorage (api.ts reads it synchronously at module load),
  *    freezes the clock, and kills animations/caret for stable screenshots.
  */
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -312,6 +313,12 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
             description: "Chromium's renderer blocked before the page loaded; retried once",
           });
           push('[retry] the known renderer hang; Playwright retries this test once');
+          const stacks = await nativeStacks();
+          if (stacks) {
+            const stacksPath = testInfo.outputPath('native-stacks.txt');
+            await writeFile(stacksPath, stacks, 'utf8');
+            await testInfo.attach('native-stacks', { path: stacksPath, contentType: 'text/plain' });
+          }
         }
       }
       if (testInfo.status !== testInfo.expectedStatus && lines.length > 0) {
@@ -405,7 +412,10 @@ function formatFrame(frame: {
 
 const CPU_SAMPLE_MS = 1_000;
 const MAX_RENDERERS = 3;
-const MAX_THREADS = 6;
+// A renderer runs about 20 threads. List them all: the stuck one can be idle on
+// CPU, and the I/O thread that wakes the main thread showed nothing when only
+// busy threads were listed (2026-10-23).
+const MAX_THREADS = 40;
 // /proc counts CPU in clock ticks, 100 per second on Linux.
 const MS_PER_TICK = 10;
 
@@ -554,6 +564,43 @@ async function descendantRenderers(): Promise<number[]> {
   return pids;
 }
 
+/**
+ * Every thread's native stack in the hung renderer and its browser process, for
+ * a local Linux repro with gdb installed (GEZEL_E2E_NATIVE_STACKS=1). Off in CI.
+ */
+async function nativeStacks(): Promise<string | null> {
+  if (process.platform !== 'linux' || !process.env.GEZEL_E2E_NATIVE_STACKS) return null;
+  const [renderer] = await rendererPids(null);
+  if (!renderer) return 'no renderer process to attach to\n';
+  // The browser is the nearest ancestor without a --type (the zygote has one).
+  let browser = renderer;
+  for (let hops = 0; hops < 4; hops++) {
+    const stat = await readFile(`/proc/${browser}/stat`, 'utf8').catch(() => null);
+    const parent = stat ? parseStat(stat)?.ppid : undefined;
+    if (!parent) break;
+    browser = parent;
+    const cmdline = await readFile(`/proc/${browser}/cmdline`, 'utf8').catch(() => '');
+    if (!cmdline.includes('--type=')) break;
+  }
+  const sections: string[] = [];
+  for (const [label, pid] of [
+    ['renderer', renderer],
+    ['browser', browser],
+  ] as const) {
+    const result = await new Promise<string>((resolveStacks) => {
+      execFile(
+        'gdb',
+        ['-batch', '-p', String(pid), '-ex', 'set pagination off', '-ex', 'thread apply all bt 30'],
+        { timeout: 120_000, maxBuffer: 32 * 1024 * 1024 },
+        (error, stdout, stderr) =>
+          resolveStacks(error && !stdout ? `gdb failed: ${error.message}\n${stderr}` : stdout),
+      );
+    });
+    sections.push(`===== ${label} ${pid} =====\n${result}`);
+  }
+  return sections.join('\n');
+}
+
 /** Parse /proc/<pid>/stat, whose name field may itself hold spaces and parentheses. */
 function parseStat(
   stat: string,
@@ -584,21 +631,19 @@ function formatRendererThreads(
     }));
     const main = sampled.find((t) => t.tid === pid);
     if (main) {
+      // An idle main thread also sleeps on a futex while it waits for tasks, so
+      // "asleep" alone cannot tell idle from stuck; the threads below can.
       const share = elapsed > 0 ? main.ms / elapsed : 0;
       const verdict =
-        share >= 0.5
-          ? 'spinning'
-          : share < 0.05 && main.state !== 'R'
-            ? 'blocked waiting'
-            : 'partly busy';
+        share >= 0.5 ? 'spinning' : share < 0.05 && main.state !== 'R' ? 'asleep' : 'partly busy';
       const wchan = main.wchan ? `, wchan ${main.wchan}` : '';
       lines.push(
         `[renderer ${pid}] main thread ${verdict}: state ${main.state}, ${main.ms}ms CPU in ${elapsed}ms${wchan}`,
       );
     }
     const others = sampled
-      .filter((t) => t.tid !== pid && (t.ms > 0 || t.state === 'R' || t.state === 'D'))
-      .sort((a, b) => b.ms - a.ms)
+      .filter((t) => t.tid !== pid)
+      .sort((a, b) => b.ms - a.ms || a.name.localeCompare(b.name))
       .slice(0, MAX_THREADS);
     for (const t of others) {
       const wchan = t.wchan ? ` wchan ${t.wchan}` : '';
@@ -609,8 +654,8 @@ function formatRendererThreads(
 }
 
 /**
- * Chromium's renderer sometimes blocks on a futex while booting the page, with
- * no JS running (2026-10: nine CI hits across six spec files, never locally). The
+ * Chromium's renderer sometimes stops answering while booting the page, with no
+ * JS running (2026-10: nine CI hits across six spec files, never locally). The
  * browser and the daemon still answer. Nothing in the page can cause or clear
  * it, so only this exact signature earns a retry; any other failure, including
  * a renderer paused or spinning in our own code, still fails the run.

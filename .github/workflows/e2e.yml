@@ -35,7 +35,9 @@ jobs:
       - run: pnpm build
       - name: Install Chromium
         if: matrix.surface == 'browser'
-        run: pnpm --filter @bendyline/gezel-app exec playwright install --with-deps chromium
+        uses: ./.github/actions/install-chromium
+        with:
+          filter: '@bendyline/gezel-app'
       - name: Run browser suite
         if: matrix.surface == 'browser'
         run: pnpm test:e2e:web:run
