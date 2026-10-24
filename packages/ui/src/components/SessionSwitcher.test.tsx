@@ -51,6 +51,7 @@ const { SessionSwitcher } = await import('./SessionSwitcher.js');
 const { ComposerToolbarContext } = await import('./composer-toolbar-context.js');
 const { resetComposerDrafts, writeDraftText } = await import('./composer-drafts.js');
 const { api } = await import('../api.js');
+const { providerLabel } = await import('./provider-label.js');
 
 function mockSessions(sessions: unknown[]) {
   vi.mocked(api.listChatSessions).mockResolvedValue({ sessions } as never);
@@ -971,9 +972,10 @@ describe('SessionSwitcher prompt drafts', () => {
     // A session record carries a provider and model from creation, but this
     // thread has not run anything — saying which engine would be a guess
     // dressed as history.
-    expect(charlie.textContent).not.toContain('qwen3.8-27b-q4');
+    const engine = providerLabel('mlx', undefined);
+    expect(charlie.textContent).not.toContain(engine);
     expect(screen.getByRole('option', { name: /Delivery failure planning/ }).textContent).toContain(
-      'qwen3.8-27b-q4',
+      engine,
     );
 
     // Unsent things share one section, ordered together by when they were
@@ -983,8 +985,39 @@ describe('SessionSwitcher prompt drafts', () => {
     expect(values.indexOf('draft:2026-09-03-0031')).toBeLessThan(values.indexOf('s-sent'));
   });
 
+  // On the desktop the model id is debug-mode text (docs/ux.md).
+  it('names only the engine on the desktop outside debug mode', async () => {
+    mockSessions([
+      {
+        id: 's-served',
+        gezelId: 'g1',
+        title: 'Catering quote',
+        lastActivityAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+        providerName: 'llama-cpp',
+        model: 'qwen3.6-27b-q8',
+        servedModel: 'gemma4-31b-q4',
+        archived: false,
+      },
+    ]);
+    mockDrafts({ fresh: [], onThread: [] });
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="s-served"
+        onSessionIdChange={vi.fn()}
+        onDraftSelect={vi.fn()}
+      />,
+    );
+    const row = await screen.findByRole('option', { name: /Catering quote/ });
+    expect(row.textContent).toContain(providerLabel('llama-cpp', undefined));
+    expect(row.textContent).not.toContain('gemma4-31b-q4');
+    expect(row.textContent).not.toContain('qwen3.6-27b-q8');
+  });
+
   // The label read the model stamped at creation while a stand-in answered.
-  it('names the model that answered, not the one the thread was created with', async () => {
+  it('names the model that answered in debug mode, not the one the thread was created with', async () => {
+    vi.mocked(api.getConfig).mockResolvedValueOnce({ provider: 'mock', debugMode: true } as never);
     mockSessions([
       {
         id: 's-served',

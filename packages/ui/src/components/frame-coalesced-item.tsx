@@ -41,11 +41,13 @@ export function FrameCoalescedLiveStickyHeader({
   sessionId,
   userMsg,
   gezels,
+  debugMode = false,
 }: {
   store: FrameCoalescedStore<LiveSlot>;
   sessionId: string;
   userMsg: TimelineMessage;
   gezels: Map<string, GezelSummary>;
+  debugMode?: boolean;
 }): React.ReactNode {
   return (
     <FrameCoalescedItem
@@ -55,6 +57,7 @@ export function FrameCoalescedLiveStickyHeader({
         <ChatStickyHeader
           payload={{ userMsg, assistantInfo: { kind: 'live', sessionId, slot } }}
           gezels={gezels}
+          debugMode={debugMode}
         />
       )}
     />

@@ -46,5 +46,37 @@ describe('timeline session divider lineage', () => {
     expect(container.textContent).toContain('task hand-off to Writer');
     expect(container.textContent).toContain('from Planner');
     expect(container.textContent).not.toContain('from Meester');
+    // A task's id is debug-mode text (docs/ux.md).
+    expect(container.textContent).not.toContain('default/10');
+  });
+
+  it('names the task id in debug mode', () => {
+    const at = '2026-09-01T12:00:00.000Z';
+    const message = {
+      sessionId: 'write',
+      gezelId: 'writer',
+      projectId: 'default',
+      sessionTitle: 'Write the deck',
+      sessionCreatedAt: at,
+      sessionLastActivityAt: at,
+      sessionProviderName: 'copilot',
+      taskRef: 'default/10',
+      role: 'user',
+      content: 'Write the deck.',
+      at,
+    } satisfies TimelineMessage;
+    const { container } = render(
+      renderDivider({
+        row: { kind: 'message', msg: message, at },
+        gezels: new Map([['writer', { id: 'writer', name: 'Writer' } as GezelSummary]]),
+        projects: new Map(),
+        activeSessionId: undefined,
+        continuing: false,
+        key: 'write-divider',
+        roleBasedNameOnlyMode: false,
+        debugMode: true,
+      }),
+    );
+    expect(container.textContent).toContain('· task default/10');
   });
 });

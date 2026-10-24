@@ -1,5 +1,5 @@
 import type { ListTimelineResponse, TimelineMessage } from '@bendyline/gezel';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -79,6 +79,8 @@ describe('ChatTimelineView — Working notes', () => {
   beforeEach(() => {
     Element.prototype.scrollTo = vi.fn() as unknown as Element['scrollTo'];
     Element.prototype.scrollIntoView = vi.fn();
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock' } as never);
+    vi.mocked(api.listQuestions).mockResolvedValue({ questions: [] });
     vi.mocked(api.listGezels).mockResolvedValue({
       gezels: [
         { id: 'florian', name: 'Florian', role: 'Meester' },
@@ -98,6 +100,84 @@ describe('ChatTimelineView — Working notes', () => {
     expect(fold).toHaveTextContent('Drafted ten days');
     const wrapUp = screen.getByText('Mira finished your trip plan.');
     expect(fold.compareDocumentPosition(wrapUp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('unfolds the crew when debug mode turns on, without reopening the view', async () => {
+    renderTimeline(true);
+    await screen.findByTestId('working-notes');
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('gezel:config-updated', { detail: { provider: 'mock', debugMode: true } }),
+      );
+    });
+    await waitFor(() => expect(screen.queryByTestId('working-notes')).not.toBeInTheDocument());
+    expect(
+      screen.getByText('Drafted ten days: Lisbon first, then the Algarve.'),
+    ).toBeInTheDocument();
+  });
+
+  // A project chat used to show the crew's whole transcript: a bakery
+  // owner's invoice request filled with five workers' hand-offs and steps.
+  it('folds by default, in every conversation', async () => {
+    render(
+      <ChatTimelineView
+        scopeKey="project:default"
+        activeSessionId={undefined}
+        loadTimeline={async () => ({ messages: MESSAGES, hasMore: false }) as ListTimelineResponse}
+        streamUrl={() => 'https://example.invalid/events'}
+      />,
+    );
+    const fold = await screen.findByTestId('working-notes');
+    expect(fold).not.toHaveAttribute('open');
+    expect(fold).toHaveTextContent('Drafted ten days');
+  });
+
+  it('shows the full tree when debug mode is already on', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock', debugMode: true } as never);
+    renderTimeline(true);
+    await screen.findByText('Drafted ten days: Lisbon first, then the Algarve.');
+    await waitFor(() => expect(screen.queryByTestId('working-notes')).not.toBeInTheDocument());
+  });
+
+  // Folding everywhere must not park a question where nobody reads it.
+  it('opens on a folded worker that is waiting for the person', async () => {
+    vi.mocked(api.listQuestions).mockResolvedValue({
+      questions: [
+        {
+          id: 'q-dates',
+          projectId: 'default',
+          gezelId: 'mira',
+          sessionId: 'worker',
+          prompt: 'Which week in May works for you?',
+          createdAt: '2026-10-11T10:04:00.000Z',
+        },
+      ],
+    } as never);
+    renderTimeline(true);
+    const fold = await screen.findByTestId('working-notes');
+    await waitFor(() => expect(fold).toHaveTextContent('Mira has a question for you'));
+    expect(fold).toHaveAttribute('open');
+    expect(fold).toHaveAttribute('data-working-notes-state', 'needs-you');
+  });
+
+  it('stays closed for a question the person already answered', async () => {
+    vi.mocked(api.listQuestions).mockResolvedValue({
+      questions: [
+        {
+          id: 'q-dates',
+          projectId: 'default',
+          gezelId: 'mira',
+          sessionId: 'worker',
+          prompt: 'Which week in May works for you?',
+          createdAt: '2026-10-11T10:04:00.000Z',
+          answer: { text: 'The second week', answeredAt: '2026-10-11T10:04:30.000Z' },
+        },
+      ],
+    } as never);
+    renderTimeline(true);
+    const fold = await screen.findByTestId('working-notes');
+    await waitFor(() => expect(fold).toHaveTextContent("Mira's working notes"));
+    expect(fold).not.toHaveAttribute('open');
   });
 
   it('keeps the full tree elsewhere', async () => {

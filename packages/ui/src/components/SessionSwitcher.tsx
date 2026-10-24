@@ -21,6 +21,7 @@ import { readDraftText, subscribeDraftText } from './composer-drafts.js';
 import { ComposerToolbarContext } from './composer-toolbar-context.js';
 import { providerLabel as resolveProviderLabel } from './provider-label.js';
 import { MENTION_RE, displayThreadTitle, isUnnamedThread, plainTitle } from './session-labels.js';
+import { useDebugMode } from './useDebugMode.js';
 
 interface Props {
   gezelId: string;
@@ -213,6 +214,7 @@ export function SessionSwitcher({
     () => (onPhone ? new Map((phoneModels ?? []).map((m) => [m.id, m.name])) : undefined),
     [onPhone, phoneModels],
   );
+  const debugMode = useDebugMode();
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   // Unsent thread starters. They have no session to belong to, so they are
   // listed above the threads rather than inside one.
@@ -809,7 +811,7 @@ export function SessionSwitcher({
 
   /** A thread row plus the drafts filed under it, minus the one naming it. */
   const renderThread = ({ s, drafts, namer, unsent }: (typeof threadRows)[number]) => {
-    const engine = engineSuffix(s, engineLabel, phoneModelNames);
+    const engine = engineSuffix(s, engineLabel, phoneModelNames, debugMode);
     return (
       <Fragment key={s.id}>
         <Select.Item
@@ -1085,10 +1087,14 @@ function renderTitleWithMentions(title: string): ReactNode {
 // A phone runs every conversation itself, so naming the device tells the
 // person nothing, and its model ids are opaque store keys. There the suffix is
 // the model's name, or nothing until the name is known.
+//
+// On the desktop the model id ("qwen3.8-27b-q4") is debug-mode text: the
+// person needs to know the work ran on this computer, not which file did it.
 function engineSuffix(
   s: ChatSessionSummary,
   engineLabel?: string | null,
   phoneModelNames?: ReadonlyMap<string, string>,
+  debugMode = false,
 ): string {
   if (s.source?.kind === 'external') return `From ${s.source.appName} · read-only`;
   if (engineLabel) return engineLabel;
@@ -1098,7 +1104,7 @@ function engineSuffix(
     return (model && phoneModelNames.get(model)) || '';
   }
   const provider = resolveProviderLabel(s.providerName, window.__GEZEL__?.platform);
-  return `${provider}${model ? ` (${model})` : ''}`;
+  return debugMode && model ? `${provider} (${model})` : provider;
 }
 
 /** What the row calls the thread: its own title, or the draft lending one. */

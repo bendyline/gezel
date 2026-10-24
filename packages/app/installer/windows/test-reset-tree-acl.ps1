@@ -1,5 +1,9 @@
 param([Parameter(Mandatory = $true)][string]$Scratch)
 $ErrorActionPreference = 'Stop'
+# The helper reports paths in Path.GetFullPath form, which expands 8.3 names
+# under .NET Framework; the CI runner's TEMP is C:\Users\RUNNER~1\..., so the
+# observers' path comparisons must use the same form or they never match.
+$Scratch = [System.IO.Path]::GetFullPath($Scratch)
 $env:PSModulePath = $PSHOME + '\Modules'
 Add-Type -Path (Join-Path $PSScriptRoot 'ResetTreeAcl.cs')
 $testOwner = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value

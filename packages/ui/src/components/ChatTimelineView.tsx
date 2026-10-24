@@ -15,6 +15,7 @@ import type {
 import {
   deriveThreadTitle,
   displayName,
+  isReadyQuestion,
   resolveGezelFontFamily,
   resolveGezelFontScale,
   stripMcpPrefix,
@@ -85,6 +86,7 @@ import {
   turnFailureShownElsewhere,
   withinHours,
 } from './chat-timeline-helpers.js';
+import { craftbookCardDedupe, liveCardsToHide } from './craftbook-card-dedupe.js';
 import { FrameCoalescedItem, FrameCoalescedLiveStickyHeader } from './frame-coalesced-item.js';
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
@@ -93,6 +95,7 @@ import { nestChildSessionThreads } from './session-thread-nesting.js';
 import { compareTimelineRows, nextTerminalBottomGraceExpiry } from './timeline-row-order.js';
 import { buildTimelineThreads } from './timeline-threads.js';
 import { useChatNarrationMode } from './useChatNarrationMode.js';
+import { useDebugMode } from './useDebugMode.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 const PAGE_SIZE = 100;
@@ -246,9 +249,10 @@ export interface ChatTimelineViewProps {
   trailingContentAfterWrapUp?: boolean;
   /**
    * Fold the sessions a turn launched (a task's workers, a consultation)
-   * into one Working notes line under it. For the meester's Home
-   * conversation, where the person reads the ask and the result rather
-   * than the crew's transcript. Debug mode shows the full tree.
+   * into one Working notes line under it, so the person reads the ask and
+   * the result rather than the crew's transcript. On by default in every
+   * conversation; debug mode shows the full tree. A fold holding a question
+   * the person has not answered opens itself.
    */
   foldWorkingNotes?: boolean;
   /**
@@ -404,7 +408,7 @@ export function ChatTimelineView({
   emptyContent,
   trailingContent,
   trailingContentAfterWrapUp = false,
-  foldWorkingNotes = false,
+  foldWorkingNotes = true,
   hideScheduledRuns = false,
   onAttentionChange,
   loadTimeline,
@@ -976,7 +980,8 @@ export function ChatTimelineView({
   const [defaultModelByProvider, setDefaultModelByProvider] = useState<
     Partial<Record<ProviderName, string>>
   >({});
-  const [debugMode, setDebugMode] = useState(false);
+  // Live, so flipping debug mode in Settings re-renders open conversations.
+  const debugMode = useDebugMode();
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -985,7 +990,6 @@ export function ChatTimelineView({
         if (cancelled) return;
         setDefaultProvider(cfg.provider);
         setDefaultModelByProvider(cfg.defaultModel ?? {});
-        setDebugMode(cfg.debugMode === true);
       } catch {
         /* non-fatal — keep the copilot fallback */
       }
@@ -3274,6 +3278,7 @@ export function ChatTimelineView({
         task={entry.task}
         wait={entry.wait}
         gezel={gezels.get(entry.wait.gezelId)}
+        debugMode={debugMode}
         onTaskReference={(ref) =>
           window.dispatchEvent(new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }))
         }
@@ -3422,6 +3427,23 @@ export function ChatTimelineView({
     if (askingMessage) fallbackQuestionsByMessage.set(askingMessage.key, question);
     else if (!question.answer) liveQuestionsBySession.set(sessionId, question);
   }
+  // A folded worker waiting on the person must not wait behind a closed
+  // "working notes" line: the fold opens on its question.
+  const openQuestionSessions = new Set<string>();
+  for (const q of questionsById.values()) {
+    if (!q.answer && !isReadyQuestion(q)) openQuestionSessions.add(q.sessionId);
+  }
+  // One craftbook card per task: the earliest one shown outside a fold
+  // stands for it (craftbook-card-dedupe.ts). A fold keeps its full
+  // transcript, and debug mode shows every card.
+  const inFoldedSession = (sid: string) => foldNested && (sessionDepthById.get(sid) ?? 0) > 0;
+  const cardDedupe = debugMode
+    ? null
+    : craftbookCardDedupe(
+        messages
+          .filter((m) => !inFoldedSession(m.sessionId))
+          .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)),
+      );
   const els: React.ReactNode[] = [];
   // The open Working notes fold, collecting the nested sessions under the
   // turn that launched them (see foldWorkingNotes).
@@ -3441,6 +3463,7 @@ export function ChatTimelineView({
         key={done.key}
         names={done.names}
         live={done.sessions.some((sid) => liveRef.current.has(sid))}
+        needsYou={done.sessions.some((sid) => openQuestionSessions.has(sid))}
         {...(done.error ? { error: done.error } : {})}
       >
         {done.nodes}
@@ -3556,6 +3579,7 @@ export function ChatTimelineView({
         dataMsgId={`msg:${m.sessionId}:${m.at}:${m.role}`}
         dataSessionId={m.sessionId}
         debugMode={debugMode}
+        {...(cardDedupe && cardDedupe.hidden.size > 0 ? { hiddenCards: cardDedupe.hidden } : {})}
         sessionId={m.sessionId}
         messageAt={m.at}
         role={m.role}
@@ -3791,6 +3815,12 @@ export function ChatTimelineView({
             }
           : {})}
         debugMode={debugMode}
+        {...(() => {
+          if (!cardDedupe || inFoldedSession(sessionId)) return {};
+          const tools = slot.segments.flatMap((seg) => (seg.kind === 'tool' ? [seg.tool] : []));
+          const hiddenCards = liveCardsToHide(tools, cardDedupe.owned);
+          return hiddenCards.size > 0 ? { hiddenCards } : {};
+        })()}
         sessionId={sessionId}
       />,
     );
@@ -4006,6 +4036,7 @@ export function ChatTimelineView({
           ...(sessionBranch ? { treeBranch: sessionBranch } : {}),
           key: `divider:${sid}:${item.at}`,
           roleBasedNameOnlyMode,
+          debugMode,
         }),
       );
       seenSessionIds.add(sid);
@@ -4146,6 +4177,7 @@ export function ChatTimelineView({
             sessionId={stickyPayload.assistantInfo.sessionId}
             userMsg={stickyPayload.userMsg}
             gezels={gezels}
+            debugMode={debugMode}
           />
         ) : (
           <ChatStickyHeader
@@ -4154,6 +4186,7 @@ export function ChatTimelineView({
               assistantInfo: { kind: 'message', msg: stickyPayload.assistantInfo.msg },
             }}
             gezels={gezels}
+            debugMode={debugMode}
           />
         ))}
       <div

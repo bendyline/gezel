@@ -13,11 +13,15 @@ import type { ReactNode } from 'react';
  * The line is also the one place a stopped worker's failure shows, in a
  * muted tone: the person needs to know the work stopped, not to read a
  * stack of error banners.
+ *
+ * A worker waiting on the person is the exception to folding: the line says
+ * so and the fold opens, so the question card inside is in view.
  */
 export function WorkingNotes({
   names,
   live,
   error,
+  needsYou = false,
   defaultOpen = false,
   children,
 }: {
@@ -27,27 +31,31 @@ export function WorkingNotes({
   live: boolean;
   /** Why the last of them stopped, when one did. */
   error?: string;
+  /** One of them asked the person something that is still unanswered. */
+  needsYou?: boolean;
   defaultOpen?: boolean;
   children: ReactNode;
 }) {
   const who = joinNames(names);
   const several = names.length > 1;
-  const state = live ? 'live' : error ? 'stopped' : 'done';
+  const state = needsYou ? 'needs-you' : live ? 'live' : error ? 'stopped' : 'done';
   return (
     <details
       className={`timeline-working-notes timeline-working-notes-${state}`}
       data-testid="working-notes"
       data-working-notes-state={state}
-      {...(defaultOpen ? { open: true } : {})}
+      {...(defaultOpen || needsYou ? { open: true } : {})}
     >
       <summary className="timeline-working-notes-summary">
         <span className="timeline-working-notes-dot" aria-hidden="true" />
         <span className="timeline-working-notes-line">
-          {live
-            ? `${who} ${several ? 'are' : 'is'} working…`
-            : error
-              ? `${who} stopped: ${error}`
-              : `${who}'s working notes`}
+          {needsYou
+            ? `${who} ${several ? 'have' : 'has'} a question for you`
+            : live
+              ? `${who} ${several ? 'are' : 'is'} working…`
+              : error
+                ? `${who} stopped: ${error}`
+                : `${who}'s working notes`}
         </span>
         <span className="timeline-working-notes-toggle">Working notes</span>
       </summary>

@@ -763,12 +763,16 @@ What the meester's thread shows after the person asks for something:
   whoever starts the work are introduced as the task begins; a gezel hired
   for a later step is introduced when they start. Each gezel is introduced
   once per thread.
-- **The crew's work folds into one line** (`WorkingNotes`) in the meester's
-  Home conversation: "Mira is working…" with a breathing dot, then "Mira's
-  working notes". The worker's transcript, thinking, tool calls and any
-  failure banners are inside; a stopped worker shows "Mira stopped: …" on
-  the line in the warning tone, never as a red banner in the person's
-  conversation. Debug mode shows the full session tree instead.
+- **The crew's work folds into one line** (`WorkingNotes`) in every
+  conversation, not only the meester's Home thread: "Mira is working…" with a
+  breathing dot, then "Mira's working notes". The worker's transcript,
+  thinking, tool calls, hand-offs and any failure banners are inside. A
+  stopped worker shows "Mira stopped: …" on the line in the warning tone,
+  never as a red banner in the person's conversation. A worker waiting on
+  the person is the one exception: the line reads "Mira has a question for
+  you" in the warning tone and the fold opens, so the question card is in
+  view. Debug mode shows the full session tree instead. A task's own chat
+  starts at the worker's session, so there is nothing above it to fold into.
 - **The finished thing is last.** The wrap-up renders after the fold, not
   above the work that made it, and closes on the finished-work card
   (`DeliverableCard` with `maker`): "Mira made this for you" with a small
@@ -1809,7 +1813,8 @@ and idle", because a card promising an imminent start buys a genuinely stuck
 task another hour of the user's patience. And it disappears the instant that
 task streams a turn: the live bubble is its representation, and a "waiting"
 card beside it contradicts what the reader can see. Batches collapse past a
-few cards into one counted line rather than burying the conversation.
+few cards into one counted line rather than burying the conversation. Its
+key reads **Open task**; the task's id appears only in debug mode.
 
 **Waiting is not wedged, and silence alone cannot tell them apart.** A turn
 that has produced no tokens may be parked behind another gezel — Gezel's
@@ -1851,6 +1856,18 @@ And the one live element, the External-services nudge on start cards
 the *current* security policy: it hides the moment the capability is on,
 and its action **deep-links to Settings → Security & Compliance** — a
 security switch is never flipped from inside chat.
+
+**One card per task per conversation.** A model that re-invokes a plan it
+already started gets an idempotent "already running" receipt each time, and
+every step advance stamps another card; one invoice request read as three
+identical "Formatted Report is underway" cards in a row. Outside debug mode
+the earliest card shown for a task stands for it
+([craftbook-card-dedupe.ts](../packages/ui/src/components/craftbook-card-dedupe.ts)).
+Later cards for the same task keep only their plain row inside Details. The
+earliest wins so that a bubble the person already read never shrinks above
+them. A Working notes fold keeps its own cards, because it is the full
+transcript, and debug mode shows every card. The chip reads **Open task**;
+the task's id is debug-mode text.
 
 **Work that made something ends on the thing it made.** A PowerPoint run
 used to end on prose: a wrap-up listing six paths newest-write-first, and a
@@ -1912,12 +1929,30 @@ count, step timings, thinking and attempted-call expanders do not head a
 reply: the reply's action row carries a **Details** key that shows them, and
 **Hide details** puts them back. What the person needs stays in view without
 the key: media, cards, and a failure the turn never recovered from. Debug
-mode shows everything, as before. A task's id (`lisbon-trip-planning/1`) is
-debug-mode text too: the hand-off card's key reads **Open task**, the chat
-rail's task card leads with its title, and a wrap-up carries no "Tasks:"
-row because its finished card already opens the work. Status chips that remain (a task's
+mode shows everything, as before, and open conversations follow the switch
+at once rather than when they are next opened. A task's id (`lisbon-trip-planning/1`) is
+debug-mode text too: the hand-off, craftbook and queued-task cards' keys
+read **Open task**, the chat rail's task card leads with its title, a
+session divider leaves off "· task …", and no reply carries a "Tasks:" row
+outside debug mode. A wrap-up whose finished card is showing drops its
+"Files:" row too. The card already opens the deliverable, and the row only
+added the drafts that went into it. Status chips that remain (a task's
 **Complete**, **Draft**) take their colour from `--success` / `--warning`
 mixed into the surface, never a pale grey that reads as disabled.
+
+**A live turn follows the same rule.** While a reply is still being written,
+its thinking, tool rows, the call being written and the "· N tools" count
+stay behind the live bubble's own **Details** key outside debug mode. Long
+local turns used to stream all of it into the conversation for minutes,
+which made the machine room the progress signal. What remains is the
+status line, the thinking dots, and one plain line for a call being
+written ("Writing file…"; a tool with no curated label reads "Working…",
+never its slug). Cards, media and an unrecovered failure sit above the
+body, where the finished reply keeps them, so nothing moves when the turn
+commits. A failure whose reason is a machine payload (a JSON envelope, a
+stack trace) reads "didn't finish. Details has the full response." The raw
+text stays behind Details. Audio a folded reply produced joins its media
+strip, so hiding the steps never hides a recording.
 
 **A thread is titled from the sentence.** A thread's title is the person's
 first sentence with its lead-in ("Can you", "Please", "I'd like you to")
@@ -2214,7 +2249,10 @@ should not be told that typing is working.
 On a phone a thread row names only the model that answered ("Qwen 3.5 2B"),
 never "This Device": every conversation there runs on the device, so the
 label says nothing. Phone model ids are opaque store keys, so a row whose
-model has no known name shows no engine at all rather than the id.
+model has no known name shows no engine at all rather than the id. On the
+desktop a thread row names only the engine ("This Mac", "Claude"); the model
+id that answered ("This Mac (qwen3.8-27b-q4)") is debug-mode text, like a
+task's id.
 
 **Identity codes.** When two people must compare a cryptographic value
 out loud — device pairing is the only case today — show a short grouped

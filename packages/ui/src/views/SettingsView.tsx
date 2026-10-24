@@ -737,6 +737,8 @@ function DaemonSettingsView() {
     try {
       const res = await api.updateConfig({ debugMode });
       setConfig(res);
+      // Open conversations and panes read the flag live through useDebugMode.
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setStatus(debugMode ? 'debug mode ON — verbose logs in ~/.gezel/logs/' : 'debug mode OFF');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
@@ -4433,9 +4435,10 @@ function DaemonSettingsView() {
               <section style={{ marginBottom: '2rem' }}>
                 <h3>Debug mode</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  Turns on verbose diagnostics — tool-call internals, bridge startup traces, chat
-                  send/response bodies, and ambient-scheduler cadence reasoning — and enables
-                  additional tools.
+                  Shows the working parts everywhere: each step and the thinking in chat, task ids,
+                  model names, and every project&apos;s developer tabs. Also turns on verbose
+                  diagnostics — tool-call internals, bridge startup traces, chat send/response
+                  bodies, and ambient-scheduler cadence reasoning — and enables additional tools.
                 </p>
                 <label className="debug-toggle">
                   <input

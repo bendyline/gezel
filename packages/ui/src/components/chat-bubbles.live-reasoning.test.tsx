@@ -12,6 +12,9 @@ const { StreamingBubble } = await import('./chat-bubbles.js');
 
 const tool = (name: string) => ({ name, durationMs: 10, success: true });
 
+// The trace renders in place only where the machine room is shown: debug
+// mode, or a live bubble whose Details is open. The quiet default is pinned
+// in chat-bubbles.quiet-live.test.tsx.
 describe('StreamingBubble live reasoning placement', () => {
   it('renders the think phase in wire order among the turn segments', () => {
     // The bug this guards: reasoning used to live on a slot-level
@@ -29,6 +32,7 @@ describe('StreamingBubble live reasoning placement', () => {
       <StreamingBubble
         authorLabel="Ada"
         authorIcon={null}
+        debugMode
         segments={segments}
         startedAt={Date.now() - 5_000}
       />,
@@ -48,6 +52,7 @@ describe('StreamingBubble live reasoning placement', () => {
       <StreamingBubble
         authorLabel="Ada"
         authorIcon={null}
+        debugMode
         segments={[{ kind: 'reasoning', content: 'One continuous thought.' }]}
         startedAt={Date.now() - 5_000}
       />,
@@ -61,6 +66,7 @@ describe('StreamingBubble live reasoning placement', () => {
       <StreamingBubble
         authorLabel="Ada"
         authorIcon={null}
+        debugMode
         segments={[{ kind: 'reasoning', content: '  \n ' }]}
         startedAt={Date.now() - 5_000}
       />,
@@ -77,6 +83,7 @@ describe('StreamingBubble live reasoning placement', () => {
       <StreamingBubble
         authorLabel="Ada"
         authorIcon={null}
+        debugMode
         segments={[{ kind: 'reasoning', content: 'Still deliberating.' }]}
         startedAt={Date.now() - 5_000}
       />,

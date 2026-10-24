@@ -125,12 +125,31 @@ describe('MessageBubble turn-aborted salvage record', () => {
         content=""
         authorLabel="Alejandro"
         authorIcon={null}
+        debugMode
         reasoning="Thought about it and said nothing."
       />,
     );
 
     expect(
       screen.getByText('(model produced reasoning but no visible reply — see Thinking above)'),
+    ).toBeInTheDocument();
+  });
+
+  // Outside debug mode the trace is folded, so "above" points at nothing.
+  it('points a reasoning-only turn at Details while the trace is folded', () => {
+    render(
+      // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
+      <MessageBubble
+        role="assistant"
+        content=""
+        authorLabel="Alejandro"
+        authorIcon={null}
+        reasoning="Thought about it and said nothing."
+      />,
+    );
+
+    expect(
+      screen.getByText('(model produced reasoning but no visible reply — open Details to read it)'),
     ).toBeInTheDocument();
   });
 });

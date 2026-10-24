@@ -66,8 +66,16 @@ describe('ToolCraftbookCard — craftbook start', () => {
     expect(screen.getByText('Acquire and verify sources')).toBeInTheDocument();
     expect(screen.getByText('Lock the slide outline')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Task default/12' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open task' }));
     expect(onFocusTask).toHaveBeenCalledWith('default/12');
+  });
+
+  // A task's id is debug-mode text everywhere a person reads (docs/ux.md).
+  it('names the task id on the chip only in debug mode', () => {
+    const { rerender } = render(<ToolCraftbookCard card={startCard()} />);
+    expect(screen.queryByText(/default\/12/)).not.toBeInTheDocument();
+    rerender(<ToolCraftbookCard card={startCard()} debugMode />);
+    expect(screen.getByRole('button', { name: 'Task default/12' })).toBeInTheDocument();
   });
 
   it('falls back to the full task tab when no rail opener is wired', async () => {
@@ -78,7 +86,7 @@ describe('ToolCraftbookCard — craftbook start', () => {
     window.addEventListener('gezel:open-tab', onOpenTab);
     render(<ToolCraftbookCard card={startCard()} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Task default/12' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open task' }));
     expect(opened).toEqual({ kind: 'task', ref: 'default/12' });
     window.removeEventListener('gezel:open-tab', onOpenTab);
   });

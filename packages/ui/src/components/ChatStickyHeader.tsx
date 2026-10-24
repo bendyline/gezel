@@ -61,6 +61,7 @@ function previewifyMarkdown(s: string): string {
 export function ChatStickyHeader({
   payload,
   gezels,
+  debugMode = false,
 }: {
   payload: {
     userMsg: TimelineMessage;
@@ -69,6 +70,8 @@ export function ChatStickyHeader({
       | { kind: 'message'; msg: TimelineMessage };
   };
   gezels: Map<string, GezelSummary>;
+  /** The tool count is machinery, like the rows it counts; debug mode only. */
+  debugMode?: boolean;
 }): React.ReactNode {
   const { userMsg, assistantInfo } = payload;
   // For the live-slot case we drive the same `THINKING · Ns · K
@@ -132,7 +135,7 @@ export function ChatStickyHeader({
             }
             queueAhead={slotForLive.queueAhead}
             elapsedSeconds={liveElapsed}
-            toolCount={countSegmentTools(slotForLive.segments)}
+            toolCount={debugMode ? countSegmentTools(slotForLive.segments) : 0}
             wirePulseCount={slotForLive.wirePulseCount}
             {...(liveStatusLabel(slotForLive)
               ? { thinkingLabel: liveStatusLabel(slotForLive) }

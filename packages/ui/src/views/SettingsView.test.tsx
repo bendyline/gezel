@@ -252,6 +252,30 @@ describe('SettingsView', () => {
     expect(screen.queryByText(/Noor/)).toBeNull();
   });
 
+  // Open conversations read debug mode live; without the broadcast they kept
+  // the value they mounted with until reopened.
+  it('broadcasts a debug mode change so open views follow it', async () => {
+    vi.mocked(api.updateConfig).mockResolvedValue({ provider: 'mock', debugMode: true } as never);
+    const seen: unknown[] = [];
+    const onUpdated = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener('gezel:config-updated', onUpdated);
+    try {
+      render(<SettingsView />);
+      fireEvent.click(await screen.findByTestId('settings-nav-about'));
+      const checkbox = await screen.findByRole('checkbox', { name: 'Debug mode' });
+      expect(checkbox).not.toBeChecked();
+
+      fireEvent.click(checkbox);
+
+      await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith({ debugMode: true }));
+      await waitFor(() =>
+        expect(seen).toContainEqual(expect.objectContaining({ debugMode: true })),
+      );
+    } finally {
+      window.removeEventListener('gezel:config-updated', onUpdated);
+    }
+  });
+
   it('defaults very early work-in-progress features off and persists the toggle', async () => {
     vi.mocked(api.updateConfig).mockResolvedValue({
       provider: 'mock',
