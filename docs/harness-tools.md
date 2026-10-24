@@ -94,9 +94,20 @@ reads files itself, so the harness reshapes the daemon's fused ranking
   squisq experiment.
 - **Default scopes are the folder, the library and memories.** Other
   knowledge catalogs are opt-in (`scopes: ["knowledge"]`).
-- **One line per file.** Chunks of the same file merge into one entry listing
+- **One entry per file.** Chunks of the same file merge into one entry listing
   every matching range; the harness asks the daemon for three times the
-  results it shows, so the list stays full.
+  results it shows, so the list stays full. Ten results by default: the cited
+  file was in the top ten in 97% of trial t1's searches, and every result is
+  carried through the app's later turns.
+- **Where the match is, not just which symbol.** An indexed range is often a
+  whole symbol (all of a 259-line class) and its snippet a window somewhere
+  inside. The harness finds the snippet in the file (it runs beside the
+  folder), reports that range, names the enclosing line, and shows the two
+  lines that best match the query, numbered: `watcher.ts:253-276 (inside
+  class Watcher {, 223-481)` then `269| // Defer events until writes settle`.
+  Without this, Codex used search in nearly every trial t1 run but still
+  opened whole files and grepped, so search added a step instead of saving
+  one. When the snippet cannot be found the old range and flat excerpt stay.
 - **Code first.** Source and test files come first. Docs and manifests
   (`.md`, `docs/`, `package.json`) follow under their own heading, at most
   three, unless they are the only matches.
@@ -165,14 +176,21 @@ what Gezel wrote):
 Setup gives an app the tools, but the app still reaches for its own Grep and
 Glob first. One line in the folder's own agent file is what changed that:
 Claude Code called Gezel's tools in 0 of 38 unprompted trials, and in 23 of 24
-once the folder's CLAUDE.md told it to use `search`. On an undocumented
-codebase (Brackets, 2021) that halved the time it took to answer questions
-about the code and cut cost by about 28%; on a well-documented one (squisq)
-it made no difference, because the app's own search already found the code.
+once the folder's CLAUDE.md told it to use `search`.
+
+The line has to be near the top. In trial t1 (2026-10-24, six codebases), the
+line appended to the end of squisq's 182 KB CLAUDE.md was acted on in 1 of 18
+Claude Code runs and 0 of 18 Codex runs; on folders without a long agent file
+both apps used `search` in nearly every run. With the line read, Claude Code
+(Sonnet 5) answered questions about the code 27% faster and 16% cheaper than
+without Gezel (21% faster and 9% cheaper than with a placebo line that names
+no tool), most on large, little-documented codebases. Codex (gpt-6.1-sol) did
+not benefit: it searched, then grepped and read anyway, and took 9% longer.
+Report: `evals/runs/AGENT-TOOLS-TRIAL-2026-10-24.md`.
 
 Once an app is set up, its section in Settings → Integrations, and
 `gezel mcp install`, show the line to copy (`harnessAgentFileLine` in core
-`harness-profile.ts`) and the file it goes in (`HARNESS_AGENT_FILE`):
+`harness-profile.ts`), say to put it near the top, and name the file it goes in (`HARNESS_AGENT_FILE`):
 CLAUDE.md for Claude Code, AGENTS.md for Codex, Cursor and VS Code. Claude
 Desktop has no folder and gets none. The Claude Code wording, naming
 `mcp__gezel__search`, is the one tested; the others name the `gezel` server,

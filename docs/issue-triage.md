@@ -65,10 +65,17 @@ reviewer model) as it read when judged. The issue record keeps only
 - **The queue** (`buildIssueHandoffQueue`) takes open issues with no task,
   not held by another app's lease, not on a file a proposal targets, not
   superseded; info-level only on request.
-  - Until a project has 20 decided verdicts, a batch is sampled: current
-    major issues, then categories round-robin, then 20% at random.
-  - After that, the likeliest real first (calibration), each bringing up to
-    four issues from its file, since the app reads a file once.
+  - **Triage batches.** Until a project has 20 decided verdicts, a batch is
+    sampled: current major issues, then categories round-robin, then 20% at
+    random. After that, the likeliest real first (calibration), each
+    bringing up to four issues from its file, since the app reads a file once.
+  - **Fix batches** (`mode: 'fix'`, the `fix_issues` prompt) never sample and
+    never pack by file. They take confirmed issues first, then by severity,
+    then by each category's worth-fixing rate (`categoryPrior`: bug-like
+    0.56, error-handling and performance 0.12, everything else 0.05),
+    pulled toward the project's own verdicts as they arrive. On trial t1's
+    night reviews this put all 35 flagged planted bugs into the first 40
+    issues, against 23 for the triage batch.
   - Handing issues to an app leases them to it for two hours, so the night
     shift does not start fixing them meanwhile.
 - **The handoff document** (`reports/issue-handoff.md`, rewritten nightly when

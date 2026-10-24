@@ -76,9 +76,14 @@ export const HARNESS_AGENT_FILE: Partial<Record<HarnessClientId, 'CLAUDE.md' | '
  * actually uses Gezel's search there. It is what decided adoption: Claude
  * Code used `search` in 0 of 38 trials without it and 23 of 24 with it, and
  * on an undocumented codebase answered in half the time (harness experiment,
- * 2026-10-21). Gezel shows it for the person to add; it never writes into
- * their folder. The Claude Code wording is the one tested; the others name
- * the server, because each app spells MCP tool names its own way.
+ * 2026-10-21). It has to sit near the top of the file: appended to a 182 KB
+ * CLAUDE.md it was acted on in 1 of 36 runs across both apps (trial t1,
+ * 2026-10-24), so the surfaces that show it say so. It names the argument
+ * because Claude Code defers MCP tools: Sonnet 5.5 called `search` without
+ * loading its schema in 32 of 40 runs and sent no query in 7. Gezel shows it
+ * for the person to add; it never writes into their folder. The Claude Code
+ * wording is the one tested; the others name the server, because each app
+ * spells MCP tool names its own way.
  */
 export function harnessAgentFileLine(client: HarnessClientId): string | null {
   if (!HARNESS_AGENT_FILE[client]) return null;
@@ -86,7 +91,7 @@ export function harnessAgentFileLine(client: HarnessClientId): string | null {
     client === 'claude-code'
       ? "Gezel's `search` tool (`mcp__gezel__search`)"
       : 'the `search` tool from the `gezel` MCP server';
-  return `This folder is indexed by Gezel. To find where a behavior or feature is implemented, call ${tool} with a plain-words description before grepping. It ranks files by meaning and returns paths with line ranges.`;
+  return `This folder is indexed by Gezel. To find where a behavior or feature is implemented, call ${tool} with a \`query\` describing it in plain words before grepping. It ranks files by meaning and returns paths with line ranges.`;
 }
 
 export const HARNESS_TOOL_DESCRIPTIONS: Record<HarnessToolName, string> = {

@@ -317,7 +317,8 @@ describe('the tools', () => {
     };
     // Knowledge catalogs are opt-in; memory is off in this binding.
     expect(sent.sources.sort()).toEqual(['artifacts', 'shared', 'workspace']);
-    expect(sent.maxResults).toBe(45);
+    // Ten results by default, fetched three times over since a file's chunks collapse to one entry.
+    expect(sent.maxResults).toBe(30);
     expect(sent.gezelId).toBeUndefined();
   });
 
@@ -349,6 +350,16 @@ describe('the tools', () => {
     expect(lines[0]).toContain('dependencyGraph.ts:10');
     expect(out).toContain('Docs in this folder that discuss it:');
     expect(lines).toHaveLength(4);
+  });
+
+  it('tells an app that searched without a query what to send', async () => {
+    // trial t1: Sonnet 5.5 called the deferred tool without loading its schema.
+    const fake = fakeGezel();
+    const client = await harness(fake);
+    const result = await client.callTool({ name: 'search', arguments: {} });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('search needs a `query`');
+    expect(fake.requests.some((r) => r.path.endsWith('/tools/search'))).toBe(false);
   });
 
   it('names an area summary by its folder, and drops photo matches beside code', async () => {

@@ -10,7 +10,12 @@ import {
 import type { DiffpackManager } from '../diffpack/manager.js';
 import type { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
-import { expectedRealScore, isLowConfidence, issueVerdictStats } from './calibration.js';
+import {
+  categoryPrior,
+  expectedRealScore,
+  isLowConfidence,
+  issueVerdictStats,
+} from './calibration.js';
 
 export const DEFAULT_HANDOFF_LIMIT = 20;
 /** How long an outside app may hold the issues it was handed before the night shift may take them. */
@@ -37,10 +42,19 @@ export interface IssueHandoffDeps {
 /**
  * The next batch of BW issues for an outside app (or the handoff document):
  * open, unclaimed, not on a file a proposal already targets, grouped by file.
- * A project with few verdicts gets a sampled batch, majors plus a spread of
- * categories plus some at random, because nobody knows yet which of the
- * reviewer's leads tend to be real; later batches take the most promising
- * first. Handing issues to an app leases them to it. See docs/issue-triage.md.
+ *
+ * Triage: a project with few verdicts gets a sampled batch, majors plus a
+ * spread of categories plus some at random, because nobody knows yet which of
+ * the reviewer's leads tend to be real; later batches take the most promising
+ * first, each bringing its file's other issues along.
+ *
+ * Fix: always the likeliest bugs first, by severity and then each category's
+ * worth-fixing rate (its prior until verdicts say otherwise), one issue per
+ * slot. Sampling and file packing both spend a fix batch on leads that are
+ * rarely worth fixing: in trial t1 they left 12 of the 35 planted bugs the
+ * review had flagged out of the first 40.
+ *
+ * Handing issues to an app leases them to it. See docs/issue-triage.md.
  */
 export async function buildIssueHandoffQueue(
   deps: IssueHandoffDeps,
@@ -89,12 +103,19 @@ export async function buildIssueHandoffQueue(
   // one still goes in each batch, so a better reviewer would show up.
   const setAside = eligible.filter((i) => isLowConfidence(stats, i));
   const standing = eligible.filter((i) => !setAside.includes(i));
-  const score = (i: BoekwachterIssue) => expectedRealScore(stats, i);
+  const score = (i: BoekwachterIssue) =>
+    mode === 'fix'
+      ? expectedRealScore(stats, i, categoryPrior(i.category))
+      : expectedRealScore(stats, i);
   const ranked = [...standing].sort((a, b) => compareForHandoff(a, b, mode, score));
+  // A fix batch takes the likeliest issues one by one and carries no
+  // drift probe: the probe is triage's way of re-checking a set-aside category.
   const selected = firstBatch
     ? sampleFirstBatch(ranked, limit, deps.random ?? Math.random)
-    : packByFile(ranked, setAside.length > 0 ? limit - 1 : limit);
-  if (!firstBatch && setAside.length > 0 && selected.length < limit) {
+    : mode === 'fix'
+      ? ranked.slice(0, limit)
+      : packByFile(ranked, setAside.length > 0 ? limit - 1 : limit);
+  if (!firstBatch && mode === 'triage' && setAside.length > 0 && selected.length < limit) {
     const probe = setAside[Math.floor((deps.random ?? Math.random)() * setAside.length)];
     if (probe) selected.push(probe);
   }
@@ -119,7 +140,9 @@ export async function buildIssueHandoffQueue(
 
 /**
  * Confirmed first when fixing; then unjudged before doubted, current before
- * stale, likeliest real, worst, oldest.
+ * stale. Triage then takes the likeliest real before the worst; a fix batch
+ * takes the worst before the likeliest, because the reviewer's "major" is the
+ * strongest single sign of a bug. Oldest last.
  */
 function compareForHandoff(
   a: BoekwachterIssue,
@@ -135,11 +158,12 @@ function compareForHandoff(
       : i.latestVerdict?.kind === 'unsure'
         ? 2
         : 1;
+  const bySeverity = (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9);
+  const byScore = score(b) - score(a);
   return (
     verdictRank(a) - verdictRank(b) ||
     Number(a.stale) - Number(b.stale) ||
-    score(b) - score(a) ||
-    (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9) ||
+    (mode === 'fix' ? bySeverity || byScore : byScore || bySeverity) ||
     a.createdAt.localeCompare(b.createdAt)
   );
 }
