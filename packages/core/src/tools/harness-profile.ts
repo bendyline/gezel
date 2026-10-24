@@ -28,6 +28,24 @@ export const HARNESS_TOOL_NAMES = [
 export type HarnessToolName = (typeof HARNESS_TOOL_NAMES)[number];
 
 /**
+ * DocBlocks' tools, passed through to an outside app: the harness starts the
+ * DocBlocks Gezel ships on the first call and forwards to it. Six of its 19:
+ * the schemas of all 19 come to about 11k tokens, which Codex carries in
+ * every turn, and the other 13 (theme inference, bundles, comparisons,
+ * template catalogs) serve requests an app rarely makes. The schemas are a
+ * snapshot of the shipped version (mcp `harness/docblocks-tools.json`).
+ */
+export const HARNESS_DOCUMENT_TOOL_NAMES = [
+  'convert_document',
+  'save_artifact',
+  'preview_document',
+  'inspect_document',
+  'list_themes',
+  'get_authoring_context',
+] as const;
+export type HarnessDocumentToolName = (typeof HARNESS_DOCUMENT_TOOL_NAMES)[number];
+
+/**
  * Knowledge catalogs outside apps never see, in any tool. The Handboek is
  * Gezel's own documentation: answers about Gezel's UI and craftbooks, which
  * only ever crowded an outside app's results about its own code.
@@ -51,13 +69,20 @@ export function isHarnessHiddenCatalog(catalogOrUri: string | undefined): boolea
  * unprompted, Claude Code called none of these tools in 38 squisq trials
  * under this wording or the earlier, general one, though it could quote them.
  * One line from the person ("use Gezel's search to find where things live")
- * got it used on two of six tasks.
+ * got it used on two of six tasks. The `save_memory` line is the exception
+ * that works: asked to remember something, Claude Code (Sonnet 5.5) kept it
+ * only in its own auto-memory in both runs without it, and also saved it to
+ * Gezel in 3 of 3 with it (Sonnet 5.5 and Opus 5.5, trial t2). Codex wrote to
+ * AGENTS.md in all 4 runs, with the line and with the same hint in the
+ * tool's description.
  */
 export const HARNESS_SERVER_INSTRUCTIONS = [
   'Gezel has indexed the folder you are working in: it has read and summarized its files, including Word, PDF, PowerPoint and Excel documents.',
   'Before you grep or glob to find where a behavior, feature or concept lives, call `search` once with a plain-words description: it ranks files by meaning and returns absolute paths with line ranges. Keep using your own search for exact strings and identifiers you already know.',
   "Read Office documents and PDFs with `read_doc_as_markdown`. `search` also covers the person's shared document library and saved memories.",
-  'Gezel never writes into this folder. A generated image is saved in Gezel; copy it into the folder yourself if it belongs there.',
+  'To make a Word, PowerPoint, PDF or Excel file, write Markdown and call `convert_document`, then `save_artifact`.',
+  'When the person asks you to remember something about this work, also save it with `save_memory`, so Gezel and their other apps know it too.',
+  'Gezel never writes into this folder. A generated image or saved document is kept in Gezel; copy it into the folder yourself if it belongs there.',
 ].join(' ');
 
 /**
@@ -146,4 +171,24 @@ export const HARNESS_TOOL_DESCRIPTIONS: Record<HarnessToolName, string> = {
     'Give each a short note with your evidence, ideally a file:line or a test. Gezel closes or keeps each issue accordingly and learns which leads to stop raising.',
     'Only report issues you actually checked.',
   ].join(' '),
+};
+
+/**
+ * Appended to DocBlocks' own description of each passed-through tool. Its
+ * descriptions assume a gezel, which holds root ids from `list_roots` and an
+ * artifacts drawer; an outside app has neither, so the harness fills the
+ * root ids and says where saved files go.
+ */
+export const HARNESS_DOCUMENT_TOOL_NOTES: Record<HarnessDocumentToolName, string> = {
+  convert_document:
+    'Use it to make a Word, PowerPoint, PDF, Excel, CSV, HTML or EPUB file (or an MP4, GIF or PNG render) from Markdown you write; for PowerPoint, one `#` heading per slide. A `file` source is a path in this folder; no root id is needed. Results stay in memory until you call `save_artifact`.',
+  save_artifact:
+    'Pass the `artifactUri` from `convert_document` and `destination: {"path": "report.docx"}`, a file name; no root id is needed. Gezel saves the file in its own folder and returns the absolute path. Copy it into this folder yourself if it belongs there: Gezel never writes into it.',
+  preview_document:
+    'Returns images of the pages or slides of an artifact from `convert_document`, or of a file in this folder, to check a result before saving it.',
+  inspect_document:
+    "To read a document's text, `read_doc_as_markdown` is simpler; use this for structure, tables, theme and diagnostics.",
+  list_themes: 'Pass a theme id to `convert_document` as `themeId`.',
+  get_authoring_context:
+    'Call it only when themes, templates or the exact options of a format would change what you write.',
 };

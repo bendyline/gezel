@@ -15,15 +15,15 @@ import type { HarnessTools } from './useHarnessTools.js';
 /** What each app does with Gezel's tools, in its own words. */
 const INTROS: Record<HarnessClientId, string> = {
   'claude-code':
-    'Claude Code can search the folder you start it in, your shared library, your memories and knowledge through Gezel, read Word, PowerPoint, Excel and PDF files, describe and make images, and check the issues Gezel found overnight. Gezel adds itself to Claude Code for every folder.',
+    'Claude Code can search the folder you start it in, your shared library, your memories and knowledge through Gezel, read and make Word, PowerPoint, Excel and PDF files, describe and make images, and check the issues Gezel found overnight. Gezel adds itself to Claude Code for every folder.',
   'claude-desktop':
-    'Claude Desktop can search your projects, shared library, memories and knowledge through Gezel, read Office files, describe and make images, and check the issues Gezel found overnight. It has no folder of its own, so it works in the project you pick here.',
+    'Claude Desktop can search your projects, shared library, memories and knowledge through Gezel, read and make Office files, describe and make images, and check the issues Gezel found overnight. It has no folder of its own, so it works in the project you pick here.',
   codex:
-    'Codex can use Gezel to search the folder you run it in, your shared library, memories and knowledge, read Office files, describe and make images, and check the issues Gezel found overnight.',
+    'Codex can use Gezel to search the folder you run it in, your shared library, memories and knowledge, read and make Office files, describe and make images, and check the issues Gezel found overnight.',
   cursor:
-    'Cursor can use Gezel to search the folder it has open, your shared library, memories and knowledge, read Office files, describe and make images, and check the issues Gezel found overnight.',
+    'Cursor can use Gezel to search the folder it has open, your shared library, memories and knowledge, read and make Office files, describe and make images, and check the issues Gezel found overnight.',
   vscode:
-    "VS Code's agent mode can use Gezel to search the folder it has open, your shared library, memories and knowledge, read Office files, describe and make images, and check the issues Gezel found overnight. The Gezel extension for VS Code adds these tools to each workspace by itself, so set them up here only if you don't use it.",
+    "VS Code's agent mode can use Gezel to search the folder it has open, your shared library, memories and knowledge, read and make Office files, describe and make images, and check the issues Gezel found overnight. The Gezel extension for VS Code adds these tools to each workspace by itself, so set them up here only if you don't use it.",
 };
 
 /** Apps Gezel sets up through their own command line rather than by editing a file. */

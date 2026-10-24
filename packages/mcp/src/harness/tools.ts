@@ -370,13 +370,7 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
     {
       description: HARNESS_TOOL_DESCRIPTIONS.search,
       inputSchema: {
-        // Optional to the schema so a call without it reaches the handler, which
-        // says what to send; the SDK's own refusal ended the search in 5 of 7 runs.
-        query: z
-          .string()
-          .max(400)
-          .optional()
-          .describe('Required. What to look for, in plain words.'),
+        query: z.string().trim().min(1).max(400).describe('What to look for, in plain words.'),
         scopes: z
           .array(z.enum(SEARCH_SCOPES))
           .optional()
@@ -408,12 +402,7 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
     },
     async (args) =>
       guarded(async () => {
-        const query = args.query?.trim();
-        if (!query) {
-          return failure(
-            'search needs a `query`: describe what you are looking for in plain words, for example {"query": "where uploaded files are checked for size"}.',
-          );
-        }
+        const query = args.query;
         const binding = await session.bind(args.pathPrefix);
         const scopes: readonly SearchScope[] = args.catalogs
           ? ['knowledge']
@@ -599,7 +588,9 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
           ];
           return text(`${head.join('\n')}\n\n${doc.markdown}`);
         }
-        const where = rootedPath(binding, args.path);
+        // A relative path is the library's, as `list_documents` names them;
+        // only an absolute one can point into this folder by mistake.
+        const where = isAbsolute(args.path) ? rootedPath(binding, args.path) : null;
         if (where && where.root !== 'library') {
           return failure(
             `${where.abs} is not in the shared library. Use read_doc_as_markdown for files in this folder.`,
@@ -795,9 +786,14 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
         const saved = artifactsDir ? join(artifactsDir, res.artifactPath) : res.artifactPath;
         const content: CallToolResult['content'] = [];
         if (res.b64Png) content.push({ type: 'image', data: res.b64Png, mimeType: 'image/png' });
+        // trial t2: told nothing, Opus asked for an edit, got a new scene, and
+        // spent a generation working out why.
+        const skipped = res.meta.img2imgSkippedReason
+          ? `This image engine can't edit images (${res.meta.img2imgSkippedReason}), so it ignored inputImages and made a new image from the prompt alone. To change an image, describe the whole picture you want. `
+          : '';
         content.push({
           type: 'text',
-          text: `Saved to ${saved} (${res.meta.widthPx}x${res.meta.heightPx}, ${res.meta.model}). Copy it into the folder with your own file tools if it belongs there.`,
+          text: `${skipped}Saved to ${saved} (${res.meta.widthPx}x${res.meta.heightPx}, ${res.meta.model}). Copy it into the folder with your own file tools if it belongs there.`,
         });
         return { content };
       }),

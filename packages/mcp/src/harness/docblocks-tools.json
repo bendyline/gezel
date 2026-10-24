@@ -1,0 +1,1569 @@
+{
+  "docblocksVersion": "2.7.5",
+  "tools": [
+    {
+      "name": "convert_document",
+      "description": "Convert plain text, Markdown, bundles, or linked-registry inputs directly into one or more immutable artifacts. Plain Markdown needs no preflight or annotations; valid Squisq annotations are optional layout hints. For PPTX, heading-based slide boundaries do not need --- separators. Use save_artifact only for durable filesystem output.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "markdown"
+                  },
+                  "markdown": {
+                    "type": "string",
+                    "maxLength": 20971520,
+                    "pattern": "^[^\\u0000\\u007f]*$"
+                  },
+                  "name": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1024,
+                        "pattern": "^[^\\u0000\\u007f]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": ["kind", "markdown"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "file"
+                  },
+                  "rootId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^(?!\\/)(?![A-Za-z]:)(?!.*(?:^|\\/)(?:\\.{1,2})(?:\\/|$))(?!.*\\/\\/)(?!.*[\\\\\\u0000-\\u001f\\u007f])(?!.*\\/$).+$"
+                  },
+                  "format": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[a-z0-9][a-z0-9.+_-]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": ["kind", "path"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "artifact"
+                  },
+                  "uri": {
+                    "type": "string",
+                    "maxLength": 278,
+                    "pattern": "^docblocks:\\/\\/artifacts\\/[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "required": ["kind", "uri"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "bundle"
+                  },
+                  "markdown": {
+                    "type": "string",
+                    "maxLength": 20971520,
+                    "pattern": "^[^\\u0000\\u007f]*$"
+                  },
+                  "assets": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "$ref": "#/properties/source/anyOf/1/properties/path"
+                        },
+                        "source": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "file"
+                                },
+                                "rootId": {
+                                  "$ref": "#/properties/source/anyOf/1/properties/rootId/anyOf/0"
+                                },
+                                "path": {
+                                  "$ref": "#/properties/source/anyOf/1/properties/path"
+                                }
+                              },
+                              "required": ["kind", "rootId", "path"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "artifact"
+                                },
+                                "uri": {
+                                  "$ref": "#/properties/source/anyOf/2/properties/uri"
+                                }
+                              },
+                              "required": ["kind", "uri"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "mimeType": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 256,
+                              "pattern": "^[a-z0-9!#$&^_.+-]+\\/[a-z0-9!#$&^_.+-]+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "altText": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "credit": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "license": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["path", "source", "mimeType", "altText", "credit", "license"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 256
+                  },
+                  "name": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": ["kind", "markdown", "assets"],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "md"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["semantic"]
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "dbk"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["semantic", "editable-native"]
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "docx"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["semantic", "editable-native"]
+                    },
+                    "title": {
+                      "type": "string",
+                      "maxLength": 4000
+                    },
+                    "author": {
+                      "type": "string",
+                      "maxLength": 4000
+                    },
+                    "description": {
+                      "type": "string",
+                      "maxLength": 8000
+                    },
+                    "defaultFont": {
+                      "type": "string",
+                      "maxLength": 256
+                    },
+                    "defaultFontSize": {
+                      "type": "number",
+                      "minimum": 6,
+                      "maximum": 96
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "pdf"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["semantic", "rendered-fidelity", "hybrid"]
+                    },
+                    "title": {
+                      "$ref": "#/properties/targets/items/anyOf/2/properties/title"
+                    },
+                    "author": {
+                      "$ref": "#/properties/targets/items/anyOf/2/properties/author"
+                    },
+                    "pageSize": {
+                      "type": "string",
+                      "enum": ["letter", "a4"]
+                    },
+                    "margin": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 288
+                    },
+                    "defaultFontSize": {
+                      "type": "number",
+                      "minimum": 6,
+                      "maximum": 96
+                    },
+                    "width": {
+                      "type": "integer",
+                      "minimum": 160,
+                      "maximum": 1920
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 90,
+                      "maximum": 1920
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "pptx"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["semantic", "editable-native", "rendered-fidelity", "hybrid"]
+                    },
+                    "title": {
+                      "$ref": "#/properties/targets/items/anyOf/2/properties/title"
+                    },
+                    "author": {
+                      "$ref": "#/properties/targets/items/anyOf/2/properties/author"
+                    },
+                    "description": {
+                      "$ref": "#/properties/targets/items/anyOf/2/properties/description"
+                    },
+                    "slideBreak": {
+                      "type": "string",
+                      "enum": ["h1", "h2", "heading"],
+                      "default": "h1",
+                      "description": "Defaults to h1: author one H1 per slide; deeper headings remain body text and no extra cover is inserted. h2 breaks at H1/H2; heading breaks at any depth. Include a title slide as an authored heading; do not add --- between heading-based slides."
+                    },
+                    "defaultFont": {
+                      "type": "string",
+                      "maxLength": 256
+                    },
+                    "defaultFontSize": {
+                      "type": "number",
+                      "minimum": 6,
+                      "maximum": 96
+                    },
+                    "width": {
+                      "type": "integer",
+                      "minimum": 160,
+                      "maximum": 1920
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 90,
+                      "maximum": 1920
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "xlsx"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["semantic", "editable-native"]
+                    },
+                    "title": {
+                      "$ref": "#/properties/targets/items/anyOf/2/properties/title"
+                    },
+                    "author": {
+                      "$ref": "#/properties/targets/items/anyOf/2/properties/author"
+                    },
+                    "sheetNamePrefix": {
+                      "type": "string",
+                      "maxLength": 31
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "csv"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["semantic"]
+                    },
+                    "delimiter": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4
+                    },
+                    "tableIndex": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "html"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["semantic"]
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": ["slideshow", "static"]
+                    },
+                    "autoPlay": {
+                      "type": "boolean"
+                    },
+                    "title": {
+                      "$ref": "#/properties/targets/items/anyOf/2/properties/title"
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "htmlzip"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["semantic"]
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": ["slideshow", "static"]
+                    },
+                    "autoPlay": {
+                      "type": "boolean"
+                    },
+                    "title": {
+                      "$ref": "#/properties/targets/items/anyOf/2/properties/title"
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "epub"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["semantic"]
+                    },
+                    "title": {
+                      "$ref": "#/properties/targets/items/anyOf/2/properties/title"
+                    },
+                    "author": {
+                      "$ref": "#/properties/targets/items/anyOf/2/properties/author"
+                    },
+                    "description": {
+                      "$ref": "#/properties/targets/items/anyOf/2/properties/description"
+                    },
+                    "language": {
+                      "type": "string",
+                      "maxLength": 64
+                    },
+                    "publisher": {
+                      "type": "string",
+                      "maxLength": 4000
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "mp4"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["rendered-fidelity"]
+                    },
+                    "fps": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 60
+                    },
+                    "quality": {
+                      "type": "string",
+                      "enum": ["draft", "normal", "high"]
+                    },
+                    "orientation": {
+                      "type": "string",
+                      "enum": ["landscape", "portrait"]
+                    },
+                    "width": {
+                      "type": "integer",
+                      "minimum": 16,
+                      "maximum": 3840
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 16,
+                      "maximum": 3840
+                    },
+                    "captionStyle": {
+                      "type": "string",
+                      "enum": ["standard", "social"]
+                    },
+                    "coverPreRoll": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 60
+                    },
+                    "animationsEnabled": {
+                      "type": "boolean",
+                      "description": "Explicit rendered-media motion switch. Use it only to honor a user preference such as no motion or dynamic motion; otherwise rely on the theme/target default. It does not select an individual transition."
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "gif"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["rendered-fidelity"]
+                    },
+                    "fps": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 30
+                    },
+                    "orientation": {
+                      "type": "string",
+                      "enum": ["landscape", "portrait"]
+                    },
+                    "width": {
+                      "type": "integer",
+                      "minimum": 16,
+                      "maximum": 1920
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 16,
+                      "maximum": 1920
+                    },
+                    "captionStyle": {
+                      "type": "string",
+                      "enum": ["standard", "social"]
+                    },
+                    "coverPreRoll": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 60
+                    },
+                    "animationsEnabled": {
+                      "type": "boolean",
+                      "description": "Explicit rendered-media motion switch. Use it only to honor a user preference such as no motion or dynamic motion; otherwise rely on the theme/target default. It does not select an individual transition."
+                    },
+                    "loop": {
+                      "type": "integer",
+                      "minimum": -1,
+                      "maximum": 65535
+                    },
+                    "maxColors": {
+                      "type": "integer",
+                      "minimum": 2,
+                      "maximum": 256
+                    },
+                    "dither": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "bayer",
+                        "heckbert",
+                        "floyd_steinberg",
+                        "sierra2",
+                        "sierra2_4a"
+                      ]
+                    },
+                    "bayerScale": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 5
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "const": "png"
+                    },
+                    "fidelity": {
+                      "type": "string",
+                      "enum": ["rendered-fidelity"]
+                    },
+                    "resolution": {
+                      "type": "string",
+                      "enum": [
+                        "hd",
+                        "fhd",
+                        "4k",
+                        "square",
+                        "square-2k",
+                        "portrait",
+                        "portrait-4k",
+                        "standard"
+                      ],
+                      "description": "Named output size for the Dashboard image. Mutually exclusive with width/height."
+                    },
+                    "width": {
+                      "type": "integer",
+                      "minimum": 64,
+                      "maximum": 7680,
+                      "description": "Custom pixel width. Requires height and excludes resolution."
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 64,
+                      "maximum": 7680,
+                      "description": "Custom pixel height. Requires width and excludes resolution."
+                    },
+                    "layout": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "description": "Dashboard layout id, or \"auto\" to pick by block count. Omit to honor the document's own squisq-dashboard-layout frontmatter."
+                    },
+                    "style": {
+                      "type": "string",
+                      "enum": ["basic", "card", "panel", "accent"],
+                      "description": "Cell dressing around each block. Omit to honor the document's own squisq-dashboard-style frontmatter."
+                    },
+                    "title": {
+                      "type": "boolean",
+                      "description": "Render the document-title band. Omit to honor the document’s own setting."
+                    }
+                  },
+                  "required": ["format"],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 12
+          },
+          "themeId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Exact Squisq theme id. Infer it from the brief when the visual direction is clear. If transformId is set and no exact theme was requested, omit themeId so the transform can apply its preferred compatible theme."
+          },
+          "transformId": {
+            "$ref": "#/properties/themeId",
+            "description": "Optional Squisq Summarize style id. It can change content emphasis, density, pacing, and structure; leave it unset for source-preserving work unless summarization or visual restructuring is requested or permitted."
+          },
+          "autoTemplates": {
+            "type": "boolean",
+            "description": "Enable content-aware automatic template selection. Defaults to true; explicit annotations still take precedence."
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "required": ["source", "targets"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "save_artifact",
+      "description": "Materialize an immutable artifact below a configured write root. Creation is no-replace; replacement requires the current SHA-256.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "artifactUri": {
+            "type": "string",
+            "maxLength": 278,
+            "pattern": "^docblocks:\\/\\/artifacts\\/[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "destination": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "rootId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^(?!\\/)(?![A-Za-z]:)(?!.*(?:^|\\/)(?:\\.{1,2})(?:\\/|$))(?!.*\\/\\/)(?!.*[\\\\\\u0000-\\u001f\\u007f])(?!.*\\/$).+$"
+                  },
+                  "ifExists": {
+                    "type": "string",
+                    "const": "error"
+                  },
+                  "expectedSha256": {
+                    "type": "null",
+                    "default": null
+                  }
+                },
+                "required": ["rootId", "path", "ifExists"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "rootId": {
+                    "$ref": "#/properties/destination/anyOf/0/properties/rootId"
+                  },
+                  "path": {
+                    "$ref": "#/properties/destination/anyOf/0/properties/path"
+                  },
+                  "ifExists": {
+                    "type": "string",
+                    "const": "replace"
+                  },
+                  "expectedSha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": ["rootId", "path", "ifExists", "expectedSha256"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": ["artifactUri", "destination"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "preview_document",
+      "description": "Render bounded visual previews as immutable image artifacts and report previewBasis. Markdown/DBK use source-render, imported document artifacts use reconstructed-import, and MP4/GIF sources use a native-extracted first-frame JPEG. Supports pagination and protocol progress/cancellation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "markdown"
+                  },
+                  "markdown": {
+                    "type": "string",
+                    "maxLength": 20971520,
+                    "pattern": "^[^\\u0000\\u007f]*$"
+                  },
+                  "name": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1024,
+                        "pattern": "^[^\\u0000\\u007f]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": ["kind", "markdown"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "file"
+                  },
+                  "rootId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^(?!\\/)(?![A-Za-z]:)(?!.*(?:^|\\/)(?:\\.{1,2})(?:\\/|$))(?!.*\\/\\/)(?!.*[\\\\\\u0000-\\u001f\\u007f])(?!.*\\/$).+$"
+                  },
+                  "format": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[a-z0-9][a-z0-9.+_-]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": ["kind", "path"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "artifact"
+                  },
+                  "uri": {
+                    "type": "string",
+                    "maxLength": 278,
+                    "pattern": "^docblocks:\\/\\/artifacts\\/[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "required": ["kind", "uri"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "bundle"
+                  },
+                  "markdown": {
+                    "type": "string",
+                    "maxLength": 20971520,
+                    "pattern": "^[^\\u0000\\u007f]*$"
+                  },
+                  "assets": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "$ref": "#/properties/source/anyOf/1/properties/path"
+                        },
+                        "source": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "file"
+                                },
+                                "rootId": {
+                                  "$ref": "#/properties/source/anyOf/1/properties/rootId/anyOf/0"
+                                },
+                                "path": {
+                                  "$ref": "#/properties/source/anyOf/1/properties/path"
+                                }
+                              },
+                              "required": ["kind", "rootId", "path"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "artifact"
+                                },
+                                "uri": {
+                                  "$ref": "#/properties/source/anyOf/2/properties/uri"
+                                }
+                              },
+                              "required": ["kind", "uri"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "mimeType": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 256,
+                              "pattern": "^[a-z0-9!#$&^_.+-]+\\/[a-z0-9!#$&^_.+-]+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "altText": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "credit": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "license": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["path", "source", "mimeType", "altText", "credit", "license"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 256
+                  },
+                  "name": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": ["kind", "markdown", "assets"],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "startIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "maxItems": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 160,
+            "maximum": 1920
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 90,
+            "maximum": 1920
+          }
+        },
+        "required": ["source"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "inspect_document",
+      "description": "Inspect bounded semantic structure, block provenance, assets, metadata, theme, and diagnostics when the user asks for document analysis. Inspection is never required before conversion.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "markdown"
+                  },
+                  "markdown": {
+                    "type": "string",
+                    "maxLength": 20971520,
+                    "pattern": "^[^\\u0000\\u007f]*$"
+                  },
+                  "name": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1024,
+                        "pattern": "^[^\\u0000\\u007f]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": ["kind", "markdown"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "file"
+                  },
+                  "rootId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^(?!\\/)(?![A-Za-z]:)(?!.*(?:^|\\/)(?:\\.{1,2})(?:\\/|$))(?!.*\\/\\/)(?!.*[\\\\\\u0000-\\u001f\\u007f])(?!.*\\/$).+$"
+                  },
+                  "format": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[a-z0-9][a-z0-9.+_-]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": ["kind", "path"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "artifact"
+                  },
+                  "uri": {
+                    "type": "string",
+                    "maxLength": 278,
+                    "pattern": "^docblocks:\\/\\/artifacts\\/[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "required": ["kind", "uri"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "bundle"
+                  },
+                  "markdown": {
+                    "type": "string",
+                    "maxLength": 20971520,
+                    "pattern": "^[^\\u0000\\u007f]*$"
+                  },
+                  "assets": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "$ref": "#/properties/source/anyOf/1/properties/path"
+                        },
+                        "source": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "file"
+                                },
+                                "rootId": {
+                                  "$ref": "#/properties/source/anyOf/1/properties/rootId/anyOf/0"
+                                },
+                                "path": {
+                                  "$ref": "#/properties/source/anyOf/1/properties/path"
+                                }
+                              },
+                              "required": ["kind", "rootId", "path"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "artifact"
+                                },
+                                "uri": {
+                                  "$ref": "#/properties/source/anyOf/2/properties/uri"
+                                }
+                              },
+                              "required": ["kind", "uri"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "mimeType": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 256,
+                              "pattern": "^[a-z0-9!#$&^_.+-]+\\/[a-z0-9!#$&^_.+-]+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "altText": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "credit": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "license": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["path", "source", "mimeType", "altText", "credit", "license"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 256
+                  },
+                  "name": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": ["kind", "markdown", "assets"],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "maxBlocks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["source"],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_themes",
+      "description": "List the linked Squisq built-in visual themes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_authoring_context",
+      "description": "Optionally discover target capabilities, safe defaults, semantically described themes and Squisq Summarize styles, and exact starter annotation examples. Use these descriptions to choose for the user rather than presenting raw ids. Plain Markdown can be converted without calling this tool.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetFormat": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]*$"
+          },
+          "goal": {
+            "type": "string",
+            "enum": ["content-first", "visual-polish"]
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "markdown"
+                  },
+                  "markdown": {
+                    "type": "string",
+                    "maxLength": 20971520,
+                    "pattern": "^[^\\u0000\\u007f]*$"
+                  },
+                  "name": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1024,
+                        "pattern": "^[^\\u0000\\u007f]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": ["kind", "markdown"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "file"
+                  },
+                  "rootId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "pattern": "^(?!\\/)(?![A-Za-z]:)(?!.*(?:^|\\/)(?:\\.{1,2})(?:\\/|$))(?!.*\\/\\/)(?!.*[\\\\\\u0000-\\u001f\\u007f])(?!.*\\/$).+$"
+                  },
+                  "format": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[a-z0-9][a-z0-9.+_-]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": ["kind", "path"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "artifact"
+                  },
+                  "uri": {
+                    "type": "string",
+                    "maxLength": 278,
+                    "pattern": "^docblocks:\\/\\/artifacts\\/[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "required": ["kind", "uri"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "bundle"
+                  },
+                  "markdown": {
+                    "type": "string",
+                    "maxLength": 20971520,
+                    "pattern": "^[^\\u0000\\u007f]*$"
+                  },
+                  "assets": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "$ref": "#/properties/source/anyOf/1/properties/path"
+                        },
+                        "source": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "file"
+                                },
+                                "rootId": {
+                                  "$ref": "#/properties/source/anyOf/1/properties/rootId/anyOf/0"
+                                },
+                                "path": {
+                                  "$ref": "#/properties/source/anyOf/1/properties/path"
+                                }
+                              },
+                              "required": ["kind", "rootId", "path"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "artifact"
+                                },
+                                "uri": {
+                                  "$ref": "#/properties/source/anyOf/2/properties/uri"
+                                }
+                              },
+                              "required": ["kind", "uri"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "mimeType": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 256,
+                              "pattern": "^[a-z0-9!#$&^_.+-]+\\/[a-z0-9!#$&^_.+-]+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "altText": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "credit": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "license": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["path", "source", "mimeType", "altText", "credit", "license"],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 256
+                  },
+                  "name": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/properties/source/anyOf/0/properties/name/anyOf/0"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "default": null
+                  }
+                },
+                "required": ["kind", "markdown", "assets"],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "maxBlocks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ]
+}

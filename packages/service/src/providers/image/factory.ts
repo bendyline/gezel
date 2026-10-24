@@ -92,6 +92,20 @@ export interface ImageProviderFactoryOptions {
  * 89 s for the chat engine to go idle, then was evicted as soon as the next
  * chat turn asked for memory, so every render paid a fresh load.
  */
+/**
+ * Nothing to generate with: the person has to download a model first. Its
+ * own type so the route can answer with the fix, not a bare 500, which reads
+ * to an outside app as "something went wrong inside Gezel".
+ */
+export class NoLocalImageModelError extends Error {
+  constructor() {
+    super(
+      'No image model is available locally. Download one from Settings → Image generation before generating.',
+    );
+    this.name = 'NoLocalImageModelError';
+  }
+}
+
 export function sdServerCapacity(home: string): NativeCapacityOptions {
   return { home };
 }
@@ -197,11 +211,7 @@ export async function createImageProvider(
         const model =
           (requestedId ? await findInstalledModel(storageRoots, requestedId) : undefined) ??
           (await findFirstInstalledModel(storageRoots));
-        if (!model) {
-          throw new Error(
-            'No image model is available locally. Download one from Settings → Image generation before generating.',
-          );
-        }
+        if (!model) throw new NoLocalImageModelError();
         launchedModel = model;
         return {
           command: binary,

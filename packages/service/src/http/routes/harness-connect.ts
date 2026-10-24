@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import {
   HARNESS_CLIENT_LABELS,
   HarnessConnectRequestSchema,
@@ -6,10 +7,12 @@ import {
   resolveHarnessToolsConfig,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
+import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { HarnessBindingError, resolveHarnessBinding } from '../../harness-tools/binding.js';
 import { buildInferDeps } from '../../projects/infer-deps.js';
+import { bundledDocblocksToolset } from '../../toolsets/bundled-docblocks.js';
 import { bearerAuth, requireFirstParty } from '../auth.js';
 import type { ServiceContext } from '../context.js';
 import {
@@ -98,10 +101,33 @@ export function harnessConnectRoutes(ctx: ServiceContext): Hono {
         memory: config.memory,
         images: config.images,
         issues: config.issues,
+        ...documentsRuntime(ctx.home),
       };
       return c.json(response);
     },
   );
 
   return app;
+}
+
+/**
+ * The DocBlocks the app's document tools start. It runs under the app's own
+ * account, beside the harness, so it reads the app's folder and writes where
+ * that account can. Nothing when this build ships none.
+ */
+function documentsRuntime(home: string): Pick<HarnessConnectResponse, 'documents'> {
+  let toolset: ReturnType<typeof bundledDocblocksToolset>;
+  try {
+    toolset = bundledDocblocksToolset();
+  } catch {
+    return {};
+  }
+  const { installPath, runtime } = toolset;
+  if (!installPath || runtime.kind !== 'npm-package') return {};
+  return {
+    documents: {
+      entry: join(installPath, runtime.entry),
+      browsersPath: playwrightBrowsersDir(home),
+    },
+  };
 }

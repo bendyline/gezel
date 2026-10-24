@@ -1,10 +1,13 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   GEZEL_API_GENERATION,
   GEZEL_API_GENERATION_FLOOR,
+  HARNESS_DOCUMENT_TOOL_NAMES,
   HARNESS_TOOL_NAMES,
   type HarnessConnectResponse,
 } from '@bendyline/gezel';
@@ -17,6 +20,7 @@ import {
   type ManagedFetch,
 } from '@bendyline/gezel-client/node';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -36,6 +40,7 @@ let root: string;
 let folder: string;
 let library: string;
 let artifacts: string;
+const sessions: HarnessSession[] = [];
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'gezel-harness-mcp-'));
@@ -48,6 +53,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  await Promise.all(sessions.splice(0).map((s) => s.close()));
   await rm(root, { recursive: true, force: true });
 });
 
@@ -133,6 +139,7 @@ async function harness(
     connect: fake.connect,
     ...opts,
   });
+  sessions.push(session);
   const server = createHarnessServer(session);
   const client = new Client(
     { name: 'harness-test', version: '1.0.0' },
@@ -159,7 +166,9 @@ describe('the harness profile', () => {
   it('lists exactly the profile, with descriptions that name only its own tools', async () => {
     const client = await harness(fakeGezel());
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual([...HARNESS_TOOL_NAMES].sort());
+    expect(tools.map((t) => t.name).sort()).toEqual(
+      [...HARNESS_TOOL_NAMES, ...HARNESS_DOCUMENT_TOOL_NAMES].sort(),
+    );
     const others = [
       'write_artifact',
       'read_artifact',
@@ -352,14 +361,37 @@ describe('the tools', () => {
     expect(lines).toHaveLength(4);
   });
 
-  it('tells an app that searched without a query what to send', async () => {
-    // trial t1: Sonnet 5.5 called the deferred tool without loading its schema.
+  it('tells an app that called a tool without its arguments what to send', async () => {
+    // trials t1 and t2: Sonnet 5.5 called deferred tools without loading their schemas.
     const fake = fakeGezel();
     const client = await harness(fake);
-    const result = await client.callTool({ name: 'search', arguments: {} });
-    expect(result.isError).toBe(true);
-    expect(textOf(result)).toContain('search needs a `query`');
+    const search = await client.callTool({ name: 'search', arguments: {} });
+    expect(search.isError).toBe(true);
+    expect(textOf(search)).toBe(
+      '`search` needs `query` (What to look for, in plain words). For example: {"query":"where uploaded files are checked for size"}',
+    );
     expect(fake.requests.some((r) => r.path.endsWith('/tools/search'))).toBe(false);
+
+    const read = await client.callTool({ name: 'read_doc_as_markdown', arguments: {} });
+    expect(textOf(read)).toMatch(/^`read_doc_as_markdown` needs `path` \(.+\)\. For example: /);
+    expect(textOf(read)).not.toContain('MCP error');
+  });
+
+  it('keeps the reason when the arguments are there but wrong', async () => {
+    const client = await harness(fakeGezel());
+    const result = await client.callTool({ name: 'search', arguments: { query: 42 } });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/^`search` could not use those arguments: .*expected string/);
+    expect(textOf(result)).toContain('It needs `query`');
+  });
+
+  it('answers a document tool called without its arguments before starting DocBlocks', async () => {
+    const fake = fakeGezel();
+    const client = await harness(fake);
+    const result = await client.callTool({ name: 'convert_document', arguments: {} });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/^`convert_document` needs `source`.* and `targets`/);
+    expect(fake.exchanges).toEqual([]);
   });
 
   it('names an area summary by its folder, and drops photo matches beside code', async () => {
@@ -448,6 +480,23 @@ describe('the tools', () => {
     });
     expect(opened.isError).toBe(true);
     expect(textOf(opened)).toMatch(/not available to other apps/);
+  });
+
+  it('reads a relative path from the library, as list_documents names it', async () => {
+    // trial t2: `read_document style-guide.md` was looked for in the folder.
+    const fake = fakeGezel();
+    fake.routes.set('GET /api/documents/read', (_body, url) => ({
+      path: url.searchParams.get('path'),
+      content: '# House style',
+    }));
+    const client = await harness(fake);
+    const out = await client.callTool({
+      name: 'read_document',
+      arguments: { path: 'style-guide.md' },
+    });
+    expect(out.isError).toBeFalsy();
+    expect(textOf(out)).toContain('# House style');
+    expect(fake.requests.at(-1)?.path).toContain('path=style-guide.md');
   });
 
   it('searches knowledge only when asked, and then shows it in full', async () => {
@@ -545,6 +594,28 @@ describe('the tools', () => {
     const sent = fake.requests.at(-1)?.body as Record<string, unknown>;
     expect(sent).toMatchObject({ prompt: 'a cat', projectId: 'repo', inline: true });
     expect(sent.saveAs).toBeUndefined();
+  });
+
+  it('says when the image engine made a new image instead of the edit asked for', async () => {
+    const fake = fakeGezel();
+    fake.routes.set('POST /api/image-gen/generate', () => ({
+      artifactPath: 'generated/van.png',
+      workspacePath: null,
+      meta: {
+        model: 'flux-2-klein-4b-q4',
+        seed: 1,
+        widthPx: 64,
+        heightPx: 64,
+        img2imgSkippedReason: 'model flux-2-klein-4b-q4 does not support image editing (img2img)',
+      },
+    }));
+    await writeFile(join(folder, 'van.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const client = await harness(fake);
+    const result = await client.callTool({
+      name: 'generate_image',
+      arguments: { prompt: 'remove the logo', inputImages: ['van.png'] },
+    });
+    expect(textOf(result)).toMatch(/can't edit images .* made a new image from the prompt alone/);
   });
 
   it('describes an image in the folder from its bytes, never one outside it', async () => {
@@ -710,4 +781,117 @@ describe("the night shift's issues", () => {
     expect(text).toMatch(/^Gezel has no open issues/);
     expect(text).not.toContain('report_issue_verdicts');
   });
+});
+
+const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
+/** The DocBlocks the service ships, when this checkout has it installed. */
+const docblocksEntry = (() => {
+  try {
+    const pkg = createRequire(join(repoRoot, 'packages/service/package.json')).resolve(
+      '@bendyline/docblocks-cli/package.json',
+    );
+    const entry = join(pkg, '..', 'dist', 'bin.js');
+    return existsSync(entry) ? entry : null;
+  } catch {
+    return null;
+  }
+})();
+
+/** The first artifact address in a DocBlocks result. */
+function artifactUri(result: Awaited<ReturnType<Client['callTool']>>): string {
+  const match = /docblocks:\/\/artifacts\/[A-Za-z0-9._:-]+/.exec(JSON.stringify(result));
+  if (!match) throw new Error(`no artifact in ${textOf(result)}`);
+  return match[0];
+}
+
+describe('making documents', () => {
+  it("lists DocBlocks' schemas, with a save that needs only a file name", async () => {
+    const { tools } = await (await harness(fakeGezel())).listTools();
+    const convert = tools.find((t) => t.name === 'convert_document');
+    expect(convert?.inputSchema.required).toEqual(['source', 'targets']);
+    expect(convert?.description).toContain('one `#` heading per slide');
+    const save = tools.find((t) => t.name === 'save_artifact');
+    const destination = (save?.inputSchema.properties as Record<string, { required?: string[] }>)
+      .destination;
+    expect(destination?.required).toEqual(['path']);
+  });
+
+  it('tells an app on an older Gezel to update', async () => {
+    const client = await harness(fakeGezel());
+    const result = await client.callTool({
+      name: 'convert_document',
+      arguments: { source: { kind: 'markdown', markdown: '# Hi' }, targets: ['docx'] },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('Update Gezel');
+  });
+
+  it.skipIf(!docblocksEntry)(
+    "converts a file in the folder and saves it in Gezel's folder, never the app's",
+    async () => {
+      await writeFile(join(folder, 'docs', 'brief.md'), '# Pilot\n\nResults improved.\n');
+      const fake = fakeGezel(() => connectResponse({ documents: { entry: docblocksEntry! } }));
+      const client = await harness(fake);
+      const converted = await client.callTool({
+        name: 'convert_document',
+        arguments: { source: join(folder, 'docs', 'brief.md'), targets: ['docx'] },
+      });
+      expect(converted.isError, textOf(converted)).toBeFalsy();
+      const saved = await client.callTool({
+        name: 'save_artifact',
+        arguments: { artifactUri: artifactUri(converted), destination: { path: 'brief.docx' } },
+      });
+      expect(saved.isError, textOf(saved)).toBeFalsy();
+      const file = join(artifacts, 'documents', 'brief.docx');
+      expect(textOf(saved)).toContain(`Saved to ${file}`);
+      expect((await readFile(file)).subarray(0, 2).toString()).toBe('PK');
+      expect(existsSync(join(folder, 'brief.docx'))).toBe(false);
+      // The same name again (the deck made twice) is numbered, not refused.
+      const again = await client.callTool({
+        name: 'save_artifact',
+        arguments: { artifactUri: artifactUri(converted), destination: { path: 'brief.docx' } },
+      });
+      expect(again.isError, textOf(again)).toBeFalsy();
+      expect(textOf(again)).toContain('so this one is named brief (2).docx');
+      expect(existsSync(join(artifacts, 'documents', 'brief (2).docx'))).toBe(true);
+      // Claude Code shows structuredContent instead of content, which hid the note.
+      expect(again.structuredContent).toBeUndefined();
+      // A replace needs the current file's hash, which Gezel reads for the app.
+      const replaced = await client.callTool({
+        name: 'save_artifact',
+        arguments: {
+          artifactUri: artifactUri(converted),
+          destination: { path: 'brief.docx', ifExists: 'replace' },
+        },
+      });
+      expect(replaced.isError, textOf(replaced)).toBeFalsy();
+      expect(textOf(replaced)).toContain(`Saved to ${file}`);
+    },
+    60_000,
+  );
+
+  it.skipIf(!docblocksEntry)(
+    'keeps the snapshot in step with the DocBlocks the service ships',
+    async () => {
+      const snapshot = JSON.parse(
+        await readFile(join(repoRoot, 'packages/mcp/src/harness/docblocks-tools.json'), 'utf8'),
+      ) as { tools: Array<{ name: string; description: string; inputSchema: unknown }> };
+      const client = new Client({ name: 'snapshot-test', version: '1.0.0' });
+      await client.connect(
+        new StdioClientTransport({ command: process.execPath, args: [docblocksEntry!, 'mcp'] }),
+      );
+      try {
+        const { tools } = await client.listTools();
+        for (const expected of snapshot.tools) {
+          const live = tools.find((t) => t.name === expected.name);
+          // Out of step: run `node scripts/snapshot-docblocks-tools.mjs`.
+          expect(live?.description, expected.name).toBe(expected.description);
+          expect(live?.inputSchema, expected.name).toEqual(expected.inputSchema);
+        }
+      } finally {
+        await client.close();
+      }
+    },
+    60_000,
+  );
 });

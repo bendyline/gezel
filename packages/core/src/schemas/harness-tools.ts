@@ -153,6 +153,14 @@ export const HarnessConnectResponseSchema = z.object({
   images: HarnessImageModeSchema,
   /** Absent from a daemon that predates issue triage; the app then says to update Gezel. */
   issues: HarnessIssueModeSchema.optional(),
+  /**
+   * The DocBlocks Gezel ships, which the app's document tools start as
+   * `node <entry> mcp`, and where its preview browser is installed. Absent
+   * from a daemon that predates them or ships none.
+   */
+  documents: z
+    .object({ entry: z.string().min(1), browsersPath: z.string().min(1).optional() })
+    .optional(),
 });
 export type HarnessConnectResponse = z.infer<typeof HarnessConnectResponseSchema>;
 
