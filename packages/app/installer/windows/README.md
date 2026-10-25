@@ -48,6 +48,23 @@ walk children. On an elevated runner it executes the production launcher with
 Administrators ownership and a locked-down child. Other hosts skip the syscall
 tests explicitly. The Windows release workflow runs them before packaging.
 
+## Keeping a sealed service tree
+
+On an upgrade the data-root repair leaves `service\` as it is when it is still
+sealed as `PublishServiceTree` left it: Administrators own it, its DACL is
+protected, no ACE outside SYSTEM and Administrators grants a write, delete,
+permission or ownership right (inherit-only ACEs included), and the first 64
+bytes of its `.gezel-bundle.sha256` equal the attestation the installer read
+from `HKLM\Software\Bendyline\Gezel` in `customInit`. It has to be read there:
+the old uninstaller an upgrade runs deletes that key before `customInstall`.
+The helper decides on the child handle it already pinned, and opens the
+sentinel relative to it without following links; a link, hard link, missing or
+different sentinel, or any looser DACL gets the full repair. The extractor
+commits every tree as a fresh object under the private root, so a tree in that
+state can only have been changed by an administrator. Re-securing its ~48k
+entries was six of an upgrade's nine minutes on Windows on ARM, spent just
+before extraction replaced the tree.
+
 ## Service SID grants
 
 `grant-service-sid.ps1` gives `GezelService`'s per-service SID its four

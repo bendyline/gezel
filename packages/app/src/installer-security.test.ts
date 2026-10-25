@@ -19,6 +19,8 @@ function position(needle: string): number {
   return index;
 }
 
+const dataRootSweep = '!insertmacro SanitizeDescendantsKeepingSealedTree "${GEZEL_DATA_DIR}"';
+
 function commandLine(containing: string): string {
   const line = hook.split(/\r?\n/).find((candidate) => candidate.includes(containing));
   expect(line, `missing installer command containing: ${containing}`).toBeDefined();
@@ -28,7 +30,7 @@ function commandLine(containing: string): string {
 describe('Windows machine-service installer security', () => {
   it('keeps private state closed while exposing runtime and read-only assets', () => {
     expect(hook).toContain('/setowner "*S-1-5-32-544"');
-    expect(hook).toContain('!insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}"');
+    expect(hook).toContain(dataRootSweep);
 
     const rootAcl = commandLine('"${GEZEL_DATA_DIR}" /inheritance:r');
     const [rootGrant = '', rootRemove = ''] = rootAcl.split('/remove:g');
@@ -268,24 +270,73 @@ describe('Windows machine-service installer security', () => {
   });
 
   it('repairs descendants through handles and refuses an incomplete repair', () => {
-    const sweep = hook.slice(
-      position('!macro SanitizeDescendants'),
-      hook.indexOf('!macroend', position('!macro SanitizeDescendants')),
+    const macro = (name: string) =>
+      hook.slice(
+        position(`!macro ${name} `),
+        hook.indexOf('!macroend', position(`!macro ${name} `)),
+      );
+    const repair = macro('RepairTreeAcl');
+    expect(repair).toContain('-File "${GEZEL_ACL_REPAIR}" -Root "${PATH}"${HELPER_ARGS}');
+    expect(repair).toContain('${IfNot} ${FileExists} "${GEZEL_ACL_REPAIR}"');
+    expect(repair).toContain('${If} $0 != 0');
+    expect(repair).toContain('Goto ${FAILURE_LABEL}');
+    expect(repair).not.toContain('icacls.exe');
+    expect(repair).not.toContain('takeown.exe');
+    expect(macro('SanitizeDescendants')).toContain(
+      '!insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" "" ${FAILURE_LABEL}',
     );
-    expect(sweep).toContain('-File "${GEZEL_ACL_REPAIR}" -Root "${PATH}"');
-    expect(sweep).toContain('${IfNot} ${FileExists} "${GEZEL_ACL_REPAIR}"');
-    expect(sweep).toContain('${If} $0 != 0');
-    expect(sweep).toContain('Goto ${FAILURE_LABEL}');
-    expect(sweep).not.toContain('icacls.exe');
-    expect(sweep).not.toContain('takeown.exe');
 
     // Repair establishes a private tree; publication widens its inheritance
     // only after the entire handle-based walk succeeds.
-    for (const container of ['"${GEZEL_DATA_DIR}"', '"${GEZEL_DATA_DIR}\\assets"']) {
-      expect(hook.indexOf(`!insertmacro SanitizeDescendants ${container}`)).toBeLessThan(
-        position(`${container} /inheritance:r`),
-      );
+    for (const [sweep, container] of [
+      [dataRootSweep, '"${GEZEL_DATA_DIR}"'],
+      [
+        '!insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\\assets"',
+        '"${GEZEL_DATA_DIR}\\assets"',
+      ],
+    ] as const) {
+      expect(position(sweep)).toBeLessThan(position(`${container} /inheritance:r`));
     }
+  });
+
+  // Re-securing the previous service tree was six of an upgrade's nine
+  // minutes (Windows on ARM, 2026-10-24), spent on ~48k entries the extractor
+  // replaced a minute later. A tree still sealed as PublishServiceTree left it
+  // can only have been changed by an administrator, so the data-root repair
+  // leaves it out, deciding on the helper's own pinned handles.
+  it('leaves a still-sealed, attested service tree out of the upgrade repair', () => {
+    expect(hook).toContain('!define GEZEL_SERVICE_TREE "${GEZEL_DATA_DIR}\\service"');
+    expect(hook).toContain(`${dataRootSweep} "existing machine-service data" "service" SkipNssm`);
+    expect(hook.match(/!insertmacro SanitizeDescendantsKeepingSealedTree /g)).toHaveLength(1);
+
+    // The old uninstaller an upgrade runs deletes the whole state key before
+    // customInstall, so the attestation is read in customInit, from the same
+    // 64-bit HKLM view PublishServiceTree writes and the app reads.
+    const initStart = position('!macro customInit');
+    const init = hook.slice(initStart, hook.indexOf('!macroend', initStart));
+    const read = init.indexOf(
+      'ReadRegStr $GezelPublishedTreeSha HKLM "${GEZEL_STATE_REGISTRY_KEY}" "${GEZEL_PUBLISHED_TREE_VALUE}"',
+    );
+    expect(read).toBeGreaterThan(init.indexOf('SetRegView 64'));
+    expect(init.indexOf('SetRegView 64')).toBeGreaterThanOrEqual(0);
+    const uninstallStart = position('!macro customUnInstall');
+    const uninstall = hook.slice(uninstallStart, hook.indexOf('!macroend', uninstallStart));
+    expect(uninstall).toContain('DeleteRegKey SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}"');
+
+    // No attestation, no exception: the plain repair runs.
+    const keeping = hook.slice(
+      position('!macro SanitizeDescendantsKeepingSealedTree '),
+      hook.indexOf('!macroend', position('!macro SanitizeDescendantsKeepingSealedTree ')),
+    );
+    const noRecord = keeping.indexOf('${If} $GezelPublishedTreeSha == ""');
+    const otherwise = keeping.indexOf('${Else}');
+    expect(noRecord).toBeGreaterThanOrEqual(0);
+    expect(keeping.slice(noRecord, otherwise)).toContain(
+      '!insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" "" ${FAILURE_LABEL}',
+    );
+    expect(keeping.slice(otherwise)).toContain(
+      `' -KeepSealedChild "\${TREE}" -SealedSha "$GezelPublishedTreeSha"'`,
+    );
   });
 
   it("removes only Gezel's own Office registrations, and never on upgrade", () => {
@@ -723,7 +774,7 @@ describe('Windows machine-service installer security', () => {
   });
 
   it('closes the private tree before link cleanup and preserves shared links', () => {
-    expect(position('!insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}"')).toBeLessThan(
+    expect(position(dataRootSweep)).toBeLessThan(
       position('!insertmacro NeutralizeReparseDescendants "${GEZEL_DATA_DIR}"'),
     );
     expect(hook).not.toContain('!insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}" ');
@@ -836,10 +887,10 @@ describe('Windows machine-service installer security', () => {
       }
     }
     expect(open, 'unbalanced SetRegView bracket at end of hooks').toBe(false);
-    // Six brackets: the tree attestation (withdraw + record), the VC++ probe,
-    // both install-state breadcrumb writes, and the uninstall removing that key.
-    // Deliberately exact, so a new one gets a deliberate look at the restore
-    // rule above.
-    expect(sequence.filter((view) => view === '64')).toHaveLength(6);
+    // Seven brackets: the tree attestation (read in customInit, withdraw,
+    // record), the VC++ probe, both install-state breadcrumb writes, and the
+    // uninstall removing that key. Deliberately exact, so a new one gets a
+    // deliberate look at the restore rule above.
+    expect(sequence.filter((view) => view === '64')).toHaveLength(7);
   });
 });

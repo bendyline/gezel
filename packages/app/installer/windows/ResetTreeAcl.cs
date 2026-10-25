@@ -5,6 +5,8 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 namespace Gezel.Installer
@@ -19,6 +21,12 @@ namespace Gezel.Installer
         const uint OwnerSecurity = 1, DaclSecurity = 4;
         const uint ProtectedDacl = 0x80000000, UnprotectedDacl = 0x20000000;
         const int NoMoreFiles = unchecked((int)0x80000006);
+        const int BufferTooSmall = unchecked((int)0xC0000023);
+        // Write, append, extended-attribute and attribute writes, delete,
+        // delete-child, WRITE_DAC, WRITE_OWNER, GENERIC_WRITE and GENERIC_ALL:
+        // any one of them lets its holder change a tree.
+        const int WriteMask = 0x500D0156;
+        const string SentinelName = ".gezel-bundle.sha256";
 
         [StructLayout(LayoutKind.Sequential)]
         struct UnicodeString { public ushort Length, MaximumLength; public IntPtr Buffer; }
@@ -55,7 +63,13 @@ namespace Gezel.Installer
         [DllImport("ntdll.dll")]
         static extern int NtSetSecurityObject(SafeFileHandle handle, uint information, byte[] descriptor);
         [DllImport("ntdll.dll")]
+        static extern int NtQuerySecurityObject(SafeFileHandle handle, uint information,
+            byte[] descriptor, uint length, out uint needed);
+        [DllImport("ntdll.dll")]
         static extern uint RtlNtStatusToDosError(int status);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool ReadFile(SafeFileHandle handle, byte[] buffer, uint count,
+            out uint read, IntPtr overlapped);
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInfo info);
         [DllImport("kernel32.dll")]
@@ -151,8 +165,91 @@ namespace Gezel.Installer
             return bytes;
         }
 
+        static bool IsSha256(string text)
+        {
+            if (text == null || text.Length != 64) return false;
+            foreach (char c in text)
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+                    return false;
+            return true;
+        }
+
+        static byte[] QuerySecurity(SafeFileHandle handle, uint information, string display)
+        {
+            byte[] buffer = new byte[4096];
+            uint needed;
+            int status = NtQuerySecurityObject(handle, information, buffer, (uint)buffer.Length, out needed);
+            if (status == BufferTooSmall)
+            {
+                buffer = new byte[needed];
+                status = NtQuerySecurityObject(handle, information, buffer, needed, out needed);
+            }
+            Check(status, "Cannot inspect " + display);
+            return buffer;
+        }
+
+        static bool SentinelMatches(SafeFileHandle tree, string sealedSha)
+        {
+            SafeFileHandle sentinel;
+            try { sentinel = Open(tree.DangerousGetHandle(), SentinelName, false); }
+            catch (Win32Exception) { return false; }
+            using (sentinel)
+            {
+                FileInfo info;
+                if (!GetFileInformationByHandle(sentinel, out info)) return false;
+                if ((info.Attributes & (Directory | ReparsePoint)) != 0 || info.Links != 1) return false;
+                byte[] text = new byte[64];
+                int total = 0;
+                while (total < text.Length)
+                {
+                    byte[] chunk = new byte[text.Length - total];
+                    uint read;
+                    if (!ReadFile(sentinel, chunk, (uint)chunk.Length, out read, IntPtr.Zero) || read == 0)
+                        break;
+                    Array.Copy(chunk, 0, text, total, (int)read);
+                    total += (int)read;
+                }
+                if (total != text.Length) return false;
+                string value = Encoding.ASCII.GetString(text);
+                return IsSha256(value) && string.Equals(value, sealedSha, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        // An upgrade's previous service tree, still as the installer published
+        // it: owned by the trusted owner, its DACL protected, writable by no one
+        // but SYSTEM and that owner, and its sentinel naming the bundle the
+        // installer attested. The extractor commits every tree as a fresh
+        // object under the private root, so since then only an administrator
+        // could have changed anything inside it. Re-securing its ~48k entries
+        // cost six minutes of every upgrade, just before the tree is replaced.
+        static bool IsSealedTree(SafeFileHandle handle, string display, string owner, string sealedSha)
+        {
+            FileInfo info;
+            if (!GetFileInformationByHandle(handle, out info))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), display);
+            if ((info.Attributes & Directory) == 0 || (info.Attributes & ReparsePoint) != 0) return false;
+            var trusted = new SecurityIdentifier(owner);
+            var system = new SecurityIdentifier("S-1-5-18");
+            var security = new RawSecurityDescriptor(
+                QuerySecurity(handle, OwnerSecurity | DaclSecurity, display), 0);
+            if (security.Owner == null || !security.Owner.Equals(trusted)) return false;
+            if ((security.ControlFlags & ControlFlags.DiscretionaryAclProtected) == 0) return false;
+            // A null DACL grants everyone everything.
+            if (security.DiscretionaryAcl == null) return false;
+            foreach (GenericAce ace in security.DiscretionaryAcl)
+            {
+                var known = ace as CommonAce;
+                if (known == null) return false;
+                if (known.AceQualifier == AceQualifier.AccessDenied) continue;
+                if (known.AceQualifier != AceQualifier.AccessAllowed) return false;
+                if (known.SecurityIdentifier.Equals(trusted) || known.SecurityIdentifier.Equals(system)) continue;
+                if ((known.AccessMask & WriteMask) != 0) return false;
+            }
+            return SentinelMatches(handle, sealedSha);
+        }
+
         static int Visit(SafeFileHandle handle, string display, string owner, bool root,
-            int depth, Action<string, string> observe)
+            int depth, Action<string, string> observe, string keepSealedChild, string sealedSha)
         {
             if (depth > 512) throw new IOException("Directory nesting limit exceeded: " + display);
             FileInfo info;
@@ -198,24 +295,51 @@ namespace Gezel.Installer
                     string childDisplay = display + "\\" + name;
                     if (observe != null) observe("enumerated", childDisplay);
                     using (SafeFileHandle child = Open(handle.DangerousGetHandle(), name, false))
-                        count += Visit(child, childDisplay, owner, false, depth + 1, observe);
+                    {
+                        if (root && keepSealedChild != null && name == keepSealedChild &&
+                            IsSealedTree(child, childDisplay, owner, sealedSha))
+                        {
+                            if (observe != null) observe("kept", childDisplay);
+                            continue;
+                        }
+                        count += Visit(child, childDisplay, owner, false, depth + 1, observe, null, null);
+                    }
                 }
             }
             finally { Marshal.FreeHGlobal(buffer); }
             return count;
         }
 
-        // The callback is an in-process test seam, not exposed by the installer
-        // command. Tests interleave a rename/junction swap at exact boundaries.
+        // Tests use the callback to interleave a rename/junction swap at exact
+        // boundaries; the installer command reads only its "kept" event.
         public static int Run(string root, string owner, Action<string, string> observe)
+        {
+            return Run(root, owner, null, null, observe);
+        }
+
+        // keepSealedChild names one direct child of root that is left exactly
+        // as it is when IsSealedTree holds for it; any other state repairs it.
+        public static int Run(string root, string owner, string keepSealedChild, string sealedSha,
+            Action<string, string> observe)
         {
             if (root == null || root.Length < 4 || !char.IsLetter(root[0]) ||
                 root[1] != ':' || root[2] != '\\' || root.IndexOf(':', 2) >= 0)
                 throw new ArgumentException("An absolute local drive directory is required");
             string full = Path.GetFullPath(root).TrimEnd('\\');
             if (full.Length <= 3) throw new ArgumentException("A volume root cannot be repaired");
+            if (string.IsNullOrEmpty(keepSealedChild))
+            {
+                keepSealedChild = null;
+            }
+            else
+            {
+                if (keepSealedChild == "." || keepSealedChild == ".." ||
+                    keepSealedChild.IndexOfAny(new[] { '\\', '/', ':', '\0' }) >= 0)
+                    throw new ArgumentException("A single directory name is required");
+                if (!IsSha256(sealedSha)) throw new ArgumentException("A sha256 attestation is required");
+            }
             using (SafeFileHandle handle = Open(IntPtr.Zero, "\\??\\" + full, true))
-                return Visit(handle, full, owner, true, 0, observe);
+                return Visit(handle, full, owner, true, 0, observe, keepSealedChild, sealedSha);
         }
     }
 }

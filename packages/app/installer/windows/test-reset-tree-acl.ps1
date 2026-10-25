@@ -152,6 +152,76 @@ try {
     Assert ((AclText $busyFile) -eq $busyBefore) 'Busy child changed before refusal'
 } finally { $held.Dispose() }
 
+# An upgrade leaves the previous service tree out of the data-root repair only
+# while it is still sealed as the installer published it and its sentinel
+# matches the attestation. Every other state is repaired like any child.
+$attested = 'ab' * 32
+$sealedDacl = 'D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;OWNER)(A;OICI;0x1200a9;;;BU)(A;OICI;0x1200a9;;;S-1-5-80-1786395786-4294646720-3734801101-1595390539-2055821610)'
+function SealedTree([string]$name, [string]$dacl, [string]$sentinel = $attested) {
+    $parent = Fixture $name
+    Set-Content -LiteralPath (Join-Path $parent 'other.txt') -Value 'other'
+    $tree = Join-Path $parent 'service'
+    New-Item -ItemType Directory -Path (Join-Path $tree 'dist') | Out-Null
+    Set-Content -LiteralPath (Join-Path $tree 'dist\code.js') -Value 'code'
+    if ($sentinel) { [System.IO.File]::WriteAllText((Join-Path $tree '.gezel-bundle.sha256'), $sentinel + "`n") }
+    # An elevated token creates objects owned by Administrators, so the
+    # trusted owner is set explicitly rather than assumed.
+    $security = New-Object System.Security.AccessControl.DirectorySecurity
+    $security.SetSecurityDescriptorSddlForm(('O:' + $testOwner + $dacl).Replace('OWNER', $testOwner), 'Owner, Access')
+    [System.IO.Directory]::SetAccessControl($tree, $security)
+    return $parent
+}
+function RepairKeeping([string]$path) {
+    $script:keptPaths = @()
+    [Gezel.Installer.ResetTreeAcl]::Run($path, $testOwner, 'service', $attested, [Action[string,string]] {
+        param($stage, $entry)
+        if ($stage -eq 'kept') { $script:keptPaths += $entry }
+    })
+}
+
+$sealed = SealedTree 'sealed-tree' $sealedDacl
+$sealedTree = Join-Path $sealed 'service'
+$treeBefore = AclText $sealedTree
+$codeBefore = AclText (Join-Path $sealedTree 'dist\code.js')
+$count = RepairKeeping $sealed
+Assert ($script:keptPaths.Count -eq 1 -and $script:keptPaths[0] -eq $sealedTree) 'A sealed, attested tree was repaired'
+Assert ($count -eq 2) 'The repair walked into a kept tree'
+Assert ((AclText $sealedTree) -eq $treeBefore) 'A kept tree changed'
+Assert ((AclText (Join-Path $sealedTree 'dist\code.js')) -eq $codeBefore) 'A file in a kept tree changed'
+Assert ((Get-Acl -LiteralPath $sealed).AreAccessRulesProtected) 'The root beside a kept tree was not secured'
+
+foreach ($case in @(
+        @{ Name = 'stale-attestation'; Dacl = $sealedDacl; Sentinel = ('cd' * 32); Count = 6 },
+        @{ Name = 'no-sentinel'; Dacl = $sealedDacl; Sentinel = ''; Count = 5 },
+        @{ Name = 'users-modify'; Dacl = $sealedDacl.Replace('(A;OICI;0x1200a9;;;BU)', '(A;OICI;0x1301bf;;;BU)'); Sentinel = $attested; Count = 6 },
+        @{ Name = 'inherit-only-write'; Dacl = $sealedDacl + '(A;OICIIO;FA;;;BU)'; Sentinel = $attested; Count = 6 },
+        @{ Name = 'unprotected'; Dacl = $sealedDacl.Replace('D:P', 'D:'); Sentinel = $attested; Count = 6 })) {
+    $parent = SealedTree $case.Name $case.Dacl $case.Sentinel
+    $count = RepairKeeping $parent
+    Assert ($script:keptPaths.Count -eq 0) "A $($case.Name) tree was kept"
+    Assert ($count -eq $case.Count) "A $($case.Name) tree was not fully repaired ($count entries)"
+    Assert (!(Get-Acl -LiteralPath (Join-Path $parent 'service')).AreAccessRulesProtected) "A $($case.Name) tree kept its own DACL"
+}
+
+# A link where the sentinel belongs is read through nothing and never kept.
+$linkedSentinel = SealedTree 'linked-sentinel' $sealedDacl ''
+New-Item -ItemType Junction -Path (Join-Path $linkedSentinel 'service\.gezel-bundle.sha256') -Target $outside | Out-Null
+Assert ((RepairKeeping $linkedSentinel) -eq 6) 'A tree with a linked sentinel was not fully repaired'
+Assert ($script:keptPaths.Count -eq 0) 'A tree with a linked sentinel was kept'
+Assert ((AclText $outside) -eq $outsideAcl) 'A linked sentinel target changed'
+
+# A link in place of the tree is repaired as a link, never kept or followed.
+$linkedTree = Fixture 'linked-tree'
+New-Item -ItemType Junction -Path (Join-Path $linkedTree 'service') -Target $outside | Out-Null
+Assert ((RepairKeeping $linkedTree) -eq 2) 'A linked tree was kept or followed'
+Assert ((AclText $outside) -eq $outsideAcl) 'A linked tree target changed'
+
+foreach ($arguments in @(@('a\b', $attested), @('..', $attested), @('service', 'not-a-sha'))) {
+    $refused = $false
+    try { [Gezel.Installer.ResetTreeAcl]::Run($sealed, $testOwner, $arguments[0], $arguments[1], $null) | Out-Null } catch { $refused = $true }
+    Assert $refused "Accepted keep arguments $($arguments -join ', ')"
+}
+
 # The release Windows runner is elevated. Exercise the actual production
 # launcher/owner and privilege recovery there; ordinary desktop runs retain
 # the same syscall/race coverage on files owned by the test account.
@@ -170,6 +240,18 @@ if ($principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administ
         Assert ((Get-Acl -LiteralPath $lockedFile).GetOwner([System.Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-544') 'Production owner was not set'
         Write-Output 'Elevated production launcher passed'
     } finally { Set-Acl -LiteralPath $lockedFile -AclObject $restoreAcl }
+
+    $publishedRoot = Fixture 'production-sealed'
+    $publishedTree = Join-Path $publishedRoot 'service'
+    New-Item -ItemType Directory -Path $publishedTree | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $publishedTree '.gezel-bundle.sha256'), $attested)
+    $publishedAcl = New-Object System.Security.AccessControl.DirectorySecurity
+    $publishedAcl.SetSecurityDescriptorSddlForm('O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)')
+    [System.IO.Directory]::SetAccessControl($publishedTree, $publishedAcl)
+    $launcherOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'reset-tree-acl.ps1') -Root $publishedRoot -KeepSealedChild service -SealedSha $attested
+    Assert ($LASTEXITCODE -eq 0) 'Production launcher failed beside a sealed tree'
+    Assert (($launcherOutput -join "`n").Contains("Left $publishedTree as published")) 'Production launcher repaired a sealed, attested tree'
+    Write-Output 'Elevated sealed-tree launcher passed'
 } else {
     Write-Output 'Elevated production launcher not run: current token is not elevated'
 }

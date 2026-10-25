@@ -64,6 +64,13 @@
 ; install takes ownership of the service lifecycle it is cleared.
 Var GezelServiceStoppedForInstall
 
+!ifndef BUILD_UNINSTALLER
+; The previous install's service-tree attestation. customInit reads it because
+; an upgrade runs the old uninstaller before customInstall, and that deletes
+; the whole state key.
+Var GezelPublishedTreeSha
+!endif
+
 ; The first-party service host gives gezeld 10 seconds to exit cleanly and
 ; then waits up to 2 more seconds after killing its job. Keep this budget
 ; comfortably above that complete ladder. A shorter installer wait can call
@@ -208,6 +215,9 @@ FunctionEnd
       StrCpy $INSTDIR "$PROGRAMFILES64\${APP_FILENAME}"
     ${EndIf}
   !endif
+  SetRegView 64
+  ReadRegStr $GezelPublishedTreeSha HKLM "${GEZEL_STATE_REGISTRY_KEY}" "${GEZEL_PUBLISHED_TREE_VALUE}"
+  SetRegView lastused
   ${If} ${Silent}
     !insertmacro StopGezelServiceForInstall
   ${EndIf}
@@ -349,12 +359,31 @@ FunctionEnd
 ; below only after the entire repair succeeds. Busy/uninspectable/hard-linked
 ; entries fail closed instead of leaving an attacker-owned child behind.
 !macro SanitizeDescendants PATH SUBJECT FAILURE_LABEL
+  !insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" "" ${FAILURE_LABEL}
+!macroend
+
+; The same repair, except that the direct child TREE is left as it is when it
+; is still sealed as PublishServiceTree left it and its sentinel matches the
+; attestation customInit read: SYSTEM/Administrators-only writes on a fresh
+; extraction mean nothing in it can be attacker-made, and re-securing its ~48k
+; entries cost six minutes of every upgrade just before extraction replaced
+; it. The helper decides on its own pinned handles; anything else gets the
+; full repair.
+!macro SanitizeDescendantsKeepingSealedTree PATH SUBJECT TREE FAILURE_LABEL
+  ${If} $GezelPublishedTreeSha == ""
+    !insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" "" ${FAILURE_LABEL}
+  ${Else}
+    !insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" ' -KeepSealedChild "${TREE}" -SealedSha "$GezelPublishedTreeSha"' ${FAILURE_LABEL}
+  ${EndIf}
+!macroend
+
+!macro RepairTreeAcl PATH SUBJECT HELPER_ARGS FAILURE_LABEL
   ${IfNot} ${FileExists} "${GEZEL_ACL_REPAIR}"
     DetailPrint "ERROR: the handle-based ACL repair tool is missing."
     Goto ${FAILURE_LABEL}
   ${EndIf}
   DetailPrint "Reviewing existing permissions under ${PATH}..."
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${GEZEL_ACL_REPAIR}" -Root "${PATH}"'
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${GEZEL_ACL_REPAIR}" -Root "${PATH}"${HELPER_ARGS}'
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: could not safely repair ${SUBJECT} permissions (exit $0)."
@@ -693,7 +722,7 @@ FunctionEnd
   ; Close and repair the tree before any path-based link cleanup. Ownership
   ; and ACL changes operate on the same no-follow handles that were checked,
   ; so a pre-created root or a concurrent descendant swap cannot redirect them.
-  !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}" "existing machine-service data" SkipNssm
+  !insertmacro SanitizeDescendantsKeepingSealedTree "${GEZEL_DATA_DIR}" "existing machine-service data" "service" SkipNssm
   !insertmacro NeutralizeReparseDescendants "${GEZEL_DATA_DIR}" "Gezel machine-service data" SkipNssm "${GEZEL_SHARED_DIR}"
 
   ; Private root: SYSTEM + Administrators only until the per-service SID exists.
