@@ -10,6 +10,8 @@ import {
   type TaskCraftbookStep,
   assignOwnerApprovalSteps,
   expandStepDeliverables,
+  interpolateContextDeep,
+  interpolateStepsContext,
   nowIso,
 } from '@bendyline/gezel';
 
@@ -96,6 +98,49 @@ export {
   interpolateStepsContext,
   taskInterpolationContext,
 } from '@bendyline/gezel';
+
+/**
+ * Land a launch's context in the task's recipe snapshots: the host's steps
+ * and contract, then the fanout half — the `spawn` config and every
+ * child-template step and contract. A fanout whose corpus lives at
+ * `…/pr-{{number}}/…` once read a path that did not exist, found no items,
+ * and logged "skipping fanout" while the host advanced to its collect
+ * barrier with no children to wait for: interpolate the whole recipe, not
+ * the fields someone remembered. Only ever pass snapshots, never the
+ * resolver's cached template, or one task's params leak into the next
+ * launch of the same craftbook.
+ *
+ * The spawn template keeps `{{diffpack.*}}` un-interpolated: those tokens
+ * are per-shard (spawnChild resolves them with the child's pack id), and a
+ * drafting host's own context would otherwise draft every shard into one
+ * pack. Host steps keep the full context (the non-fanout Boekwachter path
+ * legitimately addresses its own pack).
+ */
+export function interpolateLaunchRecipes(
+  craftbook: TaskCraftbook,
+  spawnsCraftbook: TaskCraftbook | undefined,
+  context: Record<string, string>,
+): void {
+  interpolateStepsContext(craftbook.steps, context);
+  if (craftbook.contract) {
+    craftbook.contract = interpolateContextDeep(craftbook.contract, context);
+  }
+  const spawnTemplateContext = Object.fromEntries(
+    Object.entries(context).filter(([key]) => !key.startsWith('diffpack.')),
+  );
+  if (spawnsCraftbook) {
+    interpolateStepsContext(spawnsCraftbook.steps, spawnTemplateContext);
+    if (spawnsCraftbook.contract) {
+      spawnsCraftbook.contract = interpolateContextDeep(
+        spawnsCraftbook.contract,
+        spawnTemplateContext,
+      );
+    }
+  }
+  if (craftbook.spawn) {
+    craftbook.spawn = interpolateContextDeep(craftbook.spawn, spawnTemplateContext);
+  }
+}
 
 /**
  * Turn an array of inline-step blueprints into a fresh ad-hoc craftbook.

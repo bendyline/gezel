@@ -88,7 +88,6 @@ import {
   KeyedLock,
   type ModelTier,
   NEW_THREAD_TITLE,
-  OUTCOME_TEAMMATE_TOOLS,
   type ProjectFileEntry,
   type Question,
   type ScriptMeta,
@@ -140,13 +139,11 @@ import {
   stepDeliverablePath,
   stepTurnSteering,
   taskEffectiveStatus,
-  taskSurfaceSteps,
   tierAtLeast,
   tuningForStepAction,
   turnCancelledMessage,
   validateScriptInput,
   withEffectiveTaskStatuses,
-  withInferredConsumes,
 } from '@bendyline/gezel';
 import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -548,6 +545,7 @@ import {
   resolveSessionToolSurface,
   stepAllowsOnlyBuiltinTools,
   taskStepContextualBuiltinTools,
+  taskStepSurfaceOptions,
   toolCapForTierAndRole,
 } from './session-tool-surface.js';
 import {
@@ -15259,16 +15257,7 @@ export class ChatManager extends LocalEngineRuntime {
         ? { effectiveContextWindow: runtime.effectiveContextWindow }
         : {}),
       latestUserMessage: latestUserTextForToolFilter,
-      ...(taskContext?.step
-        ? { activeStep: withInferredConsumes(taskContext.task, taskContext.step) }
-        : {}),
-      ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
-        ? { generalistSteps: taskSurfaceSteps(taskContext.task.craftbook) }
-        : {}),
-      ...(taskContext?.step && outcomeTaskHasSubagents(taskContext.task)
-        ? { taskTeammateTools: OUTCOME_TEAMMATE_TOOLS }
-        : {}),
-      ...(taskContext?.task.inputs ? { taskInputs: Object.values(taskContext.task.inputs) } : {}),
+      ...taskStepSurfaceOptions(taskContext),
       forceDirectFileWork: directFileWorkConstrained,
       existingSubstantialFileForImmediate: readExistingSubstantialFileForImmediate,
       onCapTrim: ({ before, after }) => {
@@ -16923,16 +16912,7 @@ export class ChatManager extends LocalEngineRuntime {
         ? { effectiveContextWindow: runtime.effectiveContextWindow }
         : {}),
       latestUserMessage: latestUserTextForToolFilter,
-      ...(taskContext?.step
-        ? { activeStep: withInferredConsumes(taskContext.task, taskContext.step) }
-        : {}),
-      ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
-        ? { generalistSteps: taskSurfaceSteps(taskContext.task.craftbook) }
-        : {}),
-      ...(taskContext?.step && outcomeTaskHasSubagents(taskContext.task)
-        ? { taskTeammateTools: OUTCOME_TEAMMATE_TOOLS }
-        : {}),
-      ...(taskContext?.task.inputs ? { taskInputs: Object.values(taskContext.task.inputs) } : {}),
+      ...taskStepSurfaceOptions(taskContext),
       forceDirectFileWork: directFileWorkConstrained,
       existingSubstantialFileForImmediate: readExistingSubstantialFileForImmediate,
       ...(requiredBridgeTool ? { requiredTool: requiredBridgeTool } : {}),

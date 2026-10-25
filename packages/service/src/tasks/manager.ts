@@ -83,6 +83,7 @@ import {
   inlineStepsToCraftbook,
   interpolateContext,
   interpolateContextDeep,
+  interpolateLaunchRecipes,
   interpolateStepsContext,
   pinCraftbookOwner,
   resolveCraftbookParamDefaults,
@@ -1220,13 +1221,8 @@ export class TaskManager {
       // params, so they are not persisted in `craftbookParams` below.
       ...runtimeCraftbookContext,
     };
-    interpolateStepsContext(craftbook.steps, craftbookInterpolationContext);
-    if (craftbook.contract) {
-      craftbook.contract = interpolateContextDeep(
-        craftbook.contract,
-        craftbookInterpolationContext,
-      );
-    }
+    let spawnsCraftbook = spawnBook ? snapshotCraftbookForTask(spawnBook, now) : undefined;
+    interpolateLaunchRecipes(craftbook, spawnsCraftbook, craftbookInterpolationContext);
     // A previous run may have left the same deliverable path behind. An
     // existence-only observable gate would then advance this brand-new task
     // before its assignee changed anything. Preserve explicit author intent
@@ -1245,40 +1241,6 @@ export class TaskManager {
         }
       }),
     );
-    let spawnsCraftbook = spawnBook ? snapshotCraftbookForTask(spawnBook, now) : undefined;
-    // The launch params have to reach the fanout half of the recipe too.
-    // `interpolateStepsContext` above walks the HOST's steps and stops
-    // there, so `spawn.overFile` and every child-template step kept their
-    // raw `{{…}}` — a fanout whose corpus lives at `…/pr-{{number}}/…`
-    // read a path that does not exist, found no items, and logged
-    // "skipping fanout" while the host advanced to its collect barrier
-    // with no children to wait for. Same class as the gate-interpolation
-    // miss above: interpolate the whole recipe, not the fields someone
-    // remembered. Done on the SNAPSHOTS (shallow-spread copies), never on
-    // `spawnBook`/`mainBook`, which may still be the resolver's cached
-    // template — writing through would leak one task's params into the
-    // next launch of the same craftbook.
-    // The SPAWN template must keep `{{diffpack.*}}` un-interpolated: those
-    // tokens are per-shard (spawnChild resolves them with the CHILD's pack
-    // id), and a drafting host's own context would otherwise consume them
-    // here with the host's folder — every shard would then draft into one
-    // pack. Host steps keep the full context (the non-fanout Boekwachter
-    // path legitimately addresses its own pack).
-    const spawnTemplateContext = Object.fromEntries(
-      Object.entries(craftbookInterpolationContext).filter(([key]) => !key.startsWith('diffpack.')),
-    );
-    if (spawnsCraftbook) {
-      interpolateStepsContext(spawnsCraftbook.steps, spawnTemplateContext);
-      if (spawnsCraftbook.contract) {
-        spawnsCraftbook.contract = interpolateContextDeep(
-          spawnsCraftbook.contract,
-          spawnTemplateContext,
-        );
-      }
-    }
-    if (craftbook.spawn) {
-      craftbook.spawn = interpolateContextDeep(craftbook.spawn, spawnTemplateContext);
-    }
     // A system job's step is a control surface the service runs itself; no
     // model ever takes it. Under `auto` the resolver still minted the
     // Generalist and pinned it on that step, and a pinned step is one the

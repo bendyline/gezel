@@ -3,6 +3,8 @@ import {
   type ChatSession,
   type GezelConfig,
   LEAN_PROFILE_BUILTIN_TOOLS,
+  OUTCOME_TEAMMATE_TOOLS,
+  type PromptTaskContext,
   type ProviderName,
   type ResolvedSecurityPolicy,
   type TaskCraftbookStep,
@@ -14,9 +16,12 @@ import {
   factualLookupTools,
   isLocalProvider,
   normalizeScriptRefs,
+  outcomeTaskHasSubagents,
   resolveRoleId,
   roleForMatching,
   taskInputReadTools,
+  taskSurfaceSteps,
+  withInferredConsumes,
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import type { LocalModelTier } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
@@ -261,6 +266,29 @@ export interface ResolveSessionToolSurfaceOptions {
 }
 
 type StepSurfaceInput = NonNullable<ResolveSessionToolSurfaceOptions['activeStep']>;
+
+/**
+ * The task-step options of a session's tool surface. The prompt and bridge
+ * surfaces both take them from here, so the tools the prompt lists are the
+ * tools the bridge wires.
+ */
+export function taskStepSurfaceOptions(
+  taskContext: PromptTaskContext | undefined,
+): Pick<
+  ResolveSessionToolSurfaceOptions,
+  'activeStep' | 'generalistSteps' | 'taskTeammateTools' | 'taskInputs'
+> {
+  if (!taskContext) return {};
+  const { task, step } = taskContext;
+  return {
+    ...(step ? { activeStep: withInferredConsumes(task, step) } : {}),
+    ...(step && task.executionMode === 'generalist'
+      ? { generalistSteps: taskSurfaceSteps(task.craftbook) }
+      : {}),
+    ...(step && outcomeTaskHasSubagents(task) ? { taskTeammateTools: OUTCOME_TEAMMATE_TOOLS } : {}),
+    ...(task.inputs ? { taskInputs: Object.values(task.inputs) } : {}),
+  };
+}
 
 export interface ResolvedSessionToolSurface {
   allowlist: Set<string> | null;
