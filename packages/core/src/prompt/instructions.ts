@@ -26,6 +26,7 @@ import { normalizeScriptRefs } from '../schemas/script.js';
 import type { ExpectedDeliverable } from '../schemas/session.js';
 import type { Task, TaskCraftbookStep } from '../schemas/task.js';
 import { MANAGED_WORKSPACE_WRITE_SETTING_LABEL } from '../security/policy.js';
+import { isOutcomeTask } from '../task-strategy.js';
 import {
   type PromptTaskContext,
   isGatedStep,
@@ -1425,8 +1426,11 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
       // over", and an anchor commanding the procedure's first action is a
       // direct contradiction — it steers the model into re-running the
       // step from the top instead of repairing the named gap.
+      // An outcome task's procedure is advice, so nothing in it is pinned as
+      // the first action.
+      const outcomeTask = isOutcomeTask(task.task);
       let firstActionAnchor = '';
-      if (smallOrLeaky && task.step && activeStepAttempt <= 1) {
+      if (smallOrLeaky && task.step && activeStepAttempt <= 1 && !outcomeTask) {
         const firstInput = task.step.consumes?.[0];
         const firstInputTool = firstInput?.artifact ? 'read_artifact' : 'read_file';
         const firstProcedureTool =
@@ -1441,7 +1445,14 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
         task.task.executionMode === 'generalist'
           ? " You own every step of this task in this conversation; the Task outline above shows where this step sits, and only this step's procedure is in force."
           : '';
-      activeTaskAnchor = `\n\n---\n\n**You are mid-craftbook step: \`${task.task.ref}\` — "${task.task.title}"${stepLabel}.**${generalistAnchor} The **Step procedure** block above contains your exact instructions for this turn — those instructions take precedence over your default \`about.md\` persona. At the start of a fresh step turn, read the procedure and begin with the FIRST tool action it names. If this turn's transcript already contains a successful result for that action, it is complete; continue with the next procedure action instead of starting over. Do NOT call \`read_task_notes\` to find the procedure; it's in the prompt above. Do NOT default to \`write_file\` if the procedure says otherwise.${onExitHint}${gateReminder}${procedureMomentumHint}${firstActionAnchor}`;
+      if (outcomeTask) {
+        const finish = availableToolNameSet.has('advance_task_step')
+          ? ' When every deliverable is in place, call `advance_task_step`; the runtime checks the contract and names anything unmet.'
+          : '';
+        activeTaskAnchor = `\n\n---\n\n**You are delivering task \`${task.task.ref}\` — "${task.task.title}".** The **Task contract** above is what you are held to, and it takes precedence over your default \`about.md\` persona. The recommended approach in the step block is advice: take the most direct route to deliverables that meet the bar. If this turn's transcript already shows work done, continue from there instead of starting over.${finish}`;
+      } else {
+        activeTaskAnchor = `\n\n---\n\n**You are mid-craftbook step: \`${task.task.ref}\` — "${task.task.title}"${stepLabel}.**${generalistAnchor} The **Step procedure** block above contains your exact instructions for this turn — those instructions take precedence over your default \`about.md\` persona. At the start of a fresh step turn, read the procedure and begin with the FIRST tool action it names. If this turn's transcript already contains a successful result for that action, it is complete; continue with the next procedure action instead of starting over. Do NOT call \`read_task_notes\` to find the procedure; it's in the prompt above. Do NOT default to \`write_file\` if the procedure says otherwise.${onExitHint}${gateReminder}${procedureMomentumHint}${firstActionAnchor}`;
+      }
     } else {
       const resumeAction = availableToolNameSet.has('read_task_notes')
         ? `call \`read_task_notes({ ref: "${task.task.ref}" })\` for the latest, then take the next concrete step with the tools wired this turn`

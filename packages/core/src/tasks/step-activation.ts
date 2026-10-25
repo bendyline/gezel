@@ -1,8 +1,10 @@
 /**
  * Stamp an activation onto a step and clear the state that belonged to its
  * previous pass. `attemptCount` counts activations, so a loop-back shows as
- * one more pass; a self-loop gate rejection may keep its finite recovery
- * budget, which is the one thing a fresh pass must not reset.
+ * one more pass. A self-loop gate rejection keeps its finite recovery
+ * budget, and keeps the evidence its earlier passes produced: without that,
+ * a red test run that satisfied a gate was demanded again after a rejection
+ * for an unrelated citation, and Gemma E4B spent its budget on it (2026-10-24).
  */
 import type { TaskCraftbookStep } from '../schemas/task.js';
 
@@ -24,6 +26,7 @@ export function bumpStepActivation(
       lastRedriveAt: _lastRedriveAt,
       restartResumeCount: _restartResumeCount,
       lastRestartResumeAt: _lastRestartResumeAt,
+      evidenceSince: _evidenceSince,
       ...rest
     } = step;
     const bumped = {
@@ -39,6 +42,9 @@ export function bumpStepActivation(
         ? { gateProgressAttempts: step.gateProgressAttempts }
         : {}),
       ...(step.lastGateReject !== undefined ? { lastGateReject: step.lastGateReject } : {}),
+      ...(step.evidenceSince !== undefined || step.lastActivatedAt !== undefined
+        ? { evidenceSince: step.evidenceSince ?? step.lastActivatedAt }
+        : {}),
     };
   });
 }

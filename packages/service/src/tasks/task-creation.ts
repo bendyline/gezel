@@ -4,11 +4,14 @@ import {
   type ProviderName,
   type Task,
   type TaskCraftbookStep,
+  type TaskStrategy,
   createLogger,
   deriveTaskRequestRef,
   effectiveGeneralistModeSetting,
+  executionModeForStrategy,
   parseTaskRef,
   resolveTaskExecutionMode,
+  resolveTaskStrategy,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { ChatEventBus } from '../chat/events.js';
@@ -131,20 +134,30 @@ export async function wireTaskCreation({
   tasks.setExecutionModeResolver(async ({ projectId, assigneeGezelId, nightShift, requested }) => {
     const config = await store.readConfig();
     const setting = effectiveGeneralistModeSetting(config);
+    const strategySetting =
+      config.taskStrategy && config.taskStrategy !== 'auto' ? config.taskStrategy : undefined;
     let providerName: ProviderName | undefined;
     let tier: string | undefined;
-    let mode: 'generalist' | 'stepwise';
-    if (requested === 'generalist' || requested === 'stepwise') {
-      mode = requested;
+    let strategy: TaskStrategy;
+    if (requested !== 'auto') {
+      strategy = requested;
+    } else if (strategySetting) {
+      strategy = strategySetting;
     } else {
       providerName = assigneeGezelId
         ? await chat.providerForGezel(assigneeGezelId, { nightShift: Boolean(nightShift) })
         : resolveDefaultProviderName(config);
       tier = await chat.classifyExecutionTier(providerName, assigneeGezelId);
-      mode = resolveTaskExecutionMode(setting, providerName, tier);
+      strategy = resolveTaskStrategy({ generalistMode: setting }, providerName, tier);
     }
+    const mode = executionModeForStrategy(strategy);
     const base = {
-      ...(setting ? { setting } : {}),
+      strategy,
+      ...(strategySetting
+        ? { setting: `taskStrategy:${strategySetting}` }
+        : setting
+          ? { setting }
+          : {}),
       ...(providerName ? { providerName } : {}),
       ...(tier ? { tier } : {}),
     };
@@ -163,7 +176,7 @@ export async function wireTaskCreation({
     // local model). Under `auto` that pin decides, not the install default:
     // a single-session run on a model the rule says is not ready for it is
     // exactly what `auto` exists to avoid.
-    if (requested === 'auto') {
+    if (requested === 'auto' && !strategySetting) {
       const ownerProvider = await chat.providerForGezel(generalist.gezelId, {
         nightShift: Boolean(nightShift),
       });
@@ -173,7 +186,13 @@ export async function wireTaskCreation({
           log.info(
             `[tasks] generalist ${generalist.gezelId} is pinned to ${ownerProvider} (${ownerTier}); running stepwise under auto`,
           );
-          return { mode: 'stepwise', ...base, providerName: ownerProvider, tier: ownerTier };
+          return {
+            mode: 'stepwise',
+            ...base,
+            strategy: 'stepwise',
+            providerName: ownerProvider,
+            tier: ownerTier,
+          };
         }
       }
     }

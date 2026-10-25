@@ -308,6 +308,25 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
    * unless `corpus` is given, in which case cited paths AND URLs must be
    * corpus members. Optional `minCitations` floors the citation count.
    */
+  /**
+   * The facts in `file` appear in the sources it cites: every number, date,
+   * month and quotation in a citing sentence is found in the cited file
+   * (`[n]` through a Sources list, or inline `(source: path)`). Cited URLs and
+   * `knowledge://` refs count as cited but unverifiable offline. `sources`
+   * adds material the facts may come from uncited (the supplied brief). The
+   * "cited and verified" half of a research book's quality bar; pair it with
+   * `citationsResolve` for a minimum citation count.
+   */
+  z.object({
+    kind: z.literal('claimsGrounded'),
+    file: z.string().min(1),
+    artifact: z.boolean().optional(),
+    sources: z.array(z.string().min(1)).optional(),
+    maxUnsupported: z.number().int().nonnegative().optional(),
+    maxBadCitations: z.number().int().nonnegative().optional(),
+    maxUncited: z.number().int().nonnegative().optional(),
+    label: z.string().min(1).optional(),
+  }),
   z.object({
     kind: z.literal('citationsResolve'),
     file: z.string().min(1),
@@ -332,6 +351,13 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     tools: z.array(z.string().min(1)).min(1),
     minSuccessful: z.number().int().positive().optional(),
     externalOptional: z.boolean().optional(),
+    /**
+     * Which tool calls count. `activation` (default): this step's current
+     * pass, so a retry starts over. `task`: anything the task did since it was
+     * created, which is how a book's contract judges the whole run whatever
+     * strategy carried it out.
+     */
+    window: z.enum(['activation', 'task']).optional(),
   }),
   /** Require image delivery for each {path}; artifact selects the manifest and image surface. */
   z.object({
@@ -367,6 +393,13 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     minRuns: z.number().int().positive().optional(),
     onDraft: z.enum(['defer', 'require']).optional(),
     label: z.string().min(1).optional(),
+    /**
+     * Which tool calls count. `activation` (default): this step's current
+     * pass, so a retry starts over. `task`: anything the task did since it was
+     * created, which is how a book's contract judges the whole run whatever
+     * strategy carried it out.
+     */
+    window: z.enum(['activation', 'task']).optional(),
   }),
   /**
    * A PR-review coverage ledger must name every changed path materialized in

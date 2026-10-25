@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { withTerminalContractGate } from '../craftbook-outcome.js';
 import {
   assertCraftbookParamRequirements,
   craftbookParamDefaults,
@@ -38,6 +39,7 @@ import {
 } from '../schemas/task.js';
 import { isSharedLibraryProject } from '../shared-project.js';
 import { pinCraftbookOwner } from '../task-execution.js';
+import { executionModeForStrategy, requestedTaskStrategy } from '../task-strategy.js';
 import { applyGateRejection } from '../tasks/gate-accounting.js';
 import { gateHandoffNoteText, stampGateHandoff } from '../tasks/gate-handoff.js';
 import { bumpStepActivation } from '../tasks/step-activation.js';
@@ -345,6 +347,10 @@ async function createTaskInternal(
     if (step.suggestedGezelId) await requireGezel(repo, step.suggestedGezelId);
     if (step.assignee) await assigneeExists(repo, { assignee: step.assignee });
   }
+  const requestedStrategy = requestedTaskStrategy(request);
+  if (requestedStrategy === 'outcome') {
+    throw new Error('Running a task as an outcome needs the desktop.');
+  }
   const task = TaskSchema.parse({
     projectId,
     num,
@@ -355,7 +361,12 @@ async function createTaskInternal(
     outcomes: request.outcomes,
     status: request.status ?? 'active',
     assignee,
-    executionMode: request.executionMode === 'auto' ? undefined : request.executionMode,
+    ...(requestedStrategy === 'auto'
+      ? {}
+      : {
+          executionMode: executionModeForStrategy(requestedStrategy),
+          strategy: requestedStrategy,
+        }),
     activeStepId: book.entryStepId,
     artifactDir,
     launchSessionId: request.launchSessionId,
@@ -375,12 +386,13 @@ async function createTaskInternal(
           },
         ]
       : [],
-    craftbook: {
+    // The book's contract is the same bar here as on the desktop.
+    craftbook: withTerminalContractGate({
       ...book,
       steps: book.steps.map((step) => ({ ...step, createdAt: now })),
       createdAt: now,
       updatedAt: now,
-    },
+    }),
     createdAt: now,
     updatedAt: now,
     createdBy: request.createdBy ?? { kind: 'user' },

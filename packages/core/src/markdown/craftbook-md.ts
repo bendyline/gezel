@@ -88,6 +88,7 @@ const FRONTMATTER_KEYS = [
   'commands',
   'diffpackCapable',
   'capabilityFloor',
+  'contract',
   'minGezelVersion',
   'version',
   'releasedAt',

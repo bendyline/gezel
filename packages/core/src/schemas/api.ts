@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
 import { MEMORY_KINDS } from '../runtime/memory-markdown.js';
+import { OUTCOME_TEAMMATE_SLUGS } from '../task-strategy.js';
 import {
   AmbientDashboardDisplayTargetSchema,
   AmbientDashboardResolutionSchema,
@@ -2925,6 +2926,14 @@ export const GezelConfigSchema = z.object({
    */
   generalistMode: z.enum(['auto', 'on', 'off']).optional(),
   /**
+   * How much of a craftbook's recipe a task imposes: `stepwise`,
+   * `generalist`, or `outcome` (one owner held to the book's contract, the
+   * recipe as advice). Outranks the task half of `generalistMode`; `auto`
+   * (the default, including when unset) defers to it. `generalistMode`
+   * still decides the Meester's kickoff shape. See docs/task-strategies.md.
+   */
+  taskStrategy: z.enum(['auto', 'stepwise', 'generalist', 'outcome']).optional(),
+  /**
    * @deprecated Pre-v2 name for `generalistMode` (`flat` ≙ `on`, `scaffold`
    * ≙ `off`). Still declared so `Store.ensureLayout` can read and migrate a
    * config written by an older daemon — this schema is non-strict and would
@@ -3874,6 +3883,23 @@ export const RequestAskResponseSchema = z.discriminatedUnion('outcome', [
   }),
 ]);
 export type RequestAskResponse = z.infer<typeof RequestAskResponseSchema>;
+
+/**
+ * `POST /api/projects/:id/tasks/:num/teammates` — an outcome task's owner
+ * hands a self-contained piece of the task to a teammate and waits for the
+ * answer. Answered with {@link RequestAskResponseSchema}. The teammate's
+ * session works for the task (its reads and runs count toward the task's
+ * evidence) without being a task session.
+ */
+export const TaskTeammateRequestSchema = z.object({
+  fromGezelId: z.string().min(1),
+  fromSessionId: z.string().min(1),
+  role: z.enum(OUTCOME_TEAMMATE_SLUGS),
+  question: z.string().min(1),
+  /** Idle budget (ms), clamped like an ask's. */
+  timeoutMs: z.number().int().positive().optional(),
+});
+export type TaskTeammateRequest = z.infer<typeof TaskTeammateRequestSchema>;
 
 /**
  * `POST /api/questions/:id/answer` — user submits a structured answer.

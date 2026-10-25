@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { executionModeForStrategy } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { TaskManager } from '../tasks/manager.js';
@@ -53,7 +54,7 @@ describe('indexing job task', () => {
       requests.push(requested);
       return requested === 'auto'
         ? { mode: 'generalist', ownerGezelId: 'keiko' }
-        : { mode: requested };
+        : { mode: executionModeForStrategy(requested) };
     });
     await ensureIndexingJobTask(store, tasks);
     const job = (await store.listProjectTasks('default')).find(

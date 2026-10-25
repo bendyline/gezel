@@ -177,16 +177,29 @@ describe('a session with no pack is unaffected', () => {
   });
 });
 
-describe('the task artifact namespace rejects workspace writes', () => {
-  it("write_file into the task's own folder redirects to write_artifact", async () => {
+describe('the task artifact namespace keeps workspace tools out of the drawer', () => {
+  it("write_file into the task's own folder is written to the drawer", async () => {
     const out = await text(taskScoped, 'write_file', {
       path: 'tasks/7/repro.md',
-      content: '## Symptom\n\nwrong surface\n',
+      content: '## Symptom\n\nright surface\n',
+    });
+    expect(out).toContain('[Rerouted write_file → write_artifact]');
+    expect(await svc.context.store.readProjectArtifact(projectId, 'tasks/7/repro.md')).toContain(
+      'right surface',
+    );
+    expect(await workspaceFile('tasks/7/repro.md')).toBeNull();
+  });
+
+  it('an edit tool into that folder is still refused', async () => {
+    const out = await text(taskScoped, 'replace_in_file', {
+      path: 'tasks/7/repro.md',
+      find: 'right',
+      replace: 'wrong',
     });
     expect(out).toContain('ARTIFACTS DRAWER');
-    expect(out).toContain('write_artifact');
-    // Nothing landed on either surface.
-    expect(await workspaceFile('tasks/7/repro.md')).toBeNull();
+    expect(await svc.context.store.readProjectArtifact(projectId, 'tasks/7/repro.md')).toContain(
+      'right surface',
+    );
   });
 
   it('other workspace paths are untouched by the guard', async () => {

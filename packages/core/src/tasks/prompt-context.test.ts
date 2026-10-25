@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Task } from '../schemas/task.js';
-import { isGatedStep, renderTaskContextBlock, renderTaskOutline } from './prompt-context.js';
+import {
+  isGatedStep,
+  renderTaskContextBlock,
+  renderTaskContractBlock,
+  renderTaskOutline,
+} from './prompt-context.js';
 import { resolveNextStep } from './step-routing.js';
 
 const task = {
@@ -304,5 +309,62 @@ describe('authoring notes', () => {
     expect(doc).toContain('### Squisq extended markdown');
     expect(doc).toContain("The step's procedure decides heading levels, slide breaks and layout");
     expect(renderTaskContextBlock({ task, step })).not.toContain('Squisq');
+  });
+});
+
+describe('the task contract block', () => {
+  const contract = {
+    goal: 'A deck whose figures are cited to the brief.',
+    deliverables: [
+      {
+        id: 'deck',
+        path: 'out/deck.pptx',
+        kind: 'slide-deck',
+        description: 'The deck',
+        textSource: { path: 'tasks/3/deck.md', artifact: true },
+      },
+    ],
+    grounding: { sources: ['brief.md'], citationStyle: 'numbered' },
+    criteria: [
+      {
+        id: 'grounded',
+        kind: 'quality',
+        text: 'Every figure appears in the brief',
+        checks: [{ kind: 'claimsGrounded', file: 'tasks/3/deck.md', artifact: true }],
+      },
+      { id: 'flow', kind: 'quality', enforce: 'advisory', text: 'Ends with next actions' },
+      { id: 'decoy', kind: 'quality', enforce: 'eval-only', text: 'Never says 42%' },
+    ],
+  } as const;
+
+  it('shows the same goal and bar to every strategy, without eval-only criteria', () => {
+    const block = renderTaskContractBlock(contract as never);
+    expect(block).toContain('Goal: A deck whose figures are cited to the brief.');
+    expect(block).toContain('Written from `tasks/3/deck.md` (artifacts drawer)');
+    expect(block).toContain('- Every figure appears in the brief [checked]');
+    expect(block).toContain('- Ends with next actions');
+    expect(block).toContain('list the sources under a Sources heading');
+    expect(block).not.toContain('42%');
+  });
+
+  it('replaces the outline for an outcome task', () => {
+    const outcomeTask = {
+      ...task,
+      craftbook: {
+        ...task.craftbook,
+        contract,
+        renderedAs: 'outcome',
+        steps: [{ ...step, id: 'outcome', name: 'Deliver the outcome', next: undefined }],
+      },
+      activeStepId: 'outcome',
+    } as unknown as Task;
+    const block = renderTaskContextBlock({
+      task: outcomeTask,
+      step: outcomeTask.craftbook.steps[0]!,
+    });
+    expect(block).not.toContain('### Task outline');
+    expect(block).toContain('### Task contract');
+    expect(block).toContain('#### Contract check');
+    expect(block).not.toContain('#### Phase gate');
   });
 });

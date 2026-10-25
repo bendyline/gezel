@@ -73,6 +73,9 @@ export function runtimeCraftbookFromTemplate(
     // the run's delivery mode (edit in place vs draft a diffpack proposal).
     ...(m.diffpackCapable ? { diffpackCapable: true } : {}),
     ...(m.capabilityFloor ? { capabilityFloor: m.capabilityFloor } : {}),
+    // The bar every strategy is held to. Dropped here, a task ran with no
+    // contract while its catalog version carried one.
+    ...(m.contract ? { contract: m.contract } : {}),
     createdAt: m.releasedAt,
     updatedAt: m.releasedAt,
   };

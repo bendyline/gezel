@@ -23,6 +23,7 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
   return {
     provider: resolveDefaultProviderName(config),
     generalistMode: config.generalistMode,
+    taskStrategy: config.taskStrategy,
     ollamaBaseUrl: config.ollamaBaseUrl,
     autoStartOllama: config.autoStartOllama ?? true,
     ollamaNumCtx: config.ollamaNumCtx,

@@ -79,6 +79,8 @@ export function snapshotCraftbookForTask(book: Craftbook, now: string): TaskCraf
     // Snapshot the whole-book floor so dispatch routing reads it from the
     // task record alone (effectiveCapabilityFloor).
     ...(book.capabilityFloor ? { capabilityFloor: book.capabilityFloor } : {}),
+    // The contract the run is held to, whatever strategy runs it.
+    ...(book.contract ? { contract: book.contract } : {}),
     createdAt: now,
     updatedAt: now,
   };

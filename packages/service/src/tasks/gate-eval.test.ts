@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { type GateWorkspaceReader, evaluateGate, taskSuppliedCitationPaths } from './gate-eval.js';
+import {
+  type GateWorkspaceReader,
+  evaluateGate,
+  taskGivenText,
+  taskSuppliedCitationPaths,
+} from './gate-eval.js';
 
 const reader = (files: Record<string, string>): GateWorkspaceReader => ({
   read: async (f) => (f in files ? files[f]! : null),
@@ -1245,6 +1250,42 @@ describe('evaluateGate — hardened kinds', () => {
     );
     expect(badJson.pass).toBe(false);
     expect(badJson.failures[0]).toContain('not valid JSON:');
+  });
+
+  it('claimsGrounded: reads a drawer deck’s cited workspace source and names an invented figure', async () => {
+    const brief = 'The returns pilot covered 18 SKUs. Refund leakage fell from 14.2% to 8.9%.';
+    const grounded = await evaluateGate(
+      [{ kind: 'claimsGrounded', file: 'tasks/1/deck.md', artifact: true }],
+      splitReader(
+        { 'source/brief.md': brief },
+        { 'tasks/1/deck.md': 'The pilot covered 18 SKUs (source: `source/brief.md`).' },
+      ),
+    );
+    expect(grounded.pass).toBe(true);
+
+    const invented = await evaluateGate(
+      [{ kind: 'claimsGrounded', file: 'tasks/1/deck.md', artifact: true }],
+      splitReader(
+        { 'source/brief.md': brief },
+        { 'tasks/1/deck.md': 'Refund leakage fell to 3.1% (source: `source/brief.md`).' },
+      ),
+    );
+    expect(invented.pass).toBe(false);
+    expect(invented.failures[0]).toContain('3.1');
+    expect(invented.checks[0]!.evidence).toMatchObject({ counts: { unsupported: 1 } });
+  });
+
+  it('claimsGrounded: takes today’s date and the request as given, not invented', async () => {
+    const deck = 'Results briefing for Boreal Desk, October 22, 2026.';
+    const check = [{ kind: 'claimsGrounded' as const, file: 'deck.md' }];
+    const bare = await evaluateGate(check, reader({ 'deck.md': deck }));
+    expect(bare.pass).toBe(false);
+    const given = taskGivenText(
+      { title: 'Deck', description: 'A briefing for Boreal Desk operations leads.' },
+      new Date('2026-10-22T15:00:00Z'),
+    );
+    const withGiven = await evaluateGate(check, reader({ 'deck.md': deck }), { givenText: given });
+    expect(withGiven.pass).toBe(true);
   });
 
   it('citationsResolve: quotes fabricated citations; corpus allowlists URLs', async () => {

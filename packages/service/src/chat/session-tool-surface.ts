@@ -241,6 +241,13 @@ export interface ResolveSessionToolSurfaceOptions {
    */
   generalistSteps?: ReadonlyArray<NonNullable<ResolveSessionToolSurfaceOptions['activeStep']>>;
   /**
+   * `consult_<role>` tools of an outcome task's owner. They reach teammates
+   * through the task's own route rather than the coordinator ones, so they
+   * are granted here after the coordinator-only subtraction and kept
+   * through the tier cap.
+   */
+  taskTeammateTools?: readonly string[];
+  /**
    * The task's craftbook inputs. Their read tools count as mandated by the
    * active step, so they survive the kit and every clamp; the book's own
    * step `toolPolicy` still has the last word.
@@ -626,6 +633,10 @@ export async function resolveSessionToolSurface(
   if (!coordinatorScope && rawAllowlist) {
     rawAllowlist = withoutCoordinatorOnlyTools(rawAllowlist, allModelFacingBuiltinTools);
   }
+  const teammateTools = opts.taskTeammateTools ?? [];
+  if (teammateTools.length > 0 && rawAllowlist) {
+    rawAllowlist = new Set([...rawAllowlist, ...teammateTools]);
+  }
 
   const allowlistBeforeStepPolicy = rawAllowlist;
   rawAllowlist = applyActiveStepToolPolicy(rawAllowlist, opts.activeStep);
@@ -641,6 +652,7 @@ export async function resolveSessionToolSurface(
     stepMandatedTools: new Set([
       ...mandatedStepTools,
       ...conditionallyReferencedStepTools,
+      ...teammateTools,
       ...(opts.factualWriting && rawAllowlist ? factualSourceTools(rawAllowlist) : []),
     ]),
     ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),
@@ -928,7 +940,9 @@ export async function resolveSessionToolSurface(
   // and an unfiltered (`null`) surface, which the step policy and the
   // orchestration clamp expand to the whole inventory.
   if (!coordinatorScope) {
+    const teammatesKept = teammateTools.filter((name) => allowlist?.has(name));
     allowlist = withoutCoordinatorOnlyTools(allowlist, allModelFacingBuiltinTools);
+    if (teammatesKept.length > 0) allowlist = new Set([...allowlist, ...teammatesKept]);
   }
 
   return { allowlist, projectOrchestrationConstrained, exactCraftbookConstrained };

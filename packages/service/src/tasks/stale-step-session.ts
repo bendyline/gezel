@@ -25,6 +25,7 @@ export interface StepSessionBinding {
   taskRef?: string;
   stepId?: string;
   stepActivationId?: string;
+  subagentFor?: { taskRef: string };
 }
 
 /**
@@ -36,6 +37,10 @@ export function staleStepSessionRefusal(
   binding: StepSessionBinding | null | undefined,
   task: Task | null | undefined,
 ): string | null {
+  // A teammate works for an outcome task's owner, who alone moves the task.
+  if (task && binding?.subagentFor?.taskRef === task.ref) {
+    return `You are helping on ${task.ref}; its owner advances, pauses and closes it. Don't change the task — finish your part, say what you wrote, and end your turn.`;
+  }
   if (!binding?.taskRef || !binding.stepId || !binding.stepActivationId) return null;
   if (!task || task.ref !== binding.taskRef) return null;
   const ownStep = task.craftbook.steps.find((step) => step.id === binding.stepId);

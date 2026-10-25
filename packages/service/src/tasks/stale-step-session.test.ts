@@ -36,6 +36,16 @@ const reviewer = {
 };
 
 describe('staleStepSessionRefusal', () => {
+  it('refuses a teammate helping on an outcome task, and only on that task', () => {
+    const outcome = task('outcome', [{ id: 'outcome', lastActivatedAt: EVALUATE_PASS_1 }]);
+    const helper = { gezelId: 'rae', subagentFor: { taskRef: 'office/1' } };
+    expect(staleStepSessionRefusal(helper, outcome)).toMatch(
+      /its owner advances, pauses and closes it/,
+    );
+    const elsewhere = { gezelId: 'rae', subagentFor: { taskRef: 'office/2' } };
+    expect(staleStepSessionRefusal(elsewhere, outcome)).toBeNull();
+  });
+
   it("leaves the current pass's session alone", () => {
     const current = task('evaluate', [{ id: 'evaluate', lastActivatedAt: EVALUATE_PASS_1 }]);
     expect(staleStepSessionRefusal(reviewer, current)).toBeNull();

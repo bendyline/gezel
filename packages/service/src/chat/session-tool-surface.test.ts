@@ -2063,6 +2063,20 @@ describe('resolveSessionToolSurface — generalist union surface', () => {
     expect([...allowlist!].sort()).toEqual(['read_artifact', 'read_artifacts']);
   });
 
+  it("an outcome task's owner keeps its teammate tools, which a worker never gets otherwise", async () => {
+    const teammates = ['consult_researcher', 'consult_reviewer'];
+    const plain = await resolveSessionToolSurface({ ...base, activeStep: notesStep });
+    expect(teammates.some((name) => plain.allowlist!.has(name))).toBe(false);
+    const outcome = await resolveSessionToolSurface({
+      ...base,
+      tier: 'tiny',
+      activeStep: notesStep,
+      generalistSteps: [notesStep, heroStep],
+      taskTeammateTools: teammates,
+    });
+    for (const name of teammates) expect(outcome.allowlist!.has(name)).toBe(true);
+  });
+
   it('a one-step generalist run is byte-identical to the stepwise surface', async () => {
     const stepwise = await resolveSessionToolSurface({ ...base, activeStep: notesStep });
     const generalist = await resolveSessionToolSurface({

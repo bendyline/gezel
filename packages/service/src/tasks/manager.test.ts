@@ -1,6 +1,7 @@
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { type CraftbookContract, executionModeForStrategy } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
@@ -2414,7 +2415,9 @@ describe('TaskManager — execution mode (generalist v2)', () => {
     const requested: string[] = [];
     tasks.setExecutionModeResolver(async (args) => {
       requested.push(args.requested);
-      return { mode: args.requested === 'auto' ? 'stepwise' : args.requested };
+      return {
+        mode: args.requested === 'auto' ? 'stepwise' : executionModeForStrategy(args.requested),
+      };
     });
     await tasks.create('website', {
       title: 'Forced stepwise',
@@ -2527,6 +2530,100 @@ describe('TaskManager — execution mode on drafts', () => {
     const active = await tasks.activate('website', draft.num, { force: true });
     expect(requested).toEqual(['auto']);
     expect(active.executionMode).toBe('stepwise');
+  });
+});
+
+describe('TaskManager — task strategy and the book contract', () => {
+  const contract: CraftbookContract = {
+    goal: 'A cited summary of the brief.',
+    deliverables: [
+      {
+        id: 'summary',
+        path: 'out/summary.md',
+        kind: 'markdown-report',
+        description: 'The summary',
+      },
+    ],
+    criteria: [
+      {
+        id: 'long-enough',
+        kind: 'acceptance',
+        text: 'The summary is substantial',
+        checks: [{ kind: 'minBytes', file: 'out/summary.md', bytes: 200 }],
+      },
+    ],
+  };
+  const contractBook = (withContract = true) =>
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'Summarize',
+            steps: [
+              { id: 'read', name: 'Read', prompt: 'Read brief.md.', suggestedRole: 'researcher' },
+              {
+                id: 'write',
+                name: 'Write',
+                prompt: 'Write out/summary.md.',
+                suggestedRole: 'copywriter',
+                advanceWhen: { file: 'out/summary.md' },
+              },
+              { id: 'finish', name: 'Finish', prompt: 'Wrap up.', terminal: true },
+            ],
+            entryStepId: 'read',
+            ...(withContract ? { contract } : {}),
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+  it('runs an outcome request as one generalist step held to the contract', async () => {
+    contractBook();
+    tasks.setExecutionModeResolver(async ({ requested }) => ({
+      mode: 'generalist',
+      strategy: requested === 'auto' ? 'generalist' : requested,
+      ownerGezelId: 'gen-1',
+    }));
+    const task = await tasks.create('website', {
+      title: 'Summarize',
+      craftbookId: 'summarize',
+      strategy: 'outcome',
+      strategyOptions: { subagents: false },
+    });
+    expect(task.executionMode).toBe('generalist');
+    expect(task.strategy).toBe('outcome');
+    expect(task.strategyOptions).toEqual({ subagents: false });
+    expect(task.craftbook.renderedAs).toBe('outcome');
+    expect(task.activeStepId).toBe('outcome');
+    expect(task.craftbook.steps).toHaveLength(1);
+    expect(task.craftbook.steps[0]!.assignee).toEqual({ kind: 'gezel', gezelId: 'gen-1' });
+    expect(task.craftbook.steps[0]!.attemptCount).toBe(1);
+    expect(task.craftbook.sourceSteps?.map((s) => s.id)).toEqual(['read', 'write', 'finish']);
+  });
+
+  it('refuses an explicit outcome request on a book with no contract', async () => {
+    contractBook(false);
+    await expect(
+      tasks.create('website', { title: 'No bar', craftbookId: 'summarize', strategy: 'outcome' }),
+    ).rejects.toThrow(/cannot run as an outcome: the book has no contract/);
+  });
+
+  it('holds a stepwise run to the same contract on its terminal step', async () => {
+    contractBook();
+    tasks.setExecutionModeResolver(async () => ({ mode: 'stepwise' }));
+    tasks.setRoleResolver(async (role) => ({ gezelId: `${role}-id` }));
+    const task = await tasks.create('website', { title: 'Summarize', craftbookId: 'summarize' });
+    expect(task.strategy).toBe('stepwise');
+    const finish = task.craftbook.steps.find((s) => s.id === 'finish')!;
+    expect(finish.gate).toEqual({
+      at: 'completion',
+      checks: [{ kind: 'minBytes', file: 'out/summary.md', bytes: 200 }],
+      onReject: 'write',
+    });
   });
 });
 

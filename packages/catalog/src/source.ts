@@ -1081,6 +1081,7 @@ function craftbookManifestFromDoc(
     ...(doc.spawn ? { spawn: doc.spawn } : {}),
     ...(doc.diffpackCapable ? { diffpackCapable: true } : {}),
     ...(doc.capabilityFloor ? { capabilityFloor: doc.capabilityFloor } : {}),
+    ...(doc.contract ? { contract: doc.contract } : {}),
     availableVersions,
   };
 }

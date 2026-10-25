@@ -104,6 +104,11 @@ export async function recordStepGateOutcome(
     .catch(() => {});
 }
 
+/** Where a step's activation-scoped evidence starts (see `evidenceSince`). */
+export function stepEvidenceSince(step: TaskCraftbookStep): string | undefined {
+  return step.evidenceSince ?? step.lastActivatedAt;
+}
+
 export function gateHistoryEvidence(
   history: Pick<HistoryManager, 'listEvents'> | undefined,
   projectId: string,
@@ -120,7 +125,7 @@ export function gateHistoryEvidence(
       const events = await history.listEvents({
         projectId,
         kinds: ['tool.called'],
-        ...(step.lastActivatedAt ? { from: step.lastActivatedAt } : {}),
+        ...(stepEvidenceSince(step) ? { from: stepEvidenceSince(step) } : {}),
       });
       const paths = events.flatMap((event) => {
         const d = event.details;
@@ -140,12 +145,14 @@ export function gateHistoryEvidence(
       });
       return { observable: true, paths };
     },
-    researchEvidence: async ({ sourcePath, tools }) => {
+    researchEvidence: async ({ sourcePath, tools, window }) => {
       if (!history) return { observable: false, matches: [] };
+      const taskWide = window === 'task';
+      const since = taskWide ? task.createdAt : stepEvidenceSince(step);
       const events = await history.listEvents({
         projectId,
         kinds: ['tool.called'],
-        ...(step.lastActivatedAt ? { from: step.lastActivatedAt } : {}),
+        ...(since ? { from: since } : {}),
       });
       const allowed = new Set(tools);
       const expectedPath = normalizeSourcePath(sourcePath);
@@ -158,7 +165,7 @@ export function gateHistoryEvidence(
       for (const event of events) {
         const details = event.details as Record<string, unknown> | undefined;
         if (!details || details.success !== true) continue;
-        if (details.taskRef !== task.ref || details.stepId !== step.id) continue;
+        if (details.taskRef !== task.ref || (!taskWide && details.stepId !== step.id)) continue;
         const tool = typeof details.name === 'string' ? details.name : '';
         const path = typeof details.path === 'string' ? details.path : undefined;
         const paths = Array.isArray(details.paths)
@@ -235,12 +242,14 @@ export function gateHistoryEvidence(
       }
       return { observable: true, slices };
     },
-    commandEvidence: async ({ scope, name, args }) => {
+    commandEvidence: async ({ scope, name, args, window }) => {
       if (!history) return { observable: false, runs: [] };
+      const taskWide = window === 'task';
+      const since = taskWide ? task.createdAt : stepEvidenceSince(step);
       const events = await history.listEvents({
         projectId,
         kinds: [scope === 'script' ? 'workspace.script.run' : 'workspace.npx.run'],
-        ...(step.lastActivatedAt ? { from: step.lastActivatedAt } : {}),
+        ...(since ? { from: since } : {}),
       });
       const sameArgs = (value: unknown): boolean => {
         const eventArgs = Array.isArray(value)
@@ -260,7 +269,9 @@ export function gateHistoryEvidence(
           if (!details) return false;
           // Attribution comes from the MCP env, not model args — a
           // receipt from another task or step never counts here.
-          if (details.taskRef !== task.ref || details.stepId !== step.id) return false;
+          if (details.taskRef !== task.ref || (!taskWide && details.stepId !== step.id)) {
+            return false;
+          }
           if (details.name !== name) return false;
           return sameArgs(details.args);
         })

@@ -86,6 +86,7 @@ import {
   KeyedLock,
   type ModelTier,
   NEW_THREAD_TITLE,
+  OUTCOME_TEAMMATE_TOOLS,
   type ProjectFileEntry,
   type Question,
   type ScriptMeta,
@@ -101,6 +102,7 @@ import {
   type TurnCancelReason,
   appToolsToolsetId,
   buildStepDispatchSeed,
+  contractAsksForGrounding,
   createAwakeTimeout,
   createLogger,
   decodeProjectGezelId,
@@ -119,6 +121,7 @@ import {
   normalizeCodexPermissionMode,
   nowIso,
   oneShotSystemMessage,
+  outcomeTaskHasSubagents,
   parseGezelMentionId,
   parseTaskRef,
   profileKind,
@@ -135,6 +138,7 @@ import {
   stepDeliverablePath,
   stepTurnSteering,
   taskEffectiveStatus,
+  taskSurfaceSteps,
   tierAtLeast,
   tuningForStepAction,
   turnCancelledMessage,
@@ -3160,6 +3164,12 @@ export class ChatManager extends LocalEngineRuntime {
     return readTaskWithEffectiveStatus(this.store, projectId, num).catch(() => null);
   }
 
+  /** The task a teammate's helper session works for, or null for any other session. */
+  private async subagentTask(record: ChatSession): Promise<Task | null> {
+    const parsed = record.subagentFor ? parseTaskRef(record.subagentFor.taskRef) : null;
+    return parsed ? this.readEffectiveTask(parsed.projectId, parsed.num) : null;
+  }
+
   private async shouldReleaseAfterMutationTurnForValidation(
     record: ChatSession,
     prompt: string,
@@ -3475,6 +3485,8 @@ export class ChatManager extends LocalEngineRuntime {
      * prompt. See ChatSession.consultationMode for the full contract.
      */
     consultationMode?: boolean;
+    /** The outcome task this consultation works for. See ChatSession.subagentFor. */
+    subagentFor?: { taskRef: string; ownerSessionId: string };
     /**
      * Mark the session as belonging to an anonymous app-serve visitor:
      * zero tools at session build, a visitor-context prompt addendum, and
@@ -3576,6 +3588,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(args.craftbookRef ? { craftbookRef: args.craftbookRef } : {}),
       ...(args.subject ? { subject: args.subject } : {}),
       ...(args.consultationMode ? { consultationMode: true } : {}),
+      ...(args.subagentFor ? { subagentFor: args.subagentFor } : {}),
       ...(args.visitorAccess ? { visitorAccess: true as const } : {}),
       ...(args.roleBasedNameOnlyMode !== undefined
         ? { roleBasedNameOnlyMode: args.roleBasedNameOnlyMode }
@@ -5053,7 +5066,10 @@ export class ChatManager extends LocalEngineRuntime {
     // gezel names resolve against the asker's project.
     const fromRec = await this.getSessionRecord(args.fromSessionId).catch(() => null);
     const projectId = args.projectId ?? fromRec?.projectId ?? DEFAULT_PROJECT_ID;
-    const taskRef = args.taskRef ?? fromRec?.taskRef;
+    // A teammate on an outcome task works for the task without being a task
+    // session: it never inherits the owner's task, so it cannot see or move
+    // the task's steps.
+    const taskRef = args.subagentFor ? undefined : (args.taskRef ?? fromRec?.taskRef);
     const stepId = args.stepId ?? (taskRef === fromRec?.taskRef ? fromRec?.stepId : undefined);
 
     const target = await this.resolveGezel(args.toGezelIdOrName, projectId);
@@ -5129,6 +5145,7 @@ export class ChatManager extends LocalEngineRuntime {
       // into "let me ask a designer about this myself", which is
       // exactly the pattern wild-caught on gemma4-26b Planner sessions.
       consultationMode: true,
+      ...(args.subagentFor ? { subagentFor: args.subagentFor } : {}),
       ...(expectedDeliverable ? { expectedDeliverable } : {}),
     });
 
@@ -15193,6 +15210,9 @@ export class ChatManager extends LocalEngineRuntime {
           ...(gezel?.role ? { role: gezel.role } : {}),
           ...(gezel?.roleBasedName ? { roleBasedName: gezel.roleBasedName } : {}),
           toolNames: appToolNames,
+          taskGrounded: contractAsksForGrounding(
+            (taskContext?.task ?? (await this.subagentTask(record)))?.craftbook.contract,
+          ),
         });
     const factualLookupPreference: FactualLookupPreference =
       project?.knowledgeCatalogs?.mode === 'off'
@@ -15241,7 +15261,10 @@ export class ChatManager extends LocalEngineRuntime {
         ? { activeStep: withInferredConsumes(taskContext.task, taskContext.step) }
         : {}),
       ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
-        ? { generalistSteps: taskContext.task.craftbook.steps }
+        ? { generalistSteps: taskSurfaceSteps(taskContext.task.craftbook) }
+        : {}),
+      ...(taskContext?.step && outcomeTaskHasSubagents(taskContext.task)
+        ? { taskTeammateTools: OUTCOME_TEAMMATE_TOOLS }
         : {}),
       ...(taskContext?.task.inputs ? { taskInputs: Object.values(taskContext.task.inputs) } : {}),
       forceDirectFileWork: directFileWorkConstrained,
@@ -16150,6 +16173,10 @@ export class ChatManager extends LocalEngineRuntime {
             sessionId: record.id,
             ...(record.taskRef ? { taskRef: record.taskRef } : {}),
             ...(record.stepId ? { stepId: record.stepId } : {}),
+            // A teammate's reads count toward the task it works for.
+            ...(!record.taskRef && record.subagentFor
+              ? { taskRef: record.subagentFor.taskRef, subagent: true }
+              : {}),
             argKeys: info.argKeys,
             durationMs: info.durationMs,
             success: info.success,
@@ -16285,6 +16312,15 @@ export class ChatManager extends LocalEngineRuntime {
         // the current task when a small model omits or mangles the ref
         // (e.g. `arcade-game#1` for `space-war-arcade-game/1`).
         ...(record.taskRef ? { GEZEL_TASK_REF: record.taskRef } : {}),
+        // A teammate's script runs are receipts for the task it works for,
+        // without making its session a task session.
+        ...(!record.taskRef && record.subagentFor
+          ? { GEZEL_RECEIPT_TASK_REF: record.subagentFor.taskRef }
+          : {}),
+        // The owner of an outcome task reaches teammates through the task.
+        ...(taskContext?.step && outcomeTaskHasSubagents(taskContext.task)
+          ? { GEZEL_TASK_TEAMMATES: '1' }
+          : {}),
         // Scope the task's artifact folder: workspace WRITES into this
         // namespace are redirected with an actionable error — the folder
         // lives in the artifacts drawer, and `write_file` there is the
@@ -16889,7 +16925,10 @@ export class ChatManager extends LocalEngineRuntime {
         ? { activeStep: withInferredConsumes(taskContext.task, taskContext.step) }
         : {}),
       ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
-        ? { generalistSteps: taskContext.task.craftbook.steps }
+        ? { generalistSteps: taskSurfaceSteps(taskContext.task.craftbook) }
+        : {}),
+      ...(taskContext?.step && outcomeTaskHasSubagents(taskContext.task)
+        ? { taskTeammateTools: OUTCOME_TEAMMATE_TOOLS }
         : {}),
       ...(taskContext?.task.inputs ? { taskInputs: Object.values(taskContext.task.inputs) } : {}),
       forceDirectFileWork: directFileWorkConstrained,

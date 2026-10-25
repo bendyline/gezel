@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import { z as zod } from 'zod';
 import { TaskAssigneeSchema } from './assignee.js';
+import { CraftbookContractSchema } from './craftbook-contract.js';
 import {
   CraftbookBasedOnSchema,
   CraftbookCliWorkflowSchema,
@@ -87,6 +88,8 @@ export const CraftbookDocSchema = zod.object({
   diffpackCapable: zod.boolean().optional(),
   /** Minimum model tier for the whole book — see `CraftbookSchema.capabilityFloor`. */
   capabilityFloor: ModelTierSchema.optional(),
+  /** Final goal, deliverables and quality bar — see `CraftbookSchema.contract`. */
+  contract: CraftbookContractSchema.optional(),
   /** Inline script sources (name → TypeScript). */
   scripts: CraftbookScriptsSchema.optional(),
   /** Catalog provenance — carried by bundled/local books, optional for ad-hoc docs. */

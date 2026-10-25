@@ -275,6 +275,8 @@ export function gateCheckLabel(c: GateCheck): string {
       return `nodeRuns ${c.file}`;
     case 'citationsResolve':
       return `citationsResolve ${c.file}`;
+    case 'claimsGrounded':
+      return `claimsGrounded ${c.file}`;
     case 'researchEvidence':
       return `researchEvidence ${c.sourcePath?.trim() || c.tools.join(',')}`;
     case 'imageEvidence':

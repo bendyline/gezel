@@ -12,6 +12,7 @@ import {
   type TaskNote,
   type TaskNoteAuthor,
   TaskStatusSchema,
+  TaskTeammateRequestSchema,
   type TaskWaitState,
   UpdateTaskCraftbookRequestSchema,
   UpdateTaskNoteRequestSchema,
@@ -52,6 +53,7 @@ import {
   TaskNotActiveError,
 } from '../../tasks/manager.js';
 import { retryPausedTask } from '../../tasks/retry.js';
+import { askTaskTeammate } from '../../tasks/teammates.js';
 import type { ServiceContext } from '../context.js';
 
 const taskDocLog = createLogger('craftbooks');
@@ -230,6 +232,17 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     const body = SetTaskStatusRequestSchema.parse(await c.req.json());
     const task = await ctx.tasks.setStatus(projectId, num, body.status);
     return c.json(task);
+  });
+
+  // An outcome task's owner hands a piece of the task to a teammate and
+  // waits. The guard binds the origin to the session token; the handler
+  // checks the session works this task.
+  app.post('/:projectId/tasks/:num/teammates', async (c) => {
+    const projectId = c.req.param('projectId');
+    const num = parseNum(c.req.param('num'));
+    if (num == null) return c.json({ error: 'invalid num' }, 400);
+    const body = TaskTeammateRequestSchema.parse(await c.req.json());
+    return c.json(await askTaskTeammate(ctx, { ...body, projectId, num }));
   });
 
   // Activate a draft task: flip draft → active and kick off its entry step.

@@ -45,6 +45,18 @@ const FULL: CraftbookTemplateManifest = CraftbookTemplateManifestSchema.parse({
   services: [{ kind: 'web-search' }],
   diffpackCapable: true,
   capabilityFloor: 'small',
+  contract: {
+    goal: 'Everything, done.',
+    deliverables: [{ id: 'out', path: 'out.md', kind: 'markdown-doc', description: 'The result' }],
+    criteria: [
+      {
+        id: 'exists',
+        kind: 'acceptance',
+        text: 'It exists',
+        checks: [{ kind: 'minBytes', file: 'out.md', bytes: 1 }],
+      },
+    ],
+  },
   spawn: {
     overFile: 'items.json',
     steps: [{ id: 'child', name: 'Child', prompt: 'Child work.', terminal: true }],

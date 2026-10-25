@@ -30,6 +30,8 @@ import {
   type TaskNoteAuthor,
   type TaskReferences,
   type TaskStatus,
+  type TaskStrategy,
+  type TaskStrategySetting,
   type TaskVariation,
   type UpdateTaskRequest,
   type UpdateTaskStepRequest,
@@ -39,6 +41,7 @@ import {
   assignOwnerApprovalSteps,
   taskRef as buildTaskRef,
   createLogger,
+  executionModeForStrategy,
   expandStepDeliverable,
   explicitStepJump,
   gateHandoffNoteText,
@@ -52,6 +55,7 @@ import {
   projectManagedWorkspaceWritable,
   removeStepAndCleanEdges,
   reorderStepsArray,
+  requestedTaskStrategy,
   resolveNextStep,
   resolveSecurityPolicy,
   resolveSteps,
@@ -111,6 +115,7 @@ import {
 import {
   type GateCheckOutcome,
   type GateWorkspaceReader,
+  taskGivenText,
   taskSuppliedCitationPaths,
 } from './gate-eval.js';
 import { type StepGatedEvent, gateHistoryEvidence, recordStepGateOutcome } from './gate-history.js';
@@ -1085,7 +1090,7 @@ export class TaskManager {
         }
       : undefined;
 
-    const craftbook = snapshotCraftbookForTask(mainBook, now);
+    let craftbook = snapshotCraftbookForTask(mainBook, now);
     // Land invocation params in the recipe itself, exactly like fanout
     // children do with their per-item context: `{{reviewId}}` in step
     // prompts and gate/advanceWhen file paths becomes concrete BEFORE
@@ -1216,6 +1221,12 @@ export class TaskManager {
       ...runtimeCraftbookContext,
     };
     interpolateStepsContext(craftbook.steps, craftbookInterpolationContext);
+    if (craftbook.contract) {
+      craftbook.contract = interpolateContextDeep(
+        craftbook.contract,
+        craftbookInterpolationContext,
+      );
+    }
     // A previous run may have left the same deliverable path behind. An
     // existence-only observable gate would then advance this brand-new task
     // before its assignee changed anything. Preserve explicit author intent
@@ -1234,7 +1245,7 @@ export class TaskManager {
         }
       }),
     );
-    const spawnsCraftbook = spawnBook ? snapshotCraftbookForTask(spawnBook, now) : undefined;
+    let spawnsCraftbook = spawnBook ? snapshotCraftbookForTask(spawnBook, now) : undefined;
     // The launch params have to reach the fanout half of the recipe too.
     // `interpolateStepsContext` above walks the HOST's steps and stops
     // there, so `spawn.overFile` and every child-template step kept their
@@ -1258,36 +1269,53 @@ export class TaskManager {
     );
     if (spawnsCraftbook) {
       interpolateStepsContext(spawnsCraftbook.steps, spawnTemplateContext);
+      if (spawnsCraftbook.contract) {
+        spawnsCraftbook.contract = interpolateContextDeep(
+          spawnsCraftbook.contract,
+          spawnTemplateContext,
+        );
+      }
     }
     if (craftbook.spawn) {
       craftbook.spawn = interpolateContextDeep(craftbook.spawn, spawnTemplateContext);
     }
-    const activeStepId = craftbook.entryStepId;
     // A system job's step is a control surface the service runs itself; no
     // model ever takes it. Under `auto` the resolver still minted the
     // Generalist and pinned it on that step, and a pinned step is one the
     // stuck-step sweep re-drives and then pauses. The 1.26270 release
     // candidate paused the Boekwachter's indexing job 34 minutes after first
     // boot that way (2026-09-26).
-    const requestedExecutionMode =
-      extras?.origin?.kind === 'system-job' ? 'stepwise' : (input.executionMode ?? 'auto');
+    const requestedStrategy: TaskStrategySetting =
+      extras?.origin?.kind === 'system-job' ? 'stepwise' : requestedTaskStrategy(input);
     // A draft resolves nothing yet (like roles) — `activate()` does, reading
     // an explicit request back off the stamp. Everything else resolves now.
-    let executionMode: TaskExecutionMode | undefined =
-      isDraft && requestedExecutionMode !== 'auto' ? requestedExecutionMode : undefined;
+    let strategy: TaskStrategy | undefined =
+      isDraft && requestedStrategy !== 'auto' ? requestedStrategy : undefined;
+    let executionMode: TaskExecutionMode | undefined = strategy
+      ? executionModeForStrategy(strategy)
+      : undefined;
     if (!isDraft) {
-      // First activation of the entry step → attemptCount 1.
-      craftbook.steps = bumpStepActivation(craftbook.steps, activeStepId, now);
-
-      executionMode = await applyExecutionMode(this.executionModeResolver, {
+      const applied = await applyExecutionMode(this.executionModeResolver, {
         projectId,
         ref: buildTaskRef(projectId, num),
         craftbook,
         spawnsCraftbook,
-        requested: requestedExecutionMode,
+        requested: requestedStrategy,
+        explicit: requestedStrategy !== 'auto',
+        strategyOptions: input.strategyOptions,
         ...(input.assignee?.kind === 'gezel' ? { assigneeGezelId: input.assignee.gezelId } : {}),
         ...(input.nightShift?.enabled ? { nightShift: true } : {}),
+        now,
       });
+      executionMode = applied.mode;
+      strategy = applied.strategy;
+      craftbook = applied.craftbook;
+      spawnsCraftbook = applied.spawnsCraftbook;
+    }
+    const activeStepId = craftbook.entryStepId;
+    if (!isDraft) {
+      // First activation of the entry step → attemptCount 1.
+      craftbook.steps = bumpStepActivation(craftbook.steps, activeStepId, now);
 
       // Resolve the entry step's `suggestedRole` (if any) into a concrete
       // gezel id BEFORE writing the task. Without this the very first
@@ -1328,6 +1356,10 @@ export class TaskManager {
       assignee,
       ...(assigneeAuto ? { assigneeAuto: true } : {}),
       ...(executionMode ? { executionMode } : {}),
+      ...(strategy ? { strategy } : {}),
+      ...(input.strategyOptions && strategy === 'outcome'
+        ? { strategyOptions: input.strategyOptions }
+        : {}),
       craftbook,
       ...(input.trustScripts
         ? {
@@ -1391,6 +1423,7 @@ export class TaskManager {
         steps: craftbook.steps.map((s) => ({ id: s.id, name: s.name })),
         assignee: task.assignee,
         ...(executionMode ? { executionMode } : {}),
+        ...(strategy ? { strategy } : {}),
         ...(spawnsCraftbook ? { spawnSteps: spawnsCraftbook.steps.length } : {}),
         ...(fanout ? { fanout: { count: fanout.count } } : {}),
         ...(sources.length > 0 ? { sourceCraftbookIds: sources } : {}),
@@ -1769,30 +1802,38 @@ export class TaskManager {
       }
     }
     const now = nowIso();
-    const entry = task.craftbook.entryStepId;
-    const craftbook: TaskCraftbook = {
-      ...task.craftbook,
-      steps: bumpStepActivation(task.craftbook.steps, entry, now),
-      updatedAt: now,
-    };
-    const next: Task = {
-      ...task,
-      status: 'active',
-      craftbook,
-      activeStepId: entry,
-      updatedAt: now,
-    };
-    next.executionMode = await applyExecutionMode(this.executionModeResolver, {
+    const requested: TaskStrategySetting = task.strategy ?? task.executionMode ?? 'auto';
+    const applied = await applyExecutionMode(this.executionModeResolver, {
       projectId,
-      ref: next.ref,
-      craftbook: next.craftbook,
-      spawnsCraftbook: next.spawnsCraftbook,
-      requested: task.executionMode ?? 'auto',
+      ref: task.ref,
+      craftbook: task.craftbook,
+      spawnsCraftbook: task.spawnsCraftbook,
+      requested,
+      explicit: requested !== 'auto',
+      strategyOptions: task.strategyOptions,
       ...(!task.assigneeAuto && task.assignee.kind === 'gezel'
         ? { assigneeGezelId: task.assignee.gezelId }
         : {}),
       ...(task.nightShift?.enabled ? { nightShift: true } : {}),
+      now,
     });
+    const entry = applied.craftbook.entryStepId;
+    const craftbook: TaskCraftbook = {
+      ...applied.craftbook,
+      steps: bumpStepActivation(applied.craftbook.steps, entry, now),
+      updatedAt: now,
+    };
+    const { spawnsCraftbook: _priorSpawn, ...withoutSpawn } = task;
+    const next: Task = {
+      ...withoutSpawn,
+      ...(applied.spawnsCraftbook ? { spawnsCraftbook: applied.spawnsCraftbook } : {}),
+      status: 'active',
+      executionMode: applied.mode,
+      strategy: applied.strategy,
+      craftbook,
+      activeStepId: entry,
+      updatedAt: now,
+    };
     await this.maybeResolveStepRole(next.craftbook, entry, projectId);
     // A draft created without a named owner has been carrying an interim
     // `{kind:'user'}` assignee — the entry step's role only just resolved,
@@ -3290,6 +3331,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           return this.keurmeester.judgeOneShot(prompt, timeoutMs);
         },
         ...gateHistoryEvidence(this.history, projectId, task, step, ws),
+        givenText: taskGivenText(task, new Date()),
       },
     });
 

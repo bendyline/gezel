@@ -108,6 +108,8 @@ export interface AskGezelArgs {
    * returning a long source/report body through chat.
    */
   expectedDeliverable?: ExpectedDeliverable;
+  /** The outcome task this consultation works for; see `ChatSession.subagentFor`. */
+  subagentFor?: { taskRef: string; ownerSessionId: string };
 }
 
 /**

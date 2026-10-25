@@ -107,6 +107,7 @@
     "eval:ab-band-prefix": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/ab-band-prefix.ts",
     "eval:ab-generalist": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/ab-generalist-mode.ts",
     "eval:ab-work-routing": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/ab-work-routing.ts",
+    "eval:ab-strategy": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/ab-strategy.ts",
     "eval:ab-effort:unleased": "pnpm --filter @bendyline/gezel-evals run ab-reasoning-effort",
     "eval:scorecard": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/scorecard.ts",
     "eval:scorecard-campaign": "node scripts/run-with-dependency-lease.mjs --direct-node evals/src/bin/scorecard-campaign.ts",

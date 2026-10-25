@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { MODEL_TIER_ORDER, type ModelTier } from '../roles/tier.js';
 import { type TaskAssignee, TaskAssigneeSchema } from './assignee.js';
+import { CraftbookContractSchema } from './craftbook-contract.js';
+import { DeliverableKindSchema } from './deliverable-kind.js';
 import {
   type GateSpec,
   GateSpecSchema,
@@ -1130,6 +1132,12 @@ export const CraftbookSchema = z
      * declaration, consumed by per-step routing at dispatch.
      */
     capabilityFloor: ModelTierSchema.optional(),
+    /**
+     * The book's final goal, deliverables and quality bar, independent of
+     * its steps. Every task-completion strategy is held to it. See
+     * {@link CraftbookContractSchema}.
+     */
+    contract: CraftbookContractSchema.optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -1138,31 +1146,7 @@ export type Craftbook = z.infer<typeof CraftbookSchema>;
 
 /* ──────────────────────────── Request shapes ────────────────────────── */
 
-/**
- * The CLASS of artifact a step produces — the single enum shared by the
- * `deliverable` blueprint field, the `set_step_deliverable` MCP tool, and
- * the kind→gate mapping in `deliverable.ts` (which lives outside the
- * schemas layer; the enum is here so it can't create an import cycle).
- */
-export const DeliverableKindSchema = z.enum([
-  'html-game',
-  'html-multiscreen-game',
-  'html-page',
-  'html-marketing-site',
-  'markdown-doc',
-  'markdown-report',
-  'markdown-notes',
-  'json',
-  'yaml-spec',
-  'code-module',
-  'code-with-tests',
-  'security-report',
-  'image-set',
-  'audio-file',
-  'slide-deck',
-  'data-file',
-  'generic-file',
-]);
+export { DeliverableKindSchema } from './deliverable-kind.js';
 
 /**
  * Authoring sugar on a step blueprint: "this step produces file X of

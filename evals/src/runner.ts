@@ -434,12 +434,18 @@ export async function runTrial(
   // capability into a hardware artifact. We preserve the watchdog's
   // deliberate requirement for product-visible progress, but scale its wall
   // window by the preflight decode rate just like the scenario ceiling.
-  const hardProgressTimeoutMs = trialHardProgressTimeoutMs({
+  const authoredHardProgressTimeoutMs = trialHardProgressTimeoutMs({
     authoredProgressTimeoutMs: scenario.progressTimeoutMs ?? DEFAULT_HARD_PROGRESS_TIMEOUT_MS,
     decodeRateTokensPerSec: opts.decodeRateTokensPerSec,
     minProgressTimeoutMs: llamaEvalLaunch?.hardProgressTimeoutMs,
     envProgressFloorMs: envHardProgressFloorMs(),
   });
+  // The runtime re-prompts a stalled step after 8 minutes, and that turn
+  // needs time to show progress. A 12-minute authored window failed a
+  // Gemma invoice-run trial three minutes into the re-prompt (2026-10-24).
+  const hardProgressTimeoutMs = opts.taskStrategy
+    ? Math.max(authoredHardProgressTimeoutMs, STRATEGY_HARD_PROGRESS_FLOOR_MS)
+    : authoredHardProgressTimeoutMs;
   // Soft progress watchdog: fires when the daemon shows no activity
   // across our fingerprint signals (turns, tools, slot updates, stream
   // pulses) for this long. Default 5 min covers normal "model thinking
@@ -455,7 +461,11 @@ export async function runTrial(
       const n = Number.parseInt(env, 10);
       if (Number.isFinite(n) && n > 0) return n;
     }
-    return defaultSoftProgressTimeoutMsForModel(opts.modelId, engine);
+    const byModel = defaultSoftProgressTimeoutMsForModel(opts.modelId, engine);
+    // A strategy arm is judged on what the runtime does with a silent step,
+    // and the runtime re-prompts one after 8 minutes (`stuckStep.stallMs`).
+    // A 5-minute stall cut failed three pilot trials before it could.
+    return opts.taskStrategy ? Math.max(byModel, STRATEGY_SOFT_PROGRESS_FLOOR_MS) : byModel;
   })();
   // CLI `--image-model` is a per-scenario OVERRIDE — it only applies
   // when the scenario itself declares it needs image gen. Without this
@@ -524,6 +534,7 @@ export async function runTrial(
   if (!authProbe.ok) {
     return finalize({
       generalistMode: opts.generalistMode,
+      taskStrategy: opts.taskStrategy,
       retrievalArm: opts.retrieval,
       repairPolicy: scenario.repairPolicy,
       engine,
@@ -577,6 +588,7 @@ export async function runTrial(
   } catch (err) {
     return finalize({
       generalistMode: opts.generalistMode,
+      taskStrategy: opts.taskStrategy,
       retrievalArm: opts.retrieval,
       repairPolicy: scenario.repairPolicy,
       engine,
@@ -727,6 +739,7 @@ export async function runTrial(
     const warmFailure = modelWarmFailure(err, opts.signal);
     return finalize({
       generalistMode: opts.generalistMode,
+      taskStrategy: opts.taskStrategy,
       retrievalArm: opts.retrieval,
       repairPolicy: scenario.repairPolicy,
       engine,
@@ -877,6 +890,7 @@ export async function runTrial(
       : {}),
     ...(opts.retrieval ? { retrievalTrace: true } : {}),
     ...(opts.retrieval ? { relevanceModel: opts.retrieval.relevanceModel ?? null } : {}),
+    ...(opts.taskStrategy ? { taskStrategy: opts.taskStrategy } : {}),
   });
   if (opts.qualification) {
     mergedExtraEnv.GEZEL_EVAL_OBSERVE = '1';
@@ -905,6 +919,7 @@ export async function runTrial(
     } catch (err) {
       return finalize({
         generalistMode: opts.generalistMode,
+        taskStrategy: opts.taskStrategy,
         retrievalArm: opts.retrieval,
         repairPolicy: scenario.repairPolicy,
         engine,
@@ -976,6 +991,7 @@ export async function runTrial(
       await mockRuntime?.close().catch(() => {});
       return finalize({
         generalistMode: opts.generalistMode,
+        taskStrategy: opts.taskStrategy,
         retrievalArm: opts.retrieval,
         repairPolicy: scenario.repairPolicy,
         engine,
@@ -1015,6 +1031,7 @@ export async function runTrial(
       await mockRuntime?.close().catch(() => {});
       return finalize({
         generalistMode: opts.generalistMode,
+        taskStrategy: opts.taskStrategy,
         retrievalArm: opts.retrieval,
         repairPolicy: scenario.repairPolicy,
         engine,
@@ -1060,6 +1077,7 @@ export async function runTrial(
     await mockRuntime?.close().catch(() => {});
     return finalize({
       generalistMode: opts.generalistMode,
+      taskStrategy: opts.taskStrategy,
       retrievalArm: opts.retrieval,
       repairPolicy: scenario.repairPolicy,
       engine,
@@ -1192,6 +1210,7 @@ export async function runTrial(
         : {}),
       ...(imageModelId ? { imageProvider: 'sd-cpp' as const } : {}),
       ...(opts.generalistMode ? { generalistMode: opts.generalistMode } : {}),
+      ...(opts.taskStrategy ? { taskStrategy: opts.taskStrategy.strategy } : {}),
       // A retrieval arm's policy outranks the `autoRecall: false` above:
       // config.retrieval is read before the legacy switch.
       ...(opts.retrieval
@@ -1286,7 +1305,7 @@ export async function runTrial(
       );
     }
     log(
-      `[trial] provider=${engine}${evalLlamaSpecType ? ` llamaSpec=${evalLlamaSpecType}` : ''}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.generalistMode ? ` generalistMode=${opts.generalistMode}` : ''}${scenario.repairPolicy ? ` repairPolicy=${scenario.repairPolicy}` : ''}${scenario.modelNetworkAccess ? ` modelNetwork=${scenario.modelNetworkAccess}` : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
+      `[trial] provider=${engine}${evalLlamaSpecType ? ` llamaSpec=${evalLlamaSpecType}` : ''}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.generalistMode ? ` generalistMode=${opts.generalistMode}` : ''}${opts.taskStrategy ? ` taskStrategy=${opts.taskStrategy.arm}` : ''}${scenario.repairPolicy ? ` repairPolicy=${scenario.repairPolicy}` : ''}${scenario.modelNetworkAccess ? ` modelNetwork=${scenario.modelNetworkAccess}` : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
     );
 
     // Phase 5: ensure Meester exists.
@@ -1330,6 +1349,7 @@ export async function runTrial(
                   client: boundary.client(spawned),
                   repairPolicy: scenario.repairPolicy,
                   userSimulation: opts.qualification?.userSimulation,
+                  ...(opts.taskStrategy ? { taskStrategy: opts.taskStrategy } : {}),
                   meesterId,
                   ...(mockRuntime ? { mocks: mockRuntime } : {}),
                   state: scenarioState,
@@ -1340,6 +1360,7 @@ export async function runTrial(
             : scenario.setup!({
                 client,
                 meesterId,
+                ...(opts.taskStrategy ? { taskStrategy: opts.taskStrategy } : {}),
                 ...(mockRuntime ? { mocks: mockRuntime } : {}),
                 state: scenarioState,
                 log,
@@ -1366,7 +1387,17 @@ export async function runTrial(
             log,
             signal: opts.signal,
           })
-        : startAutoAnswerer({ client, meesterId, log, signal: opts.signal });
+        : startAutoAnswerer({
+            client,
+            meesterId,
+            log,
+            signal: opts.signal,
+            // A strategy arm's pause ends its trial. A retry resets the gate
+            // budget the arms are compared on, and in the 2026-10-24 Gemma
+            // pilot it won the race against that check in four trials, two of
+            // which then passed.
+            ...(opts.taskStrategy ? { maxPauseRetries: 0 } : {}),
+          });
     let stopAutoAnswerer = startSimulation();
     if (scenario.skipInitialPrompt) {
       log('[trial] skipped initial meester prompt (scenario setup already kicked off work)');
@@ -1416,6 +1447,7 @@ export async function runTrial(
       };
       const verdict = await pollUntilDone(scenario, {
         client: boundary?.client(spawned) ?? client,
+        ...(opts.taskStrategy ? { taskStrategy: opts.taskStrategy } : {}),
         ...(boundary ? { qualificationBoundary: boundary } : {}),
         userSimulation: opts.qualification?.userSimulation,
         meesterId,
@@ -1611,6 +1643,7 @@ export async function runTrial(
 
   return finalize({
     generalistMode: opts.generalistMode,
+    taskStrategy: opts.taskStrategy,
     retrievalArm: opts.retrieval,
     repairPolicy: scenario.repairPolicy,
     engine,
@@ -1881,9 +1914,12 @@ export function evalDaemonEnvForTrial(opts: {
   retrievalTrace?: boolean;
   /** A retrieval arm's relevance model; `null` pins it off. Absent leaves the daemon default. */
   relevanceModel?: TrialRetrievalArm['relevanceModel'] | null;
+  /** A strategy-benchmark arm: tier-collapse fires only for generalist tasks, so it is off for every arm. */
+  taskStrategy?: TrialOptions['taskStrategy'];
 }): NodeJS.ProcessEnv {
   return {
     GEZEL_DISABLE_MEMORY_EXTRACTION: '1',
+    ...(opts.taskStrategy ? { GEZEL_DISABLE_TIER_COLLAPSE: '1' } : {}),
     // A few workflow evals seed the exact connector corpus they grade before
     // launching the craftbook. Let the trial daemon verify and reuse those
     // local files instead of requiring credentials or touching the network.
@@ -1950,6 +1986,14 @@ export function evalDaemonEnvForTrial(opts: {
     ...behaviorEnvForTrial(opts),
   };
 }
+
+/**
+ * The soft stall window for strategy-benchmark trials: past the runtime's
+ * own 8-minute re-prompt of a silent step, with room for that turn to start.
+ */
+export const STRATEGY_SOFT_PROGRESS_FLOOR_MS = 12 * 60_000;
+/** The no-real-progress window for strategy trials: a re-prompt plus a full turn. */
+export const STRATEGY_HARD_PROGRESS_FLOOR_MS = 20 * 60_000;
 
 /**
  * Decode rate the scenario ceilings were hand-authored against. Every
@@ -2587,6 +2631,7 @@ export async function pollUntilDone(
     client: GezelClient;
     qualificationBoundary?: QualificationBoundary;
     userSimulation?: EvalContext['userSimulation'];
+    taskStrategy?: EvalContext['taskStrategy'];
     meesterId: string;
     log: (line: string) => void;
     pollIntervalMs: number;
@@ -2754,6 +2799,7 @@ export async function pollUntilDone(
     meesterId: args.meesterId,
     ...(scenario.repairPolicy ? { repairPolicy: scenario.repairPolicy } : {}),
     ...(args.userSimulation ? { userSimulation: args.userSimulation } : {}),
+    ...(args.taskStrategy ? { taskStrategy: args.taskStrategy } : {}),
     log: args.log,
     logChanged,
     recordSniff,
@@ -5081,6 +5127,7 @@ async function finalize(args: {
   modelId: string;
   modelTier: import('@bendyline/gezel').ModelTier;
   generalistMode?: TrialOptions['generalistMode'];
+  taskStrategy?: TrialOptions['taskStrategy'];
   retrievalArm?: TrialOptions['retrieval'];
   repairPolicy?: TrialOptions['repairPolicy'];
   engine?: TrialOptions['engine'];
@@ -5173,6 +5220,7 @@ async function finalize(args: {
     modelId: args.modelId,
     modelTier: args.modelTier,
     ...(args.generalistMode ? { generalistMode: args.generalistMode } : {}),
+    ...(args.taskStrategy ? { taskStrategy: args.taskStrategy } : {}),
     ...(args.retrievalArm ? { retrievalArm: args.retrievalArm } : {}),
     ...(args.repairPolicy ? { repairPolicy: args.repairPolicy } : {}),
     ...(args.engine ? { engine: args.engine } : {}),

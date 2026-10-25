@@ -69,6 +69,14 @@ describe('resolveFactualWriting', () => {
       reason: 'off',
     });
   });
+
+  it('holds whoever works a grounded task to the rule, whatever their role', () => {
+    expect(resolveFactualWriting({ role: 'Generalist', taskGrounded: true })).toEqual({
+      on: true,
+      reason: 'task',
+    });
+    expect(resolveFactualWriting({ override: false, taskGrounded: true }).on).toBe(false);
+  });
 });
 
 describe('factualWritingGuidance', () => {

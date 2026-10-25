@@ -25,6 +25,8 @@ import {
   MIN_TASK_DESCRIPTION_LENGTH,
   ManageTaskInputSchema,
   MessageGezelInputSchema,
+  OUTCOME_TEAMMATE_SLUGS,
+  type OutcomeTeammateSlug,
   ReadDocumentInputSchema,
   ReadTaskNotesInputSchema,
   ReplaceInFileInputSchema,
@@ -371,6 +373,11 @@ const sessionTaskNamingMode = {
 // the task tools default to / recover toward the current task when the
 // model omits or mangles the ref. Empty for lobby sessions.
 const sessionTaskRef = process.env.GEZEL_TASK_REF ?? '';
+// The task a teammate's helper session works for: its script runs are that
+// task's receipts, but the session is not a task session.
+const receiptTaskRef = sessionTaskRef || (process.env.GEZEL_RECEIPT_TASK_REF ?? '');
+// The owner of an outcome task reaches teammates through the task's route.
+const taskTeammates = process.env.GEZEL_TASK_TEAMMATES === '1';
 // The craftbook TEMPLATE this session is scoped to (`record.craftbookRef`),
 // if any — set when the explicit Craftbook editor opens an AI-assist
 // session. Lets the unified craftbook_* tools default their target to the
@@ -644,10 +651,17 @@ function draftEditApi(client: GezelClient, packId: string): WorkspaceEditApi {
  */
 const sessionTaskArtifactDir = (process.env.GEZEL_TASK_ARTIFACT_DIR ?? '').replace(/\/+$/, '');
 
+/** The path, normalized, when it falls in this session's task folder. */
+function sessionTaskArtifactPath(path: string): string | null {
+  if (!sessionTaskArtifactDir) return null;
+  const p = path.replace(/\\/g, '/').replace(/^\.\//, '');
+  return p === sessionTaskArtifactDir || p.startsWith(`${sessionTaskArtifactDir}/`) ? p : null;
+}
+
 function assertNotTaskArtifactNamespace(target: ConcreteWorkspaceTarget): void {
-  if (!sessionTaskArtifactDir || target.kind !== 'current') return;
-  const p = target.path.replace(/\\/g, '/').replace(/^\.\//, '');
-  if (p === sessionTaskArtifactDir || p.startsWith(`${sessionTaskArtifactDir}/`)) {
+  if (target.kind !== 'current') return;
+  const p = sessionTaskArtifactPath(target.path);
+  if (p) {
     throw new Error(
       `\`${p}\` is this task's working folder in the ARTIFACTS DRAWER, not the project workspace. Write it with \`write_artifact({ path: ${JSON.stringify(p)}, ... })\` and read it back with \`read_artifact\` — the workspace file tools cannot reach the drawer.`,
     );
@@ -2206,6 +2220,20 @@ server.tool(
   async ({ path, content }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    // A whole-file write into this task's folder can only mean the drawer
+    // copy. Refusing it taught nothing: Qwen 3.8 27B repeated the same
+    // write_file ten times past an error naming write_artifact, and the
+    // step paused (refactor-module, 2026-10-25). Edit tools keep the
+    // refusal, since the drawer has no partial-edit equivalent.
+    const drawerPath = sessionTaskArtifactPath(path);
+    if (drawerPath && toolIsAuthorizedForThisSession('write_artifact')) {
+      const written = await writeArtifactToolCall({ path: drawerPath, content });
+      const notice = `[Rerouted write_file → write_artifact]\n${JSON.stringify(drawerPath)} is this task's working folder in the artifacts drawer, so it was written there. Use write_artifact and read_artifact for files in this folder.`;
+      return {
+        ...written,
+        content: [{ type: 'text' as const, text: notice }, ...written.content],
+      };
+    }
     const raster = rasterImageWriteRefusal(path);
     if (raster) return raster;
     const scoped = await taskScopedWriteRefusal(path, 'workspace');
@@ -2980,7 +3008,7 @@ server.tool(
         ...(sessionId ? { sessionId } : {}),
         // Receipt attribution for commandEvidence gates — env-derived, so a
         // model cannot stamp another step's receipt.
-        ...(sessionTaskRef ? { taskRef: sessionTaskRef } : {}),
+        ...(receiptTaskRef ? { taskRef: receiptTaskRef } : {}),
         ...(sessionStepId ? { stepId: sessionStepId } : {}),
       });
       return commandToolResult(`npm run ${script}`, res);
@@ -3011,7 +3039,7 @@ server.tool(
         ...(timeoutMs ? { timeoutMs } : {}),
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
-        ...(sessionTaskRef ? { taskRef: sessionTaskRef } : {}),
+        ...(receiptTaskRef ? { taskRef: receiptTaskRef } : {}),
         ...(sessionStepId ? { stepId: sessionStepId } : {}),
       });
       return commandToolResult(`npx ${bin}`, res);
@@ -4085,149 +4113,161 @@ server.tool(
         "Bypass the workspace-collision and source-code-extension guards. Only set when you deliberately want to stash a code-looking file in artifacts (rare — a mock, a scratch experiment you're not shipping).",
       ),
   }).shape,
-  async ({ path, content: rawContent, jsonContent, force }) => {
-    const stale = await staleStepMutationResult();
-    if (stale) return stale;
-    const raster = rasterImageWriteRefusal(path);
-    if (raster) return raster;
-    const scoped = await taskScopedWriteRefusal(path, 'artifacts');
-    if (scoped) return scoped;
-    if ((rawContent === undefined) === (jsonContent === undefined)) {
-      return errorResult(
-        'Supply exactly one of content or jsonContent. Use jsonContent for a structured JSON report.',
-      );
-    }
-    const value = jsonContent ?? rawContent;
-    const content = typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`;
-    const clean = normalizeArtifactPath(path);
-    if (isReservedShadowArtifactPath(clean)) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: "artifacts/shadow/ is gezel's derived shadow-file cache (converted documents, image descriptions, transcripts), regenerated automatically by indexing — anything written there would be overwritten or swept. Write your artifact elsewhere, e.g. at the artifacts root or under reports/.",
-          },
-        ],
-        isError: true,
-      };
-    }
-    if (isProtectedConnectorArtifactPath(clean)) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'The artifacts/data directory contains read-only connector mirrors. Editing a synced record can cause permanent data loss because its cursor has already advanced. Write analysis elsewhere in artifacts, or use draft_connector_action to propose a source change for the user.',
-          },
-        ],
-        isError: true,
-      };
-    }
-    if (!force) {
-      const redirected = await redirectExpectedDeliverableWriteToWorkspace(
-        clean,
-        content,
-        'write_artifact',
-      );
-      if (redirected) return redirected;
-    }
-    const verdict = !force ? classifyArtifactPath(clean) : { ok: true as const };
-    if (!verdict.ok) {
-      const normalizedContent = normalizeWorkspaceWriteContent(clean, content);
-      const syntax = validateSourceContent(clean, normalizedContent);
-      if (syntax && !syntax.ok) {
-        return {
-          content: [{ type: 'text' as const, text: syntax.message }],
-          isError: true,
-        };
-      }
-      try {
-        await api.writeProjectWorkspaceFile(projectId, {
-          path: clean,
-          content: normalizedContent,
-          ...(gezelId ? { gezelId } : {}),
-          ...(sessionId ? { sessionId } : {}),
-        });
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Wrote ${clean} to the project workspace. Note: write_artifact is for scratch artifacts; use write_file directly for app/source deliverables.`,
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
-          isError: true,
-        };
-      }
-    }
-    if (!force) {
-      const workspaceCollision = await workspaceCollisionForArtifactPath(clean);
-      if (workspaceCollision) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Refusing write_artifact({ path: "${clean}", ... }) because a workspace ${workspaceCollision.kind} already exists at that path. write_artifact would create a side-drawer copy, not update the project. Use write_file if you have workspace write access, or hand off to a developer. Set force: true only if you intentionally want an artifact copy with the same path.`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    }
-    // Syntax-check HTML/JS/TS exactly like `write_file`. `force: true`
-    // bypasses the check (matching the extension-guard escape hatch):
-    // if the model deliberately wants to stash an in-progress/broken
-    // source-code file as a scratch note, force lets it.
-    if (!force) {
-      const syntax = validateSourceContent(clean, content);
-      if (syntax && !syntax.ok) {
-        return {
-          content: [{ type: 'text' as const, text: syntax.message }],
-          isError: true,
-        };
-      }
-    }
-    // Artifact writes are whole-file replacements. Reject malformed JSON
-    // before crossing the store boundary so a tool call cut off by a local
-    // model's output cap cannot replace the last complete ledger with a
-    // syntactically broken prefix. This is intentionally extension-scoped:
-    // scratch Markdown/source artifacts retain their existing validation and
-    // `force` semantics, while a `.json` artifact is never useful malformed.
-    if (clean.toLowerCase().endsWith('.json')) {
-      try {
-        JSON.parse(content);
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Refusing to replace ${clean}: the new content is not valid JSON (${err instanceof Error ? err.message : String(err)}). The previous artifact was left unchanged. Re-emit one complete valid JSON value; if it cannot fit in one tool call, split the deliverable or use a deterministic script to assemble it.`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    }
-    // normalizeMarkdown collapses single newlines inside non-fenced paragraphs into
-    // spaces — correct for prose .md, catastrophic for source code. An end-of-line
-    // `// comment` would eat the next statement when collapsed onto one line
-    // (observed corrupting inline JS in the tictactoe eval).
-    const stored = clean.endsWith('.md') ? normalizeMarkdown(content) : content;
-    await api.writeProjectArtifact(projectId, clean, stored, {
-      ...(gezelId ? { gezelId } : {}),
-      ...(sessionId ? { sessionId } : {}),
-    });
-    const completionHint =
-      sessionTaskRef && sessionStepId
-        ? artifactCompletionHint(sessionStepCompletion, {
-            checkedByStep: sessionStepCheckedArtifacts.includes(clean),
-          })
-        : '';
-    return { content: [{ type: 'text' as const, text: `Wrote ${clean}${completionHint}` }] };
-  },
+  (args) => writeArtifactToolCall(args),
 );
+
+async function writeArtifactToolCall({
+  path,
+  content: rawContent,
+  jsonContent,
+  force,
+}: {
+  path: string;
+  content?: string | Record<string, unknown> | unknown[] | undefined;
+  jsonContent?: unknown;
+  force?: boolean | undefined;
+}) {
+  const stale = await staleStepMutationResult();
+  if (stale) return stale;
+  const raster = rasterImageWriteRefusal(path);
+  if (raster) return raster;
+  const scoped = await taskScopedWriteRefusal(path, 'artifacts');
+  if (scoped) return scoped;
+  if ((rawContent === undefined) === (jsonContent === undefined)) {
+    return errorResult(
+      'Supply exactly one of content or jsonContent. Use jsonContent for a structured JSON report.',
+    );
+  }
+  const value = jsonContent ?? rawContent;
+  const content = typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`;
+  const clean = normalizeArtifactPath(path);
+  if (isReservedShadowArtifactPath(clean)) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: "artifacts/shadow/ is gezel's derived shadow-file cache (converted documents, image descriptions, transcripts), regenerated automatically by indexing — anything written there would be overwritten or swept. Write your artifact elsewhere, e.g. at the artifacts root or under reports/.",
+        },
+      ],
+      isError: true,
+    };
+  }
+  if (isProtectedConnectorArtifactPath(clean)) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: 'The artifacts/data directory contains read-only connector mirrors. Editing a synced record can cause permanent data loss because its cursor has already advanced. Write analysis elsewhere in artifacts, or use draft_connector_action to propose a source change for the user.',
+        },
+      ],
+      isError: true,
+    };
+  }
+  if (!force) {
+    const redirected = await redirectExpectedDeliverableWriteToWorkspace(
+      clean,
+      content,
+      'write_artifact',
+    );
+    if (redirected) return redirected;
+  }
+  const verdict = !force ? classifyArtifactPath(clean) : { ok: true as const };
+  if (!verdict.ok) {
+    const normalizedContent = normalizeWorkspaceWriteContent(clean, content);
+    const syntax = validateSourceContent(clean, normalizedContent);
+    if (syntax && !syntax.ok) {
+      return {
+        content: [{ type: 'text' as const, text: syntax.message }],
+        isError: true,
+      };
+    }
+    try {
+      await api.writeProjectWorkspaceFile(projectId, {
+        path: clean,
+        content: normalizedContent,
+        ...(gezelId ? { gezelId } : {}),
+        ...(sessionId ? { sessionId } : {}),
+      });
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Wrote ${clean} to the project workspace. Note: write_artifact is for scratch artifacts; use write_file directly for app/source deliverables.`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
+        isError: true,
+      };
+    }
+  }
+  if (!force) {
+    const workspaceCollision = await workspaceCollisionForArtifactPath(clean);
+    if (workspaceCollision) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Refusing write_artifact({ path: "${clean}", ... }) because a workspace ${workspaceCollision.kind} already exists at that path. write_artifact would create a side-drawer copy, not update the project. Use write_file if you have workspace write access, or hand off to a developer. Set force: true only if you intentionally want an artifact copy with the same path.`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+  // Syntax-check HTML/JS/TS exactly like `write_file`. `force: true`
+  // bypasses the check (matching the extension-guard escape hatch):
+  // if the model deliberately wants to stash an in-progress/broken
+  // source-code file as a scratch note, force lets it.
+  if (!force) {
+    const syntax = validateSourceContent(clean, content);
+    if (syntax && !syntax.ok) {
+      return {
+        content: [{ type: 'text' as const, text: syntax.message }],
+        isError: true,
+      };
+    }
+  }
+  // Artifact writes are whole-file replacements. Reject malformed JSON
+  // before crossing the store boundary so a tool call cut off by a local
+  // model's output cap cannot replace the last complete ledger with a
+  // syntactically broken prefix. This is intentionally extension-scoped:
+  // scratch Markdown/source artifacts retain their existing validation and
+  // `force` semantics, while a `.json` artifact is never useful malformed.
+  if (clean.toLowerCase().endsWith('.json')) {
+    try {
+      JSON.parse(content);
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Refusing to replace ${clean}: the new content is not valid JSON (${err instanceof Error ? err.message : String(err)}). The previous artifact was left unchanged. Re-emit one complete valid JSON value; if it cannot fit in one tool call, split the deliverable or use a deterministic script to assemble it.`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+  // normalizeMarkdown collapses single newlines inside non-fenced paragraphs into
+  // spaces — correct for prose .md, catastrophic for source code. An end-of-line
+  // `// comment` would eat the next statement when collapsed onto one line
+  // (observed corrupting inline JS in the tictactoe eval).
+  const stored = clean.endsWith('.md') ? normalizeMarkdown(content) : content;
+  await api.writeProjectArtifact(projectId, clean, stored, {
+    ...(gezelId ? { gezelId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+  });
+  const completionHint =
+    sessionTaskRef && sessionStepId
+      ? artifactCompletionHint(sessionStepCompletion, {
+          checkedByStep: sessionStepCheckedArtifacts.includes(clean),
+        })
+      : '';
+  return { content: [{ type: 'text' as const, text: `Wrote ${clean}${completionHint}` }] };
+}
 
 server.tool(
   'run_playwright_script',
@@ -6788,6 +6828,50 @@ const DELEGATION_ROLE_SPECS: ReadonlyArray<{
   { slug: 'meester', jobTitle: 'Meester', label: 'meester', hint: 'top-level orchestration' },
 ];
 
+function isOutcomeTeammateSlug(slug: string): slug is OutcomeTeammateSlug {
+  return (OUTCOME_TEAMMATE_SLUGS as readonly string[]).includes(slug);
+}
+
+/**
+ * An outcome task's owner hands a piece of the task to a teammate. The
+ * service checks this session owns the task; the teammate works in the
+ * task's project and its reads count toward the task.
+ */
+async function consultTaskTeammate(
+  slug: OutcomeTeammateSlug,
+  label: string,
+  question: string,
+  timeoutMs: number | undefined,
+) {
+  const parsed = await parseRef(sessionTaskRef);
+  const ask = await api.askTaskTeammate(parsed.projectId, parsed.num, {
+    fromGezelId: gezelId,
+    fromSessionId: sessionId,
+    role: slug,
+    question,
+    ...(typeof timeoutMs === 'number' ? { timeoutMs } : {}),
+  });
+  if (ask.outcome === 'reply') {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `${ask.toGezelName} (${label}) answered:\n\n${ask.text}\n\nCheck any file they say they wrote before you rely on it.`,
+        },
+      ],
+    };
+  }
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify({ outcome: 'error', reason: ask.reason, message: ask.message }),
+      },
+    ],
+    isError: true,
+  };
+}
+
 for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
   server.tool(
     `delegate_${slug}`,
@@ -6866,7 +6950,9 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
 
   server.tool(
     `consult_${slug}`,
-    `Ask a project's ${label} (${hint}) a question and get their answer back synchronously, this turn. Auto-creates a ${label} if none exists. For a project you created from Default, pass \`project\` so the answer uses the right files and memory. For handing off actual work or files, use \`delegate_${slug}\` instead.`,
+    taskTeammates && isOutcomeTeammateSlug(slug)
+      ? `Hand a self-contained piece of your task to a ${label} (${hint}) and get their answer back this turn. Auto-creates a ${label} if none exists. They work in this project and see only what you write here: name the files to read and the file to write. You stay responsible for the result, so check what they wrote.`
+      : `Ask a project's ${label} (${hint}) a question and get their answer back synchronously, this turn. Auto-creates a ${label} if none exists. For a project you created from Default, pass \`project\` so the answer uses the right files and memory. For handing off actual work or files, use \`delegate_${slug}\` instead.`,
     {
       question: z
         .string()
@@ -6906,6 +6992,9 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
         };
       }
       try {
+        if (taskTeammates && sessionTaskRef && isOutcomeTeammateSlug(slug)) {
+          return await consultTaskTeammate(slug, label, question, timeoutMs);
+        }
         const resolvedProject = project ? await resolveProjectId(project) : projectId;
         const repoGuard = await repoIntakeGuardForProject({
           tool: `consult_${slug}`,
