@@ -90,7 +90,9 @@ describe('gezel mcp', () => {
     const { run, lines } = fixture();
     await run('mcp', 'install', 'cursor');
     const out = lines.join('\n');
-    expect(out).toContain('add this line to the AGENTS.md file in a folder you work in');
+    expect(out).toContain(
+      'add this line near the top of the AGENTS.md file in a folder you work in',
+    );
     expect(out).toContain('the `search` tool from the `gezel` MCP server');
     // Cursor has no prompt command Gezel can name, so none is printed.
     expect(out).not.toContain('triage_issues');

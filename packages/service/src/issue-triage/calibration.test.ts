@@ -2,6 +2,7 @@ import type { BoekwachterIssue, IssueVerdictEntry } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
   annotateLowConfidence,
+  categoryPrior,
   expectedRealScore,
   isLowConfidence,
   issueVerdictStats,
@@ -130,5 +131,16 @@ describe('how often the reviewer is right', () => {
     expect(lo).toBeGreaterThan(0.04);
     expect(hi).toBeLessThan(0.38);
     expect(wilsonInterval(0, 0)).toEqual([0, 1]);
+  });
+
+  it('starts each category from how often its leads were worth fixing', () => {
+    expect(categoryPrior('Bug')).toBeGreaterThan(categoryPrior('error handling'));
+    expect(categoryPrior('error_handling')).toBeGreaterThan(categoryPrior('smell'));
+    expect(categoryPrior('naming')).toBe(categoryPrior('complexity'));
+    // With no verdicts the prior is the score; verdicts then pull it.
+    const none = issueVerdictStats([]);
+    expect(expectedRealScore(none, issue({ category: 'bug' }), categoryPrior('bug'))).toBeCloseTo(
+      0.56,
+    );
   });
 });

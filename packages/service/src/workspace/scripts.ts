@@ -124,6 +124,7 @@ export async function runPackageScript(opts: RunPackageScriptOptions): Promise<R
 export async function runNpx(opts: RunNpxOptions): Promise<RunCommandOutcome> {
   const gate = await opts.store.assertWorkspaceWritable(opts.projectId);
   if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
+  await opts.store.ensureWorkspaceTemplate(opts.projectId);
 
   const bin = opts.bin.trim();
   if (!bin || /[\\\/]/.test(bin)) {

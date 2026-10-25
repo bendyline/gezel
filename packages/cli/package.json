@@ -36,7 +36,7 @@
     "build": "tsup && node scripts/verify-build.mjs",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist .turbo",
+    "clean": "node ../../scripts/clean-dirs.mjs dist .turbo",
     "test": "vitest run"
   },
   "dependencies": {
@@ -46,9 +46,9 @@
     "@bendyline/gezel-client": "workspace:*",
     "@bendyline/gezel-knowledge": "workspace:*",
     "@bendyline/gezel-service": "workspace:*",
-    "@bendyline/squisq": "2.13.1",
-    "@bendyline/squisq-formats": "2.8.2",
-    "@bendyline/squisq-react": "2.12.10",
+    "@bendyline/squisq": "2.13.3",
+    "@bendyline/squisq-formats": "2.8.4",
+    "@bendyline/squisq-react": "2.12.12",
     "commander": "^15.0.0",
     "ink": "^7.1.1",
     "ink-text-input": "^6.0.0",

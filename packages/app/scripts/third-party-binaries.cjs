@@ -107,7 +107,7 @@ const THIRD_PARTY_PATTERNS = [
     source: 'Microsoft MXC launcher (@microsoft/mxc-sdk)',
   },
   {
-    pattern: '(?:^|/)node_modules/@vscode/ripgrep(?:-win32-x64)?/(?:[^/]+/)*rg\\.exe$',
+    pattern: '(?:^|/)node_modules/@vscode/ripgrep(?:-win32-(?:x64|arm64))?/(?:[^/]+/)*rg\\.exe$',
     source: 'Microsoft vscode-ripgrep (prebuilt ripgrep)',
   },
   {
@@ -123,12 +123,16 @@ const THIRD_PARTY_PATTERNS = [
   // node-pty's ConPTY helpers) arrive Microsoft-signed and are preserved by
   // the isValidlySigned check rather than by this list.
   //
+  // The bundle carries only the build host's arch (pnpm installs that arch's
+  // optional packages), so an x64 and an arm64 release each match one arch.
   {
-    pattern: '(?:^|/)node_modules/@resvg/resvg-js-win32-x64-msvc/resvgjs\\.win32-x64-msvc\\.node$',
+    pattern:
+      '(?:^|/)node_modules/@resvg/resvg-js-win32-(x64|arm64)-msvc/resvgjs\\.win32-\\1-msvc\\.node$',
     source: '@resvg/resvg-js (prebuilt napi-rs addon)',
   },
   {
-    pattern: '(?:^|/)node_modules/@napi-rs/keyring-win32-x64-msvc/keyring\\.win32-x64-msvc\\.node$',
+    pattern:
+      '(?:^|/)node_modules/@napi-rs/keyring-win32-(x64|arm64)-msvc/keyring\\.win32-\\1-msvc\\.node$',
     source: '@napi-rs/keyring (prebuilt napi-rs addon)',
   },
   {

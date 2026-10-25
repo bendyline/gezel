@@ -272,7 +272,7 @@ export function buildTypedKickoffStep(input: {
   known?: ReadonlyArray<{ title: string; value: string }>;
   /** The type's model-facing tools (its page-only tools excluded). */
   tools?: ReadonlyArray<{ name: string; description?: string }>;
-}): { name: string; description: string } {
+}): { name: string; description: string; stage: 'make'; personLabel: string } {
   const goal = input.request ?? input.brief.taskDescription ?? input.brief.about;
   const unsaid =
     input.unsaid.length > 0
@@ -303,8 +303,13 @@ export function buildTypedKickoffStep(input: {
           )
           .join(', ')}. Call one for each piece rather than writing the file yourself.`
       : '';
+  // What the person's tracker reads while the lead works ("Camila is setting
+  // up your Trip Planner"); a name too long for the line says "project".
+  const setting = `setting up your ${input.typeName}`;
   return {
     name: 'First draft',
+    stage: 'make',
+    personLabel: setting.length <= 60 ? setting : 'setting up your project',
     description: `You lead this ${input.typeName} project for the person. Their goal: ${goal}${where}${tools}${known}${unsaid} Make what they asked for; if something more would help, offer it in your reply instead of adding it. Do the real work this turn rather than describing it, and finish it before you ask anything. Then reply in two or three sentences: what you made, and at most one question.`,
   };
 }

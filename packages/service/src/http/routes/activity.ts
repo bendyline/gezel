@@ -1,9 +1,12 @@
-import { resolveActivity } from '@bendyline/gezel';
+import { createLogger, resolveActivity } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { withQuestionFileReferences } from '../../references/question-files.js';
+import { listRequestTracks } from '../../requests/sources.js';
 import { normalizeNightShiftReportAttachment } from '../../tasks/night-review.js';
 import type { ServiceContext } from '../context.js';
 import { queueStatusSnapshot } from './queues.js';
+
+const log = createLogger('service');
 
 /** Product activity stays in the user daemon, including when engines live in the broker. */
 export function activityRoutes(ctx: ServiceContext): Hono {
@@ -42,6 +45,14 @@ export function activityRoutes(ctx: ServiceContext): Hono {
           }),
       )
     ).filter((owner) => owner !== null);
+    // Every request, finished ones included: a finished request absorbs its
+    // ready receipt so the person sees one row, not "1 ready / 1 working".
+    // Folding is a refinement: if requests cannot be read, Activity still
+    // lists the work as separate rows rather than failing.
+    const requests = await listRequestTracks(ctx, {}, { tasks, questions }).catch((err) => {
+      log.warn(`[activity] requests unavailable: ${err instanceof Error ? err.message : err}`);
+      return [];
+    });
     return c.json(
       resolveActivity({
         tasks,
@@ -58,6 +69,7 @@ export function activityRoutes(ctx: ServiceContext): Hono {
         ),
         queues,
         sessionOwners,
+        requests,
       }),
     );
   });

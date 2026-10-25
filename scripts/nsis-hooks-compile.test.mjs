@@ -135,7 +135,17 @@ async function makensisRunsOnThisHost(makensis) {
   });
 }
 
-test('custom NSIS hooks compile in electron-builder uninstaller and installer passes', async (t) => {
+// electron-builder names an installer's app package APP_64 (x64) or APP_ARM64
+// (arm64), and the hooks pick the matching Visual C++ runtime from it.
+const ARCH_PACKAGE_DEFINE = { x64: 'APP_64', arm64: 'APP_ARM64' };
+
+for (const arch of Object.keys(ARCH_PACKAGE_DEFINE)) {
+  test(`custom NSIS hooks compile in electron-builder uninstaller and installer passes (${arch})`, async (t) => {
+    await compileHooksFor(t, arch);
+  });
+}
+
+async function compileHooksFor(t, arch) {
   const workDir = await mkdtemp(join(tmpdir(), 'gezel-nsis-contract-'));
   try {
     const [makensis, pluginsDir] = await Promise.all([
@@ -201,14 +211,15 @@ test('custom NSIS hooks compile in electron-builder uninstaller and installer pa
 
     const template = await readFile(join(nsisTemplatesDir, 'installer.nsi'), 'utf8');
     const script = header.build() + template;
-    const archive = join(workDir, 'app-x64.nsis.7z');
+    const archive = join(workDir, `app-${arch}.nsis.7z`);
     const intermediate = join(workDir, 'uninstaller-generator.exe');
     const uninstaller = join(workDir, 'uninstaller.exe');
     const installer = join(workDir, 'installer.exe');
     await Promise.all([
       writeFile(archive, 'compile-only application archive'),
-      writeFile(join(vcRedistDir, 'vc_redist.x64.exe'), 'compile-only VC redistributable'),
+      writeFile(join(vcRedistDir, `vc_redist.${arch}.exe`), 'compile-only VC redistributable'),
     ]);
+    const appPackage = ARCH_PACKAGE_DEFINE[arch];
 
     const defines = {
       APP_ID: 'com.bendyline.gezel',
@@ -228,10 +239,10 @@ test('custom NSIS hooks compile in electron-builder uninstaller and installer pa
       UNINSTALL_URL_README: 'https://github.com/bendyline/gezel',
       MUI_ICON: join(appDir, 'assets', 'icon.ico'),
       MUI_UNICON: join(appDir, 'assets', 'icon.ico'),
-      APP_64: archive,
-      APP_64_NAME: basename(archive),
-      APP_64_HASH: '0'.repeat(128),
-      APP_64_UNPACKED_SIZE: '1',
+      [appPackage]: archive,
+      [`${appPackage}_NAME`]: basename(archive),
+      [`${appPackage}_HASH`]: '0'.repeat(128),
+      [`${appPackage}_UNPACKED_SIZE`]: '1',
       COMPANY_NAME: 'Bendyline LLC',
       APP_INSTALLER_STORE_FILE: '@bendylinegezel-app-updater\\installer.exe',
       COMPRESSION_METHOD: '7z',
@@ -278,4 +289,4 @@ test('custom NSIS hooks compile in electron-builder uninstaller and installer pa
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
-});
+}

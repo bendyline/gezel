@@ -16,6 +16,7 @@ import {
   selectQueueRows,
   useQueueLiveTurns,
 } from './QueueMeter.js';
+import { RequestTracker } from './RequestTracker.js';
 import { useActivity } from './activity-context.js';
 import { useHeaderDensity } from './header-density.js';
 import { OPEN_UPDATES_EVENT, type OpenActivityIntent, navigateToTab } from './nav-actions.js';
@@ -360,46 +361,67 @@ export function ActivityControl() {
                           rowContext={rowContext}
                         />
                       )}
-                      {rows.map((item) => (
-                        <article className="activity-work" key={item.id}>
-                          <p className="activity-context">{contextLabel(item)}</p>
-                          <strong>{item.title}</strong>
-                          {item.section === 'needs-you' && item.taskRef ? (
-                            <Suspense fallback={<p>Loading the current step…</p>}>
-                              <ActivityTaskStep
-                                taskRef={item.taskRef}
-                                snapshotAt={snapshot.at}
-                                onContinued={activity.refresh}
+                      {rows.map((item) => {
+                        // A person's request reads as its tracker, opened at their thread.
+                        const track = item.requestKey
+                          ? snapshot.requests?.find((r) => r.key === item.requestKey)
+                          : undefined;
+                        return (
+                          <article className="activity-work" key={item.id}>
+                            <p className="activity-context">{contextLabel(item)}</p>
+                            <strong>{item.title}</strong>
+                            {track ? (
+                              <RequestTracker
+                                track={track}
+                                gezels={gezels}
+                                variant="compact"
+                                roleBasedNameOnlyMode={boringMode}
                               />
-                            </Suspense>
-                          ) : (
-                            <p>{formatDetail(item.detail)}</p>
-                          )}
-                          {(item.section !== 'needs-you' || !item.taskRef) &&
-                          (item.taskRef || item.sessionId) ? (
-                            <button
-                              type="button"
-                              className="btn secondary"
-                              onClick={() => void openItem(item)}
-                            >
-                              {item.taskRef ? 'View task details' : 'Open chat'}
-                            </button>
-                          ) : null}
-                          {item.heldByActivity && (
-                            <button
-                              type="button"
-                              className="btn secondary"
-                              onClick={() => {
-                                requestSettingsSection('team');
-                                navigateToTab({ kind: 'area', area: 'settings' });
-                                setOpen(false);
-                              }}
-                            >
-                              Activity settings
-                            </button>
-                          )}
-                        </article>
-                      ))}
+                            ) : item.section === 'needs-you' && item.taskRef ? (
+                              <Suspense fallback={<p>Loading the current step…</p>}>
+                                <ActivityTaskStep
+                                  taskRef={item.taskRef}
+                                  snapshotAt={snapshot.at}
+                                  onContinued={activity.refresh}
+                                />
+                              </Suspense>
+                            ) : (
+                              <p>{formatDetail(item.detail)}</p>
+                            )}
+                            {track && item.sessionId ? (
+                              <button
+                                type="button"
+                                className="btn secondary"
+                                onClick={() => void openItem({ ...item, taskRef: undefined })}
+                              >
+                                Open chat
+                              </button>
+                            ) : (item.section !== 'needs-you' || !item.taskRef) &&
+                              (item.taskRef || item.sessionId) ? (
+                              <button
+                                type="button"
+                                className="btn secondary"
+                                onClick={() => void openItem(item)}
+                              >
+                                {item.taskRef ? 'View task details' : 'Open chat'}
+                              </button>
+                            ) : null}
+                            {item.heldByActivity && (
+                              <button
+                                type="button"
+                                className="btn secondary"
+                                onClick={() => {
+                                  requestSettingsSection('team');
+                                  navigateToTab({ kind: 'area', area: 'settings' });
+                                  setOpen(false);
+                                }}
+                              >
+                                Activity settings
+                              </button>
+                            )}
+                          </article>
+                        );
+                      })}
                       {!rows.length && !cards.length && !crew?.count && (
                         <p className="activity-empty">{empty}</p>
                       )}

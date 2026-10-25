@@ -288,6 +288,7 @@ import type {
   ListPromptDraftsResponse,
   ListQuestionsResponse,
   ListRemindersResponse,
+  ListRequestsResponse,
   ListScriptsResponse,
   ListSessionQueueResponse,
   ListSessionToolsResponse,
@@ -4232,6 +4233,8 @@ export class GezelClient {
       startedAt: number;
       elapsedMs: number;
       lastProgressAgoMs?: number;
+      enginePhase?: string;
+      engineHold?: 'behind' | 'yielding';
     }>;
   }> {
     const qs = new URLSearchParams();
@@ -5423,6 +5426,8 @@ export class GezelClient {
     to?: string;
     q?: string;
     limit?: number;
+    /** `person` lists only what a person would recognize as their work changing. */
+    audience?: 'person';
   }): Promise<ListHistoryResponse> {
     const params = new URLSearchParams();
     if (filter?.projectId) params.set('project', filter.projectId);
@@ -5432,8 +5437,23 @@ export class GezelClient {
     if (filter?.to) params.set('to', filter.to);
     if (filter?.q) params.set('q', filter.q);
     if (filter?.limit != null) params.set('limit', String(filter.limit));
+    if (filter?.audience) params.set('audience', filter.audience);
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/history${qs}`);
+  }
+
+  /**
+   * One tracker per person message: the requests written in `sessions` (all
+   * threads when omitted), only those still under way with `live`.
+   */
+  listRequests(
+    filter: { sessions?: readonly string[]; live?: boolean } = {},
+  ): Promise<ListRequestsResponse> {
+    const params = new URLSearchParams();
+    if (filter.sessions?.length) params.set('sessions', filter.sessions.join(','));
+    if (filter.live) params.set('live', '1');
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request('GET', `/api/requests${qs}`);
   }
 
   /** Full-text search across chat-session transcripts (global index). */

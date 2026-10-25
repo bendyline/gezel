@@ -1,0 +1,116 @@
+/* A request's tracker in the thread: four stops, one line, the file at Ready.
+   See docs/ux.md "One request, one tracker". */
+.request-tracker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  width: min(44rem, calc(100% - 1rem));
+  margin: 0.5rem 0 0.65rem 0.5rem;
+  padding: 0.65rem 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.request-tracker-compact {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  gap: 0.25rem;
+}
+.request-tracker-stops {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.request-tracker-stop {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-align: center;
+}
+/* The route between stops: a line from this stop's dot to the previous one. */
+.request-tracker-stop + .request-tracker-stop::before {
+  content: "";
+  position: absolute;
+  top: 0.4rem;
+  right: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--border);
+}
+.request-tracker-stop.is-done + .request-tracker-stop::before,
+.request-tracker-stop.is-done + .request-tracker-stop.is-active::before {
+  background: var(--accent);
+}
+.request-tracker-dot {
+  position: relative;
+  z-index: 1;
+  width: 0.8rem;
+  height: 0.8rem;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+}
+.request-tracker-stop.is-done .request-tracker-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.request-tracker-stop.is-active .request-tracker-dot {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.request-tracker-stop.is-active,
+.request-tracker-stop.is-done:last-child {
+  color: var(--text);
+  font-weight: 600;
+}
+.request-tracker-compact .request-tracker-label {
+  font-size: var(--text-2xs);
+}
+.request-tracker-line {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--text);
+}
+.request-tracker-compact .request-tracker-line {
+  font-size: var(--text-sm);
+}
+.request-tracker-eta,
+.request-tracker-actual {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.request-tracker-actual {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+.request-tracker-overdue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+.request-tracker-more > summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.request-tracker-more[open] > summary {
+  margin-bottom: 0.4rem;
+}
+.request-tracker-open-task {
+  margin-top: 0.4rem;
+}

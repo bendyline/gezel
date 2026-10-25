@@ -109,6 +109,8 @@ describe('POST /v1/apps/harness-connect', () => {
     expect(body.memory).toBe('save');
     expect(body.images).toBe('local');
     expect(body.libraryDir).toBeTruthy();
+    // The DocBlocks the document tools start: the one this daemon ships.
+    expect(body.documents?.entry).toMatch(/docblocks-cli[\\/]dist[\\/]bin\.js$/);
 
     const project = await svc.context.store.getProject(body.project!.id);
     expect(project?.voormanGezelId).toBeUndefined();

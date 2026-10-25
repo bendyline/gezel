@@ -2873,19 +2873,10 @@ export class Store {
         join(localDir, 'package.json'),
         `${JSON.stringify({ name: `gezel-project-${id}`, private: true, version: '0.0.0' }, null, 2)}\n`,
       );
-      // Seed the internal workspace with a Node + TypeScript baseline so
-      // gezels can immediately `writeFile('src/…')` + `run_nodejs_script`
-      // without first having to reinvent package.json / tsconfig.json.
-      // External working dirs are left alone — that's the user's repo.
-      // GitHub-linked projects: the clone will populate the real files,
-      // so seeding a template here would only confuse the Workspace tab.
-      if (!input.workingDir && !input.github?.url) {
-        await bootstrapWorkspace({
-          workspaceDir: join(localDir, 'workspace'),
-          projectId: id,
-          projectName: input.name,
-        });
-      }
+      // No Node + TypeScript template here: an invoice or a trip plan has no
+      // use for package.json. Code projects get it once their type is known
+      // (project-type/create.ts), and every other workspace gets it just
+      // before its first Node tool runs (`ensureWorkspaceTemplate`).
       let github: ProjectGitHub | undefined = input.github?.url
         ? { url: input.github.url }
         : undefined;
@@ -4648,6 +4639,25 @@ export class Store {
     return this.resolveWorkspaceDir(id, meta).dir;
   }
 
+  /**
+   * Give an internal workspace the Node + TypeScript template once. Code
+   * projects get it at creation; any other project gets it just before its
+   * first Node tool runs, so an invoice project never grows a package.json it
+   * has no use for. Without one, `pnpm add` and Node's module-type lookup
+   * walk up to the project's private package.json beside the workspace. A
+   * folder the person added and a GitHub checkout are never touched, and a
+   * workspace that already has a package.json is left alone, so a file
+   * removed on purpose stays removed.
+   */
+  async ensureWorkspaceTemplate(id: string): Promise<string[]> {
+    const meta = await this.tryGetProjectMeta(id);
+    if (!meta || meta.github?.url) return [];
+    const { dir, source } = this.resolveWorkspaceDir(id, meta);
+    if (source !== 'internal') return [];
+    if (await pathExists(join(dir, 'package.json'))) return [];
+    return bootstrapWorkspace({ workspaceDir: dir, projectId: id, projectName: meta.name });
+  }
+
   /** Only a first-party permission answer may call this; bind consent under the project lock. */
   async grantProjectWorkspaceWrites(
     id: string,
@@ -6048,6 +6058,7 @@ export class Store {
           ...(s.stepId ? { stepId: s.stepId } : {}),
           ...(parentSession ? { parentSession } : {}),
           ...(handoffFrom ? { handoffFrom } : {}),
+          ...(m.id ? { id: m.id } : {}),
           role: m.role,
           content: m.content,
           at: m.at,

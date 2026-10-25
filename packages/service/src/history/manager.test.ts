@@ -150,6 +150,71 @@ describe('HistoryManager', () => {
     expect(entries[1]?.entryType).toBe('event');
   });
 
+  it('the person audience keeps their work and threads, not the machine room', async () => {
+    await history.log({
+      kind: 'task.created',
+      projectId: 'shop',
+      summary: 'Invoices for October',
+      at: '2026-04-01T00:00:00Z',
+    });
+    await history.log({
+      kind: 'tool.called',
+      projectId: 'shop',
+      summary: 'write_file invoices.json',
+      at: '2026-04-01T00:01:00Z',
+    });
+    await history.log({
+      kind: 'prompt.compiled',
+      projectId: 'shop',
+      summary: 'Prompt compiled',
+      at: '2026-04-01T00:02:00Z',
+    });
+    const sessDir = gezelSessionsDir(home, 'ada');
+    await mkdir(sessDir, { recursive: true });
+    const base = {
+      version: 1 as const,
+      gezelId: 'ada',
+      projectId: 'shop',
+      providerName: 'copilot' as const,
+      createdAt: '2026-04-05T10:00:00Z',
+      lastActivityAt: '2026-04-05T10:22:00Z',
+      messages: [],
+      providerState: {},
+    };
+    const sessions: ChatSession[] = [
+      { ...base, id: 'thread', title: 'Make my invoices' },
+      {
+        ...base,
+        id: 'step',
+        title: 'Draft the invoices',
+        taskRef: 'shop/1',
+        stepId: 'draft',
+        parentSession: { sessionId: 'thread', gezelId: 'ada', kind: 'task-entry' },
+      },
+      { ...base, id: 'legacy-step', title: 'Check them', taskRef: 'shop/1', stepId: 'check' },
+    ];
+    for (const s of sessions) {
+      await writeFile(join(sessDir, `${s.id}.json`), JSON.stringify(s), 'utf8');
+    }
+
+    const person = await history.listEntries({ projectId: 'shop', audience: 'person' });
+    expect(
+      person.map((e) => (e.entryType === 'event' ? e.kind : `session:${e.id}`)).sort(),
+    ).toEqual(['session:thread', 'task.created']);
+
+    const all = await history.listEntries({ projectId: 'shop' });
+    expect(all).toHaveLength(6);
+  });
+
+  it('the person audience filters what the query backend returns', async () => {
+    history.setQueryBackend(async () => [
+      { id: 'a', at: '2026-05-02T00:00:00Z', kind: 'tool.called', summary: 'Ada wrote it' },
+      { id: 'b', at: '2026-05-01T00:00:00Z', kind: 'document.created', summary: 'Ada notes' },
+    ]);
+    const events = await history.listEvents({ q: 'Ada', audience: 'person' });
+    expect(events.map((e) => e.id)).toEqual(['b']);
+  });
+
   it('uses the query backend only for q queries, falling back on null', async () => {
     await history.log({ kind: 'gezel.created', gezelId: 'ada', summary: 'Created "Ada"' });
     const calls: string[] = [];

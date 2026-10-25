@@ -17,10 +17,12 @@ import type {
 } from '@bendyline/gezel';
 import {
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
+  folderKindOf,
   getProjectType,
   isSharedLibraryProject,
   listProjectTypes,
   normalizeCodexPermissionMode,
+  projectHoldsCode,
   projectManagedWorkspaceWritable,
   projectViewsTabDefault,
   resolveProjectTypeId,
@@ -126,6 +128,7 @@ import {
 import { makeReportActionFenceRenderers } from '../components/report-actions/ReportActionFence.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
+import { useDebugMode } from '../components/useDebugMode.js';
 import { useShowWorkInProgressFeatures } from '../components/useShowWorkInProgressFeatures.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
@@ -304,18 +307,44 @@ const PROJECT_TAB_VISIBILITY_OPTIONS: ReadonlyArray<{
   { key: 'map', label: 'Views' },
 ];
 
+/** Tabs about the workspace's files and tooling, which a codebase needs and an invoice does not. */
+const DEVELOPER_PROJECT_TABS: ReadonlySet<ConfigurableProjectTab> = new Set([
+  'approvals',
+  'workspace',
+  'artifacts',
+]);
+
 /**
- * Missing overrides keep each tab's historical behavior. `map` is the Views
- * tab (the Village's old key): shown by default whenever a view fits.
+ * Whether a tab shows. An explicit setting always wins. Otherwise Tools,
+ * Workspace and Artifacts belong to code projects (and debug mode): a bakery's
+ * invoice project showed package.json, prompt drafts and a code-city map
+ * beside its board. `map` is the Views tab (the Village's old key): shown when
+ * a view fits a code project, a watched folder, or debug mode.
  */
 function projectTabIsVisible(
-  project: Pick<Project, 'tabVisibility' | 'projectTypeId' | 'detectedProjectType' | 'properties'>,
+  project: Pick<
+    Project,
+    | 'tabVisibility'
+    | 'projectTypeId'
+    | 'detectedProjectType'
+    | 'properties'
+    | 'projectType'
+    | 'github'
+  >,
   tab: ConfigurableProjectTab,
+  opts: { debugMode?: boolean } = {},
 ): boolean {
+  const explicit = project.tabVisibility?.[tab];
+  if (explicit !== undefined) return explicit;
+  const developerView = opts.debugMode === true || projectHoldsCode(project);
   if (tab === 'map') {
-    return project.tabVisibility?.map ?? projectViewsTabDefault(project, OFFERED_PROJECT_VIEWS);
+    const kind = folderKindOf(project);
+    return (
+      projectViewsTabDefault(project, OFFERED_PROJECT_VIEWS) &&
+      (developerView || (kind !== undefined && kind !== 'code'))
+    );
   }
-  return project.tabVisibility?.[tab] !== false;
+  return DEVELOPER_PROJECT_TABS.has(tab) ? developerView : true;
 }
 
 // Output-pane split width, persisted as a fraction of the project-body
@@ -469,6 +498,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [error, setError] = useState<string | null>(null);
 
   const [tab, setTab] = useState<ProjectTab>('chat');
+  const debugMode = useDebugMode();
   useEffect(() => {
     if (!showWorkInProgressFeatures && tab === 'mail') setTab('about');
   }, [showWorkInProgressFeatures, tab]);
@@ -2386,31 +2416,40 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                       value: 'overview',
                       label: 'Overview',
                       icon: 'overview',
-                      show: projectTabIsVisible(selected, 'overview'),
+                      show:
+                        projectTabIsVisible(selected, 'overview', { debugMode }) ||
+                        tab === 'overview',
                     },
                     {
                       value: 'tasks',
                       label: 'Tasks',
                       icon: 'tasks',
-                      show: projectTabIsVisible(selected, 'tasks'),
+                      show:
+                        projectTabIsVisible(selected, 'tasks', { debugMode }) || tab === 'tasks',
                     },
                     {
                       value: 'packages',
                       label: 'Tools',
                       icon: 'tools',
-                      show: projectTabIsVisible(selected, 'approvals'),
+                      show:
+                        projectTabIsVisible(selected, 'approvals', { debugMode }) ||
+                        tab === 'packages',
                     },
                     {
                       value: 'workspace',
                       label: 'Workspace',
                       icon: 'workspace',
-                      show: projectTabIsVisible(selected, 'workspace'),
+                      show:
+                        projectTabIsVisible(selected, 'workspace', { debugMode }) ||
+                        tab === 'workspace',
                     },
                     {
                       value: 'artifacts',
                       label: 'Artifacts',
                       icon: 'artifacts',
-                      show: projectTabIsVisible(selected, 'artifacts'),
+                      show:
+                        projectTabIsVisible(selected, 'artifacts', { debugMode }) ||
+                        tab === 'artifacts',
                     },
                     // Shown only once the project has proposals: a tab that is
                     // empty for every project that never ran a fix is noise.
@@ -2434,7 +2473,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     },
                     {
                       ...projectViews.tabItem,
-                      show: projectTabIsVisible(selected, 'map') && projectViews.view !== null,
+                      show:
+                        (projectTabIsVisible(selected, 'map', { debugMode }) || tab === 'map') &&
+                        projectViews.view !== null,
                     },
                     { value: 'about', label: 'Settings', icon: 'settings', show: true },
                   ] satisfies Array<ProjectSectionTab & { show: boolean }>

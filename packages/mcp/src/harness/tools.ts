@@ -1,3 +1,4 @@
+import { readFileSync, statSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, sep } from 'node:path';
 import {
@@ -179,24 +180,118 @@ function renderOverview(binding: HarnessBinding, hit: UnifiedSearchResult, area:
   return `- Overview of ${where} (Gezel's summary)${summary ? `\n  ${summary}` : ''}`;
 }
 
-/** `path:12-30, 88-95 — snippet`: one line per file, every matching range kept. */
-function renderFileHit(binding: HarnessBinding, group: UnifiedSearchResult[]): string {
+/** Reads a file's lines for locating snippets; null when it cannot or should not. */
+export type ReadLines = (absolutePath: string) => string[] | null;
+
+const MAX_LOCATE_BYTES = 2_000_000;
+const SHOWN_LINES = 2;
+const SHOWN_LINE_CHARS = 140;
+
+const readLinesSync: ReadLines = (path) => {
+  try {
+    if (statSync(path).size > MAX_LOCATE_BYTES) return null;
+    return readFileSync(path, 'utf8').split(/\r?\n/);
+  } catch {
+    return null;
+  }
+};
+
+/** Words of a query worth finding in a line: four letters or more, plain endings dropped. */
+function queryWords(query: string): string[] {
+  const words = query.toLowerCase().match(/[a-z0-9_]{4,}/g) ?? [];
+  return [...new Set(words.map((w) => w.replace(/(ies|es|s|ed|ing)$/, '')))].filter(
+    (w) => w.length >= 3,
+  );
+}
+
+/**
+ * Where a hit's snippet sits in its file. A hit's range is often its whole
+ * enclosing symbol and its snippet a window somewhere inside: on marktext,
+ * `watcher.ts:223-481` was the 259-line `class Watcher` with an excerpt from
+ * its middle, so Codex opened the whole file and grepped anyway (trial t1).
+ */
+function locateSnippet(
+  fileLines: readonly string[],
+  snippet: string,
+  from: number,
+  to: number,
+): { start: number; lines: string[] } | null {
+  const lines = snippet.split(/\r?\n/);
+  const lo = Math.max(0, from - 1);
+  const hi = Math.min(fileLines.length, Math.max(to, from));
+  // The snippet's first line can begin mid-line, so match on a later, whole one.
+  for (let k = 0; k < Math.min(lines.length, 12); k++) {
+    const probe = lines[k]!.trim();
+    if (probe.length < 12) continue;
+    for (let i = lo; i < hi; i++) {
+      if (fileLines[i]!.includes(probe)) return { start: i - k + 1, lines };
+    }
+  }
+  return null;
+}
+
+/** The snippet's lines that best match the query, numbered, in file order. */
+function shownLines(located: { start: number; lines: string[] }, words: readonly string[]) {
+  const candidates = located.lines
+    .map((text, i) => ({ n: located.start + i, text: text.trim() }))
+    .filter((l) => l.text.length > 0 && !/^[{}()[\];,]+$/.test(l.text) && !l.text.endsWith('…'));
+  const score = (text: string) => words.filter((w) => text.toLowerCase().includes(w)).length;
+  const ranked = [...candidates].sort((a, b) => score(b.text) - score(a.text) || a.n - b.n);
+  const pool = ranked.length > 0 && score(ranked[0]!.text) > 0 ? ranked : candidates;
+  return pool.slice(0, SHOWN_LINES).sort((a, b) => a.n - b.n);
+}
+
+/**
+ * One entry per file. Where Gezel can find the snippet in the file, the
+ * ranges are where the matching text is, with its best lines numbered and the
+ * enclosing symbol named; otherwise the indexed ranges and a flat excerpt.
+ */
+function renderFileHit(
+  binding: HarnessBinding,
+  group: UnifiedSearchResult[],
+  words: readonly string[] = [],
+  readLines: ReadLines = readLinesSync,
+): string {
   const first = group[0]!;
-  const ranges = [
-    ...new Set(
-      group
-        .filter((h) => h.line !== undefined)
-        .map((h) => (h.lineEnd && h.lineEnd !== h.line ? `${h.line}-${h.lineEnd}` : `${h.line}`)),
-    ),
-  ].slice(0, 4);
   const abs = absoluteForHit(binding, first);
   const label =
     abs ??
     (first.projectName
       ? `${first.projectName}: ${first.path ?? first.title}`
       : (first.path ?? first.title));
+  const fileLines =
+    abs && group.some((h) => h.snippet && h.line !== undefined) ? readLines(abs) : null;
+  const ranges: string[] = [];
+  let shown: Array<{ n: number; text: string }> = [];
+  let inside = '';
+  for (const h of group) {
+    if (h.line === undefined) continue;
+    const located =
+      fileLines && h.snippet
+        ? locateSnippet(fileLines, h.snippet, h.line, h.lineEnd ?? h.line)
+        : null;
+    if (!located) {
+      ranges.push(h.lineEnd && h.lineEnd !== h.line ? `${h.line}-${h.lineEnd}` : `${h.line}`);
+      continue;
+    }
+    const end = Math.min(located.start + located.lines.length - 1, fileLines!.length);
+    ranges.push(end > located.start ? `${located.start}-${end}` : `${located.start}`);
+    if (h === first) {
+      shown = shownLines(located, words);
+      const span = (h.lineEnd ?? h.line) - h.line;
+      const head = fileLines![h.line - 1]?.trim();
+      if (head && span > located.lines.length && h.line < located.start) {
+        inside = ` (inside \`${head.slice(0, 60)}\`, ${h.line}-${h.lineEnd})`;
+      }
+    }
+  }
+  const where = ranges.length ? `:${[...new Set(ranges)].slice(0, 4).join(', ')}` : '';
+  if (shown.length > 0) {
+    const body = shown.map((l) => `  ${l.n}| ${l.text.slice(0, SHOWN_LINE_CHARS)}`).join('\n');
+    return `- ${label}${where}${inside}\n${body}`;
+  }
   const snippet = first.snippet?.replace(/\s+/g, ' ').trim().slice(0, 280) ?? '';
-  return `- ${label}${ranges.length ? `:${ranges.join(', ')}` : ''}${snippet ? `\n  ${snippet}` : ''}`;
+  return `- ${label}${where}${snippet ? `\n  ${snippet}` : ''}`;
 }
 
 /**
@@ -208,8 +303,11 @@ function renderFileHit(binding: HarnessBinding, group: UnifiedSearchResult[]): s
 export function arrangeSearchResults(
   binding: HarnessBinding,
   results: readonly UnifiedSearchResult[],
-  opts: { maxResults: number; sideByName: boolean },
+  opts: { maxResults: number; sideByName: boolean; query?: string; readLines?: ReadLines },
 ): { folder: string[]; docs: string[]; side: string[] } {
+  const words = opts.query ? queryWords(opts.query) : [];
+  const fileHit = (group: UnifiedSearchResult[]) =>
+    renderFileHit(binding, group, words, opts.readLines ?? readLinesSync);
   const groups = new Map<string, UnifiedSearchResult[]>();
   const side: UnifiedSearchResult[] = [];
   // A photo or a moment of a video matched by meaning is noise beside code an
@@ -235,12 +333,12 @@ export function arrangeSearchResults(
   const docGroups = all.filter(([path]) => isDocPath(path));
   const folder = code.slice(0, opts.maxResults).map(([, group]) => {
     const area = overviewArea(group[0]!);
-    return area === null ? renderFileHit(binding, group) : renderOverview(binding, group[0]!, area);
+    return area === null ? fileHit(group) : renderOverview(binding, group[0]!, area);
   });
   // With no code hit at all, the docs are the answer and get the whole page.
   const docs = docGroups
     .slice(0, folder.length === 0 ? opts.maxResults : MAX_DOC_HITS)
-    .map(([, group]) => renderFileHit(binding, group));
+    .map(([, group]) => fileHit(group));
   const anyFolder = folder.length + docs.length > 0;
   const keptSide = side
     .filter((hit) => opts.sideByName || !anyFolder || hit.tier === 'strong')
@@ -272,7 +370,7 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
     {
       description: HARNESS_TOOL_DESCRIPTIONS.search,
       inputSchema: {
-        query: z.string().min(1).max(400).describe('What to look for, in plain words.'),
+        query: z.string().trim().min(1).max(400).describe('What to look for, in plain words.'),
         scopes: z
           .array(z.enum(SEARCH_SCOPES))
           .optional()
@@ -291,7 +389,7 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
           .describe(
             'Only files under this folder: an absolute path, or one relative to this folder.',
           ),
-        maxResults: z.number().int().positive().max(50).optional().describe('Default 20.'),
+        maxResults: z.number().int().positive().max(50).optional().describe('Default 10.'),
         cursor: z
           .number()
           .int()
@@ -304,6 +402,7 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
     },
     async (args) =>
       guarded(async () => {
+        const query = args.query;
         const binding = await session.bind(args.pathPrefix);
         const scopes: readonly SearchScope[] = args.catalogs
           ? ['knowledge']
@@ -330,12 +429,14 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
         if (args.catalogs && catalogs?.length === 0) {
           return failure('Those knowledge catalogs are not available to other apps.');
         }
-        const maxResults = args.maxResults ?? 15;
+        // Ten, not fifteen: the cited file was in the top ten in 97% of trial t1's
+        // searches, and every result is carried through the app's later turns.
+        const maxResults = args.maxResults ?? 10;
         // Several chunks of one file collapse into one entry, so ask for more.
         const fetched = Math.min(100, maxResults * 3);
         const res = await session.run(binding, (api) =>
           api.toolSearch(boundProjectId(binding) ?? UNBOUND_PROJECT, {
-            query: args.query,
+            query,
             includeShared: sources.includes('shared'),
             sources,
             maxResults: fetched,
@@ -347,6 +448,7 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
         const { folder, docs, side } = arrangeSearchResults(binding, res.results, {
           maxResults,
           sideByName: Boolean(args.catalogs || args.scopes?.length),
+          query,
         });
         const lines: string[] = [...folder];
         if (docs.length > 0) {
@@ -486,7 +588,9 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
           ];
           return text(`${head.join('\n')}\n\n${doc.markdown}`);
         }
-        const where = rootedPath(binding, args.path);
+        // A relative path is the library's, as `list_documents` names them;
+        // only an absolute one can point into this folder by mistake.
+        const where = isAbsolute(args.path) ? rootedPath(binding, args.path) : null;
         if (where && where.root !== 'library') {
           return failure(
             `${where.abs} is not in the shared library. Use read_doc_as_markdown for files in this folder.`,
@@ -682,9 +786,14 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
         const saved = artifactsDir ? join(artifactsDir, res.artifactPath) : res.artifactPath;
         const content: CallToolResult['content'] = [];
         if (res.b64Png) content.push({ type: 'image', data: res.b64Png, mimeType: 'image/png' });
+        // trial t2: told nothing, Opus asked for an edit, got a new scene, and
+        // spent a generation working out why.
+        const skipped = res.meta.img2imgSkippedReason
+          ? `This image engine can't edit images (${res.meta.img2imgSkippedReason}), so it ignored inputImages and made a new image from the prompt alone. To change an image, describe the whole picture you want. `
+          : '';
         content.push({
           type: 'text',
-          text: `Saved to ${saved} (${res.meta.widthPx}x${res.meta.heightPx}, ${res.meta.model}). Copy it into the folder with your own file tools if it belongs there.`,
+          text: `${skipped}Saved to ${saved} (${res.meta.widthPx}x${res.meta.heightPx}, ${res.meta.model}). Copy it into the folder with your own file tools if it belongs there.`,
         });
         return { content };
       }),

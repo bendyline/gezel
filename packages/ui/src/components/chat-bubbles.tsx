@@ -91,14 +91,21 @@ import {
   formatPendingArgsPreview,
   parsePendingToolCalls,
 } from './pending-tool-calls.js';
+import { type MarkdownWalkNode, isRawHtmlDump, toHtmlCodeFence } from './raw-html-dump.js';
 import { stripVisibleToolCallMarkup } from './strip-tool-call-markup.js';
 import { renderToolArgsFragment } from './tool-args-fragment.js';
 import {
   formatDurationShort,
+  toolActivityLine,
   toolArgsDisplaySummary,
   toolDisplayName,
   toolErrorSummary,
 } from './tool-display.js';
+import {
+  VISIBLE_TOOL_FAILURES,
+  isMachinePayload,
+  unresolvedToolFailures,
+} from './tool-failures.js';
 
 /**
  * A tool-only turn still said something through its final action. Use the
@@ -433,6 +440,11 @@ export interface MessageBubbleProps {
    */
   debugMode?: boolean;
   /**
+   * Craftbook cards an earlier card for the same task already stands for
+   * (see craftbook-card-dedupe.ts). Their plain rows stay in the steps.
+   */
+  hiddenCards?: ReadonlySet<ToolCallCard>;
+  /**
    * The session id this bubble belongs to — required for the debug
    * bundle fetch. Already passed via `dataSessionId` for the timeline's
    * IntersectionObserver, but the toolbar button needs it as a prop
@@ -634,7 +646,7 @@ function HandoffNoteCard({
           {onTaskReference ? (
             <button
               type="button"
-              className="msg-ref-chip"
+              className="msg-ref-chip msg-ref-chip-label"
               onClick={() => onTaskReference(note.taskRef)}
               title={`Open task ${note.taskRef}`}
             >
@@ -691,6 +703,7 @@ export function MessageBubble({
   dataMsgId,
   dataSessionId,
   debugMode,
+  hiddenCards,
   sessionId,
   messageAt,
   recoveredInNextTurn,
@@ -819,10 +832,16 @@ export function MessageBubble({
   // A wrap-up's finished card opens the work; its task id would be a second,
   // rawer way to say the same thing.
   const hasTasks = referencedTasks && referencedTasks.length > 0 && synthetic !== 'task-wrapup';
+  // Outside debug mode the finished card is the file list too: "Files:
+  // report.pdf report.md outline.md" under it named the drafts beside the
+  // deliverable. And a task's id is debug-mode text; the cards and the chat
+  // rail open the task by name.
+  const showFiles = hasFiles && (debugMode || !(synthetic === 'task-wrapup' && deliverable));
+  const showTaskChips = hasTasks && debugMode;
   const chips =
-    hasFiles || hasTasks ? (
+    showFiles || showTaskChips ? (
       <div className="msg-refs">
-        {hasFiles && (
+        {showFiles && (
           <>
             <span className="msg-refs-label">Files:</span>
             {referencedFiles!.map((file) => (
@@ -838,7 +857,7 @@ export function MessageBubble({
             ))}
           </>
         )}
-        {hasTasks && (
+        {showTaskChips && (
           <>
             <span className="msg-refs-label">Tasks:</span>
             {referencedTasks!.map((ref) => (
@@ -1190,6 +1209,9 @@ export function MessageBubble({
           onOpenReference={onOpenReference}
           onFocusTask={onFocusTask}
           showSteps={detailsShown}
+          plainFailures={foldDetails}
+          debugMode={debugMode}
+          {...(hiddenCards ? { hiddenCards } : {})}
         />
       )}
       {!isUser && detailsShown && reasoning && reasoning.trim().length > 0 && (
@@ -1243,7 +1265,9 @@ export function MessageBubble({
                     : toolCalls && toolCalls.length > 0
                       ? summarizeTerminalToolCall(toolCalls)
                       : reasoning && reasoning.trim().length > 0
-                        ? '(model produced reasoning but no visible reply — see Thinking above)'
+                        ? detailsShown
+                          ? '(model produced reasoning but no visible reply — see Thinking above)'
+                          : '(model produced reasoning but no visible reply — open Details to read it)'
                         : 'No response — the model finished its turn without producing any text. This is usually a small local model timing out mid-thought; try resending, a larger model, or a shorter prompt.'}
             </em>
           </div>
@@ -1766,6 +1790,13 @@ export interface StreamingBubbleProps {
    * `config.debugMode`; the plain copy button shows even without it.
    */
   debugMode?: boolean;
+  /** Craftbook cards an earlier card for the same task already stands for. */
+  hiddenCards?: ReadonlySet<ToolCallCard>;
+  /**
+   * A request tracker already says what this turn's work is waiting on, so
+   * the "Still working — silent for …" banner would say it twice.
+   */
+  suppressSilenceBanner?: boolean;
   /**
    * Session id for the debug-bundle fetch. Same value as
    * `dataSessionId` but typed for the toolbar callback (which can't
@@ -2087,6 +2118,8 @@ export function StreamingBubble({
   dataMsgId,
   dataSessionId,
   debugMode,
+  hiddenCards,
+  suppressSilenceBanner = false,
   sessionId,
   question,
   onQuestionAnswered,
@@ -2121,6 +2154,12 @@ export function StreamingBubble({
       // replaced by the re-engaged turn's fresh streaming bubble.
     }
   }, [onReEngage, reEngaging]);
+  // Outside debug mode a live turn shows what the gezel is doing, not how:
+  // the thinking and tool rows wait behind Details, as on a finished reply.
+  // They were the progress signal during long local turns, which put the
+  // machine room in front of the person for minutes at a time.
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const showMachinery = debugMode === true || detailsOpen;
   // Derived counts for the status line. Cheap walks; the segments
   // array stays small (each tool / text-block is one entry).
   const toolCount = segments.reduce((n, s) => (s.kind === 'tool' ? n + 1 : n), 0);
@@ -2212,6 +2251,19 @@ export function StreamingBubble({
       }
     }
   }
+  const liveTools = segments.flatMap((s) => (s.kind === 'tool' ? [s.tool] : []));
+  const hasMachinery =
+    toolCount > 0 ||
+    renderedSegments.some((s) => s.kind === 'reasoning') ||
+    pendingToolCalls.length > 0 ||
+    Boolean(liveToolArgs);
+  const visibleSegments = showMachinery
+    ? renderedSegments
+    : renderedSegments.filter((s) => s.kind === 'text' || s.kind === 'intent');
+  const lastSegmentKind = renderedSegments[renderedSegments.length - 1]?.kind;
+  const quietActivity = showMachinery
+    ? undefined
+    : toolActivityLine(liveToolArgs?.name ?? pendingToolCalls[pendingToolCalls.length - 1]?.name);
   // Derived before the elapsed hooks so a failed turn's clock freezes at
   // the moment it died instead of counting on past its own death.
   const failed = Boolean(error);
@@ -2270,15 +2322,19 @@ export function StreamingBubble({
     !failed &&
     !queued &&
     !awaiting &&
-    !liveToolArgs &&
-    (renderedSegments.length === 0 ||
-      renderedSegments[renderedSegments.length - 1]?.kind === 'tools' ||
-      // A streaming think phase is still "working with nothing visible
-      // to show for it yet" — the same state the dots were built for.
-      // Before reasoning joined the segment list this branch was the
-      // `length === 0` one, so keeping it preserves the dots that were
-      // already there under a growing trace.
-      renderedSegments[renderedSegments.length - 1]?.kind === 'reasoning');
+    (showMachinery
+      ? !liveToolArgs &&
+        (renderedSegments.length === 0 ||
+          lastSegmentKind === 'tools' ||
+          // A streaming think phase is still "working with nothing visible
+          // to show for it yet" — the same state the dots were built for.
+          // Before reasoning joined the segment list this branch was the
+          // `length === 0` one, so keeping it preserves the dots that were
+          // already there under a growing trace.
+          lastSegmentKind === 'reasoning')
+      : // Quiet: the dots carry the work the hidden rows used to show, so
+        // they stay up for anything but prose that is still arriving.
+        lastSegmentKind !== 'text' || Boolean(quietActivity));
   const inlineWirePulse =
     !failed && !queued && !awaiting && wirePulseCount !== undefined && wirePulseCount > 0 ? (
       <span className="msg-live-inline-activity">
@@ -2313,7 +2369,7 @@ export function StreamingBubble({
           queued={queued}
           queueAhead={queueAhead}
           elapsedSeconds={elapsed}
-          toolCount={toolCount}
+          toolCount={showMachinery ? toolCount : 0}
           wirePulseCount={awaiting ? 0 : wirePulseCount}
           awaiting={awaiting}
           thinkingLabel={
@@ -2364,6 +2420,19 @@ export function StreamingBubble({
           </button>
         )}
       </div>
+      {!showMachinery && liveTools.length > 0 && (
+        // What the person needs from the hidden rows (cards, media, a
+        // failure the turn has not recovered from), where the finished
+        // reply puts them, so nothing moves when the turn commits.
+        <ToolHistoryExpando
+          tools={liveTools}
+          showSteps={false}
+          plainFailures
+          onOpenReference={onOpenReference}
+          onFocusTask={onFocusTask}
+          {...(hiddenCards ? { hiddenCards } : {})}
+        />
+      )}
       <div className="msg-body msg-body-rendered" style={bubbleBodyStyle(fontFamily, fontScale)}>
         {/* Body branches:
               - `queued` with no segments yet → render the queued
@@ -2403,7 +2472,7 @@ export function StreamingBubble({
           </output>
         ) : (
           <>
-            {renderedSegments.map((seg, i) => {
+            {visibleSegments.map((seg, i) => {
               // Stable-ish key using kind + first tool-name (or
               // text-prefix). Index-only would re-mount nodes when
               // the tool/text alternation pattern shifts. Adjacent
@@ -2427,6 +2496,8 @@ export function StreamingBubble({
                       tools={seg.tools}
                       onOpenReference={onOpenReference}
                       onFocusTask={onFocusTask}
+                      debugMode={debugMode === true}
+                      {...(hiddenCards ? { hiddenCards } : {})}
                     />
                   ) : seg.kind === 'intent' ? (
                     <IntentDivider label={seg.label} />
@@ -2436,7 +2507,7 @@ export function StreamingBubble({
                     // finished trace to its last line would hide the
                     // reasoning that led into the tool row below it —
                     // which is the whole point of showing it in place.
-                    <LiveReasoning text={seg.content} live={i === renderedSegments.length - 1} />
+                    <LiveReasoning text={seg.content} live={i === visibleSegments.length - 1} />
                   ) : (
                     // Same display-only tool-call markup scrub the
                     // persisted MessageBubble runs (see
@@ -2466,10 +2537,10 @@ export function StreamingBubble({
                 </div>
               );
             })}
-            {!failed && !queued && pendingToolCalls.length > 0 && (
+            {showMachinery && !failed && !queued && pendingToolCalls.length > 0 && (
               <PendingToolCallsList tools={pendingToolCalls} />
             )}
-            {!failed && !queued && liveToolArgs && (
+            {showMachinery && !failed && !queued && liveToolArgs && (
               // The model is streaming a structured tool call — show
               // what it's generating (tool verb + target + ticking char
               // count + live tail) right where the user is watching the
@@ -2502,6 +2573,7 @@ export function StreamingBubble({
                   <span />
                   <span />
                 </div>
+                {quietActivity && <span className="msg-quiet-activity">{quietActivity}</span>}
                 {inlineWirePulse}
               </div>
             )}
@@ -2522,6 +2594,7 @@ export function StreamingBubble({
           !queued &&
           !gpuSwapTask &&
           !awaiting &&
+          !suppressSilenceBanner &&
           silentFor !== null &&
           silentFor >= SILENCE_BANNER_AFTER_S && (
             // Gate on **silent time**, not total elapsed. A turn that's
@@ -2657,6 +2730,9 @@ export function StreamingBubble({
         )}
         side="right"
         {...(debugMode && sessionId ? { debug: { sessionId } } : {})}
+        {...(!debugMode && hasMachinery
+          ? { details: { shown: detailsOpen, onToggle: () => setDetailsOpen((open) => !open) } }
+          : {})}
       />
     </div>
   );
@@ -3155,6 +3231,8 @@ function ToolActivityList({
   tools,
   suppressMedia = false,
   suppressCards = false,
+  hiddenCards,
+  debugMode = false,
   onOpenReference,
   onFocusTask,
 }: {
@@ -3164,6 +3242,9 @@ function ToolActivityList({
   suppressMedia?: boolean;
   /** Same contract for rich inline cards — the expando promotes them above the collapse. */
   suppressCards?: boolean;
+  /** Cards an earlier card for the same task already stands for. */
+  hiddenCards?: ReadonlySet<ToolCallCard>;
+  debugMode?: boolean;
   onOpenReference?: (reference: OpenChatReference) => void;
   /** Opens a task beside the chat (rail Task pane) from an inline card. */
   onFocusTask?: (ref: string) => void;
@@ -3187,10 +3268,11 @@ function ToolActivityList({
           {!t.success && t.errorMessage && (
             <div className="thinking-tool-error">{toolErrorSummary(t.errorMessage)}</div>
           )}
-          {!suppressCards && t.card && (
+          {!suppressCards && t.card && !hiddenCards?.has(t.card) && (
             <ToolCraftbookCard
               card={t.card}
               onFocusTask={onFocusTask}
+              debugMode={debugMode}
               {...(onOpenReference ? { onOpenReference } : {})}
             />
           )}
@@ -3228,33 +3310,6 @@ function ToolActivityList({
   );
 }
 
-/** Most failures a reader needs to see at once. Beyond this the expando
- *  is the right surface — the notice is a headline, not a log. */
-const VISIBLE_TOOL_FAILURES = 2;
-
-/**
- * Failures the turn never recovered from, newest last.
- *
- * A failure superseded by a later success of the same tool is resolved —
- * the model corrected its arguments and moved on, and surfacing it would
- * make a self-healed turn read as broken. What survives is the case that
- * actually cost the user something: a completion gate that rejected the
- * work, a tool that never came back. Mirrors the service's
- * `unresolvedFailedToolCalls`, which builds the model's recovery nudge
- * from the same rule.
- */
-export function unresolvedToolFailures(
-  tools: ReadonlyArray<Pick<ChatMessageToolCall, 'name' | 'success' | 'errorMessage'>>,
-): Array<{ name: string; reason: string }> {
-  return tools
-    .filter(
-      (t, i) =>
-        !t.success && !tools.slice(i + 1).some((later) => later.name === t.name && later.success),
-    )
-    .map((t) => ({ name: t.name, reason: t.errorMessage ? toolErrorSummary(t.errorMessage) : '' }))
-    .filter((f) => f.reason.length > 0);
-}
-
 /**
  * Collapsible "tools that ran during this turn" expando, rendered at the
  * top of a completed assistant bubble. Defaults to closed — most readers
@@ -3272,15 +3327,27 @@ export function ToolHistoryExpando({
   onOpenReference,
   onFocusTask,
   showSteps = true,
+  plainFailures = false,
+  hiddenCards,
+  debugMode = false,
 }: {
   tools: ChatMessageToolCall[];
   projectId?: string;
+  /** Cards an earlier card for the same task already stands for; their row stays in the steps. */
+  hiddenCards?: ReadonlySet<ToolCallCard>;
+  debugMode?: boolean;
   /**
    * Whether the "N steps · 1.2s total" list renders. Outside debug mode it
    * waits behind the reply's Details key; media, cards and unresolved
    * failures show either way.
    */
   showSteps?: boolean;
+  /**
+   * Say a failure in words when its reason is a machine payload (a JSON
+   * envelope, a stack trace). The raw reason stays in the step list and its
+   * tooltip, behind Details.
+   */
+  plainFailures?: boolean;
   onOpenReference?: (reference: OpenChatReference) => void;
   /** Opens a task beside the chat (rail Task pane) from a promoted inline card. */
   onFocusTask?: (ref: string) => void;
@@ -3299,14 +3366,20 @@ export function ToolHistoryExpando({
   // Generated media (images from generate_image, video from generate_video)
   // shouldn't hide behind the collapsed step list — surface it in a
   // visible strip above the disclosure. The step breakdown stays collapsed.
+  // Audio plays inside the step list, so it joins the strip only while that
+  // list is hidden; promoting it in both places would play it twice.
   const mediaActivities = activities.filter(
-    (t) => t.projectId && ((t.images && t.images.length > 0) || (t.videos && t.videos.length > 0)),
+    (t) =>
+      t.projectId &&
+      ((t.images && t.images.length > 0) ||
+        (t.videos && t.videos.length > 0) ||
+        (!showSteps && t.audios && t.audios.length > 0)),
   );
   // Rich inline cards (craftbook start / step advance) get the same
   // promotion as generated media: visible above the collapsed step list,
   // suppressed inside it so the plain row still counts in "N steps" and
   // keeps the args/result provenance.
-  const cardActivities = activities.filter((t) => t.card);
+  const cardActivities = activities.filter((t) => t.card && !hiddenCards?.has(t.card));
   const failures = unresolvedToolFailures(tools).slice(-VISIBLE_TOOL_FAILURES);
   return (
     <>
@@ -3316,6 +3389,7 @@ export function ToolHistoryExpando({
             <ToolCraftbookCard
               card={t.card}
               onFocusTask={onFocusTask}
+              debugMode={debugMode}
               {...(onOpenReference ? { onOpenReference } : {})}
             />
           </div>
@@ -3328,6 +3402,9 @@ export function ToolHistoryExpando({
           ) : t.images && t.images.length > 0 && t.projectId ? (
             <ToolImageRow projectId={t.projectId} images={t.images} />
           ) : null}
+          {!showSteps && t.audios && t.audios.length > 0 && t.projectId && (
+            <ToolAudioRow projectId={t.projectId} audios={t.audios} />
+          )}
         </div>
       ))}
       {failures.map((f, i) => (
@@ -3337,7 +3414,9 @@ export function ToolHistoryExpando({
           </span>
           <span className="msg-tool-failure-body">
             <span className="msg-tool-failure-tool">{toolDisplayName(f.name)}</span>
-            {f.reason}
+            {plainFailures && isMachinePayload(f.reason)
+              ? "didn't finish. Details has the full response."
+              : f.reason}
           </span>
         </div>
       ))}
@@ -3797,62 +3876,6 @@ function formatVramSize(bytes: number): string {
   return `${Math.round(mb)} MB VRAM`;
 }
 
-// A gezel sometimes emits a whole HTML document inline (an index.html it
-// "wrote", say). Rendered as markdown that lands as a hollow page —
-// styles and scripts stripped by squisq's sanitizer, bare structure left
-// over — which is noise, not signal. When a message is *mostly* raw HTML
-// we show its source as a code block instead: honest about what the model
-// produced, far easier to read, and immune to the global-style leak that
-// raw <style> blocks used to cause.
-
-/** Full-page / styling / scripting markers — their presence in a raw-HTML
- *  node is a strong "this is a document, not chat prose" signal. */
-const RAW_HTML_PAGE_MARKER_RE = /<\s*(?:!doctype|html|head|body|style|script)\b/i;
-
-/** Below this many raw-HTML characters we leave the message alone — small
- *  inline HTML (a stray <br>, <sub>…) renders fine as-is. */
-const RAW_HTML_DUMP_MIN_CHARS = 120;
-
-/** Minimal structural view of a parsed-markdown node for the raw-HTML scan. */
-type MarkdownWalkNode = { type?: string; rawHtml?: string; children?: MarkdownWalkNode[] };
-
-/** Sum raw-HTML characters across a parsed-markdown tree and flag whether
- *  any raw-HTML node carries page markers. Fenced code parses as `code`
- *  (not `htmlBlock`), so HTML the model already fenced is left untouched. */
-function scanRawHtml(nodes: readonly MarkdownWalkNode[]): { chars: number; pageMarkers: boolean } {
-  let chars = 0;
-  let pageMarkers = false;
-  const visit = (node: MarkdownWalkNode): void => {
-    if (node.type === 'htmlBlock' || node.type === 'htmlInline') {
-      const raw = node.rawHtml ?? '';
-      chars += raw.length;
-      if (!pageMarkers && RAW_HTML_PAGE_MARKER_RE.test(raw)) pageMarkers = true;
-    }
-    if (node.children) for (const child of node.children) visit(child);
-  };
-  for (const node of nodes) visit(node);
-  return { chars, pageMarkers };
-}
-
-/** True when a chat message reads as a raw HTML document/fragment rather
- *  than prose: substantial raw HTML that either dominates the message or
- *  carries page markers. Such messages render better as source. */
-export function isRawHtmlDump(nodes: readonly MarkdownWalkNode[], source: string): boolean {
-  const { chars, pageMarkers } = scanRawHtml(nodes);
-  if (chars < RAW_HTML_DUMP_MIN_CHARS) return false;
-  const total = source.trim().length || 1;
-  return pageMarkers || chars / total >= 0.5;
-}
-
-/** Wrap a message in an ```html fence sized longer than any backtick run
- *  inside it, so arbitrary content can't terminate the block early. */
-export function toHtmlCodeFence(source: string): string {
-  let longestRun = 0;
-  for (const match of source.matchAll(/`+/g)) longestRun = Math.max(longestRun, match[0].length);
-  const fence = '`'.repeat(Math.max(3, longestRun + 1));
-  return `${fence}html\n${source}\n${fence}`;
-}
-
 export function RenderedMarkdown({
   markdown,
   mediaProvider,
@@ -3873,7 +3896,7 @@ export function RenderedMarkdown({
     try {
       const mdDoc = parseMarkdown(prepareChatMarkdown(markdown));
       // Mostly-raw-HTML messages render as source rather than a hollow
-      // sanitized page — see isRawHtmlDump / toHtmlCodeFence above.
+      // sanitized page — see raw-html-dump.ts.
       const source = isRawHtmlDump(
         (mdDoc.children ?? []) as unknown as MarkdownWalkNode[],
         markdown,

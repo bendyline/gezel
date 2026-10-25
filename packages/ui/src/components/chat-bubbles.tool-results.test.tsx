@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { StreamingBubble, ToolHistoryExpando, unresolvedToolFailures } from './chat-bubbles.js';
+import { StreamingBubble, ToolHistoryExpando } from './chat-bubbles.js';
+import { unresolvedToolFailures } from './tool-failures.js';
 
 describe('ToolHistoryExpando result details', () => {
   it('shows both the request and a short response in details', () => {
@@ -120,6 +121,7 @@ describe('tool file links', () => {
         authorLabel="Ada"
         authorIcon={null}
         startedAt={null}
+        debugMode
         onOpenReference={onOpenReference}
         segments={[
           {
@@ -198,12 +200,15 @@ describe('inline tool cards', () => {
     expect(container.querySelectorAll('.msg-tool-card')).toHaveLength(1);
   });
 
-  it('renders the card under the row while streaming', () => {
+  // Debug mode keeps the card under its tool row; the quiet default lifts it
+  // above the body (chat-bubbles.quiet-live.test.tsx).
+  it('renders the card under the row while streaming in debug mode', () => {
     const { container } = render(
       <StreamingBubble
         authorLabel="Ada"
         authorIcon={null}
         startedAt={null}
+        debugMode
         segments={[
           {
             kind: 'tool',

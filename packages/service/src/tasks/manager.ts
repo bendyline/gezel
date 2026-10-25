@@ -126,6 +126,7 @@ import { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from './laun
 import type {
   ConnectorPrepHook,
   CurrentTurnStepReactivatedHook,
+  RequestRefResolver,
   RoleResolver,
   StepActivatedHook,
   TaskCreatedHook,
@@ -168,6 +169,7 @@ export type {
   ConnectorPrepHook,
   ConnectorPrepResult,
   CurrentTurnStepReactivatedHook,
+  RequestRefResolver,
   RoleResolver,
   StepActivatedHook,
   TaskCreatedHook,
@@ -411,6 +413,7 @@ export class TaskManager {
   private craftbookResolver?: CraftbookResolver;
   private roleResolver?: RoleResolver;
   private executionModeResolver?: ExecutionModeResolver;
+  private requestRefResolver?: RequestRefResolver;
   /**
    * Join concurrent replays of the same step transition. Local models can
    * retry an MCP call when its response is slow; without single-flight both
@@ -780,6 +783,23 @@ export class TaskManager {
     this.executionModeResolver = fn;
   }
 
+  /** Wire the request resolver that stamps `Task.requestRef`. See {@link RequestRefResolver}. */
+  setRequestRefResolver(fn: RequestRefResolver): void {
+    this.requestRefResolver = fn;
+  }
+
+  private async resolveRequestRef(
+    task: Pick<Task, 'parentTaskRef' | 'launchSessionId' | 'createdAt'>,
+  ): Promise<Task['requestRef']> {
+    if (!this.requestRefResolver) return undefined;
+    try {
+      return await this.requestRefResolver(task);
+    } catch (err) {
+      log.warn('[tasks] request lookup failed:', err instanceof Error ? err.message : err);
+      return undefined;
+    }
+  }
+
   /**
    * Mutating helper: if the named step has `suggestedRole` set and no
    * higher-precedence assignment (`assignee.kind === 'gezel'` or
@@ -905,6 +925,12 @@ export class TaskManager {
        * arbitrary text into every step's prompt.
        */
       references?: TaskReferences;
+      /**
+       * The person's message this task answers, when the caller just wrote
+       * it (the composer's launch). Service-only like `origin`; otherwise
+       * the request resolver derives it from the launching session.
+       */
+      requestRef?: Task['requestRef'];
     },
   ): Promise<Task> {
     const project = await this.store.getProject(projectId);
@@ -1282,6 +1308,14 @@ export class TaskManager {
     const assignee: TaskAssignee = input.assignee ??
       stepOwnAssignee(craftbook, activeStepId) ?? { kind: 'user' };
 
+    const requestRef =
+      extras?.requestRef ??
+      (await this.resolveRequestRef({
+        ...(input.parentTaskRef ? { parentTaskRef: input.parentTaskRef } : {}),
+        ...(input.launchSessionId ? { launchSessionId: input.launchSessionId } : {}),
+        createdAt: now,
+      }));
+
     const task: Task = {
       projectId,
       num,
@@ -1321,6 +1355,7 @@ export class TaskManager {
       activeStepId,
       ...(input.parentTaskRef ? { parentTaskRef: input.parentTaskRef } : {}),
       ...(input.launchSessionId ? { launchSessionId: input.launchSessionId } : {}),
+      ...(requestRef ? { requestRef } : {}),
       artifactDir,
       ...(extras?.origin ? { origin: extras.origin } : {}),
       ...(cron ? { cron } : {}),

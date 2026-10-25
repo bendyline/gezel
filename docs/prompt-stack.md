@@ -8,8 +8,9 @@ that review — re-measure with `GEZEL_PROMPT_BREAKDOWN=1` (per-section token ta
 ## The mental model
 
 Every provider gets a real system prompt from us. There is one builder —
-`buildInstructions` in [chat/instructions.ts](../packages/service/src/chat/instructions.ts),
-called from [chat/manager.ts](../packages/service/src/chat/manager.ts) — and it
+`buildInstructions` in [core prompt/instructions.ts](../packages/core/src/prompt/instructions.ts)
+(re-exported by the service's `chat/instructions.ts`, so the phone runtime builds the same
+prompt), called from [chat/manager.ts](../packages/service/src/chat/manager.ts) — and it
 runs for every session on every provider. The differences between local and cloud are not
 "local has no system prompt"; they are:
 
@@ -50,7 +51,7 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 9 | `### Current task` + `#### Reference material found at launch` + `#### Step procedure` + `#### Phase gate` | task-scoped session (references only on a book launched with a subject) | varies; procedures can be large, references ≤5 citations |
 | 10 | `### Tasks assigned to you in this project` | not task-scoped, assignments exist | varies |
 | 11 | `### Recalled from prior sessions` legacy compatibility block | only when ChatManager is embedded without the scoped SearchService wiring | ~4–7 bullets |
-| 12 | Capability-gated conduct: **act-don't-narrate** only when the turn has callable tools; structured-decision guidance only when `ask_user_question` is wired; **markdown guidance** incl. the Squisq-dialect brief (`SQUISQ_DIALECT_BRIEF` from [prompts/squisq-dialect.ts](../packages/service/src/prompts/squisq-dialect.ts) — mermaid fences + `{[template]}` annotations; the long example-led sibling `SQUISQ_DIALECT_NOTE` goes into the transform one-shot prompt, context-gated). Task resumption is not standing conduct: it is emitted only inside rows 9/10/18 when an actual task or assignment exists, and names task tools only when wired. | by capability; markdown always | ~120 tok with no tools; up to ~370 tok with action + structured-decision guidance |
+| 12 | Capability-gated conduct: **act-don't-narrate** only when the turn has callable tools; structured-decision guidance only when `ask_user_question` is wired; **markdown guidance**, which also carries the one standing plain-words rule (name what you made or are doing, never task ids, tool names or craftbook ids; tool results that say what to tell the person end on the same sentence, `PLAIN_WORDS_RELAY` in [mcp relay-text.ts](../packages/mcp/src/relay-text.ts)), incl. the Squisq-dialect brief (`SQUISQ_DIALECT_BRIEF` from [prompts/squisq-dialect.ts](../packages/service/src/prompts/squisq-dialect.ts) — mermaid fences + `{[template]}` annotations; the long example-led sibling `SQUISQ_DIALECT_NOTE` goes into the transform one-shot prompt, context-gated). Task resumption is not standing conduct: it is emitted only inside rows 9/10/18 when an actual task or assignment exists, and names task tools only when wired. | by capability; markdown always | ~120 tok with no tools; up to ~370 tok with action + structured-decision guidance |
 | 13 | Browsing guidance (Playwright present vs "not installed, don't emit fake `browser_*`") | non-delegation roles | 1–3 lines |
 | 14 | `## Handling external (untrusted) content` | mail-enabled projects | ~850 ch |
 | 14b | `## Facts and sources` — state facts only from evidence, cite it as `[n]`, look up or leave out what is missing ([factual-writing.md](factual-writing.md)) | factual mode: the gezel's `factualWriting` setting, else a fact-stating role (writer, researcher, reviewer, …), else any session with document-write tools | ~700 ch |
@@ -414,7 +415,9 @@ Two things this table makes visible:
    the system prompt or the cache prefix, and they land where small models weight hardest
    — the last message.
 6. **Prompt text lives in exactly two homes.** Standing/universal text: `buildInstructions`
-   in [chat/manager.ts](../packages/service/src/chat/manager.ts). Model-conditional text:
+   in [core prompt/instructions.ts](../packages/core/src/prompt/instructions.ts); the
+   turn nudges (`CONTINUATION_NUDGE` and its siblings) stay in
+   [chat/manager.ts](../packages/service/src/chat/manager.ts). Model-conditional text:
    a behavior in [model-profile/behaviors/](../packages/service/src/model-profile/behaviors/).
    Nothing model-conditional hides in manager conditionals; nothing universal hides in a
    behavior. (`chat/local-model-tuning.ts`, the pre-behaviors home of this text, no longer

@@ -1,4 +1,12 @@
-param([Parameter(Mandatory = $true)][string]$Root)
+# -KeepSealedChild and -SealedSha leave one direct child of -Root out of the
+# repair when it is still sealed as the installer published it (see
+# IsSealedTree in ResetTreeAcl.cs). An unreadable attestation repairs it as
+# usual.
+param(
+    [Parameter(Mandatory = $true)][string]$Root,
+    [string]$KeepSealedChild,
+    [string]$SealedSha
+)
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = $PSHOME + '\Modules'
 $originalTemp = $env:TEMP
@@ -14,7 +22,25 @@ try {
     $env:TMP = $compilerTemp
     Add-Type -Path (Join-Path $PSScriptRoot 'ResetTreeAcl.cs')
     [Gezel.Installer.ResetTreeAcl]::EnablePrivileges()
-    $securedCount = [Gezel.Installer.ResetTreeAcl]::Run($Root, 'S-1-5-32-544', $null)
+    $keep = $null
+    $sha = $null
+    if ($KeepSealedChild) {
+        if ($SealedSha -match '^[0-9A-Fa-f]{64}$') {
+            $keep = $KeepSealedChild
+            $sha = $SealedSha
+        } else {
+            Write-Output "[reset-tree-acl] No readable attestation for $KeepSealedChild; repairing it too."
+        }
+    }
+    $kept = New-Object System.Collections.Generic.List[string]
+    $observe = [Action[string, string]] {
+        param($stage, $path)
+        if ($stage -eq 'kept') { $kept.Add($path) }
+    }.GetNewClosure()
+    $securedCount = [Gezel.Installer.ResetTreeAcl]::Run($Root, 'S-1-5-32-544', $keep, $sha, $observe)
+    foreach ($path in $kept) {
+        Write-Output "[reset-tree-acl] Left $path as published: it is still sealed and attested."
+    }
     Write-Output "[reset-tree-acl] Secured $securedCount entries without following links."
     $resultCode = 0
 } catch {

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DuckRunner } from './duck.js';
+import { DuckRunner, sqlLiteral } from './duck.js';
 import {
   MAX_SQL_LENGTH,
   SqlRejectedError,
@@ -16,10 +16,13 @@ import { findRealDuckdb, hasRealDuckdb } from './testing/duck-fixture.js';
 /**
  * The payload that defeats the row-limit wrapper. Run against the engine
  * unguarded, `SELECT * FROM (<this>) LIMIT 5` closes the wrapper's
- * parenthesis, attaches a database, and creates a file on disk.
+ * parenthesis, attaches a database, and creates a file on disk at `target`.
+ * The target sits in each test's own temp directory: a fixed `/tmp` path does
+ * not exist on Windows, where DuckDB refuses it before the ATTACH can run.
  */
-const WRAPPER_INJECTION =
-  "SELECT 1) ; ATTACH '/tmp/gezel-guard-injection.db' AS w; SELECT * FROM (SELECT 1";
+function wrapperInjection(target: string): string {
+  return `SELECT 1) ; ATTACH '${sqlLiteral(target)}' AS w; SELECT * FROM (SELECT 1`;
+}
 
 describe('lexicalCheck', () => {
   it.each([
@@ -93,7 +96,6 @@ describe.runIf(hasRealDuckdb())('parserCheck (real engine)', () => {
   });
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
-    await rm('/tmp/gezel-guard-injection.db', { force: true }).catch(() => {});
   });
 
   it.each(['SELECT 1', 'WITH c AS (SELECT 1 AS v) SELECT v FROM c', 'FROM (SELECT 1 AS a)'])(
@@ -118,9 +120,12 @@ describe.runIf(hasRealDuckdb())('parserCheck (real engine)', () => {
   });
 
   it('rejects the payload that defeats the row-limit wrapper, and creates nothing', async () => {
-    await expect(parserCheck(WRAPPER_INJECTION, runner, opts)).rejects.toThrow(SqlRejectedError);
+    const target = join(dir, 'gezel-guard-injection.db');
+    await expect(parserCheck(wrapperInjection(target), runner, opts)).rejects.toThrow(
+      SqlRejectedError,
+    );
     // Validation parses without executing, so the guard itself is inert.
-    expect(existsSync('/tmp/gezel-guard-injection.db')).toBe(false);
+    expect(existsSync(target)).toBe(false);
   });
 
   it('refuses the statement when validation itself fails, rather than running it unchecked', async () => {
@@ -145,13 +150,14 @@ describe.runIf(hasRealDuckdb())('the guard is what stops the write', () => {
   let dir: string;
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
-    await rm('/tmp/gezel-guard-injection.db', { force: true }).catch(() => {});
   });
 
   it('blocks a payload that the lockdown prelude alone allows through', async () => {
     dir = await mkdtemp(join(tmpdir(), 'gezel-guard-proof-'));
     const runner = new DuckRunner({ binaryPath: findRealDuckdb() as string });
-    const opts = { allowedDirectories: [dir, '/tmp'], timeoutMs: 30_000 };
+    const opts = { allowedDirectories: [dir], timeoutMs: 30_000 };
+    const target = join(dir, 'gezel-guard-injection.db');
+    const injection = wrapperInjection(target);
 
     // Unguarded: the wrapper's parenthesis is closed and the smuggled ATTACH
     // runs, inside a directory the prelude permits. The runner still refuses
@@ -159,18 +165,16 @@ describe.runIf(hasRealDuckdb())('the guard is what stops the write', () => {
     // which is not parseable — but by then the file exists. Rejecting
     // unparseable output is useful defence in depth and no substitute for the
     // guard: the side effect happened before anything was read back.
-    await runner
-      .runTrusted(`SELECT * FROM (${WRAPPER_INJECTION}) LIMIT 5`, opts)
-      .catch((err: unknown) => {
-        expect(String(err)).toMatch(/not JSON/);
-      });
-    expect(existsSync('/tmp/gezel-guard-injection.db')).toBe(true);
-    await rm('/tmp/gezel-guard-injection.db', { force: true });
+    await runner.runTrusted(`SELECT * FROM (${injection}) LIMIT 5`, opts).catch((err: unknown) => {
+      expect(String(err)).toMatch(/not JSON/);
+    });
+    expect(existsSync(target)).toBe(true);
+    await rm(target, { force: true });
 
     // Guarded: refused before the engine ever sees it.
-    await expect(assertReadOnlyStatement(WRAPPER_INJECTION, runner, opts)).rejects.toThrow(
+    await expect(assertReadOnlyStatement(injection, runner, opts)).rejects.toThrow(
       SqlRejectedError,
     );
-    expect(existsSync('/tmp/gezel-guard-injection.db')).toBe(false);
+    expect(existsSync(target)).toBe(false);
   });
 });

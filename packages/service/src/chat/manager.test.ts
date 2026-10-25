@@ -6588,6 +6588,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       about: 'A new arcade-style combat game.',
       missionObjectives: '- Ship a playable prototype by EOQ.',
     });
+    await store.writeProjectWorkspaceFile(proj.id, 'src/main.ts', 'export {};\n');
 
     const session = await manager.createSession({ gezelId: 'dev', projectId: proj.id });
     mock.script('on it');

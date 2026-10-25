@@ -1,4 +1,11 @@
-import type { GezelSummary, HistoryEntry, Project, SessionSearchResult } from '@bendyline/gezel';
+import {
+  type GezelSummary,
+  type HistoryEntry,
+  type HistoryEventKind,
+  PERSON_FACING_HISTORY_KINDS,
+  type Project,
+  type SessionSearchResult,
+} from '@bendyline/gezel';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -13,6 +20,7 @@ import { api } from '../api.js';
 import { ToolDiffBlock } from '../components/ToolDiffBlock.js';
 import { openTabAction, runNavActions } from '../components/nav-actions.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
+import { useDebugMode } from '../components/useDebugMode.js';
 import { Select } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import '../styles/history.css';
@@ -94,6 +102,19 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
     if (projectId !== undefined) setProjectFilter(projectId);
   }, [projectId]);
   const [kindFilter, setKindFilter] = useState('');
+  const debugMode = useDebugMode();
+  const kindOptions = useMemo(
+    () =>
+      debugMode
+        ? KINDS
+        : KINDS.filter(
+            (k) =>
+              !k.value ||
+              k.value === 'session' ||
+              PERSON_FACING_HISTORY_KINDS.has(k.value as HistoryEventKind),
+          ),
+    [debugMode],
+  );
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const viewRef = useRef<HTMLDivElement>(null);
@@ -131,10 +152,14 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
         kind?: string;
         q?: string;
         limit?: number;
+        audience?: 'person';
       } = { limit: 200 };
       if (projectFilter) filter.projectId = projectFilter;
       if (gezelFilter) filter.gezelId = gezelFilter;
       if (kindFilter && kindFilter !== 'session') filter.kind = kindFilter;
+      // A kind the person picked is shown whatever it is; without one, the
+      // list holds what happened to their work unless debug mode is on.
+      else if (!debugMode) filter.audience = 'person';
       if (q.trim()) filter.q = q.trim();
       // In parallel: full-text transcript search over what was actually said.
       // Best-effort — the history list must not fail because the transcript
@@ -175,7 +200,7 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
     } finally {
       if (version === requestVersion.current) setLoading(false);
     }
-  }, [projectFilter, gezelFilter, kindFilter, q]);
+  }, [projectFilter, gezelFilter, kindFilter, q, debugMode]);
 
   useEffect(() => {
     api
@@ -325,7 +350,7 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
-              {KINDS.map((k) => (
+              {kindOptions.map((k) => (
                 <Select.Item key={k.value || '__ALL__'} value={k.value || '__ALL__'}>
                   {k.label}
                 </Select.Item>

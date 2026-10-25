@@ -1,7 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import {
   type UtilityChild,
@@ -367,16 +368,16 @@ describe('prewarmUtilityService', () => {
 });
 
 describe('packaging the utility entry', () => {
+  // Paths native to the host: a drive-less file URL is not absolute on
+  // Windows, and the redirect handles both separators.
   it('points at the unpacked entry when the app runs from app.asar', () => {
+    const resources = resolve(sep, 'Gezel', 'Contents', 'Resources');
     expect(
-      defaultUtilityEntryPath(
-        'file:///Applications/Gezel.app/Contents/Resources/app.asar/dist/main.js',
-      ),
-    ).toBe(
-      '/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/utility-service-entry.js',
-    );
-    expect(defaultUtilityEntryPath('file:///repo/packages/app/dist/main.js')).toBe(
-      '/repo/packages/app/dist/utility-service-entry.js',
+      defaultUtilityEntryPath(pathToFileURL(join(resources, 'app.asar', 'dist', 'main.js')).href),
+    ).toBe(join(resources, 'app.asar.unpacked', 'dist', 'utility-service-entry.js'));
+    const dist = resolve(sep, 'repo', 'packages', 'app', 'dist');
+    expect(defaultUtilityEntryPath(pathToFileURL(join(dist, 'main.js')).href)).toBe(
+      join(dist, 'utility-service-entry.js'),
     );
   });
 

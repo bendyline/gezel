@@ -77,7 +77,7 @@ its engine was built for, co-versioned with the pin in `VERSION`:
 | `glm-5.3-flash-320b-q2` | [`antirez/glm-5.3-flash-gguf`](https://huggingface.co/antirez/glm-5.3-flash-gguf) IQ2_XXS/Q2_K + model-matched vision encoder | ~91 GiB (90 GiB GGUF + 1 GiB encoder) |
 | `glm-5.2-754b-q2` | [`antirez/glm-5.2-gguf`](https://huggingface.co/antirez/glm-5.2-gguf) routed IQ2_XXS | ~197 GiB |
 | `qwen3.8-flash-next-q2` | [`antirez/qwen3.8-flash-next-gguf`](https://huggingface.co/antirez/qwen3.8-flash-next-gguf) IQ2_XXS/Q2_K; 41.73 GiB resident weights + 95.37 GiB disk-only n-grams | 137.10 GiB |
-| — (upstream-only pending a full local install) | [`antirez/deepseek-v4.1-flash-gguf`](https://huggingface.co/antirez/deepseek-v4.1-flash-gguf) Q2; 151.8 GiB main weights + 188.8 GiB disk-only Engrams | 340.6 GiB |
+| `deepseek-v4.1-flash-552b-q2` | [`antirez/deepseek-v4.1-flash-gguf`](https://huggingface.co/antirez/deepseek-v4.1-flash-gguf) 1017 IQ2_XXS/Q2_K, text only; 151.8 GiB main weights + 188.8 GiB disk-only Engrams | 340.6 GiB |
 
 An entry is a ds4 model exactly when its manifest carries a `ds4` source block.
 
@@ -109,8 +109,8 @@ Re-validate GGUF compatibility whenever bumping the pin in `VERSION`.
   both top-level `reasoning_effort` and
   `chat_template_kwargs.reasoning_effort`, keeping the latter aligned with
   Qwen's catalog tuning. Never pass `--think-level` to `ds4-server`; that flag
-  belongs to ds4's standalone CLI/agent. The same request path applies to
-  DeepSeek V4.1 once it has a locally validated catalog entry.
+  belongs to ds4's standalone CLI/agent. DeepSeek V4.1 uses the same request
+  path.
 - Routed-expert SSD streaming (`--ssd-streaming
   --ssd-streaming-cache-experts NGB`) remains the safe default for models that
   implement it. Qwen3.8 does not: its 41.73 GiB of main/MTP weights stay
@@ -149,6 +149,15 @@ Re-validate GGUF compatibility whenever bumping the pin in `VERSION`.
   separate from DeepSeek DSpark's external `--mtp-model` companion and the two
   draft paths are never stacked. Operators can override with `ds4Mtp` or
   `GEZEL_DS4_MTP=off|on|auto`.
+- External DSpark (`ds4Dspark`, `--dspark --mtp-model FILE`) needs resident
+  target weights for every family except DeepSeek V4.1, which ds4 also drafts
+  while streaming experts. The V4.1 drafter is 8.04 GiB and stays resident; it
+  has no published download, so convert it with upstream's
+  `gguf-tools/deepseek41_dspark.py` and point `ds4DsparkModelPath` at it.
+  Gezel charges the file plus ds4's 64 MiB of drafter buffers against the
+  expert-cache plan and launch admission, and drops drafting rather than the
+  minimum cache. `auto` never drafts a streamed launch (upstream reports V4.1
+  drafting can be slower than plain decoding), so it takes `ds4Dspark=on`.
 - Launch context is RAM-tiered (64K below 96 GiB, 128K from 96 GiB, or 256K
   from 192 GiB) and a model may
   lower it via `ds4.maxLaunchCtx`. The tier assumes DeepSeek V4 Flash's small

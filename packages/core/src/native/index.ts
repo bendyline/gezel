@@ -76,7 +76,12 @@ export type {
   DiscoverResult,
   NativeBinaryName,
 } from './discover.js';
-export { discoverNativeBinaries, resolveNativeBinaryUnder } from './discover.js';
+export {
+  discoverNativeBinaries,
+  isCudaArchivePath,
+  resolveNativeBinaryUnder,
+  cudaArchiveCarries,
+} from './discover.js';
 export {
   windowsDetachedSpawnOptions,
   windowsHeadlessSpawnOptions,

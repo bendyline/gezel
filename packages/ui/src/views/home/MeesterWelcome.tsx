@@ -265,7 +265,7 @@ export function MeesterWelcome({
         {showIntro && (
           <section className="meester-welcome-intro" aria-labelledby="meester-welcome-intro-lead">
             <p id="meester-welcome-intro-lead" className="meester-welcome-intro-lead">
-              Also, here is a bit more info about gezel:
+              Also, while we wait, here is a bit more info about gezel:
             </p>
             <IntroHandboekArticle variant="player" />
           </section>
@@ -372,6 +372,42 @@ function WelcomeHelpers({ helpers }: { helpers: readonly WelcomeHelper[] }) {
       </ul>
     </div>
   );
+}
+
+/**
+ * Where setup stands, for the composer's "Can't send yet:" warning. Plain
+ * status rather than the meester's voice, since it sits on the toolbar.
+ */
+export function composerWaitingStatus(setup: WelcomeSetup): string {
+  if (setup.hostModels) return 'choose an AI model first';
+  const { state } = setup.model;
+  switch (state.kind) {
+    case 'off':
+      return 'connect an AI first';
+    case 'checking':
+      return 'looking for an AI model on this computer';
+    case 'needs-download':
+      return 'download an AI model first';
+    case 'installing': {
+      if (state.progress?.phase === 'verifying') return 'checking the AI model';
+      if (state.progress?.phase === 'extracting-metadata') return 'unpacking the AI model';
+      const pct = downloadPercent(state.progress);
+      return pct === null ? 'downloading the AI model' : `downloading the AI model · ${pct}%`;
+    }
+    case 'engine': {
+      if (state.error) return "the AI model couldn't be set up";
+      const { progress } = state;
+      const pct =
+        progress && progress.totalBytes > 0
+          ? Math.min(100, Math.round((progress.bytesWritten / progress.totalBytes) * 100))
+          : null;
+      return pct === null ? 'setting up the AI model' : `setting up the AI model · ${pct}%`;
+    }
+    case 'failed':
+      return "the AI model didn't download";
+    case 'ready':
+      return 'getting ready';
+  }
 }
 
 /** The tools beat: the one thing first run asks for, in the meester's voice. */

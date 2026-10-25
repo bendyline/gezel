@@ -138,3 +138,12 @@ export type TaskNeedsHelpHook = (ctx: {
  * doesn't block step activation.
  */
 export type RoleResolver = (role: string, projectId: string) => Promise<{ gezelId: string } | null>;
+
+/**
+ * Which person message a new task answers (`Task.requestRef`), from what the
+ * task records about where it came from. Wired in `task-creation.ts` to
+ * core's `deriveTaskRequestRef` over the store; a failure stamps nothing.
+ */
+export type RequestRefResolver = (
+  task: Pick<Task, 'parentTaskRef' | 'launchSessionId' | 'createdAt'>,
+) => Promise<Task['requestRef']>;

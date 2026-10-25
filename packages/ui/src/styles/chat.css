@@ -253,6 +253,13 @@
   margin-top: 0;
 }
 
+/* The plain line a live turn shows in place of its tool rows outside debug
+   mode ("Writing file…"). Muted, like the status line it sits beside. */
+.msg-quiet-activity {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
 @keyframes thinking-bounce {
   0%,
   60%,
@@ -4642,7 +4649,7 @@ button.timeline-session-divider-child::before {
 
 /* ── Working notes ───────────────────────────────────────────────────
    The sessions a turn launched (a task's workers), folded into one quiet
-   line in the meester's Home conversation. The transcript is inside. */
+   line in every conversation outside debug mode. The transcript is inside. */
 .timeline-working-notes {
   margin: 0.35rem 0 0.35rem 0.5rem;
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
@@ -4677,6 +4684,12 @@ button.timeline-session-divider-child::before {
   background: var(--warning);
 }
 .timeline-working-notes-stopped .timeline-working-notes-line {
+  color: color-mix(in srgb, var(--warning) 70%, var(--text));
+}
+.timeline-working-notes-needs-you .timeline-working-notes-dot {
+  background: var(--warning);
+}
+.timeline-working-notes-needs-you .timeline-working-notes-line {
   color: color-mix(in srgb, var(--warning) 70%, var(--text));
 }
 .timeline-working-notes-line {

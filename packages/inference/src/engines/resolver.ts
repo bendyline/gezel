@@ -1042,6 +1042,15 @@ function stampEnv(
   // resolve from the same place on a later boot.
   process.env.GEZEL_NATIVE_BIN_DIR = versionDir;
   if (engine === 'llama-server' && variant) process.env.GEZEL_LLAMA_SERVER_BACKEND = variant;
+  // Windows on ARM's bare archive also carries sqlite-vec, which npm has no
+  // build of there. The sqlite driver reads this on every database open, so
+  // vector search starts with the next query rather than the next boot.
+  const platformKey = resolvePlatformKey();
+  const ext = process.platform === 'win32' ? 'dll' : process.platform === 'darwin' ? 'dylib' : 'so';
+  const sqliteVec = platformKey ? join(versionDir, platformKey, `vec0.${ext}`) : null;
+  if (sqliteVec && !process.env.GEZEL_SQLITE_VEC_PATH && existsSync(sqliteVec)) {
+    process.env.GEZEL_SQLITE_VEC_PATH = sqliteVec;
+  }
 }
 
 async function resolveGitHubToken(): Promise<string | null> {

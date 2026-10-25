@@ -252,6 +252,30 @@ describe('SettingsView', () => {
     expect(screen.queryByText(/Noor/)).toBeNull();
   });
 
+  // Open conversations read debug mode live; without the broadcast they kept
+  // the value they mounted with until reopened.
+  it('broadcasts a debug mode change so open views follow it', async () => {
+    vi.mocked(api.updateConfig).mockResolvedValue({ provider: 'mock', debugMode: true } as never);
+    const seen: unknown[] = [];
+    const onUpdated = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener('gezel:config-updated', onUpdated);
+    try {
+      render(<SettingsView />);
+      fireEvent.click(await screen.findByTestId('settings-nav-about'));
+      const checkbox = await screen.findByRole('checkbox', { name: 'Debug mode' });
+      expect(checkbox).not.toBeChecked();
+
+      fireEvent.click(checkbox);
+
+      await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith({ debugMode: true }));
+      await waitFor(() =>
+        expect(seen).toContainEqual(expect.objectContaining({ debugMode: true })),
+      );
+    } finally {
+      window.removeEventListener('gezel:config-updated', onUpdated);
+    }
+  });
+
   it('defaults very early work-in-progress features off and persists the toggle', async () => {
     vi.mocked(api.updateConfig).mockResolvedValue({
       provider: 'mock',
@@ -695,6 +719,57 @@ describe('SettingsView', () => {
     expect(
       await screen.findByRole('button', { name: 'This PC (DwarfStar - DS4)' }),
     ).toBeInTheDocument();
+  });
+
+  // The review's screenshot opened a DwarfStar tab that said it could not run.
+  it('hides the DwarfStar tab when the daemon has no build for this machine', async () => {
+    vi.mocked(api.health).mockResolvedValue({
+      ok: true,
+      version: '0.1.0',
+      platform: 'linux',
+      ds4ServerBundled: false,
+    } as never);
+    render(<SettingsView />);
+    await screen.findByTestId('settings-nav-general');
+    await waitFor(() => expect(api.health).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId('settings-nav-ds4')).not.toBeInTheDocument());
+  });
+
+  it('keeps developer areas for debug mode or an install that uses them', async () => {
+    vi.mocked(api.listInstalledToolsets).mockResolvedValue({ toolsets: [] } as never);
+    const developer = ['ollama', 'codexCli', 'anthropicCli', 'remoteServers', 'toolsets'];
+    const plain = render(<SettingsView />);
+    await screen.findByTestId('settings-nav-general');
+    await waitFor(() =>
+      expect(screen.queryByTestId('settings-nav-toolsets')).not.toBeInTheDocument(),
+    );
+    for (const id of developer) {
+      expect(screen.queryByTestId(`settings-nav-${id}`)).not.toBeInTheDocument();
+    }
+    // Office and LibreOffice setup is for everyone.
+    expect(screen.getByTestId('settings-nav-connectedApps')).toBeInTheDocument();
+    plain.unmount();
+
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'ollama',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+    } as never);
+    const using = render(<SettingsView />);
+    expect(await screen.findByTestId('settings-nav-ollama')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-nav-codexCli')).not.toBeInTheDocument();
+    using.unmount();
+
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      debugMode: true,
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+    } as never);
+    render(<SettingsView />);
+    for (const id of developer) {
+      expect(await screen.findByTestId(`settings-nav-${id}`)).toBeInTheDocument();
+    }
   });
 
   it('explains on macOS why the night shift cannot wake a sleeping Mac', async () => {

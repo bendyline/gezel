@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  foldInflection,
   proactiveRetrievalTerms,
   queryTerms,
   searchTokens,
@@ -53,6 +54,58 @@ describe('queryTerms', () => {
 
   it('returns nothing for a query with no word characters', () => {
     expect(queryTerms('   ***   ')).toEqual([]);
+  });
+
+  it('folds plurals and verb endings to stems that still match every form', () => {
+    // squisq: the plural and the past tense matched no transition file at all.
+    expect(queryTerms('where are slide transitions rendered')).toEqual([
+      'slide',
+      'transition',
+      'render',
+    ]);
+    expect(queryTerms('dependencies classes matches loading')).toEqual([
+      'dependenc',
+      'class',
+      'match',
+      'load',
+    ]);
+  });
+
+  it('leaves words whose ending is not an inflection alone', () => {
+    expect(queryTerms('status process analysis series speed string')).toEqual([
+      'status',
+      'process',
+      'analysis',
+      'series',
+      'speed',
+      'string',
+    ]);
+  });
+});
+
+describe('foldInflection', () => {
+  it('always returns a prefix of the word, never shorter than a usable stem', () => {
+    for (const word of [
+      'transitions',
+      'rendered',
+      'properties',
+      'boxes',
+      'settings',
+      'uses',
+      'bits',
+    ]) {
+      const stem = foldInflection(word);
+      expect(word.startsWith(stem)).toBe(true);
+      expect(stem.length).toBeGreaterThanOrEqual(3);
+    }
+    expect(foldInflection('boxes')).toBe('box');
+    expect(foldInflection('uses')).toBe('uses');
+  });
+
+  it('keeps grounding in step with the search: a folded term matches the base form', () => {
+    expect(textMatchesAnyTerm('export function Transition()', queryTerms('transitions'))).toBe(
+      true,
+    );
   });
 });
 

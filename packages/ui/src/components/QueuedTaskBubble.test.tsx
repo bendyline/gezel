@@ -47,8 +47,16 @@ describe('QueuedTaskBubble', () => {
         onTaskReference={onTaskReference}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /Task gezel\/6/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open task' }));
     expect(onTaskReference).toHaveBeenCalledWith('gezel/6');
+  });
+
+  // A task's id is debug-mode text (docs/ux.md).
+  it('names the task id only in debug mode', () => {
+    const { rerender } = render(<QueuedTaskBubble task={TASK} wait={waitState()} gezel={KORAY} />);
+    expect(screen.queryByText(/gezel\/6/)).not.toBeInTheDocument();
+    rerender(<QueuedTaskBubble task={TASK} wait={waitState()} gezel={KORAY} debugMode />);
+    expect(screen.getByText('Task gezel/6')).toBeInTheDocument();
   });
 
   it('does not promise a start time for work that is deliberately parked', () => {

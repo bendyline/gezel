@@ -608,8 +608,8 @@ export function githubHeaders({ token, accept, apiVersion = false }) {
 
 /**
  * `platformVariants` returns an empty list for a platform the native
- * pipeline doesn't publish (darwin-x64, win32-arm64). An empty fetch loop
- * would exit 0 having downloaded nothing — say so instead.
+ * pipeline doesn't publish (darwin-x64). An empty fetch loop would exit 0
+ * having downloaded nothing — say so instead.
  */
 function requireKeys(platformKeys, platform) {
   if (platformKeys.length > 0) return;

@@ -40,6 +40,8 @@ export function renderDivider(args: {
    * sequence inconsistently and crash with React error #310.
    */
   roleBasedNameOnlyMode: boolean;
+  /** A task's id is debug-mode text (docs/ux.md); threaded in for the same reason. */
+  debugMode?: boolean;
 }): React.ReactNode {
   const {
     row,
@@ -53,6 +55,7 @@ export function renderDivider(args: {
     treeBranch,
     key,
     roleBasedNameOnlyMode,
+    debugMode = false,
   } = args;
   const sessionId = row.kind === 'streaming' ? row.sessionId : row.msg.sessionId;
   const gezelId = row.kind === 'streaming' ? row.slot.gezelId : row.msg.gezelId;
@@ -170,7 +173,7 @@ export function renderDivider(args: {
             {' · '}started {formatRelativeTime(createdAt)}
           </>
         )}
-        {taskRef && <> · task {taskRef}</>}
+        {debugMode && taskRef && <> · task {taskRef}</>}
       </span>
       {parent &&
         (parent.kind === 'task-handoff' ? (handoffFromName ?? parentName) : parentName) && (

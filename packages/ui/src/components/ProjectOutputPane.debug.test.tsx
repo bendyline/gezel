@@ -104,6 +104,27 @@ describe('ProjectOutputPane script error copy', () => {
     expect(await screen.findByText('Copied')).toBeInTheDocument();
   });
 
+  it('follows debug mode turned on while the pane is open', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({ ...baseConfig, debugMode: false });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+
+    renderPane();
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('gezel:config-updated', { detail: { ...baseConfig, debugMode: true } }),
+      );
+    });
+    await invokeFromPage();
+
+    expect(
+      await screen.findByRole('button', { name: 'Copy full script error details' }),
+    ).toBeInTheDocument();
+  });
+
   it('does not hydrate or show diagnostics when debug mode is off', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({ ...baseConfig, debugMode: false });
 

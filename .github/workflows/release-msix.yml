@@ -12,12 +12,15 @@
 # is also why no signing secrets are needed — the Store signs the package on
 # ingest, and an Authenticode signature applied here would be rejected.
 #
-# KNOWN OPEN ITEM (first-run spike): the Visual C++ runtime. The NSIS installer
-# runs vc_redist.x64.exe from its customInstall hook; an MSIX has no such hook,
-# and the VCLibs desktop framework package is deprecated. The likely answer is
-# staging the CRT DLLs app-local beside the engines in native-bin/. Until that
-# is settled, engines may fail to load on a machine with no MSVC runtime — so
-# validate on a clean Windows VM before the first submission.
+# One package per arch (x64, arm64), each built on a runner of that arch: the
+# service bundle carries the build host's native addons. Partner Center takes
+# both .appx files in one submission.
+#
+# The Visual C++ runtime: the NSIS installer runs Microsoft's redistributable
+# installer from its customInstall hook; an MSIX has no such hook, and the
+# VCLibs desktop framework package is deprecated. So stage-app-local-crt.mjs
+# copies the runtime DLLs beside the engines in native-bin/. Still validate on
+# a clean Windows VM before the first submission of each arch.
 name: Release MSIX (Microsoft Store)
 
 # No native-tag input: the package bundles the native release the source pins
@@ -156,8 +159,19 @@ jobs:
 
   build-msix:
     needs: [quality-lite, store-preflight]
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    env:
+      # electron-builder names the package after its arch.
+      APPX_PATTERN: '*-store-${{ matrix.arch }}.appx'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -186,7 +200,7 @@ jobs:
           NATIVE_TAG: ${{ needs.store-preflight.outputs.nativeTag }}
         run: |
           version="${NATIVE_TAG#native-v}"
-          node scripts/check-native-payload.mjs --root packages/app/native-bin
+          node scripts/check-native-payload.mjs --root packages/app/native-bin --release "$version"
           node scripts/verify-native-file-manifest.mjs \
             --root packages/app/native-bin \
             --manifest packages/inference/src/engines/native-file-manifest.json \
@@ -256,8 +270,16 @@ jobs:
         # code the Store forbids.
         run: node scripts/write-store-build-marker.mjs microsoft-store
 
+      - name: Stage the Visual C++ runtime beside the engines
+        # After the payload was verified against its pins, which do not list
+        # these files. Without them an engine fails to load on a machine that
+        # never installed the redistributable.
+        run: node packages/app/scripts/stage-app-local-crt.mjs
+        env:
+          GEZEL_APP_LOCAL_CRT_REQUIRED: '1'
+
       - name: Package MSIX
-        run: pnpm --filter @bendyline/gezel-app exec electron-builder --win --config electron-builder.appx.yml --publish never
+        run: pnpm --filter @bendyline/gezel-app exec electron-builder --win appx:${{ matrix.arch }} --config electron-builder.appx.yml --publish never
 
       - name: Inspect the generated package manifest
         shell: pwsh
@@ -266,7 +288,7 @@ jobs:
         # only surfaces as a Partner Center rejection hours later.
         run: |
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $pkg = Get-ChildItem 'packages/app/dist/installers' -Filter '*.appx' -Recurse |
+          $pkg = Get-ChildItem 'packages/app/dist/installers' -Filter $env:APPX_PATTERN -Recurse |
             Select-Object -First 1
           if (-not $pkg) { throw 'electron-builder produced no .appx package' }
           Write-Host "[msix] package: $($pkg.Name) ($([math]::Round($pkg.Length/1MB,1)) MB)"
@@ -312,7 +334,7 @@ jobs:
         # would ship without the notices the dependency licenses require.
         run: |
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $pkg = Get-ChildItem 'packages/app/dist/installers' -Filter '*.appx' -Recurse |
+          $pkg = Get-ChildItem 'packages/app/dist/installers' -Filter $env:APPX_PATTERN -Recurse |
             Select-Object -First 1
           $zip = [System.IO.Compression.ZipFile]::OpenRead($pkg.FullName)
           try {
@@ -333,7 +355,7 @@ jobs:
           # Kept as .appx, the extension electron-builder produces. MSIX and
           # APPX are the same container format and Partner Center accepts
           # either; renaming would imply a conversion that did not happen.
-          name: msix-store-artifacts
+          name: msix-store-artifacts-${{ matrix.arch }}
           path: packages/app/dist/installers/*.appx
           if-no-files-found: error
           retention-days: 14
@@ -358,7 +380,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $pkg = Get-ChildItem 'packages/app/dist/installers' -Filter '*.appx' -Recurse |
+          $pkg = Get-ChildItem 'packages/app/dist/installers' -Filter $env:APPX_PATTERN -Recurse |
             Select-Object -First 1
 
           # The certificate subject must equal the manifest publisher exactly,
@@ -390,8 +412,11 @@ jobs:
           # the duration of this job.
           Import-PfxCertificate -FilePath $pfx -CertStoreLocation 'Cert:\LocalMachine\Root' -Password $pfxPassword | Out-Null
 
+          # The runner's own signtool: a self-signed .pfx needs no signing
+          # plugin, so nothing ties this to x64.
+          $hostArch = if ($env:PROCESSOR_ARCHITECTURE -match '^(ARM64|aarch64)$') { 'arm64' } else { 'x64' }
           $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter 'signtool.exe' |
-            Where-Object { $_.FullName -like '*x64*' } | Select-Object -First 1
+            Where-Object { $_.Directory.Name -eq $hostArch } | Select-Object -First 1
           if (-not $signtool) { throw 'signtool.exe not found on this runner' }
           & $signtool.FullName sign /fd SHA256 /a /f $pfx /p ([System.Net.NetworkCredential]::new('', $pfxPassword).Password) $signed
           if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE" }
@@ -447,17 +472,18 @@ jobs:
         shell: bash
         run: |
           {
-            echo '## Microsoft Store package ready'
+            echo '## Microsoft Store package ready (${{ matrix.arch }})'
             echo
-            echo 'Download the `msix-store-artifacts` artifact from this run and upload the'
-            echo '`.appx` to Partner Center. Nothing was published automatically.'
+            echo 'Download the `msix-store-artifacts-x64` and `msix-store-artifacts-arm64`'
+            echo 'artifacts from this run and upload both `.appx` files to the same Partner'
+            echo 'Center submission. Nothing was published automatically.'
             echo
             echo 'Before the FIRST submission:'
             echo '- Reserve the app identity in Partner Center and replace the'
             echo '  `REPLACE_WITH_PARTNER_CENTER_*` placeholders in `electron-builder.appx.yml`.'
             echo '- Author `packages/app/assets/appx/` tile art (stock images ship otherwise).'
-            echo '- Validate engines load on a clean Windows VM (the VC++ runtime open item'
-            echo '  in this workflow header).'
+            echo '- Validate engines load on a clean Windows VM of each arch: the package'
+            echo '  carries the Visual C++ runtime app-local (stage-app-local-crt.mjs).'
             echo
             echo 'To test locally before submitting, sign it with a self-signed certificate'
             echo 'whose subject matches the manifest publisher exactly:'

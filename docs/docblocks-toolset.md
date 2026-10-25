@@ -52,6 +52,12 @@ To bump: set the new version in `packages/service/package.json` and in
 inventory changes, update Gilde's `versions/<ver>/manifest.json` too and bump
 Gezel's Gilde pin once that release is published.
 
+Outside AI apps (Claude Code, Codex and the rest) get six of these tools
+through Gezel's harness, which starts this same bundled DocBlocks beside
+itself and lists the tools from a snapshot of its schemas. A DocBlocks bump
+therefore also needs `node scripts/snapshot-docblocks-tools.mjs`. See
+[harness-tools.md](harness-tools.md#making-documents).
+
 ## 2. Project-scoped filesystem authority (ChatManager)
 
 `docblocks mcp` starts with **zero filesystem authority** — roots must be granted

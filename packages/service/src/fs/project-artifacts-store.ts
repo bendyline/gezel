@@ -18,6 +18,7 @@ import {
 } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import {
   type ExternalFolders,
+  PROJECT_PROMPTS_DIR_NAME,
   PROJECT_SHADOW_DIR_NAME,
   PROJECT_TABULAR_DIR_NAME,
   projectArtifactsDir,
@@ -674,13 +675,18 @@ async function pathExists(full: string): Promise<boolean> {
 
 /**
  * Reserved roots hidden from default artifact listings and from the fuzzy
- * basename walk. Both are derived caches: surfacing them would spend the
- * walk budget on machine output and let a shadow twin or a Parquet part
- * hijack a bare-filename lookup.
+ * basename walk. Shadow and tabular are derived caches: surfacing them would
+ * spend the walk budget on machine output and let a shadow twin or a Parquet
+ * part hijack a bare-filename lookup. Prompts holds the composer's drafts
+ * (`draft.json`, `message.md`): the person's own unsent messages, not work
+ * the crew made, and a draft's `message.md` must not answer a bare lookup.
+ * `?hidden=1`, a listing of the subtree itself, and an explicit read still
+ * reach all three.
  */
 const RESERVED_ROOT_SKIP: ReadonlySet<string> = new Set([
   PROJECT_SHADOW_DIR_NAME,
   PROJECT_TABULAR_DIR_NAME,
+  PROJECT_PROMPTS_DIR_NAME,
 ]);
 
 /**

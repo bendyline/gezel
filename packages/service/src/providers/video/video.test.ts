@@ -2,11 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { parseVideoProgress, parseVideoWarmupStatus } from './diffusers-video.js';
 import { buildVideoServerArgs } from './factory.js';
 import { MockVideoProvider } from './mock.js';
-import { detectVideoAccelerator, resetAcceleratorCache, videoVenvSpec } from './venv.js';
+import {
+  detectVideoAccelerator,
+  resetAcceleratorCache,
+  videoCpuReason,
+  videoPythonRequest,
+  videoVenvSpec,
+} from './venv.js';
+
+const LINUX_X64 = { platform: 'linux' as const, arch: 'x64' };
+const WINDOWS_ARM64 = { platform: 'win32' as const, arch: 'arm64' };
 
 describe('videoVenvSpec', () => {
   it('mps: floor-pinned torch from PyPI, no extra index', () => {
-    const spec = videoVenvSpec('mps');
+    const spec = videoVenvSpec('mps', LINUX_X64);
     expect(spec.extraIndexUrls).toBeUndefined();
     // Floor, not exact — an exact pin breaks on Pythons without that
     // wheel; the floor lets pip resolve a compatible build.
@@ -16,24 +25,43 @@ describe('videoVenvSpec', () => {
   });
 
   it('cuda: pins +cu124 wheels and adds the PyTorch CUDA index', () => {
-    const spec = videoVenvSpec('cuda');
+    const spec = videoVenvSpec('cuda', LINUX_X64);
     expect(spec.packages).toContain('torch==2.5.1+cu124');
     expect(spec.packages).toContain('torchvision==0.20.1+cu124');
     expect(spec.extraIndexUrls).toEqual(['https://download.pytorch.org/whl/cu124']);
   });
 
   it('cpu: pins +cpu wheels and adds the PyTorch CPU index', () => {
-    const spec = videoVenvSpec('cpu');
+    const spec = videoVenvSpec('cpu', LINUX_X64);
     expect(spec.packages).toContain('torch==2.5.1+cpu');
     expect(spec.extraIndexUrls).toEqual(['https://download.pytorch.org/whl/cpu']);
   });
 
   it('floors diffusers and transformers at the LTX-2.3-capable releases on every accelerator', () => {
     for (const accel of ['mps', 'cuda', 'cpu'] as const) {
-      const { packages } = videoVenvSpec(accel);
+      const { packages } = videoVenvSpec(accel, LINUX_X64);
       expect(packages).toContain('diffusers>=0.39.0');
       expect(packages).toContain('transformers>=4.50.0');
     }
+  });
+
+  // PyTorch's win_arm64 wheels start at 2.7.0 and are CPU-only, and its
+  // torchvision there carries git-hash local versions, never `+cpu`.
+  it('Windows on ARM: the ARM64 CPU pair from the CPU index, whatever the accelerator', () => {
+    for (const accel of ['cuda', 'cpu'] as const) {
+      const spec = videoVenvSpec(accel, WINDOWS_ARM64);
+      expect(spec.packages).toContain('torch==2.13.0+cpu');
+      expect(spec.packages).toContain('torchvision==0.28.0');
+      expect(spec.packages.some((p) => p.includes('+cu'))).toBe(false);
+      expect(spec.extraIndexUrls).toEqual(['https://download.pytorch.org/whl/cpu']);
+    }
+  });
+
+  it('names the ARM64 interpreter on Windows on ARM, where uv would pick x86_64', () => {
+    expect(videoPythonRequest(WINDOWS_ARM64)).toBe('cpython-3.12-windows-aarch64-none');
+    expect(videoPythonRequest(LINUX_X64)).toBe('3.12');
+    expect(videoCpuReason(WINDOWS_ARM64)).toBe('no-gpu-build');
+    expect(videoCpuReason(LINUX_X64)).toBeUndefined();
   });
 });
 
@@ -111,6 +139,14 @@ describe('detectVideoAccelerator', () => {
     resetAcceleratorCache();
     const accel = await detectVideoAccelerator({ platform: 'darwin', arch: 'x64' });
     expect(accel).toBe('cpu');
+  });
+
+  // Even on an RTX Spark, whose nvidia-smi answers: there is no CUDA wheel.
+  it('maps Windows on ARM to cpu without probing for NVIDIA', async () => {
+    resetAcceleratorCache();
+    const accel = await detectVideoAccelerator(WINDOWS_ARM64);
+    expect(accel).toBe('cpu');
+    resetAcceleratorCache();
   });
 });
 

@@ -268,6 +268,28 @@ describe('Sidebar', () => {
     expect(await screen.findByRole('button', { name: 'Actions for Maya' })).toBeInTheDocument();
   });
 
+  it("opens the Gezellen list when a gezel's chat opens, and lets it close again", async () => {
+    const { rerender } = render(
+      <Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />,
+    );
+    await screen.findByText('Alpha');
+    expect(screen.queryByRole('button', { name: 'Actions for Maya' })).toBeNull();
+
+    rerender(
+      <Sidebar
+        selection={{ kind: 'gezel', id: 'g1' } as RecentTab}
+        onSelect={vi.fn()}
+        onOpenArea={vi.fn()}
+      />,
+    );
+    expect(await screen.findByRole('button', { name: 'Actions for Maya' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('sidebar-group-toggle-gezels'));
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Actions for Maya' })).toBeNull(),
+    );
+  });
+
   it('shows a working indicator on an active gezel and opens that gezel from it', async () => {
     window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ gezels: true }));
     const onSelect = vi.fn();

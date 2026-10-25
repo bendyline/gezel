@@ -811,6 +811,12 @@ export function parseNvidiaMemoryProbe(
   };
 }
 
+/**
+ * RTX Spark (N1X) is GB10-class silicon but deliberately not in this list.
+ * Windows splits its memory at boot into a fixed GPU share and the OS's RAM
+ * (32 + 32 GB on a 64 GB machine, changed only by a reboot), so nvidia-smi's
+ * figure is a pool of its own and the card is budgeted as discrete.
+ */
 function isKnownUnifiedNvidiaDevice(name: string): boolean {
   const normalized = name.toLowerCase();
   return /\bgb10\b/.test(normalized) || normalized.includes('dgx spark');

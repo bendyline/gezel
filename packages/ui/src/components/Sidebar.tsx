@@ -60,6 +60,7 @@ import { openUpdates } from './nav-actions.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
 import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
+import { useDebugMode } from './useDebugMode.js';
 import { useHasKnowledgeCatalogs } from './useHasKnowledgeCatalogs.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
@@ -267,6 +268,7 @@ export function Sidebar({
   const collapsed = !compact && storedCollapsed;
   const roleBasedNameOnly = useRoleBasedNameOnlyMode();
   const showAdvancedFeatures = useShowAdvancedFeatures();
+  const debugMode = useDebugMode();
   const hasKnowledgeCatalogs = useHasKnowledgeCatalogs();
   // Until setup is done, the home tab reads "Get started" instead of "Home".
   const firstRun = useFirstRun();
@@ -287,7 +289,7 @@ export function Sidebar({
   const areaLinks = useMemo(() => {
     const links = AREA_LINKS.filter((area) => {
       if (!supportsArea(area)) return false;
-      if (area === 'scripts') return showAdvancedFeatures;
+      if (area === 'scripts') return showAdvancedFeatures || debugMode;
       // Knowledge appears the moment the user registers ≥1 catalog — the
       // rail flips exactly at that count, never from machine inventory.
       if (area === 'knowledge') return hasKnowledgeCatalogs;
@@ -310,7 +312,7 @@ export function Sidebar({
       links.splice(settingsAt < 0 ? links.length : settingsAt, 0, currentArea);
     }
     return links;
-  }, [showAdvancedFeatures, hasKnowledgeCatalogs, currentArea]);
+  }, [showAdvancedFeatures, debugMode, hasKnowledgeCatalogs, currentArea]);
   // Installation and updater notices live beneath Settings, which is the
   // lower corner of the rail in the default right-sidebar layout. Routine
   // "up to date" feedback clears after a moment; download and ready states
@@ -599,6 +601,15 @@ export function Sidebar({
     },
     [collapsed, groups, commitCollapsed, commitGroups],
   );
+
+  // Opening a gezel's chat (Say hello on a crew card, a search hit) opens the
+  // Gezellen list, so the rail shows whose chat this is. Keyed on the gezel,
+  // so closing the list while there keeps it closed.
+  const selectedGezelId = selection?.kind === 'gezel' ? selection.id : null;
+  useEffect(() => {
+    if (!selectedGezelId) return;
+    setGroups((current) => (current.gezels ? current : { ...current, gezels: true }));
+  }, [selectedGezelId]);
 
   // ── Drag-to-resize (adapted from ChatReferences) ────────────────
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);

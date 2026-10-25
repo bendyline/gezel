@@ -70,14 +70,21 @@ async function fixture() {
   const messages = async () =>
     ((await store.getSession(gezel.id, session.id))?.messages ?? []) as ChatMessage[];
   const tasks = () => store.listTasks({ projectId: session.projectId });
-  return { store, gezel, session, launch, messages, tasks };
+  const requests = async () => {
+    const response = await service.fetch(
+      `https://gezel.local/api/requests?sessions=${session.id}`,
+      { headers: { authorization: 'Bearer secret' } },
+    );
+    return (await response.json()) as { requests: Array<Record<string, unknown>> };
+  };
+  return { store, gezel, session, launch, messages, tasks, requests };
 }
 
 const message = 'Turn these meeting notes into actions for the team.';
 
 describe('phone chat launch', () => {
   it('sends a drafted message with its receipt and marks the draft sent', async () => {
-    const { store, gezel, session, launch, messages, tasks } = await fixture();
+    const { store, gezel, session, launch, messages, tasks, requests } = await fixture();
     const draft = await store.createPromptDraft(session.projectId, {
       gezelId: gezel.id,
       sessionId: session.id,
@@ -94,6 +101,23 @@ describe('phone chat launch', () => {
     expect(thread.at(-1)).toMatchObject({ synthetic: 'craftbook-launch' });
     expect((await store.getPromptDraft(session.projectId, draft.id))?.status).toBe('sent');
     expect(await tasks()).toHaveLength(1);
+    // The task names the message it answers, as on the desktop.
+    const asked = thread.at(-2)!;
+    expect(asked.id).toEqual(expect.any(String));
+    expect((await tasks())[0]?.requestRef).toEqual({
+      sessionId: session.id,
+      at: asked.at,
+      messageId: asked.id,
+    });
+    // One tracker for it, waiting on the person's own step.
+    expect((await requests()).requests).toEqual([
+      expect.objectContaining({
+        key: `${session.id}@${asked.at}`,
+        kind: 'work',
+        summary: message,
+        taskRefs: [(await tasks())[0]?.ref],
+      }),
+    ]);
 
     const retry = await launch({
       message,

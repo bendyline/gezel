@@ -690,3 +690,42 @@ test('macOS release installs the finished PKG and exercises recovery', async () 
   assert.match(macPkgSmoke, /! \/usr\/sbin\/pkgutil --pkg-info "\$package_id"/);
   assert.match(macPkgSmoke, /trap cleanup EXIT/);
 });
+
+test('Windows ships an installer per arch, each built on its own runner, behind one update feed', async () => {
+  const workflow = await readFile(
+    join(root, '.github', 'workflows', 'release-electron.yml'),
+    'utf8',
+  );
+  const jobs = workflowJobs(workflow);
+  const windows = jobs['build-windows'];
+  assert.ok(windows, 'release must build Windows');
+  // The service bundle carries the build host's native addons, so each arch
+  // is packaged on a runner of that arch, never cross-built.
+  assert.match(windows, /- arch: x64\n\s+runner: windows-latest/);
+  assert.match(windows, /- arch: arm64\n\s+runner: windows-11-arm/);
+  assert.match(windows, /runs-on: \$\{\{ matrix\.runner \}\}/);
+  assert.match(windows, /electron-builder --win nsis:\$\{\{ matrix\.arch \}\} --publish never/);
+  // Without it the arm64 installer's 7-Zip plugin skips every ARM64-filtered
+  // executable and installs an app with no .exe or .dll.
+  assert.match(
+    windows,
+    /ELECTRON_BUILDER_7Z_FILTER: \$\{\{ matrix\.arch == 'arm64' && 'BCJ' \|\| '' \}\}/,
+  );
+  assert.match(windows, /native-bin\/win32-\$\{\{ matrix\.arch \}\}\/gezel-service-host\.exe/);
+  assert.match(windows, /name: windows-artifacts-\$\{\{ matrix\.arch \}\}/);
+  assert.doesNotMatch(windows, /win32-x64\/gezel-service-host/);
+
+  // Both legs upload a latest.yml; publishing both would collide and
+  // publishing one would hand every machine that arch's installer.
+  const release = jobs.release;
+  assert.match(
+    release,
+    /merge-windows-update-feed\.mjs \\\n\s+artifacts\/windows-artifacts-x64\/latest\.yml \\\n\s+artifacts\/windows-artifacts-arm64\/latest\.yml/,
+  );
+  assert.match(release, /rm artifacts\/windows-artifacts-arm64\/latest\.yml/);
+  assert.ok(
+    release.indexOf('Merge the Windows update feeds') <
+      release.indexOf('Stage assets and generate SHA256SUMS'),
+    'the feed is merged before assets are staged, attested and published',
+  );
+});

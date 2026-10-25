@@ -199,6 +199,9 @@ describe('buildTypedKickoffStep', () => {
       unsaid: ['Departure date'],
     });
     expect(step.name).toBe('First draft');
+    // The person's tracker: making it, in their words.
+    expect(step.stage).toBe('make');
+    expect(step.personLabel).toBe('setting up your Trip Planner');
     expect(step.description).toContain('You lead this Trip Planner project');
     expect(step.description).toContain('`trip.json`');
     expect(step.description).toContain('"Departure date"');

@@ -338,7 +338,8 @@ final class MobileBridgeTests: XCTestCase {
             const project = await api('/api/projects', 'POST', {name:'Native workshop',about:'A native mobile product test.',missionObjectives:'Keep crew and files on this device.',indexingEnabled:false});
             const crew = await api('/api/gezels', 'POST', {name:'Native tester',role:'Helper',about:'Reply briefly.'});
             await api('/api/projects/' + project.id + '/gezels', 'POST', {gezelId:crew.id});
-            await api('/api/projects/' + project.id, 'PUT', {voormanGezelId:crew.id});
+            // Artifacts is a developer tab, hidden on a project that holds no code until turned on.
+            await api('/api/projects/' + project.id, 'PUT', {voormanGezelId:crew.id,tabVisibility:{artifacts:true}});
             const modelId = (await plugin.listModels()).selectedModelId;
             // The fixture's tokenizer spends a token per byte, so the desktop's standard prompt
             // (~15K bytes) overflows its 8K trained context; a 4K window selects the minimal footprint.

@@ -26,12 +26,13 @@ The rest of this page is about other apps using your gezels and models. This par
 - **Read** Word, PDF, PowerPoint and Excel files as text.
 - **Describe** an image on this computer, or read the text in it.
 - **Make an image** with the image engine you chose in Gezel.
+- **Make a Word, PowerPoint, PDF or Excel file** from what the app writes, with the same document maker your gezels use. Gezel keeps the file in the project's artifacts, and the app copies it into your folder.
 - **Remember** a decision or a preference, so Gezel and every other app see it later.
 - **Check the issues** Gezel's night shift found: say which are real, and fix them if you ask.
 
 Set an app up on its own tab: **Gezel's tools in Claude Code**, and so on. Gezel adds a server called `gezel` to that app's own settings and changes nothing else there. Claude Code and Codex are set up through their own commands; when Gezel cannot find the command, the tab shows the line to run yourself. If you use the Gezel extension for VS Code, it adds the tools to each workspace on its own.
 
-**Getting the app to use it.** An app with Gezel's tools still reaches for its own search first. Once it's set up, its tab shows one line to add to the instructions file in a folder you work in: *CLAUDE.md* for Claude Code, *AGENTS.md* for Codex, Cursor and VS Code. With that line, Claude Code used Gezel's search almost every time, and on a large, little-documented codebase it answered questions about the code in about half the time. In a codebase that's already well described, it makes little difference. Gezel shows the line for you to copy; it never changes your files.
+**Getting the app to use it.** An app with Gezel's tools still reaches for its own search first. Once it's set up, its tab shows one line to add near the top of the instructions file in a folder you work in: *CLAUDE.md* for Claude Code, *AGENTS.md* for Codex, Cursor and VS Code. Put it near the top: at the end of a long file, apps overlook it. With that line, the apps usually reach for Gezel's search first. How much it helps depends on the model. In our tests, Claude Code on Sonnet 5 answered questions about the code about a quarter faster, and up to twice as fast on large, little-documented codebases. Newer models that already find their way quickly (Sonnet 5.5, Opus 5.5, and Codex) were no faster. Gezel shows the line for you to copy; it never changes your files.
 
 **Which folder.** An app works with the Gezel project for the folder it was started in. A folder Gezel does not know yet becomes a read-only project the first time the app uses Gezel's tools there, so Gezel can index it; Gezel never writes into it. If you would rather not, choose **Only folders already in Gezel**: in other folders the app still reaches your library, memories and knowledge. Claude Desktop has no folder, so you pick its project on its tab.
 

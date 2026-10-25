@@ -2,7 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type DiscoverInput, discoverNativeBinaries } from './discover.js';
+import {
+  type DiscoverInput,
+  cudaArchiveCarries,
+  discoverNativeBinaries,
+  isCudaArchivePath,
+} from './discover.js';
 import { duckdbInstallDir } from './duckdb-pin.js';
 import { recordLlamaQuarantine } from './llama-quarantine.js';
 
@@ -29,6 +34,7 @@ const ENGINE_ENV_VARS = [
   'GEZEL_DEVICE_HEALTH_BIN',
   'GEZEL_UV_BIN',
   'GEZEL_DUCKDB_BIN',
+  'GEZEL_SQLITE_VEC_PATH',
   'GEZEL_NATIVE_BIN_DIR',
 ] as const;
 
@@ -148,6 +154,7 @@ describe('discoverNativeBinaries — short-circuits', () => {
     process.env.GEZEL_DEVICE_HEALTH_BIN = '/already/set/gezel-device-health';
     process.env.GEZEL_UV_BIN = '/already/set/uv';
     process.env.GEZEL_DUCKDB_BIN = '/already/set/duckdb';
+    process.env.GEZEL_SQLITE_VEC_PATH = '/already/set/vec0.so';
 
     const result = discover({
       home,
@@ -559,6 +566,185 @@ describe('discoverNativeBinaries — sd-server CUDA preference', () => {
       llamaProbeOverride: {
         fileExists: (p) => p === '/usr/lib/x86_64-linux-gnu/libcuda.so.1',
       },
+    });
+
+    expect(process.env.GEZEL_SD_SERVER_BIN).toBe(portableSd);
+  });
+});
+
+describe('discoverNativeBinaries — sqlite-vec', () => {
+  const discoverWindowsArm = () =>
+    discover({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'win32',
+      arch: 'arm64',
+      llamaProbeOverride: { fileExists: () => false },
+    });
+
+  it('stamps the native release extension, which keeps its upstream file name', () => {
+    mkdirSync(join(nativeBinDir, 'win32-arm64'), { recursive: true });
+    const extension = join(nativeBinDir, 'win32-arm64', 'vec0.dll');
+    writeFileSync(extension, '');
+
+    const result = discoverWindowsArm();
+
+    expect(process.env.GEZEL_SQLITE_VEC_PATH).toBe(extension);
+    expect(result.binaries.find((b) => b.name === 'sqlite-vec')).toEqual({
+      name: 'sqlite-vec',
+      source: 'discovered',
+      path: extension,
+    });
+  });
+
+  it('leaves the variable unset where the native release has no extension', () => {
+    const result = discoverWindowsArm();
+
+    expect(process.env.GEZEL_SQLITE_VEC_PATH).toBeUndefined();
+    expect(result.binaries.find((b) => b.name === 'sqlite-vec')?.source).toBe('not-found');
+  });
+
+  it('keeps an operator-set path', () => {
+    process.env.GEZEL_SQLITE_VEC_PATH = '/opt/custom/vec0.dll';
+
+    const result = discoverWindowsArm();
+
+    expect(process.env.GEZEL_SQLITE_VEC_PATH).toBe('/opt/custom/vec0.dll');
+    expect(result.binaries.find((b) => b.name === 'sqlite-vec')?.source).toBe('pre-set');
+  });
+});
+
+describe('discoverNativeBinaries — Windows on ARM with an NVIDIA GPU (RTX Spark)', () => {
+  const nvidiaDriver = { fileExists: (p: string) => p.endsWith('nvcuda.dll') };
+
+  it('runs the CUDA llama-server', () => {
+    stageBinary(nativeBinDir, 'win32-arm64-cpu', 'gezel-llama-server', 'win32');
+    const cuda = stageBinary(nativeBinDir, 'win32-arm64-cuda', 'gezel-llama-server', 'win32');
+
+    const result = discover({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'win32',
+      arch: 'arm64',
+      llamaProbeOverride: nvidiaDriver,
+    });
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBe(cuda);
+    expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe('cuda');
+    expect(result.llamaBackend?.detectedBackend).toBe('cuda');
+  });
+
+  it('falls back to the CPU build when the native release carries no CUDA archive', () => {
+    const cpu = stageBinary(nativeBinDir, 'win32-arm64-cpu', 'gezel-llama-server', 'win32');
+
+    discover({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'win32',
+      arch: 'arm64',
+      llamaProbeOverride: nvidiaDriver,
+    });
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBe(cpu);
+    expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe('cpu');
+  });
+
+  it('runs the CUDA sd-server the same archive carries', () => {
+    stageBinary(nativeBinDir, 'win32-arm64-cuda', 'gezel-llama-server', 'win32');
+    const cudaSd = stageBinary(nativeBinDir, 'win32-arm64-cuda', 'gezel-sd-server', 'win32');
+    stageBinary(nativeBinDir, 'win32-arm64', 'gezel-sd-server', 'win32');
+
+    discover({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'win32',
+      arch: 'arm64',
+      llamaProbeOverride: nvidiaDriver,
+    });
+
+    expect(process.env.GEZEL_SD_SERVER_BIN).toBe(cudaSd);
+    expect(isCudaArchivePath(cudaSd)).toBe(true);
+  });
+
+  it('runs the CUDA whisper-server the same archive carries', () => {
+    stageBinary(nativeBinDir, 'win32-arm64-cuda', 'gezel-llama-server', 'win32');
+    const cudaWhisper = stageBinary(
+      nativeBinDir,
+      'win32-arm64-cuda',
+      'gezel-whisper-server',
+      'win32',
+    );
+    stageBinary(nativeBinDir, 'win32-arm64', 'gezel-whisper-server', 'win32');
+
+    discover({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'win32',
+      arch: 'arm64',
+      llamaProbeOverride: nvidiaDriver,
+    });
+
+    expect(process.env.GEZEL_WHISPER_SERVER_BIN).toBe(cudaWhisper);
+  });
+
+  // native-v0.1.52's win32-arm64-cuda archive predates the CUDA whisper-server.
+  it('keeps the CPU whisper-server when the CUDA archive has none', () => {
+    stageBinary(nativeBinDir, 'win32-arm64-cuda', 'gezel-llama-server', 'win32');
+    const portableWhisper = stageBinary(
+      nativeBinDir,
+      'win32-arm64',
+      'gezel-whisper-server',
+      'win32',
+    );
+
+    discover({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'win32',
+      arch: 'arm64',
+      llamaProbeOverride: nvidiaDriver,
+    });
+
+    expect(process.env.GEZEL_WHISPER_SERVER_BIN).toBe(portableWhisper);
+  });
+
+  it('keeps the CPU sd-server on Windows on ARM without the NVIDIA driver', () => {
+    stageBinary(nativeBinDir, 'win32-arm64-cpu', 'gezel-llama-server', 'win32');
+    stageBinary(nativeBinDir, 'win32-arm64-cuda', 'gezel-sd-server', 'win32');
+    const portableSd = stageBinary(nativeBinDir, 'win32-arm64', 'gezel-sd-server', 'win32');
+
+    discover({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'win32',
+      arch: 'arm64',
+      llamaProbeOverride: { fileExists: () => false },
+    });
+
+    expect(process.env.GEZEL_SD_SERVER_BIN).toBe(portableSd);
+    expect(isCudaArchivePath(portableSd)).toBe(false);
+  });
+
+  it('says which CUDA archives carry which engines', () => {
+    expect(cudaArchiveCarries('sd-server', 'linux', 'x64')).toBe(true);
+    expect(cudaArchiveCarries('sd-server', 'win32', 'arm64')).toBe(true);
+    expect(cudaArchiveCarries('sd-server', 'win32', 'x64')).toBe(false);
+    expect(cudaArchiveCarries('whisper-server', 'win32', 'arm64')).toBe(true);
+    expect(cudaArchiveCarries('whisper-server', 'linux', 'arm64')).toBe(false);
+    expect(cudaArchiveCarries('uv', 'win32', 'arm64')).toBe(false);
+  });
+
+  it('leaves Windows x64 on its portable sd-server, which its CUDA archive lacks', () => {
+    stageBinary(nativeBinDir, 'win32-x64-cuda', 'gezel-llama-server', 'win32');
+    stageBinary(nativeBinDir, 'win32-x64-cuda', 'gezel-sd-server', 'win32');
+    const portableSd = stageBinary(nativeBinDir, 'win32-x64', 'gezel-sd-server', 'win32');
+
+    discover({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'win32',
+      arch: 'x64',
+      llamaProbeOverride: nvidiaDriver,
     });
 
     expect(process.env.GEZEL_SD_SERVER_BIN).toBe(portableSd);

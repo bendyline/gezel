@@ -112,6 +112,18 @@ that want media:
   third more storage and scan cost in every catalog.
 - **fp32 graphs.** Four times the download for no retrieval gain at the bench
   scale.
+- **Running the ONNX models on the GPU with DirectML.** onnxruntime-node's
+  Windows builds (x64 and ARM64) bundle DirectML, so this looked free. Measured
+  on an RTX Spark (Windows on ARM, 2026-10-24) and declined. The q8 vision
+  encoder fails while *running* under the DirectML provider ("Reshape node …
+  The parameter is incorrect"), after the session loaded, so a load-time CPU
+  fallback would not catch it; on the CPU it takes about 3.4 s per image. The
+  bge-small text embedder gives identical vectors (minimum cosine 0.999999)
+  but runs 3.3 times slower than the CPU in batches of 8, because dispatch
+  overhead dominates a model that small. The relevance cross-encoders and
+  Kokoro are smaller still. transformers.js also maps `device: 'dml'` to
+  DirectML alone, with no CPU fallback. Revisit only with a larger fp32
+  model, measured on the hardware it targets.
 
 ## Consequences
 

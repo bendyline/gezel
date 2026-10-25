@@ -9,6 +9,9 @@
 extends: ./electron-builder.yml
 
 win:
+  # The default for a bare `--win`. release-msix.yml builds one package per
+  # arch on a runner of that arch and names it (`appx:<arch>`), as the NSIS
+  # build does with `nsis:<arch>`.
   target:
     - target: appx
       arch:

@@ -33,7 +33,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf .turbo"
+    "clean": "node ../../scripts/clean-dirs.mjs .turbo"
   },
   "dependencies": {
     "@bendyline/gezel-sdk": "workspace:*"

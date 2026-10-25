@@ -45,13 +45,17 @@ async function loadSnapshot(): Promise<ActivityStatusResponse> {
       if (!(error instanceof GezelApiError) || error.status !== 404) throw error;
     }
   }
-  const [queues, questions, tasks, inflight] = await Promise.all([
+  const [queues, questions, tasks, inflight, requests] = await Promise.all([
     api.getQueueStatus(),
     runtimeCapabilities().structuredQuestions
       ? api.listQuestions({ pending: true })
       : { questions: [] },
     runtimeCapabilities().tasks ? api.listTasks() : { tasks: [], waiting: [] },
     api.listInflightTurns(),
+    // A host without requests still lists its work, one row per task.
+    api
+      .listRequests()
+      .catch(() => ({ requests: [] })),
   ]);
   return resolveActivity({
     queues,
@@ -59,6 +63,7 @@ async function loadSnapshot(): Promise<ActivityStatusResponse> {
     tasks: tasks.tasks,
     waiting: tasks.waiting ?? [],
     inflight: inflight.inflight,
+    requests: requests.requests,
   });
 }
 
@@ -154,9 +159,13 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     window.addEventListener('gezel:config-changed', changed);
     window.addEventListener('gezel:projects-changed', roster);
     window.addEventListener('gezel:gezels-changed', roster);
+    // A request's line changes when an engine starts or stops holding a
+    // turn. A generating engine reports every few tokens, so only a change
+    // of phase or hold refreshes.
+    const lastPhase = new Map<string, string>();
     void (async () => {
       try {
-        for await (const { event } of streamSharedAllChatEvents({
+        for await (const { event, sessionId } of streamSharedAllChatEvents({
           url: api.allEventsUrl(),
           headers: api.authHeader(),
           signal: controller.signal,
@@ -171,9 +180,17 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
             event.type === 'user_message' ||
             event.type === 'cancelled' ||
             event.type === 'queue_enqueued' ||
-            event.type === 'queue_removed'
+            event.type === 'queue_removed' ||
+            event.type === 'task_settled'
           )
             changed();
+          else if (event.type === 'engine_phase') {
+            const phase = `${event.phase}:${event.hold ?? ''}`;
+            if (lastPhase.get(sessionId) !== phase) {
+              lastPhase.set(sessionId, phase);
+              changed();
+            }
+          }
         }
       } catch {
         /* Polling reconciles a disconnected event stream. */

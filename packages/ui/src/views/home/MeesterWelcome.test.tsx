@@ -25,7 +25,7 @@ const { api } = await import('../../api.js');
 const { queueComposerPrefill } = await import('../../components/composer-prefill.js');
 const { useFirstRunModel } = await import('../../components/useFirstRunModel.js');
 type FirstRunModel = import('../../components/useFirstRunModel.js').FirstRunModel;
-const { MeesterWelcome } = await import('./MeesterWelcome.js');
+const { MeesterWelcome, composerWaitingStatus } = await import('./MeesterWelcome.js');
 
 const prefill = vi.mocked(queueComposerPrefill);
 const GB = 1024 ** 3;
@@ -483,7 +483,7 @@ describe('MeesterWelcome', () => {
         copilotAvailable: null,
       } as unknown as FirstRunModel;
       const { rerender } = render(<MeesterWelcome {...figure} setup={{ model }} />);
-      const lead = screen.getByText('Also, here is a bit more info about gezel:');
+      const lead = screen.getByText('Also, while we wait, here is a bit more info about gezel:');
       const intro = screen.getByTestId('home-intro-article');
       expect(intro).toHaveAttribute('data-variant', 'player');
       const openers = screen.getByRole('group', { name: 'Something to start with' });
@@ -501,7 +501,9 @@ describe('MeesterWelcome', () => {
     it('plays the intro in every first-run state, not only while downloading', async () => {
       render(<FirstRun cfg={config()} />);
       await screen.findByRole('button', { name: /Fetch my tools/ });
-      expect(screen.getByText('Also, here is a bit more info about gezel:')).toBeInTheDocument();
+      expect(
+        screen.getByText('Also, while we wait, here is a bit more info about gezel:'),
+      ).toBeInTheDocument();
       expect(screen.getByTestId('home-intro-article')).toHaveAttribute('data-variant', 'player');
 
       const ready = {
@@ -564,6 +566,32 @@ describe('MeesterWelcome', () => {
       render(<Phone />);
       expect(screen.getByText('Native model list')).toBeInTheDocument();
       expect(hostModels).toHaveBeenCalledWith({ setup: true });
+    });
+  });
+
+  describe('composerWaitingStatus', () => {
+    const withState = (state: unknown) =>
+      composerWaitingStatus({ model: { state } as unknown as FirstRunModel });
+
+    it('names where setup stands for the composer warning', () => {
+      expect(withState({ kind: 'off' })).toBe('connect an AI first');
+      expect(withState({ kind: 'needs-download', alternatives: [] })).toBe(
+        'download an AI model first',
+      );
+      expect(
+        withState({
+          kind: 'installing',
+          progress: { bytesWritten: 4 * GB, totalBytes: 16 * GB, phase: 'downloading' },
+        }),
+      ).toBe('downloading the AI model · 25%');
+      expect(withState({ kind: 'engine', progress: null })).toBe('setting up the AI model');
+      expect(withState({ kind: 'failed', error: 'offline' })).toBe("the AI model didn't download");
+      expect(
+        composerWaitingStatus({
+          model: { state: { kind: 'off' } } as unknown as FirstRunModel,
+          hostModels: () => null,
+        }),
+      ).toBe('choose an AI model first');
     });
   });
 });

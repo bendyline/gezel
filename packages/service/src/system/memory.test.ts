@@ -36,6 +36,23 @@ describe('parseNvidiaMemoryProbe', () => {
     });
   });
 
+  // What an RTX Spark N1X prints under Windows on ARM, NPU line included.
+  // Windows gives its GPU a fixed share of memory at boot, apart from the
+  // OS's RAM, so the card is its own pool despite the GB10-class silicon.
+  it('budgets an RTX Spark as discrete, since Windows fixes its GPU share at boot', () => {
+    expect(
+      parseNvidiaMemoryProbe(
+        'NVIDIA RTX Spark N1X (6144-core Blackwell RTX GPU), 32768\r\nNVIDIA NPU, [N/A]\r\n',
+        31 * GiB,
+      ),
+    ).toEqual({
+      vramBytes: 32 * GiB,
+      largestDeviceBytes: 32 * GiB,
+      memoryKind: 'discrete',
+      deviceNames: ['NVIDIA RTX Spark N1X (6144-core Blackwell RTX GPU)'],
+    });
+  });
+
   it('sums every card but keeps the largest one for single-device engines', () => {
     expect(
       parseNvidiaMemoryProbe('NVIDIA GeForce RTX 3060, 12288\nNVIDIA GeForce RTX 3060, 12288\n'),

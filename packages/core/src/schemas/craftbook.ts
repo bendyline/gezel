@@ -358,6 +358,13 @@ export const StepRunWhenSchema = z.object({
 });
 export type StepRunWhen = z.infer<typeof StepRunWhenSchema>;
 
+/**
+ * Where a step sits in the person's view of a request: taking it in, making
+ * the thing, or checking it. See `stepStage` for the inference when unset.
+ */
+export const CraftbookStepStageSchema = z.enum(['intake', 'make', 'check']);
+export type CraftbookStepStage = z.infer<typeof CraftbookStepStageSchema>;
+
 export const CraftbookStepSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -396,6 +403,14 @@ export const CraftbookStepSchema = z.object({
   authoring: CraftbookStepAuthoringSchema.optional(),
   /** Per-step subtractive tool and output-surface policy. */
   toolPolicy: CraftbookStepToolPolicySchema.optional(),
+  /** See {@link CraftbookStepStageSchema}; absent, `stepStage` infers it. */
+  stage: CraftbookStepStageSchema.optional(),
+  /**
+   * What the person reads while this step runs, as a present-participle
+   * phrase ("laying out the invoice"). Absent, `stepPersonLabel` derives one
+   * from the step name.
+   */
+  personLabel: z.string().min(1).max(60).optional(),
   assignee: TaskAssigneeSchema.optional(),
   /** Setup scripts, run in order when the step activates. Single ref = legacy shape. */
   onEnter: ScriptRefListSchema.optional(),
@@ -1210,6 +1225,10 @@ export const NewCraftbookStepSchema = z.object({
   authoring: CraftbookStepAuthoringSchema.optional(),
   /** See {@link CraftbookStepSchema.shape.toolPolicy}. */
   toolPolicy: CraftbookStepToolPolicySchema.optional(),
+  /** See {@link CraftbookStepSchema.shape.stage}. */
+  stage: CraftbookStepStageSchema.optional(),
+  /** See {@link CraftbookStepSchema.shape.personLabel}. */
+  personLabel: z.string().min(1).max(60).optional(),
   assignee: TaskAssigneeSchema.optional(),
   onEnter: ScriptRefListSchema.optional(),
   onExit: ScriptRefListSchema.optional(),
@@ -1448,6 +1467,8 @@ export function resolveSteps(blueprints: NewCraftbookStep[]): CraftbookStep[] {
       ...(s.promptProfile ? { promptProfile: s.promptProfile } : {}),
       ...(s.authoring ? { authoring: s.authoring } : {}),
       ...(s.toolPolicy ? { toolPolicy: s.toolPolicy } : {}),
+      ...(s.stage ? { stage: s.stage } : {}),
+      ...(s.personLabel ? { personLabel: s.personLabel } : {}),
       ...(s.assignee ? { assignee: s.assignee } : {}),
       ...(s.onEnter ? { onEnter: s.onEnter } : {}),
       ...(s.onExit ? { onExit: s.onExit } : {}),

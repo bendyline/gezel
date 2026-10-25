@@ -59,12 +59,15 @@ export function QueuedTaskBubble({
   wait,
   gezel,
   onTaskReference,
+  debugMode = false,
 }: {
   task: Task;
   wait: TaskWaitState;
   /** The gezel named in `wait.gezelId`, when the caller's roster has them. */
   gezel?: GezelSummary | undefined;
   onTaskReference?: (ref: string) => void;
+  /** A task's id is debug-mode text; the key reads "Open task" otherwise. */
+  debugMode?: boolean;
 }) {
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
   const assignee = gezel
@@ -101,14 +104,14 @@ export function QueuedTaskBubble({
           {onTaskReference ? (
             <button
               type="button"
-              className="msg-ref-chip"
+              className="msg-ref-chip msg-ref-chip-label"
               onClick={() => onTaskReference(task.ref)}
               title="Open this task"
             >
-              Task {task.ref}
+              {debugMode ? `Task ${task.ref}` : 'Open task'}
             </button>
           ) : (
-            <span className="msg-queued-task-ref">Task {task.ref}</span>
+            debugMode && <span className="msg-queued-task-ref">Task {task.ref}</span>
           )}
         </div>
       </div>

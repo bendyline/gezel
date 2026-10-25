@@ -12,7 +12,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types src/*.test.mjs",
-    "clean": "rm -rf dist .turbo src/data/runs-index.json"
+    "clean": "node ../../scripts/clean-dirs.mjs dist .turbo src/data/runs-index.json"
   },
   "dependencies": {
     "dompurify": "3.4.17",

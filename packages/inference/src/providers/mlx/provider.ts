@@ -1862,11 +1862,21 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // Paused mid-reply: the stream stops until the chat ahead is
             // served. The reply so far stays on screen; the pill says why.
             const detail = engineHoldLabelFor(queue);
-            this.emitEnginePhase({ provider: 'mlx', phase: 'generating', detail });
+            this.emitEnginePhase({
+              provider: 'mlx',
+              phase: 'generating',
+              detail,
+              hold: 'yielding',
+            });
             return;
           }
           const detail = this.engineHold.begin(queue, opts?.queue?.onQueueWait);
-          this.emitEnginePhase({ provider: 'mlx', phase: 'prefill', detail });
+          this.emitEnginePhase({
+            provider: 'mlx',
+            phase: 'prefill',
+            detail,
+            hold: queue.state === 'paused' ? 'yielding' : 'behind',
+          });
         };
         // Anchored at request dispatch: only work the engine did while THIS
         // turn was already waiting can explain why it never got a first byte.

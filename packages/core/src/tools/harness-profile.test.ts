@@ -9,7 +9,7 @@ describe('harness agent-file line', () => {
   it('tells Claude Code the tool by the name it uses, in CLAUDE.md', () => {
     expect(HARNESS_AGENT_FILE['claude-code']).toBe('CLAUDE.md');
     expect(harnessAgentFileLine('claude-code')).toBe(
-      "This folder is indexed by Gezel. To find where a behavior or feature is implemented, call Gezel's `search` tool (`mcp__gezel__search`) with a plain-words description before grepping. It ranks files by meaning and returns paths with line ranges.",
+      "This folder is indexed by Gezel. To find where a behavior or feature is implemented, call Gezel's `search` tool (`mcp__gezel__search`) with a `query` describing it in plain words before grepping. It ranks files by meaning and returns paths with line ranges.",
     );
   });
 

@@ -185,6 +185,12 @@ export const ProjectTypeProvenanceSchema = z.object({
   appliedAt: z.string(),
   /** Maker's mark inherited from the type at adoption. */
   icon: ProjectIconIdSchema.optional(),
+  /**
+   * The type's catalog category at adoption (`code`, `money`, …), so a project
+   * can be told apart without the catalog (see projectHoldsCode). A string, so
+   * a category a newer catalog adds never fails to parse a project.
+   */
+  category: z.string().optional(),
 });
 export type ProjectTypeProvenance = z.infer<typeof ProjectTypeProvenanceSchema>;
 

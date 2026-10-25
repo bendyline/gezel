@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  type ChatMessage,
   type ChatSession,
   type Question,
   type ReferencedFile,
@@ -9,6 +10,7 @@ import {
   isOwnerLaunchedCompletion,
   outputsWithDeliverableFirst,
   taskDeliverableCandidates,
+  taskPersonName,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../fs/store.js';
@@ -265,10 +267,15 @@ export function taskFinishedQuestion(opts: {
   // "is finished" read as a filename for a trip.
   const board = Boolean(deliverable && 'view' in deliverable && deliverable.view === 'output-page');
   const shown = board ? [] : outputs.slice(0, 3);
+  const name = taskPersonName(task);
   const lines = [
     board
-      ? `**${task.title}** is ready to look at on the project's Output page.`
-      : `**${task.title}** is finished.`,
+      ? `${name ? `**${name}** is` : 'It is'} ready to look at on the project's Output page.`
+      : name
+        ? `**${name}** is finished.`
+        : deliverable
+          ? `Your ${deliverableFormatNoun(deliverable.path)} is finished.`
+          : 'The work is finished.',
   ];
   if (shown.length > 0) {
     lines.push(
@@ -351,11 +358,13 @@ export async function loadMakerQuestion(
 
 /**
  * The message itself: warm, short, and only true things. With a deliverable
- * it leads with that one file and lists the rest as what was made on the
- * way; the chat closes the bubble with the deliverable's card, so the path
- * here is for the model's next turn as much as for the reader. A board is
+ * it names that file by what it is ("Your PDF for **Invoices** is ready") and
+ * leaves the path to the card that closes the bubble; the working files the
+ * task made on the way stay on the task. The bakery's wrap-up had listed
+ * `pdf/task-2/report.md` and two outlines under the book's name. A board is
  * "ready to look at", never "finished": its kickoff ends at a first draft.
- * The maker's open question is passed on in their words.
+ * The maker's open question is passed on in their words. What the next model
+ * turn needs (the ref and the paths) rides in {@link wrapUpModelNote}.
  */
 export function composeTaskWrapUp(
   task: Task,
@@ -366,33 +375,16 @@ export function composeTaskWrapUp(
 ): string {
   // A project type's page reads the file; the page is what to look at.
   const board = deliverable?.view === 'output-page';
-  const lines = [
-    board
-      ? `**${task.title}** is ready to look at on the project's Output page.`
-      : `All done — **${task.title}** is finished.`,
-  ];
-  const rest = deliverable ? outputs.filter((file) => !sameFile(file, deliverable)) : outputs;
-  if (deliverable) {
-    if (!board) {
-      lines.push(
-        '',
-        `Here's your ${deliverableFormatNoun(deliverable.path)}: ${fileLabel(deliverable)}`,
-      );
-    }
-    const shown = rest.slice(0, WRAP_UP_MAX_FILES - 1);
-    if (shown.length > 0) {
-      lines.push('', 'Along the way it also made:', '', ...shown.map((f) => `- ${fileLabel(f)}`));
-      const more = rest.length - shown.length;
-      if (more > 0) lines.push('', `…and ${more} more on the task page (${task.ref}).`);
-    }
-  } else {
+  const name = taskPersonName(task);
+  const lines = [wrapUpHeadline(name, deliverable, board)];
+  if (!deliverable) {
     const shown = outputs.slice(0, WRAP_UP_MAX_FILES);
     if (shown.length === 1) {
       lines.push('', `Here's what it made: ${fileLabel(shown[0]!)}`);
     } else if (shown.length > 1) {
       lines.push('', "Here's what it made:", '', ...shown.map((file) => `- ${fileLabel(file)}`));
       const more = outputs.length - shown.length;
-      if (more > 0) lines.push('', `…and ${more} more on the task page (${task.ref}).`);
+      if (more > 0) lines.push('', `…and ${more} more on the task page.`);
     }
   }
   const checks = renderFigureReview(figures, 'Before you send anything, check:');
@@ -416,7 +408,55 @@ export function composeTaskWrapUp(
         ? 'Open it to review, or tell me what you would like changed.'
         : outputs.length > 0
           ? 'Open any of them to review, or tell me what you would like changed.'
-          : `The task page (${task.ref}) has every step. Tell me if you would like anything changed.`,
+          : 'The task page has every step. Tell me if you would like anything changed.',
   );
   return lines.join('\n');
+}
+
+function wrapUpHeadline(
+  name: string | undefined,
+  deliverable: ReferencedFile | null | undefined,
+  board: boolean,
+): string {
+  if (board) {
+    return `${name ? `**${name}** is` : 'It is'} ready to look at on the project's Output page.`;
+  }
+  if (deliverable) {
+    const noun = deliverableFormatNoun(deliverable.path);
+    return name ? `Your ${noun} for **${name}** is ready.` : `Your ${noun} is ready.`;
+  }
+  return name ? `All done — **${name}** is finished.` : 'All done — the work is finished.';
+}
+
+/**
+ * The facts a wrap-up leaves to its card and the task page, for the model
+ * reading the thread back: the task ref, the deliverable and the other files.
+ * Derived from the message's own fields, so a rebuilt session replays the
+ * same bytes every time.
+ */
+export function wrapUpModelNote(message: {
+  referencedTasks?: readonly string[] | undefined;
+  referencedFiles?: readonly ReferencedFile[] | undefined;
+  deliverable?: ReferencedFile | undefined;
+}): string | null {
+  const ref = message.referencedTasks?.[0];
+  const deliverable = message.deliverable;
+  const others = (message.referencedFiles ?? []).filter(
+    (file) => !deliverable || !sameFile(file, deliverable),
+  );
+  const parts: string[] = [];
+  if (ref) parts.push(`Task ${ref}`);
+  if (deliverable) parts.push(`deliverable ${fileLabel(deliverable)}`);
+  if (others.length > 0) parts.push(`other files: ${others.map(fileLabel).join(', ')}`);
+  return parts.length > 0 ? `[${parts.join('; ')}]` : null;
+}
+
+/** `content` with {@link wrapUpModelNote} after it when `message` is a wrap-up. */
+export function withWrapUpNote(
+  message: Pick<ChatMessage, 'synthetic' | 'referencedTasks' | 'referencedFiles' | 'deliverable'>,
+  content: string,
+): string {
+  if (message.synthetic !== 'task-wrapup') return content;
+  const note = wrapUpModelNote(message);
+  return note ? `${content}\n\n${note}` : content;
 }

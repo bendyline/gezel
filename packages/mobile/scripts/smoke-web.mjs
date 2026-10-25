@@ -255,6 +255,15 @@ try {
     .fill('A field journal stored on this device.');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'detached' });
+  // Workspace and Artifacts are developer tabs, hidden on a project that holds
+  // no code until the person turns them on. Each save spreads the project's
+  // current tab settings, so wait for one to land before the next.
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+  const projectTabs = page.getByRole('group', { name: 'Project tabs', exact: true });
+  for (const name of ['Workspace', 'Artifacts']) {
+    await projectTabs.getByRole('checkbox', { name, exact: true }).click();
+    await page.getByRole('tab', { name, exact: true }).waitFor();
+  }
   await page.getByRole('tab', { name: 'Workspace', exact: true }).click();
   await createFile('brief.md', 'A quiet morning by the river.');
   await checkpoint('phone-workspace');

@@ -262,6 +262,23 @@ test('each store workflow writes its own channel marker before packaging', () =>
   );
 });
 
+test('the Microsoft Store lane packages each arch on its own runner, with its runtime', () => {
+  const msix = read('.github/workflows/release-msix.yml');
+  // The service bundle carries the build host's native addons, so each arch
+  // is packaged on a runner of that arch and the package names its arch.
+  assert.match(msix, /- arch: x64\n\s+runner: windows-latest/);
+  assert.match(msix, /- arch: arm64\n\s+runner: windows-11-arm/);
+  assert.match(msix, /electron-builder --win appx:\$\{\{ matrix\.arch \}\}/);
+  assert.match(msix, /name: msix-store-artifacts-\$\{\{ matrix\.arch \}\}/);
+  // An MSIX cannot run the redistributable installer, so the runtime DLLs
+  // ride beside the engines; staged after the pinned payload was verified.
+  const crt = msix.indexOf('stage-app-local-crt.mjs');
+  assert.notEqual(crt, -1, 'the store package must carry the Visual C++ runtime');
+  assert.ok(crt > msix.indexOf('verify-native-file-manifest.mjs'));
+  assert.ok(crt < msix.indexOf('electron-builder --win appx:'));
+  assert.match(msix, /GEZEL_APP_LOCAL_CRT_REQUIRED: '1'/);
+});
+
 test('the MAS config ships the service tree unpacked', () => {
   // A store build may not extract code at runtime, so the tree it imports has
   // to be in the bundle already. The base config ships only the tarball —

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
- * Stage `vc_redist.x64.exe` into `packages/app/dist/vc-redist/` so the NSIS
- * installer can embed it and run it during customInstall.
+ * Stage `vc_redist.<arch>.exe` into `packages/app/dist/vc-redist/` so the
+ * NSIS installer can embed it and run it during customInstall. The arch is
+ * the one being packaged: an ARM64 engine needs the ARM64 runtime, which the
+ * x64 redistributable does not install.
  *
  * Why the app needs it at all: every native engine DLL we ship
  * (`ggml-base.dll`, `ggml-cpu.dll`, `llama.dll`, `whisper.dll`, and the
@@ -37,19 +39,24 @@
  *   GEZEL_VCREDIST_REQUIRED=1 — fail instead of warning when it cannot be
  *                               found or verified. Set in release CI.
  *   GEZEL_VCREDIST_PATH       — explicit path, bypassing discovery.
+ *   GEZEL_BUNDLE_ARCH         — the arch being packaged (x64 or arm64),
+ *                               default the host's.
  */
-import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readdir, stat } from 'node:fs/promises';
+import { copyFile, mkdir, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { findInVsRedist, verifyMicrosoftSignature } from './msvc-redist.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const appRoot = resolve(scriptDir, '..');
 const outDir = join(appRoot, 'dist', 'vc-redist');
-const outFile = join(outDir, 'vc_redist.x64.exe');
 
 const required = process.env.GEZEL_VCREDIST_REQUIRED === '1';
+const arch = process.env.GEZEL_BUNDLE_ARCH ?? process.arch;
+const redistName = `vc_redist.${arch}.exe`;
+const outFile = join(outDir, redistName);
 
 function bail(message) {
   if (required) {
@@ -58,82 +65,6 @@ function bail(message) {
   }
   console.warn(`[vc-redist] ${message} — installer will ship without it.`);
   process.exit(0);
-}
-
-/** `vswhere` is installed with every VS 2017+ and knows where VS lives. */
-function vswhereInstallPaths() {
-  const vswhere = join(
-    process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)',
-    'Microsoft Visual Studio',
-    'Installer',
-    'vswhere.exe',
-  );
-  if (!existsSync(vswhere)) return [];
-  try {
-    const out = execFileSync(
-      vswhere,
-      ['-latest', '-products', '*', '-property', 'installationPath', '-nologo'],
-      { encoding: 'utf8' },
-    );
-    return out.split(/\r?\n/).filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-/** VS lays the redist down at <root>/VC/Redist/MSVC/<version>/vc_redist.x64.exe. */
-async function findUnderVsRoot(root) {
-  const redistRoot = join(root, 'VC', 'Redist', 'MSVC');
-  let versions;
-  try {
-    versions = await readdir(redistRoot);
-  } catch {
-    return null;
-  }
-  // Highest toolset version wins — it matches the newest compiler present.
-  versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-  for (const version of versions) {
-    const candidate = join(redistRoot, version, 'vc_redist.x64.exe');
-    if (existsSync(candidate)) return candidate;
-  }
-  return null;
-}
-
-/**
- * Only ship a binary that Windows itself agrees is Microsoft-signed. This is
- * the integrity check that matters for a file we execute elevated during
- * install; it is stronger than a checksum pinned against an evergreen URL,
- * which would rot on every Microsoft servicing update.
- */
-function verifyMicrosoftSignature(path) {
-  const script = `
-    Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
-    $sig = Get-AuthenticodeSignature -LiteralPath '${path.replace(/'/g, "''")}'
-    if ($sig.Status -ne 'Valid') { Write-Output "INVALID:$($sig.Status)"; exit 0 }
-    Write-Output "OK:$($sig.SignerCertificate.Subject)"
-  `;
-  // The release workflow's default shell is pwsh 7, whose PSModulePath is
-  // inherited by this child Windows PowerShell 5.1 and can stop it autoloading
-  // its own Microsoft.PowerShell.Security. Get-AuthenticodeSignature then never
-  // runs, $sig stays null, and a perfectly good binary is rejected as
-  // "INVALID:" with an empty status. Let the host resolve its own module path.
-  const { PSModulePath: _ignored, ...env } = process.env;
-  try {
-    const out = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
-      encoding: 'utf8',
-      env,
-    }).trim();
-    if (!out.startsWith('OK:')) return { valid: false, detail: out };
-    const subject = out.slice(3);
-    // Subject must actually name Microsoft; a valid signature from some
-    // other publisher is not what we intend to run elevated.
-    if (!/O=Microsoft Corporation/i.test(subject)) {
-      return { valid: false, detail: `unexpected signer: ${subject}` };
-    }
-    return { valid: true, detail: subject };
-  } catch (error) {
-    return { valid: false, detail: String(error) };
-  }
 }
 
 async function main() {
@@ -146,6 +77,10 @@ async function main() {
     console.log('[vc-redist] not a Windows build — nothing to stage.');
     return;
   }
+  if (arch !== 'x64' && arch !== 'arm64') {
+    bail(`no Visual C++ redistributable for arch "${arch}"`);
+    return;
+  }
 
   let source = process.env.GEZEL_VCREDIST_PATH ?? null;
   if (source && !existsSync(source)) {
@@ -153,19 +88,17 @@ async function main() {
     return;
   }
   if (!source) {
-    for (const root of vswhereInstallPaths()) {
-      source = await findUnderVsRoot(root);
-      if (source) break;
-    }
+    // VS lays it down at <VS>/VC/Redist/MSVC/<version>/vc_redist.<arch>.exe.
+    source = await findInVsRedist(redistName);
   }
   if (!source) {
-    bail('vc_redist.x64.exe not found in any Visual Studio installation');
+    bail(`${redistName} not found in any Visual Studio installation`);
     return;
   }
 
   const signature = verifyMicrosoftSignature(source);
   if (!signature.valid) {
-    bail(`refusing to stage an unverified vc_redist.x64.exe (${signature.detail})`);
+    bail(`refusing to stage an unverified ${redistName} (${signature.detail})`);
     return;
   }
 

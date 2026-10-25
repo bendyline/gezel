@@ -16,6 +16,7 @@ import {
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 
+import { NoLocalImageModelError } from '../../providers/image/factory.js';
 import { sdCppHonorsNegativePrompt } from '../../providers/image/sd-cpp.js';
 import type { ImageInputBytes, ImageProvider } from '../../providers/image/types.js';
 import { parseRemoteModelId } from '../../providers/remote/model-id.js';
@@ -272,6 +273,9 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
       if (promptGuide) respBody.promptGuide = promptGuide;
       return c.json(respBody);
     } catch (err) {
+      if (err instanceof NoLocalImageModelError) {
+        return c.json({ error: 'no_local_image_model', hint: err.message }, 409);
+      }
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     } finally {
       if (swapScope) {

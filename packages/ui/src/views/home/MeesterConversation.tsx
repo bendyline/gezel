@@ -18,6 +18,7 @@ import {
   MeesterWelcome,
   type WelcomeHelper,
   type WelcomeSetup,
+  composerWaitingStatus,
 } from './MeesterWelcome.js';
 
 const NewTaskDialog = lazy(() =>
@@ -280,9 +281,9 @@ export function MeesterConversation({
                 setSessionId(sid);
                 setSessionRefreshKey((k) => k + 1);
               }}
-              // The welcome already says the meester is waiting for tools;
-              // a second notice above the composer would say it twice.
-              hideWaitingNotice={Boolean(setup) && activeGezelId === meesterGezelId}
+              // Setup is on screen in the welcome, so the composer's warning
+              // names its state instead of pointing elsewhere.
+              {...(setup ? { waitingStatus: composerWaitingStatus(setup) } : {})}
               onTurnStateChange={(state) => {
                 if (state === 'streaming') onTurnStarted?.();
               }}

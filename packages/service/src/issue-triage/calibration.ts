@@ -141,6 +141,27 @@ function tallyFor(stats: IssueVerdictStats, issue: BoekwachterIssue): VerdictTal
 }
 
 /**
+ * A category's starting worth-fixing rate, before this project's verdicts say
+ * otherwise. From the 2026-10-22 calibration evaluation: bug 56%,
+ * error-handling 12%, performance 11%, smell and complexity 5%, naming 0%.
+ * Ranking a fix batch by it put every planted bug the night review flagged
+ * into the first 40 issues (35 of 35), against 23 for severity alone with
+ * each file's other issues packed in (trial t1, 2026-10-24).
+ */
+export function categoryPrior(category: string): number {
+  const c = normalizeIssueCategory(category);
+  if (
+    /^(bug|logic|correctness|security|resource-leak|race-condition|concurrency|null-safety|type-safety|data-loss)$/.test(
+      c,
+    )
+  ) {
+    return 0.56;
+  }
+  if (/^(error-handling|performance|robustness|validation)$/.test(c)) return 0.12;
+  return 0.05;
+}
+
+/**
  * How likely an issue is to be real, for ordering: its reviewer-and-category
  * actionable rate, pulled toward a prior until there are verdicts enough to
  * stand on their own.

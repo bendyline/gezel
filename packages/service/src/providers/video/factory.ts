@@ -30,7 +30,12 @@ import { DiffusersVideoProvider } from './diffusers-video.js';
 import { MockVideoProvider } from './mock.js';
 import { type InstalledVideoModel, VideoModelManager, VideoModelSelector } from './models.js';
 import type { VideoProvider } from './types.js';
-import { VIDEO_VENV_NAME, detectVideoAccelerator, videoVenvSpec } from './venv.js';
+import {
+  VIDEO_VENV_NAME,
+  detectVideoAccelerator,
+  videoPythonRequest,
+  videoVenvSpec,
+} from './venv.js';
 import { estimateVideoRequirement } from './working-set.js';
 
 export interface VideoProviderFactoryOptions {
@@ -136,7 +141,7 @@ export async function createVideoProvider(
         // interpreter (independent of a too-new system Python); on the
         // bare system-python path the floor-pinned torch (see venv.ts)
         // is the safety net.
-        preferredPythonVersion: '3.12',
+        preferredPythonVersion: videoPythonRequest(),
       });
       const venvPython = venv.binPath('python');
 

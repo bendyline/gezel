@@ -347,7 +347,6 @@ class Engine:
     # ── generation ────────────────────────────────────────────────────
     def generate(self, req: Dict[str, Any]) -> Dict[str, Any]:
         import torch
-        from diffusers.utils import export_to_video
 
         prompt = req.get("prompt") or ""
         # A negative prompt is not optional polish for these models — the
@@ -433,7 +432,7 @@ class Engine:
                     output_path=out_path,
                 )
             else:
-                export_to_video(frames, out_path, fps=fps)
+                _export_silent_video(frames, out_path, fps)
             video_bytes = Path(out_path).read_bytes()
 
         poster_b64 = _poster_png_b64(frames[0])
@@ -473,6 +472,59 @@ def _vocoder_sample_rate(pipe) -> int:  # noqa: ANN001
     config = getattr(getattr(pipe, "vocoder", None), "config", None)
     rate = getattr(config, "output_sampling_rate", None)
     return int(rate) if rate else LTX2_FALLBACK_AUDIO_SAMPLE_RATE
+
+
+def _export_silent_video(frames, out_path: str, fps: int) -> None:  # noqa: ANN001
+    """Write a clip with no audio track.
+
+    diffusers' ``export_to_video`` encodes through imageio-ffmpeg, whose wheels
+    carry an ffmpeg binary everywhere but Windows on ARM. There only its sdist
+    installs, with no binary, and the export raises after the whole clip has
+    rendered. PyAV, installed for LTX-2's audio mux, bundles FFmpeg's libraries
+    on every platform, so it writes the clip instead."""
+    from diffusers.utils import export_to_video
+
+    try:
+        export_to_video(frames, out_path, fps=fps)
+        return
+    except RuntimeError as error:
+        log(f"export_to_video unavailable ({error}); encoding with PyAV")
+
+    import av
+    import numpy as np
+
+    arrays = []
+    for frame in frames:
+        array = np.asarray(frame)
+        # Pipelines asked for numpy output hand back floats in [0, 1].
+        if array.dtype != np.uint8:
+            array = (np.clip(array, 0.0, 1.0) * 255).round().astype(np.uint8)
+        arrays.append(np.ascontiguousarray(array[..., :3]))
+    height, width = arrays[0].shape[:2]
+    with av.open(out_path, mode="w") as container:
+        stream = container.add_stream(_h264_encoder(), rate=fps)
+        stream.width = width
+        stream.height = height
+        stream.pix_fmt = "yuv420p"
+        for array in arrays:
+            for packet in stream.encode(av.VideoFrame.from_ndarray(array, format="rgb24")):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+
+
+def _h264_encoder() -> str:
+    """The first H.264 encoder this PyAV build carries, so the clip plays in
+    the app's player; MPEG-4 Part 2 only when none is present."""
+    import av
+
+    for name in ("libx264", "libopenh264", "h264_mf"):
+        try:
+            av.codec.Codec(name, "w")
+            return name
+        except Exception:  # noqa: BLE001 - absent from this build
+            continue
+    return "mpeg4"
 
 
 def _encode_video_with_audio():  # noqa: ANN202 - the diffusers muxer

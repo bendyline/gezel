@@ -10,6 +10,7 @@ import { streamSSE } from 'hono/streaming';
 import type { SSEStreamingApi } from 'hono/streaming';
 import { videoCatalogFits, videoModelFit, wontRunRefusal } from '../../models/media-fit.js';
 import { UnknownVideoModelError } from '../../providers/video/pull-registry.js';
+import { videoCpuReason } from '../../providers/video/venv.js';
 import type { EngineContext } from '../engine-context.js';
 import { mediaFitContext } from './media-fit-context.js';
 
@@ -27,11 +28,13 @@ export function videoModelRoutes(ctx: EngineContext): Hono {
   app.get('/engine-status', proxy, async (c) => {
     const provider = await ctx.videoProvider.current();
     const [engine, models] = await Promise.all([provider.health(), provider.listInstalledModels()]);
+    const cpuReason = engine.accelerator === 'cpu' ? videoCpuReason() : undefined;
     return c.json({
       engine: {
         ...engine,
         kind: providerKind(provider.name),
         provider: provider.name,
+        ...(cpuReason ? { cpuReason } : {}),
       },
       modelCount: models.length,
     });

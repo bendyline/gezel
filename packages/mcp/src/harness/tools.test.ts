@@ -105,6 +105,48 @@ describe('arrangeSearchResults', () => {
     ]);
   });
 
+  it('says where in a long symbol the match is, with its best lines numbered', () => {
+    // trial t1, marktext: the hit was all of `class Watcher` (223-481) and the
+    // excerpt came from its middle, starting partway through a line.
+    const file = Array.from({ length: 481 }, (_, i) => `// line ${i + 1}`);
+    file[222] = 'class Watcher {';
+    file[259] = "          this.read('treePathExcludePatterns')";
+    file[260] = '        if (fileInfo.isDirectory()) {';
+    file[261] = '          return false';
+    file[262] = '        }';
+    file[263] = "      ignoreInitial: type === 'file',";
+    file[264] = '      persistent: true,';
+    const snippet = [
+      "ludePatterns')",
+      '        if (fileInfo.isDirectory()) {',
+      '          return false',
+      '        }',
+      "      ignoreInitial: type === 'file',",
+      '      persistent: true,',
+    ].join('\n');
+    const { folder: lines } = arrangeSearchResults(
+      binding(),
+      [hit({ path: 'src/watcher.ts', line: 223, lineEnd: 481, snippet })],
+      { ...opts, query: 'how watched files are ignored initially', readLines: () => file },
+    );
+    expect(lines).toEqual([
+      [
+        `- ${join(folder, 'src/watcher.ts')}:260-265 (inside \`class Watcher {\`, 223-481)`,
+        '  261| if (fileInfo.isDirectory()) {',
+        "  264| ignoreInitial: type === 'file',",
+      ].join('\n'),
+    ]);
+  });
+
+  it('falls back to the indexed range when the snippet is not in the file', () => {
+    const { folder: lines } = arrangeSearchResults(
+      binding(),
+      [hit({ path: 'src/a.ts', line: 12, lineEnd: 30, snippet: 'export function moved() {}' })],
+      { ...opts, query: 'moved', readLines: () => ['nothing here'] },
+    );
+    expect(lines).toEqual([`- ${join(folder, 'src/a.ts')}:12-30\n  export function moved() {}`]);
+  });
+
   it('puts docs after the code, at most three, unless there is no code', () => {
     const docs = ['a.md', 'b.md', 'c.md', 'd.md'].map((path) => hit({ path }));
     const withCode = arrangeSearchResults(binding(), [...docs, hit({ path: 'src/a.ts' })], opts);

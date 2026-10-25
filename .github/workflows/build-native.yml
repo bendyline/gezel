@@ -506,7 +506,7 @@ jobs:
           # the ARM64 baseline step re-proves) and then ggml-cuda.dll with MSVC
           # + nvcc, loaded through GGML_BACKEND_DL. sm_121 only, like the
           # linux-arm64 leg, since it is the same GPU; the cuobjdump audit
-          # proves it landed. The runtime does not select this key yet.
+          # proves it landed. The runtime selects it on an NVIDIA driver.
           - engine: llama-cpp
             platform: win32-arm64
             variant: cuda
@@ -571,10 +571,9 @@ jobs:
             ds4_cuda_arch: 'sm_121'
             cuda_pkg: '13-0'
 
-          # ── whisper-cpp (single CPU variant per platform for the
-          #    narration MVP — Metal is implicit on darwin-arm64 via
-          #    the OS SDK; CUDA / Vulkan variants are deferred until
-          #    audio-chat work demands the latency improvement).
+          # ── whisper-cpp (a CPU build per platform — Metal is implicit on
+          #    darwin-arm64 via the OS SDK — plus CUDA for RTX Spark on
+          #    Windows-on-ARM, below).
           - engine: whisper-cpp
             platform: darwin-arm64
             variant: ''
@@ -615,6 +614,24 @@ jobs:
             artifact: gezel-whisper-server.exe
             needs_cuda: false
             needs_vulkan: false
+          # RTX Spark (NVIDIA N1X) — CUDA whisper-server in the
+          # `win32-arm64-cuda` key beside llama-server and sd-server, whose
+          # llama leg stages the NVIDIA DLLs it imports. It links whisper and
+          # ggml statically (build.ps1): llama-server's ggml*.dll share that
+          # folder under the same names, from a different ggml. Same toolkit
+          # and architecture as the llama leg, which native-payload.test.mjs
+          # holds in step.
+          - engine: whisper-cpp
+            platform: win32-arm64
+            variant: cuda
+            runner: windows-11-arm
+            script: build.ps1
+            artifact: gezel-whisper-server.exe
+            whisper_backend: cuda
+            needs_cuda: true
+            needs_vulkan: false
+            whisper_cuda_arch: '121a-real'
+            cuda_version: '13.4.1'
 
           # ── uv (precompiled download, no GPU variants) ───────
           # Shared Python bootstrap for features that need a venv
@@ -665,6 +682,19 @@ jobs:
             artifact: uv.exe
             needs_cuda: false
             needs_vulkan: false
+
+          # ── sqlite-vec (SQLite extension, Windows ARM64 only) ──────
+          # npm's sqlite-vec has prebuilds for every other platform. It is a
+          # library the service loads in-process, so the smoke test loads it
+          # into node:sqlite instead of running --help.
+          - engine: sqlite-vec
+            platform: win32-arm64
+            variant: ''
+            runner: windows-11-arm
+            script: build.ps1
+            artifact: vec0.dll
+            needs_cuda: false
+            needs_vulkan: false
     runs-on: ${{ matrix.runner }}
     # The llama-cpp darwin-arm64 metal leg has legitimately run 98 min green,
     # and the linux-x64 cuda leg 67. Sized at roughly 2x the worst observed so
@@ -706,6 +736,10 @@ jobs:
       LLAMA_CUDA_ARCH: ${{ matrix.llama_cuda_arch || '' }}
       # sd-cpp's CUDA legs read this the same way. Empty everywhere else.
       SD_CUDA_ARCH: ${{ matrix.sd_cuda_arch || '' }}
+      # whisper-cpp's Windows-on-ARM CUDA leg: its backend (build.ps1 builds
+      # CPU when empty) and architecture list. Empty everywhere else.
+      WHISPER_BACKEND: ${{ matrix.whisper_backend || '' }}
+      WHISPER_CUDA_ARCH: ${{ matrix.whisper_cuda_arch || '' }}
       # workflow_dispatch can target a comma-separated engine subset. Push
       # builds always resolve this to `all`.
       REQUESTED_ENGINES: ${{ inputs.engines || 'all' }}
@@ -750,6 +784,16 @@ jobs:
             echo "pinned=false" >> "$GITHUB_OUTPUT"
             echo "::notice title=${{ matrix.engine }} unpinned::VERSION file still has placeholder commit=$commit — skipping this job. Pin a real SHA in $version_file to build."
           fi
+
+      # The sqlite-vec smoke test loads the extension through node:sqlite
+      # (extension loading needs Node 22.13+), and only a Node of the
+      # extension's own architecture can load it.
+      - name: Set up Node for the sqlite-vec smoke test
+        if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'sqlite-vec'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          architecture: arm64
 
       # ── Vulkan SDK (Linux) ────────────────────────────────────
       # Ubuntu's libvulkan-dev ships without glslc (the shader
@@ -868,41 +912,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ('${{ matrix.cuda_version }}' -ne '13.4.1') {
-            throw "the archive pins below are CUDA 13.4.1; this leg asks for '${{ matrix.cuda_version }}'"
+            throw "native/scripts/install-cuda-arm64.ps1 pins CUDA 13.4.1; this leg asks for '${{ matrix.cuda_version }}'"
           }
-          $base = 'https://developer.download.nvidia.com/compute/cuda/redist'
-          $archives = [ordered]@{
-            'cuda_nvcc/windows-arm64/cuda_nvcc-windows-arm64-13.4.59-archive.zip'           = '4d26510f9d5b644e784a02b13423f9c8b79f8b15613ea0bb325bad42ed3443c4'
-            'cuda_crt/windows-arm64/cuda_crt-windows-arm64-13.4.59-archive.zip'             = 'a84f570d06497cf14187ddf9a2d656d752aaf66b2025c11eb93af01a8a1ce5ff'
-            'libnvvm/windows-arm64/libnvvm-windows-arm64-13.4.59-archive.zip'               = '2d051ea3fffddf67458fe66004e7045015409709c57f8cdcdade88d479b62e47'
-            'cccl/windows-arm64/cccl-windows-arm64-13.3.4.2.1-archive.zip'                  = 'e8a7c96268ae6c52a7b8b07d96e1f84ab8eae5619c3b989024ce712dda5c2cc2'
-            'cuda_cudart/windows-arm64/cuda_cudart-windows-arm64-13.4.49-archive.zip'       = 'd48085b557db615f1095d4a6f96d4d1fcc8ba0c4fd16ad40f30f953b6ae422cf'
-            'libcublas/windows-arm64/libcublas-windows-arm64-13.7.0.27-archive.zip'         = '932794dcd1e67e152ab2aeaf32ee8141ded807c6ea6d8f85692c40b02fdd09d7'
-            'cuda_cuobjdump/windows-arm64/cuda_cuobjdump-windows-arm64-13.4.49-archive.zip' = '2df6140a0cde3c33a71c8b065e0adbbee21c2b3f6d5cbc2f5128ab0493654a4c'
-          }
+          # The archive pins live in the script so a local RTX Spark build uses
+          # the identical toolkit.
           $root = Join-Path $env:RUNNER_TEMP 'cuda-13.4'
-          $downloads = Join-Path $env:RUNNER_TEMP 'cuda-redist'
-          New-Item -ItemType Directory -Force -Path $root, $downloads | Out-Null
-          foreach ($archive in $archives.GetEnumerator()) {
-            $zip = Join-Path $downloads (Split-Path -Leaf $archive.Key)
-            Invoke-WebRequest -Uri "$base/$($archive.Key)" -OutFile $zip -UseBasicParsing
-            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
-            if ($actual -ne $archive.Value) {
-              throw "sha256 mismatch for $($archive.Key): expected $($archive.Value), got $actual"
-            }
-            Expand-Archive -LiteralPath $zip -DestinationPath $downloads -Force
-            $unpacked = Join-Path $downloads ([System.IO.Path]::GetFileNameWithoutExtension($zip))
-            robocopy $unpacked $root /E /NFL /NDL /NJH /NJS /NP | Out-Null
-            if ($LASTEXITCODE -ge 8) { throw "robocopy failed merging $unpacked (exit $LASTEXITCODE)" }
-            Write-Host "[cuda] $(Split-Path -Leaf $archive.Key) verified and merged"
-          }
-          Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $root 'EULA.txt') -Force
-          foreach ($required in @('bin\nvcc.exe', 'bin\cuobjdump.exe', 'nvvm\bin\cicc.exe', 'lib\arm64\cudart.lib', 'lib\arm64\cublas.lib', 'bin\arm64')) {
-            if (-not (Test-Path (Join-Path $root $required))) { throw "CUDA install is missing $required" }
-          }
-          & (Join-Path $root 'bin\nvcc.exe') --version
-          if ($LASTEXITCODE -ne 0) { throw "nvcc --version failed (exit $LASTEXITCODE)" }
-          Get-ChildItem (Join-Path $root 'bin\arm64') -Filter '*.dll' | ForEach-Object { Write-Host "[cuda] runtime $($_.Name)" }
+          & pwsh -NoProfile -File native/scripts/install-cuda-arm64.ps1 -Root $root -Downloads (Join-Path $env:RUNNER_TEMP 'cuda-redist')
+          if ($LASTEXITCODE -ne 0) { throw "install-cuda-arm64.ps1 failed (exit $LASTEXITCODE)" }
           echo "CUDA_PATH=$root" >> $env:GITHUB_ENV
           echo "$root\bin" >> $env:GITHUB_PATH
 
@@ -1018,6 +1034,10 @@ jobs:
           if [[ "${{ matrix.platform }}" == darwin-* ]]; then
             file "$bin"
           fi
+          # A library has no --help. Load sqlite-vec the way the service
+          # does and check its version, commit, and a nearest-neighbor query.
+          if [[ "${{ matrix.engine }}" == sqlite-vec ]]; then
+            node scripts/smoke-sqlite-vec.mjs "$bin" || exit 1
           # CUDA builds dynamically link against libcuda.so.1 (Linux) /
           # nvcuda.dll (Windows). Those come from the NVIDIA *driver*
           # (not the CUDA Toolkit) and are NOT redistributable — they
@@ -1026,7 +1046,7 @@ jobs:
           # smoke check would always fail with a false positive
           # (libcuda.so.1: not found / 0xC0000135). For CUDA variants
           # we do a loader check and ignore only the driver lib.
-          if [[ "${{ matrix.variant }}" == cuda || ( "${{ matrix.engine }}" == ds4 && "${{ matrix.platform }}" == linux-* ) ]]; then
+          elif [[ "${{ matrix.variant }}" == cuda || ( "${{ matrix.engine }}" == ds4 && "${{ matrix.platform }}" == linux-* ) ]]; then
             echo "[smoke] CUDA variant — skipping runtime --help (no GPU driver on CI)."
             ls -la "$bin"
             if [[ "${{ matrix.platform }}" == linux-* ]]; then
@@ -1180,17 +1200,17 @@ jobs:
             --library "$lib" \
             --expected '${{ matrix.llama_cuda_arch }}'
 
-      # sd-cpp links ggml-cuda statically, so the device code lives in the
-      # executable itself rather than in a libggml-cuda peer. Linux and
-      # Windows-on-ARM alike; cuobjdump reads ELF and PE.
-      - name: Verify sd.cpp CUDA architecture payload
-        if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'sd-cpp' && matrix.variant == 'cuda'
+      # sd-cpp and the Windows-on-ARM whisper-cpp link ggml-cuda statically,
+      # so the device code lives in the executable itself rather than in a
+      # libggml-cuda peer. cuobjdump reads ELF and PE.
+      - name: Verify sd.cpp / whisper.cpp CUDA architecture payload
+        if: steps.preflight.outputs.pinned == 'true' && (matrix.engine == 'sd-cpp' || matrix.engine == 'whisper-cpp') && matrix.variant == 'cuda'
         shell: bash
         run: |
           set -euo pipefail
           node scripts/verify-cuda-architecture.mjs \
             --library "${{ steps.outdir.outputs.dir }}/${{ matrix.artifact }}" \
-            --expected '${{ matrix.sd_cuda_arch }}'
+            --expected '${{ matrix.sd_cuda_arch || matrix.whisper_cuda_arch }}'
 
       - name: Verify llama.cpp CUDA architecture payload (Windows)
         if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'llama-cpp' && matrix.variant == 'cuda' && startsWith(matrix.platform, 'win32-')
@@ -1237,7 +1257,7 @@ jobs:
               )
               ;;
             whisper-cpp)
-              build_dir="native/engines/whisper-cpp/.upstream/build-win32-arm64"
+              build_dir="native/engines/whisper-cpp/.upstream/build-win32-arm64${{ matrix.variant && format('-{0}', matrix.variant) || '' }}"
               args+=(
                 --mode clang-baseline
                 --baseline armv8.2-a+dotprod+fp16
@@ -1254,7 +1274,7 @@ jobs:
                 --cmake-cache "$build_dir/CMakeCache.txt"
               )
               ;;
-            device-health|service-host)
+            device-health|service-host|sqlite-vec)
               args+=(--mode msvc-baseline --baseline armv8.0)
               ;;
             uv)
@@ -1305,6 +1325,12 @@ jobs:
               fi
               if grep -qiE 'libssl-|libcrypto-' <<<"$deps"; then
                 echo "::error::$(basename "$f") imports OpenSSL. Engines are built with -DLLAMA_OPENSSL=OFF; do not reinstate the Git-for-Windows DLL scavenge."
+                bad=1
+              fi
+              # The installers' Visual C++ redistributable is x64 only, so the
+              # ARM64 extension links its C runtime statically.
+              if [[ "${{ matrix.engine }}" == sqlite-vec ]] && grep -qiE 'VCRUNTIME[0-9]*\.DLL|MSVCP[0-9]*\.DLL' <<<"$deps"; then
+                echo "::error::$(basename "$f") imports the Visual C++ runtime; build it with the static CRT (CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded)"
                 bad=1
               fi
             done
@@ -1913,7 +1939,21 @@ jobs:
                     echo "::error::artifact $name has no native-payload.tar.gz — its build leg's pack step didn't run"
                     exit 1
                   fi
-                  tar -C "$target" -xzf "$payload"
+                  # Several engines share a key's folder, so a name two of
+                  # them ship must be the same bytes (the license files are).
+                  # A whisper ggml.dll landing on llama-server's would break
+                  # llama-server without any build failing.
+                  staging="$(mktemp -d)"
+                  tar -C "$staging" -xzf "$payload"
+                  while IFS= read -r -d '' file; do
+                    rel="${file#"$staging"/}"
+                    if [[ -e "$target/$rel" || -L "$target/$rel" ]] && ! cmp -s "$file" "$target/$rel"; then
+                      echo "::error::$engine would overwrite $target/$rel with different bytes"
+                      exit 1
+                    fi
+                  done < <(find "$staging" ! -type d -print0)
+                  cp -a "$staging"/. "$target"/
+                  rm -rf "$staging"
                   echo "staged $engine → $target"
                   break 2
                 fi

@@ -676,10 +676,14 @@ and the meester's lines in the chat register (serif body). Rules:
 - **One surface per message.** While the tools arrive, progress is one
   quiet line under the meester (a thin bar, then "Fetching my tools · 42% ·
   about 3 min left"), not a banner. The composer is open for a draft with
-  Send held, and its own "can start talking once a model is downloaded"
-  notice is suppressed in the meester's thread, because the welcome already
-  says so. A failure is one plain sentence with **Try again** and quiet
-  escape links; a report link only for real failures.
+  Send held, and a held Send always says why: a `--warning` dot and line on
+  the toolbar beside it (`.chat-composer-held`), "**Can't send yet:**" plus
+  where setup stands. In the meester's thread that is the welcome's own
+  state ("downloading the AI model · 42%", `composerWaitingStatus`);
+  elsewhere it is "no AI model is downloaded" with a **Get started** key to
+  Home. A dimmed arrow alone read as broken. A failure is one plain
+  sentence with **Try again** and quiet escape links; a report link only
+  for real failures.
 - **No page swap.** When the model lands the same surface says "I'm ready.
   What shall we make?" The greeting band and the folder step stay away for
   the rest of that visit; they arrive on the next.
@@ -763,12 +767,16 @@ What the meester's thread shows after the person asks for something:
   whoever starts the work are introduced as the task begins; a gezel hired
   for a later step is introduced when they start. Each gezel is introduced
   once per thread.
-- **The crew's work folds into one line** (`WorkingNotes`) in the meester's
-  Home conversation: "Mira is working…" with a breathing dot, then "Mira's
-  working notes". The worker's transcript, thinking, tool calls and any
-  failure banners are inside; a stopped worker shows "Mira stopped: …" on
-  the line in the warning tone, never as a red banner in the person's
-  conversation. Debug mode shows the full session tree instead.
+- **The crew's work folds into one line** (`WorkingNotes`) in every
+  conversation, not only the meester's Home thread: "Mira is working…" with a
+  breathing dot, then "Mira's working notes". The worker's transcript,
+  thinking, tool calls, hand-offs and any failure banners are inside. A
+  stopped worker shows "Mira stopped: …" on the line in the warning tone,
+  never as a red banner in the person's conversation. A worker waiting on
+  the person is the one exception: the line reads "Mira has a question for
+  you" in the warning tone and the fold opens, so the question card is in
+  view. Debug mode shows the full session tree instead. A task's own chat
+  starts at the worker's session, so there is nothing above it to fold into.
 - **The finished thing is last.** The wrap-up renders after the fold, not
   above the work that made it, and closes on the finished-work card
   (`DeliverableCard` with `maker`): "Mira made this for you" with a small
@@ -802,6 +810,58 @@ What the meester's thread shows after the person asks for something:
   asks at the foot of the thread whether to look after a folder
   (`FolderOnboardingStep`). Nothing is ticked and neither overnight key is
   latched: the person chooses, or skips.
+- **A request with work behind it gets one tracker** (next section). Outside
+  debug mode it stands for the cards, introductions and finished card above;
+  the crew still arrives as cards once, at kickoff.
+
+### One request, one tracker
+
+The bakery's first invoice put three craftbook cards, five introductions, a
+silence banner, a task id and two "ready" rows in front of its owner. Now each
+person message with work behind it gets one `RequestTracker`, closing the
+thread rooted at that message. Its model is core's `RequestTrack`
+(`resolveRequestTracks`, served at `/api/requests` on both hosts), keyed by
+the message (`<sessionId>@<at>`); every task the request caused carries the
+key as `Task.requestRef`.
+
+- **Four fixed stops**: Got it → Making it → Checking it → Ready. A step's
+  stop comes from its `stage` (gilde step field), else `stepStage`'s reading
+  of its name and position. The stop is the furthest any step has reached,
+  so a review that sends work back never moves it left.
+- **One line in the lead's voice**: "Dejan is drafting the invoices". The
+  lead is the project's lead, else the thread's gezel; the crew is under
+  **Who's helping?** (`CrewMemberCard`). The phrase is the step's
+  `personLabel`, else its name with the verb turned, else the stage's phrase;
+  a name holding a file name, a template token or a word for the machinery
+  gets the stage's phrase. Waiting says why ("is waiting for another chat to
+  finish", from the engine's structured `hold`).
+- **An honest estimate**: "About 4 minutes left" from this computer's own
+  finished runs (per step, then per stage), "First time here: about 8
+  minutes" from shipped seeds. A step past half again its time and three
+  minutes more reads **Taking longer than usual** with **Keep waiting** and
+  **Stop** (behind a confirm). The tracker's states replace the silence
+  banner for the work it tracks.
+- **Ready is the file.** The finished card moves from the wrap-up into the
+  tracker, credited to the lead; the wrap-up's words stay. A request that is
+  Ready while the meester still writes says "is wrapping up" and never flips
+  back to working.
+- **What it stands for stays out of the thread** outside debug mode:
+  launch cards, joined-crew introductions, queued-task receipts and rail
+  cards for its tasks. **Open the task** under the disclosure is the way in.
+  Debug mode shows all of it again, and the tracker adds who really holds
+  which step and the task id.
+- **Not tracked**: task-scoped sessions and plain replies with no work.
+  Activity folds a request's tasks, shards, sessions and receipt into one
+  `request:<key>` row, drawn as the compact tracker, whose key opens the
+  person's thread.
+- **The lead speaks for the crew everywhere the person looks.** A gezel
+  joining later is announced in the lead's words ("**Dejan** asked **Noor**
+  (Omroeper — social posts) to help with **October invoices**"); the
+  Working notes fold under a tracked request is "Dejan's working notes"; the
+  title bar's engine key reads "Dejan · drafting the invoices" while a turn
+  works on the request; and the finished-work notification names the lead.
+  Who really made the file stays on disk (`makerGezelId`) and shows in debug
+  mode.
 
 ### Pick a plan from Home
 
@@ -937,7 +997,9 @@ across projects. It stays available when quiet. **Needs you**, **Working**,
 **Next**, and **Ready** separate decisions, current execution, waiting or
 scheduled work, and finished results. A task’s saved “active” lifecycle is not
 evidence that it is running; runtime queue and conversation facts decide that.
-Link the task, handoff, and conversation by identity so they appear as one job.
+Link the task, handoff, and conversation by identity so they appear as one job;
+a person's request goes further and is one row for everything working on it
+(see "One request, one tracker").
 Work parked until a time (a recurring schedule, the Night Shift window) is listed
 under **Next** but never counted on the key: the Meester's nightly review is
 always waiting, so a count there would only send the person looking for nothing.
@@ -1040,6 +1102,37 @@ the trigger's `data-face`, never the list's `data-fit`. Glyphs come from
 one concept keeps one picture. To keep every section on a phone, an
 iconified project tab may narrow below 44px wide, down to WCAG's 24px
 minimum. It keeps the 44px height.
+
+**Developer tabs belong to code projects.** Tools, Workspace and Artifacts
+show by default only for a codebase (core's `projectHoldsCode`: a code
+folder, a code-category type, a coding type, or a linked repository) and in
+debug mode. The Views tab shows when a view fits a codebase, a watched
+folder, or debug mode. A bakery's invoice project showed `package.json`,
+prompt drafts and a code-city map beside its board, none of which it needed.
+Hiding is only a default: an explicit choice in Project Settings → Project
+tabs always wins (the boxes show the default), and the tab a person is on
+stays visible, so opening a file into Artifacts never lands on a missing tab.
+
+**Activity lists what happened to the work.** The Overview's Recent activity
+and the History view ask for `audience: 'person'` outside debug mode: project,
+document and task milestones, questions, proposals, reports and lookouts, and
+the person's own threads, never the step sessions a task's crew worked in
+(core's `PERSON_FACING_HISTORY_KINDS`). Tool calls, compiled prompts,
+workspace writes and routing stay in the log, and History's kind menu offers
+only the kinds it lists. Picking a kind shows that kind whatever it is, and
+debug mode shows everything. The bakery's Overview had opened on eight rows
+of tool calls and prompt sizes.
+
+**Settings shows the developer areas an install uses.** Ollama, the OpenAI
+Codex and Anthropic Claude CLIs, Remote Servers and Shared Toolsets are listed
+in debug mode, or once this install uses them: the provider is the default,
+the night shift's, has a default model or saved settings; a server is paired
+or this device shares its models; a shared toolset is installed. Nobody loses
+a setting they rely on, and a bakery owner's Settings no longer opens with
+seven engines. DwarfStar is listed only where the daemon can run it, from the
+same facts its tab reads. Integrations always shows: Office and LibreOffice
+setup is for everyone. Scripts joins the navigation with **Show advanced
+features** or in debug mode.
 
 **A tab can name its current choice and carry a menu.** The project
 **Views** tab holds several views of one project (Village, and the views that
@@ -1809,7 +1902,8 @@ and idle", because a card promising an imminent start buys a genuinely stuck
 task another hour of the user's patience. And it disappears the instant that
 task streams a turn: the live bubble is its representation, and a "waiting"
 card beside it contradicts what the reader can see. Batches collapse past a
-few cards into one counted line rather than burying the conversation.
+few cards into one counted line rather than burying the conversation. Its
+key reads **Open task**; the task's id appears only in debug mode.
 
 **Waiting is not wedged, and silence alone cannot tell them apart.** A turn
 that has produced no tokens may be parked behind another gezel — Gezel's
@@ -1852,6 +1946,18 @@ the *current* security policy: it hides the moment the capability is on,
 and its action **deep-links to Settings → Security & Compliance** — a
 security switch is never flipped from inside chat.
 
+**One card per task per conversation.** A model that re-invokes a plan it
+already started gets an idempotent "already running" receipt each time, and
+every step advance stamps another card; one invoice request read as three
+identical "Formatted Report is underway" cards in a row. Outside debug mode
+the earliest card shown for a task stands for it
+([craftbook-card-dedupe.ts](../packages/ui/src/components/craftbook-card-dedupe.ts)).
+Later cards for the same task keep only their plain row inside Details. The
+earliest wins so that a bubble the person already read never shrinks above
+them. A Working notes fold keeps its own cards, because it is the full
+transcript, and debug mode shows every card. The chip reads **Open task**;
+the task's id is debug-mode text.
+
 **Work that made something ends on the thing it made.** A PowerPoint run
 used to end on prose: a wrap-up listing six paths newest-write-first, and a
 reviewer's reply naming `powerpoint/task-13/deck.pptx` as unlinked code. The
@@ -1874,8 +1980,14 @@ its label; Show in folder and Save a copy use icon buttons with tooltips and
 accessible names. On a receipt that finished its task, it shrinks to a one-line
 chip beside the task chip. The task page's overview lists every other file the
 task made under **Other files** (**Files** when there is no deliverable), one
-row each that opens it, folded after eight: the wrap-up's and the Ready card's
-"…and 3 more" send the person there. Three rules keep it honest:
+row each that opens it, folded after eight: the Ready card's "…and 3 more"
+sends the person there. The wrap-up above the card names the deliverable by
+what it is ("Your PDF for **October invoices** is ready.") and leaves its path,
+and every working file, to the card and the task page; a bakery's read "All
+done — **Formatted Report** is finished" followed by three paths. A task title
+that is only the craftbook's name is never said (core's `taskPersonName`): the
+wrap-up, the Updates card and a step's closing line fall back to the file's
+kind or "It is complete." Three rules keep it honest:
 
 - **The daemon decides what the deliverable is, and only a file that exists
   gets a card.** The resolver lives in
@@ -1912,12 +2024,30 @@ count, step timings, thinking and attempted-call expanders do not head a
 reply: the reply's action row carries a **Details** key that shows them, and
 **Hide details** puts them back. What the person needs stays in view without
 the key: media, cards, and a failure the turn never recovered from. Debug
-mode shows everything, as before. A task's id (`lisbon-trip-planning/1`) is
-debug-mode text too: the hand-off card's key reads **Open task**, the chat
-rail's task card leads with its title, and a wrap-up carries no "Tasks:"
-row because its finished card already opens the work. Status chips that remain (a task's
+mode shows everything, as before, and open conversations follow the switch
+at once rather than when they are next opened. A task's id (`lisbon-trip-planning/1`) is
+debug-mode text too: the hand-off, craftbook and queued-task cards' keys
+read **Open task**, the chat rail's task card leads with its title, a
+session divider leaves off "· task …", and no reply carries a "Tasks:" row
+outside debug mode. A wrap-up whose finished card is showing drops its
+"Files:" row too. The card already opens the deliverable, and the row only
+added the drafts that went into it. Status chips that remain (a task's
 **Complete**, **Draft**) take their colour from `--success` / `--warning`
 mixed into the surface, never a pale grey that reads as disabled.
+
+**A live turn follows the same rule.** While a reply is still being written,
+its thinking, tool rows, the call being written and the "· N tools" count
+stay behind the live bubble's own **Details** key outside debug mode. Long
+local turns used to stream all of it into the conversation for minutes,
+which made the machine room the progress signal. What remains is the
+status line, the thinking dots, and one plain line for a call being
+written ("Writing file…"; a tool with no curated label reads "Working…",
+never its slug). Cards, media and an unrecovered failure sit above the
+body, where the finished reply keeps them, so nothing moves when the turn
+commits. A failure whose reason is a machine payload (a JSON envelope, a
+stack trace) reads "didn't finish. Details has the full response." The raw
+text stays behind Details. Audio a folded reply produced joins its media
+strip, so hiding the steps never hides a recording.
 
 **A thread is titled from the sentence.** A thread's title is the person's
 first sentence with its lead-in ("Can you", "Please", "I'd like you to")
@@ -2214,7 +2344,10 @@ should not be told that typing is working.
 On a phone a thread row names only the model that answered ("Qwen 3.5 2B"),
 never "This Device": every conversation there runs on the device, so the
 label says nothing. Phone model ids are opaque store keys, so a row whose
-model has no known name shows no engine at all rather than the id.
+model has no known name shows no engine at all rather than the id. On the
+desktop a thread row names only the engine ("This Mac", "Claude"); the model
+id that answered ("This Mac (qwen3.8-27b-q4)") is debug-mode text, like a
+task's id.
 
 **Identity codes.** When two people must compare a cryptographic value
 out loud — device pairing is the only case today — show a short grouped

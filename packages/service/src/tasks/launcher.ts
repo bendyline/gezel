@@ -54,6 +54,8 @@ export interface TaskLaunchOptions {
   workflowInvocationKey?: string;
   craftbookInvocationKey?: string;
   dispatchEntry?: boolean;
+  /** The person's message the caller just wrote for this launch (`Task.requestRef`). */
+  requestRef?: Task['requestRef'];
 }
 
 export interface TaskLaunchResult {
@@ -133,6 +135,7 @@ export class TaskLauncher {
     return this.deps.tasks.create(projectId, body, {
       ...(origin ? { origin } : {}),
       ...(references ? { references } : {}),
+      ...(options.requestRef ? { requestRef: options.requestRef } : {}),
     });
   }
 

@@ -101,7 +101,10 @@ describe('MLX requests the engine is holding', () => {
     }
     expect(
       phases.some(
-        (p) => p.phase === 'prefill' && p.detail === 'Waiting for another chat to finish',
+        (p) =>
+          p.phase === 'prefill' &&
+          p.detail === 'Waiting for another chat to finish' &&
+          p.hold === 'behind',
       ),
     ).toBe(true);
     // The chat's "model queue" state is held, not left to expire between
@@ -146,7 +149,12 @@ describe('MLX requests the engine is holding', () => {
       await vi.advanceTimersByTimeAsync(60_000);
     }
     expect(
-      phases.some((p) => p.phase === 'generating' && p.detail === 'Paused while a chat goes first'),
+      phases.some(
+        (p) =>
+          p.phase === 'generating' &&
+          p.detail === 'Paused while a chat goes first' &&
+          p.hold === 'yielding',
+      ),
     ).toBe(true);
     stream.push('forty journeymen.');
     stream.finish();

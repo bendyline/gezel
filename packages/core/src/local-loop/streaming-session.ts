@@ -55,6 +55,12 @@ export interface EnginePhaseEvent {
     behind?: string[];
     ahead?: number;
   };
+  /**
+   * The engine is holding this session's request: `behind` other work it is
+   * running, or `yielding` mid-reply to a chat that goes first. Structured
+   * twin of the hold's `detail` wording, so readers never parse the label.
+   */
+  hold?: 'behind' | 'yielding';
 }
 
 /**

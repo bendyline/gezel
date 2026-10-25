@@ -406,6 +406,17 @@ export function toolActivityPhrase(name: string): string {
 }
 
 /**
+ * The one line a live turn shows outside debug mode while a call is being
+ * written: "Writing file…". An unmapped tool reads "Working…" rather than
+ * its slug, because that line stands in for the tool rows a person asked
+ * not to see.
+ */
+export function toolActivityLine(name: string | undefined): string | undefined {
+  if (!name) return undefined;
+  return isKnownTool(name) ? `${toolActivityPhrase(name)}…` : 'Working…';
+}
+
+/**
  * Turn JSON-string fragments in a persisted argument summary back into
  * ordinary display text. The summary builder quotes string values with
  * `JSON.stringify`, which is correct for storage but otherwise exposes

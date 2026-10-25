@@ -966,6 +966,27 @@ describe('project artifacts', () => {
     expect(explicit).toContain('# Converted');
   });
 
+  // A bakery's Artifacts tab listed prompts/2026-10-23-0001/draft.json and
+  // message.md: the composer's drafts, not anything the crew made.
+  it('hides composer drafts from listings and fuzzy resolve but serves explicit reads', async () => {
+    await store.createProject({ name: 'DraftList' });
+    const artifactsDir = store.projectArtifactsDir('draftlist');
+    const draft = join(artifactsDir, 'prompts', '2026-10-23-0001');
+    await mkdir(draft, { recursive: true });
+    await writeFile(join(draft, 'message.md'), 'Make the invoice a PDF');
+    await store.writeProjectArtifact('draftlist', 'report.md', '# Report');
+
+    const rootListing = await store.listProjectArtifacts('draftlist');
+    expect(rootListing.some((e) => e.name === 'prompts')).toBe(false);
+    expect(rootListing.some((e) => e.name === 'report.md')).toBe(true);
+    const recursive = await store.listProjectArtifactsRecursive('draftlist');
+    expect(recursive.some((e) => e.path.startsWith('prompts'))).toBe(false);
+    expect((await store.resolveProjectArtifact('draftlist', 'message.md')).kind).toBe('missing');
+    expect(
+      await store.readProjectArtifact('draftlist', 'prompts/2026-10-23-0001/message.md'),
+    ).toContain('Make the invoice');
+  });
+
   it('strips redundant artifacts/ prefix on write so files do not nest', async () => {
     await store.createProject({ name: 'Prefix' });
     await store.writeProjectArtifact('prefix', 'artifacts/report.md', 'x');
@@ -1180,11 +1201,49 @@ describe('project workspace', () => {
     expect(existsSync(join(wsPath, 'tsconfig.json'))).toBe(false);
   });
 
-  it('seeds bootstrap files for non-github projects with no workingDir (regression guard)', async () => {
+  // An invoice project grew package.json and tsconfig.json it had no use for.
+  // The template now arrives with a code project's type, or before a Node tool.
+  it('creates a plain project without the Node template', async () => {
     const { existsSync } = await import('node:fs');
-    await store.createProject({ name: 'WithBootstrap' });
-    const wsPath = join(home, 'projects', 'withbootstrap', 'workspace');
-    expect(existsSync(join(wsPath, 'package.json'))).toBe(true);
+    await store.createProject({ name: 'Bakery Invoices' });
+    const wsPath = join(home, 'projects', 'bakery-invoices', 'workspace');
+    expect(existsSync(join(wsPath, 'package.json'))).toBe(false);
+    expect(existsSync(join(wsPath, 'tsconfig.json'))).toBe(false);
+  });
+
+  it('adds the Node template to an internal workspace on demand, once', async () => {
+    const { existsSync } = await import('node:fs');
+    const { readFile, rm } = await import('node:fs/promises');
+    await store.createProject({ name: 'Needs Node' });
+    const wsPath = join(home, 'projects', 'needs-node', 'workspace');
+    expect(await store.ensureWorkspaceTemplate('needs-node')).toEqual([
+      'package.json',
+      'tsconfig.json',
+      '.gitignore',
+    ]);
+    expect(JSON.parse(await readFile(join(wsPath, 'package.json'), 'utf8')).type).toBe('module');
+    // A file removed on purpose stays removed once package.json exists.
+    await rm(join(wsPath, 'tsconfig.json'));
+    expect(await store.ensureWorkspaceTemplate('needs-node')).toEqual([]);
+    expect(existsSync(join(wsPath, 'tsconfig.json'))).toBe(false);
+  });
+
+  it('never adds the Node template to a GitHub project or an added folder', async () => {
+    const { existsSync } = await import('node:fs');
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    await store.createProject({
+      name: 'Cloned Two',
+      github: { url: 'https://github.com/foo/baz' },
+    });
+    expect(await store.ensureWorkspaceTemplate('cloned-two')).toEqual([]);
+    const folder = await mkdtemp(join(tmpdir(), 'gezel-added-folder-'));
+    try {
+      await store.createProject({ name: 'Added Folder', workingDir: folder });
+      expect(await store.ensureWorkspaceTemplate('added-folder')).toEqual([]);
+      expect(existsSync(join(folder, 'package.json'))).toBe(false);
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
   });
 
   // Read/write path parity. Phase 1 of the workspace-fs unification:

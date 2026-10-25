@@ -5,6 +5,7 @@ import {
   type CreateTypedProjectRequest,
   type CreateTypedProjectResponse,
   createLogger,
+  projectHoldsCode,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
@@ -433,6 +434,12 @@ export async function createTypedProject(
         },
         { projectId, ...input.projectType },
       );
+      // A code project gets the Node + TypeScript template now, after the
+      // type's own seeds so they win; others get it lazily before a Node tool.
+      if (!input.workingDir) {
+        const staged = await stageStore.getProject(projectId);
+        if (staged && projectHoldsCode(staged)) await stageStore.ensureWorkspaceTemplate(projectId);
+      }
       // Materialize everything privately first. Linking a read-only folder must
       // never write starter files or a script workspace into the user's media.
       if (input.workingDir) {

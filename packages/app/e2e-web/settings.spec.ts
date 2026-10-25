@@ -44,9 +44,12 @@ test.describe('settings', () => {
   test('section tour', async ({ page, daemon }) => {
     const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
     // API-key providers stay hidden until configured. The web fixture already
-    // configures the mock OpenAI provider; add Anthropic for this tour.
+    // configures the mock OpenAI provider; add Anthropic for this tour. Ollama
+    // is a developer area, shown once an install points at a server; this is
+    // its default address.
     await client.updateConfig({
       anthropicApiKey: 'sk-ant-e2e-anthropic',
+      ollamaBaseUrl: 'http://localhost:11434',
     });
 
     try {
@@ -70,6 +73,7 @@ test.describe('settings', () => {
     } finally {
       await client.updateConfig({
         anthropicApiKey: '',
+        ollamaBaseUrl: '',
       });
     }
   });

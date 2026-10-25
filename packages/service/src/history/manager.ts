@@ -9,6 +9,7 @@ import {
   type HistoryEvent,
   type HistoryFilter,
   type HistorySessionEntry,
+  PERSON_FACING_HISTORY_KINDS,
   createLogger,
   isSafeEntityId,
 } from '@bendyline/gezel';
@@ -212,8 +213,12 @@ export class HistoryManager {
   async listEvents(filter: HistoryFilter = {}): Promise<HistoryEvent[]> {
     if (filter.q && this.queryBackend) {
       try {
-        const indexed = await this.queryBackend(filter);
-        if (indexed !== null) {
+        const found = await this.queryBackend(filter);
+        if (found !== null) {
+          const indexed =
+            filter.audience === 'person'
+              ? found.filter((ev) => PERSON_FACING_HISTORY_KINDS.has(ev.kind))
+              : found;
           return filter.limit ? indexed.slice(0, filter.limit) : indexed;
         }
       } catch (err) {
@@ -320,6 +325,9 @@ export class HistoryManager {
       try {
         const s = JSON.parse(raw) as ChatSession;
         if (filter.projectId && s.projectId !== filter.projectId) continue;
+        // A step session is where a task's crew worked; the person's own
+        // thread already holds the request and its result.
+        if (filter.audience === 'person' && (s.parentSession || s.stepId)) continue;
         const createdMs = Date.parse(s.createdAt);
         const lastMs = Date.parse(s.lastActivityAt);
         const durationMs =
@@ -366,6 +374,7 @@ export class HistoryManager {
     if (filter.projectId && ev.projectId !== filter.projectId) return false;
     if (filter.gezelId && ev.gezelId !== filter.gezelId) return false;
     if (filter.kinds && !filter.kinds.includes(ev.kind)) return false;
+    if (filter.audience === 'person' && !PERSON_FACING_HISTORY_KINDS.has(ev.kind)) return false;
     if (filter.from && ev.at < filter.from) return false;
     if (filter.to && ev.at > filter.to) return false;
     if (filter.q && !this.eventMatchesQuery(ev, filter.q)) return false;

@@ -61,6 +61,14 @@ export interface SearchResult {
   source?: MemorySource;
 }
 
+/** The sqlite-vec extension did not load on this host, so no vector query can run. */
+export class VectorSearchUnavailableError extends Error {
+  constructor() {
+    super('vector search is unavailable: the sqlite-vec extension did not load on this platform');
+    this.name = 'VectorSearchUnavailableError';
+  }
+}
+
 /** The `source` column: the project an entry came from and the gezel that wrote it. */
 function sourceColumn(source: MemorySource | undefined): string | null {
   return source?.project || source?.gezel || source?.app ? JSON.stringify(source) : null;
@@ -230,6 +238,10 @@ export async function searchByVector(
   const db = await openMem(indexDir);
   if (!db) return [];
   try {
+    // An empty answer here would read as "nothing matched", and the callers'
+    // lexical fallbacks only run on a throw. sqlite-vec publishes no build for
+    // some platforms (Windows ARM64), where every memory search came back empty.
+    if (!db.vecAvailable) throw new VectorSearchUnavailableError();
     if (!ensureVecTable(db, vector.length)) return [];
     const rows = db
       .prepare(

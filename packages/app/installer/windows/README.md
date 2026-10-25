@@ -48,6 +48,38 @@ walk children. On an elevated runner it executes the production launcher with
 Administrators ownership and a locked-down child. Other hosts skip the syscall
 tests explicitly. The Windows release workflow runs them before packaging.
 
+## Keeping a sealed service tree
+
+On an upgrade the data-root repair leaves `service\` as it is when it is still
+sealed as `PublishServiceTree` left it: Administrators own it, its DACL is
+protected, no ACE outside SYSTEM and Administrators grants a write, delete,
+permission or ownership right (inherit-only ACEs included), and the first 64
+bytes of its `.gezel-bundle.sha256` equal the attestation the installer read
+from `HKLM\Software\Bendyline\Gezel` in `customInit`. It has to be read there:
+the old uninstaller an upgrade runs deletes that key before `customInstall`.
+The helper decides on the child handle it already pinned, and opens the
+sentinel relative to it without following links; a link, hard link, missing or
+different sentinel, or any looser DACL gets the full repair. The extractor
+commits every tree as a fresh object under the private root, so a tree in that
+state can only have been changed by an administrator. Re-securing its ~48k
+entries was six of an upgrade's nine minutes on Windows on ARM, spent just
+before extraction replaced the tree.
+
+## Service SID grants
+
+`grant-service-sid.ps1` gives `GezelService`'s per-service SID its four
+directory grants (data root, `runtime`, `assets`, the published service tree).
+icacls cannot do this reliably: it looks every trustee up, even one written as
+`*S-1-5-80-...`. After an upgrade deletes and re-creates the service,
+`NT SERVICE\GezelService` can stop resolving; on Windows 11 build 28000 every
+grant failed with 1332 and the installer removed the service. The script
+derives the SID from the service name (SHA-1 of the upper-cased UTF-16LE name,
+the value `sc.exe showsid` prints and the service token carries), replaces that
+SID's explicit ACEs as `/grant:r` does, and refuses a reparse point as its
+target. Inheritable ACEs propagate through `SetNamedSecurityInfo` exactly as
+they did under icacls; the descendant link checks in the installer still run
+before any grant and again before startup.
+
 Relevant Windows contracts: [NtOpenFile](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntopenfile),
 [NtSetSecurityObject](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntsetsecurityobject),
 and [SetSecurityInfo propagation](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo).

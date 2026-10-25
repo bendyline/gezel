@@ -83,6 +83,7 @@ export class HarnessSession {
   private roots: string[] | null | undefined;
   private rootsProvider: (() => Promise<string[] | null>) | null = null;
   private readonly current = new AsyncLocalStorage<HarnessBinding>();
+  private readonly closers: Array<() => Promise<void>> = [];
 
   constructor(opts: HarnessOptions) {
     this.opts = opts;
@@ -126,7 +127,13 @@ export class HarnessSession {
     return this.current.run(binding, async () => fn(await this.api()));
   }
 
+  /** Run `fn` when the app disconnects: processes a tool started for it. */
+  onClose(fn: () => Promise<void>): void {
+    this.closers.push(fn);
+  }
+
   async close(): Promise<void> {
+    await Promise.all(this.closers.map((fn) => fn().catch(() => {})));
     await this.local?.close().catch(() => {});
     this.local = null;
   }

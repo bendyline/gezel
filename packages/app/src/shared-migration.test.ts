@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MACHINE_SHARED_MARKER, migrateLegacyMachineDataToShared } from './shared-migration.js';
 
+// Directory symlinks need Developer Mode on Windows; junctions do not, and
+// lstat reports both as links, which is what the migration refuses.
+const LINK_DIR = process.platform === 'win32' ? 'junction' : 'dir';
+
 let root: string;
 
 beforeEach(async () => {
@@ -68,7 +72,7 @@ describe('migrateLegacyMachineDataToShared', () => {
     await writeFile(projectFile, '{"id":"old-project"}\n');
     await mkdir(join(source, 'gezels'), { recursive: true });
     await mkdir(join(root, 'outside-gezel'));
-    await symlink(join(root, 'outside-gezel'), join(source, 'gezels', 'unsafe'));
+    await symlink(join(root, 'outside-gezel'), join(source, 'gezels', 'unsafe'), LINK_DIR);
 
     await expect(
       migrateLegacyMachineDataToShared({ sourceHome: source, sharedHome: shared }),
@@ -96,7 +100,7 @@ describe('migrateLegacyMachineDataToShared', () => {
     await writeFile(sharedFile, 'shared bytes');
     await mkdir(join(source, 'gezels'), { recursive: true });
     await mkdir(join(root, 'outside-gezel'));
-    await symlink(join(root, 'outside-gezel'), join(source, 'gezels', 'unsafe'));
+    await symlink(join(root, 'outside-gezel'), join(source, 'gezels', 'unsafe'), LINK_DIR);
 
     await expect(
       migrateLegacyMachineDataToShared({ sourceHome: source, sharedHome: shared }),

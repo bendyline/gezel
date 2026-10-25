@@ -9,6 +9,7 @@ import {
   resolveTaskDeliverable,
   taskFinishedQuestion,
   wantsWrapUp,
+  withWrapUpNote,
 } from './completion-wrapup.js';
 
 const task = (over: Partial<Task> = {}): Task =>
@@ -124,11 +125,13 @@ describe('composeTaskWrapUp', () => {
       kind: 'artifact' as const,
       path: `tasks/2/file-${i}.md`,
     }));
-    expect(composeTaskWrapUp(task(), many)).toContain('…and 2 more on the task page (default/2)');
+    const text = composeTaskWrapUp(task(), many);
+    expect(text).toContain('…and 2 more on the task page.');
+    expect(text).not.toContain('default/2');
   });
 
   it('still closes the loop when the task wrote no files', () => {
-    expect(composeTaskWrapUp(task(), [])).toContain('The task page (default/2) has every step');
+    expect(composeTaskWrapUp(task(), [])).toContain('The task page has every step');
   });
 });
 
@@ -199,15 +202,39 @@ describe('the deliverable', () => {
     expect(outputs).toEqual([deck]);
   });
 
-  it('leads the wrap-up with the deliverable and lists the rest as working files', () => {
+  // The bakery's wrap-up read "All done — **Formatted Report** is finished.
+  // Here's your PDF: `tasks/2/report.pdf`. Along the way it also made: …"
+  // (2026-10-23): the book's name, three paths and a list of working papers.
+  it('names the deliverable by what it is and leaves its path to the card', () => {
     const text = composeTaskWrapUp(task(), made, null, deck);
-    const lines = text.split('\n');
-    expect(lines[2]).toBe(
-      "Here's your PowerPoint deck: `powerpoint/task-2/deck.pptx` (in the project folder)",
+    expect(text.split('\n')[0]).toBe(
+      'Your PowerPoint deck for **Weekly posts and catering quote** is ready.',
     );
-    expect(text).toContain('Along the way it also made:');
-    expect(text.match(/deck\.pptx/g)).toHaveLength(1);
+    expect(text).not.toMatch(/deck\.pptx|outline\.md|Along the way|default\/2/);
     expect(text).toContain('Open it to review');
+  });
+
+  it("never names the task by the craftbook's own name", () => {
+    const pdf = { kind: 'artifact' as const, path: 'tasks/2/report.pdf' };
+    const named = task({
+      title: 'Formatted Report',
+      craftbook: { id: 'report-pdf', name: 'Formatted Report', steps: [] },
+    } as unknown as Partial<Task>);
+    expect(composeTaskWrapUp(named, [pdf], null, pdf).split('\n')[0]).toBe('Your PDF is ready.');
+    expect(composeTaskWrapUp(named, []).split('\n')[0]).toBe('All done — the work is finished.');
+  });
+
+  it('gives the model reading the thread back the ref and the paths', () => {
+    const message = {
+      synthetic: 'task-wrapup' as const,
+      referencedTasks: ['default/2'],
+      referencedFiles: made,
+      deliverable: deck,
+    };
+    expect(withWrapUpNote(message, 'Your deck is ready.')).toBe(
+      'Your deck is ready.\n\n[Task default/2; deliverable `powerpoint/task-2/deck.pptx` (in the project folder); other files: `tasks/2/review.md`, `tasks/2/outline.md`]',
+    );
+    expect(withWrapUpNote({ ...message, synthetic: undefined }, 'Hello.')).toBe('Hello.');
   });
 
   it('puts the deliverable first on the Updates card and never previews a working paper', () => {
@@ -241,7 +268,7 @@ describe('the deliverable', () => {
           { id: 'extra', name: 'extra', advanceWhen: { file: 'powerpoint/task-2/final.pdf' } },
         ],
       },
-    } as unknown as Partial<Task>);
+    } as Partial<Task>);
     await expect(resolveTaskDeliverable(store, withSteps, [])).resolves.toEqual({
       ...deck,
       bytes: 48_000,

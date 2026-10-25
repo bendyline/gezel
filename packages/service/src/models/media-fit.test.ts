@@ -71,6 +71,15 @@ describe('media engine placement', () => {
     expect(imageMediaPool('discrete-gpu', { platform: 'win32', arch: 'x64' })).toBe('discrete');
     expect(imageMediaPool('system-ram', { platform: 'linux', arch: 'x64' })).toBe('cpu');
   });
+
+  it('puts Windows on Arm images on the card only when its CUDA build runs', () => {
+    const arm = { platform: 'win32' as const, arch: 'arm64' };
+    const cuda = 'C:\\Gezel\\native-bin\\win32-arm64-cuda\\gezel-sd-server.exe';
+    const portable = 'C:\\Gezel\\native-bin\\win32-arm64\\gezel-sd-server.exe';
+    expect(imageMediaPool('discrete-gpu', { ...arm, sdServerBin: cuda })).toBe('discrete'); // RTX Spark
+    expect(imageMediaPool('discrete-gpu', { ...arm, sdServerBin: portable })).toBe('cpu');
+    expect(imageMediaPool('discrete-gpu', { ...arm, sdServerBin: undefined })).toBe('cpu');
+  });
 });
 
 describe('sdServerRequirement', () => {

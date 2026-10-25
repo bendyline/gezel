@@ -13,7 +13,8 @@
  * failure this file exists to catch.
  *
  * Uses the real local embedder (MiniLM pinned, same rationale as
- * content-enrich.test.ts) and self-skips when embeddings are unavailable.
+ * content-enrich.test.ts) and self-skips when embeddings or sqlite-vec are
+ * unavailable.
  */
 
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -34,6 +35,7 @@ import type { Store } from '../fs/store.js';
 import { ContentIndex } from './content-index.js';
 import { runWorkspaceContentIndex } from './content-indexer.js';
 import type { EnrichDeps } from './enrich.js';
+import { sqliteVecLoads } from './testing/sqlite-vec.js';
 
 // Minimal valid PNG header declaring 800x600 (same fixture as content-images).
 const PNG_800x600 = Buffer.concat([
@@ -80,7 +82,7 @@ async function realEmbed(): Promise<((texts: string[]) => Promise<number[][]>) |
 
 it('every retrieval arm returns a hit on the golden fixture, clearing its floor', async () => {
   const embed = await realEmbed();
-  if (!embed) return; // embeddings unavailable here — skip
+  if (!embed || !(await sqliteVecLoads())) return; // no embedder or no sqlite-vec here — skip
 
   // ── fixture: code ×2 (area rollups need ≥2 files per folder), markdown,
   //    text, an image, and one artifact record ────────────────────────────

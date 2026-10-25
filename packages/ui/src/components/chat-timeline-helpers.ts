@@ -211,3 +211,16 @@ export function latestWrapUpKey(
   }
   return null;
 }
+
+/** Opens a referenced file in `projectId`'s drawer, or nothing when the timeline cannot. */
+export function projectFileOpener(
+  projectId: string,
+  onArtifact: ((path: string, projectId?: string) => void) | undefined,
+  onWorkspace: ((path: string, projectId?: string) => void) | undefined,
+): ((file: ReferencedFile) => void) | undefined {
+  if (!onArtifact && !onWorkspace) return undefined;
+  return (file) => {
+    if (file.kind === 'workspace') onWorkspace?.(file.path, projectId);
+    else onArtifact?.(file.path, projectId);
+  };
+}

@@ -841,6 +841,8 @@ export const TimelineMessageSchema = z.object({
   stepId: z.string().optional(),
   parentSession: SessionParentSchema.optional(),
   handoffFrom: SessionLinkSchema.optional(),
+  /** Mirrors `ChatMessage.id`, when the host stamped one. */
+  id: z.string().optional(),
   role: z.enum(['user', 'assistant']),
   content: z.string(),
   at: z.string(),

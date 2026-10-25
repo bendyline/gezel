@@ -170,7 +170,7 @@ function BulkTaskDetail({
     <div className="task-bulk-detail" data-testid="task-bulk-detail">
       <header className="task-bulk-header">
         <div>
-          <span className="task-detail-ref">{tasks.length} tasks selected</span>
+          <span className="task-bulk-count">{tasks.length} tasks selected</span>
           <h3>Selected tasks</h3>
           <p>
             {includesChild

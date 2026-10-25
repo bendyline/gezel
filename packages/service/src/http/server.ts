@@ -123,6 +123,7 @@ import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
 import { referencePreviewRoutes } from './routes/reference-preview.js';
 import { reminderRoutes } from './routes/reminders.js';
+import { requestRoutes } from './routes/requests.js';
 import { taskInputRoutes } from './routes/task-inputs.js';
 
 import { v1ChatRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-chat';
@@ -605,6 +606,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/usage', usageRoutes(ctx));
   app.route('/api/queues', queueRoutes(ctx));
   app.route('/api/activity', activityRoutes(ctx));
+  app.route('/api/requests', requestRoutes(ctx));
   app.route('/api/cache', cacheRoutes(ctx));
   app.route('/api/ai', aiRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));

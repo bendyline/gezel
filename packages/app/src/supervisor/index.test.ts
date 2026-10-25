@@ -173,6 +173,11 @@ vi.mock('@bendyline/gezel/native', () => ({
     };
   },
   publishLlamaCudaBlocker: () => {},
+  // Which -cuda archives carry which CUDA engine builds is core's to test.
+  cudaArchiveCarries: (name: string, platform: string, arch: string) =>
+    (name === 'sd-server' &&
+      (platform === 'linux' || (platform === 'win32' && arch === 'arm64'))) ||
+    (name === 'whisper-server' && platform === 'win32' && arch === 'arm64'),
   resolveAvailableLlamaBinary: (
     preferredBackend: 'cuda' | 'vulkan' | 'metal' | 'cpu',
     resolveBinary: (backend: 'cuda' | 'vulkan' | 'metal' | 'cpu') => string | null,

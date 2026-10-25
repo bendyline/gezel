@@ -94,9 +94,28 @@ reads files itself, so the harness reshapes the daemon's fused ranking
   squisq experiment.
 - **Default scopes are the folder, the library and memories.** Other
   knowledge catalogs are opt-in (`scopes: ["knowledge"]`).
-- **One line per file.** Chunks of the same file merge into one entry listing
+- **One entry per file.** Chunks of the same file merge into one entry listing
   every matching range; the harness asks the daemon for three times the
-  results it shows, so the list stays full.
+  results it shows, so the list stays full. Ten results by default: the cited
+  file was in the top ten in 97% of trial t1's searches, and every result is
+  carried through the app's later turns.
+- **Where the match is, not just which symbol.** An indexed range is often a
+  whole symbol (all of a 259-line class) and its snippet a window somewhere
+  inside. The harness finds the snippet in the file (it runs beside the
+  folder), reports that range, names the enclosing line, and shows the two
+  lines that best match the query, numbered: `watcher.ts:253-276 (inside
+  class Watcher {, 223-481)` then `269| // Defer events until writes settle`.
+  When the snippet cannot be found the old range and flat excerpt stay. It
+  did not change how Codex works: it still opened about 1.5 more whole files
+  per run with search than without, before and after (trial t1c).
+- **A call without its arguments is told what to send.** This holds for every
+  harness tool ([harness/arguments.ts](../packages/mcp/src/harness/arguments.ts)
+  wraps the server's validation; DocBlocks tools check their snapshot schema
+  before starting DocBlocks). The reply names each missing argument with its
+  description and gives an example call. Claude Code defers MCP tools, and
+  Sonnet 5.5 often calls one without loading its schema, sometimes with no
+  arguments. The SDK's own validation error ended its searching in 5 of 7
+  such runs; a reply that said what to send got 3 of 4 to retry.
 - **Code first.** Source and test files come first. Docs and manifests
   (`.md`, `docs/`, `package.json`) follow under their own heading, at most
   three, unless they are the only matches.
@@ -120,6 +139,39 @@ Ranking itself is the daemon's `searchCodeHybrid`
 enrichment summary corroborates the chunks of the file it describes instead
 of standing alone at line 1, and scores stay below 1 so corroborated hits
 keep their order (a tie at 1 sorted them by path).
+
+## Making documents
+
+Gezel ships [DocBlocks](docblocks-toolset.md), and an outside app has no way
+to set it up on its own, so the harness passes six of its tools through
+(`HARNESS_DOCUMENT_TOOL_NAMES`, [harness/documents.ts](../packages/mcp/src/harness/documents.ts)):
+`convert_document`, `save_artifact`, `preview_document`, `inspect_document`,
+`list_themes` and `get_authoring_context`. The other 13 stay out: the schemas
+of all 19 come to about 11k tokens, which Codex carries in every turn.
+
+- **Listing never waits on DocBlocks.** The tools list from a snapshot of the
+  shipped version's names, descriptions and input schemas
+  (`harness/docblocks-tools.json`), each description followed by Gezel's note
+  for an app (`HARNESS_DOCUMENT_TOOL_NOTES`). `node scripts/snapshot-docblocks-tools.mjs`
+  rewrites it after a DocBlocks bump; a test against the shipped DocBlocks
+  fails until then.
+- **DocBlocks runs beside the harness, under the app's account.** The connect
+  response names the entry Gezel ships (`documents.entry`, plus the preview
+  browser's folder); the first document call starts `node <entry> mcp`, one
+  process per bound folder, kept for the session because its artifacts live
+  in that process until saved. No daemon route is involved.
+- **It reads the folder and writes only Gezel's.** `--allow-read` is the bound
+  project's folder; `--allow-write` is the project's `artifacts/documents/`,
+  or the account's temp folder when a machine-wide Gezel keeps artifacts where
+  the app cannot write. The app copies the result into its folder itself, as
+  with a generated image, so Gezel still never writes there.
+- **The app never handles root ids.** A `file` source is a path in the folder
+  (absolute, or relative to the folder the app works in) and is rewritten to
+  DocBlocks' one read root. `save_artifact`'s destination is listed as just a
+  file name (`{path, ifExists?, expectedSha256?}`); the harness fills the
+  write root from `list_roots`. A name already taken in Gezel's folder gets a
+  number (`deck (2).pptx`) instead of DocBlocks' no-replace refusal, and the
+  reply says where the file was saved.
 
 ## The person's choices
 
@@ -165,14 +217,25 @@ what Gezel wrote):
 Setup gives an app the tools, but the app still reaches for its own Grep and
 Glob first. One line in the folder's own agent file is what changed that:
 Claude Code called Gezel's tools in 0 of 38 unprompted trials, and in 23 of 24
-once the folder's CLAUDE.md told it to use `search`. On an undocumented
-codebase (Brackets, 2021) that halved the time it took to answer questions
-about the code and cut cost by about 28%; on a well-documented one (squisq)
-it made no difference, because the app's own search already found the code.
+once the folder's CLAUDE.md told it to use `search`.
+
+The line has to be near the top. In trial t1 (2026-10-24, six codebases), the
+line appended to the end of squisq's 182 KB CLAUDE.md was acted on in 1 of 18
+Claude Code runs and 0 of 18 Codex runs; on folders without a long agent file
+both apps used `search` in nearly every run. With the line read, Claude Code
+on Sonnet 5 answered questions about the code 27% faster and 16% cheaper than
+without Gezel (21% faster and 9% cheaper than with a placebo line that names
+no tool), most on large, little-documented codebases. The benefit belongs to
+agents that explore a lot: Sonnet 5 took 22 tool calls per question on its
+own. Sonnet 5.5 (11) and Opus 5.5 (8) were neither faster nor cheaper with
+Gezel; Sonnet 5.5 searched every time, and Opus searched in 16 of 40 runs and
+otherwise ignored the line. Codex (gpt-6.1-sol, 7) searched, then grepped and
+opened whole files anyway, and took about 10% longer. Report:
+`evals/runs/AGENT-TOOLS-TRIAL-2026-10-24.md`.
 
 Once an app is set up, its section in Settings → Integrations, and
 `gezel mcp install`, show the line to copy (`harnessAgentFileLine` in core
-`harness-profile.ts`) and the file it goes in (`HARNESS_AGENT_FILE`):
+`harness-profile.ts`), say to put it near the top, and name the file it goes in (`HARNESS_AGENT_FILE`):
 CLAUDE.md for Claude Code, AGENTS.md for Codex, Cursor and VS Code. Claude
 Desktop has no folder and gets none. The Claude Code wording, naming
 `mcp__gezel__search`, is the one tested; the others name the `gezel` server,
@@ -199,7 +262,9 @@ is in [issue-triage.md](issue-triage.md).
 2. Its handler joins [harness/tools.ts](../packages/mcp/src/harness/tools.ts):
    absolute paths in and out, nothing that names a tool outside the profile.
 3. Its name and description join `HARNESS_TOOL_NAMES` and
-   `HARNESS_TOOL_DESCRIPTIONS`; `harness.test.ts` pins the list.
+   `HARNESS_TOOL_DESCRIPTIONS`; `harness.test.ts` pins the list. A DocBlocks
+   tool joins `HARNESS_DOCUMENT_TOOL_NAMES` and `HARNESS_DOCUMENT_TOOL_NOTES`
+   instead, then the snapshot script.
 4. If an app should reach for it unprompted, say when in
    `HARNESS_SERVER_INSTRUCTIONS`. Claude Code defers MCP tools: until the
    model loads one, it sees only the names, so a tool's description never

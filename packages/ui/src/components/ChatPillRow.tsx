@@ -17,6 +17,7 @@ import { humanMessagePreview } from './message-preview.js';
 import { formatFolderLabel } from './terminal-folder-label.js';
 import { toolActivityPhrase } from './tool-display.js';
 import { type ThreadPill, useChatThreadPills } from './useChatThreadPills.js';
+import { useDebugMode } from './useDebugMode.js';
 import { useProjectActiveTasks } from './useProjectActiveTasks.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
@@ -510,6 +511,8 @@ function TaskPillButton({
   active: boolean;
   onFocus: (task: Task) => void;
 }) {
+  // A task's id is debug-mode text, like everywhere else in a conversation.
+  const debugMode = useDebugMode();
   const unassigned = task.assignee.kind === 'user';
   const assigneeGezelId = task.assignee.kind === 'gezel' ? task.assignee.gezelId : null;
   const gezel = latestThread
@@ -566,7 +569,7 @@ function TaskPillButton({
           className="chat-pill-thread-updated-at"
           title={latestThread ? formatAbsoluteTime(latestThread.lastActivityAt) : undefined}
         >
-          {updated ? `Updated ${updated}` : task.ref}
+          {updated ? `Updated ${updated}` : debugMode ? task.ref : 'Not started yet'}
         </span>
         <span className="chat-pill-separator" aria-hidden="true">
           ·

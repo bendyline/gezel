@@ -737,6 +737,8 @@ function DaemonSettingsView() {
     try {
       const res = await api.updateConfig({ debugMode });
       setConfig(res);
+      // Open conversations and panes read the flag live through useDebugMode.
+      window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setStatus(debugMode ? 'debug mode ON — verbose logs in ~/.gezel/logs/' : 'debug mode OFF');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
@@ -1444,12 +1446,18 @@ function DaemonSettingsView() {
   // technically launch the engine but can't stream its models at a usable
   // speed. `totalRamBytes` is null until the probe answers, and the helper
   // skips the check then rather than reading unknown as too-small.
+  // The same facts the DwarfStar tab itself reads: with fewer, the tab
+  // showed on a machine whose daemon has no build and then said so inside.
   const showDs4Provider =
     provider === 'ds4' ||
     nightShiftProvider === 'ds4' ||
     detectDs4Availability({
       externalBaseUrl: config?.ds4BaseUrl,
       totalRamBytes: totalRamBytes ?? undefined,
+      ds4ServerBundled: health?.ds4ServerBundled,
+      serverPlatform: health?.platform,
+      detectedBackend: health?.llamaCppDetectedBackend,
+      gpuVendor: health?.llamaCppDetectedVendor,
     }).status !== 'unavailable';
 
   // GitHub Copilot needs GitHub's proprietary CLI, which we don't ship — it's
@@ -1623,9 +1631,40 @@ function DaemonSettingsView() {
     { id: 'ollama', label: 'Ollama' },
   ];
 
+  // Developer areas show in debug mode, or once this install uses them, so
+  // nobody loses a setting they rely on.
+  const [sharedToolsetCount, setSharedToolsetCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listInstalledToolsets({ kind: 'shared' })
+      .then((res) => {
+        if (!cancelled) setSharedToolsetCount(res.toolsets.length);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const usesProvider = (name: ProviderName) =>
+    provider === name ||
+    nightShiftProvider === name ||
+    Boolean(config?.defaultModel?.[name as keyof NonNullable<typeof config.defaultModel>]);
+  const developerAreaShown: Partial<Record<string, boolean>> = {
+    ollama: usesProvider('ollama') || Boolean(config?.ollamaBaseUrl),
+    codexCli: usesProvider('codex-cli') || Boolean(config?.codexCli),
+    anthropicCli: usesProvider('anthropic-cli') || Boolean(config?.anthropicCli),
+    remoteServers: showRemoteProvider || config?.remoteServing?.enabled === true,
+    // Unknown until the listing answers; the tab stays until it says empty.
+    toolsets: sharedToolsetCount === null || sharedToolsetCount > 0,
+  };
+  const developerAreaKey = JSON.stringify(developerAreaShown);
+
   const sections = useMemo(() => {
     const all = buildSections(uiPlatform);
+    const shown = JSON.parse(developerAreaKey) as Partial<Record<string, boolean>>;
     return all.filter((s) => {
+      if (config?.debugMode !== true && shown[s.id] === false) return false;
       if (s.id === 'mlx' && !isDarwin) return false;
       // Keep the section available for supported native installs, configured
       // external servers, and an already-selected provider. The latter two
@@ -1652,6 +1691,7 @@ function DaemonSettingsView() {
     externalChatBlocked,
     config?.debugMode,
     config?.showWorkInProgressFeatures,
+    developerAreaKey,
   ]);
 
   // Landing on a hidden tab is reachable two ways: the posture drops to Super
@@ -4433,9 +4473,10 @@ function DaemonSettingsView() {
               <section style={{ marginBottom: '2rem' }}>
                 <h3>Debug mode</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  Turns on verbose diagnostics — tool-call internals, bridge startup traces, chat
-                  send/response bodies, and ambient-scheduler cadence reasoning — and enables
-                  additional tools.
+                  Shows the working parts everywhere: each step and the thinking in chat, task ids,
+                  model names, and every project&apos;s developer tabs. Also turns on verbose
+                  diagnostics — tool-call internals, bridge startup traces, chat send/response
+                  bodies, and ambient-scheduler cadence reasoning — and enables additional tools.
                 </p>
                 <label className="debug-toggle">
                   <input

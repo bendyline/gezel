@@ -516,6 +516,7 @@ export async function applyProjectType(
     version: manifest.version,
     source,
     icon: projectTypeIcon(manifest),
+    ...(manifest.category ? { category: manifest.category } : {}),
     ...(params && Object.keys(params).length > 0 ? { params } : {}),
     appliedAt: new Date().toISOString(),
   };

@@ -217,7 +217,7 @@ describe('inferProjectForPath', () => {
       const real = join(userHome, 'code', 'real-widget');
       await mkdir(real, { recursive: true });
       const link = join(userHome, 'code', 'widget-link');
-      await symlink(real, link);
+      await symlink(real, link, process.platform === 'win32' ? 'junction' : 'dir');
       const res = await inferProjectForPath(deps, { path: link, kind: 'folder' });
       expect(res.created).toBe(true);
       expect(res.project?.workingDir).toBe(link);

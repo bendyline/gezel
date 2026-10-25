@@ -505,6 +505,12 @@
   margin: 0.2rem 0 0;
 }
 
+/* Sits where a task's ref does, but it is a count in words, so the UI face. */
+.task-bulk-count {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
 .task-bulk-header p {
   margin: 0.3rem 0 0;
   color: var(--text-muted);

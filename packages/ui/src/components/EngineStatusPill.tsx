@@ -49,6 +49,7 @@ import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { MachineMemoryStrip } from './MachineMemoryStrip.js';
+import { useActivity } from './activity-context.js';
 import { summarizeCacheEntries } from './cacheDisplay.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { type DeviceHealth, presentDeviceHealth } from './engine-pill-device-health.js';
@@ -63,6 +64,7 @@ import {
 } from './engine-pill-stats.js';
 import { useHeaderDensity } from './header-density.js';
 import { deviceLabel, providerLabel } from './provider-label.js';
+import { useDebugMode } from './useDebugMode.js';
 import {
   type LiveTurnState,
   phaseBaseLabel,
@@ -413,6 +415,8 @@ function EngineStatusPillForProvider({
   // commonly has no provider until getConfig resolves; calling this hook only
   // after that transition changes the component's hook order.
   const density = useHeaderDensity();
+  const activity = useActivity();
+  const debugMode = useDebugMode();
   // Engine management (retention, health policy, memory, Hard Stop) belongs
   // to the desktop daemon; a phone's pill reports status only.
   const manages = runtimeCapabilities().daemonSettings;
@@ -856,9 +860,22 @@ function EngineStatusPillForProvider({
     : (current?.startedAt ?? inflight.earliestStartedAt ?? undefined);
   const activeGezelId = activeMedia?.gezelId ?? current?.gezelId ?? currentInflight?.gezelId;
   const activeGezel = activeGezelId ? gezels.get(activeGezelId) : undefined;
-  const activeGezelName = activeGezel
-    ? displayName(activeGezel, config?.roleBasedNameOnlyMode === true)
+  // A turn working on a person's request is named for it: the lead and what
+  // the request is doing ("Dejan · drafting the invoices"), not the
+  // specialist and the engine phase. Debug mode shows the real turn.
+  const currentSessionId = current
+    ? [...liveTurns.entries()].find(([, turn]) => turn === current)?.[0]
+    : currentInflight?.sessionId;
+  const request =
+    !debugMode && currentSessionId
+      ? activity?.snapshot?.requests?.find((r) => r.liveSessionIds.includes(currentSessionId))
+      : undefined;
+  const requestLead = request?.leadGezelId ? gezels.get(request.leadGezelId) : undefined;
+  const speaker = requestLead ?? activeGezel;
+  const activeGezelName = speaker
+    ? displayName(speaker, config?.roleBasedNameOnlyMode === true)
     : undefined;
+  const requestDoing = request?.line?.doing.replace(/^is /, '');
   // Live decode counters. llama-server (`timings_per_token`) and MLX both
   // publish an exact running token count and decode rate on the phase
   // event; that is the truth and is printed bare. Only when an engine
@@ -900,7 +917,8 @@ function EngineStatusPillForProvider({
   // empties the label, the phase names itself — same fallback the live-turn
   // hook applies to a detail-less event.
   const pillBusyLabel =
-    stripTurnTelemetry(busyLabel) || (busyLabel && current ? phaseBaseLabel(current.phase) : '');
+    requestDoing ??
+    (stripTurnTelemetry(busyLabel) || (busyLabel && current ? phaseBaseLabel(current.phase) : ''));
   // Active tuning for the loaded model. Two independent layers can be in
   // play (see InstallModelTuningEditor): an install-wide preset
   // (`modelTuningProfile[id]`) and custom per-leaf overrides

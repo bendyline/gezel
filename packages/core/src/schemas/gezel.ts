@@ -1522,6 +1522,11 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
      * UI must derive and mark its own estimate.
      */
     tokensPerSec: z.number().nonnegative().optional(),
+    /**
+     * The engine is holding this turn: `behind` other work, or `yielding`
+     * mid-reply to a chat that goes first. Absent while it works on it.
+     */
+    hold: z.enum(['behind', 'yielding']).optional(),
   }),
   /**
    * Per-turn telemetry for locally-hosted providers (llama-cpp, Ollama,

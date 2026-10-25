@@ -21,6 +21,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const tempRoots: string[] = [];
 
+/** Junctions need no privilege on Windows; directory symlinks do. */
+const LINK_DIR = process.platform === 'win32' ? 'junction' : 'dir';
+
 afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -303,7 +306,7 @@ describe('model storage overlay', () => {
     const outside = join(parent, 'outside');
     await mkdir(root, { recursive: true });
     await mkdir(outside, { recursive: true });
-    await symlink(outside, join(root, 'redirect'), 'dir');
+    await symlink(outside, join(root, 'redirect'), LINK_DIR);
 
     await expect(assertModelStorePathSafe(root, join(root, 'redirect'))).rejects.toThrow(
       /linked or non-directory model-store path/,
@@ -323,7 +326,7 @@ describe('model storage overlay', () => {
     await mkdir(staged, { recursive: true });
     await writeFile(join(outside, 'sentinel'), 'keep');
     await writeFile(join(staged, 'weights.gguf'), 'new');
-    await symlink(outside, join(root, 'redirect'), 'dir');
+    await symlink(outside, join(root, 'redirect'), LINK_DIR);
 
     await expect(
       publishStagedModel({
@@ -374,15 +377,18 @@ describe('model storage overlay', () => {
     await writeFile(join(healthy, 'weights.gguf'), 'good');
     await writeFile(join(healthy, 'manifest.json'), '{"id":"healthy"}\n');
 
-    // A bundle whose publish step throws. A symlink in the payload is the
+    // A bundle whose publish step throws. A link in the payload is the
     // portable stand-in for the Windows ACL denial — listModelPayloadFiles
     // refuses it while backfilling hashes, so the throw escapes
-    // publishMigratedModel exactly where the icacls failure did.
+    // publishMigratedModel exactly where the icacls failure did. A directory
+    // link, because Windows can make one as a junction without privilege.
     const poisoned = join(legacyRoot, 'poisoned');
+    const stray = join(home, 'stray');
     await mkdir(poisoned, { recursive: true });
+    await mkdir(stray, { recursive: true });
     await writeFile(join(poisoned, 'weights.gguf'), 'also-good');
     await writeFile(join(poisoned, 'manifest.json'), '{"id":"poisoned"}\n');
-    await symlink(join(poisoned, 'weights.gguf'), join(poisoned, 'alias.gguf'));
+    await symlink(stray, join(poisoned, 'shards'), LINK_DIR);
 
     const env = { GEZEL_SYSTEM_SCOPE: '1', GEZEL_SHARED_ASSETS_DIR: shared };
 

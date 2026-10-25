@@ -682,8 +682,9 @@ describe('SearchService.searchProject', () => {
     });
 
     expect(embedMock).not.toHaveBeenCalled();
+    // Folded to a prefix stem, which still matches "checkers".
     expect((termSearch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[2]).toEqual([
-      'checkers',
+      'checker',
     ]);
     const memories = results.filter((result) => result.retrievalSource === 'user-memory');
     expect(memories.map((result) => [result.snippet, result.arm])).toEqual([

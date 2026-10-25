@@ -135,6 +135,7 @@ import {
   type PortableRemoteHost,
   PortableRemoteServers,
 } from './remote-servers.js';
+import { portableRequestTracks } from './request-routes.js';
 import type { PortableScripts } from './script-host.js';
 import { handlePortableScriptRoute } from './script-routes.js';
 import { createPortableScriptTaskActions } from './script-tasks.js';
@@ -2886,6 +2887,13 @@ export class PortableProductService {
     if (taskResponse) return taskResponse;
     if (resource === 'projects' && id && action === 'craftbooks' && method === 'GET')
       return json(await portableProjectCraftbookOffer(this.projectTypeSupport(), id));
+    if (resource === 'requests' && !id && method === 'GET')
+      return json(
+        await portableRequestTracks(
+          { store: this.store, session: (s) => this.session(s), turns: () => this.turns.values() },
+          query,
+        ),
+      );
     if (resource === 'health' && method === 'GET')
       return json({
         ok: true,

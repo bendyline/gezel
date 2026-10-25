@@ -14,6 +14,7 @@ import {
   takeOutputPaneFullWindow,
 } from './output-pane-maximize.js';
 import { useCompactLayout } from './useCompactLayout.js';
+import { useDebugMode } from './useDebugMode.js';
 
 /**
  * Toolbar width (CSS pixels) below which the trailing action buttons
@@ -247,7 +248,7 @@ export function ProjectOutputPane({
   const [maximized, setMaximized] = useState(() => takeOutputPaneFullWindow(projectId));
   const [capturing, setCapturing] = useState(false);
   const [captureError, setCaptureError] = useState('');
-  const [debugMode, setDebugMode] = useState(false);
+  const debugMode = useDebugMode();
   const [scriptError, setScriptError] = useState<PageScriptErrorDetails | null>(null);
   const [scriptErrorCopyState, setScriptErrorCopyState] = useState<'idle' | 'copied' | 'error'>(
     'idle',
@@ -265,22 +266,9 @@ export function ProjectOutputPane({
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const compactToolbar = useCompactLayout(toolbarRef, OUTPUT_TOOLBAR_COMPACT_PX);
 
-  // Script diagnostics are an explicitly debug-only surface. Fetch the
-  // install config here instead of sending debug state into the sandboxed
-  // preview page; normal mode neither hydrates run records nor renders the
-  // clipboard action.
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .getConfig()
-      .then((config) => {
-        if (!cancelled) setDebugMode(config.debugMode === true);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Script diagnostics are an explicitly debug-only surface. The flag is read
+  // here, never sent into the sandboxed preview page; normal mode neither
+  // hydrates run records nor renders the clipboard action.
 
   // Re-run detection only when the *set* of HTML paths actually changes
   // by value — the parent hands us a fresh array on every refresh (e.g.

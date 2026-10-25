@@ -34,6 +34,7 @@ const ENGINE_NOTICE_NAMES = {
   ds4: 'ds4 / DwarfStar',
   'llama-cpp': 'llama.cpp',
   'sd-cpp': 'stable-diffusion.cpp',
+  'sqlite-vec': 'sqlite-vec',
   uv: 'uv',
   'whisper-cpp': 'whisper.cpp',
 };

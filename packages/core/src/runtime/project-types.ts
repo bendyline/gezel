@@ -248,6 +248,7 @@ export async function planPortableTypedProject(args: {
       version: manifest.version,
       source: entry.item.sourceId,
       icon: projectTypeIcon(manifest),
+      ...(manifest.category ? { category: manifest.category } : {}),
       ...(Object.keys(params).length > 0 ? { params } : {}),
       appliedAt: args.now,
     },

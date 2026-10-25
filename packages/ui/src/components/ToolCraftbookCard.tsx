@@ -104,8 +104,14 @@ export function ToolCraftbookCard({
   card,
   onFocusTask,
   onOpenReference,
+  debugMode = false,
 }: {
   card: ToolCallCard;
+  /**
+   * A task's id is debug-mode text; the chip reads "Open task" otherwise.
+   * A prop rather than a config read: the card renders per tool row.
+   */
+  debugMode?: boolean;
   /** Opens the task beside the chat (rail Task pane). Absent → full task tab. */
   onFocusTask?: (ref: string) => void;
   /** Opens a file in the chat rail's viewer. Absent → the project's file pane. */
@@ -175,8 +181,13 @@ export function ToolCraftbookCard({
           </div>
         )}
         <div className="msg-tool-card-actions">
-          <button type="button" className="msg-ref-chip" onClick={openTask} title="Open this task">
-            Task {card.taskRef}
+          <button
+            type="button"
+            className="msg-ref-chip msg-ref-chip-label"
+            onClick={openTask}
+            title="Open this task"
+          >
+            {debugMode ? `Task ${card.taskRef}` : 'Open task'}
           </button>
           {result?.deliverable && (
             <DeliverableCard

@@ -39,11 +39,13 @@
  *     driver-signed `.cat`, so it is not shippable.
  *   - `win32-arm64-cuda` is for RTX Spark (NVIDIA N1X, the GB10 silicon of
  *     DGX Spark under Windows), which CUDA 13.4 first supports. It carries
- *     llama-server and sd-server with one copy of the arm64 NVIDIA
- *     redistributables, the same sharing as the Linux `-cuda` keys. The
- *     runtime does not select it yet: `llama-backend.ts` still answers CPU on
- *     Windows-on-ARM until the build is validated on a device. It first
- *     ships in the release named in FIRST_NATIVE_RELEASE below.
+ *     llama-server, sd-server and whisper-server with one copy of the arm64
+ *     NVIDIA redistributables, the same sharing as the Linux `-cuda` keys.
+ *     `llama-backend.ts` selects its llama-server when the NVIDIA driver is
+ *     installed, and discovery its sd-server and whisper-server with it.
+ *     whisper-server links ggml statically there: llama-server's ggml*.dll
+ *     share the folder under the same names from a different ggml. The key
+ *     first ships in the release named in FIRST_NATIVE_RELEASE below.
  *   - `gezel-device-health` is Windows + Linux only (macOS uses IOKit in-process)
  *   - `gezel-service-host` is Windows only (macOS/Linux use launchd/systemd)
  *   - no `duckdb` — the DuckDB CLI is vendored unmodified from the DuckDB
@@ -66,6 +68,11 @@
  *     the same reason ds4 does: one copy of the NVIDIA redistributables.
  *     Picking between the two is a genuine host capability choice, so it is
  *     NOT in `impliedEngineVariant` — the caller probes and decides.
+ *   - `vec0.dll` (sqlite-vec) ships for `win32-arm64` only. It is a SQLite
+ *     extension the service loads in-process, and npm's `sqlite-vec` has a
+ *     prebuild for every other platform. It is named with its extension
+ *     because it is a library, and keeps upstream's `vec0` stem because
+ *     SQLite derives the extension's entry point from the file name.
  *   - `gezel-ds4-server` is GPU-only: darwin-arm64 Metal + Linux CUDA. On
  *     Linux it lives in the `-cuda` key, NOT the bare one, because it and
  *     llama-server's CUDA build need the same NVIDIA redistributables.
@@ -95,9 +102,10 @@ export const NATIVE_PAYLOAD = Object.freeze({
     'gezel-sd-server',
     'gezel-whisper-server',
     'uv',
+    'vec0.dll',
   ],
   'win32-arm64-cpu': ['gezel-llama-server'],
-  'win32-arm64-cuda': ['gezel-llama-server', 'gezel-sd-server'],
+  'win32-arm64-cuda': ['gezel-llama-server', 'gezel-sd-server', 'gezel-whisper-server'],
   'darwin-arm64': [
     'gezel-sd-server',
     'gezel-ds4-server',
@@ -135,6 +143,7 @@ export const ENGINE_FOR_BINARY = Object.freeze({
   'gezel-ds4-server': 'ds4',
   'gezel-whisper-server': 'whisper-cpp',
   uv: 'uv',
+  'vec0.dll': 'sqlite-vec',
   'gezel-device-health': null,
   'gezel-service-host': null,
   'gezel-apple-fm': null,
@@ -160,6 +169,21 @@ export const FIRST_NATIVE_RELEASE = Object.freeze({
   'win32-arm64-cuda': '0.1.52',
 });
 
+/**
+ * The same, one level down: binaries added to a key that older releases
+ * already publish. Checks against a published release, and the SBOM built
+ * from the pinned one, must not claim a binary that release lacks.
+ *
+ * Keyed `<platform key>/<binary>`, because a binary can join one key long
+ * after it shipped in others: the CUDA whisper-server is new in
+ * `win32-arm64-cuda` while every bare key has carried a whisper-server for
+ * many releases.
+ */
+export const FIRST_NATIVE_RELEASE_BINARY = Object.freeze({
+  'win32-arm64/vec0.dll': '0.1.53',
+  'win32-arm64-cuda/gezel-whisper-server': '0.1.53',
+});
+
 function parseNativeVersion(version) {
   const match = /^(?:native-v|v)?(\d+)\.(\d+)\.(\d+)$/.exec(`${version}`.trim());
   if (!match) throw new Error(`not a native release version: ${JSON.stringify(version)}`);
@@ -182,6 +206,15 @@ export function platformKeysInRelease(version) {
     (key) =>
       !FIRST_NATIVE_RELEASE[key] || compareNativeVersions(version, FIRST_NATIVE_RELEASE[key]) >= 0,
   );
+}
+
+/** The binaries `key`'s archive carries in native release `version`. */
+export function binariesInRelease(key, version) {
+  parseNativeVersion(version);
+  return (NATIVE_PAYLOAD[key] ?? []).filter((binary) => {
+    const first = FIRST_NATIVE_RELEASE_BINARY[`${key}/${binary}`];
+    return !first || compareNativeVersions(version, first) >= 0;
+  });
 }
 
 /**
@@ -209,12 +242,16 @@ export function platformVariants(platform) {
   return allPlatformKeys().filter((key) => key === platform || key.startsWith(`${platform}-`));
 }
 
-/** Binary file names — with the `.exe` suffix on Windows keys. */
-export function expectedBinaries(platformKey) {
-  const names = NATIVE_PAYLOAD[platformKey];
-  if (!names) return null;
+/**
+ * File names — executables get the `.exe` suffix on Windows keys; a library
+ * is listed with its extension already. With `version`, only what that
+ * published release carries.
+ */
+export function expectedBinaries(platformKey, version) {
+  if (!NATIVE_PAYLOAD[platformKey]) return null;
+  const names = version ? binariesInRelease(platformKey, version) : NATIVE_PAYLOAD[platformKey];
   const ext = platformKey.startsWith('win32-') ? '.exe' : '';
-  return names.map((name) => `${name}${ext}`);
+  return names.map((name) => (name.includes('.') ? name : `${name}${ext}`));
 }
 
 /** The platform key for the host this script runs on, or null. */

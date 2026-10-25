@@ -68,8 +68,10 @@ export const Ds4ConfigSchema = z.object({
    *
    * - `off`  — never draft.
    * - `on`   — draft whenever a support model resolves and the engine allows it.
+   *            ds4 allows an SSD-streamed launch only for DeepSeek V4.1, whose
+   *            8.04 GiB drafter then stays resident beside the expert cache.
    * - `auto` — draft only where it has been shown to pay: a CUDA host running
-   *            a fully resident model. Default.
+   *            a fully resident model. Default. Never drafts a streamed launch.
    *
    * `auto` deliberately excludes Metal. Measured 2026-08-26 on an M5 Max
    * (DeepSeek V4 Flash IQ2_XXS, full residency, seed-pinned A/B/C/A): baseline

@@ -143,6 +143,40 @@ describe('the issue handoff queue', () => {
     expect(res.files[0]?.issues[0]).toMatchObject({ verdict: 'confirmed', verdictNote: 'Real.' });
   });
 
+  it('ranks a fix batch by severity, then how often the category is worth fixing', async () => {
+    // A new project: triage would sample here, fix never does.
+    issues = [
+      issue({ category: 'smell', path: 'src/a.ts' }),
+      issue({ category: 'naming', path: 'src/a.ts' }),
+      issue({ severity: 'major', category: 'smell' }),
+      issue({ category: 'error-handling' }),
+      issue({ category: 'bug' }),
+      issue({ severity: 'major', category: 'bug' }),
+    ];
+    const res = await buildIssueHandoffQueue(deps(), PROJECT, { mode: 'fix', limit: 4 });
+    expect(res.firstBatch).toBe(false);
+    const picked = res.files.flatMap((f) => f.issues.map((i) => `${i.severity}/${i.category}`));
+    expect(picked.sort()).toEqual([
+      'major/bug',
+      'major/smell',
+      'minor/bug',
+      'minor/error-handling',
+    ]);
+  });
+
+  it('gives a fix batch one issue per slot, not each file’s other issues', async () => {
+    await settleCalibration();
+    issues = [
+      issue({ severity: 'major', category: 'bug', path: 'src/a.ts' }),
+      issue({ category: 'smell', path: 'src/a.ts' }),
+      issue({ category: 'smell', path: 'src/a.ts' }),
+      issue({ category: 'bug', path: 'src/b.ts' }),
+    ];
+    const res = await buildIssueHandoffQueue(deps(), PROJECT, { mode: 'fix', limit: 2 });
+    expect(refs(res).sort()).toEqual(['BW-1', 'BW-4']);
+    expect(res.remaining).toBe(2);
+  });
+
   it('holds the issues it hands an app for that app', async () => {
     await store.observeProjectBoekwachterReviews(PROJECT, [
       {

@@ -128,7 +128,9 @@ async function setup() {
   return { connectors, actions, project };
 }
 
-describe('connectors against the simulated world', () => {
+// Each case binds and syncs several connectors in turn: about 2 s alone, but
+// past the 5 s default when the full suite saturates the workers.
+describe('connectors against the simulated world', { timeout: 30_000 }, () => {
   it('links Gmail through OAuth, syncs the inbox, and writes back through consent', async () => {
     const { connectors, actions, project } = await setup();
     process.env.GEZEL_GOOGLE_CLIENT_ID = 'sim-google-client';

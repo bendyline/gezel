@@ -26,14 +26,34 @@ export function tokenizeText(text: string): string[] {
 }
 
 /**
- * The distinctive tokens of a query, deduped and capped. Falls back to every
- * token when the query is nothing but stopwords, so a search for "how to" or
- * "create" still searches for what the user typed.
+ * A stem of a query word that still prefix-matches the word and its other
+ * forms. Each term is searched as a prefix, so "transitions" could never find
+ * the singular `Transition` code names things by, nor "rendered" a renderer:
+ * on squisq, "where are slide transitions rendered" ranked no transition file
+ * in its first 26 results (2026-10-23). Only endings whose stem is a prefix of
+ * the word are folded, so the word itself always still matches.
+ */
+export function foldInflection(token: string): string {
+  const fold = (stem: string, min: number) => (stem.length >= min ? stem : token);
+  if (token.length > 5 && token.endsWith('ies')) return fold(token.slice(0, -3), 4);
+  if (/(?:ches|shes|sses|xes|zes)$/.test(token)) return fold(token.slice(0, -2), PREFIX_MIN_LENGTH);
+  if (token.length > 4 && token.endsWith('s') && !/(?:ss|us|is)$/.test(token)) {
+    return fold(token.slice(0, -1), 4);
+  }
+  if (token.length > 5 && token.endsWith('ed')) return fold(token.slice(0, -2), 4);
+  if (token.length > 6 && token.endsWith('ing')) return fold(token.slice(0, -3), 4);
+  return token;
+}
+
+/**
+ * The distinctive tokens of a query, folded to prefix stems, deduped and
+ * capped. Falls back to every token when the query is nothing but stopwords,
+ * so a search for "how to" or "create" still searches for what the user typed.
  */
 export function queryTerms(text: string): string[] {
   const unique = [...new Set(tokenizeText(text))].slice(0, MAX_QUERY_TERMS);
   const meaningful = unique.filter((token) => !QUERY_STOP_WORDS.has(token));
-  return meaningful.length > 0 ? meaningful : unique;
+  return [...new Set((meaningful.length > 0 ? meaningful : unique).map(foldInflection))];
 }
 
 /**

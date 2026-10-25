@@ -104,9 +104,9 @@ export function HarnessToolsOverview({ tools }: { tools: HarnessTools }) {
       <h3>Gezel's tools in other apps</h3>
       <p className="muted small">
         Claude Code, Claude Desktop, Codex, Cursor and VS Code can search your projects, documents
-        and knowledge, read Office files, describe and make images, remember things, and check the
-        issues Gezel found overnight. Each one works with the project for the folder it was started
-        in. Set one up on its own tab.
+        and knowledge, read and make Office files, describe and make images, remember things, and
+        check the issues Gezel found overnight. Each one works with the project for the folder it
+        was started in. Set one up on its own tab.
       </p>
 
       {status?.unavailableReason && (

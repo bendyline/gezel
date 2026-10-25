@@ -21,7 +21,9 @@ describe('measureTree', () => {
     await writeFile(join(root, 'top.txt'), 'top');
     await writeFile(join(included, 'nested.txt'), 'nested');
     await writeFile(join(excluded, 'hidden.txt'), 'hidden');
-    await symlink(join(root, 'top.txt'), join(root, 'link.txt'));
+    // A directory link, so following it would count nested.txt twice. Windows
+    // creates a junction, which needs no symlink privilege.
+    await symlink(included, join(root, 'link'), process.platform === 'win32' ? 'junction' : 'dir');
 
     await expect(measureTree(root, [excluded])).resolves.toEqual({
       bytes: Buffer.byteLength('topnested'),

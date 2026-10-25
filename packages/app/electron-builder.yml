@@ -241,6 +241,10 @@ publish:
 # credentials before packaging and verifies the final signatures.
 win:
   artifactName: ${productName}-${version}-windows-${arch}.${ext}
+  # The default for a bare `--win`. Real builds name the arch as `nsis:<arch>`
+  # (scripts/package-win.mjs, the release workflow): the service bundle and its
+  # native addons match the build host, so each arch is packaged on its own
+  # runner, and a bare `--arm64` would add arm64 beside this x64 instead.
   target:
     - target: nsis
       arch:
@@ -282,8 +286,11 @@ win:
   # native-bin/ born-signed from the native release, and the afterPack
   # sweep leaves validly-signed files untouched — installer bytes stay
   # identical to the release asset. Replaces the vendored NSSM wrapper.
+  # `${arch}` is expanded per target, so an arm64 installer takes the arm64
+  # host; a missing file is only a build warning, and the installer then
+  # skips registering the service.
   extraFiles:
-    - from: native-bin/win32-x64/gezel-service-host.exe
+    - from: native-bin/win32-${arch}/gezel-service-host.exe
       to: gezel-service-host.exe
     # Installer security code ships with this app release, independent of the
     # native-engine pin. The signed installer protects both source and launcher.
@@ -292,6 +299,7 @@ win:
       filter:
         - ResetTreeAcl.cs
         - reset-tree-acl.ps1
+        - grant-service-sid.ps1
 
 nsis:
   # Per-machine install (Program Files), elevates UAC at install time.

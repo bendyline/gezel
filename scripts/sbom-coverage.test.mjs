@@ -27,6 +27,7 @@ import {
   ENGINE_FOR_BINARY,
   NATIVE_PAYLOAD,
   allPlatformKeys,
+  binariesInRelease,
   platformKeysInRelease,
 } from './native-payload.mjs';
 import {
@@ -742,7 +743,7 @@ test('every native payload file carries the digest the installer verifier checks
     }
     const dependsOn = dependencies.find((entry) => entry.ref === component['bom-ref']).dependsOn;
     assert.equal(dependsOn.includes('cuda'), key.endsWith('-cuda'), key);
-    for (const binary of NATIVE_PAYLOAD[key]) {
+    for (const binary of binariesInRelease(key, manifest.release)) {
       const engine = ENGINE_FOR_BINARY[binary];
       if (engine) assert.ok(dependsOn.includes(`engine:${engine}`), `${key} -> ${engine}`);
     }

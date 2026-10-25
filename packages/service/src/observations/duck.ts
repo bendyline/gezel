@@ -39,7 +39,12 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { createAwakeTimeout, createLogger } from '@bendyline/gezel';
+import {
+  createAwakeTimeout,
+  createLogger,
+  pathsEqual,
+  toInferencePlatform,
+} from '@bendyline/gezel';
 import { duckdbBinaryName, duckdbInstalledBinary } from '@bendyline/gezel/native';
 import { sandboxEnv } from '../sandbox/runner.js';
 
@@ -225,7 +230,18 @@ export class DuckRunner {
       return { path: this.explicitBinary, source: 'explicit', pinned: false };
     }
     const fromEnv = process.env.GEZEL_DUCKDB_BIN;
-    if (fromEnv) return { path: fromEnv, source: 'env', pinned: false };
+    if (fromEnv) {
+      // Native discovery and the desktop supervisor stamp the pinned install's
+      // own path here, so the boot log called the pinned build unverified.
+      const pinned =
+        this.home !== undefined &&
+        pathsEqual(
+          fromEnv,
+          duckdbInstalledBinary(this.home),
+          toInferencePlatform(process.platform),
+        );
+      return { path: fromEnv, source: 'env', pinned };
+    }
 
     if (this.home) {
       const pinned = duckdbInstalledBinary(this.home);

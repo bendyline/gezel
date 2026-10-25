@@ -258,8 +258,14 @@ vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'dark' }));
 const { ProjectsView } = await import('./ProjectsView.js');
 const { api } = await import('../api.js');
 
+// Workspace, Artifacts and Tools belong to code projects outside debug mode,
+// so the fixture these file-tab tests open is a codebase.
+const CODE_TYPE = {
+  detectedProjectType: { id: 'web-app', score: 0.9, scannedAt: '2026-10-01T00:00:00.000Z' },
+};
+
 const PROJECTS: Project[] = [
-  { id: 'pj-alpha', name: 'Alpha' } as Project,
+  { id: 'pj-alpha', name: 'Alpha', ...CODE_TYPE } as Project,
   { id: 'default', name: 'default' } as Project,
 ];
 
@@ -299,6 +305,7 @@ describe('ProjectsView', () => {
         ({
           id,
           name: id === 'pj-alpha' ? 'Alpha' : 'default',
+          ...(id === 'pj-alpha' ? CODE_TYPE : {}),
           packages: [],
           managedWorkspaceWritePolicy: 'deny',
         }) as never,
@@ -331,7 +338,7 @@ describe('ProjectsView', () => {
   it('groups archived projects at the bottom of the full project list', async () => {
     vi.mocked(api.listProjects).mockResolvedValue({
       projects: [
-        { id: 'pj-alpha', name: 'Alpha' } as Project,
+        { id: 'pj-alpha', name: 'Alpha', ...CODE_TYPE } as Project,
         { id: 'pj-buried', name: 'Buried', archived: true, status: 'inactive' } as Project,
       ],
     } as never);
@@ -352,6 +359,7 @@ describe('ProjectsView', () => {
   it('archives the open project from Project Settings and exposes Restore', async () => {
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       status: 'active',
@@ -359,6 +367,7 @@ describe('ProjectsView', () => {
     vi.mocked(api.updateProject)
       .mockResolvedValueOnce({
         id: 'pj-alpha',
+        ...CODE_TYPE,
         name: 'Alpha',
         packages: [],
         archived: true,
@@ -366,6 +375,7 @@ describe('ProjectsView', () => {
       } as never)
       .mockResolvedValueOnce({
         id: 'pj-alpha',
+        ...CODE_TYPE,
         name: 'Alpha',
         packages: [],
         status: 'inactive',
@@ -431,6 +441,7 @@ describe('ProjectsView', () => {
     } as never);
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -471,6 +482,7 @@ describe('ProjectsView', () => {
     } as never);
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -510,6 +522,7 @@ describe('ProjectsView', () => {
     } as never);
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -620,6 +633,7 @@ describe('ProjectsView', () => {
     } as never);
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -712,6 +726,7 @@ describe('ProjectsView', () => {
     } as never);
     vi.mocked(api.updateProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -881,6 +896,7 @@ describe('ProjectsView', () => {
     });
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       outputPaneVisible: false,
@@ -969,6 +985,7 @@ describe('ProjectsView', () => {
   it('keeps a failed project-document edit dirty and retries it', async () => {
     const project = {
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -1000,6 +1017,7 @@ describe('ProjectsView', () => {
   it('restores a failed project-document draft when the project view is reopened', async () => {
     const project = {
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -1041,6 +1059,7 @@ describe('ProjectsView', () => {
   it('exempts a project from Meester check-ins without discarding cadence overrides', async () => {
     const project = {
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -1090,6 +1109,7 @@ describe('ProjectsView', () => {
   it('lets Project Settings override workspace indexing', async () => {
     const project = {
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Checkers',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -1120,6 +1140,7 @@ describe('ProjectsView', () => {
   it('adds and removes one-way project links from Settings', async () => {
     const project = {
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Racing game',
       createdAt: '2026-08-01T00:00:00.000Z',
       updatedAt: '2026-08-01T00:00:00.000Z',
@@ -1176,6 +1197,7 @@ describe('ProjectsView', () => {
   it('shows workspace indexing issues and toggles the Boekwachter results pane', async () => {
     const editableProject = {
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'allow',
@@ -1327,6 +1349,7 @@ describe('ProjectsView', () => {
   it('offers five workspace view modes, persists the choice, and loads the flat index list', async () => {
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -1460,6 +1483,7 @@ describe('ProjectsView', () => {
     });
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -1506,6 +1530,7 @@ describe('ProjectsView', () => {
   it('opens the file with the Boekwachter pane when a triage row badge is clicked', async () => {
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -1574,6 +1599,7 @@ describe('ProjectsView', () => {
     } as never);
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -1592,6 +1618,7 @@ describe('ProjectsView', () => {
 
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'allow',
@@ -1922,6 +1949,7 @@ describe('ProjectsView', () => {
   it('shows only the three shared view modes on the artifacts tab', async () => {
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -1942,6 +1970,7 @@ describe('ProjectsView', () => {
     vi.mocked(api.getConfig).mockResolvedValue({ provider: 'codex-cli' } as never);
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -2025,6 +2054,7 @@ describe('ProjectsView', () => {
   it('shows and persists Claude access only when Claude is represented in the project', async () => {
     const project = {
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -2069,6 +2099,7 @@ describe('ProjectsView', () => {
   it('hides optional project tabs and lets Settings turn them back on', async () => {
     const focusedProject = {
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Checkers',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -2119,6 +2150,7 @@ describe('ProjectsView', () => {
   it('lets an explicit Map flag override the project-type-aware default', async () => {
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Writing',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -2136,6 +2168,7 @@ describe('ProjectsView', () => {
   it('names the Views tab after its view and lists it as Views in Settings', async () => {
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Code',
       packages: [],
       managedWorkspaceWritePolicy: 'deny',
@@ -2152,6 +2185,57 @@ describe('ProjectsView', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
     expect(screen.getByRole('checkbox', { name: 'Views' })).toBeChecked();
+  });
+
+  // A bakery's invoice project showed Tools, Workspace (package.json),
+  // Artifacts (prompt drafts) and a code-city map beside its board.
+  describe('developer tabs', () => {
+    const plain = {
+      id: 'pj-alpha',
+      name: 'Invoices',
+      packages: [],
+      managedWorkspaceWritePolicy: 'deny',
+    };
+    const tabNames = () => screen.getAllByRole('tab').map((t) => t.textContent ?? '');
+
+    it('belong to code projects: a plain project shows Chat, Overview, Tasks and Settings', async () => {
+      vi.mocked(api.getProject).mockResolvedValue(plain as never);
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      await screen.findByTestId('project-chat');
+      const names = tabNames();
+      for (const hidden of ['Tools', 'Workspace', 'Artifacts', 'Village view']) {
+        expect(names.some((n) => n.includes(hidden))).toBe(false);
+      }
+      for (const shown of ['Chat', 'Overview', 'Tasks', 'Settings']) {
+        expect(names.some((n) => n.includes(shown))).toBe(true);
+      }
+      // Settings offers them, unchecked, so a person can turn one on.
+      fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+      expect(screen.getByRole('checkbox', { name: 'Workspace' })).not.toBeChecked();
+    });
+
+    it('show for a plain project in debug mode', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock', debugMode: true } as never);
+      vi.mocked(api.getProject).mockResolvedValue(plain as never);
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      await screen.findByTestId('project-chat');
+      await waitFor(() =>
+        expect(screen.getByRole('tab', { name: 'Workspace' })).toBeInTheDocument(),
+      );
+      expect(screen.getByRole('tab', { name: 'Tools' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Artifacts' })).toBeInTheDocument();
+    });
+
+    it('show when the person turned one on', async () => {
+      vi.mocked(api.getProject).mockResolvedValue({
+        ...plain,
+        tabVisibility: { artifacts: true },
+      } as never);
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      await screen.findByTestId('project-chat');
+      expect(screen.getByRole('tab', { name: 'Artifacts' })).toBeInTheDocument();
+      expect(screen.queryByRole('tab', { name: 'Workspace' })).not.toBeInTheDocument();
+    });
   });
 
   it('shows an error message when listProjects rejects', async () => {
@@ -2443,6 +2527,7 @@ describe('ProjectsView', () => {
         projects: [
           {
             id: 'pj-alpha',
+            ...CODE_TYPE,
             name: 'Alpha',
             projectType: {
               id: 'checkers',
@@ -2512,12 +2597,14 @@ describe('ProjectsView', () => {
   it('lets a project opt out of overnight fixing, and defaults it on', async () => {
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       gezelIds: [],
     } as never);
     vi.mocked(api.updateProject).mockResolvedValue({
       id: 'pj-alpha',
+      ...CODE_TYPE,
       name: 'Alpha',
       packages: [],
       gezelIds: [],

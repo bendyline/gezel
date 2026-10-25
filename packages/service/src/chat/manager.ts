@@ -27,6 +27,7 @@ import {
   isAnswerEnvelope,
   isOwnerStep,
   leanSession,
+  projectLeadGezelId,
   projectTypeTurnRules,
   renderCurrentDateTimeLine,
   renderTurnStatePrelude,
@@ -39,6 +40,7 @@ import {
   stateAnswerTool,
   stepDeliverableTarget,
   stepOwnerGezelId,
+  taskPersonName,
   taskTranscriptCompatible,
   todayIso,
   turnStateWanted,
@@ -323,6 +325,7 @@ import {
   placeTaskDeliverable,
   taskFinishedQuestion,
   wantsWrapUp,
+  withWrapUpNote,
 } from '../tasks/completion-wrapup.js';
 import { reviewTaskFigures } from '../tasks/figure-review.js';
 import { aggregateModelGateEvidence } from '../tasks/gate-telemetry.js';
@@ -421,6 +424,7 @@ import {
 } from './context-forcefit.js';
 import { CraftbookOfferCache } from './craftbook-offer-cache.js';
 import { triggerCandidatesFromListing, triggerPhrasePlan } from './craftbook-trigger-route.js';
+import { crewIntroductionText } from './crew-introduction.js';
 import {
   isExpectedBinaryDocumentDeliverablePath,
   isExpectedImageDeliverablePath,
@@ -788,6 +792,7 @@ function buildUserTurnMessage(
     | undefined,
 ): ChatMessage {
   return {
+    id: randomUUID(),
     role: 'user',
     content: userText,
     at: nowIso(),
@@ -1074,6 +1079,9 @@ interface InflightTurn {
   abort?: AbortController;
   /** True once a provider request has actually been issued for this turn. */
   providerStarted?: boolean;
+  /** The engine's last reported phase for this turn, and whether it is holding it. */
+  enginePhase?: string;
+  engineHold?: 'behind' | 'yielding';
   /** Set by `cancelInflight`; remains attached to this exact turn object. */
   cancelled?: boolean;
   /**
@@ -2672,6 +2680,8 @@ export class ChatManager extends LocalEngineRuntime {
     startedAt: number;
     elapsedMs: number;
     lastProgressAgoMs?: number;
+    enginePhase?: string;
+    engineHold?: 'behind' | 'yielding';
   }> {
     const now = Date.now();
     const out: Array<{
@@ -2685,6 +2695,8 @@ export class ChatManager extends LocalEngineRuntime {
       startedAt: number;
       elapsedMs: number;
       lastProgressAgoMs?: number;
+      enginePhase?: string;
+      engineHold?: 'behind' | 'yielding';
     }> = [];
     for (const [sessionId, entry] of this.inflight) {
       const state = this.states.get(sessionId);
@@ -2707,6 +2719,8 @@ export class ChatManager extends LocalEngineRuntime {
         ...(currentTurnProgressAt !== null
           ? { lastProgressAgoMs: now - currentTurnProgressAt }
           : {}),
+        ...(entry.enginePhase ? { enginePhase: entry.enginePhase } : {}),
+        ...(entry.engineHold ? { engineHold: entry.engineHold } : {}),
       });
     }
     const nativeSessionIds = new Set(out.map((entry) => entry.sessionId));
@@ -6184,6 +6198,7 @@ export class ChatManager extends LocalEngineRuntime {
     if (!record) fail(new Error(`session ${sessionId} not found`));
 
     const userMessage: ChatMessage = {
+      id: randomUUID(),
       role: 'user',
       content: userText,
       at: nowIso(),
@@ -6245,13 +6260,21 @@ export class ChatManager extends LocalEngineRuntime {
    */
   async recordCraftbookLaunch(
     sessionId: string,
-    args: { userText: string; draftId?: string; task: Task; reused?: boolean },
+    args: {
+      userText: string;
+      draftId?: string;
+      task: Task;
+      reused?: boolean;
+      /** The identity the launch stamped on the task as its request. */
+      message?: { id: string; at: string };
+    },
   ): Promise<{ userMessage: ChatMessage; receipt: ChatMessage }> {
     const record = await this.getSessionRecord(sessionId);
     if (!record) throw new Error(`session ${sessionId} not found`);
-    const at = nowIso();
+    const at = args.message?.at ?? nowIso();
     const retrieval = taskReferencesAsRetrieval(args.task.references);
     const userMessage: ChatMessage = {
+      id: args.message?.id ?? randomUUID(),
       role: 'user',
       content: args.userText,
       at,
@@ -7557,6 +7580,11 @@ export class ChatManager extends LocalEngineRuntime {
           return;
         }
         this.telemetry.noteEnginePhase(sessionId, ev.phase);
+        const turn = this.inflight.get(sessionId);
+        if (turn) {
+          turn.enginePhase = ev.phase;
+          turn.engineHold = ev.hold;
+        }
         const provider = state.record.providerName === 'ds4' ? 'ds4' : ev.provider;
         this.events.publish(scope, {
           type: 'engine_phase',
@@ -7567,6 +7595,7 @@ export class ChatManager extends LocalEngineRuntime {
           ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
           ...(typeof ev.outputTokens === 'number' ? { outputTokens: ev.outputTokens } : {}),
           ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
+          ...(ev.hold ? { hold: ev.hold } : {}),
         });
       });
       // turn_stats — local-engine per-turn token counts +
@@ -9876,6 +9905,7 @@ export class ChatManager extends LocalEngineRuntime {
     // record stays useful even if the tool throws or hangs. Same
     // contract the LLM path follows in {@link runSend}.
     const userMessage: ChatMessage = {
+      id: randomUUID(),
       role: 'user',
       content: userText,
       at: nowIso(),
@@ -11957,9 +11987,13 @@ export class ChatManager extends LocalEngineRuntime {
     const already = introducedIn(target);
     const fresh = members.filter((m) => !already.has(m.gezelId));
     if (fresh.length === 0) return null;
+    const leadName =
+      moment === 'joined' && lead && lead !== thread.gezelId && lead !== gezelId
+        ? (await this.store.getGezel(lead).catch(() => null))?.name
+        : undefined;
     const message: ChatMessage = {
       role: 'assistant',
-      content: crewIntroductionText(task, fresh, moment),
+      content: crewIntroductionText(task, fresh, moment, leadName ? { leadName } : {}),
       at: nowIso(),
       synthetic: 'crew-introduction',
       referencedTasks: [task.ref],
@@ -12043,13 +12077,22 @@ export class ChatManager extends LocalEngineRuntime {
     if (artifacts.length > 0) message.referencedArtifacts = artifacts;
 
     const { record, scope } = await this.appendToThread(thread, message);
+    // The notification speaks as the tracker does: the project's lead, and
+    // the person's name for the work rather than the craftbook's.
+    const [taskProject, config] = await Promise.all([
+      this.store.getProject(task.projectId).catch(() => null),
+      this.store.readConfig(),
+    ]);
+    const lead =
+      (taskProject ? projectLeadGezelId(taskProject, config.meesterGezelId) : undefined) ??
+      (task.assignee?.kind === 'gezel' ? task.assignee.gezelId : undefined);
     this.events.publishProjectEvent(record.projectId, {
       type: 'task_settled',
       taskRef: task.ref,
-      title: task.title,
+      title: taskPersonName(task) ?? task.title,
       outcome,
       sessionId: record.id,
-      ...(task.assignee?.kind === 'gezel' ? { gezelId: task.assignee.gezelId } : {}),
+      ...(lead ? { gezelId: lead } : {}),
     });
 
     // A "ready for you" card in Updates, so the finished work stays one click
@@ -15863,9 +15906,11 @@ export class ChatManager extends LocalEngineRuntime {
           // answering about. Byte-identical to the live send's splice, so the
           // cached prefix still matches — which is also why the turn's date
           // line and preludes go back on in front, exactly as the send had them.
+          // A wrap-up leaves its ref and paths to the card for the person;
+          // the model reading it back gets them as a note.
           content:
             m.role === 'assistant'
-              ? stripReasoningTags(m.content)
+              ? withWrapUpNote(m, stripReasoningTags(m.content))
               : `${m.sentPreamble ?? ''}${spliceIntoText(m.content, m.recognizedImages)}`,
         }));
       // Scale what we volunteer to the window the model actually has;
@@ -17633,39 +17678,6 @@ export function growthSignature(gezel: GezelDetail, social = false): string {
     // Turning social mode on or off, or editing the character, rebuilds the prompt.
     character: social ? (fm.character ?? null) : null,
   });
-}
-
-/** "Reisleider — trip planner", "Planner", or nothing. */
-function crewRoleLabel(member: CrewMember): string {
-  if (!member.role) return '';
-  return member.gloss ? `${member.role} — ${member.gloss}` : member.role;
-}
-
-/**
- * The words a crew introduction says, for the model and for any surface
- * that shows text rather than cards.
- */
-export function crewIntroductionText(
-  task: Pick<Task, 'title'>,
-  members: readonly CrewMember[],
-  moment: 'kickoff' | 'joined',
-): string {
-  const describe = (m: CrewMember) => {
-    const label = crewRoleLabel(m);
-    return `**${m.name}**${label ? ` (${label})` : ''}`;
-  };
-  if (moment === 'joined') {
-    const m = members[0]!;
-    const label = crewRoleLabel(m);
-    return (
-      `I've brought **${m.name}** onto the crew${label ? ` as your ${label}` : ''} ` +
-      `for **${task.title}**.${m.stepName ? ` ${m.name} starts with "${m.stepName}".` : ''}`
-    );
-  }
-  const parts = members.map((m) =>
-    m.stepName ? `${describe(m)} starts with "${m.stepName}"` : `${describe(m)} leads it`,
-  );
-  return `Your crew for **${task.title}**: ${parts.join(', and ')}.`;
 }
 
 /** The first sentence of a description, short enough for a card. */

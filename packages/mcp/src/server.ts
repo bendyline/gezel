@@ -170,6 +170,7 @@ import {
   stepInsertionIndex,
   stepOwnerGezelId,
   taskOwnedPrefixes,
+  taskPersonNoun,
   taskScopedWriteDeniedMessage,
   uniqueStepId,
   unknownTaskStepText,
@@ -266,6 +267,7 @@ import {
 } from './platform-tool-availability.js';
 import { composeQuestionPrompt, resolveQuestionTaskRef } from './question-prompt.js';
 import { reanchorAfterEdit } from './reanchor.js';
+import { PLAIN_WORDS_RELAY } from './relay-text.js';
 import { repoIntakeRedirect } from './repo-intake-policy.js';
 import {
   formatScriptRunResult,
@@ -4651,7 +4653,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Started "${name}" (${project.id}) from the ${manifestName} project type.${voormanNote} Installed ${applied.scriptsInstalled.length} script(s); seeded ${applied.workspaceSeeded.length} file(s). Tell the user their ${manifestName} project is ready.`,
+            text: `Started "${name}" (${project.id}) from the ${manifestName} project type.${voormanNote} Installed ${applied.scriptsInstalled.length} script(s); seeded ${applied.workspaceSeeded.length} file(s). Tell the user their ${manifestName} project is ready. ${PLAIN_WORDS_RELAY}`,
           },
         ],
       };
@@ -5455,8 +5457,8 @@ async function runInvokeCraftbook({
       : '';
     // Structured contract: the full task rides in structuredContent so the
     // chat runtime can derive the inline craftbook start card. The text is
-    // kept byte-identical to the pre-migration template — it is what the
-    // model reads, and manager-mcp assertions pin it.
+    // what the model reads: evals parse its `Invoked craftbook "<id>"`
+    // opening, and its last sentence is what to tell the person.
     return okResult(
       TaskToolOutputSchema,
       {
@@ -5472,7 +5474,7 @@ async function runInvokeCraftbook({
         },
       },
       {
-        text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${versionText}${idempotentText}`,
+        text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${versionText}${idempotentText} Tell the person that ${taskPersonNoun(created)} is underway. ${PLAIN_WORDS_RELAY}`,
       },
     );
   } catch (err) {
@@ -7693,7 +7695,7 @@ async function runPromotedStartJobAsProject(input: {
           dispatchEntry: true,
         });
     const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as voorman. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project.`;
+    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as voorman. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult('start_project', brief.name, project.id, resultText);
     return {
       content: [
@@ -7964,7 +7966,7 @@ async function runTypedKickoff(
       dispatchEntry: true,
     });
     const role = (await api.getGezel(lead.id).catch(() => null))?.role;
-    const resultText = `Started "${project.name}" (${project.id}) as a ${type.name} project. ${lead.name}${role ? ` (${roleWithGloss(role)})` : ''} leads it and is making the first draft now in a task-scoped session (task ${task.ref}); the project's Output page shows it as it fills in. No reply lands in this thread. Tell the person in a sentence or two that ${lead.name} is on it.`;
+    const resultText = `Started "${project.name}" (${project.id}) as a ${type.name} project. ${lead.name}${role ? ` (${roleWithGloss(role)})` : ''} leads it and is making the first draft now in a task-scoped session (task ${task.ref}); the project's Output page shows it as it fills in. No reply lands in this thread. Tell the person in a sentence or two that ${lead.name} is on it. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult(opts.cacheTool, brief.name, project.id, resultText);
     return { content: [{ type: 'text' as const, text: resultText }] };
   } catch (err) {
@@ -8125,7 +8127,7 @@ async function runStartProject(
           dispatchEntry: true,
         });
     const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as voorman. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project.`;
+    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as voorman. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult(tool, brief.name, project.id, resultText);
     return {
       content: [
@@ -8458,7 +8460,7 @@ async function toggleRecurringWork(project: string, key: string, pause: boolean)
         content: [
           {
             type: 'text' as const,
-            text: `Paused "${item.craftbookName ?? item.craftbookId}"${item.taskRef ? ` (host task ${item.taskRef})` : ''}. Its history is kept; switching it back on resumes it. Tell the person it is off.`,
+            text: `Paused "${item.craftbookName ?? item.craftbookId}"${item.taskRef ? ` (host task ${item.taskRef})` : ''}. Its history is kept; switching it back on resumes it. Tell the person it is off. ${PLAIN_WORDS_RELAY}`,
           },
         ],
       };
@@ -8472,7 +8474,7 @@ async function toggleRecurringWork(project: string, key: string, pause: boolean)
       content: [
         {
           type: 'text' as const,
-          text: `Switched on "${item.craftbookName ?? item.craftbookId}" — it runs ${cadence}, host task ${task.ref}. Tell the person when it will first run.`,
+          text: `Switched on "${item.craftbookName ?? item.craftbookId}" — it runs ${cadence}, host task ${task.ref}. Tell the person when it will first run. ${PLAIN_WORDS_RELAY}`,
         },
       ],
     };
@@ -8646,7 +8648,7 @@ async function runFlatProject(
           ],
           dispatchEntry: true,
         });
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${builder.name} as lead (template: ${builder.templateId}). Created task ${task.ref} ("${task.title}") and handed ${builder.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${builder.name} is on it and they can watch the work in the ${brief.name} project.`;
+    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${builder.name} as lead (template: ${builder.templateId}). Created task ${task.ref} ("${task.title}") and handed ${builder.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${builder.name} is on it and they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult(cacheTool, brief.name, project.id, resultText);
     return {
       content: [

@@ -149,24 +149,33 @@ async function launchTaskFromSession(
     if (draft.status !== 'draft' || !draftMatchesSession(draft, session))
       throw new ProductError('This draft is not available to send in this conversation', 409);
   }
+  // Chosen before the task exists so the task can name the message the
+  // receipt below follows.
+  const at = new Date().toISOString();
+  const messageId = crypto.randomUUID();
   let task: Task;
   if (prior) task = prior;
   else {
     try {
-      task = await host.tasks.create(session.projectId, {
-        title: launch.title?.trim() || book.name,
-        description: composed.description,
-        craftbookId: launch.craftbookId,
-        ...(launch.craftbookSourceId ? { craftbookSourceId: launch.craftbookSourceId } : {}),
-        ...(Object.keys(composed.params).length > 0 ? { craftbookParams: composed.params } : {}),
-        ...(launch.inputs && Object.keys(launch.inputs).length > 0
-          ? { inputs: launch.inputs }
-          : {}),
-        ...(launch.assignee ? { assignee: launch.assignee } : {}),
-        createdBy: { kind: 'user' },
-        launchSessionId: session.id,
-        craftbookInvocationKey: key,
-      });
+      task = await host.tasks.create(
+        session.projectId,
+        {
+          title: launch.title?.trim() || book.name,
+          description: composed.description,
+          craftbookId: launch.craftbookId,
+          ...(launch.craftbookSourceId ? { craftbookSourceId: launch.craftbookSourceId } : {}),
+          ...(Object.keys(composed.params).length > 0 ? { craftbookParams: composed.params } : {}),
+          ...(launch.inputs && Object.keys(launch.inputs).length > 0
+            ? { inputs: launch.inputs }
+            : {}),
+          ...(launch.assignee ? { assignee: launch.assignee } : {}),
+          createdBy: { kind: 'user' },
+          launchSessionId: session.id,
+          craftbookInvocationKey: key,
+        },
+        undefined,
+        { requestRef: { sessionId: session.id, at, messageId } },
+      );
     } catch (error) {
       if (error instanceof PortableTaskInputError) {
         return json({ error: error.message, code: 'task-input', param: error.param }, 422);
@@ -174,8 +183,8 @@ async function launchTaskFromSession(
       throw error;
     }
   }
-  const at = new Date().toISOString();
   const userMessage: ChatMessage = {
+    id: messageId,
     role: 'user',
     content: text,
     at,

@@ -128,7 +128,7 @@ export function registerMcpCommands(
       if (status.state === 'configured' && line) {
         lines.push(
           '',
-          `${status.label} reaches for its own search first. So it uses Gezel's, add this line to the ${HARNESS_AGENT_FILE[client]} file in a folder you work in:`,
+          `${status.label} reaches for its own search first. So it uses Gezel's, add this line near the top of the ${HARNESS_AGENT_FILE[client]} file in a folder you work in (at the end of a long file it gets overlooked):`,
           '',
           `  ${line}`,
         );

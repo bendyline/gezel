@@ -12,7 +12,13 @@ import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
 import { nativeVisionEnabledFor } from '../vision-capability.js';
-import { type Ds4Backend, ds4DsparkArgs, resolveDs4Dspark } from './dspark.js';
+import {
+  DS4_V41_DRAFTER_RUNTIME_BYTES,
+  type Ds4Backend,
+  ds4DsparkArgs,
+  ds4DsparkStreamsWithSsd,
+  resolveDs4Dspark,
+} from './dspark.js';
 import { ds4MtpArgs, resolveDs4Mtp } from './mtp.js';
 import { Ds4Provider } from './provider.js';
 
@@ -376,36 +382,53 @@ export async function buildDs4Provider(opts: {
     );
   }
 
+  const cachePlanWith = (extraResidentBytes: number) =>
+    planDs4ExpertCache({
+      configuredGb: config.ds4CacheExpertsGb,
+      catalogCacheBytes: ds4Source?.cacheExpertsBytes,
+      catalogResidentBytes:
+        (ds4Source?.residentBytes ?? 0) + visionResidentBytes + extraResidentBytes,
+      totalRamBytes: totalRamGb * 1024 ** 3,
+    });
+
   // DSpark speculative decoding. Resolved here, beside the residency decision
-  // it depends on: ds4 aborts at startup if an external `--mtp-model` is combined with
-  // `--ssd-streaming`, so this can only ever draft on a fully resident launch.
+  // it depends on: ds4 aborts at startup if an external `--mtp-model` is
+  // combined with `--ssd-streaming` for any family but DeepSeek V4.1.
+  const targetArchitecture = installedModel?.architecture;
+  const streamedDrafting = ssdStreaming && ds4DsparkStreamsWithSsd(targetArchitecture);
   const dsparkSupportPath = config.ds4DsparkModelPath ?? installedModel?.draftModelPath;
   // Residency is decided on the weights alone, then the companion is priced
   // against what is left. That precedence is deliberate and not symmetric:
   // residency is worth ~9.5x and drafting ~1.05x, so a companion that would
   // push the model out of memory loses its own flag rather than costing the
-  // launch its residency.
+  // launch its residency. A streamed V4.1 launch keeps its drafter resident
+  // too, so it must still leave room for a minimum expert cache.
   let companionFitsMemory = true;
   let dsparkCompanionBytes = 0;
-  if (dsparkSupportPath && !ssdStreaming) {
+  if (dsparkSupportPath && (!ssdStreaming || streamedDrafting)) {
     const { canUseDs4FullResidency } = await import('./residency.js');
     const { stat: statCompanion } = await import('node:fs/promises');
     const companionBytes = await statCompanion(dsparkSupportPath)
       .then((st) => st.size)
       .catch(() => undefined);
-    dsparkCompanionBytes = companionBytes ?? 0;
-    companionFitsMemory = canUseDs4FullResidency({
-      modelSizeBytes: residentWeightBytes,
-      totalRamBytes,
-      ...(companionBytes !== undefined || visionResidentBytes > 0
-        ? { companionBytes: (companionBytes ?? 0) + visionResidentBytes }
-        : {}),
-    });
+    dsparkCompanionBytes =
+      (companionBytes ?? 0) +
+      (ds4DsparkStreamsWithSsd(targetArchitecture) ? DS4_V41_DRAFTER_RUNTIME_BYTES : 0);
+    companionFitsMemory = ssdStreaming
+      ? cachePlanWith(dsparkCompanionBytes).safe
+      : canUseDs4FullResidency({
+          modelSizeBytes: residentWeightBytes,
+          totalRamBytes,
+          ...(companionBytes !== undefined || visionResidentBytes > 0
+            ? { companionBytes: dsparkCompanionBytes + visionResidentBytes }
+            : {}),
+        });
   }
   const dspark = resolveDs4Dspark({
     mode: config.ds4Dspark,
     backend: backendFlag.slice(2) as Ds4Backend,
     ssdStreaming,
+    ...(targetArchitecture ? { targetArchitecture } : {}),
     companionFitsMemory,
     ...(dsparkSupportPath ? { supportModelPath: dsparkSupportPath } : {}),
   });
@@ -432,15 +455,7 @@ export async function buildDs4Provider(opts: {
   });
   if (mtp.unmetRequest) log.warn(`[ds4] ${mtp.unmetRequest}`);
 
-  const cachePlan = planDs4ExpertCache({
-    configuredGb: config.ds4CacheExpertsGb,
-    catalogCacheBytes: ds4Source?.cacheExpertsBytes,
-    catalogResidentBytes:
-      ds4Source?.residentBytes !== undefined || visionResidentBytes > 0
-        ? (ds4Source?.residentBytes ?? 0) + visionResidentBytes
-        : undefined,
-    totalRamBytes: totalRamGb * 1024 ** 3,
-  });
+  const cachePlan = cachePlanWith(dspark.enabled && ssdStreaming ? dsparkCompanionBytes : 0);
   if (ssdStreaming && !cachePlan.safe) {
     const err = new Error(
       `DwarfStar (ds4) engine: ${effectiveModelId ?? 'the selected model'} cannot keep a safe minimum expert cache while preserving memory for the operating system. Choose a lighter model in Settings → DwarfStar (ds4).`,

@@ -1,12 +1,13 @@
 /**
  * Memory vector store (sqlite-vec backed, Phase 4). Uses the real local
- * embedder; self-skips if unavailable.
+ * embedder; self-skips if it or sqlite-vec is unavailable.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { sqliteVecLoads } from '../index-store/testing/sqlite-vec.js';
 import { addToIndex, rebuildIndex, searchIndex } from './vector-index.js';
 
 let dir: string;
@@ -18,6 +19,7 @@ afterEach(async () => {
 });
 
 async function embeddingsWork(): Promise<boolean> {
+  if (!(await sqliteVecLoads())) return false;
   try {
     const { embed } = await import('@bendyline/gezel-inference/internal/memory/embeddings');
     await embed('warmup');
