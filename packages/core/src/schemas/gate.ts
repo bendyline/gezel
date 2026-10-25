@@ -51,7 +51,7 @@ const GateJsonScalarSchema = z.union([z.string(), z.number(), z.boolean(), z.nul
  * Evaluated in-process — zero sandbox spawns — so a gate should keep a
  * cheap `checks` floor even when it also carries scripts.
  */
-export const GateCheckSchema = z.discriminatedUnion('kind', [
+const GateCheckVariants = [
   /** A single file is at least `bytes` long (workspace, or the artifacts drawer when `artifact`). */
   z.object({
     kind: z.literal('minBytes'),
@@ -591,7 +591,15 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     doneWhenMinChars: z.number().int().positive().optional(),
     artifact: z.boolean().optional(),
   }),
-]);
+] as const;
+/**
+ * Named so the declarations that embed a check (every gate, and so every step,
+ * task and craftbook) print this name rather than the whole union again. They
+ * held 65 copies, about 260 KB of the shared `.d.ts` chunk.
+ */
+export interface GateCheckZodSchema
+  extends z.ZodDiscriminatedUnion<typeof GateCheckVariants, 'kind'> {}
+export const GateCheckSchema: GateCheckZodSchema = z.discriminatedUnion('kind', GateCheckVariants);
 export type GateCheck = z.infer<typeof GateCheckSchema>;
 
 /**

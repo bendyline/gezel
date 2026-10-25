@@ -116,7 +116,12 @@ describe('CatalogService against bundled data', () => {
     const detail = await service.get('gezel-template', 'developer');
     expect(detail).not.toBeNull();
     expect(detail!.manifest.kind).toBe('gezel-template');
-    expect(detail!.manifest.version).toBe('1.5.0');
+    // Newest, not a literal: content ships on its own cadence, and a pinned
+    // number made every Developer template release a test edit.
+    const versions = await service.listVersions('gezel-template', 'developer');
+    const newest = versions.find((v) => !v.yanked)?.version;
+    expect(newest).toBeDefined();
+    expect(detail!.manifest.version).toBe(newest);
     expect(detail!.about).toContain('Treat the latest request as the delta');
     expect(detail!.about).toContain('Finish the whole feature path');
     expect(detail!.about).toContain('Data shape, input, handler, persistence, render');

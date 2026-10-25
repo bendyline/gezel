@@ -59,10 +59,12 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // devices, issue triage and project views; no one declaration was at fault.
   // It tripped at 2.10 MB from request tracking; naming ScriptRefSchema's
   // type (`ScriptRefZodSchema`) took out ~100 written-out copies of the
-  // step-hook shape. Name another embedded schema the same way next time.
-  // The largest remain TaskSchema at 149 KB and the four craftbook manifest
-  // schemas at ~66 KB each, in the shared `.d.ts` chunk.)
-  '@bendyline/gezel': 2_100_000, //                    2.10 MB
+  // step-hook shape. It tripped at 2.14 MB after the app image schemas; naming
+  // GateCheckSchema's type (`GateCheckZodSchema`) took out 65 copies of the
+  // gate-check union, ~800 KB unpacked. Name another embedded schema the same
+  // way next time: the step shape, written out 23 times, is the largest repeat
+  // left in the shared `.d.ts` chunk.)
+  '@bendyline/gezel': 2_100_000, //                    2.08 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
   '@bendyline/gezel-script-runtime': 50_000,
