@@ -25,8 +25,12 @@ let gezelHome: string;
 let app: ElectronApplication;
 let page: Page;
 
+// One base for every timestamp: a request is keyed by its task's
+// `requestRef.at`, which must equal the person message's `at`. Reading the
+// clock per call put them a millisecond apart on slower machines.
+const BASE = Date.now() - 30 * 60_000;
 function at(minutes: number): string {
-  return new Date(Date.now() - 30 * 60_000 + minutes * 60_000).toISOString();
+  return new Date(BASE + minutes * 60_000).toISOString();
 }
 
 async function gezel(home: string, id: string, name: string, role: string): Promise<void> {

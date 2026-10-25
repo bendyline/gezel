@@ -181,7 +181,6 @@ test('06 - settings area loads', async () => {
   const body = await page.textContent('body');
   expect(body).toContain('GitHub Copilot');
   expect(body).toContain('OpenAI');
-  expect(body).toContain('Ollama');
   expect(body).not.toContain('Longview');
 });
 

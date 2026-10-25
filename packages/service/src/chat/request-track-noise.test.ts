@@ -51,6 +51,7 @@ async function get<T>(path: string): Promise<T> {
 }
 
 describe('one request, one tracker', () => {
+  // A whole service and a tool-calling turn: ~5 s alone, longer on a busy CI runner.
   it('stays one tracker and one Activity row through a noisy launch, and ends Ready', async () => {
     const store = svc.context.store;
     await store.writeProjectCraftbook('default', {
@@ -131,5 +132,5 @@ describe('one request, one tracker', () => {
       (item) => item.requestKey === track.key || (item.taskRef && refs.has(item.taskRef)),
     );
     expect(rows.map((r) => r.id)).toEqual([`request:${track.key}`]);
-  });
+  }, 30_000);
 });
