@@ -429,7 +429,12 @@ export class PortableTaskRunner {
       if (!existing) this.controllers.delete(ref);
     }
   }
-  async create(projectId: string, body: unknown, beforeSave?: () => Promise<void>): Promise<Task> {
+  async create(
+    projectId: string,
+    body: unknown,
+    beforeSave?: () => Promise<void>,
+    extras: { requestRef?: Task['requestRef'] } = {},
+  ): Promise<Task> {
     const request = CreateTaskRequestSchema.parse(body);
     const book = request.craftbookId
       ? await this.options.resolveCraftbook?.(
@@ -463,12 +468,10 @@ export class PortableTaskRunner {
         gezelId: await this.options.resolveAssignee(projectId, book, mode),
       };
     await beforeSave?.();
-    let task = await this.options.store.createTask(
-      projectId,
-      request,
-      book,
-      this.options.samples ? { samples: this.options.samples } : {},
-    );
+    let task = await this.options.store.createTask(projectId, request, book, {
+      ...(this.options.samples ? { samples: this.options.samples } : {}),
+      ...(extras.requestRef ? { requestRef: extras.requestRef } : {}),
+    });
     task = await this.resolveActiveRole(task);
     this.options.onChange?.(task);
     return task;

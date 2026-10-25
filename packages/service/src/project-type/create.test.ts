@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CatalogService } from '@bendyline/gezel-catalog';
+import { BundledSource, CatalogService } from '@bendyline/gezel-catalog';
 import {
   gezelDir,
   projectCreateTransactionsRoot,
@@ -145,6 +145,62 @@ describe('createTypedProject', () => {
     expect(applied.gezelsCreated).toHaveLength(1);
     expect(applied.gezelsCreated[0]).toMatchObject({ id: 'asel', name: 'Asel' });
     expect((await store.getGezel(existing.id))?.role).toBe('Gardener');
+  });
+
+  // Only a codebase starts with package.json and tsconfig.json; other types
+  // get them lazily, before a Node tool runs.
+  it('gives a code project the Node template and other types none', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'typed-project-code-catalog-'));
+    try {
+      for (const [id, category] of [
+        ['code-shop', 'code'],
+        ['note-pad', 'writing'],
+      ] as const) {
+        const itemDir = join(dataDir, 'project-types', id.slice(0, 2), id);
+        await mkdir(join(itemDir, 'versions', '1.0.0'), { recursive: true });
+        await writeFile(
+          join(itemDir, 'manifest.json'),
+          JSON.stringify({
+            schemaVersion: 1,
+            kind: 'project-type',
+            id,
+            name: id,
+            description: `A ${category} project.`,
+            category,
+            tags: [],
+            maintainer: { name: 'Test' },
+            yankedVersions: [],
+          }),
+        );
+        await writeFile(
+          join(itemDir, 'versions', '1.0.0', 'manifest.json'),
+          JSON.stringify({
+            schemaVersion: 1,
+            version: '1.0.0',
+            releasedAt: '2026-07-06T00:00:00Z',
+          }),
+        );
+      }
+      const fixtureCatalog = new CatalogService([new BundledSource({ dataDir, noIndex: true })]);
+
+      const code = await createTypedProject(
+        { store, catalog: fixtureCatalog },
+        { name: 'Shop Site', projectType: { typeId: 'code-shop' } },
+      );
+      const codeWorkspace = join(projectLocalDir(home, code.project.id), 'workspace');
+      await expect(stat(join(codeWorkspace, 'package.json'))).resolves.toBeDefined();
+      await expect(stat(join(codeWorkspace, 'tsconfig.json'))).resolves.toBeDefined();
+      expect(code.project.projectType?.category).toBe('code');
+
+      const notes = await createTypedProject(
+        { store, catalog: fixtureCatalog },
+        { name: 'Notes', projectType: { typeId: 'note-pad' } },
+      );
+      const notesWorkspace = join(projectLocalDir(home, notes.project.id), 'workspace');
+      await expect(stat(join(notesWorkspace, 'package.json'))).rejects.toThrow();
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
   });
 
   it('stages and commits a complete typed project across externalized roots', async () => {

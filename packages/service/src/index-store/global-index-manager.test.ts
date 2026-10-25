@@ -278,6 +278,16 @@ describe('GlobalIndexManager history mirror', () => {
     expect(await globalIndex.searchHistory({ q: 'Ada', to: '2026-01-15T00:00:00Z' })).toHaveLength(
       1,
     );
+    await history.log({
+      kind: 'tool.called',
+      projectId: 'proj-x',
+      at: '2026-02-02T00:00:00Z',
+      summary: 'Ada wrote notes.md',
+    });
+    await manager.reconcile();
+    expect(await globalIndex.searchHistory({ q: 'Ada' })).toHaveLength(3);
+    const person = await globalIndex.searchHistory({ q: 'Ada', audience: 'person' });
+    expect(person?.map((e) => e.kind).sort()).toEqual(['gezel.created', 'project.created']);
     // Details are searchable and quotes are escaped safely.
     expect(await globalIndex.searchHistory({ q: 'Lovelace' })).toHaveLength(1);
     expect(await globalIndex.searchHistory({ q: '"Ada tribute"' })).toHaveLength(1);

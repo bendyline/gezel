@@ -1,14 +1,12 @@
 import {
   type BoekwachterIssue,
   type NightShiftWindow,
-  type Project,
   createLogger,
-  folderKindOf,
   isActiveDiffpackStatus,
-  isCodingProject,
   nightShiftDayKey,
   projectAllowsAmbientWork,
   projectAllowsNightlyFixes,
+  projectHoldsCode,
   projectNightWorkEnabled,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -329,14 +327,4 @@ async function claimedPaths(
     for (const file of pack.files) out.add(file.path);
   }
   return out;
-}
-
-/**
- * A code folder: the kind recorded when its crew was recruited, else a
- * detected coding type or a linked GitHub repository.
- */
-function projectHoldsCode(project: Project): boolean {
-  const kind = folderKindOf(project);
-  if (kind) return kind === 'code';
-  return isCodingProject(project) || Boolean(project.github?.url);
 }

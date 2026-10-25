@@ -76,6 +76,9 @@ export async function seed(
     missionObjectives: MISSION,
   });
   await client.addGezelToProject(project.id, noor.id);
+  // A codebase, so its Workspace, Tools and Views tabs and the Node template
+  // stay part of the fixture: they now belong to code projects only.
+  await client.updateProject(project.id, { projectTypeId: 'web-app' });
 
   const taskRefs: string[] = [];
   const t1 = await client.createTask(project.id, {

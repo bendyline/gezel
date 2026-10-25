@@ -459,6 +459,9 @@ async function installNow(
     version === 'latest' || version === '*'
       ? formatNpmRegistrySpec(pkg)
       : formatNpmRegistrySpec(pkg, version);
+  // Without a workspace package.json, `pnpm add` would install into the
+  // project's private package.json one directory up.
+  await store.ensureWorkspaceTemplate(projectId);
   const res = await runPnpm(['add', `--config.registry=${registry}`, '--', spec], {
     cwd: workspaceDir,
   });

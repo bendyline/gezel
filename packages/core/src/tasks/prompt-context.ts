@@ -89,6 +89,14 @@ export function isGatedStep(
 ): boolean {
   if (normalizeScriptRefs(step.onExit).length > 0) return true;
   if (step.gate && normalizeStepGate(step.gate).at === 'completion') return true;
+  return isLoopBackStep(step, steps);
+}
+
+/** An outgoing edge of `step` (its `next` or a branch) targets itself or an earlier step. */
+export function isLoopBackStep(
+  step: Pick<CraftbookStep, 'id' | 'next' | 'branches'>,
+  steps: ReadonlyArray<Pick<CraftbookStep, 'id'>>,
+): boolean {
   const idx = steps.findIndex((s) => s.id === step.id);
   if (idx < 0) return false;
   const targets = [...(step.next ? [step.next] : []), ...(step.branches?.map((b) => b.goto) ?? [])];

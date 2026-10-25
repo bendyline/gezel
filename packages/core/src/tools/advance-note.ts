@@ -24,11 +24,16 @@ export function advanceStatusLine(opts: {
   completedName: string;
   nextName: string | undefined;
   status: string;
-  taskTitle: string;
+  /** Undefined when the title is only the craftbook's name (`taskPersonName`). */
+  taskTitle: string | undefined;
   ownerStep?: boolean;
 }): string {
   const done = `Finished "${opts.completedName}"`;
-  if (opts.status === 'complete') return `${done}. "${opts.taskTitle}" is complete.`;
+  if (opts.status === 'complete') {
+    return opts.taskTitle
+      ? `${done}. "${opts.taskTitle}" is complete.`
+      : `${done}. It is complete.`;
+  }
   if (opts.status === 'paused') return `${done}, but the task paused before the next step.`;
   if (!opts.nextName) return `${done}.`;
   if (opts.ownerStep) return `${done}. Next: "${opts.nextName}", which is waiting for your review.`;

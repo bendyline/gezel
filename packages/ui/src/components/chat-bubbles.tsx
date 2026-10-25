@@ -1787,6 +1787,11 @@ export interface StreamingBubbleProps {
   /** Craftbook cards an earlier card for the same task already stands for. */
   hiddenCards?: ReadonlySet<ToolCallCard>;
   /**
+   * A request tracker already says what this turn's work is waiting on, so
+   * the "Still working — silent for …" banner would say it twice.
+   */
+  suppressSilenceBanner?: boolean;
+  /**
    * Session id for the debug-bundle fetch. Same value as
    * `dataSessionId` but typed for the toolbar callback (which can't
    * read DOM data attributes). Optional: when omitted, the debug
@@ -2108,6 +2113,7 @@ export function StreamingBubble({
   dataSessionId,
   debugMode,
   hiddenCards,
+  suppressSilenceBanner = false,
   sessionId,
   question,
   onQuestionAnswered,
@@ -2582,6 +2588,7 @@ export function StreamingBubble({
           !queued &&
           !gpuSwapTask &&
           !awaiting &&
+          !suppressSilenceBanner &&
           silentFor !== null &&
           silentFor >= SILENCE_BANNER_AFTER_S && (
             // Gate on **silent time**, not total elapsed. A turn that's

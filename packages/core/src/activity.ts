@@ -1,6 +1,8 @@
 import type { ActivityItem, ActivityStatusResponse } from './schemas/activity.js';
+import type { ProviderName } from './schemas/gezel.js';
 import type { Question } from './schemas/question.js';
 import type { QueueStatusResponse } from './schemas/queue-status.js';
+import type { RequestTrack } from './schemas/request-track.js';
 import { type Task, type TaskWaitState, taskEffectiveStatus } from './schemas/task.js';
 import { taskActiveAssignee } from './task-execution.js';
 
@@ -12,6 +14,9 @@ export interface ActivityTurn {
   userText: string;
   startedAt: number;
   lastProgressAgoMs?: number;
+  /** The engine is holding this turn (see the `engine_phase` event's `hold`). */
+  engineHold?: 'behind' | 'yielding';
+  providerName?: ProviderName;
 }
 
 export function isReadyQuestion(question: Question): boolean {
@@ -34,6 +39,8 @@ export function resolveActivity(input: {
     gezelId: string;
     taskRef?: string;
   }>;
+  /** Each request becomes one row holding its tasks, sessions and questions. */
+  requests?: readonly RequestTrack[];
 }): ActivityStatusResponse {
   const { queues, tasks } = input;
   const questions = input.questions.filter((q) => !q.answer);
@@ -302,5 +309,72 @@ export function resolveActivity(input: {
       since: existing?.since ?? q.createdAt,
     });
   }
-  return { items: [...items.values()], questions, queues, at: queues.at };
+  if (input.requests?.length) mergeRequests(items, input.requests);
+  const live = input.requests?.filter((r) => r.state !== 'ready' || r.trailing);
+  return {
+    items: [...items.values()],
+    questions,
+    queues,
+    at: queues.at,
+    ...(live?.length ? { requests: live } : {}),
+  };
+}
+
+const REQUEST_SECTIONS: Readonly<Record<RequestTrack['state'], ActivityItem['section']>> = {
+  'needs-you': 'needs-you',
+  working: 'working',
+  waiting: 'next',
+  ready: 'ready',
+  stopped: 'next',
+};
+
+/** "is drafting the invoices" → "Drafting the invoices". */
+function requestDetail(track: RequestTrack): string {
+  const doing = track.line?.doing.replace(/^is /, '') ?? '';
+  const sentence = doing ? `${doing[0]!.toUpperCase()}${doing.slice(1)}.` : 'Ready to look at.';
+  return track.eta && track.state !== 'ready' ? `${sentence} ${track.eta.text}.` : sentence;
+}
+
+/**
+ * Fold every row that belongs to a request into one row for it: a task and
+ * its shards, the step sessions running them, their questions, and the
+ * finished-work receipt. A finished request adds a row only when it absorbed
+ * one, so old work never floods Activity.
+ */
+function mergeRequests(items: Map<string, ActivityItem>, requests: readonly RequestTrack[]): void {
+  for (const track of requests) {
+    const refs = new Set(track.taskRefs);
+    const sessions = new Set([...track.liveSessionIds]);
+    const absorbed: ActivityItem[] = [];
+    for (const [id, item] of items) {
+      const belongs =
+        (item.taskRef && refs.has(item.taskRef)) ||
+        (item.sessionId && sessions.has(item.sessionId) && !id.startsWith('background:'));
+      if (!belongs) continue;
+      absorbed.push(item);
+      items.delete(id);
+    }
+    const live = track.state !== 'ready' || track.trailing === true;
+    if (!live && absorbed.length === 0) continue;
+    const since = absorbed
+      .map((item) => item.since)
+      .filter((at): at is string => Boolean(at))
+      .sort()[0];
+    const id = `request:${track.key}`;
+    items.set(id, {
+      id,
+      section: track.trailing ? 'ready' : REQUEST_SECTIONS[track.state],
+      title: track.summary,
+      detail: requestDetail(track),
+      projectId: track.projectId,
+      sessionId: track.sessionId,
+      ...(track.leadGezelId ? { gezelId: track.leadGezelId } : {}),
+      ...(track.taskRefs[0] ? { taskRef: track.taskRefs[0] } : {}),
+      questionIds: [...new Set([...track.questionIds, ...absorbed.flatMap((i) => i.questionIds)])],
+      since: since ?? track.at,
+      heldByActivity: absorbed.some((item) => item.heldByActivity),
+      scheduled: track.state === 'waiting' && absorbed.every((item) => item.scheduled),
+      requestKey: track.key,
+    });
+  }
 }

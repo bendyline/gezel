@@ -6,9 +6,12 @@
  * one measurement shape the policy here:
  *
  *  - **The engine refuses an external MTP model alongside `--ssd-streaming`**,
- *    aborting at startup. Streaming
- *    is gezel's safe default and the only way the 153 GiB Q4 GGUF runs at all
- *    on a 128 GiB machine, so drafting is unreachable for most installs.
+ *    aborting at startup, for every family except DeepSeek V4.1
+ *    (`general.architecture` `deepseek41`, upstream ee7e840). Streaming is the
+ *    only way the 153 GiB Q4 GGUF runs at all on a 128 GiB machine, so
+ *    drafting is unreachable there. V4.1 keeps its 8.04 GiB drafter resident
+ *    while the target's experts stream, but upstream warns it can still be
+ *    slower than plain decoding, so `auto` never drafts a streamed launch.
  *  - **A support model is required.** Without one there is nothing to draft
  *    with, and ds4 exits on `--dspark` alone ("--dspark requires --mtp-model FILE").
  *  - **It does not pay on Metal.** Measured 2026-08-26, M5 Max, DeepSeek V4
@@ -27,6 +30,22 @@
 /** Which acceleration backend ds4 was launched with. */
 export type Ds4Backend = 'metal' | 'cuda';
 
+/**
+ * Whether ds4 accepts `--mtp-model` alongside `--ssd-streaming` for a target
+ * with this GGUF `general.architecture`. Mirrors the engine's own check
+ * (`DS4_MODEL_FAMILY != DS4_MODEL_FAMILY_DEEPSEEK41` in `ds4_engine_open`);
+ * an unknown architecture is treated as unsupported because the engine aborts.
+ */
+export function ds4DsparkStreamsWithSsd(architecture: string | undefined): boolean {
+  return architecture === 'deepseek41';
+}
+
+/**
+ * Buffers ds4 allocates beside a V4.1 drafter's weights; its startup memory
+ * plan charges `mtp_model.size + 64 MiB` for them.
+ */
+export const DS4_V41_DRAFTER_RUNTIME_BYTES = 64 * 1024 ** 2;
+
 export type Ds4DsparkMode = 'off' | 'on' | 'auto';
 
 export interface Ds4DsparkOptions {
@@ -36,12 +55,15 @@ export interface Ds4DsparkOptions {
   backend: Ds4Backend;
   /** Whether this launch streams experts from SSD. */
   ssdStreaming: boolean;
+  /** The target GGUF's `general.architecture`, when known. */
+  targetArchitecture?: string;
   /** Absolute path to a DSpark support GGUF, if one resolved. */
   supportModelPath?: string;
   /**
-   * Whether the companion still fits once the resident weights are accounted
+   * Whether the companion still fits once the resident weights (or, when
+   * streaming, the resident set plus a minimum expert cache) are accounted
    * for. Defaults to true so callers that cannot weigh it keep the old
-   * behavior. When false the launch keeps its residency and drops drafting —
+   * behavior. When false the launch keeps its memory plan and drops drafting —
    * residency is worth ~9.5x and drafting ~1.05x, so the flag is what yields.
    */
   companionFitsMemory?: boolean;
@@ -93,27 +115,32 @@ export function resolveDs4Dspark(opts: Ds4DsparkOptions): Ds4DsparkDecision {
     };
   }
 
-  if (opts.ssdStreaming) {
+  if (opts.ssdStreaming && !ds4DsparkStreamsWithSsd(opts.targetArchitecture)) {
     return {
       enabled: false,
-      reason: 'SSD streaming is on; ds4 rejects --mtp-model with --ssd-streaming',
+      reason:
+        'SSD streaming is on; ds4 rejects --mtp-model with --ssd-streaming except for DeepSeek V4.1',
       ...(mode === 'on'
         ? {
             unmetRequest:
-              'ds4Dspark=on cannot be honored while SSD streaming is active — ds4 refuses an external --mtp-model with --ssd-streaming. Full residency requires a model that fits this machine with headroom to spare (ds4SsdStreaming=false).',
+              'ds4Dspark=on cannot be honored while SSD streaming is active — ds4 refuses an external --mtp-model with --ssd-streaming for every model but DeepSeek V4.1. Full residency requires a model that fits this machine with headroom to spare (ds4SsdStreaming=false).',
           }
         : {}),
     };
   }
 
   if (opts.companionFitsMemory === false) {
+    const held = opts.ssdStreaming
+      ? 'the resident weights and a minimum expert cache'
+      : 'the resident weights';
     return {
       enabled: false,
-      reason: 'support model does not fit alongside the resident weights',
+      reason: `support model does not fit alongside ${held}`,
       ...(mode === 'on'
         ? {
-            unmetRequest:
-              'ds4Dspark=on cannot be honored: the DSpark support model does not fit in memory alongside the fully resident weights. Drafting was dropped rather than giving up full residency, which is worth far more than drafting.',
+            unmetRequest: opts.ssdStreaming
+              ? `ds4Dspark=on cannot be honored: the DSpark support model does not fit in memory alongside ${held}. Drafting was dropped rather than starving the expert cache.`
+              : 'ds4Dspark=on cannot be honored: the DSpark support model does not fit in memory alongside the fully resident weights. Drafting was dropped rather than giving up full residency, which is worth far more than drafting.',
           }
         : {}),
     };
@@ -128,6 +155,13 @@ export function resolveDs4Dspark(opts: Ds4DsparkOptions): Ds4DsparkDecision {
   }
 
   // auto
+  if (opts.ssdStreaming) {
+    return {
+      enabled: false,
+      reason:
+        'auto: drafting a streamed launch is unmeasured and upstream reports it can be slower; set ds4Dspark=on to draft',
+    };
+  }
   if (opts.backend !== 'cuda') {
     return {
       enabled: false,

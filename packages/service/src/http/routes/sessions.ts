@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   CancelSessionTurnRequestSchema,
   type ChatSessionSource,
@@ -14,6 +15,7 @@ import {
   getEngagementMode,
   isEngagementAllowed,
   isSafeEntityId,
+  nowIso,
   parseTaskRef,
   rewritePromptDraftFileRefs,
   stringifyCraftbookParamValues,
@@ -434,6 +436,9 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       }
     }
 
+    // The person's message is written after the task exists (its receipt
+    // names the task), so its identity is chosen first and stamped on both.
+    const message = { id: randomUUID(), at: nowIso() };
     let task: LaunchTaskFromSessionResponse['task'];
     let dispatched = false;
     try {
@@ -453,7 +458,11 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
           createdBy: { kind: 'user' },
           launchSessionId: id,
         },
-        { craftbookInvocationKey, dispatchEntry: true },
+        {
+          craftbookInvocationKey,
+          dispatchEntry: true,
+          requestRef: { sessionId: id, at: message.at, messageId: message.id },
+        },
       );
       task = launched.task;
       dispatched = launched.dispatch?.enqueued === true;
@@ -467,6 +476,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       userText: text,
       ...(body.draftId ? { draftId: body.draftId } : {}),
       task,
+      message,
     });
     if (body.draftId) {
       try {

@@ -45,4 +45,31 @@ describe('runWorkspaceScript', () => {
       '[{"ok":true}]',
     );
   });
+
+  // A plain project no longer has package.json from creation. A `.js` file
+  // with `import` syntax must still run as a module: the template arrives
+  // before the script, instead of Node reading the project's private
+  // package.json one directory up.
+  it('gives a plain project the Node template before its first script', async () => {
+    if (process.platform === 'win32') return;
+    if (process.platform === 'linux' && !(await canApplyLinuxSystemdSandbox())) return;
+    await expect(store.readProjectWorkspaceFile('default', 'package.json')).resolves.toBeNull();
+
+    await store.writeProjectWorkspaceFile(
+      'default',
+      'scripts/esm.js',
+      "import { writeFileSync } from 'node:fs';\nwriteFileSync('esm.txt', 'ok');\nconsole.log('esm ok');\n",
+    );
+    const result = await runWorkspaceScript(store, {
+      projectId: 'default',
+      scriptPath: 'scripts/esm.js',
+    });
+
+    expect(result).toMatchObject({ ok: true, code: 0 });
+    expect(result.stdout).toContain('esm ok');
+    const pkg = JSON.parse(
+      (await store.readProjectWorkspaceFile('default', 'package.json')) ?? '{}',
+    );
+    expect(pkg.type).toBe('module');
+  });
 });

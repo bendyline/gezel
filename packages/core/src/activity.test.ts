@@ -273,3 +273,57 @@ describe('Activity reflects execution rather than task lifecycle', () => {
     expect(resolve({ tasks: [], queues: queue }).items[0]?.section).toBe('next');
   });
 });
+
+describe('Activity shows one row per request', () => {
+  it("folds the bakery's tasks, shard, sessions and receipt into two rows", async () => {
+    const { resolveRequestTracks } = await import('./request-track/resolve.js');
+    const { stepDurationEstimates } = await import('./request-track/eta.js');
+    const bakery = await import('./request-track/fixtures/bakery.js');
+    const receipt: Question = {
+      id: 'ready-2',
+      projectId: 'default',
+      gezelId: 'mees',
+      sessionId: 'mees-thread',
+      taskRef: 'bakery/2',
+      prompt: '**Price list** is finished.',
+      intent: { kind: 'task-finished', taskRef: 'bakery/2' },
+      createdAt: bakery.T(28),
+    };
+    const tasks = [bakery.invoices, bakery.invoiceShard, bakery.priceList];
+    const inflight = [bakery.draftTurn, bakery.closingTurn];
+    const waiting = [
+      { ref: 'bakery/4', reason: 'provider-busy' as const, gezelId: 'aditya', since: bakery.T(26) },
+    ];
+    const requests = resolveRequestTracks({
+      tasks,
+      threads: new Map([[bakery.meesterThread.id, bakery.meesterThread]]),
+      inflight,
+      waiting,
+      questions: [receipt],
+      leadOf: (projectId) => (projectId === 'bakery' ? 'dejan' : 'mees'),
+      estimates: stepDurationEstimates([]),
+      now: bakery.NOW,
+    });
+    const shared = { tasks, inflight, waiting, questions: [receipt], queues: queues() };
+    // Without requests: a working task, a waiting shard, a live thread and a receipt.
+    expect(resolveActivity(shared).items.length).toBeGreaterThanOrEqual(4);
+
+    const { items, requests: live } = resolveActivity({ ...shared, requests });
+    expect(items.map((i) => [i.id, i.section])).toEqual(
+      expect.arrayContaining([
+        [`request:mees-thread@${bakery.T(0)}`, 'working'],
+        [`request:mees-thread@${bakery.T(20)}`, 'ready'],
+      ]),
+    );
+    expect(items).toHaveLength(2);
+    const working = items.find((i) => i.section === 'working');
+    expect(working).toMatchObject({
+      title: 'Make my October invoices for the three cafe clients',
+      gezelId: 'dejan',
+      sessionId: 'mees-thread',
+    });
+    expect(working?.detail).toMatch(/^Drafting the invoices\. First time here: about/);
+    expect(items.find((i) => i.section === 'ready')?.questionIds).toEqual(['ready-2']);
+    expect(live?.map((r) => r.state)).toEqual(['ready', 'working']);
+  });
+});

@@ -28,6 +28,10 @@ vi.mock('./useOnDeviceLiveTurns.js', async (importOriginal) => ({
   useOnDeviceLiveTurns: () => mockLiveTurns,
 }));
 
+// Null like an app with no ActivityProvider, unless a test sets requests.
+let mockActivity: unknown = null;
+vi.mock('./activity-context.js', () => ({ useActivity: () => mockActivity }));
+
 vi.mock('../shared-chat-events.js', () => ({
   streamSharedAllChatEvents: async function* () {
     // Per-provider phase/stats state is supplied by the hook mock above.
@@ -990,6 +994,35 @@ describe('EngineStatusPill — crowded titlebar', () => {
       ).toBe(false);
     } finally {
       consoleError.mockRestore();
+    }
+  });
+
+  it("names a request's lead and what it is doing, not the specialist", async () => {
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [
+        { id: 'liesel', name: 'Liesel', updatedAt: '2026-08-13T00:00:00.000Z' },
+        { id: 'dejan', name: 'Dejan', updatedAt: '2026-08-13T00:00:00.000Z' },
+      ],
+    } as never);
+    mockActivity = {
+      snapshot: {
+        requests: [
+          {
+            key: 'thread@t',
+            liveSessionIds: ['talkie-session'],
+            leadGezelId: 'dejan',
+            line: { gezelId: 'dejan', doing: 'is drafting the invoices' },
+          },
+        ],
+      },
+    };
+    try {
+      const { talkie } = await pillsAt('full');
+      await waitFor(() => expect(talkie).toHaveTextContent('Dejan'));
+      expect(talkie).toHaveTextContent('drafting the invoices');
+      expect(talkie).not.toHaveTextContent('Liesel');
+    } finally {
+      mockActivity = null;
     }
   });
 

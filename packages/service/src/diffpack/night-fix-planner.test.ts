@@ -227,6 +227,22 @@ describe('the project gates', () => {
     });
     expect((await planProjectNightFixes(makeDeps(), projectId)).taskRef).toBeTruthy();
   });
+
+  // A Software Project made from the catalog is a codebase before detection
+  // has seen a file; it used to wait until then.
+  it('counts a project made from a code-category type as code', async () => {
+    await store.updateProject(projectId, {
+      properties: { [FOLDER_KIND_PROPERTY]: '' },
+      projectType: {
+        id: 'software-project',
+        version: '1.0.0',
+        source: 'bundled',
+        category: 'code',
+        appliedAt: '2026-10-07T00:00:00.000Z',
+      },
+    });
+    expect((await planProjectNightFixes(makeDeps(), projectId)).taskRef).toBeTruthy();
+  });
 });
 
 describe('issue selection', () => {

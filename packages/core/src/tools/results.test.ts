@@ -4,9 +4,11 @@ import {
   WORKSPACE_READ_MAX_RESULT_BYTES,
   type WorkspaceReadFileSuccess,
 } from '../schemas/api.js';
+import type { Task } from '../schemas/task.js';
 import { MessageGezelInputSchema } from './inputs/team.js';
 import {
   REANCHOR_MAX_CHARS,
+  advanceTaskStepText,
   artifactCompletionHint,
   askUserQuestionText,
   cappedWorkspaceReadEnd,
@@ -457,5 +459,52 @@ describe('create_task for a colleague', () => {
       /^Next: call message_gezel\(\{ gezel: "eval-colleague", message: "new task crew\/1 — Write the crew note: <one-line ask>" \}\)\. eval-colleague has not been told about this task and will not start it until you do\./,
     );
     expect(createTaskText(created, { dispatch: true })).not.toContain('Next: call message_gezel');
+  });
+});
+
+// Local models end a step's turn on `advance_task_step` and show the result's
+// first paragraph as the gezel's reply (terminal-tool-policy.ts), so it is
+// the one part of the result a person reads.
+describe('advanceTaskStepText first paragraph', () => {
+  const advanced = (status: string, activeStepId: string | undefined, title = 'Weekly posts') =>
+    ({
+      projectId: 'shop',
+      num: 7,
+      ref: 'shop/7',
+      title,
+      status,
+      activeStepId,
+      craftbook: {
+        id: 'report-pdf',
+        name: 'Formatted Report',
+        steps: [
+          { id: 'draft', name: 'Draft the posts' },
+          { id: 'review', name: 'Owner Review', assignee: { kind: 'user' } },
+          { id: 'publish', name: 'Publish', assignee: { kind: 'gezel', gezelId: 'esra' } },
+        ],
+      },
+    }) as unknown as Task;
+
+  const firstParagraph = (task: Task) =>
+    advanceTaskStepText('shop/7', 'draft', task).split(/\n\s*\n/)[0] ?? '';
+
+  it.each([
+    ['active', 'publish'],
+    ['active', 'review'],
+    ['paused', 'publish'],
+    ['complete', undefined],
+  ])('names no ref, step id or bookkeeping when the task is %s', (status, active) => {
+    const line = firstParagraph(advanced(status, active));
+    expect(line).toMatch(/^Finished "Draft the posts"/);
+    expect(line).not.toMatch(/shop\/7|"draft"|Active step|esra|report-pdf/);
+  });
+
+  it("closes on the person's title, never the craftbook's name", () => {
+    expect(firstParagraph(advanced('complete', undefined))).toContain(
+      '"Weekly posts" is complete.',
+    );
+    expect(firstParagraph(advanced('complete', undefined, 'Formatted Report'))).toBe(
+      'Finished "Draft the posts". It is complete.',
+    );
   });
 });

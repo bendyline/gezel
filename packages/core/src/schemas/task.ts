@@ -528,6 +528,22 @@ export const TaskSchema = z.object({
   /** Chat session whose turn launched this task, when one exists. */
   launchSessionId: z.string().optional(),
   /**
+   * The person's message this task is working on: the thread and the
+   * message's timestamp (with its id when the host stamped one). Every task a
+   * request causes carries the same ref, so a request's progress reads as one
+   * tracker however many tasks and sessions the crew used. Stamped by the
+   * service at create (`deriveTaskRequestRef`) and inherited by fanout
+   * children; never set by callers. Absent on older tasks, which derive it at
+   * read time.
+   */
+  requestRef: z
+    .object({
+      sessionId: z.string(),
+      at: z.string(),
+      messageId: z.string().optional(),
+    })
+    .optional(),
+  /**
    * This task's working folder inside the project's ARTIFACTS drawer
    * (e.g. `tasks/12`). Stamped by the service at create time — never by
    * callers — and inherited verbatim by fanout children: shards write

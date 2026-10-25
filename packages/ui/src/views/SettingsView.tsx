@@ -1446,12 +1446,18 @@ function DaemonSettingsView() {
   // technically launch the engine but can't stream its models at a usable
   // speed. `totalRamBytes` is null until the probe answers, and the helper
   // skips the check then rather than reading unknown as too-small.
+  // The same facts the DwarfStar tab itself reads: with fewer, the tab
+  // showed on a machine whose daemon has no build and then said so inside.
   const showDs4Provider =
     provider === 'ds4' ||
     nightShiftProvider === 'ds4' ||
     detectDs4Availability({
       externalBaseUrl: config?.ds4BaseUrl,
       totalRamBytes: totalRamBytes ?? undefined,
+      ds4ServerBundled: health?.ds4ServerBundled,
+      serverPlatform: health?.platform,
+      detectedBackend: health?.llamaCppDetectedBackend,
+      gpuVendor: health?.llamaCppDetectedVendor,
     }).status !== 'unavailable';
 
   // GitHub Copilot needs GitHub's proprietary CLI, which we don't ship — it's
@@ -1625,9 +1631,40 @@ function DaemonSettingsView() {
     { id: 'ollama', label: 'Ollama' },
   ];
 
+  // Developer areas show in debug mode, or once this install uses them, so
+  // nobody loses a setting they rely on.
+  const [sharedToolsetCount, setSharedToolsetCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listInstalledToolsets({ kind: 'shared' })
+      .then((res) => {
+        if (!cancelled) setSharedToolsetCount(res.toolsets.length);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const usesProvider = (name: ProviderName) =>
+    provider === name ||
+    nightShiftProvider === name ||
+    Boolean(config?.defaultModel?.[name as keyof NonNullable<typeof config.defaultModel>]);
+  const developerAreaShown: Partial<Record<string, boolean>> = {
+    ollama: usesProvider('ollama') || Boolean(config?.ollamaBaseUrl),
+    codexCli: usesProvider('codex-cli') || Boolean(config?.codexCli),
+    anthropicCli: usesProvider('anthropic-cli') || Boolean(config?.anthropicCli),
+    remoteServers: showRemoteProvider || config?.remoteServing?.enabled === true,
+    // Unknown until the listing answers; the tab stays until it says empty.
+    toolsets: sharedToolsetCount === null || sharedToolsetCount > 0,
+  };
+  const developerAreaKey = JSON.stringify(developerAreaShown);
+
   const sections = useMemo(() => {
     const all = buildSections(uiPlatform);
+    const shown = JSON.parse(developerAreaKey) as Partial<Record<string, boolean>>;
     return all.filter((s) => {
+      if (config?.debugMode !== true && shown[s.id] === false) return false;
       if (s.id === 'mlx' && !isDarwin) return false;
       // Keep the section available for supported native installs, configured
       // external servers, and an already-selected provider. The latter two
@@ -1654,6 +1691,7 @@ function DaemonSettingsView() {
     externalChatBlocked,
     config?.debugMode,
     config?.showWorkInProgressFeatures,
+    developerAreaKey,
   ]);
 
   // Landing on a hidden tab is reachable two ways: the posture drops to Super

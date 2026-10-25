@@ -756,3 +756,54 @@ describe('Activity crew rows', () => {
     expect(api.cancelProviderQueueItem).toHaveBeenCalledWith('mlx', 8);
   });
 });
+
+describe('Activity — a request is one row', () => {
+  it('shows its tracker and opens the thread it was asked in', async () => {
+    const base = snapshot([]);
+    const track = {
+      key: 'mees-thread@2026-10-02T11:58:00.000Z',
+      sessionId: 'mees-thread',
+      projectId: 'default',
+      at: '2026-10-02T11:58:00.000Z',
+      summary: 'Make my October invoices',
+      kind: 'work' as const,
+      leadGezelId: 'maya',
+      stop: 'making' as const,
+      state: 'working' as const,
+      line: { gezelId: 'maya', doing: 'is drafting the invoices' },
+      taskRefs: ['shop/1'],
+      liveSessionIds: ['step-draft'],
+      crew: [],
+      questionIds: [],
+    };
+    vi.mocked(api.getActivityStatus).mockResolvedValue({
+      ...base,
+      items: [
+        {
+          id: `request:${track.key}`,
+          section: 'working',
+          title: track.summary,
+          detail: 'Drafting the invoices.',
+          projectId: 'default',
+          sessionId: 'mees-thread',
+          taskRef: 'shop/1',
+          gezelId: 'maya',
+          questionIds: [],
+          requestKey: track.key,
+        },
+      ],
+      requests: [track],
+    });
+    render(
+      <ActivityProvider>
+        <ActivityControl />
+      </ActivityProvider>,
+    );
+    await userEvent.click(await screen.findByRole('button', { name: /^Activity/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'What’s going on' });
+    const tracker = await within(dialog).findByTestId('request-tracker');
+    expect(within(tracker).getByText('Making it')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Open chat' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'View task details' })).toBeNull();
+  });
+});

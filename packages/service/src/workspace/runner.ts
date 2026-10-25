@@ -65,6 +65,9 @@ export async function runWorkspaceScript(
   if (!gate.ok) {
     throw new WorkspaceWriteDeniedError(gate);
   }
+  // Node resolves a script's module type from the nearest package.json; with
+  // none in the workspace it would read the project's private one above it.
+  await store.ensureWorkspaceTemplate(opts.projectId);
 
   const workspaceDir = gate.workspaceDir;
   const scriptAbs = safeJoin(workspaceDir, opts.scriptPath);

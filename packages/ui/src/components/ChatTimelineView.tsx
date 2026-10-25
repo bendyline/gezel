@@ -45,6 +45,7 @@ import {
   writeIndexingReceipts,
 } from './IndexingReceipt.js';
 import { QueuedTaskBubble } from './QueuedTaskBubble.js';
+import { RequestTracker } from './RequestTracker.js';
 import { TerminalBubble } from './TerminalBubble.js';
 import { TerminalStreamingBubble } from './TerminalStreamingBubble.js';
 import { WorkingNotes } from './WorkingNotes.js';
@@ -91,11 +92,21 @@ import { FrameCoalescedItem, FrameCoalescedLiveStickyHeader } from './frame-coal
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
 import type { QueuedTaskEntry } from './queued-task-entries.js';
+import {
+  isAbsorbedCrewIntro,
+  isTrackedWork,
+  isTrackedWrapUp,
+  requestKeyOfRoot,
+  trackedSessions,
+  trackedTaskCards,
+  trackedTaskRefs,
+} from './request-track-placement.js';
 import { nestChildSessionThreads } from './session-thread-nesting.js';
 import { compareTimelineRows, nextTerminalBottomGraceExpiry } from './timeline-row-order.js';
 import { buildTimelineThreads } from './timeline-threads.js';
 import { useChatNarrationMode } from './useChatNarrationMode.js';
 import { useDebugMode } from './useDebugMode.js';
+import { useRequestTracks } from './useRequestTracks.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 const PAGE_SIZE = 100;
@@ -466,6 +477,25 @@ export function ChatTimelineView({
     if (previous !== 'off' && narrationMode === 'off') chatNarrationQueue.stop();
   }, [narrationMode]);
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
+  // Live, so flipping debug mode in Settings re-renders open conversations.
+  const debugMode = useDebugMode();
+  // One tracker per request in the threads shown here (RequestTracker).
+  // Outside debug mode the work it tracks keeps out of the thread.
+  const topSessionIds = useMemo(
+    () => [
+      ...new Set(messages.filter((m) => !m.taskRef && !m.parentSession).map((m) => m.sessionId)),
+    ],
+    [messages],
+  );
+  const { tracks: requestTracks, loaded: requestsLoaded } = useRequestTracks(topSessionIds);
+  const trackedRefs = useMemo(
+    () => (debugMode ? new Set<string>() : trackedTaskRefs(requestTracks.values())),
+    [debugMode, requestTracks],
+  );
+  const quietSessions = useMemo(
+    () => (debugMode ? new Set<string>() : trackedSessions(requestTracks.values())),
+    [debugMode, requestTracks],
+  );
   const onAttentionChangeRef = useRef(onAttentionChange);
   onAttentionChangeRef.current = onAttentionChange;
   const failedTurn = messages.some((m) => Boolean(m.sessionLastTurnError));
@@ -497,8 +527,11 @@ export function ChatTimelineView({
   // every change is fine.
   useEffect(() => {
     if (!onTaskReference) return;
+    // The rail cannot take a task back, so wait to learn which are tracked.
+    if (!debugMode && !requestsLoaded) return;
     for (const m of messages) {
-      if (m.taskRef) {
+      // A tracked request's tracker is its card; the rail stays for the rest.
+      if (m.taskRef && !trackedRefs.has(m.taskRef)) {
         const scoped = !!activeSessionId && m.sessionId === activeSessionId;
         onTaskReference(m.taskRef, { scoped });
       }
@@ -506,11 +539,12 @@ export function ChatTimelineView({
         // A wrap-up shows the finished thing in the thread itself.
         const wrappedUp = m.synthetic === 'task-wrapup';
         for (const ref of m.referencedTasks) {
+          if (trackedRefs.has(ref)) continue;
           onTaskReference(ref, wrappedUp ? { wrappedUp } : undefined);
         }
       }
     }
-  }, [messages, activeSessionId, onTaskReference]);
+  }, [messages, activeSessionId, onTaskReference, trackedRefs, debugMode, requestsLoaded]);
   // Rebuild the file-reference MRU from persisted chat rows as history loads.
   // This complements the live tool-event path: parsed artifact mentions and
   // tool calls from before a remount remain available to `/open`, but passive
@@ -980,8 +1014,6 @@ export function ChatTimelineView({
   const [defaultModelByProvider, setDefaultModelByProvider] = useState<
     Partial<Record<ProviderName, string>>
   >({});
-  // Live, so flipping debug mode in Settings re-renders open conversations.
-  const debugMode = useDebugMode();
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -2557,12 +2589,14 @@ export function ChatTimelineView({
     }
     return queuedTasks.filter((entry) => {
       if (streaming.has(entry.task.ref)) return false;
+      // Its tracker already says it is waiting, and why.
+      if (trackedRefs.has(entry.task.ref)) return false;
       const sid = entry.wait.sessionId;
       if (!sid) return true;
       if (liveRef.current.has(sid)) return false;
       return !messages.some((m) => m.sessionId === sid);
     });
-  }, [queuedTasks, messages, liveStructureVersion]);
+  }, [queuedTasks, messages, liveStructureVersion, trackedRefs]);
 
   // Auto-scroll: snapshot whether the user is near the bottom *before*
   // every render, then if so, snap to the bottom *after*. If they were
@@ -3437,13 +3471,17 @@ export function ChatTimelineView({
   // stands for it (craftbook-card-dedupe.ts). A fold keeps its full
   // transcript, and debug mode shows every card.
   const inFoldedSession = (sid: string) => foldNested && (sessionDepthById.get(sid) ?? 0) > 0;
+  const shownMessages = messages.filter((m) => !inFoldedSession(m.sessionId));
   const cardDedupe = debugMode
     ? null
     : craftbookCardDedupe(
-        messages
-          .filter((m) => !inFoldedSession(m.sessionId))
-          .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)),
+        [...shownMessages].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)),
       );
+  // A tracked request's tracker stands for every card of its work.
+  const hiddenCards = cardDedupe
+    ? new Set([...cardDedupe.hidden, ...trackedTaskCards(shownMessages, trackedRefs)])
+    : null;
+  const liveOwnedRefs = cardDedupe ? new Set([...cardDedupe.owned, ...trackedRefs]) : null;
   const els: React.ReactNode[] = [];
   // The open Working notes fold, collecting the nested sessions under the
   // turn that launched them (see foldWorkingNotes).
@@ -3452,8 +3490,11 @@ export function ChatTimelineView({
     nodes: React.ReactNode[];
     sessions: string[];
     names: string[];
+    /** The tracked request's lead, who speaks for the crew in the fold's title. */
+    lead?: string;
     error?: string;
   } | null = null;
+  let foldLead: string | undefined;
   const flushFold = () => {
     if (!fold) return;
     const done = fold;
@@ -3461,7 +3502,7 @@ export function ChatTimelineView({
     els.push(
       <WorkingNotes
         key={done.key}
-        names={done.names}
+        names={done.lead ? [done.lead] : done.names}
         live={done.sessions.some((sid) => liveRef.current.has(sid))}
         needsYou={done.sessions.some((sid) => openQuestionSessions.has(sid))}
         {...(done.error ? { error: done.error } : {})}
@@ -3572,6 +3613,8 @@ export function ChatTimelineView({
           cardAcknowledged: acknowledgedErrorProjects.has(m.projectId),
         });
     if (shownElsewhere === 'live') return null;
+    // A crew member joining tracked work is under the tracker's "Who's helping?".
+    if (isAbsorbedCrewIntro(m, trackedRefs)) return null;
     const bubbleWarnings = shownElsewhere === 'card' ? undefined : m.warnings;
     return (
       <MessageBubble
@@ -3579,7 +3622,7 @@ export function ChatTimelineView({
         dataMsgId={`msg:${m.sessionId}:${m.at}:${m.role}`}
         dataSessionId={m.sessionId}
         debugMode={debugMode}
-        {...(cardDedupe && cardDedupe.hidden.size > 0 ? { hiddenCards: cardDedupe.hidden } : {})}
+        {...(hiddenCards && hiddenCards.size > 0 ? { hiddenCards } : {})}
         sessionId={m.sessionId}
         messageAt={m.at}
         role={m.role}
@@ -3619,7 +3662,9 @@ export function ChatTimelineView({
         projectId={m.projectId}
         mediaProvider={getReadonlyGezelMediaProvider(m.projectId, m.sessionId)}
         {...(files.length > 0 ? { referencedFiles: files } : {})}
-        {...(m.deliverable ? { deliverable: m.deliverable } : {})}
+        {...(m.deliverable && !isTrackedWrapUp(m, trackedRefs)
+          ? { deliverable: m.deliverable }
+          : {})}
         {...(m.retrieval && m.retrieval.hits.length > 0 ? { retrieval: m.retrieval } : {})}
         {...(m.grounding ? { grounding: m.grounding } : {})}
         {...(m.referencedTasks ? { referencedTasks: m.referencedTasks } : {})}
@@ -3816,11 +3861,12 @@ export function ChatTimelineView({
           : {})}
         debugMode={debugMode}
         {...(() => {
-          if (!cardDedupe || inFoldedSession(sessionId)) return {};
+          if (!liveOwnedRefs || inFoldedSession(sessionId)) return {};
           const tools = slot.segments.flatMap((seg) => (seg.kind === 'tool' ? [seg.tool] : []));
-          const hiddenCards = liveCardsToHide(tools, cardDedupe.owned);
-          return hiddenCards.size > 0 ? { hiddenCards } : {};
+          const liveHidden = liveCardsToHide(tools, liveOwnedRefs);
+          return liveHidden.size > 0 ? { hiddenCards: liveHidden } : {};
         })()}
+        {...(quietSessions.has(sessionId) ? { suppressSilenceBanner: true } : {})}
         sessionId={sessionId}
       />,
     );
@@ -4006,8 +4052,15 @@ export function ChatTimelineView({
     }
     if (!nestedHere) flushFold();
     if (sessionDepth === 0) emitQueuedBefore(newestActivityMs(item));
+    if (sessionDepth === 0) foldLead = undefined;
     if (nestedHere && !fold) {
-      fold = { key: `working-notes:${sid}:${item.at}`, nodes: [], sessions: [], names: [] };
+      fold = {
+        key: `working-notes:${sid}:${item.at}`,
+        nodes: [],
+        sessions: [],
+        names: [],
+        ...(foldLead ? { lead: foldLead } : {}),
+      };
     }
     const out = nestedHere && fold ? fold.nodes : els;
     if (nestedHere && fold && !fold.sessions.includes(sid)) {
@@ -4128,6 +4181,35 @@ export function ChatTimelineView({
         <div key="replies" className="timeline-thread-replies">
           {replyEls}
         </div>,
+      );
+    }
+    // The person's request closes its own thread with its tracker.
+    const requestKey = item.root ? requestKeyOfRoot(item.root.msg) : undefined;
+    const track = requestKey ? requestTracks.get(requestKey) : undefined;
+    if (isTrackedWork(track)) {
+      const leadGezel = track.leadGezelId ? gezels.get(track.leadGezelId) : undefined;
+      if (sessionDepth === 0 && leadGezel) {
+        foldLead = displayName(
+          { name: leadGezel.name, roleBasedName: leadGezel.roleBasedName },
+          roleBasedNameOnlyMode,
+        );
+      }
+      children.push(
+        <RequestTracker
+          key={`request:${track.key}`}
+          track={track}
+          gezels={gezels}
+          debugMode={debugMode}
+          roleBasedNameOnlyMode={roleBasedNameOnlyMode}
+          {...(onArtifactReference || onWorkspaceReference
+            ? {
+                onOpenFile: (file: ReferencedFile) => {
+                  if (file.kind === 'workspace') onWorkspaceReference?.(file.path, track.projectId);
+                  else onArtifactReference?.(file.path, track.projectId);
+                },
+              }
+            : {})}
+        />,
       );
     }
     // Top-level conversations keep the ordinary trigger→reply rail when

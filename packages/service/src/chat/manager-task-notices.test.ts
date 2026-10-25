@@ -78,6 +78,18 @@ describe('ChatManager — crew introduction', () => {
     );
     // The thread's own gezel needs no introduction.
     await expect(manager.postCrewIntroduction(task, 'ada', step)).resolves.toBeNull();
+
+    // With a lead of its own, the lead speaks for the crew.
+    const lead = await store.createGezel({ name: 'Dejan', role: 'Voorman' });
+    const omroeper = await store.createGezel({ name: 'Noor', role: 'Omroeper' });
+    const led = { ...task, assignee: { kind: 'gezel', gezelId: lead.id } } as Task;
+    await manager.postCrewIntroduction(led, omroeper.id, {
+      id: 'read',
+      name: 'Record it',
+    } as never);
+    expect((await store.getSession('ada', thread.id))?.messages.at(-1)?.content).toBe(
+      '**Dejan** asked **Noor** (Omroeper — social posts) to help with **Bakery weekly admin**. Noor starts with "Record it".',
+    );
   });
 
   // The UX review: the composer addressed a voorman nobody had introduced,
@@ -165,6 +177,31 @@ describe('ChatManager — task wrap-up', () => {
 
   // The owner used to learn a task was done from the worker's tool receipt
   // ("Active step is now "(none)". Task is now complete (terminal step).").
+  it("announces finished work in the project lead's name", async () => {
+    const lead = await store.createGezel({ name: 'Dejan', role: 'Voorman' });
+    const bakery = await store.createProject({ name: 'Bakery' });
+    await store.updateProject(bakery.id, { voormanGezelId: lead.id });
+    const thread = await manager.createSession({ gezelId: 'ada' });
+    const settled: Array<{ gezelId?: string; title: string }> = [];
+    const unsubscribe = events.subscribeProject('default', (env) => {
+      if (env.event.type === 'task_settled') settled.push(env.event);
+    });
+    const task = {
+      projectId: bakery.id,
+      num: 1,
+      ref: `${bakery.id}/1`,
+      title: 'Formatted Report',
+      status: 'complete',
+      launchSessionId: thread.id,
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      craftbook: { id: 'report-pdf', name: 'Formatted Report', steps: [] },
+    } as unknown as Task;
+    await manager.postTaskWrapUp(task, 'complete');
+    unsubscribe();
+    expect(settled).toHaveLength(1);
+    expect(settled[0]?.gezelId).toBe(lead.id);
+  });
+
   it('tells the launching thread what the task made and raises task_settled', async () => {
     const thread = await manager.createSession({ gezelId: 'ada' });
     const worker = await manager.createSession({

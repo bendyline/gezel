@@ -1,6 +1,7 @@
 import {
   type Ds4DsparkOptions,
   ds4DsparkArgs,
+  ds4DsparkStreamsWithSsd,
   resolveDs4Dspark,
 } from '@bendyline/gezel-inference/internal/providers/ds4/dspark';
 import { describe, expect, it } from 'vitest';
@@ -47,14 +48,61 @@ describe('DS4 DSpark policy', () => {
   // The engine aborts at startup on this combination rather than ignoring the
   // flag, so resolving it to `enabled` would take the whole session down.
   it('refuses to draft while SSD streaming, and says so when asked to', () => {
-    const auto = resolveDs4Dspark(eligible({ ssdStreaming: true }));
-    expect(auto.enabled).toBe(false);
-    expect(auto.reason).toMatch(/ssd.streaming/i);
-    expect(auto.unmetRequest).toBeUndefined();
+    for (const targetArchitecture of [undefined, 'deepseek4', 'glm-dsa', 'qwen4exp']) {
+      const auto = resolveDs4Dspark(eligible({ ssdStreaming: true, targetArchitecture }));
+      expect(auto.enabled).toBe(false);
+      expect(auto.reason).toMatch(/ssd.streaming/i);
+      expect(auto.unmetRequest).toBeUndefined();
 
-    const asked = resolveDs4Dspark(eligible({ mode: 'on', ssdStreaming: true }));
-    expect(asked.enabled).toBe(false);
-    expect(asked.unmetRequest).toMatch(/ssd streaming/i);
+      const asked = resolveDs4Dspark(
+        eligible({ mode: 'on', ssdStreaming: true, targetArchitecture }),
+      );
+      expect(asked.enabled).toBe(false);
+      expect(asked.unmetRequest).toMatch(/ssd streaming/i);
+    }
+  });
+
+  // ds4 ee7e840 accepts --mtp-model with --ssd-streaming for V4.1 only.
+  it('drafts a streamed DeepSeek V4.1 launch when asked to', () => {
+    const d = resolveDs4Dspark(
+      eligible({ mode: 'on', ssdStreaming: true, targetArchitecture: 'deepseek41' }),
+    );
+    expect(d.enabled).toBe(true);
+    expect(ds4DsparkArgs(d)).toEqual(['--dspark', '--mtp-model', SUPPORT]);
+  });
+
+  // Upstream reports V4.1 drafting can be slower than plain decode, and a
+  // streamed launch has not been measured here, so auto stays out of it.
+  it('does not draft a streamed V4.1 launch under auto, and does not warn', () => {
+    for (const backend of ['cuda', 'metal'] as const) {
+      const d = resolveDs4Dspark(
+        eligible({ backend, ssdStreaming: true, targetArchitecture: 'deepseek41' }),
+      );
+      expect(d.enabled).toBe(false);
+      expect(d.reason).toMatch(/ds4Dspark=on/);
+      expect(d.unmetRequest).toBeUndefined();
+    }
+  });
+
+  it('drops streamed V4.1 drafting when the drafter would starve the expert cache', () => {
+    const d = resolveDs4Dspark(
+      eligible({
+        mode: 'on',
+        ssdStreaming: true,
+        targetArchitecture: 'deepseek41',
+        companionFitsMemory: false,
+      }),
+    );
+    expect(d.enabled).toBe(false);
+    expect(d.reason).toMatch(/minimum expert cache/);
+    expect(d.unmetRequest).toMatch(/expert cache/);
+  });
+
+  it('allows streamed drafting only for the deepseek41 architecture', () => {
+    expect(ds4DsparkStreamsWithSsd('deepseek41')).toBe(true);
+    for (const arch of [undefined, '', 'deepseek4', 'glm-dsa', 'glm5-next', 'qwen4exp']) {
+      expect(ds4DsparkStreamsWithSsd(arch)).toBe(false);
+    }
   });
 
   it('cannot draft without a support model, and says so when asked to', () => {
@@ -85,6 +133,8 @@ describe('DS4 DSpark policy', () => {
       eligible({ mode: 'on' }),
       eligible({ backend: 'metal' }),
       eligible({ ssdStreaming: true }),
+      eligible({ ssdStreaming: true, targetArchitecture: 'deepseek41' }),
+      eligible({ mode: 'on', ssdStreaming: true, targetArchitecture: 'deepseek41' }),
       eligible({ supportModelPath: undefined }),
     ];
     for (const c of cases) expect(resolveDs4Dspark(c).reason).toMatch(/\S/);

@@ -137,6 +137,13 @@ describe('POST /api/sessions/:id/launch-task', () => {
       content: 'A short deck about Delft',
       draftId: draft.id,
     });
+    // The task names the message it answers, written after the task exists.
+    expect(out.userMessage.id).toEqual(expect.any(String));
+    expect(out.task.requestRef).toEqual({
+      sessionId: session.id,
+      at: out.userMessage.at,
+      messageId: out.userMessage.id,
+    });
     expect(out.receipt.synthetic).toBe('craftbook-launch');
     expect(out.receipt.toolCalls?.[0]?.card).toMatchObject({
       kind: 'craftbook-start',
@@ -158,6 +165,38 @@ describe('POST /api/sessions/:id/launch-task', () => {
     ).json()) as PromptDraft;
     expect(sentDraft.status).toBe('sent');
     expect(sentDraft.sentSessionId).toBe(session.id);
+  });
+
+  it("stamps a task a gezel launched mid-turn with the person's latest message", async () => {
+    // A project of its own: later cases count this project's tasks.
+    const own = (await svc.context.store.createProject({ name: 'Request identity' })).id;
+    const session = await openSession(own);
+    await svc.context.chat.send(session.id, 'Make my October invoices');
+    const stored = await svc.context.chat.getSessionRecord(session.id);
+    const asked = stored?.messages.find((m) => m.role === 'user');
+    expect(asked?.id).toEqual(expect.any(String));
+
+    // What the MCP server sends when a model calls invoke_craftbook.
+    const task = await svc.context.tasks.create(own, {
+      title: 'October invoices',
+      steps: [{ name: 'Draft' }],
+      launchSessionId: session.id,
+    });
+    expect(task.requestRef).toEqual({ sessionId: session.id, at: asked?.at, messageId: asked?.id });
+
+    // A step session's task launch answers the same request.
+    const step = await svc.context.chat.createSession({
+      gezelId,
+      projectId: own,
+      taskRef: task.ref,
+      parentSession: { sessionId: session.id, gezelId, kind: 'task-entry' },
+    });
+    const nested = await svc.context.tasks.create(own, {
+      title: 'Invoice PDF',
+      steps: [{ name: 'Render' }],
+      launchSessionId: step.id,
+    });
+    expect(nested.requestRef).toEqual(task.requestRef);
   });
 
   it('answers a retried POST with the same task and receipt, appending nothing', async () => {

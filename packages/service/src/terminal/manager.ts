@@ -229,6 +229,9 @@ export class TerminalManager {
     let wsRoot: string | null = null;
     try {
       wsRoot = await this.store.projectWorkspaceDir(projectId);
+      // `npm i` typed here would otherwise install into the project's private
+      // package.json above an internal workspace that has none yet.
+      await this.store.ensureWorkspaceTemplate(projectId);
     } catch {
       /* fall through; executeAndEmit will surface the error */
     }

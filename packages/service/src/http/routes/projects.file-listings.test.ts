@@ -102,6 +102,17 @@ describe('listings with hidden=1', () => {
     expect(paths).toContain('reports/summary.md');
   });
 
+  it('artifacts hides composer drafts by default and shows them on request', async () => {
+    const artifactsDir = svc.context.store.projectArtifactsDir(projectId);
+    await mkdir(join(artifactsDir, 'prompts', '2026-10-23-0001'), { recursive: true });
+    await writeFile(join(artifactsDir, 'prompts', '2026-10-23-0001', 'draft.json'), '{}');
+
+    const plain = await client.listProjectArtifacts(projectId, '', true);
+    expect(plain.files.map((f) => f.path).some((p) => p.startsWith('prompts'))).toBe(false);
+    const hidden = await client.listProjectArtifacts(projectId, '', true, { hidden: true });
+    expect(hidden.files.map((f) => f.path)).toContain('prompts/2026-10-23-0001/draft.json');
+  });
+
   it('shallow artifact listings follow the same rule', async () => {
     const plain = await client.listProjectArtifacts(projectId);
     expect(plain.files.map((f) => f.name)).not.toContain('shadow');

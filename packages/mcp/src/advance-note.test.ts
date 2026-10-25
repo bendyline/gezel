@@ -16,6 +16,12 @@ describe('advanceStatusLine', () => {
     expect(line).not.toMatch(/default\/|Active step|terminal step/);
   });
 
+  it("never closes on the craftbook's own name", () => {
+    expect(
+      advanceStatusLine({ ...base, taskTitle: undefined, nextName: undefined, status: 'complete' }),
+    ).toBe('Finished "Scope the Week". It is complete.');
+  });
+
   it('hands an owner step to the person', () => {
     expect(
       advanceStatusLine({ ...base, nextName: 'Owner Review', status: 'active', ownerStep: true }),

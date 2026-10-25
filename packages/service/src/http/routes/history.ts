@@ -60,6 +60,7 @@ export function historyRoutes(ctx: ServiceContext): Hono {
       to: c.req.query('to') || undefined,
       q: c.req.query('q') || undefined,
       limit: parseIntOr(c.req.query('limit'), 200),
+      ...(c.req.query('audience') === 'person' ? { audience: 'person' as const } : {}),
     };
     const include = c.req.query('include');
     if (include === 'events') {

@@ -224,6 +224,24 @@ describe('HistoryView', () => {
     expect(within(detail).queryByText('Diff')).not.toBeInTheDocument();
   });
 
+  it('lists what happened to the work outside debug mode, and everything in it', async () => {
+    render(<HistoryView />);
+    await waitFor(() =>
+      expect(api.listHistory).toHaveBeenCalledWith(expect.objectContaining({ audience: 'person' })),
+    );
+    expect(screen.getByRole('option', { name: 'Task created' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Tool called' })).not.toBeInTheDocument();
+
+    vi.mocked(api.listHistory).mockClear();
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('gezel:config-updated', { detail: { debugMode: true } }),
+      );
+    });
+    await waitFor(() => expect(api.listHistory).toHaveBeenCalled());
+    expect(vi.mocked(api.listHistory).mock.calls.at(-1)?.[0]).not.toHaveProperty('audience');
+  });
+
   it('typing in the search box and clicking Refresh re-queries with q', async () => {
     render(<HistoryView />);
     await waitFor(() => {
@@ -248,7 +266,9 @@ describe('HistoryView', () => {
     fireEvent.change(input, { target: { value: 'm' } });
     fireEvent.change(input, { target: { value: 'ma' } });
     fireEvent.change(input, { target: { value: 'maya' } });
-    await waitFor(() => expect(api.listHistory).toHaveBeenCalledWith({ limit: 200, q: 'maya' }));
+    await waitFor(() =>
+      expect(api.listHistory).toHaveBeenCalledWith({ limit: 200, q: 'maya', audience: 'person' }),
+    );
     expect(api.listHistory).toHaveBeenCalledTimes(1);
     expect(api.searchSessions).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/No entries yet/i)).not.toBeInTheDocument();

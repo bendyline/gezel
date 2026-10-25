@@ -374,6 +374,73 @@ export const HistoryEntrySchema = z.discriminatedUnion('entryType', [
 ]);
 export type HistoryEntry = z.infer<typeof HistoryEntrySchema>;
 
+/**
+ * Events a person would recognize as something that happened to their work:
+ * a project or document changing, a task starting or settling, a question,
+ * a proposal or report ready. Everything else (tool calls, prompts, workspace
+ * writes, crew messages, routing) is the machine room — still logged, shown
+ * in debug mode and through an explicit kind filter.
+ *
+ * Level-ups stay out: with social mode off nothing may show growth, and the
+ * log has no way to know which register the viewer is in.
+ */
+export const PERSON_FACING_HISTORY_KINDS: ReadonlySet<HistoryEventKind> = new Set<HistoryEventKind>(
+  [
+    'gezel.created',
+    'gezel.deleted',
+    'gezel.renamed',
+    'gezel.settings.updated',
+    'project.created',
+    'project.inferred',
+    'project.deleted',
+    'project.updated',
+    'project.about.updated',
+    'project.mission.updated',
+    'project.voorman.changed',
+    'project.suggested-work.enabled',
+    'project.suggested-work.disabled',
+    'project.status.changed',
+    'project.github.linked',
+    'project.github.unlinked',
+    'project.review.requested',
+    'project.review.settled',
+    'project.diffpack.sealed',
+    'project.diffpack.applied',
+    'project.diffpack.dismissed',
+    'project.connector.bound',
+    'project.connector.unbound',
+    'project.connector.paused',
+    'project.connector.resumed',
+    'project.digest.generated',
+    'report.action.fired',
+    'report.action.dismissed',
+    'lookout.fired',
+    'lookout.changed',
+    'document.created',
+    'document.folder.created',
+    'document.updated',
+    'document.renamed',
+    'document.deleted',
+    'meester.changed',
+    'ai-app.installed',
+    'ai-app.removed',
+    'ai-app.applied',
+    'app-serve.started',
+    'app-serve.stopped',
+    'night-shift.window-settled',
+    'task.created',
+    'task.status.changed',
+    'task.canceled',
+    'render.generated',
+    'user.question.asked',
+    'user.question.answered',
+    'knowledge.catalog.installed',
+    'knowledge.catalog.removed',
+    'knowledge.catalog.enabled',
+    'knowledge.catalog.disabled',
+  ],
+);
+
 export const HistoryFilterSchema = z.object({
   projectId: z.string().optional(),
   gezelId: z.string().optional(),
@@ -383,6 +450,12 @@ export const HistoryFilterSchema = z.object({
   q: z.string().optional(),
   limit: z.number().int().positive().optional(),
   include: z.enum(['events', 'entries']).optional(),
+  /**
+   * `person` keeps only `PERSON_FACING_HISTORY_KINDS` and the threads a
+   * person had, not the step sessions a task's crew worked in. Unlike
+   * `kinds`, it keeps session entries.
+   */
+  audience: z.enum(['person']).optional(),
 });
 export type HistoryFilter = z.infer<typeof HistoryFilterSchema>;
 

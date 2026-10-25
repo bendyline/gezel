@@ -1294,7 +1294,9 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     }
   }
 
-  const markdownGuidance = `Replies render as rich markdown — use headings, tables, lists, code blocks, **bold**/*italic*, and blockquotes when they help. Keep short answers short. ${SQUISQ_DIALECT_BRIEF}`;
+  // A person reads every reply; models repeated the ids tool results handed
+  // them ("task default/2", "Formatted Report") to a bakery owner.
+  const markdownGuidance = `Replies render as rich markdown — use headings, tables, lists, code blocks, **bold**/*italic*, and blockquotes when they help. Keep short answers short. Talk to the person in plain words: name what you made or are doing, never internal task ids, tool names or craftbook ids. ${SQUISQ_DIALECT_BRIEF}`;
 
   // Conduct is capability-shaped, not a fixed tax on every conversation.
   // Production always supplies both tool arrays. Treat an entirely omitted
@@ -1774,7 +1776,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     ]).length > 0;
   const freshProjectAddendum =
     isFreshProject && canSurvey && !itemFocus
-      ? `\n\n---\n\n## Fresh project — skip the survey\n\nThis workspace has only ${workspaceFiles?.length ?? 0} bootstrap file(s) (e.g. \`package.json\`, \`tsconfig.json\`). Artifacts, memories, tasks, packages, scripts, and craftbook drawers are nearly empty too on a freshly-started project. **Don't iterate** through \`list_artifacts\` / \`list_memories\` / \`list_packages\` / \`list_scripts\` / \`list_craftbooks\` / \`list_tasks\` looking for hidden state — there is none.\n\nIf you've already called a read tool this turn and got an empty / bootstrap-only result, your NEXT tool call must be either:\n\n${freshProjectAction}\n\nDo NOT loop on reads. The runtime aborts after 5 same-args read calls and the user sees a stuck-loop warning.`
+      ? `\n\n---\n\n## Fresh project — skip the survey\n\nThis workspace has only ${workspaceFiles?.length ?? 0} file(s). Artifacts, memories, tasks, packages, scripts, and craftbook drawers are nearly empty too on a freshly-started project. **Don't iterate** through \`list_artifacts\` / \`list_memories\` / \`list_packages\` / \`list_scripts\` / \`list_craftbooks\` / \`list_tasks\` looking for hidden state — there is none.\n\nIf you've already called a read tool this turn and got an empty / bootstrap-only result, your NEXT tool call must be either:\n\n${freshProjectAction}\n\nDo NOT loop on reads. The runtime aborts after 5 same-args read calls and the user sees a stuck-loop warning.`
       : '';
 
   const operationalGuidance = [actDontNarrate, decisionGuidance, browsingForRole.trim()]

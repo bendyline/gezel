@@ -3,6 +3,7 @@ import {
   launchFormParamSchema,
   mainContentParamKey,
 } from './craftbook-launch.js';
+import { stepDurationEstimates } from './request-track/eta.js';
 import type { CraftbookTemplateManifest } from './schemas/catalog.js';
 import type { Task } from './schemas/task.js';
 
@@ -175,39 +176,9 @@ export function planShortDescription(description: string | undefined, maxChars =
 }
 
 /**
- * Local elapsed-time samples, grouped by original book identity. Overnight
- * waits, recurring hosts and fanout children are different jobs, not samples
- * of an immediate launch. A later note/edit must not move the finish time.
+ * Local elapsed-time samples, grouped by original book identity: the whole-run
+ * medians of {@link stepDurationEstimates}.
  */
 export function planDurationEstimates(tasks: readonly Task[]): Record<string, number> {
-  const samples = new Map<string, number[]>();
-  for (const task of tasks) {
-    if (
-      task.status !== 'complete' ||
-      task.nightShift ||
-      task.cron ||
-      task.spawnsCraftbook ||
-      task.parentTaskRef
-    )
-      continue;
-    const end = Math.max(
-      ...task.craftbook.steps
-        .map((step) => Date.parse(step.completedAt ?? ''))
-        .filter(Number.isFinite),
-    );
-    const duration = end - Date.parse(task.createdAt);
-    if (!Number.isFinite(duration) || duration <= 0) continue;
-    const id = task.sourceCraftbookIds?.find((source) => source.role === 'main')?.catalogId;
-    if (!id) continue;
-    const values = samples.get(id) ?? [];
-    values.push(duration);
-    samples.set(id, values);
-  }
-  return Object.fromEntries(
-    [...samples].map(([id, values]) => {
-      values.sort((a, b) => a - b);
-      const mid = Math.floor(values.length / 2);
-      return [id, values.length % 2 ? values[mid]! : (values[mid - 1]! + values[mid]!) / 2];
-    }),
-  );
+  return stepDurationEstimates(tasks).books;
 }

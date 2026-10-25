@@ -1708,9 +1708,9 @@ export const ChatModelDs4SourceSchema = z
      * Declaring this makes it a MANDATORY download for every install of the
      * entry — `buildDownloadPlan` fetches a declared draft companion
      * unconditionally, unlike the opt-in `mmproj`. The DeepSeek support GGUF is
-     * ~5.6 GiB, and DSpark is off under `--ssd-streaming` and unhelpful on
-     * Metal, so weigh that cost against who can actually use it before adding
-     * this to an entry.
+     * ~5.6 GiB, DSpark is off under `--ssd-streaming` (DeepSeek V4.1 excepted,
+     * and only with `ds4Dspark=on`) and unhelpful on Metal, so weigh that cost
+     * against who can actually use it before adding this to an entry.
      */
     draftModel: z
       .object({

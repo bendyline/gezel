@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { QuestionSchema } from './question.js';
 import { QueueStatusResponseSchema } from './queue-status.js';
+import { RequestTrackSchema } from './request-track.js';
 
 export const ActivitySectionSchema = z.enum(['needs-you', 'working', 'next', 'ready']);
 export type ActivitySection = z.infer<typeof ActivitySectionSchema>;
@@ -25,6 +26,8 @@ export const ActivityItemSchema = z.object({
    * nightly review is always here, so counting it reads as something to check.
    */
   scheduled: z.boolean().optional(),
+  /** The person's request this row stands for (`RequestTrack.key`), when it is one. */
+  requestKey: z.string().optional(),
 });
 export type ActivityItem = z.infer<typeof ActivityItemSchema>;
 
@@ -33,5 +36,7 @@ export const ActivityStatusResponseSchema = z.object({
   questions: z.array(QuestionSchema),
   queues: QueueStatusResponseSchema,
   at: z.string(),
+  /** Requests still under way, for the title bar and the rows that stand for them. */
+  requests: z.array(RequestTrackSchema).optional(),
 });
 export type ActivityStatusResponse = z.infer<typeof ActivityStatusResponseSchema>;

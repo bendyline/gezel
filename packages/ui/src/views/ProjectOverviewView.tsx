@@ -13,6 +13,7 @@ import { PeoplePanel } from '../components/PeoplePanel.js';
 import { PhotoAlbumsSection } from '../components/PhotoAlbums.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
 import { workspaceIndexLabel } from '../components/WorkspaceIndexPane.js';
+import { useDebugMode } from '../components/useDebugMode.js';
 import { RailSection } from './home/RailSection.js';
 
 /**
@@ -52,6 +53,7 @@ export function ProjectOverviewView({
   const [recent, setRecent] = useState<HistoryEntry[]>([]);
   const [digest, setDigest] = useState<DigestPreview | null>(null);
   const [tables, setTables] = useState<ProjectTable[]>([]);
+  const debugMode = useDebugMode();
 
   useEffect(() => {
     let cancelled = false;
@@ -70,12 +72,6 @@ export function ProjectOverviewView({
       .getProjectIndexStatus(projectId)
       .then((s) => {
         if (!cancelled) setIndexStatus(s);
-      })
-      .catch(() => undefined);
-    api
-      .listHistory({ projectId, limit: 8 })
-      .then((r) => {
-        if (!cancelled) setRecent(r.entries);
       })
       .catch(() => undefined);
     api
@@ -99,6 +95,21 @@ export function ProjectOverviewView({
       cancelled = true;
     };
   }, [projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Outside debug mode, recent activity is what happened to the work, not
+    // the tool calls and step sessions it took to get there.
+    api
+      .listHistory({ projectId, limit: 8, ...(debugMode ? {} : { audience: 'person' as const }) })
+      .then((r) => {
+        if (!cancelled) setRecent(r.entries);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, debugMode]);
 
   const typeId = resolveProjectTypeId(project);
   const typeName = typeId ? (getProjectType(typeId)?.label ?? typeId) : null;

@@ -148,6 +148,7 @@ async function seedCatalog(): Promise<void> {
       id: 'language-trainer',
       name: 'Language Trainer',
       description: 'Practice a language with a patient tutor who tracks your progress.',
+      category: 'growth',
       tags: [],
       maintainer: { name: 'Test' },
       yankedVersions: [],
@@ -367,6 +368,8 @@ describe('applyProjectType', () => {
     expect(detail?.projectType?.params).toEqual({ language: 'Spanish' });
     expect(detail?.projectType?.appliedAt).toBeTruthy();
     expect(detail?.projectType?.icon).toBe('book');
+    // Recorded so a project can be told apart without the catalog (projectHoldsCode).
+    expect(detail?.projectType?.category).toBe('growth');
     expect(detail?.projectTypeId).toBe('content-writing');
     expect(detail?.voormanGezelId).toBe(applied.gezelsCreated[0]?.id);
     expect(detail?.indexingEnabled).toBe(false);

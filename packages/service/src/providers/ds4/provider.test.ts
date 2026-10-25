@@ -191,6 +191,83 @@ describe('Ds4Provider (composition over llama.cpp)', () => {
     }
   });
 
+  // ds4 accepts --mtp-model with --ssd-streaming for V4.1 only, and keeps the
+  // drafter resident, so it must come out of the expert cache rather than the
+  // system's headroom.
+  it('drafts a streamed V4.1 launch on request and shrinks the expert cache for it', async () => {
+    const savedBin = process.env.GEZEL_DS4_SERVER_BIN;
+    const savedModel = process.env.GEZEL_DS4_MODEL;
+    process.env.GEZEL_DS4_SERVER_BIN = '/opt/gezel/gezel-ds4-server';
+    delete process.env.GEZEL_DS4_MODEL;
+    const { mkdtemp, rm, truncate, writeFile } = await import('node:fs/promises');
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-ds4-dspark-stream-'));
+    const support = join(dir, 'DeepSeek-V4.1-Flash-DSpark.gguf');
+    await writeFile(support, '');
+    await truncate(support, 8 * 1024 ** 3);
+    const launchFor = async (architecture: string, ds4Dspark: 'on' | 'off') => {
+      const p = await buildDs4Provider({
+        config: {
+          defaultModel: { ds4: 'deepseek-v4.1-flash-552b-q2' },
+          ds4Dspark,
+          ds4DsparkModelPath: support,
+          ds4CacheExpertsGb: 80,
+        } as unknown as GezelConfig,
+        affinity: undefined,
+        home: join(dir, 'home'),
+        ds4Models: {
+          resolveModel: vi.fn().mockResolvedValue({
+            id: 'deepseek-v4.1-flash-552b-q2',
+            weightsPath: '/models/DeepSeek-V4.1-Flash-1017-IQ2_XXS-Q2_K-imatrix.gguf',
+            approxSizeBytes: 365_713_686_528,
+            architecture,
+          }),
+        } as never,
+        catalog: {
+          get: vi.fn().mockResolvedValue({
+            manifest: {
+              kind: 'chat-model',
+              ds4: {
+                approxSizeBytes: 365_713_686_528,
+                residentBytes: 88_315_265_024,
+                residentWeightBytes: 162_955_640_832,
+                cacheExpertsBytes: 68_719_476_736,
+              },
+            },
+          }),
+        } as never,
+      });
+      const inner = p.llamaCpp as unknown as {
+        supervisor: { resolveLaunch: () => Promise<{ args: string[] }> };
+      };
+      return (await inner.supervisor.resolveLaunch()).args;
+    };
+    const cacheArg = (args: string[]) => args[args.indexOf('--ssd-streaming-cache-experts') + 1];
+    try {
+      const drafted = await launchFor('deepseek41', 'on');
+      expect(drafted).toContain('--ssd-streaming');
+      const at = drafted.indexOf('--dspark');
+      expect(drafted.slice(at, at + 3)).toEqual(['--dspark', '--mtp-model', support]);
+      // 128 GiB − (82.25 − 64 + 8 + 1/16) GiB resident − 24 GiB headroom.
+      expect(cacheArg(drafted)).toBe('77GB');
+
+      const plain = await launchFor('deepseek41', 'off');
+      expect(plain).not.toContain('--dspark');
+      expect(cacheArg(plain)).toBe('80GB');
+
+      // Any other family would abort at startup with this combination.
+      const v4 = await launchFor('deepseek4', 'on');
+      expect(v4).toContain('--ssd-streaming');
+      expect(v4).not.toContain('--dspark');
+      expect(v4).not.toContain('--mtp-model');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+      if (savedBin === undefined) delete process.env.GEZEL_DS4_SERVER_BIN;
+      else process.env.GEZEL_DS4_SERVER_BIN = savedBin;
+      if (savedModel === undefined) delete process.env.GEZEL_DS4_MODEL;
+      else process.env.GEZEL_DS4_MODEL = savedModel;
+    }
+  });
+
   it('presents name "ds4" while wrapping a llama-cpp engine', () => {
     const inner = mockInner();
     const p = new Ds4Provider({ inner });

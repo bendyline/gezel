@@ -19,6 +19,7 @@ import {
 import { normalizeStepGate } from '../schemas/gate.js';
 import type { Task, TaskCraftbookStep, TaskNote } from '../schemas/task.js';
 import { isOwnerStep } from '../task-execution.js';
+import { taskPersonName } from '../task-person-name.js';
 import { advanceHandoffNote, advanceStatusLine } from './advance-note.js';
 
 /** The text of a tool-execution failure: `[code] message`, retryability, next step. */
@@ -544,7 +545,7 @@ export function advanceTaskStepText(ref: string, stepId: string, task: Task): st
     completedName: task.craftbook.steps.find((s) => s.id === stepId)?.name ?? stepId,
     nextName: active?.name,
     status: task.status,
-    taskTitle: task.title,
+    taskTitle: taskPersonName(task),
     ownerStep: isOwnerStep(active),
   });
   return `${statusLine}\n\nCompleted step "${stepId}" on ${ref}. Active step is now "${active?.name ?? task.activeStepId ?? '(none)'}".${handoffNote}`;

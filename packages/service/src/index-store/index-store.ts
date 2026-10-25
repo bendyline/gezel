@@ -2,6 +2,7 @@ import {
   type FileReviewIssue,
   type HistoryEvent,
   type HistoryFilter,
+  PERSON_FACING_HISTORY_KINDS,
   type ProjectIndexOverview,
   nowIso,
 } from '@bendyline/gezel';
@@ -3469,6 +3470,11 @@ export class IndexStore {
     if (filter.kinds && filter.kinds.length > 0) {
       where.push(`h.kind IN (${filter.kinds.map(() => '?').join(', ')})`);
       params.push(...filter.kinds);
+    }
+    if (filter.audience === 'person') {
+      const kinds = [...PERSON_FACING_HISTORY_KINDS];
+      where.push(`h.kind IN (${kinds.map(() => '?').join(', ')})`);
+      params.push(...kinds);
     }
     if (filter.from) {
       where.push('h.at >= ?');

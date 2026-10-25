@@ -5,7 +5,9 @@ import {
   type Task,
   type TaskCraftbookStep,
   createLogger,
+  deriveTaskRequestRef,
   effectiveGeneralistModeSetting,
+  parseTaskRef,
   resolveTaskExecutionMode,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -109,6 +111,16 @@ export async function wireTaskCreation({
     }
   };
   tasks.setRoleResolver(roleResolverClosure);
+
+  tasks.setRequestRefResolver((task) =>
+    deriveTaskRequestRef(task, {
+      task: async (ref) => {
+        const parsed = parseTaskRef(ref);
+        return parsed ? store.readTask(parsed.projectId, parsed.num) : null;
+      },
+      session: (id) => store.findSessionById(id),
+    }),
+  );
 
   // Execution mode (generalist v2): decided once per task from the install
   // setting and the provider that will actually run it, then stamped on

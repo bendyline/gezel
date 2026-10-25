@@ -102,7 +102,11 @@ describe('reading', () => {
     await store.writeProjectArtifact(PROJECT, `${DRAFT}/message.md`, 'the ask');
     const read = await store.readProjectArtifact(PROJECT, `${DRAFT}/message.md`);
     expect(read).toBe('the ask');
-    const listed = await store.listProjectArtifacts(PROJECT);
-    expect(listed.some((f) => f.name === 'prompts')).toBe(true);
+    // The drawer's root listing leaves drafts out (they are the composer's,
+    // not something the work made); the folder itself still lists them.
+    const root = await store.listProjectArtifacts(PROJECT);
+    expect(root.some((f) => f.name === 'prompts')).toBe(false);
+    const drafts = await store.listProjectArtifacts(PROJECT, 'prompts');
+    expect(drafts.length).toBeGreaterThan(0);
   });
 });

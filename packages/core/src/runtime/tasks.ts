@@ -6,7 +6,8 @@ import {
   resolveCraftbookParamDefaults,
   resolveRuntimeTokensInParams,
 } from '../craftbook-params.js';
-import { assertSafeEntityId } from '../entity-id.js';
+import { assertSafeEntityId, isSafeEntityId } from '../entity-id.js';
+import { deriveTaskRequestRef } from '../request-track/identity.js';
 import { CreateProjectRequestSchema } from '../schemas/api.js';
 import { type Craftbook, CraftbookSchema, resolveSteps } from '../schemas/craftbook.js';
 import { GATE_DEFAULT_MAX_ATTEMPTS } from '../schemas/gate.js';
@@ -19,6 +20,7 @@ import {
   type ScriptRun,
   normalizeScriptRefs,
 } from '../schemas/script.js';
+import { ChatSessionSchema } from '../schemas/session.js';
 import {
   type CompleteStepGateInfo,
   type CompleteStepResponse,
@@ -43,7 +45,7 @@ import { explicitStepJump, resolveNextStep, unknownTaskStepText } from '../tasks
 import { portableCraftbookGap } from './craftbook-host-gap.js';
 import { slugifyEntityName } from './entities.js';
 import { encodeText } from './files.js';
-import { requireGezel } from './gezels.js';
+import { gezelRoot, listGezels, requireGezel } from './gezels.js';
 import {
   getProject,
   listProjects,
@@ -202,6 +204,30 @@ interface NewProjectTaskStage {
 export interface PortableCreateTaskOptions {
   /** Where a book's bundled samples are read from, for `{ from: 'sample' }` inputs. */
   samples?: PortableSampleSource;
+  /** The person's message the caller just wrote for this task (`Task.requestRef`). */
+  requestRef?: Task['requestRef'];
+}
+
+/** The request a new task answers, derived the way the desktop derives it. */
+async function portableRequestRef(
+  repo: PortableRepository,
+  task: { launchSessionId: string; createdAt: string },
+): Promise<Task['requestRef']> {
+  return deriveTaskRequestRef(task, {
+    task: (ref) => getTask(repo, ref),
+    session: async (id) => {
+      if (!isSafeEntityId(id)) return null;
+      for (const gezel of await listGezels(repo)) {
+        const session = await repo.tolerantRecord(
+          `${gezelRoot(gezel.id)}/sessions/${id}.json`,
+          ChatSessionSchema,
+          `session ${gezel.id}/${id}`,
+        );
+        if (session) return session;
+      }
+      return null;
+    },
+  }).catch(() => undefined);
 }
 export async function createTask(
   repo: PortableRepository,
@@ -302,6 +328,11 @@ async function createTaskInternal(
   });
   assertPortableCraftbookSupported(book);
   const now = repo.now();
+  const requestRef =
+    options.requestRef ??
+    (request.launchSessionId
+      ? await portableRequestRef(repo, { launchSessionId: request.launchSessionId, createdAt: now })
+      : undefined);
   const entry = book.steps.find((step) => step.id === book.entryStepId)!;
   const assignee =
     request.assignee ??
@@ -328,6 +359,7 @@ async function createTaskInternal(
     activeStepId: book.entryStepId,
     artifactDir,
     launchSessionId: request.launchSessionId,
+    ...(requestRef ? { requestRef } : {}),
     ...(request.craftbookInvocationKey
       ? { origin: { kind: 'craftbook-invocation', key: request.craftbookInvocationKey } }
       : {}),

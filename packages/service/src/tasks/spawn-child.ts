@@ -139,6 +139,8 @@ export function buildSpawnedChildTask(opts: {
     // A shard works on its host's input; its template already carries those paths.
     ...(parent.inputs ? { inputs: parent.inputs } : {}),
     ...(parent.references ? { references: parent.references } : {}),
+    // One request, however many shards it fans into.
+    ...(parent.requestRef ? { requestRef: parent.requestRef } : {}),
     // `packId` is the reserved diffpack binding (see `resolveDiffpackId`):
     // a shard that carries one drafts into that change proposal, so its
     // workspace-write tools re-root at the pack instead of the workspace.

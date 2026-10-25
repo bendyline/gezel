@@ -128,6 +128,13 @@ describe('GET /api/history', () => {
     });
   });
 
+  it('audience=person keeps project milestones and drops tool decisions', async () => {
+    const events = await listEvents('project=histproj&audience=person');
+    const kinds = events.map((e) => e.kind);
+    expect(kinds).toContain('project.created');
+    expect(kinds).not.toContain('tool.gated');
+  });
+
   it('filters by kind (comma-separated)', async () => {
     const events = await listEvents('kind=gezel.created,gezel.renamed');
     expect(events.length).toBeGreaterThan(0);

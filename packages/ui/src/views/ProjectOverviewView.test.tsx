@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -70,6 +70,29 @@ describe('ProjectOverviewView', () => {
     // Unified index-status vocabulary — same label the status bar's chip uses.
     expect(screen.getByText('AI index in progress')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('digest-md')).toHaveTextContent('Week 27'));
+  });
+
+  it('asks for what happened to the work, and for everything in debug mode', async () => {
+    const { api } = await import('../api.js');
+    vi.mocked(api.listHistory).mockClear();
+    render(<ProjectOverviewView projectId="p1" project={project} />);
+    await waitFor(() =>
+      expect(api.listHistory).toHaveBeenCalledWith({
+        projectId: 'p1',
+        limit: 8,
+        audience: 'person',
+      }),
+    );
+    vi.mocked(api.listHistory).mockClear();
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('gezel:config-updated', { detail: { debugMode: true } }),
+      );
+    });
+    await waitFor(() =>
+      expect(api.listHistory).toHaveBeenCalledWith({ projectId: 'p1', limit: 8 }),
+    );
+    expect(api.toolMapRepo).toHaveBeenCalledTimes(1);
   });
 
   it('opening the digest dispatches the artifacts deep-link event', async () => {
