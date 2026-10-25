@@ -24,7 +24,9 @@ runs:
       run: |
         set -euo pipefail
         pnpm --filter "$FILTER" exec playwright install chromium
-        launch="require('playwright').chromium.launch().then((browser) => browser.close())"
+        # Some suites use headless shell, while browser E2E uses full Chromium.
+        # Check both so missing libraries cannot slip past the launch probe.
+        launch="(async () => { for (const options of [{}, {channel: 'chromium'}]) { const browser = await require('playwright').chromium.launch(options); await browser.close(); } })()"
         if ! pnpm --filter "$FILTER" exec node -e "$launch"; then
           echo "::warning::Chromium cannot launch with this runner's libraries; installing its system packages from apt"
           pnpm --filter "$FILTER" exec playwright install-deps chromium

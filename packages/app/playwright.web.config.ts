@@ -18,17 +18,20 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   fullyParallel: true,
   workers: process.env.CI ? 2 : 4,
-  // A smoke failure must fail the quality gate on its first occurrence. The one
-  // exception is Chromium's renderer hang (isRendererHang in fixtures/test.ts):
-  // its retry is refused unless the probe found exactly that signature, and the
-  // test is reported flaky with its diagnostics and trace kept.
+  // A retry can collect evidence for the known renderer hang, but must not
+  // turn it green: PR #103 passed on retries before the same hang failed main.
   retries: 1,
+  failOnFlakyTests: true,
   reporter: process.env.CI ? 'line' : 'list',
   use: {
     // Overridden per-worker by the daemon fixture; a valid placeholder so
     // relative page.goto('/') type-checks before the override resolves.
     baseURL: 'http://127.0.0.1:6228',
     browserName: 'chromium',
+    // Use the full browser's headless mode. The separate headless shell blocked
+    // its renderer on CI while the browser and daemon remained responsive.
+    // `playwright install chromium` already installs both executables.
+    channel: 'chromium',
     contextOptions: { reducedMotion: 'reduce' },
     colorScheme: 'light',
     locale: 'en-US',

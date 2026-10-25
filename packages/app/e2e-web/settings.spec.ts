@@ -1,5 +1,7 @@
+import { execFile } from 'node:child_process';
 import { mkdir, truncate, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { GezelClient } from '@bendyline/gezel-client';
 
 /**
@@ -88,6 +90,10 @@ test.describe('settings', () => {
     // upgraded install: identifiable, but deliberately not safe to run.
     const legacyWeights = join(legacyDir, 'legacy.gguf');
     await writeFile(legacyWeights, '');
+    // NTFS allocates the extended range unless the file is explicitly sparse.
+    if (process.platform === 'win32') {
+      await promisify(execFile)('fsutil', ['sparse', 'setflag', legacyWeights]);
+    }
     await truncate(legacyWeights, 81 * 1024 ** 3);
     await writeFile(
       join(legacyDir, 'manifest.json'),
