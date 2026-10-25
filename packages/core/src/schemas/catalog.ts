@@ -4,8 +4,8 @@ import { InterestAreaIdSchema } from '../interests/areas.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
 import { TaskAssigneeSchema } from './assignee.js';
 import { IdRegex } from './catalog-id.js';
-import { CraftbookContractSchema } from './craftbook-contract.js';
 import { SemverRegex } from './catalog-semver.js';
+import { CraftbookContractSchema } from './craftbook-contract.js';
 import {
   CraftbookBasedOnSchema,
   CraftbookCommandNeedSchema,
