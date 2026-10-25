@@ -47,9 +47,45 @@ export const VIDEO_VENV_NAME = 'video';
 const TORCH_VERSION = '2.5.1';
 const TORCHVISION_VERSION = '0.20.1';
 
+/**
+ * Windows on ARM has its own pair. PyTorch publishes CPU wheels only there
+ * (from torch 2.7.0; no CUDA index carries a win_arm64 wheel), and the
+ * 2.5.1 pair above has none at all. torchvision's win_arm64 wheels carry
+ * git-hash local versions (`0.28.0+8fb8771`) rather than `+cpu`, so it is
+ * pinned by public version, which matches them. The newest matched stable
+ * pair as of 2026-10; the oldest is 2.9.0 / 0.24.0.
+ */
+const WINDOWS_ARM64_TORCH_VERSION = '2.13.0';
+const WINDOWS_ARM64_TORCHVISION_VERSION = '0.28.0';
+
 /** PyTorch package indexes for the non-default (Win/Linux) wheels. */
 const PYTORCH_CUDA_INDEX = 'https://download.pytorch.org/whl/cu124';
 const PYTORCH_CPU_INDEX = 'https://download.pytorch.org/whl/cpu';
+
+interface VideoHost {
+  platform: NodeJS.Platform;
+  arch: string;
+}
+
+const THIS_HOST: VideoHost = { platform: process.platform, arch: process.arch };
+
+function isWindowsOnArm(host: VideoHost): boolean {
+  return host.platform === 'win32' && host.arch === 'arm64';
+}
+
+/** Why this host's video engine is on the CPU when the platform decides it. */
+export function videoCpuReason(host: VideoHost = THIS_HOST): 'no-gpu-build' | undefined {
+  return isWindowsOnArm(host) ? 'no-gpu-build' : undefined;
+}
+
+/**
+ * The interpreter uv provisions the venv with. On Windows on ARM it is named
+ * down to the architecture: uv there otherwise downloads an x86_64 CPython,
+ * whose venv then needs x86_64 wheels and runs under emulation.
+ */
+export function videoPythonRequest(host: VideoHost = THIS_HOST): string {
+  return isWindowsOnArm(host) ? 'cpython-3.12-windows-aarch64-none' : '3.12';
+}
 
 /**
  * Packages every accelerator needs on top of torch: the diffusers stack
@@ -91,7 +127,17 @@ export interface VideoVenvSpec {
  * (otherwise the second caller misses the manifest fast-path; see
  * `providers/mlx/venv.ts` for the same hazard).
  */
-export function videoVenvSpec(accel: VideoAccelerator): VideoVenvSpec {
+export function videoVenvSpec(accel: VideoAccelerator, host: VideoHost = THIS_HOST): VideoVenvSpec {
+  if (isWindowsOnArm(host)) {
+    return {
+      packages: [
+        `torch==${WINDOWS_ARM64_TORCH_VERSION}+cpu`,
+        `torchvision==${WINDOWS_ARM64_TORCHVISION_VERSION}`,
+        ...COMMON_PACKAGES,
+      ],
+      extraIndexUrls: [PYTORCH_CPU_INDEX],
+    };
+  }
   if (accel === 'cuda') {
     return {
       packages: [
@@ -136,6 +182,7 @@ let cachedAccelerator: VideoAccelerator | undefined;
  * Detect the accelerator the video engine should target on this host.
  *
  *   - Apple Silicon → `mps`.
+ *   - Windows on ARM → `cpu`, even with an NVIDIA GPU (see below).
  *   - Win/Linux with an NVIDIA GPU (detected via `nvidia-smi` on PATH) →
  *     `cuda`.
  *   - Everything else (Intel Mac, NVIDIA-less Win/Linux) → `cpu`.
@@ -155,6 +202,13 @@ export async function detectVideoAccelerator(opts?: {
   if (platform === 'darwin') {
     // Apple Silicon → MPS; Intel Macs have no usable GPU path → CPU.
     cachedAccelerator = arch === 'arm64' ? 'mps' : 'cpu';
+    return cachedAccelerator;
+  }
+
+  // An RTX Spark answers nvidia-smi, but PyTorch builds no CUDA wheel for
+  // Windows on ARM, so asking for one would fail the whole install.
+  if (isWindowsOnArm({ platform, arch })) {
+    cachedAccelerator = 'cpu';
     return cachedAccelerator;
   }
 

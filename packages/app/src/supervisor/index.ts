@@ -21,6 +21,7 @@ import {
 import {
   LLAMA_ENGINE_VERSION,
   createLlamaBuildCheck,
+  cudaArchiveCarries,
   detectLlamaBackend,
   publishLlamaCudaBlocker,
   readLlamaQuarantine,
@@ -1382,30 +1383,35 @@ async function connectOrStartPrepared(opts: ConnectOptions): Promise<SupervisedS
       opts.logger?.info?.(`[supervisor] machine asset overlay: ${sharedAssets}`);
     }
   }
+  // On Linux and Windows on ARM, sd-cpp ships a CUDA build in the `-cuda` key
+  // beside llama-server, plus a portable build (Vulkan on x64, CPU on arm64)
+  // in the bare key; on Windows on ARM whisper-cpp does too
+  // (`cudaArchiveCarries`). Prefer CUDA only when this host can run it: the
+  // installer stages every variant, so the `-cuda` directory exists on
+  // non-NVIDIA machines too, and a CUDA-linked binary dies at exec there.
+  // `resolveNativeBinaryPath` falls back to the bare key on its own when the
+  // variant directory lacks the binary, which covers a native tree staged
+  // before that engine's CUDA leg existed.
+  //
+  // Same probe llama uses below — same question, memoized at
+  // <home>/engines/llama-cpp/backend.json so asking twice is free, and it
+  // honors the user's backend override so pinning `cpu` around a broken CUDA
+  // install moves image and speech engines off CUDA with it.
+  let cudaHostProbe: Promise<boolean> | undefined;
+  const cudaVariantFor = async (name: 'sd-server' | 'whisper-server') => {
+    if (!cudaArchiveCarries(name, process.platform, process.arch)) return undefined;
+    cudaHostProbe ??= readBackendOverride(opts.home).then(
+      (override) =>
+        detectLlamaBackend({
+          engineVersion: LLAMA_ENGINE_VERSION,
+          home: opts.home,
+          ...(override ? { override } : {}),
+        }).backend === 'cuda',
+    );
+    return (await cudaHostProbe) ? 'cuda' : undefined;
+  };
   if (!process.env.GEZEL_SD_SERVER_BIN) {
-    // On Linux, sd-cpp ships a CUDA build in the `-cuda` key beside
-    // llama-server and ds4, plus a portable build (Vulkan on x64, CPU on
-    // arm64) in the bare key. Prefer CUDA only when this host can run it:
-    // the installer stages every variant, so the `-cuda` directory exists
-    // on non-NVIDIA machines too, and a CUDA-linked binary dies at exec
-    // there. `resolveNativeBinaryPath` falls back to the bare key on its
-    // own when the variant directory is absent, which covers a native tree
-    // staged before the CUDA sd leg existed.
-    //
-    // Same probe llama uses below — same question, memoized at
-    // <home>/engines/llama-cpp/backend.json so asking twice is free, and it
-    // honours the user's backend override so pinning `cpu` around a broken
-    // CUDA install downgrades sd-server with it.
-    let sdVariant: string | undefined;
-    if (process.platform === 'linux') {
-      const override = await readBackendOverride(opts.home);
-      const probe = detectLlamaBackend({
-        engineVersion: LLAMA_ENGINE_VERSION,
-        home: opts.home,
-        ...(override ? { override } : {}),
-      });
-      if (probe.backend === 'cuda') sdVariant = 'cuda';
-    }
+    const sdVariant = await cudaVariantFor('sd-server');
     const bin = resolveNativeBinaryPath('sd-server', import.meta.url, sdVariant, {
       preferDevelopmentBuild: !opts.packaged,
     });
@@ -1526,12 +1532,15 @@ async function connectOrStartPrepared(opts: ConnectOptions): Promise<SupervisedS
     }
   }
   if (!process.env.GEZEL_WHISPER_SERVER_BIN) {
-    const bin = resolveNativeBinaryPath('whisper-server', import.meta.url, undefined, {
+    const whisperVariant = await cudaVariantFor('whisper-server');
+    const bin = resolveNativeBinaryPath('whisper-server', import.meta.url, whisperVariant, {
       preferDevelopmentBuild: !opts.packaged,
     });
     if (bin) {
       process.env.GEZEL_WHISPER_SERVER_BIN = bin;
-      opts.logger?.info?.(`[supervisor] bundled whisper-server: ${bin}`);
+      opts.logger?.info?.(
+        `[supervisor] bundled whisper-server${whisperVariant ? ` (${whisperVariant})` : ''}: ${bin}`,
+      );
     }
   }
   if (!process.env.GEZEL_APPLE_FM_BIN && process.platform === 'darwin') {

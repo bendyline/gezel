@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelStorageRoots } from '@bendyline/gezel-inference/internal/models/storage-roots';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { selectWhisperModel } from './stt-factory.js';
+import { selectWhisperModel, whisperRunsOnGpu } from './stt-factory.js';
 
 let modelsRoot: string;
 let storageRoots: ModelStorageRoots;
@@ -58,5 +58,24 @@ describe('selectWhisperModel', () => {
 
   it('returns undefined when nothing is installed', async () => {
     expect(await selectWhisperModel(storageRoots, 'whisper-small.en')).toBeUndefined();
+  });
+});
+
+describe('whisperRunsOnGpu', () => {
+  it('charges the card only for builds that use it', () => {
+    const cuda = 'C:\\Gezel\\native-bin\\win32-arm64-cuda\\gezel-whisper-server.exe';
+    const cpu = 'C:\\Gezel\\native-bin\\win32-arm64\\gezel-whisper-server.exe';
+    expect(whisperRunsOnGpu(cuda, 'win32')).toBe(true);
+    expect(whisperRunsOnGpu(cpu, 'win32')).toBe(false);
+    expect(whisperRunsOnGpu('/opt/gezel/native-bin/linux-x64/gezel-whisper-server', 'linux')).toBe(
+      false,
+    );
+    // Metal shares the Mac's memory with the GPU.
+    expect(
+      whisperRunsOnGpu(
+        '/Applications/Gezel.app/native-bin/darwin-arm64/gezel-whisper-server',
+        'darwin',
+      ),
+    ).toBe(true);
   });
 });

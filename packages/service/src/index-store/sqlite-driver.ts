@@ -149,14 +149,7 @@ export async function openIndexDatabase(
   let vecAvailable = false;
   try {
     db.enableLoadExtension(true);
-    const mod = nodeRequire('sqlite-vec') as {
-      getLoadablePath?: () => string;
-      default?: { getLoadablePath?: () => string };
-    };
-    const getLoadablePath = mod.getLoadablePath ?? mod.default?.getLoadablePath;
-    if (!getLoadablePath) throw new Error('sqlite-vec: getLoadablePath missing');
-    db.loadExtension(getLoadablePath());
-    vecAvailable = true;
+    vecAvailable = loadSqliteVec(db);
   } catch {
     vecAvailable = false;
   } finally {
@@ -196,6 +189,56 @@ export async function openIndexDatabase(
     close: () => db.close(),
     vecAvailable,
   };
+}
+
+let reportedVecLoad = false;
+
+/**
+ * Load sqlite-vec from the first place that has it. `GEZEL_SQLITE_VEC_PATH`
+ * comes first, like every GEZEL_* native override: native discovery stamps it
+ * where the native release built the extension, which it does for the one
+ * platform npm's sqlite-vec has no prebuild for (Windows ARM64,
+ * native/engines/sqlite-vec). Everywhere else the npm prebuild answers.
+ * Reported once per thread, because every index open repeats the attempt.
+ */
+function loadSqliteVec(db: NodeDb): boolean {
+  const failures: string[] = [];
+  const explicit = process.env.GEZEL_SQLITE_VEC_PATH;
+  if (explicit) {
+    try {
+      db.loadExtension(explicit);
+      if (!reportedVecLoad) log.info(`[sqlite] sqlite-vec loaded from ${explicit}`);
+      reportedVecLoad = true;
+      return true;
+    } catch (error) {
+      failures.push(`${explicit}: ${errorMessage(error)}`);
+    }
+  }
+  try {
+    const mod = nodeRequire('sqlite-vec') as {
+      getLoadablePath?: () => string;
+      default?: { getLoadablePath?: () => string };
+    };
+    const getLoadablePath = mod.getLoadablePath ?? mod.default?.getLoadablePath;
+    if (!getLoadablePath) throw new Error('getLoadablePath missing');
+    db.loadExtension(getLoadablePath());
+    if (failures.length > 0 && !reportedVecLoad) {
+      log.warn(`[sqlite] using npm sqlite-vec; GEZEL_SQLITE_VEC_PATH did not load: ${failures[0]}`);
+    }
+    reportedVecLoad = true;
+    return true;
+  } catch (error) {
+    failures.push(`npm sqlite-vec: ${errorMessage(error)}`);
+  }
+  if (!reportedVecLoad) {
+    log.warn(`[sqlite] sqlite-vec did not load, so vector search is off: ${failures.join('; ')}`);
+  }
+  reportedVecLoad = true;
+  return false;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function assertReadableHeader(db: NodeDb): void {

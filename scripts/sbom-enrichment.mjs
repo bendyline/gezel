@@ -17,7 +17,12 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, posix } from 'node:path';
-import { ENGINE_FOR_BINARY, NATIVE_PAYLOAD, allPlatformKeys } from './native-payload.mjs';
+import {
+  ENGINE_FOR_BINARY,
+  NATIVE_PAYLOAD,
+  allPlatformKeys,
+  binariesInRelease,
+} from './native-payload.mjs';
 import { pnpmReleaseTargets } from './pnpm-runtime-inventory.mjs';
 import { npmPurl } from './sbom-dependency-graph.mjs';
 
@@ -559,7 +564,7 @@ export function nativePayloadComponents({
         ),
     });
     const dependsOn = new Set(helperSourceRefsForKey(key));
-    for (const binary of NATIVE_PAYLOAD[key]) {
+    for (const binary of binariesInRelease(key, manifest.release)) {
       const engine = ENGINE_FOR_BINARY[binary];
       if (!engine) continue;
       const engineRef = engineRefs.get(engine);

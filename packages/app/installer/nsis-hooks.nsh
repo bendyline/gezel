@@ -45,6 +45,7 @@
 !define GEZEL_MIGRATE_SHARED_CLI "$INSTDIR\resources\app.asar.unpacked\dist\migrate-legacy-shared.js"
 !define GEZEL_REPARSE_CLI "$INSTDIR\resources\app.asar.unpacked\dist\neutralize-reparse-points.js"
 !define GEZEL_ACL_REPAIR "$INSTDIR\resources\installer-security\reset-tree-acl.ps1"
+!define GEZEL_SID_GRANT "$INSTDIR\resources\installer-security\grant-service-sid.ps1"
 !define GEZEL_BUNDLE_TARBALL "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.tar.gz"
 !define GEZEL_BUNDLE_META "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.meta.json"
 ; The first-party service host is GezelService's ImagePath.  It spawns
@@ -195,7 +196,18 @@ FunctionEnd
 
 ; Silent auto-updates do not traverse the MUI page callbacks, so retain the
 ; orderly pre-file-replacement stop for that committed, non-interactive path.
+;
+; electron-builder's per-machine default is $PROGRAMFILES unless the installer
+; carries an x64 package, and to this 32-bit installer that is "Program Files
+; (x86)", so an arm64-only installer put a native ARM64 app there.
+; initMultiUser has chosen $INSTDIR by now; move exactly that default to the
+; 64-bit folder, and leave any other location (/D included) alone.
 !macro customInit
+  !ifdef APP_ARM64
+    ${If} $INSTDIR == "$PROGRAMFILES32\${APP_FILENAME}"
+      StrCpy $INSTDIR "$PROGRAMFILES64\${APP_FILENAME}"
+    ${EndIf}
+  !endif
   ${If} ${Silent}
     !insertmacro StopGezelServiceForInstall
   ${EndIf}
@@ -349,6 +361,18 @@ FunctionEnd
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not safely secure ${PATH}. The shared model engine will remain unavailable; close programs using this folder and inspect the installer details before retrying." /SD IDOK
     Goto ${FAILURE_LABEL}
   ${EndIf}
+!macroend
+
+; Grant the per-service SID on one directory, /grant:r style, leaving the exit
+; code in $0. Not icacls: it looks every trustee up, even one written as
+; *S-1-5-80-..., and once an upgrade deletes and re-creates the service,
+; NT SERVICE\GezelService can stop resolving (Windows 11 build 28000 failed
+; every grant with 1332 and the upgrade removed the service). The script
+; derives the SID from the name, as the service's token does, and needs no
+; lookup.
+!macro GrantServiceSid PATH GRANT
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${GEZEL_SID_GRANT}" -Path "${PATH}" -Service ${GEZEL_SERVICE_NAME} -Grant "${GRANT}"'
+  Pop $0
 !macroend
 
 ; Publish the freshly-extracted service tree so every account's per-user
@@ -561,19 +585,31 @@ FunctionEnd
 ; This is best-effort by design.  Gezel's cloud providers work fine without
 ; a CRT, so a redist hiccup must not fail the whole install — it warns and
 ; continues, and only local-model support is affected.
+;
+; The runtime must match the engines' arch: an ARM64 engine cannot load the
+; x64 CRT.  electron-builder defines APP_ARM64 / APP_64 for the packages an
+; installer carries, and Gezel builds one installer per arch.
+!ifdef APP_ARM64
+  !ifdef APP_64
+    !error "Gezel builds one installer per arch; a two-arch installer would need both Visual C++ runtimes"
+  !endif
+  !define GEZEL_VCREDIST_ARCH "arm64"
+!else
+  !define GEZEL_VCREDIST_ARCH "x64"
+!endif
 !macro InstallVCRedist
   ; The runtimes key lives in the native 64-bit view. electron-builder's
-  ; onInit already selects the 64-bit view on x64, so this bracket is
-  ; defensive; the restore must be `lastused`, never a hardcoded view — the
+  ; onInit already selects the 64-bit view on x64 and arm64, so this bracket
+  ; is defensive; the restore must be `lastused`, never a hardcoded view — the
   ; uninstaller's registry cleanup runs after our hooks and relies on the
   ; baseline view they leave behind.
   SetRegView 64
-  ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
+  ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\${GEZEL_VCREDIST_ARCH}" "Installed"
   SetRegView lastused
   ${If} $0 == 1
     DetailPrint "Microsoft Visual C++ runtime already present."
   ${Else}
-!if /FileExists "${PROJECT_DIR}\dist\vc-redist\vc_redist.x64.exe"
+!if /FileExists "${PROJECT_DIR}\dist\vc-redist\vc_redist.${GEZEL_VCREDIST_ARCH}.exe"
     DetailPrint "Installing the Microsoft Visual C++ runtime (required by local model engines)..."
     ; $PLUGINSDIR is a temp dir NSIS deletes on exit, so the 25 MB payload
     ; does not linger under Program Files after the install completes.
@@ -582,9 +618,9 @@ FunctionEnd
     ; steps in customInstall still resolve relative paths under $INSTDIR.
     InitPluginsDir
     SetOutPath "$PLUGINSDIR"
-    File "${PROJECT_DIR}\dist\vc-redist\vc_redist.x64.exe"
+    File "${PROJECT_DIR}\dist\vc-redist\vc_redist.${GEZEL_VCREDIST_ARCH}.exe"
     SetOutPath "$INSTDIR"
-    ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
+    ExecWait '"$PLUGINSDIR\vc_redist.${GEZEL_VCREDIST_ARCH}.exe" /install /quiet /norestart' $0
     ; 0 = installed, 1638 = a newer runtime is already present, 3010 = ok
     ; but a reboot is pending. All three mean the CRT is usable.
     ${If} $0 == 0
@@ -593,10 +629,10 @@ FunctionEnd
       DetailPrint "Microsoft Visual C++ runtime ready (exit $0)."
     ${Else}
       DetailPrint "WARNING: the Visual C++ runtime installer returned $0."
-      MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not install the Microsoft Visual C++ runtime (error $0). Gezel will still run, but local AI models may fail to start until you install the 'Microsoft Visual C++ 2015-2022 Redistributable (x64)'." /SD IDOK
+      MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not install the Microsoft Visual C++ runtime (error $0). Gezel will still run, but local AI models may fail to start until you install the 'Microsoft Visual C++ 2015-2022 Redistributable (${GEZEL_VCREDIST_ARCH})'." /SD IDOK
     ${EndIf}
 !else
-    !warning "vc_redist.x64.exe was not staged - the installer will not provision the Visual C++ runtime. Run packages/app/scripts/stage-vc-redist.mjs before packaging (release CI sets GEZEL_VCREDIST_REQUIRED=1)."
+    !warning "vc_redist.${GEZEL_VCREDIST_ARCH}.exe was not staged - the installer will not provision the Visual C++ runtime. Run packages/app/scripts/stage-vc-redist.mjs before packaging (release CI sets GEZEL_VCREDIST_REQUIRED=1)."
     DetailPrint "Visual C++ runtime not bundled with this build; skipping."
 !endif
   ${EndIf}
@@ -892,16 +928,14 @@ FunctionEnd
   ; protected runtime directory (which intentionally does not inherit).  The
   ; published service tree does not inherit either; it gets read/execute only,
   ; below.
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)"'
-  Pop $0
+  !insertmacro GrantServiceSid "${GEZEL_DATA_DIR}" "(OI)(CI)(M)"
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant the service SID access to private state (exit $0)."
     !insertmacro RemoveGezelService
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted model engine access to private state (Windows error $0). The registration was removed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\runtime" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)"'
-  Pop $0
+  !insertmacro GrantServiceSid "${GEZEL_DATA_DIR}\runtime" "(OI)(CI)(M)"
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant the service SID access to runtime state (exit $0)."
     !insertmacro RemoveGezelService
@@ -914,8 +948,7 @@ FunctionEnd
   ; BUILTIN\Users membership.  If PublishServiceTree could not protect the
   ; tree, it still inherits the data root's Modify ACE; that tree carries no
   ; attestation, so no other account will run it.
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SERVICE_TREE}" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(RX)" /L'
-  Pop $0
+  !insertmacro GrantServiceSid "${GEZEL_SERVICE_TREE}" "(OI)(CI)(RX)"
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant the service SID read access to its code (exit $0)."
     !insertmacro RemoveGezelService
@@ -950,8 +983,7 @@ FunctionEnd
   ; still cannot rewrite the boundary that makes this store read-only to users.
   ; The (M) ACE is what covers the container itself, so creating and deleting
   ; bundles under assets\models keeps working.
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)" "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(IO)(F)" /L'
-  Pop $0
+  !insertmacro GrantServiceSid "${GEZEL_DATA_DIR}\assets" "(OI)(CI)(M);(OI)(CI)(IO)(F)"
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant the service SID access to shared assets (exit $0)."
     !insertmacro RemoveGezelService

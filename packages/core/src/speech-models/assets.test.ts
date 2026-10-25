@@ -95,7 +95,8 @@ it('rejects wrong bytes even at the right size and does not create directories d
 
 it('rejects linked directories and never writes through them', async () => {
   await mkdir(join(root, 'outside'));
-  await symlink(join(root, 'outside'), join(root, 'cache'));
+  // A junction needs no privilege on Windows; the type is ignored elsewhere.
+  await symlink(join(root, 'outside'), join(root, 'cache'), 'junction');
   const store = new SpeechAssetStore({ root: join(root, 'cache') });
   await expect(
     store.materialize(model, file, join(root, 'app.bin'), { download: true }),

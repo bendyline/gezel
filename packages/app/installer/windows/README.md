@@ -48,6 +48,21 @@ walk children. On an elevated runner it executes the production launcher with
 Administrators ownership and a locked-down child. Other hosts skip the syscall
 tests explicitly. The Windows release workflow runs them before packaging.
 
+## Service SID grants
+
+`grant-service-sid.ps1` gives `GezelService`'s per-service SID its four
+directory grants (data root, `runtime`, `assets`, the published service tree).
+icacls cannot do this reliably: it looks every trustee up, even one written as
+`*S-1-5-80-...`. After an upgrade deletes and re-creates the service,
+`NT SERVICE\GezelService` can stop resolving; on Windows 11 build 28000 every
+grant failed with 1332 and the installer removed the service. The script
+derives the SID from the service name (SHA-1 of the upper-cased UTF-16LE name,
+the value `sc.exe showsid` prints and the service token carries), replaces that
+SID's explicit ACEs as `/grant:r` does, and refuses a reparse point as its
+target. Inheritable ACEs propagate through `SetNamedSecurityInfo` exactly as
+they did under icacls; the descendant link checks in the installer still run
+before any grant and again before startup.
+
 Relevant Windows contracts: [NtOpenFile](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntopenfile),
 [NtSetSecurityObject](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntsetsecurityobject),
 and [SetSecurityInfo propagation](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo).

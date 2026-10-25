@@ -166,9 +166,20 @@ jobs:
         run: pnpm lint:prompts
 
   windows-service-portability:
-    name: Windows service portability contracts
+    # Both arches, each on its own runner. A matrix expression in the name
+    # stops GitHub appending the matrix values, so the x64 check keeps the
+    # exact name it had before Windows on ARM joined.
+    name: ${{ matrix.arch == 'x64' && 'Windows service portability contracts' || 'Windows on ARM service portability contracts' }}
     needs: workflow-policy
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -199,6 +210,16 @@ jobs:
           src/http/mutation-authority.test.ts
           src/chat/manager-machine-shared-mcp.test.ts
           src/machine-engine/bridge.integration.test.ts
+      # Native discovery picks a different engine build per arch (CUDA on an
+      # RTX Spark, CPU on other Windows on ARM machines), and on Windows the
+      # storage suites link folders with junctions, which need no Developer
+      # Mode, where other hosts use symlinks.
+      - name: Exercise native engine discovery and junction-linked storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @bendyline/gezel test src/native/discover.test.ts src/native/llama-backend.test.ts
+          pnpm --filter @bendyline/gezel-service test src/storage/sizes.test.ts src/storage/safe-remove.test.ts src/projects/infer-project.test.ts src/models/storage-roots.test.ts
       # The installer's link helper decides what an elevated recursive ACL sweep
       # may follow, and only Windows has junctions; a release-only run would
       # find a regression after the merge.

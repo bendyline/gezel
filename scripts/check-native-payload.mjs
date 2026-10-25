@@ -43,7 +43,8 @@ if (releaseIdx !== -1 && !release) {
   console.error('error: --release requires a native release version, e.g. 0.1.51');
   process.exit(2);
 }
-// A published release carries only the keys that existed when it was built.
+// A published release carries only the keys and binaries that existed when it
+// was built.
 const publishedKeys = release ? new Set(platformKeysInRelease(release)) : null;
 const inRelease = (key) => !publishedKeys || publishedKeys.has(key);
 
@@ -94,12 +95,13 @@ for (const key of keys) {
     problems.push(`${key}: directory missing at ${dir}`);
     continue;
   }
-  const missing = expectedBinaries(key).filter((name) => !existsSync(join(dir, name)));
+  const expected = expectedBinaries(key, release ?? undefined);
+  const missing = expected.filter((name) => !existsSync(join(dir, name)));
   if (missing.length > 0) {
     problems.push(`${key}: missing ${missing.join(', ')}`);
     continue;
   }
-  console.log(`  ok ${key}: ${expectedBinaries(key).join(', ')}`);
+  console.log(`  ok ${key}: ${expected.join(', ')}`);
 }
 
 if (problems.length > 0) {

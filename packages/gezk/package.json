@@ -45,7 +45,7 @@
     "typecheck": "tsc --noEmit",
     "export-schemas": "tsx scripts/export-schemas.ts",
     "test": "vitest run",
-    "clean": "rm -rf dist .turbo"
+    "clean": "node ../../scripts/clean-dirs.mjs dist .turbo"
   },
   "dependencies": {
     "zod": "^4.4.3"

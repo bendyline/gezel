@@ -908,6 +908,13 @@
   background: var(--surface-hover, var(--surface, transparent));
 }
 
+/* "Open task" is a word key, not an identifier like the file and task-ref
+   chips, so it takes the UI face. */
+.msg-ref-chip.msg-ref-chip-label {
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+}
+
 /* Inline code spans that the parser promoted to `#artifact:` / `#workspace:`
    links. Keeps the code-span visual weight (monospace + subtle surface)
    while tagging them as clickable with the accent underline. Both schemes

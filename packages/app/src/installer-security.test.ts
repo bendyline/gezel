@@ -69,7 +69,31 @@ describe('Windows machine-service installer security', () => {
 
     // The protected runtime directory does not inherit the service SID from
     // the parent; the asset boundary also has an explicit DACL.
-    expect(hook.match(/NT SERVICE\\\${GEZEL_SERVICE_NAME}:\(OI\)\(CI\)\(M\)/g)).toHaveLength(3);
+    expect(hook.match(/GrantServiceSid "[^"]+" "\(OI\)\(CI\)\(M\)/g)).toEqual([
+      'GrantServiceSid "${GEZEL_DATA_DIR}" "(OI)(CI)(M)',
+      'GrantServiceSid "${GEZEL_DATA_DIR}\\runtime" "(OI)(CI)(M)',
+      'GrantServiceSid "${GEZEL_DATA_DIR}\\assets" "(OI)(CI)(M)',
+    ]);
+  });
+
+  // Regression: on Windows 11 build 28000 an upgrade, which deletes and
+  // re-creates GezelService, left NT SERVICE\GezelService unresolvable.
+  // icacls looks every trustee up, even one written as *S-1-5-80-..., so all
+  // four grants failed with 1332 and the installer removed the service.
+  it('grants the service SID without an account lookup', () => {
+    expect(hook).not.toMatch(/NT SERVICE\\\$\{GEZEL_SERVICE_NAME\}:/);
+    expect(hook).not.toMatch(/icacls[^\n]*\*S-1-5-80-/);
+    expect(hook).toContain(
+      '!define GEZEL_SID_GRANT "$INSTDIR\\resources\\installer-security\\grant-service-sid.ps1"',
+    );
+    const macroStart = position('!macro GrantServiceSid PATH GRANT');
+    const macro = hook.slice(macroStart, hook.indexOf('!macroend', macroStart));
+    expect(macro).toContain(
+      '"$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${GEZEL_SID_GRANT}"',
+    );
+    expect(macro).toContain('-Service ${GEZEL_SERVICE_NAME}');
+    expect(macro).toContain('Pop $0');
+    expect(hook.match(/!insertmacro GrantServiceSid /g)).toHaveLength(4);
   });
 
   // Regression: v1.26219.44 granted the service SID only (M) on the asset
@@ -79,20 +103,19 @@ describe('Windows machine-service installer security', () => {
   // failed with "Access is denied" on every model SanitizeDescendants had just
   // re-owned to Administrators. The daemon crash-looped on SCM 1066.
   it('lets the broker re-inherit model bundles without opening the asset boundary', () => {
-    const assetsGrant = commandLine('"${GEZEL_DATA_DIR}\\assets" /grant:r');
+    const assetsGrant = commandLine('GrantServiceSid "${GEZEL_DATA_DIR}\\assets"');
+    const specs = (assetsGrant.match(/"([^"]*)"\s*$/)?.[1] ?? '').split(';');
 
     // Modify on the container: create and delete bundles under assets\models.
-    expect(assetsGrant).toContain('NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)');
-
     // FullControl on DESCENDANTS ONLY, so the broker holds the WRITE_DAC that
     // `icacls /reset` requires on each bundle. (IO) keeps it off the container.
-    expect(assetsGrant).toContain('NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(IO)(F)');
+    expect(specs).toEqual(['(OI)(CI)(M)', '(OI)(CI)(IO)(F)']);
 
     // The inherit-only marker is what stops a compromised daemon from
     // rewriting the `assets` DACL itself and handing users write access.
-    expect(assetsGrant).not.toMatch(
-      /NT SERVICE\\\$\{GEZEL_SERVICE_NAME}:\((?!.*\(IO\))[^"]*\)\(F\)/,
-    );
+    for (const spec of specs.filter((candidate) => candidate.endsWith('(F)'))) {
+      expect(spec).toContain('(IO)');
+    }
 
     // Users keep read-only inheritance — the sharing contract is unchanged.
     expect(commandLine('"${GEZEL_DATA_DIR}\\assets" /inheritance:r')).toContain(
@@ -183,6 +206,7 @@ describe('Windows machine-service installer security', () => {
       expect(acl).toContain('*S-1-5-32-545:(OI)(CI)(M)');
       expect(acl).not.toContain('NT SERVICE\\${GEZEL_SERVICE_NAME}');
     }
+    expect(hook).not.toContain('GrantServiceSid "${GEZEL_SHARED_DIR}');
 
     expect(position('!insertmacro RemoveGezelService')).toBeLessThan(
       position('Migrating legacy machine-wide projects and gezels'),
@@ -221,11 +245,11 @@ describe('Windows machine-service installer security', () => {
       '"${GEZEL_DATA_DIR}" /grant:r "*S-1-5-32-545:(X)"',
       '"${GEZEL_DATA_DIR}\\runtime" /inheritance:r',
       '"${GEZEL_DATA_DIR}\\assets" /inheritance:r',
-      '"${GEZEL_DATA_DIR}" /grant:r "NT SERVICE',
-      '"${GEZEL_DATA_DIR}\\runtime" /grant:r "NT SERVICE',
-      '"${GEZEL_DATA_DIR}\\assets" /grant:r "NT SERVICE',
+      'GrantServiceSid "${GEZEL_DATA_DIR}" ',
+      'GrantServiceSid "${GEZEL_DATA_DIR}\\runtime"',
+      'GrantServiceSid "${GEZEL_DATA_DIR}\\assets"',
       '"${GEZEL_SERVICE_TREE}" /inheritance:r',
-      '"${GEZEL_SERVICE_TREE}" /grant:r "NT SERVICE',
+      'GrantServiceSid "${GEZEL_SERVICE_TREE}"',
     ]) {
       expect(commandLine(gate), `${gate} must not recurse`).not.toContain('/T');
     }
@@ -315,7 +339,7 @@ describe('Windows machine-service installer security', () => {
     const create = position('sc.exe" create ${GEZEL_SERVICE_NAME}');
     const restrictedSid = position('sidtype ${GEZEL_SERVICE_NAME} unrestricted');
     const restrictedPrivileges = position('privs ${GEZEL_SERVICE_NAME} SeChangeNotifyPrivilege');
-    const firstServiceSidAcl = position('NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)');
+    const firstServiceSidAcl = position('GrantServiceSid "${GEZEL_DATA_DIR}" "(OI)(CI)(M)"');
     const enableAutostart = position('config ${GEZEL_SERVICE_NAME} start= auto');
     const start = hook.indexOf('sc.exe" start ${GEZEL_SERVICE_NAME}', enableAutostart);
     expect(start, 'missing post-registration service start').toBeGreaterThanOrEqual(0);
@@ -383,7 +407,7 @@ describe('Windows machine-service installer security', () => {
 
     const privilegesBlock = hook.slice(
       position('privs ${GEZEL_SERVICE_NAME} SeChangeNotifyPrivilege'),
-      position('NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)'),
+      position('GrantServiceSid "${GEZEL_DATA_DIR}" "(OI)(CI)(M)"'),
     );
     expect(privilegesBlock).toContain('!insertmacro RemoveGezelService');
     expect(privilegesBlock).toContain('Goto SkipNssm');
@@ -608,9 +632,9 @@ describe('Windows machine-service installer security', () => {
     // The broker runs its code but never writes it.
     const brokerGrants = hook
       .split(/\r?\n/)
-      .filter((line) => line.includes('"${GEZEL_SERVICE_TREE}"') && line.includes('NT SERVICE'));
+      .filter((line) => line.includes('GrantServiceSid "${GEZEL_SERVICE_TREE}"'));
     expect(brokerGrants).toHaveLength(1);
-    expect(brokerGrants[0]).toContain('/grant:r "NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(RX)"');
+    expect(brokerGrants[0]).toContain('GrantServiceSid "${GEZEL_SERVICE_TREE}" "(OI)(CI)(RX)"');
 
     // Publishing: the protected DACL comes before the attestation, and a
     // failure skips the attestation rather than recording an open tree.
@@ -637,8 +661,8 @@ describe('Windows machine-service installer security', () => {
     const extract = at('--dest="${GEZEL_SERVICE_TREE}" --force');
     const published = at('!insertmacro PublishServiceTree');
     const sidType = at('sidtype ${GEZEL_SERVICE_NAME} unrestricted');
-    const rootGrant = at('"${GEZEL_DATA_DIR}" /grant:r "NT SERVICE');
-    const brokerRead = at('"${GEZEL_SERVICE_TREE}" /grant:r "NT SERVICE');
+    const rootGrant = at('GrantServiceSid "${GEZEL_DATA_DIR}" ');
+    const brokerRead = at('GrantServiceSid "${GEZEL_SERVICE_TREE}"');
     const autostart = at('config ${GEZEL_SERVICE_NAME} start= auto');
     expect(extract).toBeLessThan(published);
     expect(published).toBeLessThan(sidType);
@@ -688,9 +712,7 @@ describe('Windows machine-service installer security', () => {
     expect(guards[0]).toBeLessThan(
       position('!insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\\assets"'),
     );
-    expect(guards[1]).toBeGreaterThan(
-      position('NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(IO)(F)'),
-    );
+    expect(guards[1]).toBeGreaterThan(position('(OI)(CI)(IO)(F)"'));
     expect(guards[1]).toBeLessThan(position('config ${GEZEL_SERVICE_NAME} start= auto'));
 
     const uninstallStart = position('!macro customUnInstall');

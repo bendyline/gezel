@@ -1,7 +1,8 @@
 /**
  * Phase 3 enrichment + semantic search. Uses the real local embedder
  * (transformers.js) for both enrich and query so the vector path is exercised
- * end-to-end; self-skips if embeddings are unavailable in this environment.
+ * end-to-end; self-skips if embeddings or sqlite-vec are unavailable in this
+ * environment.
  *
  * Pins the small MiniLM model regardless of the production default: this test
  * exercises the enrich→embed→search PLUMBING (model-agnostic), and MiniLM
@@ -29,6 +30,7 @@ import type { Store } from '../fs/store.js';
 import { ContentIndex } from './content-index.js';
 import { runWorkspaceContentIndex } from './content-indexer.js';
 import { type EnrichDeps, parseSymbolSummaryJson } from './enrich.js';
+import { sqliteVecLoads } from './testing/sqlite-vec.js';
 
 let dir: string;
 let home: string;
@@ -65,7 +67,7 @@ async function realEmbed(): Promise<((texts: string[]) => Promise<number[][]>) |
 describe('embed-only tier (semantic search without a Boekwachter)', () => {
   it('embeds with no LLM, leaves the summary gate open, and a later full pass still summarizes', async () => {
     const embed = await realEmbed();
-    if (!embed) return;
+    if (!embed || !(await sqliteVecLoads())) return;
 
     await mkdir(join(dir, 'src'), { recursive: true });
     await writeFile(
@@ -144,7 +146,7 @@ describe('enrichment + search_code', () => {
   // on the default.
   it('semantic search_code surfaces a file by meaning after enrichment', async () => {
     const embed = await realEmbed();
-    if (!embed) return; // embeddings unavailable here — skip
+    if (!embed || !(await sqliteVecLoads())) return; // no embedder or no sqlite-vec here — skip
 
     await mkdir(join(dir, 'src'), { recursive: true });
     await writeFile(

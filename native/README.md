@@ -60,6 +60,7 @@ native/build/<platform>/            # single-backend engines + helpers
 ├── gezel-ds4-server                # darwin-arm64 + linux-* (GPU-only)
 ├── gezel-apple-fm                  # darwin-arm64, OS-managed Apple Intelligence
 ├── uv[.exe]                        # vendored unmodified, never gezel- prefixed
+├── vec0.dll                        # win32-arm64 only: sqlite-vec, a SQLite extension
 └── THIRD_PARTY_LICENSES/           # staged per artifact before upload
 
 native/build/<platform>-<variant>/  # multi-backend engines (llama-cpp)
@@ -82,9 +83,13 @@ aarch64 SDK for Linux or Windows). Intel Mac (`darwin-x64`) is not built:
 on-device first-run routes those users to Copilot/OpenAI.
 
 `win32-arm64-cuda` is for RTX Spark (NVIDIA N1X, the GB10 silicon of DGX
-Spark under Windows), which CUDA 13.4 first supports. CI assembles CUDA
-13.4.1 from NVIDIA's pinned windows-arm64 redistributable archives and builds
-natively on `windows-11-arm`. nvcc's only host compiler on Windows is
+Spark under Windows), which CUDA 13.4 first supports. NVIDIA ships no
+Windows ARM64 CUDA installer, so
+[`native/scripts/install-cuda-arm64.ps1`](scripts/install-cuda-arm64.ps1)
+assembles CUDA 13.4.1 from NVIDIA's sha256-pinned windows-arm64
+redistributable archives; CI runs it on `windows-11-arm`, and so does a local
+build (`-Root <dir>`, then point `CUDA_PATH` at it; LLVM, CMake and the VS
+ARM64 tools must be installed). nvcc's only host compiler on Windows is
 `cl.exe`, so the CUDA half goes through
 [`native/cmake/arm64-windows-cuda.cmake`](cmake/arm64-windows-cuda.cmake)
 while C and C++ stay on clang and the baseline below:
@@ -95,9 +100,20 @@ while C and C++ stay on clang and the baseline below:
 - **sd-cpp** links its CUDA code into one clang-built executable. Its ggml
   keys the host flags it hands nvcc on the C++ compiler, so `build.ps1`
   rekeys two lines on `WIN32` for that build.
+- **whisper-cpp** (`WHISPER_BACKEND=cuda`) builds the same way as sd-cpp, and
+  links whisper and ggml statically: llama-server's `ggml*.dll` already sit in
+  this folder under the same names, from a different ggml, so the build
+  refuses to emit any. The draft-release merge also fails on any file two
+  engines ship with different bytes.
 
-The runtime does not select this key yet: `llama-backend.ts` answers CPU on
-Windows-on-ARM until the payload is validated on a device.
+`llama-backend.ts` selects this key's llama-server when the NVIDIA driver is
+installed, and discovery then takes its sd-server and whisper-server too
+(`cudaArchiveCarries` in `packages/core/src/native/discover.ts`). All three
+were first run on an RTX Spark with driver 621.01 (2026-10-24): a 27B Q4 chat
+model read prompts at about 320 tokens/s and wrote at about 28, against about
+10 and 2 on the CPU build; flux-2-klein rendered 1024x1024 in 8 s warm; and
+whisper base.en transcribed an 11-second clip in about 160 ms, against about
+550 ms on the CPU build.
 
 The `win32-arm64` CPU payload differs from every other key in two ways
 worth knowing before you touch it:
@@ -143,6 +159,14 @@ absolute paths to the service through `GEZEL_NATIVE_BIN_DIR`,
 `GEZEL_LLAMA_SERVER_BIN`, `GEZEL_SD_SERVER_BIN`, `GEZEL_WHISPER_SERVER_BIN`,
 `GEZEL_DS4_SERVER_BIN`, `GEZEL_APPLE_FM_BIN`, `GEZEL_UV_BIN`, and `GEZEL_DEVICE_HEALTH_BIN` (the
 last points the service's device safety probe at the bundled helper).
+
+`vec0.dll` is the one library in the payload. The service loads it into its
+own process, so only the service's discovery stamps it (`GEZEL_SQLITE_VEC_PATH`),
+its smoke test loads it instead of running `--help`, and it keeps upstream's
+file name because SQLite derives the entry point from it. Nothing downloads
+or starts it on demand, so it is not a `NativeEngineName`. It ships only for
+`win32-arm64`, the one platform npm's `sqlite-vec` has no prebuild for. See
+[engines/sqlite-vec/README.md](engines/sqlite-vec/README.md).
 
 The Apple helper needs Xcode 27 to build and macOS 26+ with Apple Intelligence
 ready to generate; older macOS releases can still launch its weak-linked unavailable
@@ -276,6 +300,23 @@ Point Gezel at your local build via:
 export GEZEL_SD_SERVER_BIN=$PWD/native/build/darwin-arm64/sd-server
 pnpm app
 ```
+
+A dev launch already prefers `native/build/` over `packages/app/native-bin/`
+for engine executables. A SQLite extension is not an engine, so point at it
+directly: `GEZEL_SQLITE_VEC_PATH=<repo>\native\build\win32-arm64\vec0.dll`.
+
+To package a binary that the pinned native release does not carry yet (a new
+engine, or `vec0.dll` before 0.1.53), stage it into `native-bin/` for the
+build and take it back out afterwards:
+
+```sh
+node scripts/stage-local-native.mjs           # copies only what the pin lacks
+pnpm --filter @bendyline/gezel-app run package:win
+node scripts/stage-local-native.mjs --remove
+```
+
+Leaving it staged makes the next `pnpm app` re-fetch the pinned release,
+because the verifier rejects files it has no pin for.
 
 ## CI pipelines
 

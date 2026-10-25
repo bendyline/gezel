@@ -68,6 +68,7 @@ export function VideoEngineSettings({ onModelsChanged }: Props) {
 
   const engineDown = probe.kind === 'probe-failed';
   const accelerator = 'status' in probe ? probe.status.engine.accelerator : undefined;
+  const cpuReason = 'status' in probe ? probe.status.engine.cpuReason : undefined;
 
   const onConfirmationChange = useCallback(async (mode: 'ask' | 'always-allow') => {
     setStatus('saving…');
@@ -108,7 +109,7 @@ export function VideoEngineSettings({ onModelsChanged }: Props) {
 
       <VideoGeneratorGezelHint />
 
-      {accelerator === 'cpu' && <CpuFallbackNotice memory={memory} />}
+      {accelerator === 'cpu' && <CpuFallbackNotice memory={memory} cpuReason={cpuReason} />}
       {probe.kind === 'probe-failed' && (
         <p className="error">Couldn't reach the Gezel service. Details: {probe.error}</p>
       )}
@@ -182,7 +183,9 @@ export type CpuFallbackCause =
   /** A GPU is present, but PyTorch has no backend for it on this platform. */
   | { kind: 'unsupported-gpu'; vendorLabel: string | null }
   /** An NVIDIA card is present but the engine could not resolve CUDA. */
-  | { kind: 'cuda-unavailable' };
+  | { kind: 'cuda-unavailable' }
+  /** PyTorch publishes no GPU build for this platform at all (Windows on ARM). */
+  | { kind: 'no-gpu-build' };
 
 /**
  * Why video generation resolved to the CPU. The distinction is the whole
@@ -195,8 +198,17 @@ export type CpuFallbackCause =
  *
  * `memory` is null when the profile probe failed; unknown hardware must
  * not assert a cause, so it falls back to the vaguer no-gpu copy.
+ *
+ * `cpuReason` is the engine's own word that the platform decides it, which
+ * outranks the card: an RTX Spark is NVIDIA hardware that CUDA reaches fine,
+ * so the driver advice below would send its owner after a fault they do
+ * not have.
  */
-export function cpuFallbackCause(memory: MemoryProfile | null): CpuFallbackCause {
+export function cpuFallbackCause(
+  memory: MemoryProfile | null,
+  cpuReason?: 'no-gpu-build',
+): CpuFallbackCause {
+  if (cpuReason === 'no-gpu-build') return { kind: 'no-gpu-build' };
   const hasGpu = memory?.source === 'gpu-nvidia' || memory?.source === 'gpu-vulkan';
   if (!hasGpu) return { kind: 'no-gpu' };
   const vendor = memory?.gpuVendor;
@@ -209,8 +221,24 @@ export function cpuFallbackCause(memory: MemoryProfile | null): CpuFallbackCause
 
 const SLOWNESS = 'which is extremely slow (minutes to hours per clip)';
 
-function CpuFallbackNotice({ memory }: { memory: MemoryProfile | null }) {
-  const cause = cpuFallbackCause(memory);
+function CpuFallbackNotice({
+  memory,
+  cpuReason,
+}: {
+  memory: MemoryProfile | null;
+  cpuReason?: 'no-gpu-build';
+}) {
+  const cause = cpuFallbackCause(memory, cpuReason);
+
+  if (cause.kind === 'no-gpu-build') {
+    return (
+      <p className="error">
+        The video engine is built on PyTorch, which has no GPU version for Windows on ARM yet, so
+        video will be generated on the <strong>CPU</strong>, {SLOWNESS}. Chat, images and speech
+        still use your GPU.
+      </p>
+    );
+  }
 
   if (cause.kind === 'unsupported-gpu') {
     const who = cause.vendorLabel ? `Your ${cause.vendorLabel} GPU` : "This machine's GPU";

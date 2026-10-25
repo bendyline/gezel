@@ -28,9 +28,14 @@ import {
 import { ensureSpeechModel } from '@bendyline/gezel-inference/internal/providers/audio/managed-speech-model';
 import type { SpeechToTextProvider } from '@bendyline/gezel-inference/internal/providers/audio/types';
 import { WhisperCppProvider } from '@bendyline/gezel-inference/internal/providers/audio/whisper-cpp';
+import { estimateNativeLaunchMemory } from '@bendyline/gezel-inference/internal/providers/native/device-capacity';
 import { pickFreePort } from '@bendyline/gezel-inference/internal/providers/native/port';
-import { NativeEngineSupervisor } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
+import {
+  type NativeEngineLaunch,
+  NativeEngineSupervisor,
+} from '@bendyline/gezel-inference/internal/providers/native/supervisor';
 import { patientFetch } from '@bendyline/gezel-inference/internal/providers/patient-fetch';
+import { isCudaArchivePath } from '@bendyline/gezel/native';
 import {
   SPEECH_MODEL_CATALOG,
   SpeechAssetStore,
@@ -48,6 +53,18 @@ export interface SpeechToTextFactoryOptions {
    * through to the first installed model by id.
    */
   defaultModelId?: string;
+}
+
+/**
+ * Whether whisper-server keeps its model in graphics memory: the CUDA build
+ * (RTX Spark, in the `-cuda` archive) and the Metal build on macOS do; the
+ * CPU builds everywhere else use system RAM.
+ */
+export function whisperRunsOnGpu(
+  binary: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return platform === 'darwin' || isCudaArchivePath(binary);
 }
 
 export async function createSpeechToTextProvider(
@@ -76,8 +93,19 @@ export async function createSpeechToTextProvider(
   if (env.GEZEL_WHISPER_SERVER_BIN) {
     const binary = env.GEZEL_WHISPER_SERVER_BIN;
     let cachedPort: number | undefined;
+    let lastLaunch: NativeEngineLaunch | undefined;
     const supervisor = new NativeEngineSupervisor({
-      capacity: { home: opts.home },
+      capacity: {
+        home: opts.home,
+        // Priced from the weights like any engine, but charged where the
+        // build keeps them: a CPU build on a machine with a discrete card
+        // was charged to the card, crowding out engines that do use it.
+        requirement: async () => {
+          if (!lastLaunch) return undefined;
+          const estimate = await estimateNativeLaunchMemory(lastLaunch);
+          return whisperRunsOnGpu(binary) ? estimate : { ...estimate, gpuBytes: 0 };
+        },
+      },
       logPrefix: '[whisper-server]',
       // whisper-server exposes a real /health, so the default readiness
       // path works — no readyOnAnyResponse needed unlike sd-server.
@@ -96,11 +124,12 @@ export async function createSpeechToTextProvider(
             'No STT model is available locally. Download one from Settings → Audio before transcribing.',
           );
         }
-        return {
+        lastLaunch = {
           command: binary,
           args: ['--host', '127.0.0.1', '--port', String(port), '--model', model.weightsPath],
           baseUrl: `http://127.0.0.1:${port}`,
         };
+        return lastLaunch;
       },
     });
     return new WhisperCppProvider({

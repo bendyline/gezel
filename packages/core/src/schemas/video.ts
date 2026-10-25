@@ -161,6 +161,13 @@ export const VideoEngineStatusResponseSchema = z.object({
      * providers (no local accelerator involved).
      */
     accelerator: VideoAcceleratorSchema.optional(),
+    /**
+     * Why a local engine runs on the CPU when the platform itself is the
+     * reason: `no-gpu-build` means PyTorch publishes no GPU build there
+     * (Windows on ARM, even with an NVIDIA GPU), so no driver or setting
+     * will change it. Absent otherwise.
+     */
+    cpuReason: z.enum(['no-gpu-build']).optional(),
   }),
   modelCount: z.number().int().nonnegative(),
 });

@@ -222,8 +222,10 @@ export function resolveAvailableLlamaBinary(
  * Version history:
  *   1 — linux-arm64 support: dispatch arm64 through detectLinuxOrWin,
  *       add aarch64-linux-gnu paths to CUDA/Vulkan lookups.
+ *   2 — Windows on ARM probes for the NVIDIA driver (RTX Spark) instead of
+ *       answering CPU.
  */
-const PROBE_SCHEMA_VERSION = 1;
+const PROBE_SCHEMA_VERSION = 2;
 
 interface CacheFile {
   /** Schema version of the probe that wrote this file. Missing on entries written by older versions of Gezel. */
@@ -281,6 +283,7 @@ function windowsSystem32(): string {
 function detectDriverBackend(
   os: 'linux' | 'win32',
   probeFile: (p: string) => boolean,
+  arch?: string,
 ): { backend: 'cuda' | 'vulkan' | 'cpu'; path?: string } {
   if (os === 'linux') {
     const libcuda = anyExists(LINUX_CUDA_DRIVER_PATHS, probeFile);
@@ -294,6 +297,9 @@ function detectDriverBackend(
   const sys32 = windowsSystem32();
   const nvcuda = anyExists([join(sys32, 'nvcuda.dll'), join(sys32, 'nvml.dll')], probeFile);
   if (nvcuda) return { backend: 'cuda', path: nvcuda };
+  // No Vulkan build ships for Windows on ARM (LunarG has no ARM64 SDK), so a
+  // Vulkan loader there is no reason to leave the CPU build.
+  if (arch === 'arm64') return { backend: 'cpu' };
 
   const vulkan = anyExists([join(sys32, 'vulkan-1.dll')], probeFile);
   if (vulkan) return { backend: 'vulkan', path: vulkan };
@@ -390,9 +396,10 @@ function detectLinuxOrWin(
   probeCmd: (c: string) => boolean,
   readFileText: (p: string) => string | undefined,
   readDir: (p: string) => string[],
+  arch?: string,
 ): { backend: LlamaBackend; reason: string; vendorHint?: GpuVendorHint } {
   const vendorHint = detectVendor(os, probeFile, readFileText, readDir);
-  const driver = detectDriverBackend(os, probeFile);
+  const driver = detectDriverBackend(os, probeFile, arch);
   // ── CUDA probe ─────────────────────────────────────────────────
   // We care about the DRIVER, not the toolkit — bundled
   // llama-server-cuda ships its own cudart alongside it. Linux
@@ -423,6 +430,9 @@ function detectLinuxOrWin(
     return { backend: 'vulkan', reason: `found ${driver.path}`, vendorHint };
   }
 
+  if (os === 'win32' && arch === 'arm64') {
+    return { backend: 'cpu', reason: 'Windows on ARM without an NVIDIA CUDA driver', vendorHint };
+  }
   return { backend: 'cpu', reason: 'no CUDA driver and no Vulkan loader found', vendorHint };
 }
 
@@ -493,8 +503,8 @@ function probeOrCached(input: DetectInput): {
       const cached: CacheFile = JSON.parse(readFileSync(cachePath, 'utf8'));
       const schemaOk = (cached.probeSchemaVersion ?? 0) >= PROBE_SCHEMA_VERSION;
       const currentDriverBackend =
-        (plat === 'linux' && (ar === 'x64' || ar === 'arm64')) || (plat === 'win32' && ar === 'x64')
-          ? detectDriverBackend(plat, probeFile).backend
+        (plat === 'linux' || plat === 'win32') && (ar === 'x64' || ar === 'arm64')
+          ? detectDriverBackend(plat, probeFile, ar).backend
           : undefined;
       const driverStateUnchanged =
         currentDriverBackend === undefined || currentDriverBackend === cached.backend;
@@ -535,18 +545,14 @@ function probeOrCached(input: DetectInput): {
     // way; if the loader is present we'll try Vulkan and fail
     // through to CPU on launch error.
     result = detectLinuxOrWin('linux', probeFile, probeCmd, probeReadFile, probeReadDir);
-  } else if (plat === 'win32' && ar === 'x64') {
-    result = detectLinuxOrWin('win32', probeFile, probeCmd, probeReadFile, probeReadDir);
-  } else if (plat === 'win32' && ar === 'arm64') {
-    // Windows-on-ARM answers CPU without probing. The native pipeline now
-    // also builds `win32-arm64-cuda` for RTX Spark (CUDA 13.4 is the first
-    // toolkit for WoA), but no one has run that payload on a device yet, and
-    // native releases before the one named in native-payload.mjs's
-    // FIRST_NATIVE_RELEASE carry no such archive. Probing for an NVIDIA GPU
-    // here, as the win32 x64 branch does, is the step that turns it on. There
-    // is no Vulkan build for this platform, and Adreno via OpenCL would be a
-    // new variant and a new branch here.
-    result = { backend: 'cpu', reason: 'Windows on ARM — CPU build is the only one shipped' };
+  } else if (plat === 'win32' && (ar === 'x64' || ar === 'arm64')) {
+    // Windows on ARM ships CPU and CUDA builds: the CUDA one is for RTX Spark
+    // (NVIDIA N1X, first supported by CUDA 13.4), first run on one with driver
+    // 621.01 on 2026-10-24: a 27B Q4 read prompts at ~320 tok/s and wrote at
+    // ~28, against ~10 and ~2 on the CPU build. A release without the
+    // `win32-arm64-cuda` archive falls back to CPU in
+    // resolveAvailableLlamaBinary. Adreno via OpenCL would be a new variant.
+    result = detectLinuxOrWin('win32', probeFile, probeCmd, probeReadFile, probeReadDir, ar);
   } else {
     result = { backend: 'cpu', reason: `unsupported platform ${plat}/${ar} — CPU only` };
   }

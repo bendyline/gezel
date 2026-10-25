@@ -104,7 +104,7 @@ export function QueuedTaskBubble({
           {onTaskReference ? (
             <button
               type="button"
-              className="msg-ref-chip"
+              className="msg-ref-chip msg-ref-chip-label"
               onClick={() => onTaskReference(task.ref)}
               title="Open this task"
             >

@@ -536,7 +536,8 @@ export function HomeWorkshop({
                       invite: (
                         <div className="meester-folder-invite" data-testid="folder-invite">
                           <p className="meester-welcome-line">
-                            Want me to look after a folder of yours too? I'll only read it.
+                            Want me to look after a folder of yours too? I won't change any of the
+                            files unless you ask me to; I'll only read them.
                           </p>
                           <FolderOnboardingStep
                             config={config}

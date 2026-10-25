@@ -39,6 +39,7 @@ import {
 } from '@bendyline/gezel-inference/internal/providers/native/device-capacity';
 import { measuredCapacityBudget } from '@bendyline/gezel-inference/internal/providers/native/measured-budget';
 import { detectMemoryProfileCached } from '@bendyline/gezel-inference/internal/system/memory';
+import { isCudaArchivePath } from '@bendyline/gezel/native';
 import { sdServerLoadProfile } from '../providers/image/sd-cpp.js';
 import { detectVideoAccelerator } from '../providers/video/venv.js';
 import {
@@ -88,19 +89,27 @@ export function videoMediaPool(
 }
 
 /**
- * Where sd-server keeps weights. It ships one binary per platform: Metal on
- * Apple Silicon, CPU on Intel Macs and Windows on Arm, CUDA or Vulkan
- * elsewhere, falling back to the processor when no GPU answers.
+ * Where sd-server keeps weights: Metal on Apple Silicon, CPU on Intel Macs,
+ * CUDA or Vulkan elsewhere, falling back to the processor when no GPU
+ * answers. Windows on Arm runs on the processor unless discovery picked its
+ * CUDA build, which only an RTX Spark gets.
  */
 export function imageMediaPool(
   kind: CapacityBudgetKind,
-  host: { platform: NodeJS.Platform; arch: string } = {
+  host: { platform: NodeJS.Platform; arch: string; sdServerBin?: string | undefined } = {
     platform: process.platform,
     arch: process.arch,
+    sdServerBin: process.env.GEZEL_SD_SERVER_BIN,
   },
 ): MediaMemoryPool {
   if (host.platform === 'darwin') return host.arch === 'arm64' ? 'unified' : 'cpu';
-  if (host.platform === 'win32' && host.arch === 'arm64') return 'cpu';
+  if (
+    host.platform === 'win32' &&
+    host.arch === 'arm64' &&
+    !(host.sdServerBin && isCudaArchivePath(host.sdServerBin))
+  ) {
+    return 'cpu';
+  }
   return kind === 'discrete-gpu' ? 'discrete' : kind === 'unified' ? 'unified' : 'cpu';
 }
 

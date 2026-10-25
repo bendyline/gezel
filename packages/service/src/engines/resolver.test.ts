@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { type Server, createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -107,6 +107,7 @@ afterEach(() => {
     'GEZEL_LLAMA_SERVER_BIN',
     'GEZEL_NATIVE_BIN_DIR',
     'GEZEL_LLAMA_SERVER_BACKEND',
+    'GEZEL_SQLITE_VEC_PATH',
   ]) {
     if (k in savedEnv) {
       if (savedEnv[k] === undefined) delete process.env[k];
@@ -119,6 +120,7 @@ function snapshotEnv() {
     'GEZEL_LLAMA_SERVER_BIN',
     'GEZEL_NATIVE_BIN_DIR',
     'GEZEL_LLAMA_SERVER_BACKEND',
+    'GEZEL_SQLITE_VEC_PATH',
   ]) {
     savedEnv[k] = process.env[k];
   }
@@ -191,6 +193,35 @@ describe('resolveEngine — happy path', () => {
       });
       expect(again.cached).toBe(true);
       expect(verifyCalls).toBe(2);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  // npm's sqlite-vec has no Windows-on-ARM build; that bare archive carries
+  // vec0.dll, and the next database open should find it without a reboot.
+  it('stamps a sqlite-vec extension that sits in the release beside the engine', async () => {
+    snapshotEnv();
+    delete process.env.GEZEL_SQLITE_VEC_PATH;
+    const home = await freshHome();
+    try {
+      const ext = IS_WIN ? 'dll' : process.platform === 'darwin' ? 'dylib' : 'so';
+      const bareKey = join(home, 'engines', 'native-bin', VERSION, PLATFORM_KEY);
+      await mkdir(bareKey, { recursive: true });
+      await writeFile(join(bareKey, `vec0.${ext}`), 'extension');
+      await resolveEngineToCompletion({
+        engine: 'llama-server',
+        home,
+        variant: VARIANT,
+        version: VERSION,
+        githubApiBase: base,
+        token: 'fixture',
+        expectedSha256sumsDigest: sumsDigest,
+        expectedArchiveSha256: { [ARCHIVE_NAME]: sha(archiveBytes) },
+        signaturePolicy: 'off',
+        verifyOverride: async () => ({ result: { status: 'unsigned' as const }, accepted: true }),
+      });
+      expect(process.env.GEZEL_SQLITE_VEC_PATH).toBe(join(bareKey, `vec0.${ext}`));
     } finally {
       await rm(home, { recursive: true, force: true });
     }

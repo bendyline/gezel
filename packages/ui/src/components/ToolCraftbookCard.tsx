@@ -181,7 +181,12 @@ export function ToolCraftbookCard({
           </div>
         )}
         <div className="msg-tool-card-actions">
-          <button type="button" className="msg-ref-chip" onClick={openTask} title="Open this task">
+          <button
+            type="button"
+            className="msg-ref-chip msg-ref-chip-label"
+            onClick={openTask}
+            title="Open this task"
+          >
             {debugMode ? `Task ${card.taskRef}` : 'Open task'}
           </button>
           {result?.deliverable && (

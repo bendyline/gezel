@@ -676,10 +676,14 @@ and the meester's lines in the chat register (serif body). Rules:
 - **One surface per message.** While the tools arrive, progress is one
   quiet line under the meester (a thin bar, then "Fetching my tools · 42% ·
   about 3 min left"), not a banner. The composer is open for a draft with
-  Send held, and its own "can start talking once a model is downloaded"
-  notice is suppressed in the meester's thread, because the welcome already
-  says so. A failure is one plain sentence with **Try again** and quiet
-  escape links; a report link only for real failures.
+  Send held, and a held Send always says why: a `--warning` dot and line on
+  the toolbar beside it (`.chat-composer-held`), "**Can't send yet:**" plus
+  where setup stands. In the meester's thread that is the welcome's own
+  state ("downloading the AI model · 42%", `composerWaitingStatus`);
+  elsewhere it is "no AI model is downloaded" with a **Get started** key to
+  Home. A dimmed arrow alone read as broken. A failure is one plain
+  sentence with **Try again** and quiet escape links; a report link only
+  for real failures.
 - **No page swap.** When the model lands the same surface says "I'm ready.
   What shall we make?" The greeting band and the folder step stay away for
   the rest of that visit; they arrive on the next.

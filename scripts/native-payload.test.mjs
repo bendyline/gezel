@@ -21,8 +21,10 @@ import { fileURLToPath } from 'node:url';
 import {
   ENGINE_FOR_BINARY,
   FIRST_NATIVE_RELEASE,
+  FIRST_NATIVE_RELEASE_BINARY,
   NATIVE_PAYLOAD,
   allPlatformKeys,
+  binariesInRelease,
   expectedBinaries,
   platformKeysForEngine,
   platformKeysInRelease,
@@ -223,11 +225,56 @@ test('sd.cpp CUDA legs build against the llama CUDA leg they share a key with', 
   );
 });
 
+test('the CUDA whisper-server builds against its key-mate llama leg, statically', () => {
+  const matrix = parseMatrix();
+  const whisperCuda = matrix.filter(
+    (entry) => entry.engine === 'whisper-cpp' && entry.variant === 'cuda',
+  );
+  assert.deepEqual(
+    whisperCuda.map((entry) => entry.platform),
+    ['win32-arm64'],
+  );
+  for (const entry of whisperCuda) {
+    const llama = matrix.find(
+      (candidate) =>
+        candidate.engine === 'llama-cpp' &&
+        candidate.variant === 'cuda' &&
+        candidate.platform === entry.platform,
+    );
+    assert.ok(
+      llama,
+      `no llama-cpp CUDA leg on ${entry.platform} stages the libraries whisper links`,
+    );
+    for (const field of ['cuda_version', 'runner']) {
+      assert.equal(entry[field], llama[field], `${entry.platform} whisper ${field}`);
+    }
+    assert.equal(
+      entry.whisper_cuda_arch,
+      llama.llama_cuda_arch,
+      `${entry.platform} whisper-server and llama-server ship in one -cuda key; change their GPU coverage together`,
+    );
+  }
+  assert.match(workflow, /^ {6}WHISPER_BACKEND: \$\{\{ matrix\.whisper_backend \|\| '' \}\}$/m);
+  assert.match(workflow, /^ {6}WHISPER_CUDA_ARCH: \$\{\{ matrix\.whisper_cuda_arch \|\| '' \}\}$/m);
+
+  // llama-server's ggml*.dll sit in the same folder under the same names,
+  // from a different ggml: a shared whisper build would overwrite them.
+  const whisperWindows =
+    windowsWrapperPaths.find(([path]) => path.includes('whisper-cpp/build.ps1'))?.[1] ?? '';
+  assert.match(whisperWindows, /'-DGGML_CUDA=ON', '-DBUILD_SHARED_LIBS=OFF'/);
+  assert.match(whisperWindows, /\$outKey = if \(\$arm64Cuda\) \{ "\$platform-cuda" \}/);
+  assert.match(whisperWindows, /must link ggml statically/);
+});
+
 test('Windows-on-ARM CUDA targets RTX Spark with a pinned toolkit', () => {
   const legs = parseMatrix().filter(
     (entry) => entry.platform === 'win32-arm64' && entry.variant === 'cuda',
   );
-  assert.deepEqual(legs.map((entry) => entry.engine).sort(), ['llama-cpp', 'sd-cpp']);
+  assert.deepEqual(legs.map((entry) => entry.engine).sort(), [
+    'llama-cpp',
+    'sd-cpp',
+    'whisper-cpp',
+  ]);
   for (const entry of legs) {
     assert.equal(
       entry.runner,
@@ -236,14 +283,24 @@ test('Windows-on-ARM CUDA targets RTX Spark with a pinned toolkit', () => {
     );
     assert.equal(entry.cuda_version, '13.4.1', `${entry.engine} toolkit`);
     // N1X is GB10 silicon: the same target as the linux-arm64 CUDA legs.
-    assert.equal(entry.llama_cuda_arch ?? entry.sd_cuda_arch, '121a-real', entry.engine);
+    assert.equal(
+      entry.llama_cuda_arch ?? entry.sd_cuda_arch ?? entry.whisper_cuda_arch,
+      '121a-real',
+      entry.engine,
+    );
   }
 
+  // The toolkit is assembled by one script, which CI and a local RTX Spark
+  // build both run, so the pins live there.
   const start = workflow.indexOf('      - name: Install CUDA Toolkit (Windows ARM64)');
   const end = workflow.indexOf('      # ── Linux CPU baseline build deps', start);
   assert.notEqual(start, -1, 'could not find the Windows ARM64 CUDA install step');
   assert.notEqual(end, -1, 'could not find the end of the Windows ARM64 CUDA install step');
-  const step = workflow.slice(start, end);
+  assert.match(workflow.slice(start, end), /native\/scripts\/install-cuda-arm64\.ps1 -Root /);
+  const step = readFileSync(
+    fileURLToPath(new URL('../native/scripts/install-cuda-arm64.ps1', import.meta.url)),
+    'utf8',
+  );
   const pins = [...step.matchAll(/'([a-z_]+\/windows-arm64\/[\w.-]+\.zip)'\s*=\s*'([0-9a-f]+)'/g)];
   assert.deepEqual(pins.map(([, path]) => path.split('/')[0]).sort(), [
     'cccl',
@@ -291,6 +348,47 @@ test('releases published before a key existed are not asked for it', () => {
     assert.match(contents, /check-native-payload\.mjs --list-keys --release "\$version"/, name);
     assert.doesNotMatch(contents, /check-native-payload\.mjs --list-keys\)/, name);
   }
+});
+
+test('releases published before a binary existed are not asked for it', () => {
+  for (const [entry, version] of Object.entries(FIRST_NATIVE_RELEASE_BINARY)) {
+    const [key, binary] = entry.split('/');
+    assert.ok(
+      NATIVE_PAYLOAD[key]?.includes(binary),
+      `FIRST_NATIVE_RELEASE_BINARY names ${entry}, which nothing ships`,
+    );
+    const [major, minor, patch] = version.split('.').map(Number);
+    const before = `${major}.${minor}.${patch - 1}`;
+    const file = expectedBinaries(key).find((name) => name.startsWith(binary));
+    assert.ok(!binariesInRelease(key, before).includes(binary), `${before} predates ${entry}`);
+    assert.ok(binariesInRelease(key, version).includes(binary), `${version} ships ${entry}`);
+    assert.ok(!expectedBinaries(key, before).includes(file), `${key} in ${before}`);
+    assert.ok(expectedBinaries(key).includes(file), 'a new build always carries it');
+  }
+  // Gated per key: the CUDA whisper-server is new to win32-arm64-cuda, but the
+  // bare keys have shipped a whisper-server all along.
+  assert.ok(binariesInRelease('win32-arm64', '0.1.52').includes('gezel-whisper-server'));
+  assert.ok(!binariesInRelease('win32-arm64-cuda', '0.1.52').includes('gezel-whisper-server'));
+  assert.equal(expectedBinaries('no-such-key', '0.1.52'), null);
+
+  // The packaging jobs stage the pinned release, so their check must ask only
+  // for what that release carries: without --release, an arm64 runner wants
+  // the vec0.dll that first ships in a later release and fails the build.
+  for (const name of ['release-electron.yml', 'release-msix.yml', 'release-mas.yml']) {
+    const contents = readFileSync(
+      fileURLToPath(new URL(`../.github/workflows/${name}`, import.meta.url)),
+      'utf8',
+    );
+    const checks = contents.match(/check-native-payload\.mjs --root [^\n]*/g) ?? [];
+    assert.ok(checks.length > 0, `${name} checks its staged payload`);
+    for (const check of checks) assert.match(check, /--release "\$version"$/, name);
+  }
+});
+
+test('libraries keep their own extension on Windows keys', () => {
+  assert.ok(expectedBinaries('win32-arm64').includes('vec0.dll'));
+  assert.ok(expectedBinaries('win32-arm64').includes('uv.exe'));
+  assert.ok(!expectedBinaries('win32-arm64').includes('vec0.dll.exe'));
 });
 
 test('native-payload.mjs covers exactly the platform keys the matrix builds', () => {

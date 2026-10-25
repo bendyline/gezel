@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
+import { sqliteVecLoads } from '../index-store/testing/sqlite-vec.js';
 import { parseMemoryDay } from './daily-markdown.js';
 import { MemoryHealthMonitor } from './health.js';
 import { MemoryManager } from './manager.js';
@@ -60,6 +61,8 @@ const embeddingsMock = (await import(
   __embedCalls(): number;
 };
 
+const vecLoads = await sqliteVecLoads();
+
 let home: string;
 let store: Store;
 let memory: MemoryManager;
@@ -104,7 +107,7 @@ describe('MemoryManager.save dedup', () => {
     expect(embeddingsMock.__embedCalls()).toBe(callsBefore);
   });
 
-  it('catches near-duplicates via vector similarity', async () => {
+  it.skipIf(!vecLoads)('catches near-duplicates via vector similarity', async () => {
     await memory.save('gezel', 'deduper', 'The project uses sqlite-vec for the memory index');
     const outcome = await memory.save(
       'gezel',
@@ -198,14 +201,17 @@ describe('MemoryManager search degradation', () => {
     ]);
   });
 
-  it('embeds once and reuses the query vector across both indexed scopes', async () => {
-    await memory.save('gezel', 'deduper', 'The release uses a blue-green deployment.');
-    await memory.save('project', 'default', 'The project rollback window is fifteen minutes.');
-    const callsBefore = embeddingsMock.__embedCalls();
+  it.skipIf(!vecLoads)(
+    'embeds once and reuses the query vector across both indexed scopes',
+    async () => {
+      await memory.save('gezel', 'deduper', 'The release uses a blue-green deployment.');
+      await memory.save('project', 'default', 'The project rollback window is fifteen minutes.');
+      const callsBefore = embeddingsMock.__embedCalls();
 
-    const outcome = await memory.searchAllDetailed('deduper', 'default', 'release rollback');
+      const outcome = await memory.searchAllDetailed('deduper', 'default', 'release rollback');
 
-    expect(outcome.mode).toBe('semantic');
-    expect(embeddingsMock.__embedCalls()).toBe(callsBefore + 1);
-  });
+      expect(outcome.mode).toBe('semantic');
+      expect(embeddingsMock.__embedCalls()).toBe(callsBefore + 1);
+    },
+  );
 });

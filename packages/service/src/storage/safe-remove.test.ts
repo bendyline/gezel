@@ -68,7 +68,7 @@ describe('assertPathDeletable', () => {
     const realTarget = await seedDir(join(outside, 'real-content'));
     const link = join(home, 'engines');
     await mkdir(join(home), { recursive: true });
-    await symlink(realTarget, link, 'dir');
+    await symlink(realTarget, link, process.platform === 'win32' ? 'junction' : 'dir');
 
     await expect(assertPathDeletable(link, { home })).rejects.toBeInstanceOf(UndeletablePathError);
     expect(await exists(join(realTarget, 'payload.bin'))).toBe(true);
@@ -79,7 +79,7 @@ describe('assertPathDeletable', () => {
     // space as freed, so a link is refused regardless of where it points.
     const real = await seedDir(join(home, 'engines', 'real'));
     const link = join(home, 'engines', 'linked');
-    await symlink(real, link, 'dir');
+    await symlink(real, link, process.platform === 'win32' ? 'junction' : 'dir');
 
     await expect(assertPathDeletable(link, { home })).rejects.toThrow(/link, not a folder/);
   });

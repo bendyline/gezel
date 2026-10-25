@@ -144,6 +144,74 @@ describe('detectLlamaBackend — Linux arm64', () => {
   });
 });
 
+describe('detectLlamaBackend — Windows on ARM', () => {
+  const sys32 = process.env.SYSTEMROOT
+    ? join(process.env.SYSTEMROOT, 'System32')
+    : 'C:\\Windows\\System32';
+  const onArm = (present: string[]) => ({
+    ...probeWith(present),
+    platform: 'win32' as const,
+    arch: 'arm64' as const,
+  });
+
+  it('picks cuda when the NVIDIA driver is present (RTX Spark)', () => {
+    const r = detectLlamaBackend({
+      engineVersion: 'b8892',
+      home,
+      probe: onArm([join(sys32, 'nvcuda.dll')]),
+    });
+    expect(r.backend).toBe('cuda');
+    expect(r.reason).toContain('nvcuda.dll');
+  });
+
+  it('stays on cpu with only a Vulkan loader, since no ARM64 Vulkan build ships', () => {
+    const r = detectLlamaBackend({
+      engineVersion: 'b8892',
+      home,
+      probe: onArm([join(sys32, 'vulkan-1.dll')]),
+    });
+    expect(r.backend).toBe('cpu');
+    expect(r.reason).toContain('without an NVIDIA CUDA driver');
+  });
+
+  it('re-probes a cpu answer cached before it could see the GPU', () => {
+    const cacheDir = join(home, 'engines', 'llama-cpp');
+    require('node:fs').mkdirSync(cacheDir, { recursive: true });
+    require('node:fs').writeFileSync(
+      join(cacheDir, 'backend.json'),
+      JSON.stringify({
+        probeSchemaVersion: 1,
+        engineVersion: 'b8892',
+        backend: 'cpu',
+        reason: 'Windows on ARM — CPU build is the only one shipped',
+        probedAt: '2026-10-24T00:00:00.000Z',
+      }),
+    );
+    const r = detectLlamaBackend({
+      engineVersion: 'b8892',
+      home,
+      probe: onArm([join(sys32, 'nvcuda.dll')]),
+    });
+    expect(r.cached).toBe(false);
+    expect(r.backend).toBe('cuda');
+  });
+
+  it('re-probes a cached cuda answer once the driver is gone', () => {
+    const present = new Set([join(sys32, 'nvcuda.dll')]);
+    const probe = {
+      fileExists: (p: string) => present.has(p),
+      commandOk: () => false,
+      platform: 'win32' as const,
+      arch: 'arm64' as const,
+    };
+    expect(detectLlamaBackend({ engineVersion: 'b8892', home, probe }).backend).toBe('cuda');
+    present.clear();
+    const r = detectLlamaBackend({ engineVersion: 'b8892', home, probe });
+    expect(r.cached).toBe(false);
+    expect(r.backend).toBe('cpu');
+  });
+});
+
 describe('detectLlamaBackend — Windows x64', () => {
   // Pre-compute the System32 paths the probe will look for.
   const sys32 = process.env.SYSTEMROOT
@@ -305,7 +373,7 @@ describe('detectLlamaBackend — caching', () => {
     const written = JSON.parse(
       readFileSync(join(home, 'engines', 'llama-cpp', 'backend.json'), 'utf8'),
     );
-    expect(written.probeSchemaVersion).toBe(1);
+    expect(written.probeSchemaVersion).toBe(2);
   });
 
   it('tolerates a corrupt cache file by re-probing', () => {

@@ -1966,9 +1966,11 @@ describe('ChatComposer before a model arrives', () => {
       );
 
       expect(screen.getByTestId('chat-waiting-for-model')).toHaveTextContent(
-        'Tomas can start talking once a model is downloaded.',
+        "Can't send yet: no AI model is downloaded",
       );
-      expect(screen.getByRole('button', { name: /^send$/i })).toBeDisabled();
+      const sendKey = screen.getByRole('button', { name: /^send$/i });
+      expect(sendKey).toBeDisabled();
+      expect(sendKey).toHaveAttribute('title', "Can't send yet: no AI model is downloaded");
       // The draft can still be written; Enter does not send it.
       fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
       pressSendShortcut();
@@ -1980,6 +1982,27 @@ describe('ChatComposer before a model arrives', () => {
     } finally {
       window.removeEventListener('gezel:navigate', onNavigate);
     }
+  });
+
+  it("names the setup's own state when the surface runs setup", () => {
+    render(
+      <FirstRunProvider value={true}>
+        <ChatComposer
+          gezelId="tomas"
+          gezelName="Tomas"
+          projectId="default"
+          sessionId="session-1"
+          recipientGezels={[tomas]}
+          waitingStatus="downloading the AI model · 42%"
+        />
+      </FirstRunProvider>,
+    );
+
+    expect(screen.getByTestId('chat-waiting-for-model')).toHaveTextContent(
+      "Can't send yet: downloading the AI model · 42%",
+    );
+    expect(screen.queryByRole('button', { name: 'Get started' })).toBeNull();
+    expect(screen.getByRole('button', { name: /^send$/i })).toBeDisabled();
   });
 
   it('does not hold a gezel with a provider of its own', () => {

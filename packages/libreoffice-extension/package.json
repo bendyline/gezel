@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:py": "python3 -m unittest discover -s tests/python -p 'test_*.py'",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "node ../../scripts/clean-dirs.mjs dist"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

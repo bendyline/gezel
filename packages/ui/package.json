@@ -16,7 +16,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist dist-embedded dist-office .turbo",
+    "clean": "node ../../scripts/clean-dirs.mjs dist dist-embedded dist-office .turbo",
     "poppetje:review": "node scripts/poppetje-review.mjs"
   },
   "dependencies": {

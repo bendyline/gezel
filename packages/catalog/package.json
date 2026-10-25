@@ -40,7 +40,7 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit && tsc --noEmit -p scripts/tsconfig.json",
     "test": "vitest run && node --test ../../scripts/update-gilde.test.mjs",
-    "clean": "rm -rf dist .turbo",
+    "clean": "node ../../scripts/clean-dirs.mjs dist .turbo",
     "import-mcp-registry": "tsx scripts/import-mcp-registry.ts",
     "build-index": "node scripts/run-gilde-build-index.mjs",
     "lint-manifests": "tsx src/chat-model-manifest-lint.ts",

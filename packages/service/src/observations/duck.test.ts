@@ -279,9 +279,21 @@ describe('DuckRunner — binary discovery ladder', () => {
   it('lets GEZEL_DUCKDB_BIN override a present pinned build', () => {
     process.env.GEZEL_DUCKDB_BIN = '/opt/custom/duckdb';
     const runner = new DuckRunner({ home: '/tmp/gezel-home', fileExists: () => true });
-    expect(runner.resolvedBinaryProvenance()).toMatchObject({
+    expect(runner.resolvedBinaryProvenance()).toEqual({
       path: '/opt/custom/duckdb',
       source: 'env',
+      pinned: false,
+    });
+  });
+
+  it('counts GEZEL_DUCKDB_BIN as pinned when discovery stamped the pinned install', () => {
+    const home = '/tmp/gezel-home';
+    process.env.GEZEL_DUCKDB_BIN = duckdbInstalledBinary(home);
+    const runner = new DuckRunner({ home, fileExists: () => true });
+    expect(runner.resolvedBinaryProvenance()).toEqual({
+      path: duckdbInstalledBinary(home),
+      source: 'env',
+      pinned: true,
     });
   });
 

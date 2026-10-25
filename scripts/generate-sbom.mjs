@@ -267,7 +267,7 @@ components.push({
   name: 'microsoft-visual-cpp-redistributable',
   scope: 'required',
   description:
-    'Microsoft Visual C++ 2015-2022 Redistributable (x64) embedded in the Windows installer and executed during install; supplies MSVCP140/VCRUNTIME140 for the bundled native engines',
+    "Microsoft Visual C++ 2015-2022 Redistributable (x64 or ARM64, matching the installer's architecture) embedded in the Windows installer and executed during install; supplies MSVCP140/VCRUNTIME140 for the bundled native engines",
   licenses: [{ license: { name: 'Microsoft Visual C++ Redistributable Terms' } }],
   properties: [
     { name: 'gezel:component-kind', value: 'native-redistributable' },

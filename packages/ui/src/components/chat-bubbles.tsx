@@ -640,7 +640,7 @@ function HandoffNoteCard({
           {onTaskReference ? (
             <button
               type="button"
-              className="msg-ref-chip"
+              className="msg-ref-chip msg-ref-chip-label"
               onClick={() => onTaskReference(note.taskRef)}
               title={`Open task ${note.taskRef}`}
             >

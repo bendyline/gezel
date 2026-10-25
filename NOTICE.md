@@ -297,6 +297,7 @@ copies and their engine- and helper-aware manifest live in
 | **stable-diffusion.cpp** (`sd-server`) | tag `master-975-95b3090` | MIT | [leejet/stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) |
 | **whisper.cpp** (`whisper-server`) | tag `v1.9.1` | MIT | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) |
 | **uv** (precompiled binary, not built from source) | tag `0.11.32` | Apache-2.0 OR MIT | [astral-sh/uv](https://github.com/astral-sh/uv) |
+| **sqlite-vec** (`vec0.dll`, Windows ARM64 only, built from the release amalgamation against SQLite's public-domain headers; every other platform loads the npm prebuild listed above) | tag `v0.1.9` | MIT OR Apache-2.0 | [asg017/sqlite-vec](https://github.com/asg017/sqlite-vec) |
 | **Vulkan loader** (`libvulkan.so.1`, bundled beside stable-diffusion.cpp on `linux-x64` and llama.cpp on `linux-x64-vulkan`) | build-platform version | Apache-2.0 | [KhronosGroup/Vulkan-Loader](https://github.com/KhronosGroup/Vulkan-Loader) |
 | **AMD Display Library (ADL) SDK headers** (ABI definitions compiled into Windows `gezel-device-health.exe`; no AMD binary redistributed) | `18.0` | MIT | [GPUOpen-LibrariesAndSDKs/display-library](https://github.com/GPUOpen-LibrariesAndSDKs/display-library) |
 
@@ -308,8 +309,8 @@ into every ggml engine: a **YaRN** RoPE implementation (MIT, © 2023 Jeffrey
 Quesnelle and Bowen Peng), FP16 conversion from **Maratyszcza/FP16** (MIT,
 © 2017 Facebook Inc., 2017 Georgia Institute of Technology, 2019 Google LLC),
 and vector math adapted from **Arm Optimized Routines** (MIT OR Apache-2.0 WITH
-LLVM-exception, © Arm Limited). CUDA builds of llama.cpp and
-stable-diffusion.cpp also compile NVIDIA's **CUB** (BSD-3-Clause, © Duane
+LLVM-exception, © Arm Limited). CUDA builds of llama.cpp,
+stable-diffusion.cpp and whisper.cpp also compile NVIDIA's **CUB** (BSD-3-Clause, © Duane
 Merrill and NVIDIA) from the CUDA toolkit, and Vulkan builds compile the
 Khronos **Vulkan-Headers** (Apache-2.0 OR MIT). The bundled Vulkan loader
 compiles in **cJSON** (MIT, © 2009 Dave Gamble, with Khronos, Valve and LunarG
@@ -654,8 +655,9 @@ components are redistributed:
   GPU components. (The Visual C++ runtime below is installer-scoped on
   Windows, so it accompanies every Windows variant including those.)
 
-- **Microsoft Visual C++ 2015-2022 Redistributable (x64)**
-  (`vc_redist.x64.exe`) is embedded in the **Windows installer only** and run
+- **Microsoft Visual C++ 2015-2022 Redistributable (x64 or ARM64)**
+  (`vc_redist.x64.exe` or `vc_redist.arm64.exe`, matching the installer's
+  architecture) is embedded in the **Windows installer only** and run
   once during installation (`/install /quiet /norestart`, see
   `packages/app/installer/nsis-hooks.nsh`). It is required rather than
   optional: every native engine binary Gezel ships on Windows imports
@@ -667,7 +669,9 @@ components are redistributed:
   which permit shipping it with an application that requires it.
 
   It is installed centrally rather than copied app-local, so Windows Update
-  services it. `packages/app/scripts/stage-vc-redist.mjs` takes the copy
+  services it. The Microsoft Store package is the exception: an MSIX cannot
+  run an installer, so it carries the same runtime's DLLs (`msvcp140*.dll`,
+  `vcruntime140*.dll`) beside the engines instead, under the same terms. `packages/app/scripts/stage-vc-redist.mjs` takes the copy
   belonging to the Visual Studio toolset that compiled those engine DLLs — a
   CRT must match its compiling toolset — and refuses to stage any file whose
   Authenticode signature is not valid and does not name Microsoft Corporation.

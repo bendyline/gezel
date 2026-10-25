@@ -57,6 +57,11 @@
         "LICENSE-vulkan-loader-cjson-MIT.txt"
       ]
     },
+    "sqlite-vec": {
+      "tag": "v0.1.9",
+      "commit": "e9f598abfa0c06b328d8fe5da9c3760cce74be10",
+      "files": ["LICENSE-sqlite-vec-APACHE.txt", "LICENSE-sqlite-vec-MIT.txt"]
+    },
     "uv": {
       "tag": "0.11.32",
       "commit": "3010295ae7ff572de459987ad70db315a62ecd61",
@@ -71,7 +76,8 @@
         "LICENSE-fp16-MIT.txt",
         "LICENSE-arm-optimized-routines-MIT-OR-Apache-2.0.txt",
         "LICENSE-cpp-httplib-MIT.txt",
-        "LICENSE-nlohmann-json-MIT.txt"
+        "LICENSE-nlohmann-json-MIT.txt",
+        "LICENSE-nvidia-cub-BSD-3-Clause.txt"
       ]
     }
   },

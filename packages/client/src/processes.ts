@@ -66,8 +66,8 @@ export async function listProcessSnapshots(
   options: ListProcessSnapshotsOptions = {},
 ): Promise<ProcessSnapshot[]> {
   const platform = options.platform ?? process.platform;
-  const run = options.run ?? runProcessCommand;
   if (platform === 'win32') {
+    const run = options.run ?? windowsProcessQueryRunner;
     const stdout = await run(windowsPowerShellPath(), [
       '-NoLogo',
       '-NoProfile',
@@ -80,9 +80,23 @@ export async function listProcessSnapshots(
     return parseWindowsProcessSnapshot(stdout);
   }
   if (platform === 'darwin' || platform === 'linux') {
+    const run = options.run ?? runProcessCommand;
     return parseUnixProcessSnapshot(await run('/bin/ps', ['-axo', 'pid=,ppid=,command=']));
   }
   return [];
+}
+
+/**
+ * Windows PowerShell plus a WMI query is slow to start, and slower under a
+ * service account: as LocalService on an RTX Spark (2026-10-24) PowerShell
+ * took 2.2 s to start and each Win32_Process query 3.5 to 4 s in all, against
+ * about 1 s for the same query as the signed-in user. The 5 s limit `ps`
+ * gets therefore failed GezelService's startup orphan sweep every time.
+ */
+const WINDOWS_PROCESS_QUERY_TIMEOUT_MS = 30_000;
+
+function windowsProcessQueryRunner(command: string, args: string[]): Promise<string> {
+  return runProcessCommand(command, args, WINDOWS_PROCESS_QUERY_TIMEOUT_MS);
 }
 
 /** Parse the portable `ps -axo pid=,ppid=,command=` shape. */
@@ -194,11 +208,15 @@ export async function stopProcessByPid(
   return stopped;
 }
 
-async function runProcessCommand(command: string, args: string[]): Promise<string> {
+async function runProcessCommand(
+  command: string,
+  args: string[],
+  timeout = 5_000,
+): Promise<string> {
   const { stdout } = await execFileAsync(command, args, {
     encoding: 'utf8',
     windowsHide: true,
-    timeout: 5_000,
+    timeout,
     maxBuffer: 8 * 1024 * 1024,
   });
   return String(stdout);

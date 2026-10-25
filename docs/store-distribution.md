@@ -187,10 +187,12 @@ loud rather than plausible defaults.
 
 - **Microsoft Store** — reserve the identity in Partner Center and replace the
   `REPLACE_WITH_PARTNER_CENTER_*` placeholders; author `assets/appx/` tile art
-  (electron-builder substitutes stock images rather than failing); settle the
-  VC++ runtime question for the engines (app-local CRT DLLs are the likely
-  answer, since the VCLibs desktop framework package is deprecated) and
-  validate on a clean Windows VM.
+  (electron-builder substitutes stock images rather than failing); validate on
+  a clean Windows VM of each arch (x64 and ARM64). The engines' VC++ runtime
+  ships app-local: the VCLibs desktop framework package is deprecated and an
+  MSIX cannot run Microsoft's redistributable installer, so
+  `packages/app/scripts/stage-app-local-crt.mjs` copies the Microsoft-signed
+  runtime DLLs beside the engines in each `native-bin` key.
 - **Mac App Store** — register the bundle ID and the App Group in App Store
   Connect, and confirm the provisioning profile carries the App Groups
   capability. Without it the app installs, runs, and silently never finds a

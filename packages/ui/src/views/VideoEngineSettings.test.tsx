@@ -142,5 +142,12 @@ describe('VideoEngineSettings', () => {
         vendorLabel: null,
       });
     });
+
+    // An RTX Spark is NVIDIA hardware CUDA reaches; its driver is fine.
+    it('blames the platform, not the driver, when PyTorch has no GPU build there', () => {
+      expect(
+        cpuFallbackCause({ source: 'gpu-nvidia', gpuVendor: 'nvidia' } as never, 'no-gpu-build'),
+      ).toEqual({ kind: 'no-gpu-build' });
+    });
   });
 });

@@ -78,7 +78,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:prewarm-embedder": "tsx scripts/prewarm-test-embedder.ts",
-    "clean": "rm -rf dist .turbo"
+    "clean": "node ../../scripts/clean-dirs.mjs dist .turbo"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.113.0",

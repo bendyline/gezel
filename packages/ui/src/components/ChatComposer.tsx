@@ -312,11 +312,12 @@ export interface ChatComposerProps {
    */
   imageGenerator?: { defaults?: Record<string, unknown> | undefined };
   /**
-   * Leave out the "can start talking once a model is downloaded" notice. For
-   * a surface that already says so in its own words (the meester's welcome).
-   * Send stays held either way.
+   * Where setup stands while Send waits for a model, in the words of the
+   * surface that runs it (the meester's welcome: "downloading the AI model ·
+   * 42%"). The toolbar's warning shows it after "Can't send yet:" and drops
+   * its Get started key, since setup is already on screen.
    */
-  hideWaitingNotice?: boolean;
+  waitingStatus?: string;
 }
 
 interface ComposerNarrateButtonProps {
@@ -412,7 +413,7 @@ export function ChatComposer({
   onDraftRestored,
   taskLaunch: taskLaunchProps,
   imageGenerator,
-  hideWaitingNotice = false,
+  waitingStatus,
 }: ChatComposerProps) {
   const composerRef = useRef<HTMLDivElement>(null);
   // Hysteresis because a split grip can drag the width across the line, and
@@ -710,6 +711,7 @@ export function ChatComposer({
   const engagementOff = engagementMode === 'off';
   // The draft can still be written; it just can't go anywhere yet.
   const waitingForModel = useWaitingForModel(gezelId, recipientGezels);
+  const waitingDetail = waitingStatus ?? 'no AI model is downloaded';
   const localTurnRef = useRef<LocalTurnStream | null>(null);
   const localTurnSequenceRef = useRef(0);
   // Live session id — initialized from the prop and updated the first time
@@ -1766,24 +1768,6 @@ export function ChatComposer({
           </button>
         </div>
       )}
-      {waitingForModel && !engagementOff && !hideWaitingNotice && (
-        <div
-          className="chat-composer-waiting"
-          aria-live="polite"
-          data-testid="chat-waiting-for-model"
-        >
-          <span>{gezelName} can start talking once a model is downloaded.</span>
-          <button
-            type="button"
-            className="gz-key"
-            onClick={() =>
-              window.dispatchEvent(new CustomEvent('gezel:navigate', { detail: { view: 'home' } }))
-            }
-          >
-            Get started
-          </button>
-        </div>
-      )}
       {wedged && (
         <div className="chat-composer-wedged">
           <div className="chat-composer-wedged-head">
@@ -2058,6 +2042,36 @@ export function ChatComposer({
           }
           toolbarSlotRight={
             <>
+              {/* Beside Send, so a held key always says why. A dimmed arrow
+                  alone read as broken. AI switched off has its own banner. */}
+              {waitingForModel && !engagementOff && (
+                <>
+                  <output
+                    className="chat-composer-held"
+                    aria-live="polite"
+                    data-testid="chat-waiting-for-model"
+                    title={`Can't send yet: ${waitingDetail}`}
+                  >
+                    <span className="chat-composer-held-dot" aria-hidden="true" />
+                    <span className="chat-composer-held-text">
+                      <strong>Can't send yet:</strong> {waitingDetail}
+                    </span>
+                  </output>
+                  {waitingStatus === undefined && (
+                    <button
+                      type="button"
+                      className="squisq-toolbar-button chat-composer-tool-btn chat-composer-tool-btn-word"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new CustomEvent('gezel:navigate', { detail: { view: 'home' } }),
+                        )
+                      }
+                    >
+                      Get started
+                    </button>
+                  )}
+                </>
+              )}
               {runtimeCapabilities().chatAttachments && (
                 <ComposerImageClipboard onError={setError} />
               )}
@@ -2181,7 +2195,7 @@ export function ChatComposer({
                     engagementOff
                       ? 'AI is disabled in Settings → General'
                       : waitingForModel
-                        ? `${gezelName} can start talking once a model is downloaded`
+                        ? `Can't send yet: ${waitingDetail}`
                         : taskLaunch.attached && !taskLaunch.readiness.ready
                           ? taskLaunch.readiness.reason
                           : taskLaunch.attached

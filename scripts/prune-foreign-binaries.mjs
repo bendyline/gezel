@@ -9,8 +9,8 @@
  * service bundle could not execute on the arm64 Mac it shipped to.
  *
  * Every release job builds on a runner matching its target (arm64 macOS,
- * x64/arm64 Linux, x64 Windows), so the build host's own platform/arch is the
- * right thing to keep. `GEZEL_BUNDLE_PLATFORM` / `GEZEL_BUNDLE_ARCH` override
+ * x64/arm64 Linux, x64/arm64 Windows), so the build host's own platform/arch
+ * is the right thing to keep. `GEZEL_BUNDLE_PLATFORM` / `GEZEL_BUNDLE_ARCH` override
  * that if a cross-build ever appears.
  *
  * Deliberately conservative. Only three directory shapes are pruned:

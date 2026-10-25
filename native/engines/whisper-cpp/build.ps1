@@ -1,11 +1,14 @@
 # build.ps1 - Windows build of whisper-server from the pinned
 # whisper.cpp upstream.
 #
-# Emits: native/build/win32-x64/gezel-whisper-server.exe
+# Emits: native/build/win32-{x64,arm64}/gezel-whisper-server.exe (CPU),
+#        native/build/win32-arm64-cuda/gezel-whisper-server.exe (WHISPER_BACKEND=cuda)
 #
-# Single CPU build per platform for the narration MVP. CUDA / Vulkan
-# variants are deferred until audio-chat work demands the latency
-# improvement.
+# CPU on every platform. Windows on ARM also builds CUDA for RTX Spark
+# (NVIDIA N1X), into the win32-arm64-cuda key beside llama-server and
+# sd-server. That build links whisper and ggml statically: llama-server's
+# ggml*.dll already sit in that folder under the same names, from a
+# different ggml, and a shared build would overwrite them.
 #
 # ASCII-only on purpose: Windows PowerShell 5.1 reads scripts as
 # the system codepage (cp1252) by default. Em-dashes and other
@@ -16,9 +19,58 @@
 # Prereqs:
 #   - Visual Studio Build Tools with "Desktop development with C++".
 #   - CMake 3.24+.
+#   - CUDA backend: CUDA_PATH pointing at a CUDA 13.4 Windows ARM64 toolkit
+#     (native\scripts\install-cuda-arm64.ps1 assembles one), and the
+#     VC.Tools.ARM64 component, since nvcc's host compiler is cl.exe.
 
 param()
 $ErrorActionPreference = 'Stop'
+
+# Import the Visual Studio ARM64 environment for the CUDA build: the CUDA
+# toolchain needs VCToolsInstallDir and cl.exe as nvcc's host compiler. Same
+# helper as sd-cpp/build.ps1; the CPU build needs only clang and Ninja.
+function Import-VsDevEnv {
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+  if (-not (Test-Path $vswhere)) {
+    throw "vswhere not found at $vswhere. Install Visual Studio Build Tools with the 'Desktop development with C++' workload."
+  }
+  $hostIsArm64 = $env:PROCESSOR_ARCHITECTURE -match '^(ARM64|aarch64)$'
+  $vcComponent = 'Microsoft.VisualStudio.Component.VC.Tools.ARM64'
+  $vcvarsScript = if ($hostIsArm64) { 'vcvarsarm64.bat' } else { 'vcvarsamd64_arm64.bat' }
+  $vsPath = & $vswhere -latest -products * -requires $vcComponent -property installationPath
+  if (-not $vsPath) {
+    throw "No Visual Studio install with the $vcComponent toolset found. Install the matching C++ workload."
+  }
+  $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\$vcvarsScript"
+  if (-not (Test-Path $vcvars)) {
+    throw "$vcvarsScript not found at $vcvars - the VS install looks incomplete."
+  }
+  Write-Host "[build] importing VS arm64 dev environment from $vsPath ($vcvarsScript)"
+  $envText = & $env:ComSpec /d /c "`"$vcvars`" >nul 2>&1 && set"
+  if ($LASTEXITCODE -ne 0) { throw "$vcvarsScript failed (exit $LASTEXITCODE)" }
+  $devPath = $null
+  foreach ($line in $envText) {
+    if ($line -match '^([^=]+)=(.*)$') {
+      $name = $matches[1]
+      $value = $matches[2]
+      if ($name -ieq 'Path') {
+        if (-not $devPath -or $value -match '\\VC\\Tools\\(?:MSVC|Llvm)\\') {
+          $devPath = $value
+        }
+        continue
+      }
+      [System.Environment]::SetEnvironmentVariable($name, $value, 'Process')
+    }
+  }
+  if (-not $devPath) { throw "$vcvarsScript did not produce a PATH value" }
+  [System.Environment]::SetEnvironmentVariable('Path', $devPath, 'Process')
+  if (-not $env:VSCMD_ARG_TGT_ARCH -or $env:VSCMD_ARG_TGT_ARCH -ine 'arm64') {
+    throw "$vcvarsScript selected target '$env:VSCMD_ARG_TGT_ARCH'; expected 'arm64'"
+  }
+  if (-not (Get-Command cl -ErrorAction SilentlyContinue)) {
+    throw "cl.exe is still not on PATH after importing the VS dev environment."
+  }
+}
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $here '..\..\..') | Select-Object -ExpandProperty Path
@@ -69,6 +121,14 @@ switch -Regex ($targetArch) {
 }
 $isArm64 = $platform -eq 'win32-arm64'
 
+# -- Resolve backend -------------------------------------------------
+$backend = if ($env:WHISPER_BACKEND) { $env:WHISPER_BACKEND } else { 'cpu' }
+if ($backend -notin @('cpu', 'cuda')) { throw "unknown WHISPER_BACKEND=$backend (valid: cpu, cuda)" }
+if ($backend -eq 'cuda' -and -not $isArm64) {
+  throw 'WHISPER_BACKEND=cuda is built for win32-arm64 (RTX Spark) only'
+}
+$arm64Cuda = $backend -eq 'cuda'
+
 # -- Preflight: required build tools -------------------------------
 # Without these, cmake invocations would otherwise fail mid-pipeline
 # in ways the rest of the script can't recover cleanly from. Surface
@@ -104,6 +164,9 @@ $cmakeFlags = @(
 # cannot honour. Ninja is single-config, so `--config Release` must not be
 # passed on that branch.
 $configureArgs = @()
+# Before the tool check: the VS environment also puts its own clang and
+# Ninja on PATH.
+if ($arm64Cuda) { Import-VsDevEnv }
 if ($isArm64) {
   $toolchain = Join-Path $repoRoot 'native\cmake\arm64-windows-llvm.cmake'
   if (-not (Test-Path $toolchain)) { throw "arm64 toolchain file not found at $toolchain" }
@@ -116,18 +179,60 @@ if ($isArm64) {
   $configureArgs = @('-G', 'Ninja', "-DCMAKE_TOOLCHAIN_FILE=$toolchain", "-DGEZEL_ARM_ARCH=$armArch")
   $cmakeFlags += "-DGGML_CPU_ARM_ARCH=$armArch"
 }
-Write-Host "[build] platform=$platform"
-
-$buildDir = Join-Path $src "build-$platform"
-& cmake -S $src -B $buildDir @configureArgs @cmakeFlags
-if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
-$buildArgs = if ($isArm64) {
-  @('--build', $buildDir, '--target', 'whisper-server', '-j')
-} else {
-  @('--build', $buildDir, '--config', 'Release', '--target', 'whisper-server', '-j')
+$cudaArch = if ($env:WHISPER_CUDA_ARCH) { $env:WHISPER_CUDA_ARCH } else { '' }
+if ($arm64Cuda) {
+  # C and C++ stay on clang and the declared baseline; the CUDA half of the
+  # shared toolchain points nvcc at cl.exe and the ARM64 import libraries.
+  $configureArgs += '-DGEZEL_ARM64_CUDA=ON'
+  $cmakeFlags += @('-DGGML_CUDA=ON', '-DBUILD_SHARED_LIBS=OFF')
+  # Release legs always pin this; see WHISPER_CUDA_ARCH in build-native.yml.
+  if ($cudaArch) { $cmakeFlags += "-DCMAKE_CUDA_ARCHITECTURES=$cudaArch" }
 }
-& cmake @buildArgs
-if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
+Write-Host "[build] platform=$platform backend=$backend cuda_architectures=$(if ($cudaArch) { $cudaArch } else { 'unset' })"
+
+# ggml-cuda chooses the flags it hands nvcc's host compiler from the C++
+# compiler (`if (NOT MSVC)`), which in this clang build would give cl.exe GCC
+# flags and withhold the /Zc:preprocessor CUDA 13's CCCL needs. nvcc's only
+# host compiler on Windows is cl.exe, so key both on WIN32 too, as
+# sd-cpp/build.ps1 does. whisper.cpp carries ggml in-tree rather than as a
+# submodule. Each line must match exactly once, so an upstream change fails
+# here rather than inside nvcc.
+$ggmlCudaCmake = 'ggml/src/ggml-cuda/CMakeLists.txt'
+if ($arm64Cuda) {
+  & git -C $src checkout -- $ggmlCudaCmake
+  if ($LASTEXITCODE -ne 0) { throw "could not reset $ggmlCudaCmake" }
+  $cmakePath = Join-Path $src $ggmlCudaCmake
+  $text = [System.IO.File]::ReadAllText($cmakePath)
+  foreach ($rewrite in @(
+      @('if (GGML_ALL_WARNINGS AND NOT MSVC)', 'if (GGML_ALL_WARNINGS AND NOT MSVC AND NOT WIN32)'),
+      @('if (NOT MSVC)', 'if (NOT MSVC AND NOT WIN32)'))) {
+    $count = ([regex]::Matches($text, [regex]::Escape($rewrite[0]))).Count
+    if ($count -ne 1) {
+      throw "expected '$($rewrite[0])' once in $ggmlCudaCmake, found $count - recheck the WIN32 host-flag rewrite against the new pin"
+    }
+    $text = $text.Replace($rewrite[0], $rewrite[1])
+  }
+  [System.IO.File]::WriteAllText($cmakePath, $text, [System.Text.UTF8Encoding]::new($false))
+  Write-Host "[build] ggml-cuda host flags keyed on WIN32 (cl.exe) for the clang arm64 build"
+}
+
+$buildDir = Join-Path $src $(if ($arm64Cuda) { "build-$platform-cuda" } else { "build-$platform" })
+try {
+  & cmake -S $src -B $buildDir @configureArgs @cmakeFlags
+  if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+  $buildArgs = if ($isArm64) {
+    @('--build', $buildDir, '--target', 'whisper-server', '-j')
+  } else {
+    @('--build', $buildDir, '--config', 'Release', '--target', 'whisper-server', '-j')
+  }
+  & cmake @buildArgs
+  if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
+} finally {
+  if ($arm64Cuda) {
+    & git -C $src checkout -- $ggmlCudaCmake
+    if ($LASTEXITCODE -ne 0) { Write-Warning "could not restore $ggmlCudaCmake" }
+  }
+}
 
 # -- 3. Locate + copy the produced binary --------------------------
 $found = Get-ChildItem -Path $buildDir -Recurse -Filter 'whisper-server.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -136,7 +241,10 @@ if (-not $found) {
 }
 Write-Host "[build] produced: $($found.FullName)"
 
-$outDir = Join-Path $repoRoot "native\build\$platform"
+# The CUDA build joins llama-server and sd-server in the -cuda key, whose
+# llama leg stages the NVIDIA runtime DLLs it imports.
+$outKey = if ($arm64Cuda) { "$platform-cuda" } else { $platform }
+$outDir = Join-Path $repoRoot "native\build\$outKey"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 # Ship under a gezel- prefix (gezel-whisper-server.exe) for process attribution
 # while preserving the whisper.cpp lineage. Only the installed file is prefixed;
@@ -144,14 +252,24 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $serverName = 'gezel-whisper-server.exe'
 Copy-Item $found.FullName (Join-Path $outDir $serverName) -Force
 
-# Copy ggml/whisper runtime DLLs sitting beside the exe (same pattern
-# as llama-cpp's build).
 $buildOutDir = $found.DirectoryName
-Get-ChildItem -Path $buildOutDir -Filter '*.dll' -ErrorAction SilentlyContinue |
-  ForEach-Object {
-    Copy-Item $_.FullName (Join-Path $outDir $_.Name) -Force
-    Write-Host "[build] bundled $($_.Name)"
+if ($arm64Cuda) {
+  # Statically linked, so nothing may ride along: a whisper.dll or ggml*.dll
+  # here would land on llama-server's same-named DLLs in the -cuda key.
+  $shared = Get-ChildItem -Path $buildOutDir -Filter '*.dll' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^(ggml|whisper)' }
+  if ($shared) {
+    throw "the CUDA whisper-server must link ggml statically, but the build produced $($shared.Name -join ', ')"
   }
+} else {
+  # Copy ggml/whisper runtime DLLs sitting beside the exe (same pattern
+  # as llama-cpp's build).
+  Get-ChildItem -Path $buildOutDir -Filter '*.dll' -ErrorAction SilentlyContinue |
+    ForEach-Object {
+      Copy-Item $_.FullName (Join-Path $outDir $_.Name) -Force
+      Write-Host "[build] bundled $($_.Name)"
+    }
+}
 
 $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $outDir $serverName)).Hash
 Write-Host "[build] installed: $(Join-Path $outDir $serverName)"

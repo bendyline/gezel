@@ -52,7 +52,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist .turbo",
+    "clean": "node ../../scripts/clean-dirs.mjs dist .turbo",
     "test": "vitest run"
   },
   "dependencies": {

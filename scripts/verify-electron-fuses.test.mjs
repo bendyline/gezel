@@ -126,7 +126,13 @@ test('release CI reads the fuse wire from every packaged platform binary', async
   const workflow = await readFile(workflowPath, 'utf8');
   assert.match(
     workflow,
-    /node scripts\/verify-electron-fuses\.mjs packages\/app\/dist\/installers\/win-unpacked\/gezel\.exe/,
+    /node scripts\/verify-electron-fuses\.mjs "\$env:WIN_UNPACKED\/gezel\.exe"/,
+  );
+  // Both Windows legs: electron-builder unpacks x64 to win-unpacked and
+  // arm64 to win-arm64-unpacked.
+  assert.match(
+    workflow,
+    /WIN_UNPACKED: packages\/app\/dist\/installers\/\$\{\{ matrix\.arch == 'x64' && 'win-unpacked' \|\| format\('win-\{0\}-unpacked', matrix\.arch\) \}\}/,
   );
   assert.match(workflow, /node scripts\/verify-electron-fuses\.mjs "\$app"/);
   assert.match(workflow, /-path '\*-unpacked\/gezel'[\s\S]{0,120}verify-electron-fuses\.mjs/);

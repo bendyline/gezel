@@ -77,7 +77,7 @@
     "dev": "node scripts/stage-assets.mjs && tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist"
+    "clean": "node scripts/clean.mjs"
   },
   "dependencies": {
     "@bendyline/gezel": "workspace:*",

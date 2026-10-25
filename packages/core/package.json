@@ -116,7 +116,7 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist .turbo"
+    "clean": "node ../../scripts/clean-dirs.mjs dist .turbo"
   },
   "dependencies": {
     "@bendyline/gezk": "workspace:*",

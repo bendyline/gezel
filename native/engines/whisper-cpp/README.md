@@ -9,8 +9,9 @@ clone it at the pinned commit (see `VERSION`) into `.upstream/`
 (gitignored) and build with CMake.
 
 Status: **integrated**. The native release matrix produces one CPU-oriented
-build per platform and the service exposes it through the audio provider.
-GPU/Vulkan variants and `whisper-stream` are not currently shipped.
+build per platform, plus a CUDA build for Windows on ARM (RTX Spark), and the
+service exposes it through the audio provider. Other GPU/Vulkan variants and
+`whisper-stream` are not currently shipped.
 
 ## Produced binary
 
@@ -39,10 +40,13 @@ llama.cpp.
 | `linux-x64`    | cpu                           |
 | `linux-arm64`  | cpu                           |
 | `win32-x64`    | cpu                           |
+| `win32-arm64`  | cpu, and cuda in `win32-arm64-cuda` (`WHISPER_BACKEND=cuda`) |
 
-Adding CUDA / Vulkan / cuBLAS variants follows the same shape as
-llama-cpp's matrix and is expected when audio chat lands (lower
-latency on weak hardware is the value).
+The Windows-on-ARM CUDA build links whisper and ggml statically, because
+llama-server's `ggml*.dll` share its `-cuda` folder under the same names
+(see `build.ps1`). On an RTX Spark it transcribed an 11-second clip with
+`base.en` in about 160 ms, against about 550 ms for the CPU build. CUDA /
+Vulkan variants elsewhere follow the same shape as llama-cpp's matrix.
 
 ## Build locally
 

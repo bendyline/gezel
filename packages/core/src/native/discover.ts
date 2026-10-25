@@ -100,7 +100,12 @@ export interface DiscoverInput {
 export interface DiscoverResult {
   /** One entry per binary the discovery attempted. */
   binaries: Array<{
-    name: NativeBinaryName;
+    /**
+     * `sqlite-vec` is a SQLite extension the service loads in-process
+     * (native/engines/sqlite-vec), not an engine the resolver can fetch or
+     * start, so it stays out of {@link NativeBinaryName}.
+     */
+    name: NativeBinaryName | 'sqlite-vec';
     /** `'pre-set'` — env var was already populated, discovery skipped. */
     source: 'pre-set' | 'discovered' | 'no-native-bin-dir' | 'no-platform-key' | 'not-found';
     /** Resolved path when `source` is `'pre-set'` or `'discovered'`. */
@@ -175,6 +180,29 @@ export function resolveNativeBinaryUnder(
 }
 
 /**
+ * Whether this platform's `-cuda` archive carries a CUDA build of `name`
+ * beside llama-server's, to prefer over the portable build in the bare key
+ * when this host runs CUDA (scripts/native-payload.mjs). Windows x64's holds
+ * llama-server alone; whisper-server's CUDA build is Windows-on-ARM only.
+ * ds4-server is not a choice: on Linux it ships only in `-cuda`.
+ */
+export function cudaArchiveCarries(
+  name: NativeBinaryName,
+  platform: NodeJS.Platform,
+  arch: string,
+): boolean {
+  const windowsOnArm = platform === 'win32' && arch === 'arm64';
+  if (name === 'sd-server') return platform === 'linux' || windowsOnArm;
+  if (name === 'whisper-server') return windowsOnArm;
+  return false;
+}
+
+/** Whether an engine path is one of those builds, which live in `<platform>-cuda/`. */
+export function isCudaArchivePath(path: string): boolean {
+  return /-cuda[\\/][^\\/]+$/.test(path);
+}
+
+/**
  * Discover bundled native binaries and stamp the matching env vars on
  * `process.env`. Idempotent: a second call after the env is set is a
  * no-op. Tolerant of partial bundling — a missing binary just leaves
@@ -202,6 +230,7 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
       'device-health',
       'uv',
       'duckdb',
+      'sqlite-vec',
     ] as const) {
       binaries.push({ name, source: 'no-platform-key' });
     }
@@ -374,12 +403,14 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
   // the bare key) still resolves and an in-place upgrade doesn't lose ds4.
   // On unsupported platforms the binary is simply absent → 'not-found' → the
   // provider's actionable error / the UI availability probe hides ds4.
-  // sd-server rides the same `-cuda` key on Linux, but the choice is a
-  // capability question rather than a fact about where the archive is: unlike
-  // ds4, sd-cpp ALSO ships a portable build in the bare key, and installers
-  // stage every variant for the platform — so a non-NVIDIA host has a `-cuda`
-  // directory sitting right there, and preferring it blindly would hand that
-  // host a CUDA-linked binary that dies at exec before sd.cpp can fall back.
+  // sd-server rides the same `-cuda` key on Linux and Windows on ARM (and
+  // whisper-server on Windows on ARM; `cudaArchiveCarries`), but the choice
+  // is a capability question rather than a fact about where the archive is:
+  // unlike ds4, sd-cpp ALSO ships a portable build in the bare
+  // key, and installers stage every variant for the platform — so a
+  // non-NVIDIA host has a `-cuda` directory sitting right there, and
+  // preferring it blindly would hand that host a CUDA-linked binary that dies
+  // at exec before sd.cpp can fall back.
   //
   // Reuse llama's resolved backend rather than probing again. It answers the
   // same question, it is already memoized, and it honours
@@ -390,7 +421,8 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
   // supervisor has already stamped GEZEL_SD_SERVER_BIN anyway.
   const cudaCapable = result.llamaBackend?.backend === 'cuda';
   const subdirFor = (name: NativeBinaryName): string =>
-    platform === 'linux' && (name === 'ds4-server' || (name === 'sd-server' && cudaCapable))
+    (platform === 'linux' && name === 'ds4-server') ||
+    (cudaCapable && cudaArchiveCarries(name, platform, arch))
       ? `${platformKey}-cuda`
       : platformKey;
   for (const { name, envVar } of [
@@ -421,6 +453,32 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
       log?.info?.(`[native] discovered ${name}: ${bin}`);
     } else {
       binaries.push({ name, source: 'not-found' });
+    }
+  }
+
+  // ── sqlite-vec (a SQLite extension, loaded into the service's process) ──
+  // npm's sqlite-vec has prebuilds for every platform but Windows ARM64, which
+  // the native release builds instead. Discovery only stamps the path; the
+  // sqlite driver tries it before the npm copy. Absent everywhere else, so a
+  // miss is not worth a log line. The file keeps upstream's `vec0` name:
+  // SQLite derives the extension's entry point from it.
+  if (process.env.GEZEL_SQLITE_VEC_PATH) {
+    binaries.push({
+      name: 'sqlite-vec',
+      source: 'pre-set',
+      path: process.env.GEZEL_SQLITE_VEC_PATH,
+    });
+  } else if (!dir) {
+    binaries.push({ name: 'sqlite-vec', source: 'no-native-bin-dir' });
+  } else {
+    const ext = platform === 'win32' ? 'dll' : platform === 'darwin' ? 'dylib' : 'so';
+    const path = join(dir, platformKey, `vec0.${ext}`);
+    if (fileExists(path)) {
+      process.env.GEZEL_SQLITE_VEC_PATH = path;
+      binaries.push({ name: 'sqlite-vec', source: 'discovered', path });
+      log?.info?.(`[native] discovered sqlite-vec: ${path}`);
+    } else {
+      binaries.push({ name: 'sqlite-vec', source: 'not-found' });
     }
   }
 

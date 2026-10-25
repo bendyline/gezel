@@ -103,6 +103,7 @@ describe('GitManager.resolveCheckout', () => {
   // so we don't re-clone the same repo into the workspace. The
   // `cleanStaleWorkspaceBootstraps` migration moves these later.
   it('adopts an existing legacy gh/ clone instead of cloning fresh', async () => {
+    if (!(await isGitInstalled())) return;
     const project = await makeProject();
     const legacy = join(home, 'projects', project.id, 'gh');
     await initLocalRepo(legacy, URL);
