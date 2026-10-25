@@ -1399,7 +1399,7 @@ function coordinatorPriorityLength(role: string | undefined): number | null {
   if (normalized.includes('voorman') || normalized.includes('foreman')) {
     return VOORMAN_TOOL_CAP_PRIORITY.length;
   }
-  if (normalized.includes('meester')) return MEESTER_TOOL_CAP_PRIORITY.length;
+  if (resolveRoleId(role) === 'meester') return MEESTER_TOOL_CAP_PRIORITY.length;
   return null;
 }
 
@@ -1408,13 +1408,14 @@ function toolCapPriorityForRole(
   deliverableKind?: import('@bendyline/gezel').DeliverableKind,
 ): readonly string[] {
   const normalized = roleForMatching(role)?.toLowerCase().trim() ?? '';
-  const base = normalized.includes('meester')
-    ? MEESTER_TOOL_CAP_PRIORITY
-    : normalized.includes('voorman') || normalized.includes('foreman')
-      ? VOORMAN_TOOL_CAP_PRIORITY
-      : isImplementationRole(role)
-        ? IMPLEMENTATION_TOOL_CAP_PRIORITY
-        : [];
+  const base =
+    resolveRoleId(role) === 'meester'
+      ? MEESTER_TOOL_CAP_PRIORITY
+      : normalized.includes('voorman') || normalized.includes('foreman')
+        ? VOORMAN_TOOL_CAP_PRIORITY
+        : isImplementationRole(role)
+          ? IMPLEMENTATION_TOOL_CAP_PRIORITY
+          : [];
   // Deliverable-aware prefix: the active step's producing tools rank
   // first so the tiny cap never trims them in favor of generic breadth
   // (e.g. derive_file ranked 10th would fall below a 15-tool cut on a
@@ -1525,7 +1526,7 @@ function shouldConstrainToProjectOrchestration(opts: {
 }): boolean {
   if (!isLocalProvider(opts.provider)) return false;
   const normalizedRole = roleForMatching(opts.role)?.toLowerCase().trim() ?? '';
-  if (!normalizedRole.includes('meester') && !normalizedRole.includes('voorman')) return false;
+  if (resolveRoleId(opts.role) !== 'meester' && !normalizedRole.includes('voorman')) return false;
   const text = opts.latestUserMessage?.toLowerCase() ?? '';
   if (!text.trim()) return false;
   // Procedure/recipe asks have their own Meester prelude and tool surface.
@@ -1621,7 +1622,7 @@ export function projectOrchestrationConstraintActive(opts: {
 }): boolean {
   const normalizedRole = roleForMatching(opts.role)?.toLowerCase().trim() ?? '';
   if (
-    normalizedRole.includes('meester') &&
+    resolveRoleId(opts.role) === 'meester' &&
     isLocalProvider(opts.provider) &&
     sessionContainsRemoteRepoIntakeRequest(opts.record, opts.latestUserMessage)
   ) {
