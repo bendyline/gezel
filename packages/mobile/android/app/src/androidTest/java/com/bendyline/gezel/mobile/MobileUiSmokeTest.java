@@ -369,6 +369,8 @@ public final class MobileUiSmokeTest {
     @Test public void sharedHtmlViewerLoadsRelativeAssetsAndRunsAnOfflineButton() throws Exception {
         run("""
             const project=await api('/api/projects','POST',{name:'Preview workshop',indexingEnabled:false});
+            // Artifacts is a developer tab, hidden on a project that holds no code until turned on.
+            await api('/api/projects/'+project.id,'PUT',{tabVisibility:{artifacts:true}});
             const files={
                 'offline-game.html':`<link rel="stylesheet" href="assets/style.css"><button id="play" onclick="parent.postMessage({nativeViewerClicked:true}, '*')">Play offline</button><img id="icon" src="assets/icon.svg"><script src="assets/game.js"></script>`,
                 'assets/style.css':'#play{color:rgb(12,34,56);padding:16px;font-size:20px}',
@@ -467,7 +469,8 @@ public final class MobileUiSmokeTest {
             const project = await api('/api/projects', 'POST', {name:'Native workshop',about:'A native mobile product test.',missionObjectives:'Keep projects, crew and files on this device.',indexingEnabled:false});
             const crew = await api('/api/gezels', 'POST', {name:'Native tester',role:'Helper',about:'Reply briefly.'});
             await api('/api/projects/' + project.id + '/gezels', 'POST', {gezelId:crew.id});
-            await api('/api/projects/' + project.id, 'PUT', {voormanGezelId:crew.id});
+            // Artifacts is a developer tab, hidden on a project that holds no code until turned on.
+            await api('/api/projects/' + project.id, 'PUT', {voormanGezelId:crew.id,tabVisibility:{artifacts:true}});
             const modelId = (await plugin.listModels()).selectedModelId;
             // The fixture's tokenizer spends a token per byte, so the desktop's standard prompt
             // (~15K bytes) overflows its 8K trained context; a 4K window selects the minimal footprint.

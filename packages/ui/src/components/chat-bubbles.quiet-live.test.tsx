@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { StreamingSegment } from './chat-bubbles.js';
-import { StreamingBubble, ToolHistoryExpando, isMachinePayload } from './chat-bubbles.js';
+import { StreamingBubble, ToolHistoryExpando } from './chat-bubbles.js';
+import { isMachinePayload } from './tool-failures.js';
 
 /**
  * A live turn outside debug mode. A first-hour review watched a local model

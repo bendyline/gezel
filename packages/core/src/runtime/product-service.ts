@@ -40,8 +40,6 @@ import type { BuiltInstructions } from '../prompt/instructions.js';
 import { IN_APP_WEB_PREVIEW_GUIDANCE } from '../prompt/web-preview.js';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../question-format.js';
 import { parseRemoteModelId, remoteChatFetch } from '../remote/index.js';
-import { stepDurationEstimates } from '../request-track/eta.js';
-import { assembleRequestTracks } from '../request-track/resolve.js';
 import { resolveRoleId } from '../roles/index.js';
 import {
   type AnswerQuestionRequest,
@@ -63,7 +61,6 @@ import {
   MobileProviderIdSchema,
 } from '../schemas/mobile-provider.js';
 import type { PromptDraftMeta } from '../schemas/prompt-draft.js';
-import type { ListRequestsResponse } from '../schemas/request-track.js';
 import {
   OFFLINE_RUNTIME_CAPABILITIES,
   type RuntimeCapabilities,
@@ -138,6 +135,7 @@ import {
   type PortableRemoteHost,
   PortableRemoteServers,
 } from './remote-servers.js';
+import { portableRequestTracks } from './request-routes.js';
 import type { PortableScripts } from './script-host.js';
 import { handlePortableScriptRoute } from './script-routes.js';
 import { createPortableScriptTaskActions } from './script-tasks.js';
@@ -617,51 +615,6 @@ export class PortableProductService {
       updatedAt: draft.updatedAt,
       ...(deleted ? { deleted: true } : {}),
     });
-  }
-  /**
-   * The phone's `/api/requests`, from the same resolver as the desktop's. It
-   * has no wrap-ups, fanout or task runner waits, so a finished request takes
-   * its deliverable from the book's promised file and a queued one says only
-   * that it is about to start.
-   */
-  private async requestTracks(query: URLSearchParams): Promise<ListRequestsResponse> {
-    const now = Date.now();
-    const [tasks, questions, config] = await Promise.all([
-      this.store.listTasks(),
-      this.store.listQuestions({ pending: true }),
-      this.store.readConfig(),
-    ]);
-    const sessions = (query.get('sessions') ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const inflight = [...this.turns.values()].map((turn) => ({
-      sessionId: turn.session.id,
-      gezelId: turn.session.gezelId,
-      projectId: turn.session.projectId,
-      ...(turn.session.taskRef ? { taskRef: turn.session.taskRef } : {}),
-      providerName: turn.session.providerName,
-      userText: turn.text,
-      startedAt: turn.startedAt,
-    }));
-    const requests = await assembleRequestTracks(
-      {
-        tasks,
-        session: (id) => this.session(id).catch(() => null),
-        project: (id) => this.store.getProject(id).catch(() => null),
-        ...(config.meesterGezelId ? { meesterGezelId: config.meesterGezelId } : {}),
-        inflight,
-        waiting: [],
-        questions,
-        estimates: stepDurationEstimates(tasks),
-        now,
-      },
-      {
-        ...(sessions.length > 0 ? { sessions } : {}),
-        ...(query.get('live') === '1' ? { live: true } : {}),
-      },
-    );
-    return { requests, at: new Date(now).toISOString() };
   }
   private async session(id: string): Promise<ChatSession> {
     const pending = this.pendingSaves.get(id);
@@ -2935,7 +2888,12 @@ export class PortableProductService {
     if (resource === 'projects' && id && action === 'craftbooks' && method === 'GET')
       return json(await portableProjectCraftbookOffer(this.projectTypeSupport(), id));
     if (resource === 'requests' && !id && method === 'GET')
-      return json(await this.requestTracks(query));
+      return json(
+        await portableRequestTracks(
+          { store: this.store, session: (s) => this.session(s), turns: () => this.turns.values() },
+          query,
+        ),
+      );
     if (resource === 'health' && method === 'GET')
       return json({
         ok: true,

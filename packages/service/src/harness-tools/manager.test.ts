@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { type GezelConfig, HARNESS_DOCUMENT_TOOL_NAMES, HARNESS_TOOL_NAMES } from '@bendyline/gezel';
+import {
+  type GezelConfig,
+  HARNESS_DOCUMENT_TOOL_NAMES,
+  HARNESS_TOOL_NAMES,
+} from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type TokenStore, createTokenStore } from '../http/token-store.js';
 import { readJsonMember, upsertJsonMember } from '../local-harness/json-member.js';

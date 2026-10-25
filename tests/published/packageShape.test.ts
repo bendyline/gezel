@@ -57,9 +57,12 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // its own copy of the shared code. tsup now splits it into chunks. It
   // tripped again at 2.06 MB from feature schemas spread across lookouts,
   // devices, issue triage and project views; no one declaration was at fault.
-  // The largest remain TaskSchema at 174 KB and the four craftbook manifest
-  // schemas at ~78 KB each, in the shared `.d.ts` chunk.)
-  '@bendyline/gezel': 2_100_000, //                    2.06 MB
+  // It tripped at 2.10 MB from request tracking; naming ScriptRefSchema's
+  // type (`ScriptRefZodSchema`) took out ~100 written-out copies of the
+  // step-hook shape. Name another embedded schema the same way next time.
+  // The largest remain TaskSchema at 149 KB and the four craftbook manifest
+  // schemas at ~66 KB each, in the shared `.d.ts` chunk.)
+  '@bendyline/gezel': 2_100_000, //                    2.10 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
   '@bendyline/gezel-script-runtime': 50_000,

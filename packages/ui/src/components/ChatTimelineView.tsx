@@ -7,7 +7,6 @@ import type {
   Project,
   ProviderName,
   Question,
-  ReferencedFile,
   SessionGpuTask,
   TerminalTimelineEntry,
   TimelineMessage,
@@ -83,11 +82,12 @@ import {
   latestWrapUpKey,
   mergeTerminalEntries,
   mergeTimelineMessages,
+  projectFileOpener,
   referencedFilesOf,
   turnFailureShownElsewhere,
   withinHours,
 } from './chat-timeline-helpers.js';
-import { craftbookCardDedupe, liveCardsToHide } from './craftbook-card-dedupe.js';
+import { liveCardsToHide } from './craftbook-card-dedupe.js';
 import { FrameCoalescedItem, FrameCoalescedLiveStickyHeader } from './frame-coalesced-item.js';
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
@@ -97,16 +97,14 @@ import {
   isTrackedWork,
   isTrackedWrapUp,
   requestKeyOfRoot,
-  trackedSessions,
-  trackedTaskCards,
-  trackedTaskRefs,
+  timelineCardHiding,
 } from './request-track-placement.js';
 import { nestChildSessionThreads } from './session-thread-nesting.js';
 import { compareTimelineRows, nextTerminalBottomGraceExpiry } from './timeline-row-order.js';
 import { buildTimelineThreads } from './timeline-threads.js';
 import { useChatNarrationMode } from './useChatNarrationMode.js';
 import { useDebugMode } from './useDebugMode.js';
-import { useRequestTracks } from './useRequestTracks.js';
+import { useTrackedRequests } from './useRequestTracks.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 const PAGE_SIZE = 100;
@@ -481,20 +479,9 @@ export function ChatTimelineView({
   const debugMode = useDebugMode();
   // One tracker per request in the threads shown here (RequestTracker).
   // Outside debug mode the work it tracks keeps out of the thread.
-  const topSessionIds = useMemo(
-    () => [
-      ...new Set(messages.filter((m) => !m.taskRef && !m.parentSession).map((m) => m.sessionId)),
-    ],
-    [messages],
-  );
-  const { tracks: requestTracks, loaded: requestsLoaded } = useRequestTracks(topSessionIds);
-  const trackedRefs = useMemo(
-    () => (debugMode ? new Set<string>() : trackedTaskRefs(requestTracks.values())),
-    [debugMode, requestTracks],
-  );
-  const quietSessions = useMemo(
-    () => (debugMode ? new Set<string>() : trackedSessions(requestTracks.values())),
-    [debugMode, requestTracks],
+  const { requestTracks, requestsLoaded, trackedRefs, quietSessions } = useTrackedRequests(
+    messages,
+    debugMode,
   );
   const onAttentionChangeRef = useRef(onAttentionChange);
   onAttentionChangeRef.current = onAttentionChange;
@@ -3467,21 +3454,16 @@ export function ChatTimelineView({
   for (const q of questionsById.values()) {
     if (!q.answer && !isReadyQuestion(q)) openQuestionSessions.add(q.sessionId);
   }
-  // One craftbook card per task: the earliest one shown outside a fold
-  // stands for it (craftbook-card-dedupe.ts). A fold keeps its full
-  // transcript, and debug mode shows every card.
+  // One craftbook card per task, and none for tracked work; debug mode shows every card.
   const inFoldedSession = (sid: string) => foldNested && (sessionDepthById.get(sid) ?? 0) > 0;
-  const shownMessages = messages.filter((m) => !inFoldedSession(m.sessionId));
-  const cardDedupe = debugMode
+  const cardHiding = debugMode
     ? null
-    : craftbookCardDedupe(
-        [...shownMessages].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)),
+    : timelineCardHiding(
+        messages.filter((m) => !inFoldedSession(m.sessionId)),
+        trackedRefs,
       );
-  // A tracked request's tracker stands for every card of its work.
-  const hiddenCards = cardDedupe
-    ? new Set([...cardDedupe.hidden, ...trackedTaskCards(shownMessages, trackedRefs)])
-    : null;
-  const liveOwnedRefs = cardDedupe ? new Set([...cardDedupe.owned, ...trackedRefs]) : null;
+  const hiddenCards = cardHiding?.hiddenCards ?? null;
+  const liveOwnedRefs = cardHiding?.liveOwnedRefs ?? null;
   const els: React.ReactNode[] = [];
   // The open Working notes fold, collecting the nested sessions under the
   // turn that launched them (see foldWorkingNotes).
@@ -3616,6 +3598,7 @@ export function ChatTimelineView({
     // A crew member joining tracked work is under the tracker's "Who's helping?".
     if (isAbsorbedCrewIntro(m, trackedRefs)) return null;
     const bubbleWarnings = shownElsewhere === 'card' ? undefined : m.warnings;
+    const openFile = projectFileOpener(m.projectId, onArtifactReference, onWorkspaceReference);
     return (
       <MessageBubble
         key={`msg:${m.sessionId}:${m.at}:${m.role}`}
@@ -3718,14 +3701,7 @@ export function ChatTimelineView({
                 }),
             }
           : {})}
-        {...(onArtifactReference || onWorkspaceReference
-          ? {
-              onFileReference: (file: ReferencedFile) => {
-                if (file.kind === 'workspace') onWorkspaceReference?.(file.path, m.projectId);
-                else onArtifactReference?.(file.path, m.projectId);
-              },
-            }
-          : {})}
+        {...(openFile ? { onFileReference: openFile } : {})}
         onTaskReference={(ref) =>
           window.dispatchEvent(new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }))
         }
@@ -4187,6 +4163,11 @@ export function ChatTimelineView({
     const requestKey = item.root ? requestKeyOfRoot(item.root.msg) : undefined;
     const track = requestKey ? requestTracks.get(requestKey) : undefined;
     if (isTrackedWork(track)) {
+      const openTrackedFile = projectFileOpener(
+        track.projectId,
+        onArtifactReference,
+        onWorkspaceReference,
+      );
       const leadGezel = track.leadGezelId ? gezels.get(track.leadGezelId) : undefined;
       if (sessionDepth === 0 && leadGezel) {
         foldLead = displayName(
@@ -4201,14 +4182,7 @@ export function ChatTimelineView({
           gezels={gezels}
           debugMode={debugMode}
           roleBasedNameOnlyMode={roleBasedNameOnlyMode}
-          {...(onArtifactReference || onWorkspaceReference
-            ? {
-                onOpenFile: (file: ReferencedFile) => {
-                  if (file.kind === 'workspace') onWorkspaceReference?.(file.path, track.projectId);
-                  else onArtifactReference?.(file.path, track.projectId);
-                },
-              }
-            : {})}
+          {...(openTrackedFile ? { onOpenFile: openTrackedFile } : {})}
         />,
       );
     }

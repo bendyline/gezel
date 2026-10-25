@@ -2,6 +2,7 @@ import type { RequestTrack } from '@bendyline/gezel';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { useActivity } from './activity-context.js';
+import { trackedSessions, trackedTaskRefs } from './request-track-placement.js';
 
 /**
  * The requests written in `sessionIds`, by key (`RequestTrack.key`). Fetched
@@ -55,4 +56,35 @@ export function useRequestTracks(sessionIds: readonly string[]): {
     return merged;
   }, [fetched, live, sessions]);
   return { tracks, loaded: sessions === '' || answeredFor === sessions };
+}
+
+/**
+ * The requests started in a timeline's top-level threads, and what their
+ * trackers stand for: the tasks and the quiet sessions that keep out of the
+ * thread. Debug mode shows the work itself, so nothing is tracked away.
+ */
+export function useTrackedRequests(
+  messages: ReadonlyArray<{
+    sessionId: string;
+    taskRef?: string | undefined;
+    parentSession?: unknown;
+  }>,
+  debugMode: boolean,
+) {
+  const topSessionIds = useMemo(
+    () => [
+      ...new Set(messages.filter((m) => !m.taskRef && !m.parentSession).map((m) => m.sessionId)),
+    ],
+    [messages],
+  );
+  const { tracks, loaded } = useRequestTracks(topSessionIds);
+  const trackedRefs = useMemo(
+    () => (debugMode ? new Set<string>() : trackedTaskRefs(tracks.values())),
+    [debugMode, tracks],
+  );
+  const quietSessions = useMemo(
+    () => (debugMode ? new Set<string>() : trackedSessions(tracks.values())),
+    [debugMode, tracks],
+  );
+  return { requestTracks: tracks, requestsLoaded: loaded, trackedRefs, quietSessions };
 }

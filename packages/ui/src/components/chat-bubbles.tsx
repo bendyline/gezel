@@ -91,6 +91,7 @@ import {
   formatPendingArgsPreview,
   parsePendingToolCalls,
 } from './pending-tool-calls.js';
+import { type MarkdownWalkNode, isRawHtmlDump, toHtmlCodeFence } from './raw-html-dump.js';
 import { stripVisibleToolCallMarkup } from './strip-tool-call-markup.js';
 import { renderToolArgsFragment } from './tool-args-fragment.js';
 import {
@@ -100,6 +101,11 @@ import {
   toolDisplayName,
   toolErrorSummary,
 } from './tool-display.js';
+import {
+  VISIBLE_TOOL_FAILURES,
+  isMachinePayload,
+  unresolvedToolFailures,
+} from './tool-failures.js';
 
 /**
  * A tool-only turn still said something through its final action. Use the
@@ -3304,42 +3310,6 @@ function ToolActivityList({
   );
 }
 
-/** Most failures a reader needs to see at once. Beyond this the expando
- *  is the right surface — the notice is a headline, not a log. */
-const VISIBLE_TOOL_FAILURES = 2;
-
-/**
- * Failures the turn never recovered from, newest last.
- *
- * A failure superseded by a later success of the same tool is resolved —
- * the model corrected its arguments and moved on, and surfacing it would
- * make a self-healed turn read as broken. What survives is the case that
- * actually cost the user something: a completion gate that rejected the
- * work, a tool that never came back. Mirrors the service's
- * `unresolvedFailedToolCalls`, which builds the model's recovery nudge
- * from the same rule.
- */
-export function unresolvedToolFailures(
-  tools: ReadonlyArray<Pick<ChatMessageToolCall, 'name' | 'success' | 'errorMessage'>>,
-): Array<{ name: string; reason: string }> {
-  return tools
-    .filter(
-      (t, i) =>
-        !t.success && !tools.slice(i + 1).some((later) => later.name === t.name && later.success),
-    )
-    .map((t) => ({ name: t.name, reason: t.errorMessage ? toolErrorSummary(t.errorMessage) : '' }))
-    .filter((f) => f.reason.length > 0);
-}
-
-/**
- * A failure reason written for a program rather than a person: a JSON
- * envelope, or a stack trace. A person reading the conversation learns
- * nothing from either.
- */
-export function isMachinePayload(reason: string): boolean {
-  return /^\s*[[{]/.test(reason) || /\n\s+at\s+\S/.test(reason);
-}
-
 /**
  * Collapsible "tools that ran during this turn" expando, rendered at the
  * top of a completed assistant bubble. Defaults to closed — most readers
@@ -3906,62 +3876,6 @@ function formatVramSize(bytes: number): string {
   return `${Math.round(mb)} MB VRAM`;
 }
 
-// A gezel sometimes emits a whole HTML document inline (an index.html it
-// "wrote", say). Rendered as markdown that lands as a hollow page —
-// styles and scripts stripped by squisq's sanitizer, bare structure left
-// over — which is noise, not signal. When a message is *mostly* raw HTML
-// we show its source as a code block instead: honest about what the model
-// produced, far easier to read, and immune to the global-style leak that
-// raw <style> blocks used to cause.
-
-/** Full-page / styling / scripting markers — their presence in a raw-HTML
- *  node is a strong "this is a document, not chat prose" signal. */
-const RAW_HTML_PAGE_MARKER_RE = /<\s*(?:!doctype|html|head|body|style|script)\b/i;
-
-/** Below this many raw-HTML characters we leave the message alone — small
- *  inline HTML (a stray <br>, <sub>…) renders fine as-is. */
-const RAW_HTML_DUMP_MIN_CHARS = 120;
-
-/** Minimal structural view of a parsed-markdown node for the raw-HTML scan. */
-type MarkdownWalkNode = { type?: string; rawHtml?: string; children?: MarkdownWalkNode[] };
-
-/** Sum raw-HTML characters across a parsed-markdown tree and flag whether
- *  any raw-HTML node carries page markers. Fenced code parses as `code`
- *  (not `htmlBlock`), so HTML the model already fenced is left untouched. */
-function scanRawHtml(nodes: readonly MarkdownWalkNode[]): { chars: number; pageMarkers: boolean } {
-  let chars = 0;
-  let pageMarkers = false;
-  const visit = (node: MarkdownWalkNode): void => {
-    if (node.type === 'htmlBlock' || node.type === 'htmlInline') {
-      const raw = node.rawHtml ?? '';
-      chars += raw.length;
-      if (!pageMarkers && RAW_HTML_PAGE_MARKER_RE.test(raw)) pageMarkers = true;
-    }
-    if (node.children) for (const child of node.children) visit(child);
-  };
-  for (const node of nodes) visit(node);
-  return { chars, pageMarkers };
-}
-
-/** True when a chat message reads as a raw HTML document/fragment rather
- *  than prose: substantial raw HTML that either dominates the message or
- *  carries page markers. Such messages render better as source. */
-export function isRawHtmlDump(nodes: readonly MarkdownWalkNode[], source: string): boolean {
-  const { chars, pageMarkers } = scanRawHtml(nodes);
-  if (chars < RAW_HTML_DUMP_MIN_CHARS) return false;
-  const total = source.trim().length || 1;
-  return pageMarkers || chars / total >= 0.5;
-}
-
-/** Wrap a message in an ```html fence sized longer than any backtick run
- *  inside it, so arbitrary content can't terminate the block early. */
-export function toHtmlCodeFence(source: string): string {
-  let longestRun = 0;
-  for (const match of source.matchAll(/`+/g)) longestRun = Math.max(longestRun, match[0].length);
-  const fence = '`'.repeat(Math.max(3, longestRun + 1));
-  return `${fence}html\n${source}\n${fence}`;
-}
-
 export function RenderedMarkdown({
   markdown,
   mediaProvider,
@@ -3982,7 +3896,7 @@ export function RenderedMarkdown({
     try {
       const mdDoc = parseMarkdown(prepareChatMarkdown(markdown));
       // Mostly-raw-HTML messages render as source rather than a hollow
-      // sanitized page — see isRawHtmlDump / toHtmlCodeFence above.
+      // sanitized page — see raw-html-dump.ts.
       const source = isRawHtmlDump(
         (mdDoc.children ?? []) as unknown as MarkdownWalkNode[],
         markdown,

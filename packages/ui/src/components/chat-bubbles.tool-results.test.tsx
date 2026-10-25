@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { StreamingBubble, ToolHistoryExpando, unresolvedToolFailures } from './chat-bubbles.js';
+import { StreamingBubble, ToolHistoryExpando } from './chat-bubbles.js';
+import { unresolvedToolFailures } from './tool-failures.js';
 
 describe('ToolHistoryExpando result details', () => {
   it('shows both the request and a short response in details', () => {

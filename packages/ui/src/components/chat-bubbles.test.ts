@@ -4,10 +4,9 @@ import {
   authorTitle,
   countReasoningWords,
   formatDebugBundle,
-  isRawHtmlDump,
   isStalledSilence,
-  toHtmlCodeFence,
 } from './chat-bubbles.js';
+import { isRawHtmlDump, toHtmlCodeFence } from './raw-html-dump.js';
 
 describe('authorTitle', () => {
   it('leads with the role, which a narrow timeline hides from the header', () => {

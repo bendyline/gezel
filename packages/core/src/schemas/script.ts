@@ -271,14 +271,21 @@ export type ScriptOutputPredicate = z.infer<typeof ScriptOutputPredicateSchema>;
  * `autoAdvanceWhen: { op: 'ok' }`; if both are supplied,
  * `autoAdvanceWhen` wins.
  */
-export const ScriptRefSchema = z.object({
+const ScriptRefShape = {
   name: z.string().min(1),
   /** Resolution scope; absent = 'project'. See {@link ScriptScopeSchema}. */
   scope: ScriptScopeSchema.optional(),
   inputs: z.record(z.string(), z.unknown()).optional(),
   autoAdvanceOnSuccess: z.boolean().optional(),
   autoAdvanceWhen: ScriptOutputPredicateSchema.optional(),
-});
+};
+/**
+ * Named so the declarations that embed a ref (every step shape, and so every
+ * task and craftbook) print this name rather than the whole shape again.
+ * They held about a hundred copies, against the package's size budget.
+ */
+export interface ScriptRefZodSchema extends z.ZodObject<typeof ScriptRefShape> {}
+export const ScriptRefSchema: ScriptRefZodSchema = z.object(ScriptRefShape);
 export type ScriptRef = z.infer<typeof ScriptRefSchema>;
 
 /**

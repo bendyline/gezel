@@ -1,4 +1,5 @@
 import type { RequestTrack, TimelineMessage, ToolCallCard } from '@bendyline/gezel';
+import { craftbookCardDedupe } from './craftbook-card-dedupe.js';
 
 /**
  * Where a request's tracker goes, and what it stands in for. The tracker
@@ -60,6 +61,26 @@ export function trackedTaskCards(
     }
   }
   return out;
+}
+
+/**
+ * The craftbook cards a timeline hides outside debug mode: every card of
+ * tracked work, and all but the earliest card of each other task
+ * (craftbook-card-dedupe.ts). `shown` is what renders outside a fold, which
+ * keeps its full transcript. A turn still streaming checks its cards against
+ * `liveOwnedRefs`.
+ */
+export function timelineCardHiding(
+  shown: readonly Pick<TimelineMessage, 'at' | 'toolCalls'>[],
+  refs: ReadonlySet<string>,
+): { hiddenCards: ReadonlySet<ToolCallCard>; liveOwnedRefs: ReadonlySet<string> } {
+  const dedupe = craftbookCardDedupe(
+    [...shown].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)),
+  );
+  return {
+    hiddenCards: new Set([...dedupe.hidden, ...trackedTaskCards(shown, refs)]),
+    liveOwnedRefs: new Set([...dedupe.owned, ...refs]),
+  };
 }
 
 /** A joined-crew introduction for tracked work: the tracker's "Who's helping?" holds it. */
