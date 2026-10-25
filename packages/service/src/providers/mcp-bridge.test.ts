@@ -975,7 +975,7 @@ describe('McpBridge', () => {
       specialistRole: 'builder',
     });
     expect(create).toContain('Started project "Pet Shop Solo Promotion"');
-    expect(create).toContain('as voorman');
+    expect(create).toContain('as crew lead');
 
     const projectId = create.match(/\(([a-z0-9-]+)\)/)![1]!;
 
@@ -1086,9 +1086,9 @@ describe('McpBridge', () => {
       missionObjectives: '- Goal 1\n- Goal 2',
     });
 
-    // list_projects should now mention the voorman id.
+    // list_projects should now mention the crew lead id.
     const listing = await bridge.callTool('list_projects', {});
-    expect(listing).toContain('voorman:');
+    expect(listing).toContain('crew lead:');
   });
 
   it('update_task warns that assignee changes do not notify the gezel', async () => {

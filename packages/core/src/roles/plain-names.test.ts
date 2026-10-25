@@ -51,6 +51,11 @@ describe('plain role titles', () => {
     expect(plainRoleProse('A Zorgcoördinator keeps notes.', 'Care Coordinator')).toBe(
       'A Care Coordinator keeps notes.',
     );
+    expect(plainRoleProse('You are an oefen-interviewer.', 'Oefen-interviewer')).toBe(
+      'You are a mock interviewer.',
+    );
+    // Every title compiles, whatever its letters.
+    for (const [legacy] of pairs) expect(() => plainRoleProse(legacy, legacy)).not.toThrow();
     expect(plainRoleProse('Ask the voorman, then the Meester.', 'Librarian')).toBe(
       'Ask the voorman, then the Meester.',
     );

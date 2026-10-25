@@ -115,7 +115,8 @@ export function plainRoleProse(text: string, role: string | undefined): string {
   const key = legacyRoleKey(role);
   if (!key || !text) return text;
   const plain = PLAIN_ROLE_TITLES[key]!;
-  const word = [...key].map((ch) => ACCENTED[ch] ?? ch.replace(/[-]/g, '\\-')).join('');
+  // Keys are letters and hyphens; a bare hyphen is literal outside a class.
+  const word = [...key].map((ch) => ACCENTED[ch] ?? ch).join('');
   const pattern = new RegExp(
     String.raw`(?<![\p{L}\p{N}])(?:(a|an)(\s+(?:\*\*)?))?(${word})(?![\p{L}\p{N}])`,
     'giu',
