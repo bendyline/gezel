@@ -30,6 +30,18 @@ import {
   shouldConstrainToScenarioFileRepair,
 } from './role-tool-filter.js';
 
+describe('read-before-write tool access', () => {
+  it.each([
+    'Read `notes.md`, then write summary.md now.',
+    'Start by reading src/domain.ts and src/repository.ts. Write src/convert.ts now.',
+  ])('preserves existing read tools for prerequisite inputs: %s', (latestUserMessage) => {
+    const allowlist = new Set(['read_file', 'read_files', 'write_file', 'replace_lines']);
+    const opts = { role: 'Developer', latestUserMessage };
+    expect(shouldConstrainToImmediateFileWrite(opts)).toBe(false);
+    expect(constrainAllowlistForImmediateFileWrite(allowlist, opts)).toBe(allowlist);
+  });
+});
+
 describe('roleToolsetGroups', () => {
   it.each([false, true])(
     'keeps conversation compact with advisers and craftbooks (role tools: %s)',

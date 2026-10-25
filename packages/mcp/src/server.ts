@@ -8434,7 +8434,7 @@ server.tool(
     // The ranking binds a request to a project it names, and the prelude tells
     // the model the destination is bound, so an omitted `project` takes it.
     const resolvedProject = project
-      ? await resolveProjectId(project)
+      ? await resolveProjectId(project, ['start_work'])
       : ((await rankingForTurn(projectId, said).catch(() => null))?.projectId ?? projectId);
     const parsed =
       parseWorkOptionId(option) ?? (await resolveBareWorkOption(option, resolvedProject, said));
@@ -10179,7 +10179,10 @@ server.tool(
  * ("pet-store-prototype"). On total miss, throw a helpful error listing
  * the actual ids so the model can self-correct on the next tool call.
  */
-async function resolveProjectId(input: string): Promise<string> {
+async function resolveProjectId(
+  input: string,
+  recoveryTools: readonly string[] = [],
+): Promise<string> {
   try {
     const p = await api.getProject(input);
     return p.id;
@@ -10203,7 +10206,7 @@ async function resolveProjectId(input: string): Promise<string> {
   }
   const match = findProjectByReference(all, input);
   if (match) return match.id;
-  throw new Error(projectNotFoundMessage(input, all));
+  throw new Error(projectNotFoundMessage(input, all, recoveryTools));
 }
 
 /**

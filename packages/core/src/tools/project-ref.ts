@@ -15,7 +15,16 @@ export function findProjectByReference<T extends ProjectRef>(
   return projects.find((p) => p.name.toLowerCase() === lc);
 }
 
-export function projectNotFoundMessage(input: string, projects: readonly ProjectRef[]): string {
+export function projectNotFoundMessage(
+  input: string,
+  projects: readonly ProjectRef[],
+  availableTools: readonly string[] = [],
+): string {
   const available = projects.map((p) => `"${p.id}" (${p.name})`).join(', ');
-  return `project "${input}" does not exist. Available projects: ${available || '(none)'}. Project ids and exact display names are both accepted. [runtime: non-retryable] Do not retry this same project reference. Call \`list_projects\` and use an id it returns; if this is genuinely new work, launch it with \`start_project\` or the matching craftbook before messaging a gezel.`;
+  // Recovery must not prescribe a launcher hidden by the session's tool diet.
+  // A start_work caller can safely name itself even when its legacy macro is absent.
+  const newWork = availableTools.includes('start_work')
+    ? ' For genuinely new work, call `start_work({ "option": "new-project" })` without a `project` argument. A new project name belongs in the optional `name` argument.'
+    : '';
+  return `project "${input}" does not exist. Available projects: ${available || '(none)'}. Project ids and exact display names are both accepted. [runtime: non-retryable] Do not retry this same project reference. For an existing project, use one of the ids above.${newWork}`;
 }

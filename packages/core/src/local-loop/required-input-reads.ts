@@ -44,10 +44,14 @@ export function requiredInputsRead(
   return [];
 }
 
-const READ_VERB = /\b(?:read|open)\b/i;
-const WRITE_VERB = /\b(?:write|create|produce|save|update|generate|draft|build)\b/i;
-const NEGATED_READ = /\b(?:do not|don't|never|no need to)\s+(?:read|open)\b/i;
+const READ_VERB = /\b(?:read(?:ing)?|open(?:ing)?)\b/i;
+const WRITE_VERB =
+  /\b(?:write|writing|create|creating|produce|save|update|updating|generate|draft|build|edit|patch)\b/i;
+const NEGATED_READ =
+  /\b(?:do not|don't|never|no need to|without|instead of)\s+(?:read(?:ing)?|open(?:ing)?)\b/i;
 const QUOTED_FILE = /`([^`\s]+\.[A-Za-z0-9]+)`/g;
+const BARE_FILE =
+  /(?:^|[\s("',;])((?:[\w.-]+\/)*[\w.-]+\.(?:html?|css|mjs|cjs|js|jsx|ts|tsx|json|md|rst|adoc|csv|tsv|txt|log|diff|patch|ya?ml|toml|xml|svg|py|rb|go|rs|java|c|cpp|h|hpp|sh|sql|pdf|docx|pptx|xlsx))(?=$|[\s,;.!?)"'])/gi;
 
 /**
  * Files a prompt explicitly asks to read ("Read `a.md`, `b.md`, and the
@@ -62,12 +66,26 @@ const QUOTED_FILE = /`([^`\s]+\.[A-Za-z0-9]+)`/g;
 export function promptReadInputs(prompt: string): RequiredInput[] {
   const inputs = new Map<string, RequiredInput>();
   for (const sentence of prompt.split(/(?<=[.!?])\s+/)) {
-    const readAt = sentence.search(READ_VERB);
-    if (readAt < 0 || NEGATED_READ.test(sentence)) continue;
-    const rest = sentence.slice(readAt + 1);
+    const files = [...sentence.matchAll(QUOTED_FILE), ...sentence.matchAll(BARE_FILE)].sort(
+      (a, b) => a.index - b.index,
+    );
+    // A path such as src/edit.ts is an input, not an instruction verb.
+    // Mask references without changing offsets before scanning the prose.
+    let prose = sentence;
+    for (const file of files) {
+      prose =
+        prose.slice(0, file.index) +
+        ' '.repeat(file[0].length) +
+        prose.slice(file.index + file[0].length);
+    }
+    const read = READ_VERB.exec(prose);
+    if (!read || NEGATED_READ.test(prose)) continue;
+    const readEnd = read.index + read[0].length;
+    const rest = prose.slice(readEnd);
     const writeAt = rest.search(WRITE_VERB);
-    const span = writeAt < 0 ? rest : rest.slice(0, writeAt);
-    for (const match of span.matchAll(QUOTED_FILE)) {
+    const spanEnd = writeAt < 0 ? sentence.length : readEnd + writeAt;
+    for (const match of files) {
+      if (match.index < readEnd || match.index >= spanEnd) continue;
       const path = normalizeWorkspacePathForCompare(match[1]!);
       inputs.set(path, { path, artifact: false });
     }

@@ -11,6 +11,7 @@ import {
   hasExplicitFullFileRewriteWording,
   isSingleFileSourceRepairRequest,
 } from '../local-loop/direct-file-work-prompt.js';
+import { promptReadInputs } from '../local-loop/required-input-reads.js';
 import { classifyLocalModelTier, classifyModelTier } from '../model-profile/local-model-tier.js';
 import { roleForMatching } from '../roles/plain-names.js';
 import { resolveRoleId, toolsetGroupsForRole } from '../roles/registry.js';
@@ -1094,6 +1095,9 @@ export function shouldConstrainToImmediateFileWrite(opts: {
   const roleKey = canonicalRoleKey(opts.role) ?? '';
   if (!roleActsAsUrgentFileWriter(opts.role)) return false;
   const text = (opts.latestUserMessage ?? '').trim();
+  // The provider can defer its write-only request until these reads complete,
+  // but only if the session still advertises the tools that open the inputs.
+  if (promptReadInputs(text).length > 0) return false;
   if (isScenarioFullRewriteNudge(text)) return true;
   // A handoff that affirmatively names an append/surgical mutation tool is
   // an existing-file edit, even when a stale generic annotation elsewhere in
