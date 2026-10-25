@@ -92,11 +92,36 @@ describe('plain role titles', () => {
 
   it('keeps the kits the old titles had', () => {
     expect(resolveRoleId('Crew Lead')).toBe('voorman');
-    expect(resolveRoleId('Inspector')).toBe('meester');
     expect(resolveRoleId('Trip Planner')).toBeNull();
     expect(resolveRoleId('Character Artist')).toBe('designer');
     expect(isBackgroundServiceRole('Librarian')).toBe(true);
     expect(isBackgroundServiceRole('Scribe')).toBe(true);
     expect(isBackgroundServiceRole('Inspector')).toBe(true);
+  });
+
+  // "Meester" once matched as a substring, so every -meester compound got
+  // the coordinator's kit, with no workspace writes.
+  it('gives the coordinator kit to the Meester only, not to -meester compounds', () => {
+    expect(resolveRoleId('Meester')).toBe('meester');
+    expect(resolveRoleId('Head Meester')).toBe('meester');
+    expect(resolveRoleId('the meester (guildmaster)')).toBe('meester');
+    for (const role of [
+      'Keurmeester',
+      'Inspector',
+      'Penningmeester',
+      'Household Treasurer',
+      'Kantoormeester',
+      'Office Administrator',
+      'Huismeester',
+      'Home Keeper',
+      'Ceremoniemeester',
+      'Event Planner',
+      'Werkmeester',
+      'Video Editor',
+      'Burgemeester',
+    ]) {
+      expect(resolveRoleId(role), role).toBeNull();
+      expect(toolsetGroupsForRole(role), role).toContain('workspace-fs-write');
+    }
   });
 });

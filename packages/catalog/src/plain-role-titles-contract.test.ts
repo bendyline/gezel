@@ -22,11 +22,15 @@ import {
 import { describe, expect, it } from 'vitest';
 import { gildeDataDir } from './gilde-data.js';
 
-/** `resolveRoleId` as it read a title before renamed titles were mapped. */
+/** `resolveRoleId` as it reads a title that is not mapped to a renamed one. */
 function resolveWithoutRenames(role: string): RoleId | null {
   const key = role.toLowerCase().trim();
   if (key in ROLES) return key as RoleId;
-  return ROLE_ALIASES.find((alias) => key.includes(alias.contains))?.canonical ?? null;
+  const matches = (alias: (typeof ROLE_ALIASES)[number]) =>
+    alias.wholeWord
+      ? new RegExp(String.raw`(?<![\p{L}\p{N}])${alias.contains}(?![\p{L}\p{N}])`, 'u').test(key)
+      : key.includes(alias.contains);
+  return ROLE_ALIASES.find(matches)?.canonical ?? null;
 }
 
 async function catalogRoles(): Promise<Set<string>> {
