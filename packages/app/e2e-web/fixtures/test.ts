@@ -26,6 +26,7 @@ import {
 import { type CDPSession, type Page, test as base, expect } from '@playwright/test';
 import { FIXED_CLOCK_MS } from '../helpers/determinism.js';
 import { type SeedWorld, seed } from '../helpers/seed.js';
+import { bootTraceEnabled, startBootTrace } from './chrome-trace.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 // packages/app/e2e-web/fixtures -> packages/ui/dist (the browser UI bundle the daemon serves)
@@ -242,7 +243,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   // would have named the cause). Auto so every spec gets it without
   // opting in.
   browserDiagnostics: [
-    async ({ page, daemon, browserName }, use, testInfo) => {
+    async ({ page, daemon, browser, browserName }, use, testInfo) => {
       const hangMarker = join(
         testInfo.project.outputDir,
         '.renderer-hangs',
@@ -293,33 +294,54 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
           push(`[debugger]   ${formatFrame(frame)}`);
       });
       await cdp?.send('Debugger.enable');
+      const started = cdp && bootTraceEnabled() ? await startBootTrace(browser, page) : null;
+      if (typeof started === 'string') push(started);
+      const bootTrace = typeof started === 'string' ? null : started;
       await use(undefined);
-      if (testInfo.status !== testInfo.expectedStatus) {
-        // A blank page whose goto never reaches `load` recorded nothing above
-        // (2026-10-02). Its trace showed every request after the bundle as
-        // pending, which fits two causes: a renderer stuck in JS (Chromium
-        // reports responses from the renderer) or daemon requests that never
-        // answer, holding Chrome's six connections per origin so the lazy
-        // chunks behind `load` never go out. Ask each side directly.
-        probing = true;
-        const renderer = cdp ? await probeRenderer(page, cdp) : [];
-        const daemonLines = await probeDaemon(daemon);
-        for (const line of [...renderer, ...daemonLines]) push(line);
-        if (!pausedBeforeProbe && isRendererHang(renderer, daemonLines)) {
-          await mkdir(dirname(hangMarker), { recursive: true });
-          await writeFile(hangMarker, `${testInfo.title}\n`, 'utf8');
-          testInfo.annotations.push({
-            type: 'renderer-hang',
-            description: "Chromium's renderer blocked before the page loaded; retried once",
-          });
-          push('[retry] the known renderer hang; Playwright retries this test once');
-          const stacks = await nativeStacks();
-          if (stacks) {
-            const stacksPath = testInfo.outputPath('native-stacks.txt');
-            await writeFile(stacksPath, stacks, 'utf8');
-            await testInfo.attach('native-stacks', { path: stacksPath, contentType: 'text/plain' });
+      try {
+        if (testInfo.status !== testInfo.expectedStatus) {
+          // A blank page whose goto never reaches `load` recorded nothing above
+          // (2026-10-02). Its trace showed every request after the bundle as
+          // pending, which fits two causes: a renderer stuck in JS (Chromium
+          // reports responses from the renderer) or daemon requests that never
+          // answer, holding Chrome's six connections per origin so the lazy
+          // chunks behind `load` never go out. Ask each side directly.
+          probing = true;
+          const renderer = cdp ? await probeRenderer(page, cdp) : [];
+          const daemonLines = await probeDaemon(daemon);
+          for (const line of [...renderer, ...daemonLines]) push(line);
+          if (!pausedBeforeProbe && isRendererHang(renderer, daemonLines)) {
+            await mkdir(dirname(hangMarker), { recursive: true });
+            await writeFile(hangMarker, `${testInfo.title}\n`, 'utf8');
+            testInfo.annotations.push({
+              type: 'renderer-hang',
+              description: "Chromium's renderer blocked before the page loaded; retried once",
+            });
+            push('[retry] the known renderer hang; Playwright retries this test once');
+            const stacks = await nativeStacks();
+            if (stacks) {
+              const stacksPath = testInfo.outputPath('native-stacks.txt');
+              await writeFile(stacksPath, stacks, 'utf8');
+              await testInfo.attach('native-stacks', {
+                path: stacksPath,
+                contentType: 'text/plain',
+              });
+            }
+            if (bootTrace) {
+              const tracePath = testInfo.outputPath('chrome-trace.json.gz');
+              const { kept, lines: summary } = await bootTrace.save(tracePath);
+              for (const line of summary) push(line);
+              if (kept) {
+                await testInfo.attach('chrome-trace', {
+                  path: tracePath,
+                  contentType: 'application/gzip',
+                });
+              }
+            }
           }
         }
+      } finally {
+        await bootTrace?.discard();
       }
       if (testInfo.status !== testInfo.expectedStatus && lines.length > 0) {
         // Attach by path (not body) so the text survives in

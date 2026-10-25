@@ -32,18 +32,20 @@ const CATEGORIES = [
   'devtools.timeline',
   'disabled-by-default-devtools.timeline',
   'v8',
-  'cc',
+  // Not cc or viz: the browser keeps compositing while the page is stuck, and
+  // those frames were half of a trace's bytes.
   'gpu',
-  'viz',
 ];
 
-// A ring buffer: if the wait outlasts it, the oldest events go and the
-// blocked thread's last ones, copied at the stop, stay.
+// A ring buffer, so a wait that outlasts it loses the oldest events rather than
+// the newest. A 30 s hang recorded 58 MB of JSON locally and did not wrap it.
 const BUFFER_KB = 64 * 1024;
-const STOP_TIMEOUT_MS = 15_000;
+// Chromium converts the whole buffer to JSON before it answers: 4 s for that 30 s hang.
+const STOP_TIMEOUT_MS = 30_000;
 const READ_CHUNK_BYTES = 4 * 1024 * 1024;
+const STUCK_MS = 1_000;
 const MAX_ARG_CHARS = 240;
-const MAX_OPEN_THREADS = 12;
+const MAX_THREADS = 8;
 const MAX_FINISHED = 8;
 
 /** CI only, unless GEZEL_E2E_CHROME_TRACE says otherwise; the hang has never reproduced locally. */
@@ -55,7 +57,7 @@ export function bootTraceEnabled(): boolean {
 
 export interface BootTrace {
   /** Stop the trace, write it gzipped to `path`, and summarize what was still running. */
-  save(path: string): Promise<string[]>;
+  save(path: string): Promise<{ kept: boolean; lines: string[] }>;
   /** Stop the trace and throw it away. */
   discard(): Promise<void>;
 }
@@ -119,8 +121,12 @@ export async function startBootTrace(browser: Browser, page: Page): Promise<Boot
       page.off('load', onLoad);
       if (finished) {
         await finished;
-        return ['[trace] the page had already loaded, so its boot trace was not kept'];
+        return {
+          kept: false,
+          lines: ['[trace] the page had already loaded, so its boot trace was not kept'],
+        };
       }
+      let kept = false;
       let lines: string[] = [];
       finished = (async () => {
         const done = await end();
@@ -131,6 +137,7 @@ export async function startBootTrace(browser: Browser, page: Page): Promise<Boot
         try {
           const json = await readStream(session, done.stream);
           await writeFile(path, await gzipAsync(json));
+          kept = true;
           lines = [
             `[trace] kept ${path.split(/[\\/]/).pop()} (${Math.round(json.length / 1024)} KB of JSON${done.dataLossOccurred ? ', oldest events overwritten' : ''}); open it in ui.perfetto.dev`,
             ...summarizeBootTrace(json),
@@ -141,7 +148,7 @@ export async function startBootTrace(browser: Browser, page: Page): Promise<Boot
         await close(done.stream);
       })();
       await finished;
-      return lines;
+      return { kept, lines };
     },
   };
 }
@@ -172,10 +179,10 @@ interface Slice {
 }
 
 /**
- * The slices still open on every thread when the trace ended, innermost last,
- * and the main threads' last finished slices. A thread waiting for its next
+ * The slices still open on each stuck thread when the trace ended, innermost
+ * last, and the slices it finished just before. A thread waiting for its next
  * task has none open, so an open slice that began long before the end is the
- * wait itself.
+ * wait itself. With no thread stuck, the renderers' main threads are shown.
  */
 export function summarizeBootTrace(json: string): string[] {
   const parsed = JSON.parse(json) as { traceEvents?: TraceEvent[] } | TraceEvent[];
@@ -224,24 +231,41 @@ export function summarizeBootTrace(json: string): string[] {
   };
   const at = (ts: number) => `+${Math.round((ts - start) / 1000)}ms`;
   const lines = [`[trace] ${timed.length} slices over ${Math.round((last - start) / 1000)}ms`];
-  const stuck = [...open]
-    .filter(([, stack]) => stack.length > 0)
-    .sort(([, a], [, b]) => (a[0]?.ts ?? 0) - (b[0]?.ts ?? 0))
-    .slice(0, MAX_OPEN_THREADS);
-  if (stuck.length === 0) lines.push('[trace] no slice was open on any thread when the trace ended');
-  for (const [key, stack] of stuck) {
-    lines.push(`[trace] ${label(key)}: open when the trace ended, outermost first`);
+  // Stopping the trace runs a task on every process, so most threads are mid-task
+  // at the end. Stuck means the innermost open slice is old.
+  const innermostTs = (key: string) => open.get(key)?.at(-1)?.ts ?? last;
+  const stuck = [...open.keys()]
+    .filter((key) => last - innermostTs(key) >= STUCK_MS * 1000)
+    .sort((a, b) => innermostTs(a) - innermostTs(b));
+  if (stuck.length === 0) {
+    lines.push(
+      `[trace] no thread had been inside one slice for ${STUCK_MS}ms when the trace ended`,
+    );
+  }
+  const focus =
+    stuck.length > 0
+      ? stuck
+      : [...threadNames].filter(([, name]) => name === 'CrRendererMain').map(([key]) => key);
+  for (const key of focus.slice(0, MAX_THREADS)) {
+    const stack = open.get(key) ?? [];
+    lines.push(
+      stack.length > 0
+        ? `[trace] ${label(key)}: open when the trace ended, outermost first`
+        : `[trace] ${label(key)}: nothing open when the trace ended`,
+    );
     for (const slice of stack) {
-      const args = slice.args && Object.keys(slice.args).length > 0 ? ` ${clip(JSON.stringify(slice.args))}` : '';
+      const args =
+        slice.args && Object.keys(slice.args).length > 0
+          ? ` ${clip(JSON.stringify(slice.args))}`
+          : '';
       lines.push(
         `[trace]   ${slice.name} since ${at(slice.ts)}, ${Math.round((last - slice.ts) / 1000)}ms before the end${args}`,
       );
     }
-  }
-  for (const [key, slices] of finished) {
-    if (!/^Cr\w*Main$/.test(threadNames.get(key) ?? '')) continue;
-    const recent = slices.slice(-MAX_FINISHED).map((s) => `${s.name} ${Math.round(s.dur / 1000)}ms at ${at(s.end)}`);
-    lines.push(`[trace] ${label(key)}: last finished: ${recent.join(', ')}`);
+    const recent = (finished.get(key) ?? []).map(
+      (s) => `${s.name} ${Math.round(s.dur / 1000)}ms at ${at(s.end)}`,
+    );
+    if (recent.length > 0) lines.push(`[trace]   last finished: ${recent.join(', ')}`);
   }
   return lines;
 }
