@@ -44,6 +44,7 @@ export const KNOWN_SCOPES = [
   'root',
   'openai',
   'knowledge',
+  'images',
   'product',
   'cli',
   'ui',
@@ -65,6 +66,7 @@ export type GezelScope = (typeof KNOWN_SCOPES)[number];
 export const APP_GRANTABLE_SCOPES = [
   'openai',
   'knowledge',
+  'images',
   'remote-inference',
   'product',
   'cli',
@@ -169,6 +171,8 @@ function isGrantableAppToken(input: { appId: string; scopes: readonly string[] }
  *  - `root`  — full access to every `/api/*` and `/v1/*` route.
  *  - `openai` — `/v1/chat/completions`, `/v1/embeddings`, `/v1/models`,
  *               `/v1/models/ensure`. The coarse public-app scope.
+ *  - `images` — `/v1/images/*`: on-device image generation and its models.
+ *               Uses GPU memory and disk, so it needs its own consent.
  *  - `product` — user-approved access to the ordinary Gezel product API for
  *                external applications such as the VS Code extension.
  *  - `cli` — user-approved product API access for the Gezel command line.
@@ -260,6 +264,13 @@ export interface TokenStore {
    * must {@link revoke} first to rotate. Persists to disk.
    */
   issue(input: IssueTokenInput): Promise<TokenRecord>;
+  /**
+   * Swap an app's token for one carrying more scopes, in one write. The
+   * current token stays valid until the new one is committed, so an app
+   * asking to add a scope keeps working while the person decides. Throws
+   * when the app has no token or the new scopes drop one it holds.
+   */
+  replace(input: IssueTokenInput): Promise<TokenRecord>;
   /**
    * Drop the token for an app. Returns `true` if a record was removed.
    * Persists to disk. Cannot revoke the root token (no-op + returns false).
@@ -456,6 +467,43 @@ export async function createTokenStore(opts: CreateTokenStoreOptions): Promise<T
       });
     },
 
+    async replace(input: IssueTokenInput): Promise<TokenRecord> {
+      return mutate(async () => {
+        assertGrantableAppToken(input);
+        const previous = byAppId.get(input.appId);
+        if (!previous) {
+          throw new Error(`token-store: appId has no token to replace: ${input.appId}`);
+        }
+        if (!previous.scopes.every((scope) => input.scopes.includes(scope))) {
+          throw new Error(`token-store: a replacement may only add scopes: ${input.appId}`);
+        }
+        const token = input.token ?? randomBytes(32).toString('base64url');
+        if (byToken.has(token)) {
+          throw new Error('token-store: token collision (caller-supplied token already in use)');
+        }
+        const record: TokenRecord = {
+          ...previous,
+          appName: input.appName,
+          scopes: [...input.scopes],
+          token,
+          createdAt: Date.now(),
+          lastUsedAt: 0,
+        };
+        byToken.delete(previous.token);
+        byToken.set(record.token, record);
+        byAppId.set(record.appId, record);
+        try {
+          await persist();
+        } catch (err) {
+          byToken.delete(record.token);
+          byToken.set(previous.token, previous);
+          byAppId.set(previous.appId, previous);
+          throw err;
+        }
+        return record;
+      });
+    },
+
     async revoke(appId: string): Promise<boolean> {
       return mutate(async () => {
         if (appId === 'root') return false;
@@ -628,7 +676,13 @@ function decodePersisted(raw: string): TokenRecord[] {
     ) {
       throw new Error('invalid token record fields');
     }
-    const scopes = e.scopes as string[];
+    // A newer build may have granted a scope this one does not know. Keep
+    // the grant without it rather than declaring the whole file corrupt and
+    // losing every app's access; only the unknown authority is dropped.
+    const scopes = (e.scopes as string[]).filter((scope) =>
+      (KNOWN_SCOPES as readonly string[]).includes(scope),
+    );
+    if (scopes.length === 0) continue;
     // Durable records are third-party grants only. Never resurrect internal
     // root/UI/session authority from a legacy, corrupted, or attacker-edited
     // tokens.json. Unknown token kinds are rejected rather than normalized.

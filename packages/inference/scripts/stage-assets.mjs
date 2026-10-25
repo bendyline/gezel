@@ -23,8 +23,9 @@ if (gilde.version !== pinned) {
     `[stage-assets] staging the inference catalog from linked Gilde ${gilde.version} (${link.spec}), not the pinned ${pinned}`,
   );
 }
+const CATALOG_KINDS = ['chat-models', 'image-models', 'knowledge-catalogs'];
 await mkdir('dist/catalog', { recursive: true });
-for (const kind of ['chat-models', 'knowledge-catalogs'])
+for (const kind of CATALOG_KINDS)
   await cp(join(gildeRoot, 'data', kind), join('dist/catalog', kind), { recursive: true });
 await cp(join(gildeRoot, 'LICENSE'), 'dist/catalog/LICENSE');
 await writeFile(
@@ -34,7 +35,7 @@ await writeFile(
       package: gilde.name,
       version: gilde.version,
       ...(gilde.version !== pinned && link ? { linked: link.spec } : {}),
-      kinds: ['chat-models', 'knowledge-catalogs'],
+      kinds: CATALOG_KINDS,
     },
     null,
     2,

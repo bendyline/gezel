@@ -87,6 +87,21 @@ product authority. The factory exposes lifecycle-tracked `knowledge.state`,
 `update`, and `retrieve`; calling those without authority fails
 `knowledge_unavailable`. Constructing it still performs no connection.
 
+Pass `images: true` to add `connection.images`: on-device image generation
+(`generate`, with `onProgress` phases `queued`, `loading_model`, `sampling`
+and `decoding`; aborting the signal stops the render) and its models
+(`models`, `ensure`, `ensureEvents`, `cancelEnsure`, `remove`). It never adds
+to the first consent. `images.access()` answers `granted`, `needs-approval`
+(a standalone Gezel whose grant lacks `images`), `no-engine` or `unsupported`
+(a Gezel that predates image generation for apps); `images.requestAccess({
+onVerificationCode })` asks for the wider grant from an explicit action while
+the current one keeps working. Hosted inference serves images whenever an
+engine is present. Models are listed apart from chat models, as
+`sd-cpp:<catalogId>`, each with its license, whether it draws legible text,
+its hardware tier and how it fits this computer. Image models from a
+standalone Gezel's home are reported `shared` and cannot be removed from the
+app.
+
 `withKnowledgeContext(app.knowledge, messages, options)` is also available from
 the browser-safe SDK. Supply `maxPromptCharacters`, `maxMessages`, optional
 `contextWindow`/`maxOutputTokens`, and `signal`. It uses up to four cited passages

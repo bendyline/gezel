@@ -23,6 +23,17 @@ export {
   type KnowledgeRetrieveInput,
   type KnowledgeState,
 } from './knowledge-client.js';
+export {
+  type GeneratedImage,
+  type ImageGenerateInput,
+  type ImageGenerateOptions,
+  type ImageModel,
+  type ImageModelEnsureEvent,
+  type ImageModelEnsureResult,
+  type ImageProgress,
+  type ImageSupport,
+  ImagesClient,
+} from './images-client.js';
 export type {
   AppKnowledgeState,
   AppKnowledgeAction,

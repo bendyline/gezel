@@ -627,6 +627,29 @@ not a process row
     await expect(sup.ensureRunning()).rejects.toThrow(/crashed too many times|failed repeatedly/);
   });
 
+  it('does not charge deliberate stops of a ready engine to the restart budget', async () => {
+    const fakeSpawn = (() =>
+      makeFakeChild() as unknown as ReturnType<
+        typeof import('node:child_process').spawn
+      >) as unknown as typeof import('node:child_process').spawn;
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({ command: 'fake', args: [], baseUrl: 'http://127.0.0.1:3' }),
+      spawn: fakeSpawn,
+      fetchImpl: async () => new Response('ok'),
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 10_000_000,
+      idleTimeoutMs: 0,
+      onLog: () => {},
+    });
+
+    for (const reason of ['stop', 'idle', 'memory-pressure', 'stop', 'stop'] as const) {
+      await sup.ensureRunning();
+      await sup.stop(reason);
+    }
+    await expect(sup.ensureRunning()).resolves.toMatchObject({ baseUrl: 'http://127.0.0.1:3' });
+    await sup.stop();
+  });
+
   it('uses the configured logPrefix in log output', async () => {
     const fakeSpawn = (() =>
       makeFakeChild() as unknown as ReturnType<

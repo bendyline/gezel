@@ -1,5 +1,6 @@
 export * from './app-knowledge.js';
 export * from './app-chat.js';
+export * from './app-images.js';
 
 import { z } from 'zod';
 

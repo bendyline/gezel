@@ -166,6 +166,62 @@ describe('TokenStore', () => {
     await expect(createTokenStore({ home, rootToken: 'ROOT' })).rejects.toThrow(/unusable/);
   });
 
+  it('keeps a grant a newer build widened with a scope this build does not know', async () => {
+    await writeFile(
+      join(home, 'tokens.json'),
+      JSON.stringify({
+        version: 1,
+        tokens: [
+          {
+            appId: 'future-app',
+            appName: 'Future',
+            scopes: ['openai', 'holograms'],
+            token: 'FUTURE-TOKEN',
+            createdAt: Date.now(),
+          },
+          {
+            appId: 'only-future',
+            appName: 'Only future',
+            scopes: ['holograms'],
+            token: 'ONLY-FUTURE',
+            createdAt: Date.now(),
+          },
+        ],
+      }),
+      'utf8',
+    );
+    const store = await createTokenStore({ home, rootToken: 'ROOT' });
+    expect(store.lookup('FUTURE-TOKEN')?.scopes).toEqual(['openai']);
+    expect(store.lookup('ONLY-FUTURE')).toBeNull();
+  });
+
+  it('replaces a token with a wider one in one write, and only ever widens', async () => {
+    const store = await createTokenStore({ home, rootToken: 'ROOT' });
+    const before = await store.issue({
+      appId: 'docblocks',
+      appName: 'DocBlocks',
+      scopes: ['openai'],
+    });
+    await expect(
+      store.replace({ appId: 'docblocks', appName: 'DocBlocks', scopes: ['images'] }),
+    ).rejects.toThrow(/only add scopes/);
+    await expect(
+      store.replace({ appId: 'stranger', appName: 'Stranger', scopes: ['openai', 'images'] }),
+    ).rejects.toThrow(/no token to replace/);
+    expect(store.lookup(before.token)?.scopes).toEqual(['openai']);
+
+    const after = await store.replace({
+      appId: 'docblocks',
+      appName: 'DocBlocks',
+      scopes: ['openai', 'images'],
+    });
+    expect(store.lookup(before.token)).toBeNull();
+    expect(store.lookup(after.token)?.scopes).toEqual(['openai', 'images']);
+    const reopened = await createTokenStore({ home, rootToken: 'ROOT' });
+    expect(reopened.list().filter((r) => r.appId === 'docblocks')).toHaveLength(1);
+    expect(reopened.lookup(after.token)?.scopes).toEqual(['openai', 'images']);
+  });
+
   it('revoke drops the token and persists the removal', async () => {
     const first = await createTokenStore({ home, rootToken: 'ROOT-1' });
     const rec = await first.issue({

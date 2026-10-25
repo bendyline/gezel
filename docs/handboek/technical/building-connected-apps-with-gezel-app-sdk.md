@@ -85,6 +85,10 @@ Every connection has a stable `appId`, a user-visible name, and one or more scop
 | `openai` | Model listing, chat, embeddings, and ensuring a local model is present | Click approval by default |
 | `product` | The ordinary Gezel product API through `@bendyline/gezel-client` | Approval plus a requester-visible verification code |
 | `remote-inference` | Gezel's paired-device inference surface | Click approval by default |
+| `knowledge` | Searching the knowledge catalogs installed in Gezel | Approval plus a requester-visible verification code |
+| `images` | Generating images on this computer and downloading image models (`app.images`) | Approval plus a requester-visible verification code |
+
+An app that is already connected adds a scope without disconnecting: `app.requestScopes({ appId, appName, scopes: [...held, 'images'], onVerificationCode })` asks for the wider grant while the current token keeps working, then switches the client to the new token. Ask for `images` only from an explicit action, such as an "Allow image generation" button, and only when `app.images.support()` reports that this Gezel serves it; an older Gezel answers `images_unsupported` before anything changes.
 
 Third-party applications should not request the first-party `cli` scope or call `authorizeLocalOwner()`. Those surfaces are reserved for Gezel's own command line and same-user clients. Ask for `product` only when the application truly needs projects, tasks, gezels, or other product state; add `openai` only if that same application also performs inference.
 

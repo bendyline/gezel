@@ -41,6 +41,7 @@
  */
 export { detectGezel, type DetectGezelOptions } from './detect.js';
 export { authorize, connect } from './connect.js';
+export { requestScopes, type RequestScopesInput } from './grant-flow.js';
 export { authorizeLocal, authorizeLocalOwner, connectLocal } from './local.js';
 export { GezelApp } from './client.js';
 export {
@@ -48,6 +49,17 @@ export {
   type KnowledgeRetrieveInput,
   type KnowledgeState,
 } from './knowledge-client.js';
+export {
+  type GeneratedImage,
+  type ImageGenerateInput,
+  type ImageGenerateOptions,
+  type ImageModel,
+  type ImageModelEnsureEvent,
+  type ImageModelEnsureResult,
+  type ImageProgress,
+  type ImageSupport,
+  ImagesClient,
+} from './images-client.js';
 export type {
   AppKnowledgeState,
   AppKnowledgeAction,

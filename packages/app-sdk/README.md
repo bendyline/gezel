@@ -542,6 +542,39 @@ Catalog and relevance-model downloads must follow an explicit user action.
 This surface grants no access to projects, sessions, arbitrary paths, URLs,
 machine-wide catalogs, or broader product administration.
 
+## Image generation
+
+`app.images` renders images on this computer with Gezel's local engine
+(stable-diffusion.cpp) and manages its models. It needs the `images` scope,
+which carries a verification code because image models use graphics memory and
+tens of gigabytes of disk. Hosted inference grants it to its host.
+
+- `app.images.support({ signal })` reads health: `supported` is false on a
+  Gezel that predates image generation for apps, `available` false when no
+  engine can render here. Ask for the scope only when `supported` is true.
+- `app.requestScopes({ appId, appName, scopes: [...held, 'images'],
+  onVerificationCode, tokenStorage })` adds the scope to a connected app from
+  an explicit action. The current token keeps working until the person
+  approves; the client then switches to the new token. It never revokes, and
+  answers `images_unsupported` or `scope_upgrade_unsupported` before changing
+  anything on a Gezel that cannot.
+- `app.images.models({ signal })` lists installed and downloadable models as
+  `sd-cpp:<catalogId>`, apart from `/v1/models`, with `fit`, `license`,
+  `commercial_use`, `renders_text`, `prompt_style` and `hardware_tier`.
+  `shared` marks a model another store owns, which `remove` refuses.
+- `app.images.ensure(model)` returns `ready` or a background download's
+  `jobId`; `ensureEvents(jobId)` streams its progress and `cancelEnsure(jobId)`
+  stops it. A model that cannot run on this computer refuses with
+  `model_wont_run`.
+- `app.images.generate({ prompt, model, aspectRatio, quality, seed },
+  { onProgress, signal })` returns the PNG bytes and the size, seed and model
+  used. Progress phases are `queued`, `loading_model` (weights load inside the
+  first render after the engine starts), `sampling` and `decoding`. Renders
+  run one at a time. Aborting the signal stops the render by stopping the
+  engine, so the next render reloads its weights. Failures carry codes such as
+  `image_capacity` (not enough graphics memory), `no_local_image_model` and
+  `model_not_installed`.
+
 ### Live inference progress
 
 Pass `stream_options: { include_progress: true, include_usage: true }` to `app.chat`

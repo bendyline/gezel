@@ -158,6 +158,7 @@ export function computeHostEnvironment(
       'GEZEL_LLAMA_SERVER_BIN',
       'GEZEL_DS4_SERVER_BIN',
       'GEZEL_SD_SERVER_BIN',
+      'GEZEL_SD_SERVER_URL',
       'GEZEL_WHISPER_SERVER_BIN',
       'GEZEL_DEVICE_HEALTH_BIN',
       'GEZEL_APPLE_FM_BIN',

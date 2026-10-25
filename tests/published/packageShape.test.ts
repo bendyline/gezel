@@ -411,6 +411,7 @@ describe('published package payloads', () => {
       'dist/index.js',
       'dist/catalog/LICENSE',
       'dist/catalog/provenance.json',
+      'dist/catalog/image-models/raw-index.json',
       'dist/kokoro-lexicon/LICENSE',
       'dist/knowledge/search-worker.js',
       'dist/memory/embed-worker.js',

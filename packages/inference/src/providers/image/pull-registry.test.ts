@@ -9,8 +9,11 @@ import type {
 import { CatalogService } from '@bendyline/gezel-catalog';
 import type { CatalogSource } from '@bendyline/gezel-catalog';
 import { describe, expect, it } from 'vitest';
-import type { ImageProviderManager } from './manager.js';
-import { ImageModelPullRegistry, UnknownImageModelError } from './pull-registry.js';
+import {
+  ImageModelPullRegistry,
+  type ImageProviderSource,
+  UnknownImageModelError,
+} from './pull-registry.js';
 import type {
   ImageEngineHealth,
   ImageGenerationInput,
@@ -188,11 +191,11 @@ function buildRegistry(): {
   const source = new FakeCatalogSource();
   source.set(MANIFEST);
   const catalog = new CatalogService([source]);
-  const providerManager: Pick<ImageProviderManager, 'current'> = {
+  const providerManager: Pick<ImageProviderSource, 'current'> = {
     current: async () => provider,
   };
   const registry = new ImageModelPullRegistry({
-    imageProvider: providerManager as ImageProviderManager,
+    imageProvider: providerManager as ImageProviderSource,
     catalog,
   });
   return { registry, provider, source };

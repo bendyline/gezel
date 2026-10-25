@@ -458,7 +458,7 @@ export async function startProductService(
       // A machine runtime credential is readable across local accounts, so
       // it receives inference and model-lifecycle authority only. The user
       // daemon's credential retains the first-party product API scopes.
-      scopes: ['ui', 'openai', 'knowledge'],
+      scopes: ['ui', 'openai', 'knowledge', 'images'],
       token: clientToken,
     },
     ...(webUiToken
@@ -1123,8 +1123,12 @@ export async function startProductService(
   // Pull registry — owns the lifecycle of in-flight image-model pulls
   // so the download keeps running when the user navigates away from the
   // Settings → Image generation page. The HTTP routes are just consumers
-  // that subscribe to its event fan-out + snapshot list.
-  const imagePulls = new ImageModelPullRegistry({ imageProvider, catalog });
+  // that subscribe to its event fan-out + snapshot list. Downloads are local
+  // weights whatever the person renders with, so they go to the local engine.
+  const imagePulls = new ImageModelPullRegistry({
+    imageProvider: { current: () => imageProvider.localProvider() },
+    catalog,
+  });
   // Chat-model install registries — same design for llama-cpp / ds4 / mlx:
   // the install runs as a background job owned by the registry, HTTP
   // requests are subscribers, and a client disconnect no longer abandons a

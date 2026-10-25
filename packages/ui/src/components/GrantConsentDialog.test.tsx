@@ -46,6 +46,37 @@ describe('GrantConsentDialog', () => {
     expect(screen.getByLabelText('Connection code')).toBeInTheDocument();
   });
 
+  it('asks a connected app for only the access it adds', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          apps: [],
+          grants: [
+            {
+              id: 'grant-images',
+              appId: 'docblocks',
+              appName: 'DocBlocks',
+              scopes: ['openai', 'knowledge', 'images'],
+              upgradeFrom: ['openai', 'knowledge'],
+              status: 'pending',
+              createdAt: Date.now(),
+              verificationRequired: true,
+            },
+          ],
+        }),
+      }),
+    );
+
+    render(<GrantConsentDialog />);
+    expect(await screen.findByText('DocBlocks wants more access')).toBeInTheDocument();
+    const added = screen.getAllByRole('definition').slice(1);
+    expect(added).toHaveLength(1);
+    expect(added[0]?.textContent).toMatch(/images/i);
+    expect(screen.getByLabelText('Connection code')).toBeInTheDocument();
+  });
+
   it('warns clearly about the authority of a CLI grant', async () => {
     vi.stubGlobal(
       'fetch',

@@ -433,6 +433,14 @@ export class NativeEngineSupervisor {
   // swallowed so a buggy parser can't take down the supervisor.
   private readonly logListeners = new Set<(line: string) => void>();
   private recentStarts: number[] = [];
+  /**
+   * The {@link recentStarts} entry for the child running now. A child that
+   * became ready and was then stopped on purpose (idle, memory pressure, a
+   * model swap) was not a crash, so its start is returned to the budget.
+   * Otherwise an engine asked to swap models or yield memory three times in
+   * a minute would refuse the fourth start as a crash loop.
+   */
+  private currentStartAt: number | undefined;
   private lastUsedAt = 0;
   /**
    * The same mark on the awake clock. Every idle/pressure DECISION reads this
@@ -722,7 +730,11 @@ export class NativeEngineSupervisor {
     const { child } = this.state;
     if (this.state.kind === 'running' && reason !== 'health-restart') {
       await this.runBeforeStop(reason, this.state.launch.baseUrl);
+      const index =
+        this.currentStartAt === undefined ? -1 : this.recentStarts.indexOf(this.currentStartAt);
+      if (index >= 0) this.recentStarts.splice(index, 1);
     }
+    this.currentStartAt = undefined;
     this.pressureDeadlineAt = undefined;
     this.expectedExitReason = reason;
     this.state = { kind: 'stopped' };
@@ -826,7 +838,9 @@ export class NativeEngineSupervisor {
         },
       );
     }
-    this.recentStarts.push(Date.now());
+    const startedAt = Date.now();
+    this.recentStarts.push(startedAt);
+    this.currentStartAt = startedAt;
     let child: ChildProcess;
     try {
       child = this.spawn(launch.command, launch.args, {

@@ -36,11 +36,15 @@ export interface KnowledgeState extends AppKnowledgeState {
 
 /** Narrow catalog authority. Never accepts file paths, URLs, or project IDs. */
 export class KnowledgeClient {
+  private readonly token: () => string;
   constructor(
     private readonly baseUrl: string,
-    private readonly token: string,
+    /** A function when the token can change, as it does after `GezelApp.requestScopes`. */
+    token: string | (() => string),
     private readonly fetchFn: typeof fetch,
-  ) {}
+  ) {
+    this.token = typeof token === 'string' ? () => token : token;
+  }
   private async request(
     path: string,
     body: unknown | undefined,
@@ -49,7 +53,7 @@ export class KnowledgeClient {
     const response = await this.fetchFn(`${this.baseUrl}/v1/knowledge/${path}`, {
       method: body === undefined ? 'GET' : 'POST',
       headers: {
-        Authorization: `Bearer ${this.token}`,
+        Authorization: `Bearer ${this.token()}`,
         'Content-Type': 'application/json',
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),

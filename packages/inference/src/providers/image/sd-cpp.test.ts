@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { ImageModelAuxiliaryFileSchema } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StableDiffusionCppProvider, parseSamplingProgress } from './sd-cpp.js';
+import type { ImageGenerationProgress } from './types.js';
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -297,11 +298,12 @@ describe('StableDiffusionCppProvider.generate', () => {
     expect(out.meta.steps).toBe(4);
   });
 
-  it('forwards parsed sd-server sampling progress to onProgress', async () => {
+  it('forwards sd-server load, sampling and decode progress as distinct phases', async () => {
     const pngB64 = Buffer.concat([PNG_SIGNATURE, Buffer.alloc(4, 0)]).toString('base64');
     let logListener: ((line: string) => void) | undefined;
     const fakeSupervisor = {
       withRequest: <T>(run: () => Promise<T>) => run(),
+      currentBaseUrl: () => undefined,
       ensureRunning: async () => ({
         command: 'sd-server',
         args: [],
@@ -319,8 +321,15 @@ describe('StableDiffusionCppProvider.generate', () => {
     const fakeFetch: typeof fetch = async () => {
       // Simulate two sd-server progress lines arriving while the
       // diffusion loop is running, then resolve with the final image.
+      // Weights load lazily inside the first request after a launch.
+      logListener?.('[sd-server]   |#########          | 49/298 - 435.57MB/s');
       logListener?.('[sd-server]   |==>                | 1/20 - 18.20s/it');
       logListener?.('[sd-server]   |======>            | 7/20 - 18.04s/it');
+      logListener?.('[sd-server]   |==================>| 20/20 - 18.01s/it');
+      // The VAE's weights load just before decoding; that is not a step back.
+      logListener?.('[sd-server]   |##################| 251/251 - 812.81MB/s');
+      // The tiled VAE decode prints a bar of its own after sampling.
+      logListener?.('[sd-server]   |=>                 | 1/49 - 4.16s/it');
       return new Response(JSON.stringify({ images: [pngB64] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -332,14 +341,18 @@ describe('StableDiffusionCppProvider.generate', () => {
       fetchImpl: fakeFetch,
       supervisor: fakeSupervisor as never,
     });
-    const events: Array<{ step: number; totalSteps: number; secondsPerStep?: number }> = [];
+    const events: ImageGenerationProgress[] = [];
     await provider.generate({
       prompt: 'a compass',
       onProgress: (p) => events.push(p),
     });
     expect(events).toEqual([
-      { step: 1, totalSteps: 20, secondsPerStep: 18.2 },
-      { step: 7, totalSteps: 20, secondsPerStep: 18.04 },
+      { phase: 'loading_model', step: 0, totalSteps: 0 },
+      { phase: 'loading_model', step: 49, totalSteps: 298 },
+      { phase: 'sampling', step: 1, totalSteps: 20, secondsPerStep: 18.2 },
+      { phase: 'sampling', step: 7, totalSteps: 20, secondsPerStep: 18.04 },
+      { phase: 'sampling', step: 20, totalSteps: 20, secondsPerStep: 18.01 },
+      { phase: 'decoding', step: 1, totalSteps: 49, secondsPerStep: 4.16 },
     ]);
     // Listener must be released once generate resolves so a future
     // generate's listener doesn't pile up alongside this one.
@@ -355,6 +368,7 @@ describe('StableDiffusionCppProvider.generate', () => {
     };
     const fakeSupervisor = {
       withRequest: <T>(run: () => Promise<T>) => run(),
+      currentBaseUrl: () => undefined,
       ensureRunning: async () => ({
         command: 'sd-server',
         args: [],
@@ -393,6 +407,7 @@ describe('StableDiffusionCppProvider.generate', () => {
     const calls: Array<{ body: Record<string, unknown> }> = [];
     const fakeSupervisor = {
       withRequest: <T>(run: () => Promise<T>) => run(),
+      currentBaseUrl: () => undefined,
       ensureRunning: async () => ({
         command: 'sd-server',
         args: [],
@@ -433,6 +448,7 @@ describe('StableDiffusionCppProvider.generate', () => {
     const stop = vi.fn(async () => {});
     const fakeSupervisor = {
       withRequest: <T>(run: () => Promise<T>) => run(),
+      currentBaseUrl: () => undefined,
       ensureRunning: async () => ({
         command: 'sd-server',
         args: [],
@@ -899,5 +915,150 @@ describe('parseSamplingProgress', () => {
       parseSamplingProgress('denoiser.hpp:499 - get_sigmas with discrete scheduler'),
     ).toBeNull();
     expect(parseSamplingProgress('')).toBeNull();
+  });
+});
+
+describe('StableDiffusionCppProvider — cancel, queue and capacity', () => {
+  const pngB64 = () => Buffer.concat([PNG_SIGNATURE, Buffer.alloc(4, 0)]).toString('base64');
+
+  function fakeEngine() {
+    let logListener: ((line: string) => void) | undefined;
+    const supervisor = {
+      withRequest: <T>(run: () => Promise<T>, signal?: AbortSignal) => {
+        signal?.throwIfAborted();
+        return run();
+      },
+      currentBaseUrl: () => 'http://127.0.0.1:9090',
+      ensureRunning: async () => ({
+        command: 'sd-server',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9090',
+      }),
+      markUsed: () => {},
+      stop: vi.fn(async () => {}),
+      subscribeLogLines: (fn: (line: string) => void) => {
+        logListener = fn;
+        return () => {
+          logListener = undefined;
+        };
+      },
+    };
+    return { supervisor, log: (line: string) => logListener?.(line) };
+  }
+
+  /** A fetch whose renders finish only when the test says so, honoring the request signal. */
+  function gatedFetch() {
+    const pending: Array<{ resolve: () => void; prompt: string }> = [];
+    const started: string[] = [];
+    const fetchImpl: typeof fetch = (_url, init) =>
+      new Promise<Response>((resolve, reject) => {
+        const prompt = String(JSON.parse(String(init?.body)).prompt);
+        started.push(prompt);
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+          once: true,
+        });
+        pending.push({
+          prompt,
+          resolve: () =>
+            resolve(
+              new Response(JSON.stringify({ images: [pngB64()] }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+              }),
+            ),
+        });
+      });
+    return { fetchImpl, pending, started };
+  }
+
+  it('stops the engine when a running render is cancelled', async () => {
+    const engine = fakeEngine();
+    const gate = gatedFetch();
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://127.0.0.1:9090',
+      modelsRoot,
+      fetchImpl: gate.fetchImpl,
+      supervisor: engine.supervisor as never,
+    });
+    const controller = new AbortController();
+    const render = provider.generate({ prompt: 'a lighthouse', signal: controller.signal });
+    await vi.waitFor(() => expect(gate.started).toEqual(['a lighthouse']));
+    controller.abort();
+    await expect(render).rejects.toMatchObject({ code: 'image_generation_cancelled' });
+    expect(engine.supervisor.stop).toHaveBeenCalled();
+  });
+
+  it('renders one image at a time and lets a queued caller leave without touching the engine', async () => {
+    const engine = fakeEngine();
+    const gate = gatedFetch();
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://127.0.0.1:9090',
+      modelsRoot,
+      fetchImpl: gate.fetchImpl,
+      supervisor: engine.supervisor as never,
+    });
+    const first = provider.generate({ prompt: 'first' });
+    await vi.waitFor(() => expect(gate.started).toEqual(['first']));
+
+    const leaving = new AbortController();
+    const secondEvents: ImageGenerationProgress[] = [];
+    const second = provider.generate({
+      prompt: 'second',
+      signal: leaving.signal,
+      onProgress: (p) => secondEvents.push(p),
+    });
+    const third = provider.generate({ prompt: 'third' });
+    await vi.waitFor(() => expect(secondEvents[0]).toMatchObject({ phase: 'queued' }));
+
+    leaving.abort();
+    await expect(second).rejects.toMatchObject({ code: 'image_generation_cancelled' });
+    // The third caller still waits for the first render, not for the one that left.
+    expect(gate.started).toEqual(['first']);
+    expect(engine.supervisor.stop).not.toHaveBeenCalled();
+
+    gate.pending[0]!.resolve();
+    await first;
+    await vi.waitFor(() => expect(gate.started).toEqual(['first', 'third']));
+    gate.pending[1]!.resolve();
+    await expect(third).resolves.toMatchObject({ meta: { durationMs: expect.any(Number) } });
+  });
+
+  it('reports a graphics-memory shortfall as a capacity error and stops the engine', async () => {
+    const engine = fakeEngine();
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://127.0.0.1:9090',
+      modelsRoot,
+      fetchImpl: async () => {
+        engine.log(
+          '[sd-server] [W] model manager cannot make enough memory available on Vulkan1: need 4847.50 MB device / 4335.50 MB budget, available 2951.48 MB device',
+        );
+        return new Response(JSON.stringify({ error: 'generate_image returned no results' }), {
+          status: 500,
+        });
+      },
+      supervisor: engine.supervisor as never,
+    });
+    await expect(provider.generate({ prompt: 'a chart' })).rejects.toMatchObject({
+      code: 'image_capacity',
+      message: expect.stringContaining('cannot make enough memory available'),
+    });
+    expect(engine.supervisor.stop).toHaveBeenCalled();
+  });
+
+  it('keeps an unexplained engine failure as a plain error', async () => {
+    const engine = fakeEngine();
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://127.0.0.1:9090',
+      modelsRoot,
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ error: 'generate_image returned no results' }), {
+          status: 500,
+        }),
+      supervisor: engine.supervisor as never,
+    });
+    await expect(provider.generate({ prompt: 'a chart' })).rejects.toThrow(
+      /sd-server returned 500/,
+    );
+    expect(engine.supervisor.stop).not.toHaveBeenCalled();
   });
 });

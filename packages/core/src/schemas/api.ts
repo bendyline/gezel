@@ -332,6 +332,13 @@ export const HealthResponseSchema = z.object({
       current: z.number().int(),
     })
     .optional(),
+  /**
+   * Local image generation for apps (`/v1/images/*`). Present on hosts that
+   * serve those routes; `available` says whether an engine can render here.
+   * An app asks for the `images` scope only when the field is present, so a
+   * daemon predating it never sees a scope it would refuse.
+   */
+  images: z.object({ available: z.boolean() }).optional(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 

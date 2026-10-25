@@ -201,6 +201,9 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         ...(swapScope
           ? {
               onProgress: (p) => {
+                // The bubble draws the sampling bar; weight loads, the
+                // queue and the tiled decode report their own units.
+                if (p.phase && p.phase !== 'sampling') return;
                 ctx.chatEvents.publish(swapScope, {
                   type: 'gpu_swap',
                   state: 'progress',

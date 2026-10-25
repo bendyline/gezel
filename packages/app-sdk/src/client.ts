@@ -5,6 +5,8 @@ import {
   AppModelListSchema,
 } from '@bendyline/gezel-client/app-models';
 import { GezelSdkError, errorFromResponse } from './errors.js';
+import { type RequestScopesInput, requestScopes } from './grant-flow.js';
+import { ImagesClient } from './images-client.js';
 import { KnowledgeClient } from './knowledge-client.js';
 import { readSseDataChunks } from './sse.js';
 import type {
@@ -43,8 +45,10 @@ export interface GezelAppOptions<F extends ChatResponseFormat = 'openai'> {
  */
 export class GezelApp<F extends ChatResponseFormat = 'openai'> {
   readonly knowledge: KnowledgeClient;
+  /** On-device image generation. Needs the `images` scope; see {@link requestScopes}. */
+  readonly images: ImagesClient;
   private readonly baseUrl: string;
-  private readonly token: string;
+  private token: string;
   private readonly fetchFn: typeof fetch;
   private readonly closeTransport?: () => Promise<void>;
   private closing?: Promise<void>;
@@ -54,7 +58,21 @@ export class GezelApp<F extends ChatResponseFormat = 'openai'> {
     this.token = opts.token;
     this.fetchFn = opts.fetch;
     this.closeTransport = opts.close;
-    this.knowledge = new KnowledgeClient(this.baseUrl, this.token, this.fetchFn);
+    this.knowledge = new KnowledgeClient(this.baseUrl, () => this.token, this.fetchFn);
+    this.images = new ImagesClient(this.baseUrl, () => this.token, this.fetchFn);
+  }
+
+  /**
+   * Ask the person to add scopes to this app's grant without disconnecting
+   * it. Until they approve, every call keeps using the current token; after,
+   * this client and its sub-clients use the new one, which is also saved
+   * through `tokenStorage`. See the standalone `requestScopes` for errors.
+   */
+  async requestScopes(input: RequestScopesInput): Promise<void> {
+    this.token = await requestScopes(
+      { baseUrl: this.baseUrl, token: this.token, fetch: this.fetchFn },
+      input,
+    );
   }
 
   close(): Promise<void> {

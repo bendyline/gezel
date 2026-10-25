@@ -8,10 +8,14 @@ clone it at the pinned commit (see `VERSION`) into
 
 ## Produced binary
 
-`sd-server` — the HTTP server wrapper upstream ships. It speaks an
-OpenAI-compatible `/v1/images/generations` shape plus a `/health`
-endpoint that the supervisor probes. See
-`packages/service/src/providers/image/sd-cpp.ts` for the client side.
+`sd-server` — the HTTP server wrapper upstream ships. Gezel drives its
+A1111-compatible `/sdapi/v1/txt2img` and `/sdapi/v1/img2img`. It has no
+`/health`: it starts listening once it has read the model's metadata, and
+loads the weights inside the first request. Its job API
+(`/sdcpp/v1/img_gen`, `/sdcpp/v1/jobs/<id>`) can cancel only queued jobs
+(`cancel_generating: false` at `master-951`), and a render keeps running
+after its client disconnects, so cancelling a render stops the process. See
+`packages/inference/src/providers/image/sd-cpp.ts` for the client side.
 
 ## Platform backends
 
