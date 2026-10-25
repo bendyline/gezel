@@ -11,7 +11,7 @@ The **Conversationalist** is the gezel for an open conversation: exploring an id
 
 When evidence would help, they look it up on the web or in your document library and bring what they found back into the answer, keeping what a source says apart from their own reading of it. When another point of view would help, they ask an adviser. And when you ask for a real deliverable — a deck, a report, a larger piece of work — they can start a craftbook to carry it forward. Everyday questions stay in the conversation; they don't need a task or a handoff.
 
-A Chat project is where the Conversationalist feels most at home: one open thread, no voorman, no workspace to manage.
+A Chat project is where the Conversationalist feels most at home: one open thread, no crew lead, no workspace to manage.
 
 ::handboek-gezel-roster{role=conversationalist}
 

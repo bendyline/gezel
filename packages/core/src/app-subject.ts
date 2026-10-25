@@ -1,3 +1,4 @@
+import { roleForMatching } from './roles/plain-names.js';
 /**
  * The item an app's own chat is about — the Word document beside the Office
  * pane — and everything the runtime says to a model about it.
@@ -212,12 +213,12 @@ export function renderAppSubjectStateLine(
 
 /**
  * Roles that run a background service (indexing, filing, review) rather than
- * converse. A chat beside a document never defaults to one: the Boekwachter's
+ * converse. A chat beside a document never defaults to one: the Librarian's
  * about.md tells it to stay invisible, and it reads like a writer to the
  * factual-role check because of its name.
  */
 const BACKGROUND_SERVICE_ROLES = new Set(['boekwachter', 'klerk', 'keurmeester']);
 
 export function isBackgroundServiceRole(role: string | undefined): boolean {
-  return BACKGROUND_SERVICE_ROLES.has(role?.trim().toLowerCase() ?? '');
+  return BACKGROUND_SERVICE_ROLES.has(roleForMatching(role)?.trim().toLowerCase() ?? '');
 }

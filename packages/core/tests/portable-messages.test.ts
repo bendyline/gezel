@@ -165,6 +165,17 @@ describe('ordinary client crew messages on the portable host', () => {
     expect(f.requests).toEqual([]);
   });
 
+  it('reaches a migrated gezel by the role-based name it had before the rename', async () => {
+    const f = await setup();
+    const lead = await f.store.createGezel({ name: 'Foreman', role: 'Voorman' });
+    expect(lead.roleBasedName).toBe('crew-lead');
+    const sent = await f.client.messageGezel('voorman', f.body);
+    await settle(f.service);
+    expect((await f.store.listSessions({ gezelId: lead.id })).map((s) => s.id)).toContain(
+      sent.sessionId,
+    );
+  });
+
   it('does not elevate a coordinator into a workspace writer', async () => {
     const f = await setup();
     const coordinator = await f.store.createGezel({ name: 'Foreman', role: 'Voorman' });

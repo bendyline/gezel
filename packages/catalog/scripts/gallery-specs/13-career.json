@@ -141,7 +141,7 @@
       {
         "id": "plan",
         "name": "Plan the interview",
-        "role": "Oefen-interviewer",
+        "role": "mock interviewer",
         "summary": "six to ten calibrated questions with planned follow-up chains",
         "prompt": "Build the interview plan. Step 1: establish the target role, company, and round — read the project's pipeline record and company brief when present; otherwise ask, briefly. Step 2: draft six to ten questions mixing behavioral and role-specific, calibrated to the round (a recruiter screen is not a final loop). Step 3: for each major expected claim, plan a follow-up chain — the 'what did YOU do?' probe. At least one chain must apply real pressure. Step 4: define the debrief contract up front: two or three strengths quoting the candidate, two or three fixes each with a sketched stronger answer, exactly one drill, and a readiness read. Step 5: write an acceptance-criteria checklist ('questions specific to the target role', 'at least one pressure follow-up chain', 'debrief contract stated'). Write the plan + checklist via write_task_note AND to notes/interview-plan.md.",
         "produces": {
@@ -152,7 +152,7 @@
       {
         "id": "conduct",
         "name": "Conduct the interview",
-        "role": "Oefen-interviewer",
+        "role": "mock interviewer",
         "summary": "the live practice round, transcribed as it runs",
         "prompt": "Run the interview live with the user. Step 1: set the frame in one line ('I'm your interviewer for a <round> for <role> — ready?') then go in character. Step 2: one question per turn, through the user-interaction capabilities on your current roster; wait for the answer before the next. Step 3: use the planned follow-up chains on vague or team-credited answers; stay realistic, never cruel — if the candidate is rattled, step out of character, steady them, resume when ready. Step 4: after each exchange, append a condensed record to notes/interview-transcript.md: the question, the gist of the answer, your one-line read. Step 5: end the roleplay explicitly ('Stepping out of character now') once the planned questions or the candidate's energy are spent. The transcript file is the phase's deliverable — keep it current as you go, not reconstructed after.",
         "produces": {
@@ -163,7 +163,7 @@
       {
         "id": "debrief",
         "name": "Write the debrief",
-        "role": "Oefen-interviewer",
+        "role": "mock interviewer",
         "summary": "kind, specific, grounded in the transcript",
         "prompt": "Write reports/interview-debrief.md to the contract from the plan. Step 1: '## Strengths' — two or three, each quoting the candidate's own words from the transcript so they can hear what worked. Step 2: '## Fixes' — two or three, each naming the moment it surfaced, why it lands badly in a real round, and a sketched stronger answer they could actually give. Step 3: '## Drill' — exactly one exercise to run before the real interview, matched to the biggest fix. Step 4: '## Readiness' — an honest read: ready, or one more round (and on what). Step 5: every point must trace to the transcript; no generic interview advice. On a loop-back, fix ONLY the named issues.",
         "produces": {
@@ -193,7 +193,7 @@
         "path": "reports/interview-debrief.md",
         "kind": "markdown-report"
       },
-      "reviewer": "Loopbaancoach"
+      "reviewer": "career coach"
     },
     "release": {
       "version": "1.0.1",
@@ -273,7 +273,7 @@
       {
         "id": "snapshot",
         "name": "Snapshot the pipeline",
-        "role": "Loopbaancoach",
+        "role": "career coach",
         "summary": "the grounded state: per-stage counts, movement, staleness, follow-ups due",
         "prompt": "Ground the review in the real record — invent nothing. Step 1: read the live pipeline through the pipeline status capability on your current roster when available; otherwise read the workspace pipeline.json and activity.json records directly. Step 2: snapshot per-stage counts and list every application with its stage and last-touched date. Step 3: mark movement — anything whose stage changed in the last seven days. Step 4: mark staleness — any active application untouched for more than seven days. Step 5: list follow-ups due — logged follow-up events due within the next seven days or overdue. Step 6: note materials debt: serious applications missing a tailored résumé or company brief. Write the snapshot via write_task_note AND to notes/pipeline-snapshot.md.",
         "produces": {
@@ -284,7 +284,7 @@
       {
         "id": "review",
         "name": "Write the weekly review",
-        "role": "Loopbaancoach",
+        "role": "career coach",
         "summary": "moved, stalled with unblocking actions, follow-ups, and exactly three priorities",
         "prompt": "Write reports/weekly-pipeline-review.md from the snapshot. Step 1: '## Moved this week' — each change in one line, celebrated where it deserves it. Step 2: '## Stalled' — every stale item with its unblocking action; the carry-over rule is absolute: each one is explicitly chased, consciously parked with a reason, or closed — nothing is silently dropped. Step 3: '## Follow-ups due' — who, about what, by when. Step 4: '## Materials debt' — tailoring and briefs owed for serious applications. Step 5: '## Next week' — EXACTLY three concrete priorities; three, not ten. Every line must trace to the snapshot. On a loop-back, fix ONLY the named issues.",
         "produces": {

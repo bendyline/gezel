@@ -3,6 +3,7 @@ import { nativeToolSpecs } from '../tools/native-tools.js';
 import {
   normalizePagePath,
   pageReadIsDeclared,
+  projectTypeCrewMatch,
   projectTypeHostGap,
   projectTypeModelTools,
   projectTypePageTools,
@@ -216,5 +217,14 @@ describe('turn rules a type declares', () => {
       'new_game: reaction.turn names missing, which is not a tool of this type',
       'more than one tool declares state; a message is answered from one',
     ]);
+  });
+});
+
+describe('project type crew reuse', () => {
+  it('reuses a gezel whose role was renamed from the slot role', () => {
+    const migrated = { id: 'pim', name: 'Pim', role: 'Checkers Player' };
+    expect(
+      projectTypeCrewMatch([migrated], { templateId: 'other', role: 'Damspeler' }, new Set()),
+    ).toBe(migrated);
   });
 });

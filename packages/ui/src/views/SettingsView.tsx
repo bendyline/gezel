@@ -598,14 +598,14 @@ function DaemonSettingsView() {
     try {
       const res = await api.updateConfig({ klerkGezelId: id });
       setConfig(res);
-      setStatus('klerk updated');
+      setStatus('scribe updated');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
     }
   }, []);
 
   const createNewKlerk = useCallback(async (name?: string) => {
-    setStatus('creating new klerk…');
+    setStatus('creating new scribe…');
     try {
       const res = await api.createNewKlerk(name?.trim() ? { name: name.trim() } : {});
       setConfig(res.config);
@@ -621,7 +621,7 @@ function DaemonSettingsView() {
         const filtered = prev.filter((g) => g.id !== res.gezel.id);
         return [summary, ...filtered];
       });
-      setStatus(`created & activated klerk "${res.gezel.name}"`);
+      setStatus(`created & activated scribe "${res.gezel.name}"`);
     } catch (err) {
       setStatus(`create failed: ${(err as Error).message}`);
     }
@@ -633,14 +633,14 @@ function DaemonSettingsView() {
       const res = await api.updateConfig({ boekwachterGezelId: id });
       setConfig(res);
       window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-      setStatus('boekwachter updated');
+      setStatus('librarian updated');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
     }
   }, []);
 
   const createNewBoekwachter = useCallback(async (name?: string) => {
-    setStatus('creating new boekwachter…');
+    setStatus('creating new librarian…');
     try {
       const res = await api.createNewBoekwachter(name?.trim() ? { name: name.trim() } : {});
       setConfig(res.config);
@@ -661,7 +661,7 @@ function DaemonSettingsView() {
         const filtered = prev.filter((gezel) => gezel.id !== res.gezel.id);
         return [summary, ...filtered];
       });
-      setStatus(`created & activated boekwachter "${res.gezel.name}"`);
+      setStatus(`created & activated librarian "${res.gezel.name}"`);
     } catch (err) {
       setStatus(`create failed: ${(err as Error).message}`);
     }
@@ -672,14 +672,14 @@ function DaemonSettingsView() {
     try {
       const res = await api.updateConfig({ keurmeesterGezelId: id });
       setConfig(res);
-      setStatus('keurmeester updated');
+      setStatus('inspector updated');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
     }
   }, []);
 
   const createNewKeurmeester = useCallback(async (name?: string) => {
-    setStatus('creating new keurmeester…');
+    setStatus('creating new inspector…');
     try {
       const res = await api.createNewKeurmeester(name?.trim() ? { name: name.trim() } : {});
       setConfig(res.config);
@@ -695,7 +695,7 @@ function DaemonSettingsView() {
         const filtered = prev.filter((g) => g.id !== res.gezel.id);
         return [summary, ...filtered];
       });
-      setStatus(`created & activated keurmeester "${res.gezel.name}"`);
+      setStatus(`created & activated inspector "${res.gezel.name}"`);
     } catch (err) {
       setStatus(`create failed: ${(err as Error).message}`);
     }
@@ -2325,11 +2325,11 @@ function DaemonSettingsView() {
                 </div>
               </section>
               <section style={{ marginBottom: '2rem' }}>
-                <h3>Klerk</h3>
+                <h3>Scribe</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  The Klerk is your workshop scribe — they handle utility text work (about.md
-                  drafts, rewrites, end-of-thread summaries, memory consolidation) so you can route
-                  grunt tasks to a different model than your conversational gezellen.
+                  The Scribe handles your workshop&apos;s utility text work (about.md drafts,
+                  rewrites, end-of-thread summaries, memory consolidation) so you can route grunt
+                  tasks to a different model than your conversational gezellen.
                 </p>
                 <div className="meester-picker">
                   {config?.klerkGezelId &&
@@ -2355,7 +2355,7 @@ function DaemonSettingsView() {
                       );
                     })()}
                   <label className="muted small" style={{ marginTop: '0.5rem', display: 'block' }}>
-                    Change klerk to:
+                    Change Scribe to:
                   </label>
                   <Select.Root
                     value={config?.klerkGezelId ?? ''}
@@ -2369,7 +2369,7 @@ function DaemonSettingsView() {
                     }}
                   >
                     <Select.Trigger>
-                      <Select.Value placeholder="Select klerk…" />
+                      <Select.Value placeholder="Select Scribe…" />
                     </Select.Trigger>
                     <Select.Content>
                       {gezels.map((g) => (
@@ -2377,7 +2377,7 @@ function DaemonSettingsView() {
                           {assignmentLabel(g, boringMode)}
                         </Select.Item>
                       ))}
-                      <Select.Item value="__new">✨ New Klerk gezel…</Select.Item>
+                      <Select.Item value="__new">✨ New Scribe gezel…</Select.Item>
                     </Select.Content>
                   </Select.Root>
 
@@ -2414,12 +2414,12 @@ function DaemonSettingsView() {
                           Cancel
                         </button>
                         <button type="submit" className="primary" disabled={newKlerkBusy}>
-                          {newKlerkBusy ? 'Creating…' : 'Create Klerk'}
+                          {newKlerkBusy ? 'Creating…' : 'Create Scribe'}
                         </button>
                       </div>
                       <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
-                        A fresh gezel will be spun up with the curated Klerk prompt and set as your
-                        active scribe. Tune their model in the Gezellen tab to point utility work at
+                        A fresh gezel will be spun up with the curated Scribe prompt and set as your
+                        active Scribe. Tune their model in the Gezellen tab to point utility work at
                         Sonnet, a local model, or whatever fits.
                       </p>
                     </form>
@@ -2428,11 +2428,11 @@ function DaemonSettingsView() {
               </section>
 
               <section style={{ marginBottom: '2rem' }} data-testid="boekwachter-settings">
-                <h3>Boekwachter</h3>
+                <h3>Librarian</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  The Boekwachter is your workshop&apos;s index-keeper. A project with a Boekwachter
-                  on its assigned crew gets background AI summaries, file reviews, folder rollups,
-                  and weekly digests. Remove the role from a project to keep fast structural search
+                  The Librarian is your workshop&apos;s index-keeper. A project with a Librarian on
+                  its assigned crew gets background AI summaries, file reviews, folder rollups, and
+                  weekly digests. Remove the role from a project to keep fast structural search
                   without those AI passes. Indexing stays local by default; a local provider and
                   model selected on this gezel can tune the work.
                 </p>
@@ -2462,7 +2462,7 @@ function DaemonSettingsView() {
                       );
                     })()}
                   <label className="muted small" style={{ marginTop: '0.5rem', display: 'block' }}>
-                    Change boekwachter to:
+                    Change Librarian to:
                   </label>
                   <Select.Root
                     value={config?.boekwachterGezelId ?? ''}
@@ -2476,7 +2476,7 @@ function DaemonSettingsView() {
                     }}
                   >
                     <Select.Trigger>
-                      <Select.Value placeholder="Select boekwachter…" />
+                      <Select.Value placeholder="Select Librarian…" />
                     </Select.Trigger>
                     <Select.Content>
                       {gezels.map((gezel) => (
@@ -2484,7 +2484,7 @@ function DaemonSettingsView() {
                           {assignmentLabel(gezel, boringMode)}
                         </Select.Item>
                       ))}
-                      <Select.Item value="__new">New Boekwachter gezel…</Select.Item>
+                      <Select.Item value="__new">New Librarian gezel…</Select.Item>
                     </Select.Content>
                   </Select.Root>
 
@@ -2521,12 +2521,12 @@ function DaemonSettingsView() {
                           Cancel
                         </button>
                         <button type="submit" className="primary" disabled={newBoekwachterBusy}>
-                          {newBoekwachterBusy ? 'Creating…' : 'Create Boekwachter'}
+                          {newBoekwachterBusy ? 'Creating…' : 'Create Librarian'}
                         </button>
                       </div>
                       <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
-                        The new gezel uses the canonical gilde Boekwachter personality. Projects
-                        assigned to the current Boekwachter transfer to the new one.
+                        The new gezel uses the canonical gilde Librarian personality. Projects
+                        assigned to the current Librarian transfer to the new one.
                       </p>
                     </form>
                   )}
@@ -2535,13 +2535,13 @@ function DaemonSettingsView() {
 
               {config?.showAdvancedFeatures && (
                 <section style={{ marginBottom: '2rem' }} data-testid="keurmeester-settings">
-                  <h3>Keurmeester</h3>
+                  <h3>Inspector</h3>
                   <p className="muted" style={{ marginTop: 0 }}>
-                    The Keurmeester is the guild's quality inspector. When a small on-device model
-                    gets stuck — spinning on the same step, going silent, failing the same check
-                    over and over — a frontier model is consulted to diagnose the problem and step
-                    in: a well-aimed nudge, a rewritten task step, or (at most twice per task) doing
-                    the failing step itself and handing the work back.
+                    The Inspector checks the guild&apos;s work. When a small on-device model gets
+                    stuck — spinning on the same step, going silent, failing the same check over and
+                    over — a frontier model is consulted to diagnose the problem and step in: a
+                    well-aimed nudge, a rewritten task step, or (at most twice per task) doing the
+                    failing step itself and handing the work back.
                   </p>
                   {config?.keurmeester?.enabled !== true && !keurmeesterConsentOpen && (
                     <button type="button" onClick={() => setKeurmeesterConsentOpen(true)}>
@@ -2650,8 +2650,8 @@ function DaemonSettingsView() {
                             void saveKeurmeesterConfig({ allowTakeover: e.target.checked })
                           }
                         />
-                        Allow bounded takeover (the Keurmeester may perform a repeatedly-failing
-                        step itself — at most once per step, twice per task — then hand back)
+                        Allow bounded takeover (the Inspector may perform a repeatedly-failing step
+                        itself — at most once per step, twice per task — then hand back)
                       </label>
                       <div className="meester-picker" style={{ marginTop: '0.75rem' }}>
                         {config?.keurmeesterGezelId &&
@@ -2680,7 +2680,7 @@ function DaemonSettingsView() {
                           })()}
                         {!config?.keurmeesterGezelId && (
                           <p className="muted small" style={{ margin: 0 }}>
-                            No Keurmeester gezel yet — one is created automatically on the first
+                            No Inspector gezel yet — one is created automatically on the first
                             intervention, or designate/create one now:
                           </p>
                         )}
@@ -2688,7 +2688,7 @@ function DaemonSettingsView() {
                           className="muted small"
                           style={{ marginTop: '0.5rem', display: 'block' }}
                         >
-                          Change keurmeester to:
+                          Change Inspector to:
                         </label>
                         <Select.Root
                           value={config?.keurmeesterGezelId ?? ''}
@@ -2702,7 +2702,7 @@ function DaemonSettingsView() {
                           }}
                         >
                           <Select.Trigger>
-                            <Select.Value placeholder="Select keurmeester…" />
+                            <Select.Value placeholder="Select Inspector…" />
                           </Select.Trigger>
                           <Select.Content>
                             {gezels.map((g) => (
@@ -2710,7 +2710,7 @@ function DaemonSettingsView() {
                                 {assignmentLabel(g, boringMode)}
                               </Select.Item>
                             ))}
-                            <Select.Item value="__new">✨ New Keurmeester gezel…</Select.Item>
+                            <Select.Item value="__new">✨ New Inspector gezel…</Select.Item>
                           </Select.Content>
                         </Select.Root>
 
@@ -2751,12 +2751,12 @@ function DaemonSettingsView() {
                                 className="primary"
                                 disabled={newKeurmeesterBusy}
                               >
-                                {newKeurmeesterBusy ? 'Creating…' : 'Create Keurmeester'}
+                                {newKeurmeesterBusy ? 'Creating…' : 'Create Inspector'}
                               </button>
                             </div>
                             <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
-                              A fresh gezel is spun up with the curated inspector prompt and set as
-                              your active keurmeester. Their interventions appear in chat and in the
+                              A fresh gezel is spun up with the curated Inspector prompt and set as
+                              your active Inspector. Their interventions appear in chat and in the
                               History tab.
                             </p>
                           </form>
@@ -3322,7 +3322,7 @@ function DaemonSettingsView() {
                 <p className="muted" style={{ marginTop: 0 }}>
                   Give each gezel only the tools their role actually needs. A smaller toolbox keeps
                   them focused and makes every reply faster and cheaper — it matters most with small
-                  on-device models. Known roles (Meester, Voorman, Reviewer, Copywriter, Designer,
+                  on-device models. Known roles (Meester, Crew Lead, Reviewer, Copywriter, Designer,
                   Planner) start with a sensible set; each gezel's own Toolsets tab can override it.
                 </p>
                 <div className="provider-switch">

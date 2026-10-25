@@ -15,6 +15,7 @@ import {
   isLocalProvider,
   normalizeScriptRefs,
   resolveRoleId,
+  roleForMatching,
   taskInputReadTools,
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
@@ -1285,7 +1286,7 @@ const GENERIC_TOOL_CAP_FALLBACK: readonly string[] = [
 ];
 
 function isImplementationRole(role: string | undefined): boolean {
-  const normalized = role?.toLowerCase().trim() ?? '';
+  const normalized = roleForMatching(role)?.toLowerCase().trim() ?? '';
   return (
     normalized.includes('builder') ||
     normalized.includes('generalist') ||
@@ -1394,7 +1395,7 @@ function coordinatorToolDietCap(
 
 /** Curated orchestration-list length for coordinator roles, else null. */
 function coordinatorPriorityLength(role: string | undefined): number | null {
-  const normalized = role?.toLowerCase().trim() ?? '';
+  const normalized = roleForMatching(role)?.toLowerCase().trim() ?? '';
   if (normalized.includes('voorman') || normalized.includes('foreman')) {
     return VOORMAN_TOOL_CAP_PRIORITY.length;
   }
@@ -1406,7 +1407,7 @@ function toolCapPriorityForRole(
   role: string | undefined,
   deliverableKind?: import('@bendyline/gezel').DeliverableKind,
 ): readonly string[] {
-  const normalized = role?.toLowerCase().trim() ?? '';
+  const normalized = roleForMatching(role)?.toLowerCase().trim() ?? '';
   const base = normalized.includes('meester')
     ? MEESTER_TOOL_CAP_PRIORITY
     : normalized.includes('voorman') || normalized.includes('foreman')
@@ -1523,7 +1524,7 @@ function shouldConstrainToProjectOrchestration(opts: {
   latestUserMessage: string | undefined;
 }): boolean {
   if (!isLocalProvider(opts.provider)) return false;
-  const normalizedRole = opts.role?.toLowerCase().trim() ?? '';
+  const normalizedRole = roleForMatching(opts.role)?.toLowerCase().trim() ?? '';
   if (!normalizedRole.includes('meester') && !normalizedRole.includes('voorman')) return false;
   const text = opts.latestUserMessage?.toLowerCase() ?? '';
   if (!text.trim()) return false;
@@ -1618,7 +1619,7 @@ export function projectOrchestrationConstraintActive(opts: {
   provider: ProviderName;
   latestUserMessage: string | undefined;
 }): boolean {
-  const normalizedRole = opts.role?.toLowerCase().trim() ?? '';
+  const normalizedRole = roleForMatching(opts.role)?.toLowerCase().trim() ?? '';
   if (
     normalizedRole.includes('meester') &&
     isLocalProvider(opts.provider) &&

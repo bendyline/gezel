@@ -95,7 +95,7 @@ describe('Checkers bundled project type', () => {
     expect(applied.gezelsCreated).toHaveLength(1);
     expect(applied.gezelsCreated[0]?.voorman).toBe(true);
     const player = await store.getGezel(applied.gezelsCreated[0]!.id);
-    expect(player?.role).toBe('Damspeler');
+    expect(player?.role).toBe('Checkers Player');
 
     expect(applied.scriptsInstalled).toEqual(['game-store']);
     const scriptBody = await readFile(projectScriptFile(home, project.id, 'game-store'), 'utf8');

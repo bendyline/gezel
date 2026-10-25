@@ -171,7 +171,7 @@ describe('KeurmeesterManager', () => {
     const config = await store.readConfig();
     expect(config.keurmeesterGezelId).toBeTruthy();
     const minted = await store.getGezel(config.keurmeesterGezelId!);
-    expect(minted?.parsed.frontmatter.role).toBe('Keurmeester');
+    expect(minted?.parsed.frontmatter.role).toBe('Inspector');
 
     // Consult ran on the pinned frontier target through the persona lane.
     expect(oneShotCalls).toHaveLength(1);

@@ -1304,7 +1304,7 @@ function RepoPreviewProgress({
   // Resolve the Klerk only while this row is visible; a closed dialog or a
   // non-GitHub project should not add config/roster reads to ProjectsView.
   const klerk = useKlerkInfo();
-  const klerkName = klerk?.name ?? 'Klerk';
+  const klerkName = klerk?.name ?? 'The Scribe';
   return (
     <output className="gz-npd-repo-progress" aria-live="polite">
       <GezelIcon

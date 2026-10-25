@@ -67,7 +67,7 @@ describe.each(['apple-foundation-models', 'android-mlkit'] as const)(
       });
       expect(response.status).toBe(200);
       const events = await response.text();
-      expect(events).toContain('Klerk model is not available');
+      expect(events).toContain('Scribe model is not available');
       expect(events).toContain('"type":"error"');
       expect(f.inference.generate).not.toHaveBeenCalled();
       expect(f.service.busy).toBe(false);

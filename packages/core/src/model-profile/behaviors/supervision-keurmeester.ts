@@ -16,5 +16,5 @@ import type { Behavior } from '../types.js';
 export const SupervisionKeurmeester: Behavior = {
   id: 'supervision.keurmeester',
   description:
-    'Enable Keurmeester supervision: consult a frontier model when this model exhausts its recovery budget',
+    'Enable Inspector supervision: consult a frontier model when this model exhausts its recovery budget',
 };

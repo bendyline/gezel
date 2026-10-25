@@ -19,6 +19,7 @@ import {
   type ProviderName,
   effectiveCapabilityFloor,
   resolveSecurityPolicy,
+  roleForMatching,
   securityPolicyForLevel,
   tierAtLeast,
 } from '@bendyline/gezel';
@@ -148,7 +149,7 @@ function toolStrategiesFor(
     id: 'default' | 'coordinator-tool-diet';
     coordinatorToolDiet: boolean;
   }> = [{ id: 'default', coordinatorToolDiet: false }];
-  const normalizedRole = role.toLowerCase();
+  const normalizedRole = roleForMatching(role).toLowerCase();
   const coordinator =
     normalizedRole.includes('meester') ||
     normalizedRole.includes('voorman') ||

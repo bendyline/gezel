@@ -131,7 +131,7 @@ export function renderProjectContextSections(candidates: ProjectContext[]): stri
   return candidates.map((c) => {
     const lines: string[] = [`## Project "${c.project.name}" (id: ${c.project.id})`];
     if (c.project.description) lines.push(c.project.description);
-    if (c.voormanName) lines.push(`Voorman: ${c.voormanName}`);
+    if (c.voormanName) lines.push(`Crew lead: ${c.voormanName}`);
     if (c.lastActivityAt) lines.push(`Last activity: ${c.lastActivityAt}`);
     if (c.pendingQuestions > 0) {
       lines.push(`${c.pendingQuestions} question(s) waiting on the user.`);

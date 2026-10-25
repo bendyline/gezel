@@ -12,18 +12,18 @@ type ProjectShape = { mode?: 'crew' | 'solo' | undefined; leadLabel?: string | u
 
 /**
  * The project lead's label. A project type can override it (`leadLabel`,
- * e.g. checkers → "Opponent"); otherwise "Voorman" for crew, "Builder"
+ * e.g. checkers → "Opponent"); otherwise "Crew Lead" for crew, "Builder"
  * for solo (jobs).
  */
 export function crewLeadLabel(project: ProjectShape | null | undefined): string {
   if (project?.leadLabel) return project.leadLabel;
-  return project?.mode === 'solo' ? 'Builder' : 'Voorman';
+  return project?.mode === 'solo' ? 'Builder' : 'Crew Lead';
 }
 
-/** Lowercase form for inline prose ("the voorman of…", "no opponent set"). */
+/** Lowercase form for inline prose ("the crew lead of…", "no opponent set"). */
 export function crewLeadLabelLower(project: ProjectShape | null | undefined): string {
   if (project?.leadLabel) return project.leadLabel.toLowerCase();
-  return project?.mode === 'solo' ? 'builder' : 'voorman';
+  return project?.mode === 'solo' ? 'builder' : 'crew lead';
 }
 
 /** "Project" for crew shape, "Job" for solo shape — matches the create-button labels. */

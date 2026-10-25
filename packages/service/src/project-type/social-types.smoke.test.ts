@@ -108,7 +108,7 @@ describe.skipIf(!localGilde).each(SOCIAL)('social project type: $typeId', (row) 
     const voorman = applied.gezelsCreated.find((g) => g.voorman);
     expect(voorman).toBeDefined();
     const gezel = await store.getGezel(voorman!.id);
-    expect(gezel?.role).toBe('Omroeper');
+    expect(gezel?.role).toBe('Social Media Writer');
 
     expect(applied.scriptsInstalled).toEqual(['posts-store']);
     const scriptBody = await readFile(projectScriptFile(home, project.id, 'posts-store'), 'utf8');

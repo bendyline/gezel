@@ -103,7 +103,7 @@ ${
     : '**Default is excluded.** Its one-off questions, scratch work, artifacts, and loose tasks are outside this review. Saving this report in Default does not make its contents eligible for inspection or recommendations.'
 }
 
-Then write ONE consolidated report to \`artifacts/${OVERSIGHT_REPORT_PATH}\` (overwrite any prior copy). Structure it as a list of concrete, approvable recommendations grouped by project, each with: what to change, why, and (where useful) a short ready-to-apply draft (e.g. a rewritten about.md paragraph). These are suggestions for the user to approve in the morning — do NOT apply them, do NOT message voormen, do NOT start or advance tasks.
+Then write ONE consolidated report to \`artifacts/${OVERSIGHT_REPORT_PATH}\` (overwrite any prior copy). Structure it as a list of concrete, approvable recommendations grouped by project, each with: what to change, why, and (where useful) a short ready-to-apply draft (e.g. a rewritten about.md paragraph). These are suggestions for the user to approve in the morning — do NOT apply them, do NOT message crew leads, do NOT start or advance tasks.
 
 ## Actionable recommendations
 

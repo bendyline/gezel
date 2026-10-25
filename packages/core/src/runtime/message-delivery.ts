@@ -8,6 +8,7 @@ import type { MessageGezelRequest } from '../schemas/api.js';
 import type { FileTurnIntent } from '../schemas/file-turn-intent.js';
 import type { ChatMessage } from '../schemas/gezel.js';
 import type { ChatSession, ExpectedDeliverable } from '../schemas/session.js';
+import { renamedRoleBasedName } from '../tools/assignee-arg.js';
 import { validatePortablePath } from './files.js';
 import { portableToolSurface } from './product-tools.js';
 import type { PortableStore } from './store.js';
@@ -66,9 +67,15 @@ export async function preparePortableMessage(
     throw new Error('Sending conversation does not belong to this gezel');
   const roster = await store.listGezels();
   const direct = roster.find((g) => g.id === toIdOrName);
-  const names = roster.filter((g) =>
-    [g.name, g.roleBasedName].some((name) => name?.toLowerCase() === toIdOrName.toLowerCase()),
-  );
+  const named = (ref: string) =>
+    roster.filter((g) =>
+      [g.name, g.roleBasedName].some((name) => name?.toLowerCase() === ref.toLowerCase()),
+    );
+  // A role-based name from before its role was renamed ("voorman") finds
+  // the gezel now called "crew-lead".
+  const renamed = renamedRoleBasedName(toIdOrName);
+  const exact = named(toIdOrName);
+  const names = exact.length === 0 && renamed ? named(renamed) : exact;
   const target = direct ?? (names.length === 1 ? names[0] : undefined);
   if (!target) throw new Error('Choose an unambiguous gezel id or display name from the crew.');
   if (target.id === sender.id) throw new Error('A gezel cannot message itself');

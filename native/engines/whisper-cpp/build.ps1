@@ -216,6 +216,29 @@ if ($arm64Cuda) {
   Write-Host "[build] ggml-cuda host flags keyed on WIN32 (cl.exe) for the clang arm64 build"
 }
 
+# The server's first call is ggml_backend_load_all(), which loads every
+# ggml-<backend>.dll in the executable's folder. This build has its backends
+# compiled in, and its folder is the -cuda key, where llama-server's
+# ggml-cuda.dll and ggml-cpu.dll sit: loading them put a second ggml in the
+# process, which aborted at startup with GGML_ASSERT(prev !=
+# ggml_uncaught_exception) on every RTX Spark (native-v0.1.53). The CPU builds
+# link ggml dynamically and keep the call.
+$serverCpp = 'examples/server/server.cpp'
+if ($arm64Cuda) {
+  & git -C $src checkout -- $serverCpp
+  if ($LASTEXITCODE -ne 0) { throw "could not reset $serverCpp" }
+  $serverPath = Join-Path $src $serverCpp
+  $text = [System.IO.File]::ReadAllText($serverPath)
+  $needle = 'ggml_backend_load_all();'
+  $count = ([regex]::Matches($text, [regex]::Escape($needle))).Count
+  if ($count -ne 1) {
+    throw "expected '$needle' once in $serverCpp, found $count - recheck the static-build backend discovery patch against the new pin"
+  }
+  $text = $text.Replace($needle, '/* gezel: static build, backends compiled in */')
+  [System.IO.File]::WriteAllText($serverPath, $text, [System.Text.UTF8Encoding]::new($false))
+  Write-Host "[build] removed backend DLL discovery from the static CUDA whisper-server"
+}
+
 $buildDir = Join-Path $src $(if ($arm64Cuda) { "build-$platform-cuda" } else { "build-$platform" })
 try {
   & cmake -S $src -B $buildDir @configureArgs @cmakeFlags
@@ -229,8 +252,10 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
 } finally {
   if ($arm64Cuda) {
-    & git -C $src checkout -- $ggmlCudaCmake
-    if ($LASTEXITCODE -ne 0) { Write-Warning "could not restore $ggmlCudaCmake" }
+    foreach ($patched in @($ggmlCudaCmake, $serverCpp)) {
+      & git -C $src checkout -- $patched
+      if ($LASTEXITCODE -ne 0) { Write-Warning "could not restore $patched" }
+    }
   }
 }
 

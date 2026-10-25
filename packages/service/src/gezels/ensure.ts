@@ -3,8 +3,10 @@ import {
   type GildeTemplateResolution,
   gezelNamesInUse,
   inferGenderForName,
+  legacyRoleKey,
   pickUnusedGezelName,
   pickUnusedSuggestedName,
+  plainRoleTitle,
   resolveGezelTemplateById,
   resolveGezelTemplateForRole,
 } from '@bendyline/gezel';
@@ -194,9 +196,14 @@ export async function ensureGezel(args: {
   // The about.md keeps the raw title — it reads as prose ("You are the crew's
   // **marine biologist**"), where display casing would be wrong. Only the
   // frontmatter role, which the UI renders verbatim as a label, is cased.
-  const roleTitle = titleCaseRole(query);
+  // An older craftbook's Dutch title ("kantoormeester") is written as its
+  // plain role in both places.
+  const roleQuery = legacyRoleKey(query) ? plainRoleTitle(query).toLowerCase() : query;
+  const roleTitle = titleCaseRole(roleQuery);
   const bespokeAbout =
-    bespokeMode === 'static' ? staticSpecialistAbout(query) : await generateGezelAbout(chat, query);
+    bespokeMode === 'static'
+      ? staticSpecialistAbout(roleQuery)
+      : await generateGezelAbout(chat, roleQuery);
   const { name: chosenName, gender: chosenGender } = pickNameAndGender({
     preferredName: opts.preferredName,
     inUse,

@@ -13,7 +13,8 @@ import { isBinaryDocumentPath } from '@bendyline/gezel';
 // Role lookups may include the display/role-based name beside the canonical
 // role (for example "planner calendar desk"), so match role tokens rather
 // than requiring the whole label to equal one word.
-const COORDINATION_ONLY_ROLES = /\b(?:voorman|coordinator|planner|meester|foreman)\b/i;
+const COORDINATION_ONLY_ROLES =
+  /\b(?:voorman|crew[\s-]?lead|coordinator|planner|meester|foreman)\b/i;
 
 export function isCoordinationOnlyRole(role: string | null | undefined): boolean {
   return role != null && COORDINATION_ONLY_ROLES.test(role.trim());

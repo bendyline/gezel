@@ -1,4 +1,9 @@
-import { createLogger, isSharedLibraryProject } from '@bendyline/gezel';
+import {
+  createLogger,
+  isSharedLibraryProject,
+  legacyRoleKey,
+  plainRoleTitle,
+} from '@bendyline/gezel';
 import {
   MERGE_WEIGHTS,
   dedupeSearchResults,
@@ -209,7 +214,7 @@ interface CatalogEntry {
   /**
    * Extra match targets that are not the display title — a gezel's role and
    * role-based name. Searchable because the product's whole vocabulary is
-   * roles: a user reading the Handboek types "meester" or "boekwachter", not
+   * roles: a user reading the Handboek types "meester" or "librarian", not
    * the random first name that gezel happens to carry. Matched at a discount
    * so a real name match still wins.
    */
@@ -570,14 +575,20 @@ export class SearchService {
       entries.push({ kind: 'project', id: `project:${p.id}`, title: p.name, projectId: p.id });
     }
     for (const g of gezels) {
-      const keywords = [g.role, g.roleBasedName].filter(
-        (k): k is string => typeof k === 'string' && k.trim().length > 0,
-      );
+      // A renamed role is found by both titles: "librarian" and "boekwachter".
+      const legacy = legacyRoleKey(g.role);
+      const keywords = [
+        ...new Set(
+          [g.role, legacy && plainRoleTitle(legacy), legacy, g.roleBasedName].filter(
+            (k): k is string => typeof k === 'string' && k.trim().length > 0,
+          ),
+        ),
+      ];
       entries.push({
         kind: 'gezel',
         id: `gezel:${g.id}`,
         title: g.name,
-        ...(g.role ? { subtitle: g.role } : {}),
+        ...(g.role ? { subtitle: plainRoleTitle(g.role) } : {}),
         ...(keywords.length > 0 ? { keywords } : {}),
       });
     }

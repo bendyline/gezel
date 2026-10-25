@@ -205,7 +205,7 @@ describe('a visitor turn reads nothing private', () => {
     const owned = [
       'Draft the owner’s tax letter',
       'Get the owner to B2 Spanish by June.',
-      'You are the voorman of this project',
+      'You are the crew lead of this project',
       `../${other.id}/`,
       'acme/taal-private',
       'Owner Gmail',

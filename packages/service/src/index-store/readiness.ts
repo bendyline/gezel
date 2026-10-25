@@ -130,7 +130,7 @@ function buildReport(args: {
   } else {
     if (!staffed) {
       notes.push(
-        'No Boekwachter gezel is on this project crew, so the AI tiers (per-file reviews, summaries, Boekwachter issues) cannot run and their pending counts will never drain. Static index and search coverage below are still meaningful. Add a Boekwachter to the crew to unlock per-file AI review coverage.',
+        'No Librarian is on this project crew, so the AI tiers (per-file reviews, summaries, tracked issues) cannot run and their pending counts will never drain. Static index and search coverage below are still meaningful. Add a Librarian to the crew to unlock per-file AI review coverage.',
       );
     }
     if (paused) {

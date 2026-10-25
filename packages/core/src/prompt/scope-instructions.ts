@@ -223,7 +223,7 @@ export function scopeInstructionsMarkdown(
   if (omittedHeadings.length > 0) {
     out += `\n\n_Project-guide sections omitted to keep this prompt focused on the task: ${omittedHeadings
       .map((h) => `“${h}”`)
-      .join(', ')}. Ask the voorman or read \`AGENTS.md\` in the workspace if you need one._`;
+      .join(', ')}. Ask the crew lead or read \`AGENTS.md\` in the workspace if you need one._`;
   }
   return { scoped: out, keptHeadings, omittedHeadings };
 }

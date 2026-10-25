@@ -17,6 +17,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
   type CrewMember,
+  type GezelSummary,
   MINIMAL_FOOTPRINT_MAX_WINDOW,
   PROMPT_FOOTPRINT_POLICY,
   type TaskDeliverable,
@@ -27,14 +28,15 @@ import {
   isAnswerEnvelope,
   isOwnerStep,
   leanSession,
+  plainRoleTitle,
   projectLeadGezelId,
   projectTypeTurnRules,
+  renamedRoleBasedName,
   renderCurrentDateTimeLine,
   renderTurnStatePrelude,
   resolveFactualWriting,
   resolvePromptFootprint,
   resolveSocialMode,
-  roleGloss,
   routingRequestText,
   selectPersonNotes,
   stateAnswerTool,
@@ -5463,27 +5465,29 @@ export class ChatManager extends LocalEngineRuntime {
     // Within a project, accept the canonical `@project` alias and the
     // names of any project-local gezels — resolved against the project's
     // own `.gezel/` roster, which the global list never contains.
+    let locals: GezelSummary[] = [];
     if (projectId && projectId !== DEFAULT_PROJECT_ID) {
       if (lc === '@project' || lc === 'project') {
         const canonical = await this.store.getGezel(projectGezelId(projectId));
         if (canonical) return canonical;
       }
-      const locals = await this.store.listProjectGezels(projectId).catch(() => []);
-      const localMatch = locals.find(
-        (g) =>
-          g.id.toLowerCase() === lc ||
-          g.name.toLowerCase() === lc ||
-          g.roleBasedName?.toLowerCase() === lc,
-      );
-      if (localMatch) return this.store.getGezel(localMatch.id);
+      locals = await this.store.listProjectGezels(projectId).catch(() => []);
     }
+    const exact = (g: GezelSummary) =>
+      g.id.toLowerCase() === lc ||
+      g.name.toLowerCase() === lc ||
+      g.roleBasedName?.toLowerCase() === lc;
+    const localMatch = locals.find(exact);
+    if (localMatch) return this.store.getGezel(localMatch.id);
     const all = await this.store.listGezels();
-    const match = all.find(
-      (g) =>
-        g.id.toLowerCase() === lc ||
-        g.name.toLowerCase() === lc ||
-        g.roleBasedName?.toLowerCase() === lc,
-    );
+    // A migrated gezel's role-based name is its plain title ("crew-lead");
+    // the old one ("voorman") still finds it once nothing matches exactly.
+    const renamed = renamedRoleBasedName(lc);
+    const match =
+      all.find(exact) ??
+      (renamed
+        ? [...locals, ...all].find((g) => g.roleBasedName?.toLowerCase() === renamed)
+        : undefined);
     if (!match) return null;
     return this.store.getGezel(match.id);
   }
@@ -8988,7 +8992,7 @@ export class ChatManager extends LocalEngineRuntime {
               // convention as the context-loop halt.
               const noticeMessage: ChatMessage = {
                 role: 'assistant',
-                content: `[Keurmeester ${consult.keurmeesterName} stepped in: ${consult.diagnosis}]`,
+                content: `[Inspector ${consult.keurmeesterName} stepped in: ${consult.diagnosis}]`,
                 at: nowIso(),
                 synthetic: 'keurmeester-notice',
               };
@@ -9146,7 +9150,7 @@ export class ChatManager extends LocalEngineRuntime {
               if (consult?.correctivePrompt) {
                 const noticeMessage: ChatMessage = {
                   role: 'assistant',
-                  content: `[Keurmeester ${consult.keurmeesterName} stepped in: ${consult.diagnosis}]`,
+                  content: `[Inspector ${consult.keurmeesterName} stepped in: ${consult.diagnosis}]`,
                   at: nowIso(),
                   synthetic: 'keurmeester-notice',
                 };
@@ -11608,7 +11612,7 @@ export class ChatManager extends LocalEngineRuntime {
     const config = await wait(this.store.readConfig());
     let personaAbout: string | undefined;
     if (opts.useKlerk) {
-      actorLabel ??= 'Klerk';
+      actorLabel ??= 'Scribe';
       if (config.klerkGezelId) {
         const klerk = await wait(this.store.getGezel(config.klerkGezelId).catch(() => null));
         if (klerk) {
@@ -11618,7 +11622,7 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
     if (opts.useKeurmeester) {
-      actorLabel ??= 'Keurmeester';
+      actorLabel ??= 'Inspector';
       if (config.keurmeesterGezelId) {
         const keurmeester = await wait(
           this.store.getGezel(config.keurmeesterGezelId).catch(() => null),
@@ -11986,14 +11990,12 @@ export class ChatManager extends LocalEngineRuntime {
       if (id === thread.gezelId || introduced.has(id)) continue;
       const gezel = await this.store.getGezel(id).catch(() => null);
       if (!gezel) continue;
-      const role = gezel.role?.trim();
-      const gloss = roleGloss(role);
+      const role = gezel.role?.trim() ? plainRoleTitle(gezel.role) : undefined;
       const purpose = firstSentence(gezel.description);
       members.push({
         gezelId: id,
         name: gezel.name,
         ...(role ? { role } : {}),
-        ...(gloss ? { gloss } : {}),
         ...(purpose ? { purpose } : {}),
         ...(id === gezelId ? { stepName: step.name } : {}),
       });

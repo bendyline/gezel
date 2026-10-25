@@ -970,7 +970,7 @@ describe('Sidebar', () => {
     expect(window.localStorage.getItem('gezel:nav:sidebar-width')).toBe('280');
   });
 
-  it('shows the Dutch role description as the subtitle in boring mode', async () => {
+  it('shows the role description as the subtitle in boring mode', async () => {
     // Gezels group is collapsed by default — expand it so the rows render.
     window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ gezels: true }));
     vi.mocked(api.getConfig).mockResolvedValue({
@@ -978,11 +978,11 @@ describe('Sidebar', () => {
       roleBasedNameOnlyMode: true,
     } as never);
     vi.mocked(api.listGezels).mockResolvedValue({
-      gezels: [{ id: 'g1', name: 'Maya', role: 'Klerk', roleBasedName: 'klerk' } as GezelSummary],
+      gezels: [{ id: 'g1', name: 'Maya', role: 'Scribe', roleBasedName: 'scribe' } as GezelSummary],
     } as never);
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     // The label is the role-based name…
-    expect(await screen.findByText('klerk')).toBeInTheDocument();
+    expect(await screen.findByText('scribe')).toBeInTheDocument();
     // …and the subtitle is the plain-language description, not the role word.
     expect(await screen.findByText('Writing and editing')).toBeInTheDocument();
   });
@@ -991,13 +991,13 @@ describe('Sidebar', () => {
     window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ gezels: true }));
     vi.mocked(api.listGezels).mockResolvedValue({
       gezels: [
-        { id: 'g1', name: 'Maya', role: 'Voorman', roleBasedName: 'voorman' } as GezelSummary,
+        { id: 'g1', name: 'Maya', role: 'Crew Lead', roleBasedName: 'crew lead' } as GezelSummary,
       ],
     } as never);
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     const label = await screen.findByText('Maya');
     expect(label.closest('button')?.getAttribute('title')).toBe(
-      'Maya — Voorman · Manages projects',
+      'Maya — Crew Lead · Manages projects',
     );
   });
 

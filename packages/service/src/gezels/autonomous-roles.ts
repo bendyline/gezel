@@ -6,6 +6,7 @@ import {
   inferGenderForName,
   pickUnusedGezelName,
   resolveRoleId,
+  roleForMatching,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../fs/store.js';
@@ -43,7 +44,8 @@ const ROLE_DEFINITIONS: Record<AutonomousRole, AutonomousRoleDefinition> = {
 };
 
 function normalized(value: string | undefined): string {
-  return (value ?? '')
+  // "Librarian" and "Boekwachter" are the same seat.
+  return (roleForMatching(value) ?? '')
     .trim()
     .toLocaleLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -145,7 +147,7 @@ export async function createFreshBoekwachter(
 ): Promise<GezelDetail> {
   const resolved = await resolveGildeTemplateForRole(catalog, 'Boekwachter');
   if (!resolved || resolved.templateId !== ROLE_DEFINITIONS.boekwachter.templateId) {
-    throw new Error('The canonical Boekwachter template is unavailable.');
+    throw new Error('The canonical Librarian template is unavailable.');
   }
 
   let name: string;
@@ -207,7 +209,7 @@ export async function ensureDefaultBoekwachter(
   const ensured = existingRole
     ? await store.getGezel(existingRole.id)
     : await createFreshBoekwachter(store, catalog);
-  if (!ensured) throw new Error('Failed to ensure the Boekwachter gezel.');
+  if (!ensured) throw new Error('Failed to ensure the Librarian gezel.');
   if (existingRole) await store.writeConfig({ boekwachterGezelId: ensured.id });
   await recruitBoekwachterTo(store, ensured.id, opts.recruitProjectIds, { allProjects: true });
   return ensured;

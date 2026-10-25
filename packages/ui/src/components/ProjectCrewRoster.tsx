@@ -1,5 +1,5 @@
 import type { GezelSummary, ProjectDetail } from '@bendyline/gezel';
-import { displayName } from '@bendyline/gezel';
+import { displayName, roleForMatching } from '@bendyline/gezel';
 import { useMemo, useState } from 'react';
 import { crewLeadLabelLower } from '../labels.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
@@ -71,7 +71,7 @@ export function ProjectCrewRoster({
       (project.gezelIds ?? []).includes(gezel.id) &&
       (gezel.id === boekwachterGezelId ||
         gezel.templateId === 'boekwachter' ||
-        gezel.role?.trim().toLocaleLowerCase() === 'boekwachter'),
+        roleForMatching(gezel.role)?.trim().toLocaleLowerCase() === 'boekwachter'),
   );
 
   const changeBoekwachter = async (action: 'add' | 'remove') => {
@@ -159,7 +159,7 @@ export function ProjectCrewRoster({
             <span className="muted small">
               {projectBoekwachter
                 ? `${projectBoekwachter.name} studies changed files, writes short summaries and reviews, and prepares weekly digests while the workshop is quiet.`
-                : 'Structural file and symbol search stays available. Add the Boekwachter to this crew for background AI summaries, reviews, and digests.'}
+                : 'Structural file and symbol search stays available. Add the Librarian to this crew for background AI summaries, reviews, and digests.'}
             </span>
           </div>
           {projectBoekwachter ? (
@@ -169,7 +169,7 @@ export function ProjectCrewRoster({
               disabled={boekwachterBusy || !onRemoveGezel}
               onClick={() => void changeBoekwachter('remove')}
             >
-              {boekwachterBusy ? 'Updating…' : 'Remove Boekwachter'}
+              {boekwachterBusy ? 'Updating…' : 'Remove Librarian'}
             </button>
           ) : (
             <button
@@ -182,7 +182,7 @@ export function ProjectCrewRoster({
                 ? 'Updating…'
                 : designatedBoekwachter
                   ? `Add ${designatedBoekwachter.name}`
-                  : 'No Boekwachter available'}
+                  : 'No Librarian available'}
             </button>
           )}
         </div>

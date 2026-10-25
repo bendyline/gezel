@@ -355,7 +355,7 @@ export function parseParamFlags(flags: string[]): Record<string, unknown> {
 function printPlan(plan: ProjectTypeApplyPlan): void {
   const roles = plan.gezels.map(
     (gezel) =>
-      `${gezel.templateId}${gezel.voorman ? ' (voorman' : ' ('}${gezel.reuse ? ', reused)' : gezel.voorman ? ', new)' : 'new)'}`,
+      `${gezel.templateId}${gezel.voorman ? ' (crew lead' : ' ('}${gezel.reuse ? ', reused)' : gezel.voorman ? ', new)' : 'new)'}`,
   );
   if (roles.length > 0) console.log(`  roles:      ${roles.join(', ')}`);
   if (plan.scripts.length > 0) console.log(`  scripts:    ${plan.scripts.join(', ')}`);

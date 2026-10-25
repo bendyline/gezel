@@ -1,5 +1,10 @@
 import type { CatalogItemSummary } from '@bendyline/gezel';
-import { catalogGroundFor, initialPoppetjeForGezel } from '@bendyline/gezel';
+import {
+  catalogGroundFor,
+  initialPoppetjeForGezel,
+  isLegacyRoleTitle,
+  plainRoleTitle,
+} from '@bendyline/gezel';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { Poppetje } from '../../poppetje/index.js';
 import { runtimeCapabilities } from '../../runtime-capabilities.js';
@@ -152,6 +157,12 @@ export function NewProjectBrief({ selection }: { selection: PaneSelection }) {
             <div className="gz-npd-crew">
               {crew.map((member) => {
                 const memberName = prettifyTemplateId(member.templateId);
+                // Crew template ids can still be Dutch titles (`reisleider`);
+                // the caption reads in plain English, the figure stays seeded
+                // as before.
+                const memberTitle = isLegacyRoleTitle(member.templateId)
+                  ? plainRoleTitle(member.templateId)
+                  : memberName;
                 return (
                   <figure key={member.templateId} className="gz-npd-crew-member">
                     <span className="gz-npd-crew-figure">
@@ -162,8 +173,8 @@ export function NewProjectBrief({ selection }: { selection: PaneSelection }) {
                       />
                     </span>
                     <figcaption>
-                      {memberName}
-                      {member.voorman && <span className="gz-npd-crew-voorman">voorman</span>}
+                      {memberTitle}
+                      {member.voorman && <span className="gz-npd-crew-voorman">crew lead</span>}
                     </figcaption>
                   </figure>
                 );

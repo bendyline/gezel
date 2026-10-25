@@ -2200,7 +2200,7 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
 
     // The tool result goes back into Ada's pinned-boring session — it must
     // carry the role-based name, or the model leaks "Maya" into prose.
-    expect(res.toGezelName).toBe('voorman');
+    expect(res.toGezelName).toBe('crew-lead');
 
     await waitForCondition(async () => {
       const disk = await store.getSession('maya', res.sessionId);
@@ -2271,7 +2271,7 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
       text: 'status?',
     });
 
-    expect(res.toGezelName).toBe('voorman');
+    expect(res.toGezelName).toBe('crew-lead');
 
     await waitForCondition(async () => {
       const disk = await store.getSession('maya', res.sessionId);

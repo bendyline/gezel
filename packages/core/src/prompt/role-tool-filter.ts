@@ -12,6 +12,7 @@ import {
   isSingleFileSourceRepairRequest,
 } from '../local-loop/direct-file-work-prompt.js';
 import { classifyLocalModelTier, classifyModelTier } from '../model-profile/local-model-tier.js';
+import { roleForMatching } from '../roles/plain-names.js';
 import { resolveRoleId, toolsetGroupsForRole } from '../roles/registry.js';
 import type { GezelConfig } from '../schemas/api.js';
 import type { ProviderName } from '../schemas/gezel.js';
@@ -509,7 +510,7 @@ export function permitsBrowserAutomation(opts: {
 }
 
 function isStructuredFileWorkerRole(role: string | undefined): boolean {
-  const text = (role ?? '').toLowerCase();
+  const text = (roleForMatching(role) ?? '').toLowerCase();
   return /\b(?:boekwachter|bookkeeper|record[-\s]?keeper|records[-\s]?(?:keeper|clerk|specialist)|data[-\s]?(?:entry|steward|clerk))\b/.test(
     text,
   );

@@ -82,8 +82,8 @@ and why. Gezels on local models spend nothing and are never held.
 
 ## Fixes that arrive as proposals
 
-A project with both a **Boekwachter** and a **developer** on its crew gets one
-more kind of night work: the Boekwachter finds problems in your files, and
+A project with both a **Librarian** and a **developer** on its crew gets one
+more kind of night work: the Librarian finds problems in your files, and
 overnight the developer works through them.
 
 What arrives in the morning is not a changed project. It's a set of **change
@@ -112,7 +112,7 @@ date** and applying it asks you to confirm first, naming the files that moved.
 And if two proposals touch the same file, both say so, because applying one
 will put the other out of date.
 
-You can start the same thing by hand any time: open a file the Boekwachter has
+You can start the same thing by hand any time: open a file the Librarian has
 flagged, and hit **Fix** on the issue. It doesn't wait for nightfall, and it
 produces the same reviewable proposal.
 
@@ -124,7 +124,7 @@ A proposal can also move things: put photos into folders, copy a set of
 files, make a new folder. Those appear after the edits as plain rows ("Move
 `Camera/IMG_0042.jpg` → `Birthday/IMG_0042.jpg`"), grouped by the folder they
 land in when there are many, and they never replace a file that's already
-there. A problem the Boekwachter found is marked fixed when you apply the
+there. A problem the Librarian found is marked fixed when you apply the
 proposal that fixes it, not when the fix is drafted, and goes back to open if
 you dismiss it.
 

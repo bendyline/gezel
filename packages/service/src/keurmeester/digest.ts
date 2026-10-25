@@ -142,7 +142,7 @@ export class KeurmeesterDigestGenerator {
       await this.writeState({ lastCaseTs: newestTs, lastRunAt: now.toISOString() });
       await this.history.log({
         kind: 'keurmeester.digest.generated',
-        summary: `Keurmeester digest ${day}: ${stats.consults} consult(s), ${stats.unblockedRate} unblocked`,
+        summary: `Inspector digest ${day}: ${stats.consults} consult(s), ${stats.unblockedRate} unblocked`,
         details: {
           day,
           path: digestPath,
@@ -171,7 +171,7 @@ export class KeurmeesterDigestGenerator {
     const provider = ProviderNameSchema.safeParse(config.keurmeester?.providerName);
     if (!provider.success || isLocalProvider(provider.data)) return null;
     const prompt = [
-      'You are the Keurmeester reviewing your own intervention log to improve the guild systemically. Below is an aggregate of recent supervision cases (a frontier model rescuing small local models), plus per-case one-liners.',
+      'You are the Inspector reviewing your own intervention log to improve the guild systemically. Below is an aggregate of recent supervision cases (a frontier model rescuing small local models), plus per-case one-liners.',
       '',
       stats.promptBlock.slice(0, PROMPT_INPUT_CAP),
       '',
@@ -183,7 +183,7 @@ export class KeurmeesterDigestGenerator {
           providerName: provider.data,
           ...(config.keurmeester?.model ? { model: config.keurmeester.model } : {}),
           useKeurmeester: true,
-          jobLabel: 'keurmeester · digest',
+          jobLabel: 'inspector · digest',
         })
       ).trim();
       return text || null;
@@ -302,7 +302,7 @@ export function aggregateCases(records: KeurmeesterCaseRecord[]): CaseStats {
 }
 
 function renderDigest(day: string, stats: CaseStats, recommendations: string | null): string {
-  const parts = [`# Keurmeester digest — ${day}`, '', stats.promptBlock, ''];
+  const parts = [`# Inspector digest — ${day}`, '', stats.promptBlock, ''];
   if (recommendations) {
     parts.push('## Systemic recommendations', '', recommendations, '');
   } else {

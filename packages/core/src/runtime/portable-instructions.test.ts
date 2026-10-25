@@ -138,7 +138,7 @@ describe('buildPortableInstructions', () => {
     expect(built).toEqual(desktop);
     expect(built.volatileContext).toBeTruthy();
     expect(built.volatileContext).toContain('Owner is Noor.');
-    expect(built.full).toContain('The voorman of this project is **Noor**.');
+    expect(built.full).toContain('The crew lead of this project is **Noor**.');
     expect(built.full).toContain('### About this project');
   });
 

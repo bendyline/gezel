@@ -44,7 +44,7 @@ code, and the Gallery for pictures and documents.
 Choosing a file in any view opens it in the panel on the right. The panel
 says what the file is and what gezel's summary says about it. It also shows
 what the file uses and what uses it, any problems the
-[Boekwachter](the-crew.md) found, and a preview. The file stays chosen when
+[Librarian](the-crew.md) found, and a preview. The file stays chosen when
 you switch views, so you can find it in the Diagram, then see when it last
 changed on the Timeline.
 

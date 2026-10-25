@@ -1008,7 +1008,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         areasUpdated: 0,
         architectureUpdated: false,
         drained: false,
-        hint: 'No Boekwachter on this crew — semantic-search embeddings are being refreshed; add a Boekwachter to unlock AI summaries and reviews.',
+        hint: 'No Librarian on this crew — semantic-search embeddings are being refreshed; add a Librarian to unlock AI summaries and reviews.',
       });
     }
     if (await ctx.indexingJob.isPaused()) {

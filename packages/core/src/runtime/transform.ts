@@ -126,7 +126,7 @@ async function complete(
     const target = await options.resolveKlerk(controller.signal);
     check();
     if (!target.gezelId || !target.modelId)
-      throw new Error('Choose an available model for the Klerk in Settings');
+      throw new Error('Choose an available model for the Scribe in Settings');
     const providerId = MobileProviderIdSchema.parse(target.providerId);
     const budget = MobileInferenceBudgetSchema.parse({
       contextSize: target.contextSize,

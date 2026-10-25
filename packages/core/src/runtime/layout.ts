@@ -1,8 +1,14 @@
 import { seedCharacter } from '../character/index.js';
 import { parseGezelMarkdown, serializeGezelMarkdown } from '../markdown/gezel-md.js';
+import {
+  isLegacyRoleTitle,
+  legacyRoleKey,
+  plainRoleProse,
+  plainRoleTitle,
+} from '../roles/plain-names.js';
 import { ProjectSchema } from '../schemas/project.js';
 import { SHARED_PROJECT_MARKER, isSharedLibraryProject } from '../shared-project.js';
-import { slugifyEntityName } from './entities.js';
+import { pickRoleBasedName, slugifyEntityName } from './entities.js';
 import { boundedText } from './files.js';
 import { gezelRoot, gezelWrites, listGezels } from './gezels.js';
 import { MEESTER_ABOUT_MD, randomMeesterName } from './meester.js';
@@ -53,23 +59,34 @@ export async function ensureLayout(repo: PortableRepository): Promise<void> {
       config.meesterGezelId = id;
     }
   }
-  // Gezels made before characters existed get the one their id seeds, once.
+  // Gezels made before characters existed get the one their id seeds, once,
+  // and a Dutch role title ("Boekwachter") becomes its plain one ("Librarian"),
+  // in gezel.md and where its about.md names itself.
+  const takenRoleNames = new Set(
+    gezels.flatMap((gezel) => (gezel.roleBasedName ? [gezel.roleBasedName] : [])),
+  );
   for (const gezel of gezels) {
-    if (gezel.character) continue;
+    if (legacyRoleKey(gezel.role)) {
+      const aboutPath = `${gezelRoot(gezel.id)}/about.md`;
+      const about = await repo.text(aboutPath);
+      const plain = about === null ? null : plainRoleProse(about, gezel.role);
+      if (plain !== null && plain !== about) writes.set(aboutPath, boundedText(plain));
+    }
+    if (gezel.character && !isLegacyRoleTitle(gezel.role)) continue;
     const path = `${gezelRoot(gezel.id)}/gezel.md`;
     const source = await repo.text(path);
     if (source === null) continue;
     const parsed = parseGezelMarkdown(source);
-    if (parsed.frontmatter.character) continue;
-    writes.set(
-      path,
-      boundedText(
-        serializeGezelMarkdown({
-          ...parsed,
-          frontmatter: { ...parsed.frontmatter, character: seedCharacter(gezel.id) },
-        }),
-      ),
-    );
+    const frontmatter = { ...parsed.frontmatter };
+    if (!frontmatter.character) frontmatter.character = seedCharacter(gezel.id);
+    if (frontmatter.role && isLegacyRoleTitle(frontmatter.role)) {
+      frontmatter.role = plainRoleTitle(frontmatter.role);
+      if (frontmatter.roleBasedName) takenRoleNames.delete(frontmatter.roleBasedName);
+      frontmatter.roleBasedName = pickRoleBasedName(frontmatter.role, takenRoleNames);
+      takenRoleNames.add(frontmatter.roleBasedName);
+    }
+    if (parsed.frontmatter.character && frontmatter.role === parsed.frontmatter.role) continue;
+    writes.set(path, boundedText(serializeGezelMarkdown({ ...parsed, frontmatter })));
   }
   config.provider ??= 'llama-cpp';
   const configBytes = repo.json(config);

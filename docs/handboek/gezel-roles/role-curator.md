@@ -11,7 +11,7 @@ Give the **Curator** a folder of photos and they look after it the way a good ar
 
 Overnight they turn each recent outing into an **album**: a slideshow of the frames that tell the day, in order, captioned, with gentle motion between them, which you can play, edit, or export as a video. The album keeps its own smaller copies of the photos; the Curator never moves, renames or deletes a photo on their own, and anything that would change your folder arrives as a proposal you apply. Where a photo was taken stays out of anything they write.
 
-A photo folder you add gets a Curator as its lead, alongside the Boekwachter who reads and describes it.
+A photo folder you add gets a Curator as its lead, alongside the Librarian who reads and describes it.
 
 ::handboek-gezel-roster{role=curator}
 

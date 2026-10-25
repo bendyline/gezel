@@ -27,6 +27,7 @@ import {
   type Task,
   resolveGeneralistKickoff,
   resolveSecurityPolicy,
+  roleForMatching,
   securityPolicyForLevel,
 } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
@@ -260,7 +261,7 @@ function scenariosForRole(
       securityPolicy: normal,
     },
   ];
-  if (role.toLowerCase().includes('meester')) {
+  if (roleForMatching(role).toLowerCase().includes('meester')) {
     common.push(
       {
         id: 'meester-crew-build-prelude',
@@ -392,7 +393,7 @@ function providersForModel(manifest: {
 
 function toolStrategiesFor(tier: string, role: string): MatrixToolStrategy[] {
   const strategies: MatrixToolStrategy[] = [{ id: 'default', coordinatorToolDiet: false }];
-  const normalizedRole = role.toLowerCase();
+  const normalizedRole = roleForMatching(role).toLowerCase();
   const isCoordinator =
     normalizedRole.includes('meester') ||
     normalizedRole.includes('voorman') ||

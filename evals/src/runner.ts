@@ -5451,7 +5451,7 @@ export function chooseReEngageSession<S extends ReEngageSessionCandidate>(
     const t = Date.parse(s.lastActivityAt);
     return Number.isFinite(t) ? t : 0;
   };
-  const builderRoles = /^(builder|generalist|developer|voorman)$/i;
+  const builderRoles = /^(builder|generalist|developer|voorman|crew[\s-]?lead)$/i;
   const matches = (s: { gezelId: string }, re: RegExp): boolean => {
     const role = gezelRoles.get(s.gezelId) ?? null;
     return role !== null && re.test(role);

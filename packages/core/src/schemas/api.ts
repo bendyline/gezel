@@ -880,6 +880,24 @@ export const LlamaCppBackendHealthResponseSchema = z.object({
       at: z.string(),
     })
     .optional(),
+  /**
+   * Windows: the on-device engines cannot start because this PC lacks the
+   * Microsoft Visual C++ runtime they all import, which only the desktop
+   * installer provides. Read from the engine's import table, so installing
+   * the runtime clears it without a restart.
+   */
+  missingRuntime: z
+    .object({
+      /** The engines' architecture, which picks the download. */
+      arch: z.enum(['arm64', 'x64']),
+      /** The first runtime DLL Windows could not load. */
+      dll: z.string(),
+      /** Microsoft's redistributable installer for `arch`. */
+      downloadUrl: z.string(),
+      /** Technical explanation, for a "Technical details" disclosure. */
+      detail: z.string(),
+    })
+    .optional(),
   /** Linux's out-of-memory killer stopped the engine since the engine owner started. */
   outOfMemory: z
     .object({

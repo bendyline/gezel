@@ -379,7 +379,7 @@ describe('FileMapView code context', () => {
     });
   });
 
-  it('renders the boekwachter review card with notes, issues, and provenance', async () => {
+  it('renders the Librarian review card with notes, issues, and provenance', async () => {
     vi.mocked(api.toolFileReview).mockResolvedValue({
       path: 'src/a.ts',
       found: true,
@@ -387,7 +387,7 @@ describe('FileMapView code context', () => {
     });
     await openBlock('src/a.ts');
 
-    expect(await screen.findByText('Boekwachter review · 7/10')).toBeInTheDocument();
+    expect(await screen.findByText('Librarian’s review · 7/10')).toBeInTheDocument();
     expect(screen.getByText('Well structured, one real bug.')).toBeInTheDocument();
     // notes render through the shared read-only markdown field
     await screen.findByTestId('markdown-stub');
@@ -435,10 +435,10 @@ describe('FileMapView code context', () => {
 
     expect(
       await screen.findByText(
-        'Not reviewed yet — the boekwachter studies files when idle or during Night Shift.',
+        'Not reviewed yet — the Librarian studies files when idle or during Night Shift.',
       ),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/Boekwachter review ·/)).toBeNull();
+    expect(screen.queryByText(/Librarian’s review ·/)).toBeNull();
   });
 
   it('says a rubric-less file type is never reviewed, without the idle promise', async () => {
@@ -451,7 +451,7 @@ describe('FileMapView code context', () => {
 
     expect(await screen.findByText('This file type isn’t reviewed.')).toBeInTheDocument();
     expect(screen.queryByText(/Not reviewed yet/)).toBeNull();
-    expect(screen.queryByText(/Boekwachter review ·/)).toBeNull();
+    expect(screen.queryByText(/Librarian’s review ·/)).toBeNull();
   });
 
   it('treats a failed review fetch as no review at all', async () => {
@@ -461,7 +461,7 @@ describe('FileMapView code context', () => {
     await waitFor(() =>
       expect(api.toolFileReview).toHaveBeenCalledWith('p1', { path: 'src/a.ts' }),
     );
-    expect(screen.queryByText(/Boekwachter review ·/)).toBeNull();
+    expect(screen.queryByText(/Librarian’s review ·/)).toBeNull();
     expect(screen.queryByText(/Not reviewed yet/)).toBeNull();
   });
 

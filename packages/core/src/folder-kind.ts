@@ -102,5 +102,5 @@ export function describeFolderNightWork(kind: FolderKind): string[] {
 
 /** The crew a folder of this kind gets, by role. */
 export function folderCrewRoles(kind: FolderKind): string[] {
-  return kind === 'code' ? ['Boekwachter', 'Builder'] : ['Boekwachter'];
+  return kind === 'code' ? ['Librarian', 'Builder'] : ['Librarian'];
 }

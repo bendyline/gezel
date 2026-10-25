@@ -22,4 +22,13 @@ export {
   type RoleId,
   GENERALIST_TEMPLATE_ID,
 } from './registry.js';
-export { roleGloss, roleWithGloss } from './plain-names.js';
+export {
+  isLegacyRoleTitle,
+  legacyRoleKey,
+  legacyRoleTitles,
+  plainRoleProse,
+  plainRoleTitle,
+  roleForMatching,
+  roleGloss,
+  roleWithGloss,
+} from './plain-names.js';

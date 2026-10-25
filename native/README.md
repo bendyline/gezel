@@ -104,7 +104,11 @@ while C and C++ stay on clang and the baseline below:
   links whisper and ggml statically: llama-server's `ggml*.dll` already sit in
   this folder under the same names, from a different ggml, so the build
   refuses to emit any. The draft-release merge also fails on any file two
-  engines ship with different bytes.
+  engines ship with different bytes. Static linking is not enough on its
+  own: whisper's server loads every `ggml-<backend>.dll` in its folder at
+  startup, and loading llama-server's put a second ggml in the process,
+  which aborted on every RTX Spark in native-v0.1.53. `build.ps1` removes
+  that call from this build.
 
 `llama-backend.ts` selects this key's llama-server when the NVIDIA driver is
 installed, and discovery then takes its sd-server and whisper-server too
@@ -340,6 +344,12 @@ production archive set and verifies every archive against `SHA256SUMS`.
 After inspecting and testing the draft, a maintainer publishes it
 directly from the GitHub Releases UI.
 
+Test a draft on real hardware, from its archives, not from `native/build/`.
+CI runners have no GPU and build each leg alone, so CI never starts a GPU
+engine beside the other engines its archive merges in. Run
+`node scripts/smoke-native-help.mjs <binary>` over every executable in the
+host's extracted archives, then a real request through each engine.
+
 ### Integrity model
 
 Desktop binaries are **signed at birth** in the build matrix, immediately after
@@ -357,9 +367,11 @@ signed bytes:
   [`packages/app/scripts/third-party-binaries.cjs`](../packages/app/scripts/third-party-binaries.cjs).
   They ship byte-identical to their upstream release, so a user can hash
   them against the vendor's own manifest. (Contrary to what this section
-  used to say, NVIDIA's DLLs carry **no** signature when they arrive from
-  `developer.download.nvidia.com` — so this is "leave them alone", not
-  "preserve a vendor signature", except for `node.exe`.) The exemption is
+  used to say, NVIDIA's x64 CUDA 12 DLLs carry **no** signature when they
+  arrive from `developer.download.nvidia.com` — so this is "leave them
+  alone", not "preserve a vendor signature". The CUDA 13.4.1 windows-arm64
+  DLLs in `win32-arm64-cuda` do carry NVIDIA's signature, as does
+  `node.exe`; the rule is the same either way.) The exemption is
   an explicit allowlist: a first-party DLL that failed to get signed still
   fails the release.
 - **macOS** — every Mach-O in the bundle (engine executable and peer

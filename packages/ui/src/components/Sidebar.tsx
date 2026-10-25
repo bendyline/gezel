@@ -11,6 +11,7 @@ import {
   displayName,
   isOutsideInInternalPath,
   isSharedLibraryProject,
+  roleForMatching,
 } from '@bendyline/gezel';
 import {
   type DragEvent as ReactDragEvent,
@@ -91,7 +92,7 @@ const PROJECT_STATUS_DESCRIPTIONS: Record<ProjectLifecycleStatus, string> = {
 
 function roleDescription(role?: string, roleBasedName?: string): string {
   for (const candidate of [role, roleBasedName]) {
-    const key = candidate?.trim().toLowerCase();
+    const key = roleForMatching(candidate)?.trim().toLowerCase();
     if (!key) continue;
     for (const [roleKey, desc] of Object.entries(ROLE_DESCRIPTIONS)) {
       if (key === roleKey || key.includes(roleKey)) return desc;

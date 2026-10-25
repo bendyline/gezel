@@ -2,6 +2,8 @@ import {
   type GezelSummary,
   type ProjectTypeGezelRole,
   getProjectType,
+  legacyRoleKey,
+  plainRoleTitle,
   resolveProjectTypeId,
 } from '@bendyline/gezel';
 import type { PickerItem } from './components/Picker.js';
@@ -90,9 +92,23 @@ function clip(text: string, width: number): string {
   return `${flat.slice(0, Math.max(1, width - 1)).trimEnd()}…`;
 }
 
-/** Lowercased comparison key for a role/name string; '' when absent. */
+/**
+ * A role as one comparable key, lowercased; '' when absent. A renamed role's two titles are one role —
+ * the catalog still says "Voorman" where a migrated gezel says "Crew Lead"
+ * and its role-based name says "crew-lead".
+ */
 function roleIdentity(value: string | undefined | null): string {
-  return (value ?? '').trim().toLowerCase();
+  const raw = (value ?? '').trim();
+  return (legacyRoleKey(raw) ?? legacyRoleKey(raw.replace(/-/g, ' ')) ?? raw).toLowerCase();
+}
+
+/** The keys a typed `/gezel` argument may match: as written, and as a role. */
+function argKeys(values: ReadonlyArray<string | undefined>): string[] {
+  return [
+    ...new Set(
+      values.flatMap((value) => [(value ?? '').trim().toLowerCase(), roleIdentity(value)]),
+    ),
+  ].filter(Boolean);
 }
 
 function displayName(gezel: GezelSummary, roleBasedNameOnly: boolean): string {
@@ -180,7 +196,7 @@ export function buildGezelPickerItems(inputs: GezelPickerInputs): PickerItem[] {
     template: GezelTemplateChoice,
     reason?: string,
   ): Omit<PickerItem, 'section'> => ({
-    label: template.name,
+    label: plainRoleTitle(template.name),
     value: `${TEMPLATE_VALUE_PREFIX}${template.id}`,
     hint: clip(reason ?? template.description, hintWidth),
   });
@@ -254,7 +270,7 @@ export function buildGezelPickerItems(inputs: GezelPickerInputs): PickerItem[] {
     .sort((a, b) => (coreRank.get(a.id) ?? 0) - (coreRank.get(b.id) ?? 0));
   const more = remaining
     .filter((t) => !coreRank.has(t.id))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => plainRoleTitle(a.name).localeCompare(plainRoleTitle(b.name)));
 
   for (const template of core) push(SECTION_CORE, templateItem(template));
   for (const template of more) push(SECTION_MORE, templateItem(template));
@@ -292,15 +308,15 @@ export function resolveGezelArg(
   const query = arg.trim().toLowerCase();
   if (!query) return { kind: 'unknown' };
   const { gezels, templates } = inputs;
+  const queryRole = roleIdentity(query);
 
-  const gezelKeys = (g: GezelSummary): string[] =>
-    [g.id, g.name, g.roleBasedName, g.role].map(roleIdentity).filter(Boolean);
-  const templateKeys = (t: GezelTemplateChoice): string[] =>
-    [t.id, t.role, t.name].map(roleIdentity).filter(Boolean);
+  const gezelKeys = (g: GezelSummary): string[] => argKeys([g.id, g.name, g.roleBasedName, g.role]);
+  const templateKeys = (t: GezelTemplateChoice): string[] => argKeys([t.id, t.role, t.name]);
+  const exact = (keys: string[]) => keys.includes(query) || keys.includes(queryRole);
 
-  const exactGezel = gezels.find((g) => gezelKeys(g).includes(query));
+  const exactGezel = gezels.find((g) => exact(gezelKeys(g)));
   if (exactGezel) return { kind: 'gezel', gezelId: exactGezel.id };
-  const exactTemplate = templates.find((t) => templateKeys(t).includes(query));
+  const exactTemplate = templates.find((t) => exact(templateKeys(t)));
   if (exactTemplate) return { kind: 'template', templateId: exactTemplate.id };
 
   const prefixGezels = gezels.filter((g) => gezelKeys(g).some((k) => k.startsWith(query)));
@@ -312,7 +328,7 @@ export function resolveGezelArg(
   const prefixTemplates = templates.filter((t) => templateKeys(t).some((k) => k.startsWith(query)));
   if (prefixTemplates.length === 1) return { kind: 'template', templateId: prefixTemplates[0]!.id };
   if (prefixTemplates.length > 1) {
-    return { kind: 'ambiguous', labels: prefixTemplates.map((t) => t.name) };
+    return { kind: 'ambiguous', labels: prefixTemplates.map((t) => plainRoleTitle(t.name)) };
   }
 
   return { kind: 'unknown' };

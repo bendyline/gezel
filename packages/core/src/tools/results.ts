@@ -2,6 +2,7 @@ import { formatMediaClock } from '../media-label.js';
 import { memoryNoteLine, memoryScopeOfSource } from '../memory-notes.js';
 import { normalizeArtifactPath } from '../path-rules.js';
 import { contextBudgetCeiling, estimateTokens } from '../retrieval-budget.js';
+import { plainRoleTitle } from '../roles/plain-names.js';
 import { type MemoryScope, isMemoryKind, isMemoryScope } from '../runtime/memory-markdown.js';
 /**
  * The text a model reads back from a gezel tool, shared by the desktop MCP
@@ -765,7 +766,7 @@ export function scriptRunOutputFromText(text: string): unknown {
 
 export function listGezelsText(gezels: readonly { id: string; name: string; role?: string }[]) {
   const listing = gezels
-    .map((g) => `• ${g.name}${g.role ? ` (${g.role})` : ''} — id: ${g.id}`)
+    .map((g) => `• ${g.name}${g.role ? ` (${plainRoleTitle(g.role)})` : ''} — id: ${g.id}`)
     .join('\n');
   const summary = gezels.length
     ? `Listed ${gezels.length} ${gezels.length === 1 ? 'gezel' : 'gezels'}.`
@@ -788,7 +789,7 @@ export function listProjectsText(
   const listing = projects
     .map((p) => {
       const type = p.projectTypeId ?? p.detectedProjectType?.id;
-      const head = `• ${p.name} — id: ${p.id}${type ? ` [${type}]` : ''}${p.workingDir ? ` (ext: ${p.workingDir})` : ''}${p.voormanGezelId ? ` (voorman: ${p.voormanGezelId})` : ''}`;
+      const head = `• ${p.name} — id: ${p.id}${type ? ` [${type}]` : ''}${p.workingDir ? ` (ext: ${p.workingDir})` : ''}${p.voormanGezelId ? ` (crew lead: ${p.voormanGezelId})` : ''}`;
       const body = p.architecture ?? p.description;
       return body ? `${head}\n    ${body}` : head;
     })
@@ -1091,7 +1092,9 @@ export function listGildeText(
   templates: readonly { id: string; name: string; description: string }[],
 ): string {
   if (!templates.length) return 'No templates in the gilde.';
-  return templates.map((t) => `• ${t.name} (id: ${t.id}) — ${t.description}`).join('\n');
+  return templates
+    .map((t) => `• ${plainRoleTitle(t.name)} (id: ${t.id}) — ${t.description}`)
+    .join('\n');
 }
 
 /** A project's crew: the shared roster in order, then workspace-local gezels. */
@@ -1108,7 +1111,9 @@ export function listProjectGezelsText(
       [
         `Shared roster (${roster.length}):`,
         ...roster.map(({ id, gezel: g }) =>
-          g ? `• ${g.name}${g.role ? ` (${g.role})` : ''} — id: ${id}` : `• id: ${id}`,
+          g
+            ? `• ${g.name}${g.role ? ` (${plainRoleTitle(g.role)})` : ''} — id: ${id}`
+            : `• id: ${id}`,
         ),
       ].join('\n'),
     );
@@ -1117,7 +1122,9 @@ export function listProjectGezelsText(
     sections.push(
       [
         `Workspace-local (${local.length}):`,
-        ...local.map((g) => `• ${g.name}${g.role ? ` (${g.role})` : ''} — id: ${g.id}`),
+        ...local.map(
+          (g) => `• ${g.name}${g.role ? ` (${plainRoleTitle(g.role)})` : ''} — id: ${g.id}`,
+        ),
       ].join('\n'),
     );
   }

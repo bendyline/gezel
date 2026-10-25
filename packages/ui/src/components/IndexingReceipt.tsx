@@ -150,7 +150,7 @@ export function IndexingReceiptRow({
   const gezel = gezels.get(receipt.gezelId);
   const gezelName = gezel
     ? displayName({ name: gezel.name, roleBasedName: gezel.roleBasedName }, roleBasedNameOnlyMode)
-    : 'Boekwachter';
+    : 'The Librarian';
   const project =
     showProjectName && receipt.projectId !== 'default'
       ? projects.get(receipt.projectId)

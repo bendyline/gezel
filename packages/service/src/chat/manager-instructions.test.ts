@@ -815,8 +815,8 @@ describe('buildInstructions active gezel identity', () => {
       voormanGender: 'male',
     });
 
-    expect(full).toContain('You are the voorman of this project.');
-    expect(full).toContain('Do not ask the user to escalate work to the voorman — that is you.');
+    expect(full).toContain('You are the crew lead of this project.');
+    expect(full).toContain('Do not ask the user to escalate work to the crew lead — that is you.');
     expect(full).not.toContain('Wren');
     expect(full).not.toContain('(he/him)');
   });
@@ -838,12 +838,12 @@ describe('buildInstructions boring mode (roleBasedNameOnlyMode)', () => {
       roleBasedNameOnlyMode: true,
       project: crewProject,
       voormanName: 'Tomas',
-      voormanRoleBasedName: 'voorman',
+      voormanRoleBasedName: 'crew-lead',
       voormanGender: 'male',
     });
 
     expect(full).toContain('by role name only');
-    expect(full).toContain('**voorman**');
+    expect(full).toContain('**crew-lead**');
     // The friendly name must not appear anywhere — a single leak teaches
     // the model an identifier the boring-mode client never displays.
     expect(full).not.toContain('Tomas');
@@ -856,7 +856,7 @@ describe('buildInstructions boring mode (roleBasedNameOnlyMode)', () => {
       about: 'Review the work.',
       project: crewProject,
       voormanName: 'Tomas',
-      voormanRoleBasedName: 'voorman',
+      voormanRoleBasedName: 'crew-lead',
     });
 
     expect(full).not.toContain('by role name only');

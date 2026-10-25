@@ -1571,7 +1571,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
           output =
             "You already posted a question card to the user earlier in this turn. The second `ask_user_question` call was suppressed so the user only sees one card. END YOUR TURN NOW — the user's answer to the first question will arrive as the next user message; this turn produces no further visible content.";
         } else if (isProjectStartingCall(fn.name, fn.arguments) && startedProjectOrJobThisTurn) {
-          output = `You already called \`${startedProjectOrJobThisTurn.tool}\` earlier in this turn — the kickoff is in flight. Do NOT call another project-start tool to brainstorm names or scopes; each call creates a real project, voorman, and kickoff task. END YOUR TURN NOW — tell the user one sentence about the project that's spinning up. The voorman picks the work up from here.`;
+          output = `You already called \`${startedProjectOrJobThisTurn.tool}\` earlier in this turn — the kickoff is in flight. Do NOT call another project-start tool to brainstorm names or scopes; each call creates a real project, crew lead, and kickoff task. END YOUR TURN NOW — tell the user one sentence about the project that's spinning up. The voorman picks the work up from here.`;
         } else if (this.deps.bridges.hasTool(fn.name)) {
           try {
             // Adaptive cap — compute how many chars of tool output

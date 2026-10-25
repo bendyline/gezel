@@ -62,7 +62,7 @@ The shared library's database stays outside your documents folder, even when tha
 
 The content index has a deterministic structural pass and a separate enrichment pass. The structural pass discovers files, classifies them, checks modification time and size, then uses content hashes to avoid repeating work on unchanged content. It extracts supported code symbols and dependencies, Markdown headings, document text, and other searchable metadata without needing a language model.
 
-Office documents and other convertible formats get a Markdown representation for search while the original file remains the visible document. Image descriptions and audio transcripts can provide additional text when the corresponding enrichment features are available. The Boekwachter, the crew member responsible for keeping material organized, uses this indexing and enrichment stack.
+Office documents and other convertible formats get a Markdown representation for search while the original file remains the visible document. Image descriptions and audio transcripts can provide additional text when the corresponding enrichment features are available. The Librarian, the crew member responsible for keeping material organized, uses this indexing and enrichment stack.
 
 Enrichment can add summaries and text embeddings. Those operations have different costs: an embedding runs a local feature-extraction model, while an AI-written summary or description uses the configured inference path. A file can therefore be found by name or keyword before its semantic enrichment has completed. Disabling or losing the embedding runtime does not erase the original content.
 

@@ -97,8 +97,8 @@ describe('Job Hunt bundled project type', () => {
     expect(detail?.voormanGezelId).toBe(applied.gezelsCreated[0]?.id);
     const coach = await store.getGezel(applied.gezelsCreated[0]!.id);
     const interviewer = await store.getGezel(applied.gezelsCreated[1]!.id);
-    expect(coach?.role).toBe('Loopbaancoach');
-    expect(interviewer?.role).toBe('Oefen-interviewer');
+    expect(coach?.role).toBe('Career Coach');
+    expect(interviewer?.role).toBe('Mock Interviewer');
   });
 
   it('installs the script and renders both seeds with the role param', async () => {

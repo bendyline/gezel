@@ -30,7 +30,8 @@ describe('CrewIntroCard', () => {
       'Mira',
       'Anastasia',
     ]);
-    expect(screen.getByText('Reisleider — trip planner')).toBeInTheDocument();
+    expect(screen.getByText('Trip Planner')).toBeInTheDocument();
+    expect(screen.getByText('Crew Lead')).toBeInTheDocument();
     expect(screen.getByText('Starts with “First draft”')).toBeInTheDocument();
   });
 

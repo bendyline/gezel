@@ -57,7 +57,7 @@ Run `gezel --help`, or `--help` on any command, for every option.
 | Command | What it does |
 |---|---|
 | `gezel` | Open the interactive terminal app for this folder's project |
-| `gezel run [prompt…]` | One prompt, one reply, using this project's voorman unless you pass `--gezel <id>`. A sole `-` reads the prompt from stdin |
+| `gezel run [prompt…]` | One prompt, one reply, using this project's crew lead unless you pass `--gezel <id>`. A sole `-` reads the prompt from stdin |
 | `gezel do <craftbook…>` | Start a craftbook as a task in this folder's project: its name, then required values, `key=value` parameters, and your request. `--wait` follows it to the end |
 | `gezel <craftbook> …` | Shorthand for `gezel do <craftbook> …`, matched exactly on the craftbook's command name; built-in commands always win |
 | `gezel craftbook list [words…]` | List the craftbooks `gezel do` can start in this folder's project (command name, title, category); words filter by command, title, and tags. `--json` for scripts |

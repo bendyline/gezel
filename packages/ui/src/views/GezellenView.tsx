@@ -1,5 +1,5 @@
 import type { GezelDetail, GezelGender, GezelSummary } from '@bendyline/gezel';
-import { pickRandomNameWithGender, pronounsForGender } from '@bendyline/gezel';
+import { pickRandomNameWithGender, plainRoleTitle, pronounsForGender } from '@bendyline/gezel';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { CatalogBrowser } from '../components/CatalogBrowser.js';
@@ -568,9 +568,10 @@ function TemplateTab({
                 disabled={busy}
                 className={isPicked ? 'primary' : ''}
                 onClick={() => {
+                  const defaultName = plainRoleTitle(m.name);
                   setPicked({
                     id: m.id,
-                    defaultName: m.name,
+                    defaultName,
                     nameSuggestions: suggestions,
                     isFixedFunction: fixedFunction,
                   });
@@ -582,9 +583,9 @@ function TemplateTab({
                   // template's display name (existing behavior).
                   if (suggestions.length > 0) {
                     const idx = Math.floor(Math.random() * suggestions.length);
-                    setName(suggestions[idx] ?? m.name);
+                    setName(suggestions[idx] ?? defaultName);
                   } else {
-                    setName(m.name);
+                    setName(defaultName);
                   }
                 }}
               >

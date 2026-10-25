@@ -245,12 +245,12 @@ describe('ProjectGitStatusBar', () => {
     expect(screen.getByRole('button', { name: 'Stopping…' })).toBeDisabled();
   });
 
-  it('offers to add the Boekwachter when the full scan cannot start without one', async () => {
+  it('offers to add the Librarian when the full scan cannot start without one', async () => {
     const refusal = Object.assign(new Error('Gezel API error 409'), {
       details: {
         error: 'boekwachter-required',
         message:
-          'Add a Boekwachter to this project crew to enable AI summaries, reviews, and semantic enrichment.',
+          'Add the Librarian to this project crew to enable AI summaries, reviews, and semantic enrichment.',
       },
     });
     vi.mocked(api.driveIndexEnrichment).mockRejectedValue(refusal);
@@ -262,7 +262,7 @@ describe('ProjectGitStatusBar', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Start full AI scan' }));
     const addLink = await screen.findByRole('button', {
-      name: 'Add a Boekwachter to this project crew',
+      name: 'Add the Librarian to this project crew',
     });
     expect(addLink).toHaveClass('project-index-panel-error-link');
     // A refused start is not a running drive — the button re-arms.

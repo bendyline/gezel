@@ -1,4 +1,5 @@
 import type { GateScriptRef } from '../schemas/gate.js';
+import { roleForMatching } from './plain-names.js';
 import type { ModelTier } from './tier.js';
 import { tierAtLeast } from './tier.js';
 
@@ -178,7 +179,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
   // tier cap so its REAL tools (tasks/craftbooks/delegation) aren't evicted.
   voorman: {
     id: 'voorman',
-    label: 'Voorman',
+    label: 'Crew Lead',
     summary: 'Foreman: triages, diagnoses, and routes work to specialists; read-only investigator.',
     toolsetGroups: [
       'team-management',
@@ -639,7 +640,9 @@ export const ROLE_ALIASES: ReadonlyArray<{ contains: string; canonical: RoleId }
  */
 export function resolveRoleId(role: string | undefined): RoleId | null {
   if (!role) return null;
-  const key = role.toLowerCase().trim();
+  // A renamed title resolves exactly as its Dutch key did ("Inspector" keeps
+  // the kit "Keurmeester" got), so renaming never changes a gezel's tools.
+  const key = roleForMatching(role).toLowerCase().trim();
   if (key in ROLES) return key as RoleId;
   for (const alias of ROLE_ALIASES) {
     if (key.includes(alias.contains)) return alias.canonical;

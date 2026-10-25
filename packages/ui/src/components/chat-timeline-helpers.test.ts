@@ -25,6 +25,14 @@ describe('a turn waiting on its first download', () => {
     expect(isExpectedAvailabilityError({ code: 'native-engine-crash' })).toBe(false);
   });
 
+  it('treats a missing Windows runtime as the PC’s, and keeps Retry for after the install', () => {
+    const missing = { code: 'native-engine-crash', panicKind: 'missing-runtime' };
+    expect(isExpectedAvailabilityError(missing)).toBe(true);
+    expect(isRetryableFailedTurn('[llama-cpp] on-device engine could not start', missing)).toBe(
+      true,
+    );
+  });
+
   it('offers Retry only while something is on its way', () => {
     expect(isRetryableFailedTurn(downloading, { code: 'model-not-ready' })).toBe(true);
     expect(isRetryableFailedTurn(nothingInstalled, { code: 'model-not-ready' })).toBe(false);

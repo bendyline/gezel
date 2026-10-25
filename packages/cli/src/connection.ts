@@ -18,6 +18,7 @@ import {
   gezelNamesInUse,
   pickUnusedGezelName,
   projectLeadGezelId,
+  roleForMatching,
   setLogLevel,
   setLogOutput,
 } from '@bendyline/gezel';
@@ -1085,7 +1086,9 @@ export async function ensureCliProjectLead(
 
   const { gezels } = await client.listGezels();
   let voorman = gezels.find(
-    (gezel) => gezel.templateId === 'voorman' || gezel.role?.trim().toLowerCase() === 'voorman',
+    (gezel) =>
+      gezel.templateId === 'voorman' ||
+      roleForMatching(gezel.role)?.trim().toLowerCase() === 'voorman',
   );
   if (!voorman) {
     const { name, gender } = pickUnusedGezelName(gezelNamesInUse(gezels));
@@ -1093,7 +1096,7 @@ export async function ensureCliProjectLead(
   }
   const updated = await client.updateProject(projectId, { voormanGezelId: voorman.id });
   if (!updated.voormanGezelId) {
-    throw new CliError(`project "${updated.name}" has no voorman`);
+    throw new CliError(`project "${updated.name}" has no crew lead`);
   }
   return updated.voormanGezelId;
 }

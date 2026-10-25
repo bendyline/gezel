@@ -14,6 +14,7 @@
  * narrow the aliases. If it under-collapses (voormen keep spinning up
  * duplicate "engineer" + "developer" gezels), add more synonyms.
  */
+import { roleForMatching } from '../roles/plain-names.js';
 
 /**
  * One canonical role → every way callers might refer to it. The key is
@@ -73,7 +74,9 @@ const ALIAS_TO_CANONICAL: Record<string, string> = (() => {
  */
 export function roleTokens(text: string): Set<string> {
   if (!text) return new Set();
-  let normalized = text;
+  // A renamed title tokenizes as its Dutch key, so "Trip Planner" is not
+  // suddenly a fit for every "planner" step that "Reisleider" never was.
+  let normalized = roleForMatching(text);
   for (const [pattern, replacement] of ROLE_PHRASE_ALIASES) {
     normalized = normalized.replace(pattern, replacement);
   }

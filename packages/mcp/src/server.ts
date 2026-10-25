@@ -56,12 +56,12 @@ import {
   matchProjectTypeForBrief,
   normalizeArtifactPath,
   parseWorkOptionId,
+  plainRoleTitle,
   projectNameFromRequest,
   projectNotFoundMessage,
   projectTypeNamedByBrief,
   projectTypesMentionedByBrief,
   renderSuggestWorkResult,
-  roleWithGloss,
   routingRequestText,
 } from '@bendyline/gezel';
 /**
@@ -4593,7 +4593,7 @@ server.tool(
 
 server.tool(
   'apply_project_type',
-  'Apply a custom project type to an EXISTING project — renders its about/mission, creates its gezel(s) and sets the voorman, installs its scripts, and seeds its workspace. Use this to retrofit a plain project into a typed one. To create a fresh typed project in one call, use start_project_from_type instead.',
+  'Apply a custom project type to an EXISTING project — renders its about/mission, creates its gezel(s) and sets the crew lead, installs its scripts, and seeds its workspace. Use this to retrofit a plain project into a typed one. To create a fresh typed project in one call, use start_project_from_type instead.',
   {
     typeId: z.string().describe('Project type id (from list_project_types).'),
     project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
@@ -4612,7 +4612,7 @@ server.tool(
       const gz = applied.gezelsCreated
         .map(
           (g) =>
-            `${g.name}${g.voorman ? ' (voorman)' : ''}${g.reused ? ' (already on the crew)' : ''}`,
+            `${g.name}${g.voorman ? ' (crew lead)' : ''}${g.reused ? ' (already on the crew)' : ''}`,
         )
         .join(', ');
       return {
@@ -4636,7 +4636,7 @@ server.tool(
 
 server.tool(
   'start_project_from_type',
-  'Create a fresh project from a custom project type in one call: makes the project, applies the type (its gezel becomes the voorman, its scripts/seed/dashboard are installed), and notifies the voorman to greet the user. Use when the user\'s goal matches a type from list_project_types (e.g. "I want to learn Spanish" → the language-trainer type). For a generic build of any size, use start_project.',
+  'Create a fresh project from a custom project type in one call: makes the project, applies the type (its gezel becomes the crew lead, its scripts/seed/dashboard are installed), and notifies the crew lead to greet the user. Use when the user\'s goal matches a type from list_project_types (e.g. "I want to learn Spanish" → the language-trainer type). For a generic build of any size, use start_project.',
   {
     name: z.string().describe('Project name, e.g. "Learn Spanish".'),
     typeId: z.string().describe('Project type id (from list_project_types).'),
@@ -4647,7 +4647,7 @@ server.tool(
     kickoffMessage: z
       .string()
       .optional()
-      .describe('Optional first message to send the voorman after setup.'),
+      .describe('Optional first message to send the crew lead after setup.'),
   },
   async ({ name, typeId, params, kickoffMessage }) => {
     let manifestName = typeId;
@@ -4680,14 +4680,14 @@ server.tool(
       if (voorman) {
         const text =
           kickoffMessage ??
-          `You're the voorman of the new "${name}" project (${manifestName}). Greet the user warmly, explain what you'll help with, and get them started.`;
+          `You're the crew lead of the new "${name}" project (${manifestName}). Greet the user warmly, explain what you'll help with, and get them started.`;
         await api.messageGezel(voorman.id, {
           fromGezelId: gezelId,
           ...(sessionId ? { fromSessionId: sessionId } : {}),
           projectId: project.id,
           text,
         });
-        voormanNote = ` ${voorman.name} is the voorman and will greet the user in the next turn.`;
+        voormanNote = ` ${voorman.name} is the crew lead and will greet the user in the next turn.`;
       }
       return {
         content: [
@@ -6158,7 +6158,7 @@ server.tool(
 
 server.tool(
   'export_task_craftbook',
-  "Promote a task's embedded craftbook into a reusable LOCAL craftbook template (the inverse of invoke_craftbook). Strips per-instance lifecycle state and mints a fresh template id. Use after the voorman has shaped a good craftbook on a task and you want to reuse it.",
+  "Promote a task's embedded craftbook into a reusable LOCAL craftbook template (the inverse of invoke_craftbook). Strips per-instance lifecycle state and mints a fresh template id. Use after the crew lead has shaped a good craftbook on a task and you want to reuse it.",
   {
     task: z.string().optional().describe('Task ref. Omit → session task.'),
     id: z.string().optional().describe('Preferred template id (slugified; deduped on collision).'),
@@ -6180,7 +6180,7 @@ server.tool(
 
 server.tool(
   'list_project_local_gezels',
-  "List this project's own gezels — the `@project` gezel derived from the workspace AGENTS.md/CLAUDE.md (the project's default voorman) plus any others defined in the workspace `.gezel/` folder. Address the canonical one as `@project` in ask_gezel / message_gezel. These never appear in the global list_gezels roster.",
+  "List this project's own gezels — the `@project` gezel derived from the workspace AGENTS.md/CLAUDE.md (the project's default crew lead) plus any others defined in the workspace `.gezel/` folder. Address the canonical one as `@project` in ask_gezel / message_gezel. These never appear in the global list_gezels roster.",
   {
     project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
   },
@@ -6608,7 +6608,7 @@ const ROLE_TO_JOB_TITLE: Record<z.infer<typeof SPECIALIST_ROLES>, string> = {
   writer: 'Copywriter',
   planner: 'Planner',
   reviewer: 'Reviewer',
-  voorman: 'Voorman',
+  voorman: 'Crew Lead',
   // Must match the `image-generator` template's role string verbatim
   // so the role-tool-filter map keys hit and the gezel gets the
   // `images` group. Display name renders as "Image Generator" in
@@ -6618,10 +6618,10 @@ const ROLE_TO_JOB_TITLE: Record<z.infer<typeof SPECIALIST_ROLES>, string> = {
 
 server.tool(
   'ask_specialist',
-  "Quick role-shaped consultation. Picks (or auto-creates) a gezel matching `role` and synchronously asks them `question` — their answer comes back as the tool result, ready to use inline within this turn. ONE call replaces the `ensure_gezel` → `ask_gezel` sequence. Use this for domain answers you need to keep working: 'researcher' for facts and prior art, 'designer' for visual / UX feedback, 'developer' or 'builder' for technical implementation calls, 'writer' for copy, 'planner' for breaking work down, 'reviewer' for QA on a draft, 'voorman' for project-status questions. Do NOT use this for shippable file or image deliverables (`index.html`, `review.md`, `logo.png`): first call `ensure_gezel`, then `message_gezel` with `expectedDeliverable: { kind: \"file\", filePath: \"<path>\" }` so the specialist works asynchronously and writes/renders the file. `ask_specialist` rejects file-shaped expectedDeliverable hints. The chosen specialist auto-joins your current project so the user can switch to their chat for follow-ups. For a specific known gezel use `ask_gezel`; for fan-out / fire-and-forget pings use `message_gezel`.",
+  "Quick role-shaped consultation. Picks (or auto-creates) a gezel matching `role` and synchronously asks them `question` — their answer comes back as the tool result, ready to use inline within this turn. ONE call replaces the `ensure_gezel` → `ask_gezel` sequence. Use this for domain answers you need to keep working: 'researcher' for facts and prior art, 'designer' for visual / UX feedback, 'developer' or 'builder' for technical implementation calls, 'writer' for copy, 'planner' for breaking work down, 'reviewer' for QA on a draft, 'voorman' (the crew lead) for project-status questions. Do NOT use this for shippable file or image deliverables (`index.html`, `review.md`, `logo.png`): first call `ensure_gezel`, then `message_gezel` with `expectedDeliverable: { kind: \"file\", filePath: \"<path>\" }` so the specialist works asynchronously and writes/renders the file. `ask_specialist` rejects file-shaped expectedDeliverable hints. The chosen specialist auto-joins your current project so the user can switch to their chat for follow-ups. For a specific known gezel use `ask_gezel`; for fan-out / fire-and-forget pings use `message_gezel`.",
   {
     role: SPECIALIST_ROLES.describe(
-      'researcher = long-form analysis / facts / prior art (files a written report to disk by default), developer = team-oriented engineering, builder = solo product engineer, generalist = one gezel for a whole multi-step task of any craft, designer = visual/UX advice (does NOT render images), writer = copy/content, planner = strategy/decomposition, reviewer = QA/feedback (short structured verification reply by default), voorman = current-project lead, image-generator = render an actual PNG via generate_image (use this when you need a real image asset, not just visual feedback).',
+      'researcher = long-form analysis / facts / prior art (files a written report to disk by default), developer = team-oriented engineering, builder = solo product engineer, generalist = one gezel for a whole multi-step task of any craft, designer = visual/UX advice (does NOT render images), writer = copy/content, planner = strategy/decomposition, reviewer = QA/feedback (short structured verification reply by default), voorman = crew lead of the current project, image-generator = render an actual PNG via generate_image (use this when you need a real image asset, not just visual feedback).',
     ),
     question: z
       .string()
@@ -6821,8 +6821,8 @@ const DELEGATION_ROLE_SPECS: ReadonlyArray<{
   },
   {
     slug: 'voorman',
-    jobTitle: 'Voorman',
-    label: 'voorman',
+    jobTitle: 'Crew Lead',
+    label: 'crew lead',
     hint: 'project lead / coordination / status',
   },
   { slug: 'meester', jobTitle: 'Meester', label: 'meester', hint: 'top-level orchestration' },
@@ -7784,7 +7784,7 @@ async function runPromotedStartJobAsProject(input: {
           dispatchEntry: true,
         });
     const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as voorman. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
+    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as crew lead. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult('start_project', brief.name, project.id, resultText);
     return {
       content: [
@@ -8055,7 +8055,7 @@ async function runTypedKickoff(
       dispatchEntry: true,
     });
     const role = (await api.getGezel(lead.id).catch(() => null))?.role;
-    const resultText = `Started "${project.name}" (${project.id}) as a ${type.name} project. ${lead.name}${role ? ` (${roleWithGloss(role)})` : ''} leads it and is making the first draft now in a task-scoped session (task ${task.ref}); the project's Output page shows it as it fills in. No reply lands in this thread. Tell the person in a sentence or two that ${lead.name} is on it. ${PLAIN_WORDS_RELAY}`;
+    const resultText = `Started "${project.name}" (${project.id}) as a ${type.name} project. ${lead.name}${role ? ` (${plainRoleTitle(role)})` : ''} leads it and is making the first draft now in a task-scoped session (task ${task.ref}); the project's Output page shows it as it fills in. No reply lands in this thread. Tell the person in a sentence or two that ${lead.name} is on it. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult(opts.cacheTool, brief.name, project.id, resultText);
     return { content: [{ type: 'text' as const, text: resultText }] };
   } catch (err) {
@@ -8136,7 +8136,7 @@ async function runStartProject(
       content: [
         {
           type: 'text' as const,
-          text: `[runtime] A \`${idempotent.tool}\` call for "${brief.name}" completed moments ago — replaying the original result instead of creating a duplicate. END YOUR TURN; the voorman from the original call is already on it.\n\n${idempotent.resultText}`,
+          text: `[runtime] A \`${idempotent.tool}\` call for "${brief.name}" completed moments ago — replaying the original result instead of creating a duplicate. END YOUR TURN; the crew lead from the original call is already on it.\n\n${idempotent.resultText}`,
         },
       ],
     };
@@ -8216,7 +8216,7 @@ async function runStartProject(
           dispatchEntry: true,
         });
     const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as voorman. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
+    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as crew lead. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult(tool, brief.name, project.id, resultText);
     return {
       content: [
@@ -8993,7 +8993,7 @@ server.tool(
 
 server.tool(
   'remove_gezel_from_project',
-  "Drop a gezel from a project's roster. Advisory only — doesn't tear down their existing chat sessions, task assignments, or the project's voorman pointer; the gezel just stops showing up in the project's team list. Re-add via `add_gezel_to_project` (or any of the auto-add triggers will pull them back in).",
+  "Drop a gezel from a project's roster. Advisory only — doesn't tear down their existing chat sessions, task assignments, or the project's crew lead pointer; the gezel just stops showing up in the project's team list. Re-add via `add_gezel_to_project` (or any of the auto-add triggers will pull them back in).",
   {
     gezel: z.string().describe('Gezel id or display name'),
     project: z
@@ -9401,7 +9401,7 @@ server.tool(
     plan: z
       .string()
       .optional()
-      .describe("The voorman's evolving approach. Overwrites the existing plan."),
+      .describe("The crew lead's evolving approach. Overwrites the existing plan."),
     assignee: assigneeArg().optional(),
     cron: z.string().optional(),
     cronOverlap: cronOverlapEnum.optional(),
@@ -11272,7 +11272,7 @@ server.tool(
 
 server.tool(
   'file_review',
-  "The boekwachter's cliffs notes + health review for one file: what it does and how it flows, issues spotted (severity/category/message/line), and a 1-10 health score with its reason, judged against a per-file-type rubric. Call before deep-diving an unfamiliar file, or when outline_file shows low health. Issues are LEADS from a background model pass, not confirmed problems — verify each in the code.",
+  "The Librarian's notes + health review for one file: what it does and how it flows, issues spotted (severity/category/message/line), and a 1-10 health score with its reason, judged against a per-file-type rubric. Call before deep-diving an unfamiliar file, or when outline_file shows low health. Issues are LEADS from a background model pass, not confirmed problems — verify each in the code.",
   {
     path: z.string().min(1).describe('Workspace-relative file path, e.g. src/server.ts.'),
   },
@@ -11298,7 +11298,7 @@ server.tool(
           res.eligible === false
             ? 'this file type is not reviewed (no rubric covers its kind — e.g. data files, caches, media)'
             : res.pending
-              ? 'the boekwachter has not reviewed this file yet (it studies files when idle or during Night Shift)'
+              ? 'the Librarian has not reviewed this file yet (it studies files when idle or during Night Shift)'
               : 'file is not in the index';
         return {
           content: [{ type: 'text' as const, text: `file_review: no review — ${why}.` }],
@@ -11335,7 +11335,7 @@ server.tool(
 
 server.tool(
   'get_file_issue',
-  'Retrieve the durable metadata for one Boekwachter issue by its BW reference: path, previous/current line state, lifecycle, read state, and linked task. Use this when a prompt or task mentions BW-N.',
+  'Retrieve the durable metadata for one tracked issue by its BW reference: path, previous/current line state, lifecycle, read state, and linked task. Use this when a prompt or task mentions BW-N.',
   {
     ref: z
       .string()
@@ -11372,7 +11372,7 @@ server.tool(
 
 server.tool(
   'set_file_issue_status',
-  'Update a tracked Boekwachter issue by BW reference. Read/unread is independent of lifecycle. Use dismissed + not_an_issue only after verifying that the review lead is invalid; task completion normally resolves issues automatically.',
+  'Update a tracked issue by BW reference. Read/unread is independent of lifecycle. Use dismissed + not_an_issue only after verifying that the review lead is invalid; task completion normally resolves issues automatically.',
   {
     ref: z
       .string()
@@ -11897,7 +11897,7 @@ server.tool(
 
 server.tool(
   'list_file_issues',
-  'Quality issues the boekwachter review pass spotted across files (likely bugs, code smells, unclear naming; grammar/clarity in docs), filterable by severity, category, or path prefix. Severities are info|minor|major — a quality vocabulary, unrelated to security severities; use scan_findings for vulnerabilities. These are LEADS from a background model pass, not confirmed problems; verify each in the code.',
+  "Quality issues the Librarian's review pass spotted across files (likely bugs, code smells, unclear naming; grammar/clarity in docs), filterable by severity, category, or path prefix. Severities are info|minor|major — a quality vocabulary, unrelated to security severities; use scan_findings for vulnerabilities. These are LEADS from a background model pass, not confirmed problems; verify each in the code.",
   {
     severity: z.enum(['info', 'minor', 'major']).optional(),
     category: z.string().optional().describe('e.g. bug, smell, error-handling, grammar, clarity.'),

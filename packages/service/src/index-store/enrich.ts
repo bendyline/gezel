@@ -399,7 +399,7 @@ export async function buildEnrichDeps(
   const primaryThroughput = throughputFor({ providerName, model });
   const gezelOpts = opts.boekwachter
     ? { gezelId: opts.boekwachter.id, useGezelPersona: true, actorLabel: opts.boekwachter.name }
-    : { actorLabel: 'Boekwachter' };
+    : { actorLabel: 'Librarian' };
   const oneShot =
     (
       target: { providerName: ProviderName; model: string },

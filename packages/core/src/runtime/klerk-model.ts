@@ -43,7 +43,7 @@ export async function resolvePortableKlerkModel(
     const recruited = await host.recruit('Klerk');
     signal.throwIfAborted();
     gezel = await host.store.getGezel(recruited.id);
-    if (!gezel) throw new ProductError('The Klerk could not be prepared');
+    if (!gezel) throw new ProductError('The Scribe could not be prepared');
     await host.store.writeConfig({ klerkGezelId: gezel.id });
   }
   // The Klerk's chores stay on this device, even while conversations use
@@ -51,7 +51,7 @@ export async function resolvePortableKlerkModel(
   const requested = gezel.provider ?? config.provider ?? 'llama-cpp';
   const local = requested === 'remote' ? await pickLocalProvider(host) : null;
   if (requested === 'remote' && !local)
-    throw new ProductError('Set up a model on this device in Settings for the Klerk.', 409);
+    throw new ProductError('Set up a model on this device in Settings for the Scribe.', 409);
   const providerId = local?.providerId ?? MobileProviderIdSchema.parse(requested);
   const provider = (await host.providers()).find((item) => item.id === providerId);
   if (provider?.availability !== 'available')
@@ -62,10 +62,10 @@ export async function resolvePortableKlerkModel(
     inventory?.selectedModelId ??
     providerId;
   if (providerId !== 'llama-cpp' && modelId !== providerId)
-    throw new ProductError('The Klerk model is not available from this on-device provider.', 409);
+    throw new ProductError('The Scribe model is not available from this on-device provider.', 409);
   if (inventory && !inventory.models.some((model) => model.id === modelId))
     throw new ProductError(
-      'The Klerk model is no longer available. Choose a model in Settings.',
+      'The Scribe model is no longer available. Choose a model in Settings.',
       409,
     );
   const budget = modelBudget(

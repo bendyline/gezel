@@ -32,9 +32,11 @@ Windows build does with `cl /LD`:
   ggml refuses MSVC there. This is plain C.
 - **`/arch:armv8.0`**, the same explicit floor as the MSVC helpers, checked by
   `scripts/assert-arm64-baseline.mjs` in `msvc-baseline` mode.
-- **Static C runtime.** The installers' Visual C++ redistributable is x64
-  only, so a `/MD` build would fail to load on a clean Windows-on-ARM
-  machine. CI fails the build if the DLL imports `VCRUNTIME*.DLL`.
+- **Static C runtime.** The extension loads into whatever Node process runs
+  the service, including npm and CLI installs where no installer ever put
+  the ARM64 Visual C++ runtime on the machine, so a `/MD` build would fail to
+  load on a clean Windows-on-ARM machine. CI fails the build if the DLL
+  imports `VCRUNTIME*.DLL`.
 - **Scalar code.** Upstream enables NEON only for Apple Silicon; its Linux
   ARM64 build is scalar too.
 - **One source fix.** Upstream's MSVC-on-ARM fallback for

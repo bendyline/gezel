@@ -123,8 +123,8 @@ export function BoekwachterPill() {
     <button
       type="button"
       className="boekwachter-pill"
-      aria-label={`Open ${name ?? 'Boekwachter'} — ${message}`}
-      title={`${name ?? 'Boekwachter'} is ${message}. Open gezel.`}
+      aria-label={`Open ${name ?? 'the Librarian'} — ${message}`}
+      title={`${name ?? 'The Librarian'} is ${message}. Open gezel.`}
       onClick={() =>
         window.dispatchEvent(
           new CustomEvent('gezel:open-tab', {

@@ -45,7 +45,7 @@ export async function createNightFixTask(
   // store, and asked the person to grant write access (2026-10-09).
   const description = [
     [
-      `Draft change proposals for ${args.issues.length} open Boekwachter issue(s) in this project.`,
+      `Draft change proposals for ${args.issues.length} open tracked issue(s) in this project.`,
       'Nothing you write reaches the project files. Your edits are collected into',
       'reviewable change proposals the user reads and applies themselves.',
     ].join(' '),

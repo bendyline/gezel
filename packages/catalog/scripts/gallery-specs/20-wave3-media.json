@@ -16,7 +16,7 @@
       {
         "id": "scope",
         "name": "Scope the review",
-        "role": "regisseur",
+        "role": "film director",
         "summary": "footage inventory, transcript read, review criteria locked",
         "prompt": "Define the edit pass before forming a single opinion. Step 1: read media/index.json from the workspace — every clip with its id and duration — and read the transcript under transcripts/ plus the storyboard or brief if one exists, so you know what the piece is trying to be. Step 2: lock the review criteria — every keep-or-cut call carries a timecode and a stated reason, pacing judgments name the specific stretch that drags or rushes, b-roll gaps are named where the footage cannot carry the point, and no note references footage that is not in the index. Step 3: define what the cut list must record for each decision — which clip, the in and out points, the action (keep, cut, trim, reorder), and a short note tying it back to the edit notes. Step 4: write an acceptance-criteria checklist ('every note carries a timecode', 'every cut decision has a reason', 'every cut-list row points at a real clip', 'in and out points sit inside that clip's duration', 'the draggy stretches are addressed, not just observed'). Call write_task_note with the clip count + criteria + checklist and write notes/scope.md. No reviewing yet.",
         "produces": {
@@ -108,7 +108,7 @@
       {
         "id": "scope",
         "name": "Pre-flight the cut list",
-        "role": "werkmeester",
+        "role": "video editor",
         "summary": "cutlist validated against the media index, run plan locked",
         "prompt": "Verify before you render — an assembly that runs on a bad cut list wastes the whole pass. Step 1: read cutlist.json and media/index.json from the workspace and check every record: the clip id exists in the index, the in point is before the out point, and both sit inside that clip's duration. List every violation precisely; if any exist, stop and report them instead of assembling around them. Step 2: compute the expected output — how many segments, and the total duration the kept material should add up to — so the verify phase has a number to check against. Step 3: lock the run plan — the assembly runs through the project's pipeline script via the run_installed_script tool, it writes its run log to renders/assembly-log.json with a status field, and on any failure the run stops and the error is reported rather than papered over. Step 4: write an acceptance-criteria checklist ('every cutlist record validated before the run', 'the render exists at renders/rough-cut.mp4', 'the run log reports status ok', 'actual duration matches the expected duration', 'the report states what ran and what to spot-check'). Call write_task_note with the segment count + expected duration + checklist and write notes/scope.md.",
         "produces": {
@@ -189,7 +189,7 @@
       {
         "id": "scope",
         "name": "Scope the tape",
-        "role": "filmarchivaris",
+        "role": "film archivist",
         "summary": "tape metadata, the family roster, indexing rules locked",
         "prompt": "Define the indexing job before touching the tape. Step 1: identify the tape being indexed — its label or number, roughly when it was shot, and where its transcript lands under transcripts/ (when a transcript is already on file there, this run verifies and indexes it rather than re-transcribing). Step 2: read family.md from the workspace — the roster of names is the controlled vocabulary for people tags; a tag that is not on the roster is a typo waiting to break search. Step 3: read clips.json to see how prior tapes were indexed, and lock the indexing rules — every moment worth finding gets a record with the tape, the timecode where it starts, the people in it tagged from the roster, and a description written the way someone would actually search for it ('Opa's toast at the 80th', not 'man speaking'). Step 4: write an acceptance-criteria checklist ('transcript on file under transcripts/', 'every notable moment indexed with its timecode', 'every people tag matches the roster', 'descriptions are searchable phrases', 'existing clip records untouched'). Call write_task_note with the tape id + roster size + checklist and write notes/scope.md.",
         "produces": {
@@ -283,7 +283,7 @@
       {
         "id": "scope",
         "name": "Scope the occasion",
-        "role": "filmarchivaris",
+        "role": "film archivist",
         "summary": "occasion, person, selection criteria and length budget locked",
         "prompt": "Define the reel before pulling a single clip. Step 1: name the occasion and the person it honors, and read family.md so names and relationships are right. Step 2: read clips.json — the archive's indexed moments — and survey what exists for this person: which tapes, which years, which of the family-famous moments are on file. Step 3: lock the selection criteria — the reel covers the person's eras rather than clustering in one year, the moments the family always retells make the cut, every selection carries a stated reason, only clips that exist in the archive may be used (no invented footage, ever), and the total sticks to a length budget you set now from the occasion. Step 4: write an acceptance-criteria checklist ('every selected clip exists in clips.json', 'every selection has a reason', 'eras covered per the criteria', 'total within the length budget', 'assembled through the project's pipeline script via run_installed_script with a status-ok log', 'chapter list and dedication delivered'). Call write_task_note with the occasion + archive counts + checklist and write notes/scope.md.",
         "produces": {

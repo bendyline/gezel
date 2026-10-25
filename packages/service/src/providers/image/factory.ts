@@ -341,6 +341,13 @@ async function findFirstInstalledModel(
  * card it's the difference between succeeding and dying on `vae alloc
  * compute buffer failed`. Quality difference is imperceptible for the
  * tile sizes sd.cpp picks.
+ *
+ * The text encoder never takes flash attention. ggml's CPU kernel sums the
+ * attention values in FP16, which a Qwen-family encoder overflows: FLUX.2
+ * klein on a Windows-on-ARM CPU rendered unrelated shapes with a 200
+ * (native-v0.1.53). It bites wherever the encoder lands on the CPU, and the
+ * encoder runs once per image, so GPUs lose nothing. `--diffusion-fa` means
+ * `--flash-attn off,diffusion=on`, so that branch already leaves it off.
  */
 export function buildSdServerArgs(model: ResolvedInstalledModel, port: number): string[] {
   const args: string[] = [];
@@ -356,6 +363,7 @@ export function buildSdServerArgs(model: ResolvedInstalledModel, port: number): 
   if (steps) args.push('--steps', String(steps));
   const profile = sdServerLoadProfile(model.id);
   if (profile.diffusionFlashAttention) args.push('--diffusion-fa');
+  else args.push('--flash-attn', 'auto,te=off');
   if (profile.bf16TensorPattern) {
     args.push('--tensor-type-rules', `${profile.bf16TensorPattern}=bf16`);
   }

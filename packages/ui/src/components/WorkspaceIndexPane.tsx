@@ -31,7 +31,7 @@ export function WorkspaceIndexToggle({ open, issueCount, onToggle }: WorkspaceIn
   const action = open ? 'Hide' : 'Show';
   const issuePhrase =
     issueCount > 0 ? `, ${issueCount} issue${issueCount === 1 ? '' : 's'} in this file` : '';
-  const label = `${action} Boekwachter index pane${issuePhrase}`;
+  const label = `${action} index pane${issuePhrase}`;
   return (
     <button
       type="button"
@@ -137,17 +137,17 @@ export function WorkspaceIndexPane({
     : null;
 
   return (
-    <aside className="workspace-index-pane" aria-label="Boekwachter index results">
+    <aside className="workspace-index-pane" aria-label="Index results">
       <header className="workspace-index-pane-header">
         <div className="workspace-index-pane-title">
-          <span className="workspace-index-pane-eyebrow">Boekwachter</span>
+          <span className="workspace-index-pane-eyebrow">Librarian</span>
           <h2 title={path ?? undefined}>{fileName ?? 'Index results'}</h2>
         </div>
         <button
           type="button"
           className="workspace-index-pane-close"
           onClick={onClose}
-          aria-label="Close Boekwachter index pane"
+          aria-label="Close index pane"
           title="Close index pane"
         >
           <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
@@ -173,12 +173,12 @@ export function WorkspaceIndexPane({
       <div className="workspace-index-pane-body">
         {error ? (
           <p className="workspace-index-pane-message error" role="alert">
-            Couldn’t load the Boekwachter results: {error}
+            Couldn’t load the index results: {error}
           </p>
         ) : !path ? (
           <p className="workspace-index-pane-message">Select a workspace file to see its review.</p>
         ) : loading ? (
-          <p className="workspace-index-pane-message">Opening the Boekwachter’s notes…</p>
+          <p className="workspace-index-pane-message">Opening the Librarian’s notes…</p>
         ) : result || trackedIssues.length > 0 ? (
           <>
             {result && (
@@ -271,14 +271,14 @@ export function WorkspaceIndexPane({
           </>
         ) : review?.pending ? (
           <p className="workspace-index-pane-message">
-            Not reviewed yet. The Boekwachter studies files while the app is idle or during Night
+            Not reviewed yet. The Librarian studies files while the app is idle or during Night
             Shift.
           </p>
         ) : (
           <p className="workspace-index-pane-message">
             {fileIssueCount > 0
               ? `${fileIssueCount} indexed issue${fileIssueCount === 1 ? '' : 's'} found, but the full review is not available yet.`
-              : 'No Boekwachter review is available for this file yet.'}
+              : 'No review is available for this file yet.'}
           </p>
         )}
       </div>

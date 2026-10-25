@@ -191,7 +191,7 @@ describe('data macros', () => {
   it('role-summary-table lists every built-in role with article links', async () => {
     const { markdown } = await expandMacros('::handboek-role-summary-table', { ...ctx('site') });
     expect(markdown).toContain('| [Meester](role/meester) |');
-    expect(markdown).toContain('| [Voorman](role/voorman) |');
+    expect(markdown).toContain('| [Crew Lead](role/voorman) |');
     expect(markdown).toContain('| Model floor |');
   });
 

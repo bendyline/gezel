@@ -1,6 +1,6 @@
 ---
 id: the-crew
-title: "Your crew: gezellen, the Meester, and the Voorman"
+title: "Your crew: gezellen, the Meester, and the crew lead"
 order: 2
 summary: Who's who in your workshop, and how the roles fit together.
 ---
@@ -26,9 +26,16 @@ Every gezel has:
 - **A character** — a temperament, a quirk, a style, and how much small talk they make. In social mode it colors how they come across in chat; see [Social mode](character-and-growth.md).
 - **A memory** — notes they keep about your work together, searched and recalled automatically.
 
-## The Voorman
+## The crew lead
 
-A **voorman** (Dutch for foreman) is a gezel you put in charge of one project. They triage what comes in, route work to the right specialist, and keep an eye on progress. You don't need one for small projects — but when a project involves several gezellen, a voorman keeps the crew coordinated.
+A **crew lead** is a gezel you put in charge of one project. They triage what comes in, route work to the right specialist, and keep an eye on progress. You don't need one for small projects — but when a project involves several gezellen, a crew lead keeps the crew coordinated.
+
+## The Librarian and the Scribe
+
+Two helpers arrive with every workshop and mostly work in the background:
+
+- **The Librarian** reads the files in your projects while the computer is idle and during the Night Shift. They write short summaries, review code, keep track of issues worth fixing, and write weekly digests. Settings → Your Team chooses which gezel wears the hat.
+- **The Scribe** handles the small writing jobs: drafting a gezel's description, rewriting a passage, summarizing a long thread. "Transform with…" in a document is the Scribe at work.
 
 ## Growing the crew
 

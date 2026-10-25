@@ -16,7 +16,7 @@
       {
         "id": "scope",
         "name": "Blueprint the exam",
-        "role": "studiemaat",
+        "role": "study partner",
         "summary": "deck picture, weak-spot weighting, timing and scoring rules",
         "prompt": "Blueprint the exam before writing a single question. Step 1: read deck.json from the workspace — every card with its front, back, box, and got-it/missed stats — and note the exam date or occasion from the owner's ask. Step 2: name the deck's topics (group the cards by theme) and the weak spots with numbers as evidence: cards sitting in box 1, and cards missed as often as they were got. Step 3: lock the blueprint — how many questions, coverage across every topic, weak material weighted roughly double, the time limit, and the scoring rule (points per question, what score means ready). Step 4: write an acceptance-criteria checklist ('every topic represented', 'weak cards get the extra weight the blueprint promises', 'every question comes from a deck card — nothing invented', 'the timer and scoring actually work', 'the key explains every answer'). Call write_task_note with the topic list + weak-spot count + checklist and write notes/scope.md.",
         "produces": {
@@ -93,7 +93,7 @@
       {
         "id": "scope",
         "name": "Rank the weak spots",
-        "role": "studiemaat",
+        "role": "study partner",
         "summary": "weak spots named from the record, with the numbers as evidence",
         "prompt": "Find the real weak spots before building anything. Step 1: read deck.json from the workspace — every card's box and its got-it/missed stats are the review record. Step 2: rank the weakness with evidence — cards stuck in box 1, cards missed as often as got, and the themes those cards cluster into; write each weak spot with its numbers ('irregular verbs: 5 of 6 cards in box 1, 11 misses against 4 got-its'), never a hunch. Step 3: lock the drill rules — only ranked weak material goes in, ten to fifteen items, each item coming at the card's idea from a fresh angle rather than repeating the card verbatim. Step 4: write an acceptance-criteria checklist ('every drill item traces to a ranked weak card', 'no item drills material the record says is strong', 'the drill checks answers on the spot', 'the follow-up plan says when each spot counts as closed'). Call write_task_note with the ranked list + checklist and write notes/scope.md.",
         "produces": {
@@ -163,7 +163,7 @@
       {
         "id": "scope",
         "name": "Write the juice checklist",
-        "role": "spellenmaker",
+        "role": "game maker",
         "summary": "every player action listed with the feedback it deserves",
         "prompt": "Read the game before touching it. Step 1: open index.html from the workspace and trace the play loop — every player action (move, shoot, hit, get hit, pick up, score, die, restart) and what feedback each currently gives; a working game with silent, flashless actions is exactly what this pass fixes. Step 2: write the juice checklist — for each action, the visible feedback it will get (flash, shake, particle burst, score pop, easing) and the sound hook where one fits. Step 3: lock the restraint rules — effects are short and purposeful, no strobing or seizure bait, the game's readability never drops, and nothing regresses: the game must still start, play, end, and restart exactly as before. Step 4: write an acceptance-criteria checklist ('every listed action has visible feedback', 'effects restrained and readable', 'the script still parses and the loop still runs', 'game over and restart still work'). Call write_task_note with the action count + checklist and write notes/scope.md.",
         "produces": {
@@ -277,7 +277,7 @@
       {
         "id": "scope",
         "name": "Write the character brief",
-        "role": "tekenaar",
+        "role": "character artist",
         "summary": "silhouette, palette, expression and pose list from the story",
         "prompt": "Pin the character down in words before a single image. Step 1: read the story notes in the workspace and the owner's ask — who this character is, what they do in the pages, and any look already established. Step 2: write the identity spec — the silhouette in one sentence (the shape you'd know in shadow), the palette as a short list of specific colors, the two or three features that make them THEM, and what they would never look like. Step 3: list the poses and expressions the pages actually need — at least four (a neutral standing turn, an action pose, and the emotional beats the story calls for). Step 4: write an acceptance-criteria checklist ('at least four references covering the pose and expression list', 'every reference recorded in the manifest with its seed and prompt', 'palette and silhouette written on the sheet', 'the manifest lists only files that really exist'). Call write_task_note with the character name + pose list + checklist and write notes/scope.md.",
         "produces": {
@@ -328,7 +328,7 @@
       {
         "id": "scope",
         "name": "Plan the panels",
-        "role": "verhalenverteller",
+        "role": "storyteller",
         "summary": "script beats to panels, each anchored to a character sheet",
         "prompt": "Break the page before generating a pixel. Step 1: read the page's script from the story notes and the character kits under characters/ — each character's manifest carries the references, seeds, and prompts that lock their look. Step 2: break the script into beats and assign each beat a panel — the moment, the framing, and who is in frame. Step 3: for every character in every panel, name the exact sheet reference (and its seed and prompt from the manifest) that anchors how they are drawn — a panel drawn from memory instead of the sheet is how page twelve stops matching page one. Step 4: copy the caption and balloon text for each panel verbatim from the script — the letterer changes nothing. Step 5: write an acceptance-criteria checklist ('every script beat has a panel', 'every figure anchored to a named sheet reference', 'captions and balloons verbatim from the script', 'panels read in order on the assembled page'). Call write_task_note with the panel count + checklist and write notes/scope.md.",
         "produces": {
@@ -379,7 +379,7 @@
       {
         "id": "scope",
         "name": "Lock the batch",
-        "role": "assetsmid",
+        "role": "game asset artist",
         "summary": "tile list, naming convention, size spec, style anchor",
         "prompt": "Lock the batch before generating a tile. Step 1: read assets/manifest.json from the workspace — the library's existing records — and the style notes in assets/ (the palette, tile size, outline and shading rules that make the library one family). Step 2: write the tile list from the ask — every tile the batch needs, including the unglamorous edges and corners that make a set usable, at least eight. Step 3: lock the conventions — file names as assets/tiles/tile-<terrain>-<variant>.png, the size spec from the style notes, and the tags each tile will carry. Step 4: write an acceptance-criteria checklist ('every listed tile generated at spec size in the house style', 'every file named to the convention', 'every new tile appended to the manifest with id, file, size, and tags', 'the manifest stays valid JSON and lists only files that exist'). Call write_task_note with the tile list + checklist and write notes/scope.md.",
         "produces": {
@@ -453,7 +453,7 @@
       {
         "id": "scope",
         "name": "Lock the turnaround",
-        "role": "assetsmid",
+        "role": "game asset artist",
         "summary": "character read, angle list, style anchor, consistency rules",
         "prompt": "Lock the turnaround before generating a view. Step 1: read the style notes in assets/ and assets/manifest.json — the palette, proportions, and outline rules the library already lives by, and any existing art of this character. Step 2: write the character read — silhouette in one sentence, the palette entries this character owns, and the two or three features every view must carry. Step 3: lock the angle list — front, side, back, and three-quarter at minimum — and the consistency rule: every view is the SAME figure at the same scale in the same style, generated from the same anchor, not four separate drawings. Step 4: write an acceptance-criteria checklist ('all four angles present at the convention names', 'the figure reads as the same character in every view', 'every view recorded in the manifest with its seed and prompt', 'the manifest stays valid and honest'). Call write_task_note with the character + angle list + checklist and write notes/scope.md.",
         "produces": {

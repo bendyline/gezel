@@ -4,6 +4,7 @@ import {
   engineBackendNotice,
   engineGpuNotice,
   engineOutOfMemoryNotice,
+  engineRuntimeNotice,
   railSystemNotices,
   serviceNotice,
   updateNotice,
@@ -420,6 +421,47 @@ describe('engineGpuNotice', () => {
     expect(engineBackendNotice({ quarantined: ['cuda'], running: 'vulkan' })?.settingsSection).toBe(
       'llamaCpp',
     );
+  });
+});
+
+describe('engineRuntimeNotice', () => {
+  const missingRuntime = {
+    arch: 'arm64' as const,
+    dll: 'VCRUNTIME140.dll',
+    downloadUrl: 'https://aka.ms/vs/17/release/vc_redist.arm64.exe',
+    detail:
+      'gezel-llama-server.exe: VCRUNTIME140.dll is not in the engine folder, System32 or PATH',
+  };
+
+  it('stays quiet while the runtime is installed', () => {
+    expect(engineRuntimeNotice({})).toBeNull();
+    expect(engineRuntimeNotice({ health: { running: 'cpu' } })).toBeNull();
+  });
+
+  it('links to Microsoft’s installer for the engines’ architecture and asks for no report', () => {
+    const notice = engineRuntimeNotice({ health: { missingRuntime } });
+    expect(notice).toMatchObject({
+      id: 'engine-runtime-missing',
+      railLabel: 'Install a Windows component',
+      link: { href: missingRuntime.downloadUrl, label: 'Download the ARM64 installer' },
+      technical: missingRuntime.detail,
+      reportable: false,
+    });
+    expect(notice?.body).toContain('Microsoft Visual C++ Redistributable (ARM64)');
+    expect(notice?.body).toContain('You do not need to restart Gezel.');
+  });
+
+  it('reaches the rail ahead of the GPU notices it explains', () => {
+    const notices = railSystemNotices({
+      reason: null,
+      update: null,
+      backendHealth: {
+        missingRuntime,
+        gpuUnused: { backend: 'cuda', reason: 'not-loaded', at: '2026-10-25T10:00:00.000Z' },
+        running: 'cuda',
+      },
+    });
+    expect(notices.map((n) => n.id)).toEqual(['engine-runtime-missing', 'engine-gpu-unused']);
   });
 });
 

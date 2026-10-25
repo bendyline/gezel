@@ -44,7 +44,11 @@ llama.cpp.
 
 The Windows-on-ARM CUDA build links whisper and ggml statically, because
 llama-server's `ggml*.dll` share its `-cuda` folder under the same names
-(see `build.ps1`). On an RTX Spark it transcribed an 11-second clip with
+(see `build.ps1`). For the same reason `build.ps1` removes the server's
+`ggml_backend_load_all()` call from that build: it loaded llama-server's
+`ggml-cuda.dll` and `ggml-cpu.dll` beside it, and the second ggml aborted
+startup on every RTX Spark in native-v0.1.53. Test it from the merged
+release folder, not alone. On an RTX Spark it transcribed an 11-second clip with
 `base.en` in about 160 ms, against about 550 ms for the CPU build. CUDA /
 Vulkan variants elsewhere follow the same shape as llama-cpp's matrix.
 

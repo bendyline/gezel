@@ -44,7 +44,7 @@ app, so gezel leaves it alone.
 
 ## The crew that comes with it
 
-Every folder gets the **Boekwachter**, who reads, describes and reviews it. A
+Every folder gets the **Librarian**, who reads, describes and reviews it. A
 code folder also gets a **Builder**, which is what lets your crew draft fixes
 overnight, and a photo folder a **Curator**, who looks after your albums. Gezel adds them once, when you add the folder; if you later take
 one off the folder, they stay off.

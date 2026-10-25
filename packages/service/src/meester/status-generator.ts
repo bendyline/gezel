@@ -453,7 +453,7 @@ Rules:
 - "headline": warm and concrete, grounded in the projects above, ideally ending in a call to action. Example: "Your space war game is done! Click to play it!" Never generic filler like "Everything is on track."
 - "cta" (optional): where clicking the headline lands. "target" is one of {"kind":"project","projectId":...}, {"kind":"task","projectId":...,"taskRef":...}, or {"kind":"view","view":"projects"|"gezels"|"documents"|"settings"}. Valid projectId values: ${projectIds || '(none)'}. Valid taskRef values: ${taskRefs || '(none)'}. Use only these.
 - "report": a brief markdown dashboard (at most ~300 words) for the user — per-project status, what moved, what is stuck, what needs them. Ground every statement in the activity above; no speculation.
-- "actions" (optional, at most ${MAX_ACTIONS_PER_RUN}): concrete follow-ups worth drafting as tasks for a project's voorman — e.g. reviewing a stalled task, answering an open question, finishing something nearly done. Each needs a projectId from the list above, a short title, and a description telling the voorman exactly what to do and why. Only propose follow-ups that genuinely move a project forward; an empty list is fine.`;
+- "actions" (optional, at most ${MAX_ACTIONS_PER_RUN}): concrete follow-ups worth drafting as tasks for a project's crew lead — e.g. reviewing a stalled task, answering an open question, finishing something nearly done. Each needs a projectId from the list above, a short title, and a description telling the crew lead exactly what to do and why. Only propose follow-ups that genuinely move a project forward; an empty list is fine.`;
 }
 
 function describe(err: unknown): string {

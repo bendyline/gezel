@@ -9,6 +9,7 @@ import {
   catalogGroundFor,
   isRetiredModel,
   modelAttribution,
+  plainRoleTitle,
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
@@ -289,7 +290,7 @@ export function CatalogBrowser({
                 <CatalogItemLogo item={item} />
                 <div className="catalog-item-head">
                   <div className="catalog-item-name">
-                    {item.manifest.name}
+                    {plainRoleTitle(item.manifest.name)}
                     {isCommunityCatalogItem(item) && <CommunityBadge />}
                   </div>
                   {isCommunityCatalogItem(item) && item.manifest.maintainer.name && (

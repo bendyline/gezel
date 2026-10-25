@@ -593,7 +593,7 @@ export function TaskDetail({
                 />
               )}
               <span>
-                {systemOwner?.name ?? 'Boekwachter'} <small>· system-run</small>
+                {systemOwner?.name ?? 'Librarian'} <small>· system-run</small>
               </span>
             </div>
           ) : runtimeCapabilities().taskStructureEditing ? (

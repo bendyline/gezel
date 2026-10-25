@@ -137,7 +137,7 @@ async function setup(ctx: EvalContext): Promise<void> {
   const project = await client.createProject({
     name: `index-bench-${manifest.id}`,
     about: `Benchmark corpus: a pinned subset of ${manifest.id} used to measure index quality. Read-only for agents.`,
-    missionObjectives: 'Serve as the boekwachter index-quality benchmark corpus.',
+    missionObjectives: 'Serve as the Librarian index-quality benchmark corpus.',
   });
   // Indexing 3.0 gated the AI tiers on a Boekwachter project member — the
   // enrich drive 409s (`boekwachter-required`) without one. Recruit the

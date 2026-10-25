@@ -88,7 +88,7 @@ describe('ChatManager — crew introduction', () => {
       name: 'Record it',
     } as never);
     expect((await store.getSession('ada', thread.id))?.messages.at(-1)?.content).toBe(
-      '**Dejan** asked **Noor** (Omroeper — social posts) to help with **Bakery weekly admin**. Noor starts with "Record it".',
+      '**Dejan** asked **Noor** (Social Media Writer) to help with **Bakery weekly admin**. Noor starts with "Record it".',
     );
   });
 
@@ -118,15 +118,14 @@ describe('ChatManager — crew introduction', () => {
         {
           gezelId: guide.id,
           name: 'Mira',
-          role: 'Reisleider',
-          gloss: 'trip planner',
+          role: 'Trip Planner',
           stepName: 'First draft',
         },
-        { gezelId: lead.id, name: 'Anastasia', role: 'Voorman', gloss: 'crew lead' },
+        { gezelId: lead.id, name: 'Anastasia', role: 'Crew Lead' },
       ],
     });
     expect(intro?.content).toBe(
-      'Your crew for **Trip: Portugal**: **Mira** (Reisleider — trip planner) starts with "First draft", and **Anastasia** (Voorman — crew lead) leads it.',
+      'Your crew for **Trip: Portugal**: **Mira** (Trip Planner) starts with "First draft", and **Anastasia** (Crew Lead) leads it.',
     );
     // Introduced once: a later step does not introduce Mira again.
     await expect(manager.postCrewIntroduction(task, guide.id, step, 'joined')).resolves.toBeNull();

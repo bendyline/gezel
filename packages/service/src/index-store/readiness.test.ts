@@ -149,7 +149,7 @@ describe('ensureIndexFresh', () => {
     expect(report.aiTier.staffed).toBe(false);
     expect(report.aiTier.achievable).toBe(false);
     expect(report.wait.drained).toBe(true);
-    expect(report.notes.join(' ')).toContain('Boekwachter');
+    expect(report.notes.join(' ')).toContain('Librarian');
   });
 
   it('does not drive while the indexing job is paused, and says so', async () => {

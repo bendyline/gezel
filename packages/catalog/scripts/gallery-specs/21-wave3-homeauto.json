@@ -16,7 +16,7 @@
       {
         "id": "scope",
         "name": "Scope the wish",
-        "role": "huisautomaat",
+        "role": "home automator",
         "summary": "the owner's intent, the real device inventory, and the safety rules locked",
         "prompt": "Understand the wish and the house before writing a single trigger. Step 1: restate the owner's intent in one plain sentence — when should what happen, and when should it NOT — and confirm it with them if anything is ambiguous. Step 2: pull the device inventory through the project's home capabilities and list the devices this automation actually needs: the sensors that will trigger it, the devices it will act on, each with its exact inventory id and current state. If a device the wish assumes does not exist in the inventory, say so now — never plan around an invented device. Step 3: lock the safety rules — nothing that heats, locks, or opens runs unattended without a stated failsafe; every automation carries a manual override the owner can flip without ceremony; and no recipe is armed before a dry run has exercised it against the devices. Step 4: write an acceptance-criteria checklist ('every device in the recipe exists in the inventory, by exact id', 'trigger, conditions, and actions are all present and specific', 'a manual override is written into the recipe', 'the dry run exercised every action with the tool responses recorded', 'the install notes say how to arm it and how to stop it'). Call write_task_note with the intent sentence + the devices involved + the checklist and write notes/scope.md.",
         "produces": {
@@ -81,7 +81,7 @@
       {
         "id": "scope",
         "name": "Scope the report",
-        "role": "huisautomaat",
+        "role": "home automator",
         "summary": "coverage, anomalies-first ordering, and brevity locked as criteria",
         "prompt": "Decide what a good morning report is before reading a single sensor. Step 1: pull the device inventory through the project's home capabilities and note the zones the house actually has — the report must account for every one of them, so nothing quietly falls off the page. Step 2: define what counts as unusual against what is typical for the hour — a door or window open overnight, a battery running low, a sensor that has gone quiet, anything switched on that should not be. Step 3: lock the shape — anything unusual comes FIRST, each oddity with the device, what is off, and one concrete suggested action; the nominal rest is compressed to a line or two, never a device-by-device inventory dump; the whole report reads standing up, before coffee. Step 4: write an acceptance-criteria checklist ('every zone accounted for', 'anomalies surfaced before anything normal', 'each anomaly carries one suggested action', 'every device mentioned exists in the states evidence — nothing invented', 'short and warm'). Call write_task_note with the zone count + checklist and write notes/scope.md.",
         "produces": {

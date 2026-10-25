@@ -38,7 +38,9 @@ describe('MEESTER_ABOUT_MD', () => {
       .replace(
         'a second job for the same deliverable creates racing writers, and reading a file is a question for the existing assignee, not a new job.',
         'a second project for the same deliverable creates racing writers, and reading a file is a question for the existing assignee, not a new project.',
-      );
+      )
+      // Role titles are plain English now; gilde still says "Voormen".
+      .replace('Voormen and specialists do the work', 'Crew leads and specialists do the work');
     expect(projectOnlyCatalogAbout.trim()).toBe(MEESTER_ABOUT_MD.trim());
   });
 });

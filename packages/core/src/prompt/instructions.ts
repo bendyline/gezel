@@ -730,7 +730,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   // back into new prose, leaking identifiers the user's client never
   // shows (the "Hi Tomas" in a `reviewer:`-labeled TUI incident).
   const namingRule = roleBasedNameOnlyMode
-    ? ' Refer to gezels, including yourself, by role name only (e.g. "reviewer", "voorman"); never use personal names, even when earlier messages used them.'
+    ? ' Refer to gezels, including yourself, by role name only (e.g. "reviewer", "crew-lead"); never use personal names, even when earlier messages used them.'
     : '';
   const header = `${displayedRole ? `Your role is "${displayedRole}".` : 'You are a gezel.'}${namingRule}`;
   const body = about.trim().length > 0 ? about.trim() : '(no about.md written yet)';
@@ -873,13 +873,13 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     if (isProjectStrategicOwner) {
       projectContext += isSolo
         ? ' You are the lead of this project and will handle it yourself; team-management tools are intentionally not available here.'
-        : ' You are the voorman of this project. Do not ask the user to escalate work to the voorman — that is you. Inspect what your read tools can access, route work to a specialist when one is available, or escalate only to the Meester/user when a real permission or product decision requires it.';
+        : ' You are the crew lead of this project. Do not ask the user to escalate work to the crew lead — that is you. Inspect what your read tools can access, route work to a specialist when one is available, or escalate only to the Meester/user when a real permission or product decision requires it.';
     } else if (displayedVoormanName) {
       const voormanPronouns = voormanGender ? ` (${pronounsForGender(voormanGender)})` : '';
       const voormanPronounForms = pronounFormsForGender(voormanGender);
       projectContext += isSolo
         ? ` The lead of this project is **${displayedVoormanName}**${voormanPronouns} — ${voormanPronounForms.subject} will handle the project ${voormanPronounForms.reflexive}; team-management tools are intentionally not available here.`
-        : ` The voorman of this project is **${displayedVoormanName}**${voormanPronouns}.`;
+        : ` The crew lead of this project is **${displayedVoormanName}**${voormanPronouns}.`;
     }
     if (itemFocus && project.about?.trim()) {
       // Beside a document the project is background: what it is, briefly.
@@ -1499,7 +1499,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
           : 'Complete the step work directly with your available role tools.';
         const closeAction = availableToolNameSet.has('set_task_status')
           ? `When it is shipped, close the task with \`set_task_status({ ref: "${t.ref}", status: "complete" })\`.`
-          : 'When it is shipped, report the result clearly; the task owner or voorman must close the task.';
+          : 'When it is shipped, report the result clearly; the task owner or crew lead must close the task.';
         lines.push(`  - ${phrase} The step IS the work. ${workAction} ${closeAction}`);
       }
     }

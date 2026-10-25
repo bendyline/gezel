@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 /**
  * Meester E2E — first-launch auto-provisioning. On an empty GEZEL_HOME, the
- * service should create the curated Meester gezel (and a Klerk for utility
+ * service should create the curated Meester gezel (and a Scribe for utility
  * work), tag the Meester via `config.meesterGezelId`, and the UI should
  * render the ⭐ badge on the sidebar + a populated Settings section.
  */
@@ -66,7 +66,7 @@ test('first-run auto-provisions a Meester gezel', async () => {
     fullPage: true,
   });
 
-  // At least one gezel exists (the auto-provisioned Meester; Klerk is
+  // At least one gezel exists (the auto-provisioned Meester; the Scribe is
   // also created for utility work, hence not asserting an exact count).
   expect(await rows.count()).toBeGreaterThanOrEqual(1);
 });
@@ -89,7 +89,7 @@ test('Settings shows the meester with the dropdown pre-selected', async () => {
 
   // The Radix trigger inside .meester-picker shows the currently-selected
   // gezel's name — expect it to reflect the auto-provisioned Meester.
-  // (The Klerk section reuses the same .meester-picker class; the Meester
+  // (The Scribe section reuses the same .meester-picker class; the Meester
   // section comes first in the DOM, so .first() targets it.)
   const meesterTrigger = page.locator('.meester-picker .gz-select-trigger').first();
   const triggerText = (await meesterTrigger.textContent()) ?? '';

@@ -353,9 +353,9 @@ async function setup({ client, log }: EvalContext): Promise<void> {
   try {
     // Boekwachter is a template-only role (record-keeper) — the default
     // toolset groups carry workspace read+write, which is all this needs.
-    const created = await client.createGezel({ name: CLERK_NAME, role: 'Boekwachter' });
+    const created = await client.createGezel({ name: CLERK_NAME, role: 'Librarian' });
     clerk = { id: created.id };
-    log(`[scenario:setup] created boekwachter "${CLERK_NAME}" id=${clerk.id}`);
+    log(`[scenario:setup] created librarian "${CLERK_NAME}" id=${clerk.id}`);
   } catch (err) {
     const { gezels } = await client.listGezels();
     const existing = gezels.find((g) => g.name === CLERK_NAME);
