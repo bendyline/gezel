@@ -595,7 +595,9 @@ const GateCheckVariants = [
 /**
  * Named so the declarations that embed a check (every gate, and so every step,
  * task and craftbook) print this name rather than the whole union again. They
- * held 65 copies, about 260 KB of the shared `.d.ts` chunk.
+ * held 65 copies, about 800 KB of the shared `.d.ts` chunk. The name is
+ * re-exported from ./craftbook.js: a consumer whose own schema embeds a gate
+ * check cannot emit its declarations without it (TS2883).
  */
 export interface GateCheckZodSchema
   extends z.ZodDiscriminatedUnion<typeof GateCheckVariants, 'kind'> {}

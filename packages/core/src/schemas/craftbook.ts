@@ -30,6 +30,7 @@ import {
 export {
   GateCheckSchema,
   type GateCheck,
+  type GateCheckZodSchema,
   GateSpecSchema,
   type GateSpec,
   GateScriptRefSchema,
