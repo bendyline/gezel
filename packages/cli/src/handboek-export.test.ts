@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SCORECARD, SCORECARD_DATA_ATTRS, SCORECARD_QUERY_PARAMS } from '@bendyline/gezel';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -141,13 +142,22 @@ describe('resolveCssHref', () => {
 describe('runHandboekExport', () => {
   let out: string;
   let result: HandboekExportResult;
+  const priorHandboekDir = process.env.GEZEL_HANDBOEK_DIR;
 
   beforeAll(async () => {
+    // Render from the docs tree, as scripts/export-handboek-site.mjs does. A
+    // built service's dist/handboek-content leaves out assets/scorecards/, so
+    // rendering from it would link the scorecard downloads to gezel.com.
+    process.env.GEZEL_HANDBOEK_DIR = fileURLToPath(
+      new URL('../../../docs/handboek', import.meta.url),
+    );
     out = await mkdtemp(join(tmpdir(), 'gezel-handboek-site-'));
     result = await runHandboekExport({ out, css: ['../house.css'], siteUrl: '/' });
   }, 120_000);
 
   afterAll(async () => {
+    if (priorHandboekDir === undefined) delete process.env.GEZEL_HANDBOEK_DIR;
+    else process.env.GEZEL_HANDBOEK_DIR = priorHandboekDir;
     await rm(out, { recursive: true, force: true }).catch(() => {});
   });
 
