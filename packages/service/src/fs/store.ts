@@ -416,6 +416,7 @@ export class Store {
   private readonly craftbooks: CraftbookStore;
   private projectCreationTail: Promise<void> = Promise.resolve();
   private readonly findingLifecycleLocks = new KeyedLock();
+  private readonly questionWriteLocks = new KeyedLock();
   /** The BW issue registry (`boekwachter-issues.json`) and its verdict log. */
   readonly boekwachterIssues: BoekwachterIssueStore;
   /**
@@ -6774,18 +6775,36 @@ export class Store {
 
   /**
    * Upsert a `Question` record. Read-merge-write keyed by `id`. Single
-   * file per project (`questions.json`) — questions are low-volume and
-   * the panels always want the full list, so the per-id task layout
-   * would be needless overhead here.
+   * file per project (`questions.json`) — the panels always want the full
+   * list, so the per-id task layout would be needless overhead here.
    */
   async writeQuestion(question: Question): Promise<void> {
-    const file = projectQuestionsFile(this.home, question.projectId);
-    const existing = await this.listProjectQuestions(question.projectId);
-    const idx = existing.findIndex((q) => q.id === question.id);
-    if (idx >= 0) existing[idx] = question;
-    else existing.push(question);
-    await mkdir(dirname(file), { recursive: true });
-    await writeFileAtomic(file, `${JSON.stringify(existing, null, 2)}\n`);
+    await this.updateProjectQuestions(question.projectId, (questions) => {
+      const idx = questions.findIndex((q) => q.id === question.id);
+      if (idx >= 0) questions[idx] = question;
+      else questions.push(question);
+      return true;
+    });
+  }
+
+  /**
+   * Edit a project's questions in one read-modify-write. `change` edits the
+   * array in place and says whether it changed anything. Writes for one
+   * project are serialized: unlocked, two cards filed at once each rewrote
+   * the list they had read, and one was lost. One media collection reached
+   * 4,600 cards (2.8 MB), so a batch of edits shares a single rewrite.
+   */
+  async updateProjectQuestions(
+    projectId: string,
+    change: (questions: Question[]) => boolean,
+  ): Promise<void> {
+    const file = projectQuestionsFile(this.home, projectId);
+    await this.questionWriteLocks.run(projectId, async () => {
+      const existing = await this.listProjectQuestions(projectId);
+      if (!change(existing)) return;
+      await mkdir(dirname(file), { recursive: true });
+      await writeFileAtomic(file, `${JSON.stringify(existing, null, 2)}\n`);
+    });
   }
 
   async getQuestion(projectId: string, id: string): Promise<Question | null> {

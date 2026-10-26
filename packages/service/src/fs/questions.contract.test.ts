@@ -75,3 +75,30 @@ describe('question records agree across hosts', () => {
     expect(await read(b.home)).toEqual(await read(a.home));
   });
 });
+
+describe('desktop question writes', () => {
+  it('keeps every card when several are filed at once', async () => {
+    const { store } = await desktopHome();
+    await Promise.all(
+      Array.from({ length: 12 }, (_, i) => store.writeQuestion(ask(`burst-${i}`, i % 10))),
+    );
+    const ids = (await store.listProjectQuestions('default')).map((q) => q.id);
+    for (let i = 0; i < 12; i++) expect(ids).toContain(`burst-${i}`);
+  });
+
+  it('applies a batch of edits in one rewrite, and none when nothing changed', async () => {
+    const { home, store } = await desktopHome();
+    const file = join(home, 'projects', 'default', 'questions.json');
+    const before = await readFile(file, 'utf8');
+    await store.updateProjectQuestions('default', () => false);
+    expect(await readFile(file, 'utf8')).toBe(before);
+    await store.updateProjectQuestions('default', (questions) => {
+      for (const [index, question] of questions.entries()) {
+        if (!question.answer)
+          questions[index] = answeredQuestion(question, { silentSkip: true }, at(9));
+      }
+      return true;
+    });
+    expect(await store.listAllPendingQuestions()).toEqual([]);
+  });
+});

@@ -768,7 +768,7 @@ The log is exposed three ways:
 - **UI**: a History tab with filter bar + expandable rows (`packages/ui/src/views/HistoryView.tsx`).
 - **MCP**: `search_history` tool on `@bendyline/gezel-mcp`. This is the primary intended audience — gezels debugging "when did X happen?" or "did anyone change the mission recently?".
 
-No rotation in MVP; explicit events are small and even a year of heavy use stays well under a few MB.
+No rotation yet, and task-heavy projects grow fast: every model tool call is a `tool.called` event, and one media-review project passed 845 MB (1.37M events) in a month. Queries bounded by `from` or `limit` therefore read each file backwards from its end and stop past the bound ([read-backward.ts](packages/service/src/history/read-backward.ts)); this relies on append order, with an hour of slack. Gate evidence (`gate-history.ts`) depends on it. An unbounded query still reads every line, so keep hot paths bounded.
 
 ### Usage & quotas
 

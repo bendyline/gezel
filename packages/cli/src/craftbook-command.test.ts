@@ -205,6 +205,21 @@ describe('task wait', () => {
     expect(result.task.status).toBe('paused');
     expect(result.questionIds).toBeUndefined();
   });
+  it('asks the daemon only for the watched tasks’ questions', async () => {
+    const client = {
+      getTaskByRef: vi
+        .fn()
+        .mockResolvedValueOnce(task('active'))
+        .mockResolvedValue(task('complete')),
+      listTaskChildren: vi.fn(),
+      listQuestions: vi.fn().mockResolvedValue({ questions: [] }),
+    };
+    await waitForTask(client, 'p/1', { timeoutMs: 100, pollMs: 1 });
+    expect(client.listQuestions).toHaveBeenCalledWith(
+      { projectId: 'p', pending: true, taskRefs: ['p/1'] },
+      expect.anything(),
+    );
+  });
   it('ignores historical pause cards after a retry without answering them', async () => {
     const client = {
       getTaskByRef: vi

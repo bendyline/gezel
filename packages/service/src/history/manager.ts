@@ -20,8 +20,23 @@ import {
   globalHistoryFile,
   projectHistoryFile,
 } from '@bendyline/gezel/paths';
+import { readLinesBackward } from './read-backward.js';
 
 const log = createLogger('history');
+
+/** How far out of `at` order an appended event may land and still be found. */
+export const HISTORY_ORDER_SLACK_MS = 60 * 60_000;
+
+/** The `at` below which a bounded backward read can stop, or undefined to read everything. */
+function historyOrderFloor(at: string): string | undefined {
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? new Date(ms - HISTORY_ORDER_SLACK_MS).toISOString() : undefined;
+}
+
+async function* readLinesForward(path: string): AsyncGenerator<string> {
+  const stream = createReadStream(path, { encoding: 'utf8' });
+  yield* createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
+}
 
 /**
  * Append-only audit log. Explicit events live in per-scope JSONL files;
@@ -209,7 +224,17 @@ export class HistoryManager {
     });
   }
 
-  /** Discrete events only. Newest-first. */
+  /**
+   * Discrete events only. Newest-first.
+   *
+   * A query bounded by `from` or `limit` reads each file from its end and stops
+   * at the first event older than anything it could still return, less
+   * {@link HISTORY_ORDER_SLACK_MS}. That relies on append order: `log` stamps
+   * `at` inside the serialized append, so a file is in `at` order apart from
+   * clock steps and caller-supplied stamps, which the slack absorbs. Gate
+   * evidence asks for the current step's tool calls this way on every
+   * completion, and project logs reach hundreds of megabytes.
+   */
   async listEvents(filter: HistoryFilter = {}): Promise<HistoryEvent[]> {
     if (filter.q && this.queryBackend) {
       try {
@@ -227,25 +252,42 @@ export class HistoryManager {
     }
     const events: HistoryEvent[] = [];
     const files = await this.eventFiles(filter.projectId);
+    const bounded = Boolean(filter.from || filter.limit);
+    // A line can only be one of these kinds if it spells the kind as a JSON
+    // string, so cheaper `includes` checks spare most lines the full parse.
+    const kindNeedles = filter.kinds?.map((kind) => JSON.stringify(kind));
+    const fromFloor = filter.from ? historyOrderFloor(filter.from) : undefined;
     for (const path of files) {
-      let stream: ReturnType<typeof createReadStream>;
+      // Once this file alone has `limit` matches, nothing older than the
+      // oldest of them can make the cut, whatever the other files hold.
+      let stopBelow = fromFloor;
+      let matched = 0;
+      let oldestMatched: string | undefined;
       try {
-        stream = createReadStream(path, { encoding: 'utf8' });
-      } catch {
-        continue;
-      }
-      const lines = createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
-      try {
-        for await (const line of lines) {
+        for await (const line of bounded ? readLinesBackward(path) : readLinesForward(path)) {
           if (!line.trim()) continue;
+          if (!bounded && kindNeedles && !kindNeedles.some((needle) => line.includes(needle)))
+            continue;
+          let ev: HistoryEvent;
           try {
-            const ev = JSON.parse(line) as HistoryEvent;
-            if (!this.matches(ev, filter)) continue;
-            events.push(ev);
-            this.trimNewest(events, filter.limit);
+            ev = JSON.parse(line) as HistoryEvent;
           } catch {
-            /* skip malformed */
+            continue;
           }
+          if (stopBelow !== undefined && typeof ev.at === 'string' && ev.at < stopBelow) break;
+          if (!this.matches(ev, filter)) continue;
+          events.push(ev);
+          if (bounded && filter.limit) {
+            matched += 1;
+            if (oldestMatched === undefined || ev.at < oldestMatched) oldestMatched = ev.at;
+            const floor =
+              matched === filter.limit && oldestMatched
+                ? historyOrderFloor(oldestMatched)
+                : undefined;
+            if (floor !== undefined && (stopBelow === undefined || floor > stopBelow))
+              stopBelow = floor;
+          }
+          this.trimNewest(events, filter.limit);
         }
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;

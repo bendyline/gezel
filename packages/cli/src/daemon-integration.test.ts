@@ -368,6 +368,16 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
       expect((await client.getTaskByRef(meta.childRef)).parentTaskRef).toBe(meta.parentRef);
       expect((await client.getTaskByRef(meta.childRef)).title).toBe('Write dp04 subject');
       expect((await client.getTaskByRef(meta.childRef)).craftbookParams?.region).toBe('dp04');
+      // The module completed its parent's user-assigned step itself, so the
+      // person was never asked to approve it, not even by a withdrawn card.
+      const parentProject = (await client.getTaskByRef(meta.parentRef)).projectId;
+      const parentCards = await client.listQuestions({
+        projectId: parentProject,
+        taskRefs: [meta.parentRef],
+      });
+      expect(parentCards.questions.filter((q) => q.intent?.kind === 'step-awaits-owner')).toEqual(
+        [],
+      );
       await expect(
         runCli('--project', folder, 'do', 'batch-meta', 'dp04', '--strict-sandbox'),
       ).rejects.toMatchObject({ code: 1 });
