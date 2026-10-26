@@ -1,6 +1,7 @@
 import {
   ACCESSORY_OPTIONS,
   BANGS_OPTIONS,
+  BODY_ARCHETYPES,
   BODY_SHAPE_KEYS,
   DRESS_OPTIONS,
   EXPRESSION_OPTIONS,
@@ -19,7 +20,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { Poppetje } from './Poppetje.js';
-import { resolveLayout, scaleFor } from './geometry.js';
+import { buildProfileBand, resolveLayout, scaleFor } from './geometry.js';
 
 /** Static markup with all def-id noise removed, for content comparisons. */
 function staticMarkup(poppetje: PoppetjeStruct, props: Record<string, unknown> = {}): string {
@@ -204,6 +205,42 @@ describe('Poppetje', () => {
     expect(tiny.container.querySelector('feTurbulence')).toBeNull();
     expect(regular.container.querySelector('feTurbulence')).not.toBeNull();
   });
+
+  it('models the turned body only above the tiny-icon level of detail', () => {
+    const p = poppetjeFromSeed(7);
+    const blurs = (props: Record<string, unknown>) =>
+      render(<Poppetje poppetje={p} {...props} />).container.querySelectorAll('feGaussianBlur')
+        .length;
+    expect(blurs({ variant: 'icon', size: 24 })).toBeLessThan(blurs({ variant: 'icon', size: 40 }));
+    expect(blurs({ variant: 'full', size: 24, grainStyle: 'none' })).toBeGreaterThan(
+      blurs({ variant: 'icon', size: 24, grainStyle: 'none' }),
+    );
+  });
+
+  it('adds gloss catchlights only once the eyes are a few pixels across', () => {
+    const p = { ...poppetjeFromSeed(7, { key: 'imara' }), accessory: null };
+    const catchlights = (props: Record<string, unknown>) =>
+      (staticMarkup(p, props).match(/fill="#fff6e6"/g) ?? []).length;
+    expect(catchlights({ variant: 'full', size: 120 })).toBe(2);
+    expect(catchlights({ variant: 'headshot', size: 96 })).toBe(2);
+    expect(catchlights({ variant: 'icon', size: 24 })).toBe(0);
+    expect(catchlights({ variant: 'full', size: 60 })).toBe(0);
+  });
+});
+
+describe('buildProfileBand', () => {
+  it('follows the turned silhouette at any fraction of its width', () => {
+    const arch = BODY_ARCHETYPES.curvy!;
+    const L = resolveLayout(scaleFor('adult'));
+    const waistAt = (u: number) => `${(40 + (u * arch.waistW) / 2).toFixed(2)} ${L.waistY}`;
+    const full = buildProfileBand(arch, L, -1, 1);
+    expect(full).toContain(waistAt(-1));
+    expect(full).toContain(waistAt(1));
+    // A band inside the form pinches with the waist, not a straight stripe.
+    const inner = buildProfileBand(arch, L, -0.5, -0.2);
+    expect(inner).toContain(waistAt(-0.5));
+    expect(inner).toContain(waistAt(-0.2));
+  });
 });
 
 describe('Poppetje svgId (static rendering)', () => {
@@ -223,6 +260,37 @@ describe('Poppetje svgId (static rendering)', () => {
     // Every url(#ref) must resolve inside the same document fragment.
     for (const [, ref] of a.matchAll(/url\(#([^)]+)\)/g)) {
       expect(aIds.has(ref!), `dangling url(#${ref})`).toBe(true);
+    }
+  });
+
+  it('resolves every url() at each level of detail, with hats, hoods, and knots', () => {
+    // Several defs exist only at some levels of detail; a reference that
+    // outlives its def renders as nothing rather than failing loudly.
+    const base = poppetjeFromSeed(7, { key: 'grain-character-117' });
+    const figures = [
+      base,
+      { ...base, hat: 'cap' as const },
+      { ...base, hat: 'hood' as const },
+      { ...base, key: 'grain-character-0' },
+      { ...base, key: 'grain-character-266', facialHair: 'beard' as const },
+    ];
+    const framings = [
+      { variant: 'full', size: 120 },
+      { variant: 'headshot', size: 64 },
+      { variant: 'icon', size: 24 },
+      { variant: 'icon', size: 40 },
+      { variant: 'full', size: 120, grainStyle: 'none' },
+    ] as const;
+    for (const figure of figures) {
+      for (const framing of framings) {
+        const markup = renderToStaticMarkup(
+          <Poppetje poppetje={figure} svgId="lod" {...framing} />,
+        );
+        const ids = new Set([...markup.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]!));
+        for (const [, ref] of markup.matchAll(/url\(#([^)]+)\)/g)) {
+          expect(ids.has(ref!), `dangling url(#${ref}) at ${JSON.stringify(framing)}`).toBe(true);
+        }
+      }
     }
   });
 

@@ -73,6 +73,54 @@ export function buildBodyPath(arch: BodyArchetype, L: ResolvedLayout): string {
   ].join(' ');
 }
 
+/**
+ * A vertical band of the turned body between two fractions of its local
+ * half-width (`-1` is the left silhouette, `1` the right). Every body control
+ * point sits at `40 ± w / 2`, so scaling those widths maps the profile curve
+ * itself: a band follows the waist pinch and the hip flare the way light and
+ * shadow wrap a lathe-turned form. A bounding-box gradient cannot; at a curvy
+ * waist it samples only its middle and the edge shading disappears. The band
+ * overshoots the shoulder and foot and is meant to be clipped to the body.
+ */
+export function buildProfileBand(
+  arch: BodyArchetype,
+  L: ResolvedLayout,
+  from: number,
+  to: number,
+): string {
+  const { baseW, hipW, waistW, chestW, shoulderW } = arch;
+  const { baseY, hipY, waistY, chestY, shoulderY } = L;
+  const shoulderSideY = shoulderY + 2.4;
+  const top = shoulderY - 4;
+  const bottom = baseY + 6;
+  const up = (u: number) => {
+    const x = (w: number) => (40 + (u * w) / 2).toFixed(2);
+    return [
+      `C ${x(hipW)} ${baseY + (hipY - baseY) * 0.55}, ${x(hipW)} ${hipY + (waistY - hipY) * 0.45}, ${x(waistW)} ${waistY}`,
+      `C ${x(chestW)} ${waistY + (chestY - waistY) * 0.55}, ${x(chestW)} ${chestY + (shoulderSideY - chestY) * 0.45}, ${x(shoulderW)} ${shoulderSideY}`,
+    ];
+  };
+  const down = (u: number) => {
+    const x = (w: number) => (40 + (u * w) / 2).toFixed(2);
+    return [
+      `C ${x(chestW)} ${chestY + (shoulderSideY - chestY) * 0.45}, ${x(chestW)} ${waistY + (chestY - waistY) * 0.55}, ${x(waistW)} ${waistY}`,
+      `C ${x(hipW)} ${hipY + (waistY - hipY) * 0.45}, ${x(hipW)} ${baseY + (hipY - baseY) * 0.55}, ${x(baseW)} ${baseY}`,
+    ];
+  };
+  const x0 = (u: number, w: number) => (40 + (u * w) / 2).toFixed(2);
+  return [
+    `M ${x0(from, baseW)} ${bottom}`,
+    `L ${x0(from, baseW)} ${baseY}`,
+    ...up(from),
+    `L ${x0(from, shoulderW)} ${top}`,
+    `L ${x0(to, shoulderW)} ${top}`,
+    `L ${x0(to, shoulderW)} ${shoulderSideY}`,
+    ...down(to),
+    `L ${x0(to, baseW)} ${bottom}`,
+    'Z',
+  ].join(' ');
+}
+
 /** Build one organic whorl ring path (closed). */
 export function whorlRing(
   rx: number,

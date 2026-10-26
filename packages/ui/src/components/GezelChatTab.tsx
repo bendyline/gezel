@@ -6,6 +6,7 @@ import {
   pronounFormsForGender,
 } from '@bendyline/gezel';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
 import { ChatComposer } from './ChatComposer.js';
@@ -91,11 +92,18 @@ export function GezelChatTab({
   engineLabel,
   workingProjectIds,
   activeTurnsReady = true,
+  projectPickerSlot,
 }: {
   gezel: GezelDetail;
   engineLabel: string | null;
   workingProjectIds?: ReadonlySet<string>;
   activeTurnsReady?: boolean;
+  /**
+   * Where the project picker renders: the gezel's tab row, beside Chat.
+   * `null` while that slot is still mounting. Omitted, the picker sits in
+   * its own row above the chat.
+   */
+  projectPickerSlot?: HTMLElement | null;
 }) {
   const [projects, setProjects] = useState<ProjectForGezel[] | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
@@ -240,31 +248,36 @@ export function GezelChatTab({
     );
   }
 
+  const projectPicker = (
+    <Select.Root
+      value={selectedProjectId}
+      onValueChange={(value) => {
+        projectChoiceWasManualRef.current = true;
+        activityDefaultAppliedRef.current = true;
+        setSelectedProjectId(value);
+      }}
+    >
+      <Select.Trigger className="gezel-chat-project-select" aria-label="Project">
+        <Select.Value />
+      </Select.Trigger>
+      <Select.Content>
+        <Select.Item value={ALL_PROJECTS}>All projects</Select.Item>
+        {projects.map((p) => (
+          <Select.Item key={p.projectId} value={p.projectId}>
+            {projectLabel(p)}
+          </Select.Item>
+        ))}
+      </Select.Content>
+    </Select.Root>
+  );
+
   return (
     <div className="gezel-chat-tab">
-      <div className="gezel-chat-project-row">
-        <span className="muted small">Project:</span>
-        <Select.Root
-          value={selectedProjectId}
-          onValueChange={(value) => {
-            projectChoiceWasManualRef.current = true;
-            activityDefaultAppliedRef.current = true;
-            setSelectedProjectId(value);
-          }}
-        >
-          <Select.Trigger className="gezel-chat-project-select" aria-label="Project">
-            <Select.Value />
-          </Select.Trigger>
-          <Select.Content>
-            <Select.Item value={ALL_PROJECTS}>All projects</Select.Item>
-            {projects.map((p) => (
-              <Select.Item key={p.projectId} value={p.projectId}>
-                {projectLabel(p)}
-              </Select.Item>
-            ))}
-          </Select.Content>
-        </Select.Root>
-      </div>
+      {projectPickerSlot === undefined ? (
+        <div className="gezel-chat-project-row">{projectPicker}</div>
+      ) : (
+        projectPickerSlot && createPortal(projectPicker, projectPickerSlot)
+      )}
 
       {selectedProjectId === ALL_PROJECTS ? (
         <GezelChatAllProjectsBody key={`${gezel.id}:__ALL__`} gezel={gezel} />

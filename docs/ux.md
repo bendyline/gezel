@@ -1104,6 +1104,13 @@ address line. Reach for this only when the tab genuinely sits on the seam of
 what it switches; a tab floating above unrelated content has nothing to
 connect to and should be an underline tab or keys instead.
 
+**A tab's scope picker sits beside that tab.** When one tab's content is
+scoped by a choice the others ignore — the gezel screen's Chat, scoped to a
+project — the picker goes in the tab row right after that tab, unlabeled, and
+only while that tab is open. It does not get a row of its own above the
+content. It keeps a fixed width so the tabs after it stay put when the choice
+changes; a long value ends in an ellipsis.
+
 **Tab rows fit by shedding labels, not by scrolling.** A tab row that
 names where you can go must show every destination at once. The project
 section tabs and the compact conversation tabs (Chat / Task / Skills /
@@ -2871,9 +2878,9 @@ window narrows too.
 
 Poppetjes are the app's character system, not generic avatars. Their visual
 language is small hand-painted, lathe-turned wooden figures: simple faces,
-warm asymmetric light, rounded volume, quiet grain below the paint, and stable
-silhouettes that survive icon crops. Avoid flat clip-art shading, literal wood
-texture, and glossy plastic highlights. The persistence invariants, rendering
+warm asymmetric light, rounded volume under a soft satin sheen, quiet grain
+below the paint, and stable silhouettes that survive icon crops. Avoid flat
+clip-art shading, literal wood texture, and glossy plastic highlights. The persistence invariants, rendering
 stack, application-crop rules, and PNG quality workflow are documented in
 [poppetje-rendering.md](poppetje-rendering.md).
 

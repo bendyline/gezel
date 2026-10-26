@@ -84,6 +84,22 @@ describe('GezelChatTab project selection', () => {
     );
   });
 
+  it('renders the project picker into the tab-row slot when given one', async () => {
+    const slot = document.createElement('span');
+    document.body.appendChild(slot);
+    try {
+      const view = render(
+        <GezelChatTab gezel={GEZEL} engineLabel={null} projectPickerSlot={slot} />,
+      );
+      const select = await screen.findByTestId('mock-select');
+      expect(slot.contains(select)).toBe(true);
+      expect(view.container.querySelector('.gezel-chat-project-row')).toBeNull();
+      expect(screen.queryByText('Project:')).toBeNull();
+    } finally {
+      slot.remove();
+    }
+  });
+
   it('returns an already-open gezel to their working project when clicked again', async () => {
     render(<GezelChatTab gezel={GEZEL} engineLabel={null} workingProjectIds={new Set(['p2'])} />);
     const select = await screen.findByTestId('mock-select');
