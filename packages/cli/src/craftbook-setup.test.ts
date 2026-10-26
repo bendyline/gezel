@@ -209,10 +209,14 @@ describe('ensureCraftbookSetup', () => {
       write: (text) => written.push(text),
     });
 
-    // Lockdown plus External services is the Unrestricted preset, and the
-    // person is told so before agreeing.
-    expect(ask.questions[0]).toContain('from Lockdown to Unrestricted');
-    expect(state.securityPolicy).toMatchObject({ level: 'free', allowExternalServices: true });
+    // Lockdown plus External services is not a preset — Unrestricted also
+    // runs package scripts — and the person is told so before agreeing.
+    expect(ask.questions[0]).toContain('from Lockdown to Custom');
+    expect(state.securityPolicy).toMatchObject({
+      level: 'custom',
+      allowExternalServices: true,
+      allowPackageScriptExecution: false,
+    });
     expect(client.updateConfig).toHaveBeenCalledWith({
       braveSearchApiKey: KEY,
       webSearch: { provider: 'brave' },
@@ -224,6 +228,42 @@ describe('ensureCraftbookSetup', () => {
     expect(ask.questions[2]).toContain('32.00 GB');
     expect(state.installed).toEqual(['qwen3.8-27b-q4', 'gemma4-31b-q4']);
     expect(written.join('')).not.toContain(KEY);
+  });
+
+  it('turns on package scripts for a book that runs the test suite, and only that', async () => {
+    const state: FakeState = {
+      securityPolicy: LOCKDOWN,
+      hasBraveSearchApiKey: true,
+      installed: [],
+    };
+    const client = fakeClient(state);
+    const needs = {
+      commands: [{ scope: 'script' as const, name: 'test', reason: 'Proves the fix' }],
+    };
+
+    const error = await ensureCraftbookSetup(asClient(client), {
+      ...base,
+      needs,
+      prompter: null,
+      write: () => {},
+    }).catch((e: Error) => e);
+    expect((error as Error).message).toContain('cannot run npm run test (Proves the fix)');
+    expect((error as Error).message).toContain('gezel security run-package-scripts on');
+
+    const ask = prompter({ confirm: [true] });
+    await ensureCraftbookSetup(asClient(client), {
+      ...base,
+      needs,
+      prompter: ask,
+      write: () => {},
+    });
+    expect(ask.questions[0]).toContain('outside the sandbox');
+    expect(state.securityPolicy).toMatchObject({
+      level: 'custom',
+      allowExternalServices: false,
+      allowPackageScriptExecution: true,
+      allowPackageScriptEdits: false,
+    });
   });
 
   it('stops at the first no, and names what is left', async () => {

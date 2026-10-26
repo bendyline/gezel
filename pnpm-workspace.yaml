@@ -78,7 +78,11 @@ minimumReleaseAgeExclude:
   # 2026-10-06, taken before the hold expires by explicit decision.
   - "@huggingface/transformers@4.3.1"
   - "@vitejs/plugin-react@6.0.4"
-  - "electron@43.7.7"
+  # Security release: 43.8.1 blocks the compromised eMudhra intermediates
+  # (GHSA-jr5w-w6x2-84p9, high) in Chromium and Node's tls/https/fetch, with
+  # no app-side workaround. 43.8.3 was published 2026-10-21 and taken before
+  # the hold expires by explicit decision.
+  - "electron@43.8.3"
   - "jose@6.2.4"
   - "mermaid@11.16.1"
   - "nodemailer@10.0.12"

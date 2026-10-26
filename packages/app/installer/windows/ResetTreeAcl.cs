@@ -1,6 +1,7 @@
 // Installer-only Windows ACL repair. All enumeration and mutation is relative
 // to pinned directory handles; a path preflight is never an authorization check.
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -22,6 +23,9 @@ namespace Gezel.Installer
         const uint ProtectedDacl = 0x80000000, UnprotectedDacl = 0x20000000;
         const int NoMoreFiles = unchecked((int)0x80000006);
         const int BufferTooSmall = unchecked((int)0xC0000023);
+        const int BufferOverflow = unchecked((int)0x80000005);
+        const int FileHardLinkInformation = 46;
+        const uint ShareAll = 7, BackupSemantics = 0x02000000, OpenReparsePointFlag = 0x00200000;
         // Write, append, extended-attribute and attribute writes, delete,
         // delete-child, WRITE_DAC, WRITE_OWNER, GENERIC_WRITE and GENERIC_ALL:
         // any one of them lets its holder change a tree.
@@ -48,6 +52,8 @@ namespace Gezel.Installer
             public uint Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
         }
         [StructLayout(LayoutKind.Sequential)]
+        struct FileIdDescriptor { public uint Size; public int Type; public long FileId, Reserved; }
+        [StructLayout(LayoutKind.Sequential)]
         struct Luid { public uint Low; public int High; }
         [StructLayout(LayoutKind.Sequential)]
         struct TokenPrivilege { public uint Count; public Luid Luid; public uint Attributes; }
@@ -66,7 +72,16 @@ namespace Gezel.Installer
         static extern int NtQuerySecurityObject(SafeFileHandle handle, uint information,
             byte[] descriptor, uint length, out uint needed);
         [DllImport("ntdll.dll")]
+        static extern int NtQueryInformationFile(SafeFileHandle handle, out IoStatus status,
+            IntPtr buffer, uint length, int infoClass);
+        [DllImport("ntdll.dll")]
         static extern uint RtlNtStatusToDosError(int status);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern SafeFileHandle OpenFileById(SafeFileHandle volumeHint, ref FileIdDescriptor id,
+            uint access, uint share, IntPtr security, uint flags);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern uint GetFinalPathNameByHandle(SafeFileHandle handle, StringBuilder path,
+            uint length, uint flags);
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern bool ReadFile(SafeFileHandle handle, byte[] buffer, uint count,
             out uint read, IntPtr overlapped);
@@ -215,6 +230,129 @@ namespace Gezel.Installer
             }
         }
 
+        // A repair's root, resolved once, and the direct children of it that
+        // are trust zones of their own: the tree every local account can write
+        // and the published service code. The rest of the root is one zone.
+        sealed class Scope
+        {
+            public SafeFileHandle Root;
+            public string RootPath;
+            public string[] SeparateZones;
+        }
+
+        static string FinalPath(SafeFileHandle handle, string display)
+        {
+            var path = new StringBuilder(512);
+            uint length = GetFinalPathNameByHandle(handle, path, (uint)path.Capacity, 0);
+            if (length >= path.Capacity)
+            {
+                path = new StringBuilder(checked((int)length + 1));
+                length = GetFinalPathNameByHandle(handle, path, (uint)path.Capacity, 0);
+            }
+            if (length == 0 || length >= path.Capacity)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot resolve " + display);
+            return path.ToString();
+        }
+
+        static string DirectoryPath(Scope scope, long fileId, string display)
+        {
+            var id = new FileIdDescriptor {
+                Size = (uint)Marshal.SizeOf(typeof(FileIdDescriptor)), Type = 0, FileId = fileId
+            };
+            using (SafeFileHandle directory = OpenFileById(scope.Root, ref id, ReadAttributes | Synchronize,
+                ShareAll, IntPtr.Zero, BackupSemantics | OpenReparsePointFlag))
+            {
+                if (directory.IsInvalid)
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot resolve a name of " + display);
+                return FinalPath(directory, display);
+            }
+        }
+
+        // Every name of a file, as full paths, read from the file's own handle
+        // (FILE_LINKS_INFORMATION) rather than from any path.
+        static List<string> LinkNames(SafeFileHandle file, Scope scope, string display)
+        {
+            int size = 4096;
+            for (int attempt = 0; attempt < 8; attempt++)
+            {
+                IntPtr buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    IoStatus status;
+                    int result = NtQueryInformationFile(file, out status, buffer, (uint)size,
+                        FileHardLinkInformation);
+                    if (result == BufferOverflow || result == BufferTooSmall)
+                    {
+                        size = Math.Max(size * 2, Marshal.ReadInt32(buffer, 0) + 64);
+                        continue;
+                    }
+                    Check(result, "Cannot list the names of " + display);
+                    int count = Marshal.ReadInt32(buffer, 4);
+                    var names = new List<string>(count);
+                    int offset = 8;
+                    for (int i = 0; i < count; i++)
+                    {
+                        if (offset + 20 > size) throw new IOException("Invalid name list for " + display);
+                        int next = Marshal.ReadInt32(buffer, offset);
+                        long parent = Marshal.ReadInt64(buffer, offset + 8);
+                        int chars = Marshal.ReadInt32(buffer, offset + 16);
+                        if (chars < 1 || offset + 20 + chars * 2 > size)
+                            throw new IOException("Invalid name list for " + display);
+                        string name = Marshal.PtrToStringUni(IntPtr.Add(buffer, offset + 20), chars);
+                        names.Add(DirectoryPath(scope, parent, display) + "\\" + name);
+                        if (next == 0) break;
+                        if (next < 20) throw new IOException("Invalid name list for " + display);
+                        offset += next;
+                    }
+                    return names;
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            throw new IOException("Cannot list the names of " + display);
+        }
+
+        // null outside the repaired tree, a separate zone's name inside one,
+        // and "" anywhere else in the tree.
+        static string Zone(Scope scope, string path)
+        {
+            string prefix = scope.RootPath + "\\";
+            if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+            string rest = path.Substring(prefix.Length);
+            int slash = rest.IndexOf('\\');
+            if (slash > 0)
+            {
+                string first = rest.Substring(0, slash);
+                foreach (string zone in scope.SeparateZones)
+                    if (string.Equals(first, zone, StringComparison.OrdinalIgnoreCase)) return zone;
+            }
+            return "";
+        }
+
+        // A hard link is another name for the same security descriptor:
+        // repairing it repairs every name, and the boundaries NSIS publishes
+        // afterwards reach every name through inheritance. That is safe only
+        // while all of them lie in one zone of this tree, which is where the
+        // machine engine's speech-model store and uv's cache link on purpose.
+        // A name outside the tree, or in another zone, is refused: an outside
+        // target would be taken over, and a name in the shared tree would hand
+        // its users the private file's other name.
+        static void RequireOneZone(SafeFileHandle file, Scope scope, string display, uint links)
+        {
+            List<string> names = LinkNames(file, scope, display);
+            if (names.Count != links)
+                throw new IOException("Refusing hard-linked file whose names cannot all be listed: " + display);
+            string first = null;
+            foreach (string name in names)
+            {
+                string zone = Zone(scope, name);
+                if (zone == null)
+                    throw new IOException("Refusing hard-linked file with a name outside the tree: " + display);
+                if (first == null) first = zone;
+                else if (zone != first)
+                    throw new IOException("Refusing hard-linked file whose names cross trust zones: " + display);
+            }
+        }
+
         // An upgrade's previous service tree, still as the installer published
         // it: owned by the trusted owner, its DACL protected, writable by no one
         // but SYSTEM and that owner, and its sentinel naming the bundle the
@@ -249,7 +387,8 @@ namespace Gezel.Installer
         }
 
         static int Visit(SafeFileHandle handle, string display, string owner, bool root,
-            int depth, Action<string, string> observe, string keepSealedChild, string sealedSha)
+            int depth, Action<string, string> observe, string keepSealedChild, string sealedSha,
+            Scope scope)
         {
             if (depth > 512) throw new IOException("Directory nesting limit exceeded: " + display);
             FileInfo info;
@@ -258,9 +397,7 @@ namespace Gezel.Installer
             bool directory = (info.Attributes & Directory) != 0;
             bool reparse = (info.Attributes & ReparsePoint) != 0;
             if (root && (!directory || reparse)) throw new IOException("Root must be a real directory");
-            // A hard link is another name for the same security descriptor.
-            // Never repair it, even if its other names happen to be in-tree.
-            if (!directory && info.Links != 1) throw new IOException("Refusing hard-linked file: " + display);
+            if (!directory && info.Links != 1) RequireOneZone(handle, scope, display, info.Links);
             if (observe != null) observe("opened", display);
             // NtSetSecurityObject changes this object only. SetSecurityInfo and
             // icacls can initiate their own descendant propagation/traversal,
@@ -302,7 +439,7 @@ namespace Gezel.Installer
                             if (observe != null) observe("kept", childDisplay);
                             continue;
                         }
-                        count += Visit(child, childDisplay, owner, false, depth + 1, observe, null, null);
+                        count += Visit(child, childDisplay, owner, false, depth + 1, observe, null, null, scope);
                     }
                 }
             }
@@ -317,11 +454,24 @@ namespace Gezel.Installer
             return Run(root, owner, null, null, observe);
         }
 
-        // keepSealedChild names one direct child of root that is left exactly
-        // as it is when IsSealedTree holds for it; any other state repairs it.
         public static int Run(string root, string owner, string keepSealedChild, string sealedSha,
             Action<string, string> observe)
         {
+            return Run(root, owner, keepSealedChild, sealedSha, null, observe);
+        }
+
+        // keepSealedChild names one direct child of root that is left exactly
+        // as it is when IsSealedTree holds for it; any other state repairs it.
+        // separateZones names direct children of root whose subtrees are trust
+        // zones of their own; a hard link may not join names across zones.
+        public static int Run(string root, string owner, string keepSealedChild, string sealedSha,
+            string[] separateZones, Action<string, string> observe)
+        {
+            separateZones = separateZones ?? new string[0];
+            foreach (string zone in separateZones)
+                if (string.IsNullOrEmpty(zone) || zone == "." || zone == ".." ||
+                    zone.IndexOfAny(new[] { '\\', '/', ':', '\0' }) >= 0)
+                    throw new ArgumentException("Each zone must be a single directory name");
             if (root == null || root.Length < 4 || !char.IsLetter(root[0]) ||
                 root[1] != ':' || root[2] != '\\' || root.IndexOf(':', 2) >= 0)
                 throw new ArgumentException("An absolute local drive directory is required");
@@ -339,7 +489,13 @@ namespace Gezel.Installer
                 if (!IsSha256(sealedSha)) throw new ArgumentException("A sha256 attestation is required");
             }
             using (SafeFileHandle handle = Open(IntPtr.Zero, "\\??\\" + full, true))
-                return Visit(handle, full, owner, true, 0, observe, keepSealedChild, sealedSha);
+            {
+                var scope = new Scope {
+                    Root = handle, RootPath = FinalPath(handle, full).TrimEnd('\\'),
+                    SeparateZones = separateZones
+                };
+                return Visit(handle, full, owner, true, 0, observe, keepSealedChild, sealedSha, scope);
+            }
         }
     }
 }

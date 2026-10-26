@@ -1,9 +1,16 @@
-import { resolveSecurityPolicy } from '@bendyline/gezel';
+import { readFile } from 'node:fs/promises';
+import {
+  type EgressIndicator,
+  egressIndicatorRefusal,
+  findEgressIndicators,
+  resolveSecurityPolicy,
+} from '@bendyline/gezel';
 import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { OutputRingBuffer } from '../fs/ring.js';
 import type { Store } from '../fs/store.js';
 import { denyNetBoundaryAvailable, runInSandbox } from '../sandbox/runner.js';
 import { WorkspaceWriteDeniedError } from './errors.js';
+import { restoreGatedManifestEdits, snapshotRootManifests } from './manifest-guard.js';
 
 /**
  * Default wall-clock timeout for `run_nodejs_script`. Clamped in the
@@ -30,6 +37,8 @@ export interface RunWorkspaceScriptResult {
   stderrTruncated: boolean;
   timedOut: boolean;
   error?: string;
+  /** Set when the script was refused before it ran; the route records it in History. */
+  egressIndicators?: EgressIndicator[];
 }
 
 /**
@@ -84,10 +93,27 @@ export async function runWorkspaceScript(
     };
   }
 
+  const source = await readFile(scriptAbs, 'utf8').catch(() => '');
+  const egressIndicators = findEgressIndicators(source);
+  if (egressIndicators.length > 0) {
+    return {
+      ok: false,
+      code: -1,
+      stdout: '',
+      stderr: '',
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      timedOut: false,
+      error: egressIndicatorRefusal(egressIndicators),
+      egressIndicators,
+    };
+  }
+
   const artifactsDir = store.projectArtifactsDir(opts.projectId);
   const timeout = clampTimeout(opts.timeoutMs);
   const stdoutRing = new OutputRingBuffer(OUTPUT_CAP_BYTES);
   const stderrRing = new OutputRingBuffer(OUTPUT_CAP_BYTES);
+  const manifests = await snapshotRootManifests(workspaceDir);
 
   const res = await runInSandbox({
     entry: scriptAbs,
@@ -101,6 +127,8 @@ export async function runWorkspaceScript(
     onStdout: (line) => stdoutRing.append(`${line}\n`),
     onStderr: (line) => stderrRing.append(`${line}\n`),
   });
+  const restoredNote = await restoreGatedManifestEdits(store, workspaceDir, manifests);
+  if (restoredNote) stderrRing.append(`${restoredNote}\n`);
 
   const stdout = stdoutRing.value();
   const stderr = stderrRing.value();

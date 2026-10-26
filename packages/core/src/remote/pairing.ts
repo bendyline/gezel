@@ -6,7 +6,8 @@
  *
  * The server shows an 8-digit code (Settings → Remote Servers → Add a
  * device). The client runs SPAKE2 with it over a TLS channel pinned to the
- * certificate the server's `/v1/identity` presented. Both device
+ * certificate the server's `/v1/identity` presented and its identity key
+ * signed. Both device
  * fingerprints are in the transcript, so a run that confirms proves the
  * server is the device showing the code the person typed: that is the
  * out-of-band check, and no identity-code comparison is needed. The server
@@ -19,8 +20,7 @@ import {
   type ClientIdentity,
   type RemoteIdentity,
   RemoteIdentitySchema,
-  certFingerprintFromPem,
-  fingerprintOfPublicKeyPem,
+  verifyRemoteIdentity,
 } from './identity.js';
 import {
   Spake2Error,
@@ -156,11 +156,18 @@ async function closeQuietly(fetchImpl: RemoteFetch): Promise<void> {
   await fetchImpl.close?.().catch(() => undefined);
 }
 
+const IDENTITY_UNVERIFIED = "That server's identity doesn't check out.";
+
 /**
- * The server's identity, read before anything is pinned. Checked for internal
- * consistency (its key hashes to its fingerprint, its certificate to the
- * fingerprint it names); whether it is the *right* server is what the connect
- * code proves.
+ * The server's identity, read before anything is pinned. Its key must hash to
+ * its fingerprint and must have signed the certificate it presents; whether it
+ * is the *right* server is what the connect code proves.
+ *
+ * The signature is what makes the pin safe. SPAKE2 binds the two device
+ * fingerprints, not the TLS channel, so without it anyone who answers for the
+ * server's address could present the real identity beside their own
+ * certificate, relay the exchange to the real server, and read the token the
+ * server returns over the channel this client pinned to them.
  */
 export async function readServerIdentity(
   http: RemoteHttp,
@@ -174,14 +181,7 @@ export async function readServerIdentity(
     });
     if (!response.ok) throw new Error(`That address answered with HTTP ${response.status}.`);
     const identity = RemoteIdentitySchema.parse(await response.json());
-    if (
-      !identity.tlsCertPem ||
-      !identity.tlsCertFingerprint ||
-      (await fingerprintOfPublicKeyPem(identity.publicKeyPem)) !== identity.fingerprint ||
-      (await certFingerprintFromPem(identity.tlsCertPem)) !== identity.tlsCertFingerprint
-    ) {
-      throw new Error("That server's identity doesn't check out.");
-    }
+    if (!(await verifyRemoteIdentity(identity))) throw new Error(IDENTITY_UNVERIFIED);
     return identity;
   } finally {
     await closeQuietly(bootstrap);
@@ -220,6 +220,9 @@ export async function pairWithConnectCode(
   const code = normalizePairingCode(input.code);
   if (!code) throw new PairingCodeRejectedError();
   const identity = input.identity ?? (await readServerIdentity(http, baseUrl));
+  if (input.identity && !(await verifyRemoteIdentity(input.identity))) {
+    throw new Error(IDENTITY_UNVERIFIED);
+  }
   if (!identity.pairingMethods?.includes('code')) throw new PairingCodeUnsupportedError();
 
   const pinned = http.pinned(identity.tlsCertPem!);

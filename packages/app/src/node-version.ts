@@ -21,11 +21,11 @@
  * script downloads: the raw node.exe on Windows, the whole tarball on
  * unix.
  */
-export const NODE_VERSION = '24.18.1';
+export const NODE_VERSION = '24.22.1';
 
 /** sha256 of the version-tagged Node.js LICENSE file shipped beside the runtime. */
 export const NODE_LICENSE_SHA256 =
-  '148eacf7863ef4329224a29398623077200a27194aa075569faf4a0a85566ca5';
+  '5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace';
 
 /**
  * sha256 of each platform asset. Keys match the suffix used by the
@@ -38,12 +38,12 @@ export const NODE_LICENSE_SHA256 =
  * `scripts/bump-node.mjs`.
  */
 export const NODE_SHA256: Record<string, string> = {
-  'macos-arm64': 'eb02f7fab96d3d67de40c5ec8566096fcb4c2026728787683ae5a97eb612b941',
-  'macos-x64': '6fb20fceacbb157c2f95825b80df4a454a0f6d81cdcd7bb81eeae9147e0e76ec',
-  'linux-x64': '9f5eb6ac21845a66c493c91a253b1da32fd684e89e9b7202d4936982336be4ca',
-  'linux-arm64': 'df224555a083b918e46260cc969838501b9f9a87140c1195e5b9597b56d5dae2',
-  'win-x64': 'ac51903c4c111815d52280b1fdcc8da067cbb37e2fe1a765097b85c3292c8582',
-  'win-arm64': '845fc4ce00780241667f92e8f7a3a679321a655dddb3b610f2d85693b17ddf28',
+  'macos-arm64': '89c682593d76cd44233fa53b1563264e7de9cbb189cad169135c5b4fadfbc0a7',
+  'macos-x64': 'd132557e7ee2b85af08b0c8c34338e65c6430f2238d01f727728ef42dc83b035',
+  'linux-x64': 'eb6728e77c576a35162c122c45ccadf224d89ff00abc8dae46cc2897c6002d7c',
+  'linux-arm64': '33c37be234ba8bee041961047b19160f4d7d0f164e8e246f78bdd10feff148b3',
+  'win-x64': 'd702daa815eabbff763c7d3808e235cf031cf2ca70211b56847bc72f51e240e5',
+  'win-arm64': '8bea91dc437fe01e7d92ef0efc6c9eaf654369aaba9b2d3e9841552ea7b95a00',
 };
 
 /**

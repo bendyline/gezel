@@ -71,8 +71,8 @@ attribution file is taken from the exact Electron distribution being packaged.
 
 | Component | Pinned version | License | Source |
 |---|---|---|---|
-| **Electron** | `43.7.7` | MIT, with bundled Chromium notices | [electron/electron](https://github.com/electron/electron) |
-| **Node.js** | `24.18.1` | MIT, with bundled third-party notices | [nodejs/node](https://github.com/nodejs/node) |
+| **Electron** | `43.8.3` | MIT, with bundled Chromium notices | [electron/electron](https://github.com/electron/electron) |
+| **Node.js** | `24.22.1` | MIT, with bundled third-party notices | [nodejs/node](https://github.com/nodejs/node) |
 | **pnpm** | `11.27.1` | MIT | [pnpm/pnpm](https://github.com/pnpm/pnpm) |
 | **DuckDB** | `1.5.5` | MIT | [duckdb/duckdb](https://github.com/duckdb/duckdb) |
 | **MXC launcher** | `1.0.0` | MIT | [microsoft/mxc](https://github.com/microsoft/mxc) — Microsoft eXecution Containers' `wxc-exec.exe`, taken unmodified from the [`@microsoft/mxc-sdk`](https://www.npmjs.com/package/@microsoft/mxc-sdk) npm package; Windows installers only |

@@ -23,8 +23,12 @@ export type SecurityLevel = SecurityPolicy['level'];
 /** A preset level (everything except the synthetic `custom`). */
 export type SecurityPresetLevel = Exclude<SecurityLevel, 'custom'>;
 
-/** The five authoritative capability booleans (no `level`). */
-export type SecurityCapabilities = Omit<SecurityPolicy, 'level'>;
+/**
+ * The authoritative capability booleans (no `level`). Required here even
+ * where the stored schema still accepts a policy saved before a switch
+ * existed: {@link resolveSecurityPolicy} fills those in.
+ */
+export type SecurityCapabilities = Required<Omit<SecurityPolicy, 'level'>>;
 
 /**
  * Copilot's SDK-native tools run outside Gezel's scoped MCP bridge. Keep
@@ -46,7 +50,7 @@ export function resolveSandboxCopilot(
 }
 
 /**
- * The resolved posture: the five stored capabilities plus the derived
+ * The resolved posture: the stored capabilities plus the derived
  * predicates the enforcement points consume directly.
  */
 export interface ResolvedSecurityPolicy extends SecurityCapabilities {
@@ -114,8 +118,10 @@ export interface ResolvedSecurityPolicy extends SecurityCapabilities {
  *   governed per project by {@link projectManagedWorkspaceWritable}: internal
  *   workspaces (our own folder, nothing precious) stay writable, external
  *   working directories stay deny-until-opted-in.
- * - `lockdown`: coding posture. Edits, scripts, cloud chat, GitHub R/W,
- *   auto-update — but no open-web research (services off).
+ * - `lockdown`: coding posture. Edits, sandboxed scripts, cloud chat, GitHub
+ *   R/W, auto-update — but no open-web research (services off) and no
+ *   package scripts, which run unsandboxed with the network and could reach
+ *   the web anyway.
  * - `free`: everything.
  */
 export const SECURITY_PRESETS: Record<SecurityPresetLevel, SecurityCapabilities> = {
@@ -125,6 +131,8 @@ export const SECURITY_PRESETS: Record<SecurityPresetLevel, SecurityCapabilities>
     allowExternalServices: false,
     allowScriptExecution: false,
     allowAppNetwork: false,
+    allowPackageScriptEdits: false,
+    allowPackageScriptExecution: false,
   },
   lockdown: {
     allowFileEdits: true,
@@ -132,6 +140,8 @@ export const SECURITY_PRESETS: Record<SecurityPresetLevel, SecurityCapabilities>
     allowExternalServices: false,
     allowScriptExecution: true,
     allowAppNetwork: true,
+    allowPackageScriptEdits: false,
+    allowPackageScriptExecution: false,
   },
   free: {
     allowFileEdits: true,
@@ -139,8 +149,12 @@ export const SECURITY_PRESETS: Record<SecurityPresetLevel, SecurityCapabilities>
     allowExternalServices: true,
     allowScriptExecution: true,
     allowAppNetwork: true,
+    allowPackageScriptEdits: true,
+    allowPackageScriptExecution: true,
   },
 };
+
+const CAPABILITY_KEYS = Object.keys(SECURITY_PRESETS.free) as Array<keyof SecurityCapabilities>;
 
 /**
  * Fail-safe posture for a config with no stored policy. First-run migration
@@ -151,11 +165,18 @@ export const DEFAULT_SECURITY_LEVEL: SecurityPresetLevel = 'lockdown';
 
 /**
  * Build a full {@link SecurityPolicy} object for a preset level — used by
- * the slider (and the first-run step) to write the five booleans in
+ * the slider (and the first-run step) to write every capability in
  * lockstep with the chosen level.
  */
 export function securityPolicyForLevel(level: SecurityPresetLevel): SecurityPolicy {
   return { level, ...SECURITY_PRESETS[level] };
+}
+
+/** The stored capability set of a policy, without a resolved policy's derived predicates. */
+export function securityCapabilitiesOf(policy: SecurityCapabilities): SecurityCapabilities {
+  return Object.fromEntries(
+    CAPABILITY_KEYS.map((key) => [key, policy[key]]),
+  ) as SecurityCapabilities;
 }
 
 /**
@@ -166,15 +187,7 @@ export function securityPolicyForLevel(level: SecurityPresetLevel): SecurityPoli
 export function classifySecurityLevel(caps: SecurityCapabilities): SecurityLevel {
   for (const level of ['super-lockdown', 'lockdown', 'free'] as const) {
     const preset = SECURITY_PRESETS[level];
-    if (
-      preset.allowFileEdits === caps.allowFileEdits &&
-      preset.allowExternalChat === caps.allowExternalChat &&
-      preset.allowExternalServices === caps.allowExternalServices &&
-      preset.allowScriptExecution === caps.allowScriptExecution &&
-      preset.allowAppNetwork === caps.allowAppNetwork
-    ) {
-      return level;
-    }
+    if (CAPABILITY_KEYS.every((key) => preset[key] === caps[key])) return level;
   }
   return 'custom';
 }
@@ -334,9 +347,14 @@ export function resolveGezelWorkspaceAccess(opts: {
 }
 
 /**
- * Resolve the effective security posture from config. The five stored
+ * Resolve the effective security posture from config. The stored
  * booleans are always authoritative (the `level` is just a label); when
  * the policy is absent we fall back to {@link DEFAULT_SECURITY_LEVEL}.
+ *
+ * The package-script switches arrived after the others. A policy saved
+ * before them rode package scripts on `allowScriptExecution`; it now gets
+ * them only where it already let gezels reach the web, because a package
+ * script can. So a stored `lockdown` loses them and `free` keeps them.
  */
 export function resolveSecurityPolicy(
   config: Pick<GezelConfig, 'securityPolicy'>,
@@ -349,6 +367,12 @@ export function resolveSecurityPolicy(
         allowExternalServices: stored.allowExternalServices,
         allowScriptExecution: stored.allowScriptExecution,
         allowAppNetwork: stored.allowAppNetwork,
+        allowPackageScriptEdits:
+          stored.allowPackageScriptEdits ??
+          (stored.allowExternalServices && stored.allowScriptExecution),
+        allowPackageScriptExecution:
+          stored.allowPackageScriptExecution ??
+          (stored.allowExternalServices && stored.allowScriptExecution),
       }
     : SECURITY_PRESETS[DEFAULT_SECURITY_LEVEL];
   const level = stored?.level ?? DEFAULT_SECURITY_LEVEL;

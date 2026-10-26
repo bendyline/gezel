@@ -108,6 +108,27 @@ describe('craftbookSetupGaps', () => {
     expect(gaps).toMatchObject([{ kind: 'web-search', keyMissing: true }]);
   });
 
+  it('asks for package scripts when a book proves its work by running them', () => {
+    const commands = [
+      { scope: 'script' as const, name: 'test', reason: 'Runs the suite' },
+      { scope: 'npx' as const, name: 'tsc', optional: true },
+    ];
+    expect(
+      craftbookSetupGaps({ commands }, { ...READY, allowPackageScriptExecution: false }),
+    ).toEqual([
+      { kind: 'package-scripts', commands: ['npm run test'], reasons: ['Runs the suite'] },
+    ]);
+    expect(
+      craftbookSetupGaps({ commands }, { ...READY, allowPackageScriptExecution: true }),
+    ).toEqual([]);
+    expect(
+      craftbookSetupGaps(
+        { commands: [{ scope: 'npx', name: 'tsc', optional: true }] },
+        { ...READY, allowPackageScriptExecution: false },
+      ),
+    ).toEqual([]);
+  });
+
   it('needs only External services for a book that fetches pages but does not search', () => {
     const gaps = craftbookSetupGaps(
       { services: [{ kind: 'external-services' }] },

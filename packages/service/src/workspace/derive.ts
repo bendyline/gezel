@@ -1,12 +1,18 @@
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  type EgressIndicator,
+  egressIndicatorRefusal,
+  findEgressIndicators,
+} from '@bendyline/gezel';
 import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { dataTableSniff } from '@bendyline/gezel/checks';
 import { OutputRingBuffer } from '../fs/ring.js';
 import type { Store } from '../fs/store.js';
 import { runInSandbox } from '../sandbox/runner.js';
 import { WorkspaceWriteDeniedError } from './errors.js';
+import { restoreGatedManifestEdits, snapshotRootManifests } from './manifest-guard.js';
 import { workspaceScriptDeniesNetwork } from './runner.js';
 
 /**
@@ -55,6 +61,8 @@ export interface DeriveWorkspaceFileResult {
   /** Script ran clean but the output failed verification (missing/empty/unparseable). */
   verifyError?: string;
   error?: string;
+  /** Set when the script was refused before it ran; the route records it in History. */
+  egressIndicators?: EgressIndicator[];
 }
 
 export async function deriveWorkspaceFile(
@@ -85,10 +93,16 @@ export async function deriveWorkspaceFile(
     };
   }
 
+  const egressIndicators = findEgressIndicators(opts.script);
+  if (egressIndicators.length > 0) {
+    return { ...emptyRun(), error: egressIndicatorRefusal(egressIndicators), egressIndicators };
+  }
+
   const timeout = clampTimeout(opts.timeoutMs);
   const stdoutRing = new OutputRingBuffer(OUTPUT_CAP_BYTES);
   const stderrRing = new OutputRingBuffer(OUTPUT_CAP_BYTES);
   const artifactsDir = store.projectArtifactsDir(opts.projectId);
+  const manifests = await snapshotRootManifests(workspaceDir);
 
   // `tmpdir()` is often `/var/...` on macOS while Node's permission
   // checks compare the resolved `/private/var/...` path. Match
@@ -114,6 +128,8 @@ export async function deriveWorkspaceFile(
   } finally {
     await rm(scratchDir, { recursive: true, force: true }).catch(() => {});
   }
+  const restoredNote = await restoreGatedManifestEdits(store, workspaceDir, manifests);
+  if (restoredNote) stderrRing.append(`${restoredNote}\n`);
 
   const stdout = mergeRunOutput(stdoutRing.value(), res.stdout);
   const stderr = mergeRunOutput(stderrRing.value(), res.stderr);

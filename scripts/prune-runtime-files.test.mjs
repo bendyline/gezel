@@ -89,6 +89,7 @@ describe('pruneRuntimeFiles', () => {
       'source-map': 2,
       'type-declaration': 3,
       'bundler-only': 0,
+      'unused-asset': 0,
     });
     assert.equal(result.removed.length, 5);
 
@@ -179,5 +180,42 @@ describe('undistributable bundler builds', () => {
 
   it('does not match a similarly named file from another package', () => {
     assert.equal(runtimePruneReason('node_modules/other/dist/kokoro.web.js'), null);
+  });
+});
+
+describe('unused package assets', () => {
+  const fontAwesome = 'node_modules/@fortawesome/fontawesome-free';
+
+  it("drops Font Awesome's per-icon SVGs, sprites, JS, SCSS and metadata, wherever it is deployed", () => {
+    for (const path of [
+      `${fontAwesome}/svgs/solid/house.svg`,
+      `${fontAwesome}/svgs-full/brands/github.svg`,
+      `${fontAwesome}/sprites/solid.svg`,
+      `${fontAwesome}/sprites-full/regular.svg`,
+      `${fontAwesome}/js/all.min.js`,
+      `${fontAwesome}/metadata/icon-families.json`,
+      `${fontAwesome}/scss/_variables.scss`,
+      `${fontAwesome}/less/variables.less`,
+      `node_modules/@bendyline/docblocks-cli/${fontAwesome}/svgs/solid/house.svg`,
+    ]) {
+      assert.equal(runtimePruneReason(path), 'unused-asset', path);
+    }
+  });
+
+  it('keeps the stylesheets, webfonts, license and manifest a CSS import would need', () => {
+    for (const path of [
+      `${fontAwesome}/css/all.min.css`,
+      `${fontAwesome}/webfonts/fa-solid-900.woff2`,
+      `${fontAwesome}/LICENSE.txt`,
+      `${fontAwesome}/package.json`,
+    ]) {
+      assert.equal(runtimePruneReason(path), null, path);
+    }
+  });
+
+  it('does not match the same folder names in another package', () => {
+    assert.equal(runtimePruneReason('node_modules/@fortawesome/other/svgs/a.svg'), null);
+    assert.equal(runtimePruneReason('node_modules/icons/svgs/a.svg'), null);
+    assert.equal(runtimePruneReason('node_modules/@bendyline/squisq-react/dist/js/a.js'), null);
   });
 });

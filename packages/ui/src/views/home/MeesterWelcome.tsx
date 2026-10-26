@@ -387,7 +387,7 @@ export function composerWaitingStatus(setup: WelcomeSetup): string {
     case 'checking':
       return 'looking for an AI model on this computer';
     case 'needs-download':
-      return 'download an AI model first';
+      return 'download tools (an AI model) first';
     case 'installing': {
       if (state.progress?.phase === 'verifying') return 'checking the AI model';
       if (state.progress?.phase === 'extracting-metadata') return 'unpacking the AI model';

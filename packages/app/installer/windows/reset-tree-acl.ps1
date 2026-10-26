@@ -2,10 +2,15 @@
 # repair when it is still sealed as the installer published it (see
 # IsSealedTree in ResetTreeAcl.cs). An unreadable attestation repairs it as
 # usual.
+#
+# -SeparateZones is a comma-separated list of direct children of -Root that are
+# trust zones of their own. A hard-linked file is repaired only when all of
+# its names lie in one zone of the tree (see RequireOneZone).
 param(
     [Parameter(Mandatory = $true)][string]$Root,
     [string]$KeepSealedChild,
-    [string]$SealedSha
+    [string]$SealedSha,
+    [string]$SeparateZones
 )
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = $PSHOME + '\Modules'
@@ -37,7 +42,9 @@ try {
         param($stage, $path)
         if ($stage -eq 'kept') { $kept.Add($path) }
     }.GetNewClosure()
-    $securedCount = [Gezel.Installer.ResetTreeAcl]::Run($Root, 'S-1-5-32-544', $keep, $sha, $observe)
+    $zones = [string[]]@()
+    if ($SeparateZones) { $zones = [string[]]@($SeparateZones.Split(',') | ForEach-Object { $_.Trim() }) }
+    $securedCount = [Gezel.Installer.ResetTreeAcl]::Run($Root, 'S-1-5-32-544', $keep, $sha, $zones, $observe)
     foreach ($path in $kept) {
         Write-Output "[reset-tree-acl] Left $path as published: it is still sealed and attested."
     }

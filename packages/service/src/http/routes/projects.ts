@@ -8,6 +8,7 @@ import {
   CreateProjectRequestSchema,
   CreateTypedProjectRequestSchema,
   DriveIndexEnrichmentRequestSchema,
+  type EgressIndicator,
   FetchDiffRequestSchema,
   FetchRepoRequestSchema,
   FileGraphRequestSchema,
@@ -33,6 +34,7 @@ import {
   resolveProjectTypeId,
   resolveSecurityPolicy,
   starterCraftbookIds,
+  toolCallBlockedHistoryEntry,
 } from '@bendyline/gezel';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
@@ -101,7 +103,11 @@ import { browserScriptEnv } from '../../sandbox/runner.js';
 import { setFolderNightWork } from '../../suggested-work/arm.js';
 import { readCommandApprovals } from '../../workspace/command-approvals.js';
 import { deriveWorkspaceFile } from '../../workspace/derive.js';
-import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../../workspace/errors.js';
+import {
+  PackageScriptEditDeniedError,
+  WorkspaceEditError,
+  WorkspaceWriteDeniedError,
+} from '../../workspace/errors.js';
 import { type EnsureProjectLeadResult, ensureProjectVoorman } from '../../workspace/import-sync.js';
 import { readJournalTail } from '../../workspace/journal.js';
 import {
@@ -134,6 +140,9 @@ function mapWorkspaceError(err: unknown): { status: number; body: Record<string,
       body: { error: err.message, code: err.code, reason: err.reason, workingDir: err.workingDir },
     };
   }
+  if (err instanceof PackageScriptEditDeniedError) {
+    return { status: 403, body: { error: err.message, code: err.code, path: err.path } };
+  }
   if (err instanceof PathSafetyError) {
     return { status: 400, body: { error: err.message, code: err.code } };
   }
@@ -146,6 +155,26 @@ function mapWorkspaceError(err: unknown): { status: number; body: Record<string,
 
 export function projectRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+
+  /** History for a gezel-written script the runner refused before it ran. */
+  const recordBlockedScript = (
+    c: Context,
+    projectId: string,
+    tool: string,
+    indicators: EgressIndicator[] | undefined,
+  ): void => {
+    if (!indicators?.length) return;
+    const auth = c.get('auth');
+    const entry = toolCallBlockedHistoryEntry({
+      tool,
+      surface: 'gezel-tool',
+      indicators,
+      projectId,
+      ...(auth?.gezelId ? { gezelId: auth.gezelId } : {}),
+    });
+    log.warn(`${entry.summary} (project ${projectId})`);
+    void ctx.history?.log(entry).catch(() => undefined);
+  };
 
   app.get('/', async (c) => {
     const projects = await ctx.store.listProjects();
@@ -2641,6 +2670,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         ...(body.args ? { args: body.args } : {}),
         ...(effectiveTimeout ? { timeoutMs: effectiveTimeout } : {}),
       });
+      recordBlockedScript(c, id, 'run_nodejs_script', result.egressIndicators);
       return c.json(result);
     } catch (err) {
       const mapped = mapWorkspaceError(err);
@@ -2669,6 +2699,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         outputPath: body.outputPath,
         ...(effectiveTimeout ? { timeoutMs: effectiveTimeout } : {}),
       });
+      recordBlockedScript(c, id, 'derive_file', result.egressIndicators);
       return c.json(result);
     } catch (err) {
       const mapped = mapWorkspaceError(err);

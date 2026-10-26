@@ -737,6 +737,17 @@ jobs:
           $sharedLink = Join-Path $proj 'dep'
           New-Junction $sharedLink $pnpmStore
 
+          # (d) A hard link inside the private tree, the way the machine
+          # engine's speech-model store installs a model: the content-addressed
+          # blob and the installed file are two names of one file. v1.26287.93
+          # already created these, and the RC that refused every hard link
+          # dropped GezelService on each such upgrade.
+          $speechBlob = Join-Path $dataRoot 'assets\models\speech-assets\upgrade-smoke-blob'
+          $speechModel = Join-Path $dataRoot 'assets\models\whisper-cpp\upgrade-smoke\model.bin'
+          New-Item -ItemType Directory -Path (Split-Path $speechBlob), (Split-Path $speechModel) -Force | Out-Null
+          Set-Content -LiteralPath $speechBlob -Value 'speech model' -NoNewline
+          New-Item -ItemType HardLink -Path $speechModel -Target $speechBlob -ErrorAction Stop | Out-Null
+
           # electron-updater's silent invocation. A wait with a deadline rather
           # than -Wait, so a wedged installer fails this step instead of the job.
           $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -811,6 +822,11 @@ jobs:
           } elseif ((Get-Content -LiteralPath (Join-Path $sharedLink 'index.js') -Raw -ErrorAction SilentlyContinue) -ne 'dep') {
             $failures += "$sharedLink no longer resolves to its store directory"
           }
+          if ((Get-Content -LiteralPath $speechModel -Raw -ErrorAction SilentlyContinue) -ne 'speech model') {
+            $failures += "The in-tree hard link $speechModel did not survive the upgrade"
+          } elseif ((& fsutil.exe hardlink list $speechModel | Measure-Object).Count -ne 2) {
+            $failures += "$speechModel is no longer one file with $speechBlob"
+          }
           $outsideIntact = (Get-Content -LiteralPath $outsideMarker -Raw -ErrorAction SilentlyContinue) -eq 'outside'
           if (-not $outsideIntact) {
             $failures += "Removing $escapeLink touched its target: $outsideMarker changed"
@@ -833,7 +849,7 @@ jobs:
             Write-Host '::endgroup::'
             throw ($failures -join [Environment]::NewLine)
           }
-          Write-Host '[upgrade-smoke] silent upgrade kept the uv and pnpm in-tree junctions, removed the escaping one, and left its target untouched'
+          Write-Host '[upgrade-smoke] silent upgrade kept the uv and pnpm in-tree junctions and the speech-store hard link, removed the escaping junction, and left its target untouched'
           exit 0
 
       - name: Collect Windows installer-smoke diagnostics

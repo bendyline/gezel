@@ -77,10 +77,13 @@ import {
   type WikipediaReadResponse,
   WikipediaSearchRequestSchema,
   createLogger,
+  egressIndicatorRefusal,
+  findEgressIndicators,
   isHarnessHiddenCatalog,
   parseIssueHandoffResponses,
   projectManagedWorkspaceWritable,
   resolveSecurityPolicy,
+  toolCallBlockedHistoryEntry,
 } from '@bendyline/gezel';
 import {
   PathSafetyError,
@@ -244,6 +247,21 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       let finalUrl = currentUrl;
       let res: Response | null = null;
       for (let redirects = 0; redirects <= 5; redirects++) {
+        // Every hop, like the SSRF check: a public URL can redirect to a drop.
+        const indicators = findEgressIndicators(currentUrl);
+        if (indicators.length > 0) {
+          const auth = c.get('auth');
+          const entry = toolCallBlockedHistoryEntry({
+            tool: 'fetch_url',
+            surface: 'gezel-tool',
+            indicators,
+            projectId: c.req.param('id'),
+            ...(auth?.gezelId ? { gezelId: auth.gezelId } : {}),
+          });
+          log.warn(entry.summary);
+          void ctx.history?.log(entry).catch(() => undefined);
+          return c.json({ error: egressIndicatorRefusal(indicators) }, 403);
+        }
         if (!isAllowedHermeticEvalFetchUrl(currentUrl)) {
           await assertPublicUrl(currentUrl);
         }

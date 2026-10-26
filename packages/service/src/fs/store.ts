@@ -106,6 +106,7 @@ import {
   encodeProjectGezelId,
   inferGenderForName,
   isLegacyRoleTitle,
+  isPackageManifestPath,
   isSafeEntityId,
   isScheduledRunSession,
   isSharedLibraryProject,
@@ -113,12 +114,14 @@ import {
   legacyDensityToGeneralistMode,
   legacyRoleKey,
   nowIso,
+  packageScriptsEdit,
   parseGezelMarkdown,
   pickKokoroVoiceForGender,
   plainRoleProse,
   plainRoleTitle,
   projectManagedWorkspaceWritePolicy,
   resolveFactualWriting,
+  resolveSecurityPolicy,
   resolveSharedProjectId,
   seedCharacter,
   serializeGezelMarkdown,
@@ -214,7 +217,11 @@ import {
   computeReplaceLines,
   readFileForEditOrThrow,
 } from '../workspace/edit.js';
-import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../workspace/errors.js';
+import {
+  PackageScriptEditDeniedError,
+  WorkspaceEditError,
+  WorkspaceWriteDeniedError,
+} from '../workspace/errors.js';
 import { type JournalContext, appendJournalEntry } from '../workspace/journal.js';
 import { bootstrapWorkspace } from '../workspace/template.js';
 import {
@@ -4919,6 +4926,7 @@ export class Store {
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, filePath, { allowRoot: false });
+    await this.guardPackageScriptEdit(filePath, full, content, ctx, opts);
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, content, { noReplace: opts?.createOnly });
     await appendJournalEntry(this.home, id, 'write', filePath, { content, ctx });
@@ -4961,6 +4969,7 @@ export class Store {
     const oldContent = await readFileForEditOrThrow(full, args.path);
 
     const newContent = computeReplaceInFile(oldContent, args);
+    await this.guardPackageScriptEdit(args.path, full, newContent, ctx, { before: oldContent });
 
     await writeFileAtomic(full, newContent);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: newContent, ctx });
@@ -4998,6 +5007,7 @@ export class Store {
     const oldContent = await readFileForEditOrThrow(full, args.path);
 
     const newContent = computeReplaceLines(oldContent, args);
+    await this.guardPackageScriptEdit(args.path, full, newContent, ctx, { before: oldContent });
 
     await writeFileAtomic(full, newContent);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: newContent, ctx });
@@ -5066,6 +5076,7 @@ export class Store {
         'identity-edit',
       );
     }
+    await this.guardPackageScriptEdit(args.path, full, applied, ctx, { before: oldContent });
     await writeFileAtomic(full, applied);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: applied, ctx });
     const result = buildWorkspaceEditResult(args.path, oldContent, applied);
@@ -5147,6 +5158,10 @@ export class Store {
           results.push({ path: edit.path, ok: true, error: 'no-op' });
           continue;
         }
+        await this.guardPackageScriptEdit(edit.path, full, applied, ctx, {
+          ...opts,
+          before: oldContent,
+        });
         planned.push({ path: edit.path, full, oldContent, newContent: applied });
         results.push({ path: edit.path, ok: true });
       } catch (err) {
@@ -5202,12 +5217,68 @@ export class Store {
     const full = await resolveInside(gate.workspaceDir, args.path, { allowRoot: false });
     const oldContent = await readFileForEditOrThrow(full, args.path);
     const newContent = computeInsertAtMarker(oldContent, { ...args, where });
+    await this.guardPackageScriptEdit(args.path, full, newContent, ctx, { before: oldContent });
     await writeFileAtomic(full, newContent);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: newContent, ctx });
     const result = buildWorkspaceEditResult(args.path, oldContent, newContent);
     await this.logWorkspaceEditHistory(id, 'insert_at_marker', result, ctx);
     await this.touchProject(id);
     return result;
+  }
+
+  /**
+   * The package-script check for a write that carries no journal actor —
+   * the script SDK's `fs.write` from a run a gezel started.
+   */
+  async assertGezelPackageScriptEdit(id: string, relPath: string, after: string): Promise<void> {
+    if (!isPackageManifestPath(relPath)) return;
+    const full = await resolveInside(await this.projectWorkspaceDir(id), relPath, {
+      allowRoot: false,
+    });
+    await this.guardPackageScriptEdit(relPath, full, after, { gezelId: 'script' });
+  }
+
+  /**
+   * Refuse a gezel's write that adds or changes a package manifest's
+   * `scripts` while `allowPackageScriptEdits` is off. The person's own
+   * writes and applied proposals (`userInitiated`) are never checked.
+   */
+  private async guardPackageScriptEdit(
+    relPath: string,
+    full: string,
+    after: string | Buffer,
+    ctx?: JournalContext,
+    opts?: { userInitiated?: boolean; before?: string | null },
+  ): Promise<void> {
+    if (!ctx?.gezelId || opts?.userInitiated || !isPackageManifestPath(relPath)) return;
+    const before =
+      opts?.before !== undefined ? opts.before : await readFile(full, 'utf8').catch(() => null);
+    const edit = packageScriptsEdit(
+      relPath,
+      before,
+      typeof after === 'string' ? after : after.toString('utf8'),
+    );
+    if (edit.kind === 'unchanged') return;
+    if (resolveSecurityPolicy(await this.readConfig()).allowPackageScriptEdits) return;
+    throw new PackageScriptEditDeniedError(relPath, edit);
+  }
+
+  /**
+   * The rename/copy form: a file moved onto a manifest path brings its
+   * content's scripts with it. A directory move keeps every manifest inside
+   * it as it was, so only a file landing on a manifest name is compared.
+   */
+  private async guardPackageScriptMove(
+    toPath: string,
+    fromFull: string,
+    toFull: string,
+    ctx?: JournalContext,
+    opts?: { userInitiated?: boolean },
+  ): Promise<void> {
+    if (!ctx?.gezelId || opts?.userInitiated || !isPackageManifestPath(toPath)) return;
+    const source = await stat(fromFull).catch(() => null);
+    if (!source?.isFile()) return;
+    await this.guardPackageScriptEdit(toPath, toFull, await readFile(fromFull), ctx, opts);
   }
 
   private async logWorkspaceEditHistory(
@@ -5275,6 +5346,7 @@ export class Store {
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, filePath, { allowRoot: false });
+    await this.guardPackageScriptEdit(filePath, full, data, ctx);
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, data, { noReplace: options?.createOnly });
     await this.history?.log({
@@ -5387,6 +5459,7 @@ export class Store {
     if (opts.noReplace && (await pathExists(toFull))) {
       throw new Error(`${toPath} already exists`);
     }
+    await this.guardPackageScriptMove(toPath, fromFull, toFull, ctx, opts);
     await mkdir(dirname(toFull), { recursive: true });
     await rename(fromFull, toFull);
     await appendJournalEntry(this.home, id, 'rename', toPath, { fromPath, ctx });
@@ -5420,6 +5493,7 @@ export class Store {
     const fromFull = await resolveInside(gate.workspaceDir, fromPath, { allowRoot: false });
     const toFull = await resolveInside(gate.workspaceDir, toPath, { allowRoot: false });
     if (await pathExists(toFull)) throw new Error(`${toPath} already exists`);
+    await this.guardPackageScriptMove(toPath, fromFull, toFull, ctx, opts);
     await mkdir(dirname(toFull), { recursive: true });
     await cp(fromFull, toFull, { recursive: true, errorOnExist: true, force: false });
     await appendJournalEntry(this.home, id, 'copy', toPath, { fromPath, ctx });

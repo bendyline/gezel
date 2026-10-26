@@ -45,6 +45,7 @@ import {
   taskPersonName,
   taskTranscriptCompatible,
   todayIso,
+  toolCallBlockedHistoryEntry,
   turnStateWanted,
   withCharacterChatCap,
   withCurrentDateTimeLine,
@@ -16150,6 +16151,18 @@ export class ChatManager extends LocalEngineRuntime {
           ...(card ? { card } : {}),
         },
       );
+      if (historyManager && info.egressIndicators?.length) {
+        await historyManager.log(
+          toolCallBlockedHistoryEntry({
+            tool: info.name,
+            surface: 'mcp-toolset',
+            indicators: info.egressIndicators,
+            projectId: record.projectId,
+            gezelId: record.gezelId,
+            sessionId: record.id,
+          }),
+        );
+      }
       if (historyManager) {
         await historyManager.log({
           kind: 'tool.called',

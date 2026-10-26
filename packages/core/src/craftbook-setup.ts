@@ -1,5 +1,10 @@
 import { craftbookParamDefaults, interpolateContext } from './craftbook-params.js';
-import type { Craftbook, CraftbookModelNeed, CraftbookServiceNeed } from './schemas/craftbook.js';
+import type {
+  Craftbook,
+  CraftbookCommandNeed,
+  CraftbookModelNeed,
+  CraftbookServiceNeed,
+} from './schemas/craftbook.js';
 
 /**
  * What a craftbook needs from this Gezel before it can run, and what is
@@ -13,7 +18,7 @@ import type { Craftbook, CraftbookModelNeed, CraftbookServiceNeed } from './sche
  */
 
 /** The needs a book declares, or a workflow module computes at run time. */
-export type CraftbookSetupNeeds = Pick<Craftbook, 'models' | 'services'>;
+export type CraftbookSetupNeeds = Pick<Craftbook, 'models' | 'services' | 'commands'>;
 
 /** On-device engines Gezel downloads chat-model weights into. */
 export const CRAFTBOOK_MODEL_ENGINES = ['llama-cpp', 'mlx', 'ds4'] as const;
@@ -65,6 +70,8 @@ export function resolveCraftbookModelNeeds(
 
 export type CraftbookSetupGap =
   | { kind: 'external-services'; reasons: string[] }
+  /** The book proves its work by running these package commands, and gezels may not run them. */
+  | { kind: 'package-scripts'; commands: string[]; reasons: string[] }
   /** No keyed web search. `keyMissing` false means the key is saved but Brave is not selected. */
   | { kind: 'web-search'; keyMissing: boolean; reasons: string[] }
   | { kind: 'model'; id: string; provider: CraftbookModelEngine; reasons: string[] };
@@ -72,6 +79,8 @@ export type CraftbookSetupGap =
 export interface CraftbookSetupState {
   /** `resolveSecurityPolicy(config).allowExternalServices`. */
   allowExternalServices: boolean;
+  /** `resolveSecurityPolicy(config).allowPackageScriptExecution`; absent counts as allowed. */
+  allowPackageScriptExecution?: boolean;
   /** `config.webSearch.provider`; absent is the zero-key Wikipedia default. */
   webSearchProvider?: string;
   hasBraveSearchApiKey: boolean;
@@ -82,12 +91,13 @@ export interface CraftbookSetupState {
 /**
  * The gaps between a run's needs and this Gezel, in the order a host should
  * close them: External services first (web search cannot work without it),
- * then web search, then downloads. Empty means ready.
+ * then web search, then package scripts, then downloads. Empty means ready.
  */
 export function craftbookSetupGaps(
   needs: {
     services?: readonly CraftbookServiceNeed[];
     models?: readonly ResolvedCraftbookModelNeed[];
+    commands?: readonly CraftbookCommandNeed[];
   },
   state: CraftbookSetupState,
 ): CraftbookSetupGap[] {
@@ -105,6 +115,20 @@ export function craftbookSetupGaps(
       kind: 'web-search',
       keyMissing: !state.hasBraveSearchApiKey,
       reasons: reasonsOf(webSearch),
+    });
+  }
+  const commands = (needs.commands ?? []).filter((need) => need.optional !== true);
+  if (commands.length > 0 && state.allowPackageScriptExecution === false) {
+    gaps.push({
+      kind: 'package-scripts',
+      commands: commands.map((need) =>
+        need.scope === 'script' ? `npm run ${need.name}` : `npx ${need.name}`,
+      ),
+      reasons: [
+        ...new Set(
+          commands.map((need) => need.reason).filter((reason): reason is string => !!reason),
+        ),
+      ],
     });
   }
   for (const model of needs.models ?? []) {

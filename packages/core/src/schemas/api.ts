@@ -730,7 +730,7 @@ export type ExternalFolders = z.infer<typeof ExternalFoldersSchema>;
 
 /**
  * Centralized security & compliance policy. The `level` is the
- * user-facing slider position; the five booleans are the authoritative
+ * user-facing slider position; the capability booleans are the authoritative
  * capability set the rest of the system enforces. A preset level
  * (`super-lockdown` / `lockdown` / `free`) keeps the booleans in lockstep
  * with {@link SECURITY_PRESETS}; `custom` is set automatically when the
@@ -754,6 +754,19 @@ export const SecurityPolicySchema = z.object({
   allowScriptExecution: z.boolean(),
   /** Desktop-shell network gate: updater/background traffic and renderer-originated off-daemon requests. */
   allowAppNetwork: z.boolean(),
+  /**
+   * Allow gezels to change the `scripts` of a package manifest (`package.json`,
+   * `package.json5`, `package.yaml`) anywhere in a workspace. Absent on a
+   * policy saved before the switch existed; `resolveSecurityPolicy` derives it.
+   */
+  allowPackageScriptEdits: z.boolean().optional(),
+  /**
+   * Allow gezels to run package scripts and installed package binaries
+   * (`run_package_script`, `run_npx`). These run outside the script sandbox,
+   * as the person's account, with network access. Absent on a policy saved
+   * before the switch existed; `resolveSecurityPolicy` derives it.
+   */
+  allowPackageScriptExecution: z.boolean().optional(),
 });
 export type SecurityPolicy = z.infer<typeof SecurityPolicySchema>;
 

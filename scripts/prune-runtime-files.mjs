@@ -61,10 +61,29 @@ export function isUndistributableBundlerBuild(relativePath) {
   return /(?:^|\/)node_modules\/kokoro-js\/dist\/kokoro\.web\.js$/.test(slash(relativePath));
 }
 
-/** Return `source-map`, `type-declaration`, `bundler-only`, or null. */
+/**
+ * Package folders no runtime reads.
+ *
+ * `@bendyline/squisq-react` lists Font Awesome as a dependency, yet its dist
+ * already carries everything it uses: `dist/styles` bundles the stylesheets
+ * beside copies of the webfonts, and the standalone player inlines them. So
+ * `pnpm deploy` copied the whole package for nothing: an SVG per icon twice
+ * (`svgs`, `svgs-full`), sprites, JS, SCSS and metadata, ~5,800 files and
+ * ~41 MB, each one a tar extraction and a Defender scan on first launch. The
+ * stylesheets, webfonts and license stay for anything that imports the
+ * package's own CSS.
+ */
+export function isUnusedPackageAsset(relativePath) {
+  return /(?:^|\/)node_modules\/@fortawesome\/fontawesome-free\/(?:svgs|svgs-full|sprites|sprites-full|js|metadata|scss|less)\//.test(
+    slash(relativePath),
+  );
+}
+
+/** Return `source-map`, `type-declaration`, `bundler-only`, `unused-asset`, or null. */
 export function runtimePruneReason(relativePath) {
   const path = slash(relativePath).toLowerCase();
   if (isUndistributableBundlerBuild(relativePath)) return 'bundler-only';
+  if (isUnusedPackageAsset(relativePath)) return 'unused-asset';
   if (SOURCE_MAP_SUFFIXES.some((suffix) => path.endsWith(suffix))) return 'source-map';
   if (
     DECLARATION_SUFFIXES.some((suffix) => path.endsWith(suffix)) &&
@@ -83,7 +102,12 @@ export function runtimePruneReason(relativePath) {
 export async function pruneRuntimeFiles(root, options = {}) {
   const dryRun = options.dryRun ?? false;
   const removed = [];
-  const byReason = { 'source-map': 0, 'type-declaration': 0, 'bundler-only': 0 };
+  const byReason = {
+    'source-map': 0,
+    'type-declaration': 0,
+    'bundler-only': 0,
+    'unused-asset': 0,
+  };
   let bytes = 0;
   let emptyDirectories = 0;
 
@@ -139,7 +163,8 @@ export async function pruneRuntimeFilesWithReport(root, options = {}) {
     `[prune-runtime] removed ${result.removed.length} files ` +
       `(${result.byReason['source-map']} source maps, ` +
       `${result.byReason['type-declaration']} declarations, ` +
-      `${result.byReason['bundler-only']} undistributable bundler builds; ` +
+      `${result.byReason['bundler-only']} undistributable bundler builds, ` +
+      `${result.byReason['unused-asset']} unused package assets; ` +
       `${(result.bytes / 1048576).toFixed(1)} MB) and ` +
       `${result.emptyDirectories} empty directories`,
   );

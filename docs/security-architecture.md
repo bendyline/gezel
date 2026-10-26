@@ -306,7 +306,8 @@ rest of the Handboek API stays first-party.
 `packages/core/src/security/policy.ts` — the single source of truth.
 
 One config object (`config.securityPolicy`) drives everything. The `level` is a **UI label
-only**; enforcement reads the **five capability booleans** via `resolveSecurityPolicy()`. The
+only**; enforcement reads the **capability booleans** via `resolveSecurityPolicy()`, never the
+level. The
 axis that matters is **agency** — these gate what *the model* may do autonomously; user-
 initiated actions (a human pulling a repo, the app's own npm/CLI processes) are exempt.
 
@@ -317,6 +318,8 @@ initiated actions (a human pulling a repo, the app's own npm/CLI processes) are 
 | `allowExternalServices` (web search, `fetch_url`, …) | ✗ | ✗ | ✓ |
 | `allowScriptExecution` (gate-scripts, code-exec) | ✗ | ✓ | ✓ |
 | `allowAppNetwork` (background app egress) | ✗ | ✓ | ✓ |
+| `allowPackageScriptExecution` (`run_package_script`, `run_npx`) | ✗ | ✗ | ✓ |
+| `allowPackageScriptEdits` (gezel edits to a package manifest's `scripts`) | ✗ | ✗ | ✓ |
 | *derived* `allowModelGit` (= `allowFileEdits`) | ✗ | ✓ | ✓ |
 | *derived* `allowNonBuiltinToolsets` (= services ∧ scripts) | ✗ | ✗ | ✓ |
 
@@ -387,6 +390,9 @@ off-preset combination (`classifySecurityLevel` re-labels the slider).
      `workspace.write`, and strips `documents.write` when `!allowFileEdits`).
    - managed workspace writes → `fs/store.ts` `assertWorkspaceWritable` (the per-project
      named policy above; independent of `allowFileEdits`).
+   - package scripts → `workspace/scripts.ts` (`allowPackageScriptExecution`); package
+     manifest `scripts` edits → `fs/store.ts` `guardPackageScriptEdit`
+     (`allowPackageScriptEdits`). See §7.
 
 > **Surface filtering alone is not a sink.** `web_search` fails closed at both its surface
 > and its provider; `fetch_url` must enforce at its route too, or a direct token-holder (or a
@@ -493,9 +499,10 @@ argument. Cross-project/team tools (`message_gezel`, `create_task`, `update_proj
   Workspace writes follow the per-project gate: internal workspaces are writable by default,
   while external folders require explicit opt-in. Egress is off at the surface, the call-time
   guard, *and* the sinks.
-- **lockdown** — adds cloud chat, script execution, model Git/GitHub tools, and auto-update,
-  but keeps open-web services, mail, and unconfined third-party toolsets off. Note
-  `run_package_script` can reach the network (consent-gated, content-hashed — see below).
+- **lockdown** — adds cloud chat, sandboxed script execution, model Git/GitHub tools, and
+  auto-update, but keeps open-web services, mail, unconfined third-party toolsets, and package
+  scripts off. Package scripts run unsandboxed with the network, so they would reach the open
+  web the level promises to keep closed; each package switch can be turned on by itself.
 - **free** — adds `fetch_url`/`web_search` (SSRF-guarded) and non-builtin MCP toolsets
   (unconfined third-party code — the riskiest surface, `free` only).
 
@@ -511,6 +518,21 @@ entry for package binaries, and adds literal file references, wrapper/symlink ta
 recursively visible relative JavaScript/TypeScript imports. Those paths and abbreviated
 digests are shown in the prompt. If any included file changes, the next invocation prompts
 again. The input list is not a complete runtime dependency graph; see §14.
+
+**Package scripts have two switches of their own, ahead of the approval.**
+`allowPackageScriptExecution` gates running: `PACKAGE_SCRIPT_TOOLS` leave the surface
+(`role-tool-filter.ts`), and `runPackageScript` / `runNpx` (`workspace/scripts.ts`) refuse at
+the sink and raise no kickoff approvals. It is independent of `allowScriptExecution`, which
+governs the sandboxed scripts gezels write. `allowPackageScriptEdits` gates a gezel adding or
+changing a manifest's `scripts` (`package.json`, `package.json5`, `package.yaml`, anywhere in
+the workspace): every gezel-initiated Store write checks `packageScriptsEdit` (core
+`security/package-scripts.ts`) before it lands, the script SDK's `fs.write` does the same for
+runs a gezel started, and `run_nodejs_script` / `derive_file` — which write through Node's
+permission model, not the Store — get the root manifests snapshotted and put back
+(`workspace/manifest-guard.ts`). The person's own writes and applied proposals
+(`userInitiated`) are never checked. Removing a script is allowed; it cannot make anything
+run. A planted script would run later with the person's whole account, from Gezel or from
+their own terminal, which is why editing is a separate permission from running.
 
 ---
 
@@ -605,6 +627,38 @@ a public URL can't 30x into an internal target. Unresolvable hosts are allowed t
 naturally (not a private-target threat). Validation is at DNS-resolution time — a determined
 DNS-rebinding attacker could flip between check and connect; a connect-time IP pin is the full
 fix and is not yet implemented.
+
+### 11.1 Egress tripwire on tool calls
+
+`packages/core/src/security/egress-indicators.ts` — `findEgressIndicators` /
+`findEgressIndicatorsInValue`. A lexical check, run on a tool call **before it runs**, for four
+kinds of indicator: cloud metadata services (`169.254.169.254`, `169.254.170.2`,
+`100.100.100.200`, `fd00:ec2::254`, `metadata.google.internal`), other link-local addresses,
+a short watchlist of data-drop, request-capture and tunnel hosts (plus the Alibaba hosts named
+in Cohere's October 2026 report), and Linux namespace tools invoked with options
+(`unshare -Urm`, `nsenter`). It exists because an open-weight model was seen making exactly
+these calls, unrequested, while its reasoning said it would call no tools — the reasoning
+trace is not a boundary, the call is.
+
+It runs where a call executes or fetches, never on text written into a file, so a security
+report may still quote these hosts:
+
+- **Gezel's own sinks** read what actually runs: the `package.json` script body and arguments
+  (`runPackageScript`), `run_npx` arguments, the Playwright script source, the
+  `run_nodejs_script` file and `derive_file` source, and every `fetch_url` redirect hop.
+- **`McpBridge.callToolRich`** reads all arguments of a call to a bridge that does not serve
+  gezel-mcp — third-party toolsets, the Playwright browser, app-registered tools — since no
+  Gezel sink stands behind them.
+- **The `/v1` facades** (`openai-compat/tool-call-screen.ts`) read each tool call before the
+  calling app can run it. Live-streamed arguments are sent without their closing tail until
+  the call is screened, so a client cannot parse — and run — it early; a withheld Responses
+  call closes `incomplete` with no arguments. The reply says what was stopped.
+
+Loopback and private addresses are deliberately not indicators: coding agents reach their
+own dev servers and LAN machines every day (`fetch_url`'s SSRF guard still blocks them for
+daemon-side fetches). Every block is a `security.tool-call-blocked` History entry with the
+tool, the surface, and what matched. Provider-native shells (Claude CLI, Codex CLI, an
+unsandboxed Copilot) are not covered; see §14.
 
 ---
 
@@ -729,6 +783,8 @@ privileged service identity or putting the daemon root token on disk.
 | External user working directories from a machine daemon | NEEDS BROKER/GRANT | Dedicated service identities cannot safely inherit arbitrary user-profile access. Add an explicit ACL grant or user-context broker when linking such a folder; do not restore a privileged daemon identity. |
 | `denyNet` execution without an OS boundary | FAIL CLOSED | Windows runs it in the MXC container when the probe passes; Linux runs scripts without RPC under systemd. Elsewhere (Windows with the container off or unavailable, Linux RPC scripts) model/gate scripts return exit 126. Restore execution only with a real OS sandbox, not a JavaScript-only shim. |
 | SSRF connect-time IP pin | DEFERRED | Current guard validates at DNS-resolution time (rebinding-window residual). |
+| Egress tripwire coverage (§11.1) | PARTIAL | Lexical and easy to evade on purpose: it targets trained-in habits, not an adversary. Provider-native shells (Claude CLI, Codex CLI, an unsandboxed Copilot) and MCP toolsets those providers call directly never pass the bridge, so their calls are not read. The next layer is a Gezel-owned egress proxy that logs and filters the connections themselves. |
+| Package-script edits by sandboxed scripts | PARTIAL | `run_nodejs_script` / `derive_file` write through Node's permission model, not the Store, so only the workspace's root manifests are snapshotted and put back. A nested workspace package's `scripts` can still change that way while `allowPackageScriptEdits` is off. |
 | URL, Git, local-file, workspace, and alias NPM sources | NOT SUPPORTED | The generic install surfaces intentionally accept registry packages only. If alternate sources become necessary, add a separate explicit consent-gated API with source-specific validation and SSRF controls; do not widen the registry-package parser. |
 | Package-command input closure | PARTIAL | Persistent approvals bind identifiable project-local files, but outside-project paths, directory/glob contents, dynamically selected files, implicit config conventions, PATH-resolved programs, bare package imports, oversized files, input graphs beyond the bounded scan, and network responses cannot always be inferred safely before execution. Treat an approved package command as trusted code, not a sandbox. |
 | Default security level = `free` | BY DESIGN | Confirm against product risk appetite. |

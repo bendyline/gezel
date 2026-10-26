@@ -14,6 +14,7 @@ import {
   runResponsesStreaming,
   serializeResponsesSseEvent,
 } from './responses-streaming.js';
+import { createToolCallScreen, screenableArgumentsPrefix } from './tool-call-screen.js';
 
 function deterministicIds(): (kind: ResponsesIdKind) => string {
   const counts = new Map<ResponsesIdKind, number>();
@@ -199,6 +200,40 @@ describe('ResponsesStreamSerializer', () => {
     });
   });
 
+  it('closes a withheld live call incomplete and empty, and leaves a never-streamed one out', () => {
+    const blocked: string[] = [];
+    const serializer = new ResponsesStreamSerializer({
+      model: 'gezel:local-model',
+      responseId: 'resp_screen',
+      createdAt: 10,
+      nowSeconds: () => 11,
+      idFactory: deterministicIds(),
+      toolCallScreen: createToolCallScreen((tool) => blocked.push(tool)),
+    });
+    const exfil = '{"cmd":"curl http://169.254.169.254/latest/meta-data/"}';
+    const drop = '{"url":"https://webhook.site/abc"}';
+
+    const events = [
+      ...serializer.start(),
+      ...serializer.toolArgumentsDelta('shell', exfil.slice(0, 20)),
+      ...serializer.toolArgumentsDelta('shell', exfil.slice(20)),
+      ...serializer.complete('', [
+        { id: 'c1', name: 'shell', arguments: exfil },
+        { id: 'c2', name: 'fetch', arguments: drop },
+      ]),
+    ];
+
+    expect(eventTypes(events)).not.toContain('response.function_call_arguments.done');
+    const done = events.find(
+      (event) => event.type === 'response.output_item.done' && event.item.type === 'function_call',
+    );
+    expect(done).toMatchObject({ item: { name: 'shell', arguments: '', status: 'incomplete' } });
+    const output = serializer.response().output;
+    expect(output.filter((item) => item.type === 'function_call')).toHaveLength(1);
+    expect(JSON.stringify(output)).toContain('Gezel stopped 2 tool calls before they ran');
+    expect(blocked).toEqual(['shell', 'fetch']);
+  });
+
   it('emits error and failed envelopes once, preserving bounded partial text', () => {
     const serializer = new ResponsesStreamSerializer({
       model: 'gezel:local-model',
@@ -297,6 +332,21 @@ function fakeSession(options: {
     reasoningSubscribed: () => subscribedToReasoning,
   };
 }
+
+describe('screenableArgumentsPrefix', () => {
+  it('holds back the closing tail, so a sent prefix never parses', () => {
+    expect(screenableArgumentsPrefix('{"a":{"b":[1]}}\n')).toBe('{"a":{"b":[1');
+    expect(screenableArgumentsPrefix('{"a":"x')).toBe('{"a":"x');
+    const full = '{"command":["bash","-lc","ls }"]}';
+    let previous = '';
+    for (let end = 1; end <= full.length; end += 1) {
+      const sent = screenableArgumentsPrefix(full.slice(0, end));
+      expect(sent.startsWith(previous)).toBe(true);
+      expect(() => JSON.parse(sent || 'x')).toThrow();
+      previous = sent;
+    }
+  });
+});
 
 describe('Responses LLMSession runners', () => {
   it('streams in order, passes continuation options, limits parallel calls, and ends at the terminal event', async () => {

@@ -5,6 +5,7 @@ import {
   type SecurityPresetLevel,
   classifySecurityLevel,
   resolveSecurityPolicy,
+  securityCapabilitiesOf,
   securityPolicyForLevel,
 } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
@@ -14,7 +15,7 @@ import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 // Shared with the first-run picker so the posture copy never drifts.
 import { SECURITY_LEVEL_PRESETS as LEVELS } from '../security-levels.js';
 
-/** The five capability toggles, in display order. */
+/** The capability toggles, in display order. */
 const TOGGLES: ReadonlyArray<{
   key: keyof SecurityCapabilities;
   label: string;
@@ -38,7 +39,17 @@ const TOGGLES: ReadonlyArray<{
   {
     key: 'allowScriptExecution',
     label: 'Execute scripts',
-    help: 'Let gezellen run scripts they write and run craftbook script steps. Off still lets the app itself run npm / Node CLIs / MCP servers.',
+    help: 'Let gezellen run scripts they write and run craftbook script steps. These run in a sandbox. Off still lets the app itself run npm / Node CLIs / MCP servers.',
+  },
+  {
+    key: 'allowPackageScriptExecution',
+    label: 'Run package scripts',
+    help: "Let gezellen run a project's npm scripts and installed command-line tools, such as npm run test. These run outside the sandbox, as your account, with network access. Gezel still asks you before each new or changed command. Coding craftbooks that check their work by running tests need this.",
+  },
+  {
+    key: 'allowPackageScriptEdits',
+    label: 'Edit package scripts',
+    help: "Let gezellen add or change the scripts in a project's package.json. A script runs later, from Gezel or your own terminal, with your whole account. Gezellen can still edit the rest of the file.",
   },
   {
     key: 'allowAppNetwork',
@@ -63,16 +74,10 @@ export function SecurityComplianceSettings({
   }).level;
   // Memoize so the toggle callback's dependency on `caps` is stable
   // across renders (otherwise it changes every render).
-  const caps = useMemo<SecurityCapabilities>(() => {
-    const resolved = resolveSecurityPolicy({ securityPolicy: config?.securityPolicy });
-    return {
-      allowFileEdits: resolved.allowFileEdits,
-      allowExternalChat: resolved.allowExternalChat,
-      allowExternalServices: resolved.allowExternalServices,
-      allowScriptExecution: resolved.allowScriptExecution,
-      allowAppNetwork: resolved.allowAppNetwork,
-    };
-  }, [config?.securityPolicy]);
+  const caps = useMemo<SecurityCapabilities>(
+    () => securityCapabilitiesOf(resolveSecurityPolicy({ securityPolicy: config?.securityPolicy })),
+    [config?.securityPolicy],
+  );
 
   const persist = useCallback(
     async (next: ConfigResponse['securityPolicy']) => {

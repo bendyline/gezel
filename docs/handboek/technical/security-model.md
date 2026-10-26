@@ -60,9 +60,11 @@ wrapped in several independent layers:
 The layers deliberately overlap, but they are defense in depth rather than a
 promise that hostile code can never escape.
 
-Some tools deliberately run with more authority. After showing the exact
-command and receiving your approval, **package scripts and installed package
-binaries** (`run_package_script` and `run_npx`) run as your operating-system
+Some tools deliberately run with more authority. **Package scripts and
+installed package binaries** (`run_package_script` and `run_npx`) are off
+unless Settings → Security & Compliance has **Run package scripts** on, which
+Unrestricted does and Lockdown does not. When it is on, and after showing the
+exact command and receiving your approval, they run as your operating-system
 account. They may start other programs, use the network, and read or change
 files outside the project. A persistent approval is tied to the exact command,
 its arguments, and the content hashes of local inputs Gezel can identify — such
@@ -71,7 +73,21 @@ binary entry. Changing one of those files asks for approval again. Commands can
 still discover files dynamically, load implicit configuration, resolve other
 programs through `PATH`, use outside-project or directory/glob inputs, or fetch
 code from the network, so this binding is not a complete dependency graph and
-does not turn package commands into a sandbox.
+does not turn package commands into a sandbox. A separate switch, **Edit
+package scripts**, decides whether gezels may add or change the scripts in a
+project's `package.json` at all. A script runs later with your whole account,
+from Gezel or from your own terminal, so planting one is treated as its own
+permission. With it off, gezels can still edit the rest of the file, and
+removing a script is always allowed.
+
+One check runs on every tool call that executes or fetches, before it runs:
+Gezel refuses a call that names a cloud metadata service such as
+`169.254.169.254`, a link-local address, a known data-drop, request-capture or
+tunnel service, or a Linux namespace tool such as `unshare`. That covers
+Gezel's own tools, third-party toolsets and the browser, and the tool calls a
+model returns to another app through Gezel's OpenAI-compatible endpoints. It is
+a tripwire against a model's bad habits, not a sandbox: it reads the call's
+text and is easy to get around on purpose. Each refusal appears in History.
 Third-party MCP servers are also not inside the
 standalone-script sandbox; because they are unconfined local or remote code,
 Gezel enables them only under the corresponding Security & Compliance setting.
@@ -117,8 +133,8 @@ package sources would need a separate, explicitly approved feature with their
 own network and path protections.
 
 What happens later depends on the tool type. A standalone script uses the
-sandbox described above. A package command runs with your account's authority
-after explicit approval. A third-party MCP server is unconfined and requires
+sandbox described above. A package command runs with your account's authority,
+only when Run package scripts is on and after explicit approval. A third-party MCP server is unconfined and requires
 the security posture that permits non-builtin toolsets. Review the package,
 publisher, requested capabilities, and exact command before granting that
 authority.
