@@ -78,6 +78,8 @@ export interface PinnedSystemToolset {
    * installed toolset is in place.
    */
   onDemand?: boolean;
+  /** Companion packages required by our integration, pinned in SYSTEM_LOCKFILES. */
+  additionalDependencies?: Record<string, string>;
 }
 
 /**
@@ -131,9 +133,11 @@ export const SYSTEM_TOOLSETS: PinnedSystemToolset[] = [
     // see `resolveCopilotAvailability`.
     onDemand: true,
     pkg: '@github/copilot-sdk',
-    version: '1.0.7',
+    version: '1.0.26',
     integrity:
-      'sha512-dgCFCPfxWUkrgclQbrm7WCFzTf5RnJHsK1Lqsc3KjPBbDLPutJT0qIGg3xJ0ZELLyX0icg3TOmVczhR4HdwHxw==',
+      'sha512-H3yQjF6f3/xodnZgD7CWL8NNmmNs0U/7iivqjDE689fLbF4hC25G9EnQ+xEGiWrNX+tXOnmYqLLVIbPJWdGg9Q==',
+    // The SDK now ships a headless runtime; interactive sign-in still needs the CLI.
+    additionalDependencies: { '@github/copilot': '1.0.103' },
     entry: 'dist/cjs/index.js',
   },
 ];

@@ -1,10 +1,10 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { ChatSession } from '@bendyline/gezel';
-import { gezelSessionsDir, projectHistoryFile } from '@bendyline/gezel/paths';
+import { dirname, join } from 'node:path';
+import type { ChatSession, HistoryEvent } from '@bendyline/gezel';
+import { gezelSessionsDir, globalHistoryFile, projectHistoryFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { HistoryManager } from './manager.js';
+import { HISTORY_ORDER_SLACK_MS, HistoryManager } from './manager.js';
 
 let home: string;
 let history: HistoryManager;
@@ -308,6 +308,103 @@ describe('HistoryManager', () => {
     expect(events[0]).not.toHaveProperty('details');
     expect(events[0]).not.toHaveProperty('gezelId');
     expect(rebuilds).toBe(2);
+  });
+
+  describe('bounded reads', () => {
+    const minute = (n: number) => new Date(Date.UTC(2026, 9, 26, 12, 0) + n * 60_000).toISOString();
+
+    async function writeProjectEvents(
+      projectId: string,
+      events: Array<Partial<HistoryEvent> & { at: string }>,
+    ): Promise<void> {
+      const file = projectHistoryFile(home, projectId);
+      await mkdir(dirname(file), { recursive: true });
+      const lines = events.map((event, i) =>
+        JSON.stringify({
+          id: `e${i}`,
+          kind: 'tool.called',
+          summary: `event ${i}`,
+          projectId,
+          ...event,
+        }),
+      );
+      await writeFile(file, `${lines.join('\n')}\n`);
+    }
+
+    it('a from-bounded read returns exactly what a full scan filtered by time would', async () => {
+      const events = Array.from({ length: 600 }, (_, i) => ({
+        at: minute(i),
+        kind: (i % 3 === 0 ? 'task.step.gated' : 'tool.called') as HistoryEvent['kind'],
+        details: { taskRef: `p/${i % 7}` },
+      }));
+      await writeProjectEvents('p', events);
+      const everything = await history.listEvents({ projectId: 'p' });
+      const toolCalls: HistoryEvent['kind'][] = ['tool.called'];
+      for (const from of [minute(0), minute(250), minute(599), minute(700)]) {
+        for (const kinds of [undefined, toolCalls]) {
+          const bounded = await history.listEvents({
+            projectId: 'p',
+            from,
+            ...(kinds ? { kinds } : {}),
+          });
+          const expected = everything.filter(
+            (event) => event.at >= from && (!kinds || kinds.includes(event.kind)),
+          );
+          expect(bounded.map((event) => event.id)).toEqual(expected.map((event) => event.id));
+        }
+      }
+    });
+
+    it('still finds an event appended out of order within the slack', async () => {
+      await writeProjectEvents('p', [
+        { at: minute(0) },
+        { at: minute(100), summary: 'late stamp' },
+        { at: minute(60) },
+        { at: minute(130) },
+      ]);
+      const events = await history.listEvents({ projectId: 'p', from: minute(95) });
+      expect(events.map((event) => event.summary)).toEqual(['event 3', 'late stamp']);
+    });
+
+    it('stops at the first event older than the slack, by contract', async () => {
+      // An event stamped far ahead of its position is past the documented
+      // bound: a bounded read never reaches it.
+      await writeProjectEvents('p', [
+        { at: minute(300), summary: 'misplaced' },
+        { at: minute(0) },
+        { at: minute(200) },
+      ]);
+      const bounded = await history.listEvents({ projectId: 'p', from: minute(150) });
+      expect(bounded.map((event) => event.summary)).toEqual(['event 2']);
+      expect(HISTORY_ORDER_SLACK_MS).toBe(60 * 60_000);
+    });
+
+    it('a limit returns the newest events across the global and project logs', async () => {
+      await writeProjectEvents(
+        'p',
+        Array.from({ length: 50 }, (_, i) => ({ at: minute(i * 10) })),
+      );
+      await mkdir(home, { recursive: true });
+      await writeFile(
+        globalHistoryFile(home),
+        `${[5, 245, 495].map((m) => JSON.stringify({ id: `g${m}`, kind: 'gezel.created', summary: 'global', at: minute(m) })).join('\n')}\n`,
+      );
+      const events = await history.listEvents({ limit: 4 });
+      expect(events.map((event) => event.id)).toEqual(['g495', 'e49', 'e48', 'e47']);
+      const recent = await history.listEvents({ limit: 3, from: minute(240) });
+      expect(recent.map((event) => event.id)).toEqual(['g495', 'e49', 'e48']);
+      const projectOnly = await history.listEvents({ projectId: 'p', limit: 2 });
+      expect(projectOnly.map((event) => event.id)).toEqual(['e49', 'e48']);
+    });
+
+    it('an unbounded kinds query skips lines that only mention the kind elsewhere', async () => {
+      await writeProjectEvents('p', [
+        { at: minute(0), kind: 'task.step.gated', details: { note: 'tool.called' } },
+        { at: minute(1), kind: 'tool.called' },
+      ]);
+      const events = await history.listEvents({ projectId: 'p', kinds: ['tool.called'] });
+      expect(events.map((event) => event.id)).toEqual(['e1']);
+    });
   });
 
   it('serializes privacy rewrites with concurrent appends', async () => {

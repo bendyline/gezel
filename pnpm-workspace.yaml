@@ -49,6 +49,25 @@ networkConcurrency: 8
 # rose to seven days on 2026-10-02 — delete those once they are a week old.
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
+  # Required for Copilot's experimental image-generation API.
+  - "@github/copilot-sdk@1.0.26"
+  - "@github/copilot-sdk-darwin-arm64@1.0.26"
+  - "@github/copilot-sdk-darwin-x64@1.0.26"
+  - "@github/copilot-sdk-linux-arm64@1.0.26"
+  - "@github/copilot-sdk-linux-x64@1.0.26"
+  - "@github/copilot-sdk-linuxmusl-arm64@1.0.26"
+  - "@github/copilot-sdk-linuxmusl-x64@1.0.26"
+  - "@github/copilot-sdk-win32-arm64@1.0.26"
+  - "@github/copilot-sdk-win32-x64@1.0.26"
+  - "@github/copilot@1.0.103"
+  - "@github/copilot-darwin-arm64@1.0.103"
+  - "@github/copilot-darwin-x64@1.0.103"
+  - "@github/copilot-linux-arm64@1.0.103"
+  - "@github/copilot-linux-x64@1.0.103"
+  - "@github/copilot-linuxmusl-arm64@1.0.103"
+  - "@github/copilot-linuxmusl-x64@1.0.103"
+  - "@github/copilot-win32-arm64@1.0.103"
+  - "@github/copilot-win32-x64@1.0.103"
   - "@bendyline/*"
   - "@anthropic-ai/sdk@0.113.0"
   - "@bendyline/gilde"
@@ -59,7 +78,11 @@ minimumReleaseAgeExclude:
   # 2026-10-06, taken before the hold expires by explicit decision.
   - "@huggingface/transformers@4.3.1"
   - "@vitejs/plugin-react@6.0.4"
-  - "electron@43.7.7"
+  # Security release: 43.8.1 blocks the compromised eMudhra intermediates
+  # (GHSA-jr5w-w6x2-84p9, high) in Chromium and Node's tls/https/fetch, with
+  # no app-side workaround. 43.8.3 was published 2026-10-21 and taken before
+  # the hold expires by explicit decision.
+  - "electron@43.8.3"
   - "jose@6.2.4"
   - "mermaid@11.16.1"
   - "nodemailer@10.0.12"

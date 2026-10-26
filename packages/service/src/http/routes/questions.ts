@@ -47,7 +47,8 @@ async function askingStepId(
  * Routes for the structured ask-user-question system.
  *
  * - `POST /` — gezel posts a question (called by the MCP tool).
- * - `GET /` — list (filterable by `project=` and `pending=true`).
+ * - `GET /` — list (filterable by `project=`, `pending=true` and one or more
+ *   `taskRef=` attachments).
  * - `POST /:id/answer` — user submits a structured answer (or declines);
  *   the answer text is injected back into the originating session via
  *   `ChatManager.deliverQuestionAnswer`, which kicks off the gezel's
@@ -150,6 +151,7 @@ export function questionRoutes(ctx: ServiceContext): Hono {
   app.get('/', async (c) => {
     const projectId = c.req.query('project') || undefined;
     const pending = c.req.query('pending') === 'true';
+    const taskRefs = new Set(c.req.queries('taskRef') ?? []);
     let questions: Question[];
     if (projectId) {
       questions = await ctx.store.listProjectQuestions(projectId);
@@ -161,6 +163,11 @@ export function questionRoutes(ctx: ServiceContext): Hono {
       // question across every project would be a lot, and the UI never
       // wants that today.
       questions = await ctx.store.listAllPendingQuestions();
+    }
+    // Filter before resolving file references, which stats paths in every
+    // returned prompt: an observer watching one task needs only its cards.
+    if (taskRefs.size > 0) {
+      questions = questions.filter((q) => q.taskRef !== undefined && taskRefs.has(q.taskRef));
     }
     return c.json({
       questions: await withQuestionFileReferences(

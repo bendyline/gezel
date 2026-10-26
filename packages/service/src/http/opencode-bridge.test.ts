@@ -229,13 +229,19 @@ describe('buildOpenCodeBridgeApp', () => {
       .map((line) => JSON.parse(line.slice('data: '.length)));
     const toolDeltas = chunks.flatMap((chunk) => chunk.choices?.[0]?.delta?.tool_calls ?? []);
 
-    expect(toolDeltas).toHaveLength(2);
+    // Open, the live arguments, then the closing tail the egress screen held
+    // back so OpenCode could not parse — and run — the call before it was
+    // screened.
+    expect(toolDeltas).toHaveLength(3);
     expect(toolDeltas[0]).toMatchObject({
       index: 0,
       type: 'function',
       function: { name: 'write' },
     });
-    expect(toolDeltas.map((delta) => delta.function?.arguments ?? '').join('')).toBe(args);
+    const sent = toolDeltas.map((delta) => delta.function?.arguments ?? '');
+    expect(() => JSON.parse(sent.slice(0, -1).join(''))).toThrow();
+    expect(sent.at(-1)).toBe('}');
+    expect(sent.join('')).toBe(args);
     expect(chunks.at(-1)?.choices?.[0]?.finish_reason).toBe('tool_calls');
   });
 

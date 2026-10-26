@@ -576,7 +576,7 @@ describe('MeesterWelcome', () => {
     it('names where setup stands for the composer warning', () => {
       expect(withState({ kind: 'off' })).toBe('connect an AI first');
       expect(withState({ kind: 'needs-download', alternatives: [] })).toBe(
-        'download an AI model first',
+        'download tools (an AI model) first',
       );
       expect(
         withState({

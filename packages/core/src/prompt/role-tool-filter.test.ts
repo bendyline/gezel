@@ -687,6 +687,32 @@ describe('computeToolAllowlist', () => {
       expect(allow!.has('write_file')).toBe(true);
       expect(allow!.has('run_git')).toBe(true);
       expect(allow!.has('web_search')).toBe(false);
+      // Sandboxed scripts run; unsandboxed package scripts do not.
+      expect(allow!.has('run_nodejs_script')).toBe(true);
+      expect(allow!.has('run_package_script')).toBe(false);
+      expect(allow!.has('run_npx')).toBe(false);
+      expect(allow!.has('list_package_scripts')).toBe(false);
+    });
+
+    it('gates package scripts on their own switch, apart from script execution', () => {
+      const surface = (overrides: Partial<ReturnType<typeof resolveSecurityPolicy>>) =>
+        computeToolAllowlist({
+          role: 'developer',
+          mode: 'always',
+          provider: 'mlx',
+          modelId: 'meta-llama/Llama-3-70B',
+          securityPolicy: {
+            ...resolveSecurityPolicy({ securityPolicy: securityPolicyForLevel('free') }),
+            ...overrides,
+          },
+        })!;
+      const scriptsOff = surface({ allowScriptExecution: false });
+      expect(scriptsOff.has('run_nodejs_script')).toBe(false);
+      expect(scriptsOff.has('run_package_script')).toBe(true);
+      expect(scriptsOff.has('run_npx')).toBe(true);
+      const packagesOff = surface({ allowPackageScriptExecution: false });
+      expect(packagesOff.has('run_nodejs_script')).toBe(true);
+      expect(packagesOff.has('run_package_script')).toBe(false);
     });
 
     it('fires even when role filtering is off (mode: never)', () => {

@@ -327,8 +327,11 @@ export class PortableRemoteServers {
         return await channel(input, init);
       } catch (err) {
         if (init?.signal?.aborted || errorCode(err) !== REMOTE_CERTIFICATE_REFUSED) throw err;
-        const identity = await readServerIdentity(http, current.baseUrl);
+        // readServerIdentity throws on an identity that fails verification;
+        // the refused certificate is still the error to report.
+        const identity = await readServerIdentity(http, current.baseUrl).catch(() => null);
         if (
+          !identity ||
           identity.fingerprint !== current.pinnedIdentityFingerprint ||
           !(await verifyRemoteIdentity(identity))
         ) {

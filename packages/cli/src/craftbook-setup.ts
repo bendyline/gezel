@@ -1,7 +1,8 @@
 /**
  * Before `gezel do` runs a craftbook (or a workflow module asks through
  * `context.ensureSetup`), make sure this Gezel can do what the book needs:
- * External services on, a working web search, its chat models downloaded.
+ * External services on, a working web search, package scripts allowed when
+ * the book checks its work by running them, its chat models downloaded.
  *
  * At a terminal each missing piece is offered as one question; anywhere
  * else the run stops before it starts and names the commands that fix it.
@@ -28,7 +29,11 @@ import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { CliError } from './connection.js';
 import { formatGb, pullChatModel } from './model-pull.js';
 import { installNativeToolkit } from './native-command.js';
-import { SECURITY_LEVEL_LABELS, policyWithExternalServices } from './settings-command.js';
+import {
+  SECURITY_LEVEL_LABELS,
+  policyWithCapability,
+  policyWithExternalServices,
+} from './settings-command.js';
 
 export type CraftbookSetupClient = Pick<
   GezelClient,
@@ -89,7 +94,8 @@ export async function ensureCraftbookSetup(
   options: CraftbookSetupOptions,
 ): Promise<void> {
   const services = options.needs.services ?? [];
-  if (!options.needs.models?.length && services.length === 0) return;
+  const commands = options.needs.commands ?? [];
+  if (!options.needs.models?.length && services.length === 0 && commands.length === 0) return;
   const config = await client.getConfig();
   const models = resolveCraftbookModelNeeds(options.needs.models, {
     ...(options.params ? { params: options.params } : {}),
@@ -97,7 +103,7 @@ export async function ensureCraftbookSetup(
     defaultProvider: defaultModelEngine(config, options.platform, options.arch),
   });
   const gaps = craftbookSetupGaps(
-    { services, models },
+    { services, models, commands },
     await readSetupState(client, config, models),
   );
   if (gaps.length === 0) return;
@@ -140,6 +146,18 @@ export async function ensureCraftbookSetup(
       if (!yes) stop(gap);
       await client.updateConfig({ securityPolicy: next });
       options.write('External services: on\n');
+    } else if (gap.kind === 'package-scripts') {
+      const current = await client.getConfig();
+      const next = policyWithCapability(current, 'allowPackageScriptExecution', true);
+      const from = SECURITY_LEVEL_LABELS[resolveSecurityPolicy(current).level];
+      const to = SECURITY_LEVEL_LABELS[next.level];
+      const change = from === to ? '' : ` This changes your security level from ${from} to ${to}.`;
+      const yes = await prompter.confirm(
+        `Let gezels run package scripts such as ${gap.commands[0]}? They run outside the sandbox, as your account, with network access, and Gezel asks before each new command.${change} [y/N] `,
+      );
+      if (!yes) stop(gap);
+      await client.updateConfig({ securityPolicy: next });
+      options.write('Run package scripts: on\n');
     } else if (gap.kind === 'web-search') {
       if (gap.keyMissing) {
         options.write(
@@ -193,7 +211,7 @@ export async function ensureCraftbookSetup(
   }
 
   const after = craftbookSetupGaps(
-    { services, models },
+    { services, models, commands },
     await readSetupState(client, await client.getConfig(), models),
   );
   if (after.length > 0) {
@@ -342,6 +360,7 @@ async function readSetupState(
   );
   return {
     allowExternalServices: resolveSecurityPolicy(config).allowExternalServices,
+    allowPackageScriptExecution: resolveSecurityPolicy(config).allowPackageScriptExecution,
     ...(config.webSearch?.provider ? { webSearchProvider: config.webSearch.provider } : {}),
     hasBraveSearchApiKey: config.hasBraveSearchApiKey === true,
     installedModels: Object.fromEntries(installed),
@@ -393,6 +412,8 @@ function describeGap(gap: CraftbookSetupGap, sizes: ReadonlyMap<string, number>)
   switch (gap.kind) {
     case 'external-services':
       return `External services are off, so gezels cannot reach the web${why}.`;
+    case 'package-scripts':
+      return `Run package scripts is off, so gezels cannot run ${gap.commands.join(', ')}${why}.`;
     case 'web-search':
       return gap.keyMissing
         ? `Web search needs a Brave Search API key, and none is set${why}.`
@@ -408,6 +429,7 @@ function instructions(gaps: readonly CraftbookSetupGap[]): string[] {
   const out: string[] = [];
   for (const gap of gaps) {
     if (gap.kind === 'external-services') out.push('gezel security external-services on');
+    else if (gap.kind === 'package-scripts') out.push('gezel security run-package-scripts on');
     else if (gap.kind === 'web-search')
       out.push(
         `gezel secret set braveSearchApiKey --env BRAVE_SEARCH_API_KEY --use-for-search   (get a key at ${BRAVE_KEY_URL})`,

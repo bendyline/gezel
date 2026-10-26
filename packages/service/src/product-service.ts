@@ -249,6 +249,10 @@ import { TaskRunner } from './tasks/runner.js';
 import { runActivationGate, runSpawnFanout } from './tasks/runtime-activation.js';
 import { TaskScheduler } from './tasks/scheduler.js';
 import {
+  withdrawStaleServiceCards,
+  withdrawStaleServiceCardsEverywhere,
+} from './tasks/service-card-withdrawal.js';
+import {
   type TaskStepRef,
   pauseTaskAfterFailedHandoff as pauseAfterFailedHandoff,
 } from './tasks/step-pause.js';
@@ -929,6 +933,9 @@ export async function startProductService(
     await withdrawFinishedPassQuestions({ store, chatEvents }, task).catch((err: unknown) =>
       log.warn(`[tasks] ${task.ref}: question withdrawal failed: ${String(err)}`),
     );
+    await withdrawStaleServiceCards({ store, chatEvents }, task).catch((err: unknown) =>
+      log.warn(`[tasks] ${task.ref}: card withdrawal failed: ${String(err)}`),
+    );
   });
   nightShift.setOnActivated(async () => {
     // Index first, tasks second: the catch-up flag is raised synchronously,
@@ -1227,6 +1234,10 @@ export async function startProductService(
     // step after a gate loops back (tasks/finished-pass-questions.ts).
     await withdrawFinishedPassQuestions({ store, chatEvents }, task).catch((err: unknown) =>
       log.warn(`[tasks] ${task.ref}: question withdrawal failed: ${String(err)}`),
+    );
+    // Before any owner card for the new step is filed below.
+    await withdrawStaleServiceCards({ store, chatEvents }, task).catch((err: unknown) =>
+      log.warn(`[tasks] ${task.ref}: card withdrawal failed: ${String(err)}`),
     );
     introduceFreshHire(task, newStep);
     if (await runActivationGate(runtimeActivation, { projectId, task, newStep })) return;
@@ -2712,6 +2723,21 @@ export async function startProductService(
         chat.runIdleSummarizationSweep().catch(() => {
           /* swallow */
         });
+      },
+      () => stopping,
+    ),
+  );
+  // Cards whose task settled before the runtime withdrew them, or while it was down.
+  cancelBootWork.push(
+    deferBootWork(
+      30_000,
+      () => {
+        void withdrawStaleServiceCardsEverywhere({
+          store,
+          chatEvents,
+          listProjectIds: async () => (await store.listProjects()).map((project) => project.id),
+          readTask: (projectId, num) => store.readTask(projectId, num),
+        }).catch((err) => log.warn(`[tasks] stale card sweep failed: ${String(err)}`));
       },
       () => stopping,
     ),

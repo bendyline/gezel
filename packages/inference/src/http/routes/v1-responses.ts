@@ -1,4 +1,4 @@
-import { createLogger } from '@bendyline/gezel';
+import { createLogger, toolCallBlockedHistoryEntry } from '@bendyline/gezel';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
@@ -31,6 +31,7 @@ import {
   type TranslatedResponsesRequest,
   translateResponsesRequest,
 } from '../openai-compat/responses-translate.js';
+import { createToolCallScreen } from '../openai-compat/tool-call-screen.js';
 import {
   flattenTranscriptIntoPrompt,
   parseGezelModelRef,
@@ -273,8 +274,19 @@ export function v1ResponsesRoutes(ctx: InferenceContext, opts: V1ResponsesRouteO
           requestSignal.removeEventListener('abort', abortTurn);
         };
 
+        const toolCallScreen = createToolCallScreen((tool, indicators) => {
+          const entry = toolCallBlockedHistoryEntry({
+            tool,
+            surface: 'responses',
+            indicators,
+            appId,
+          });
+          log.warn(`${entry.summary} (app ${appId})`);
+          void ctx.history?.log(entry).catch(() => {});
+        });
         const runnerOptions = {
           ...(attachments.length > 0 ? { attachments } : {}),
+          toolCallScreen,
           ...(lengthCapTokens !== undefined ? { lengthCapTokens } : {}),
           toolBindings: translated.toolBindings,
           toolKinds: translated.toolKinds,

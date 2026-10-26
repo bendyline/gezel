@@ -369,11 +369,18 @@ FunctionEnd
 ; entries cost six minutes of every upgrade just before extraction replaced
 ; it. The helper decides on its own pinned handles; anything else gets the
 ; full repair.
-!macro SanitizeDescendantsKeepingSealedTree PATH SUBJECT TREE FAILURE_LABEL
+;
+; ZONES names the root's children that are trust zones of their own. The
+; machine engine hard-links within its private tree (the speech-model store,
+; uv's cache), and v1.26287.93 already left such links behind; refusing every
+; hard link failed each such upgrade and dropped GezelService. A link that
+; stays inside one zone is repaired like any file; one that leaves the tree or
+; joins two zones is still refused.
+!macro SanitizeDescendantsKeepingSealedTree PATH SUBJECT TREE ZONES FAILURE_LABEL
   ${If} $GezelPublishedTreeSha == ""
-    !insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" "" ${FAILURE_LABEL}
+    !insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" ' -SeparateZones "${ZONES}"' ${FAILURE_LABEL}
   ${Else}
-    !insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" ' -KeepSealedChild "${TREE}" -SealedSha "$GezelPublishedTreeSha"' ${FAILURE_LABEL}
+    !insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" ' -SeparateZones "${ZONES}" -KeepSealedChild "${TREE}" -SealedSha "$GezelPublishedTreeSha"' ${FAILURE_LABEL}
   ${EndIf}
 !macroend
 
@@ -722,7 +729,7 @@ FunctionEnd
   ; Close and repair the tree before any path-based link cleanup. Ownership
   ; and ACL changes operate on the same no-follow handles that were checked,
   ; so a pre-created root or a concurrent descendant swap cannot redirect them.
-  !insertmacro SanitizeDescendantsKeepingSealedTree "${GEZEL_DATA_DIR}" "existing machine-service data" "service" SkipNssm
+  !insertmacro SanitizeDescendantsKeepingSealedTree "${GEZEL_DATA_DIR}" "existing machine-service data" "service" "shared,service" SkipNssm
   !insertmacro NeutralizeReparseDescendants "${GEZEL_DATA_DIR}" "Gezel machine-service data" SkipNssm "${GEZEL_SHARED_DIR}"
 
   ; Private root: SYSTEM + Administrators only until the per-service SID exists.

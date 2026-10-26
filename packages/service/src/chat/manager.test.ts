@@ -5940,6 +5940,12 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     await localStore.writeConfig({
       provider: 'llama-cpp',
       defaultModel: { 'llama-cpp': 'gemma4-12b-q4' },
+      // Lockdown with package scripts on: the full implementation lane.
+      securityPolicy: {
+        ...securityPolicyForLevel('lockdown'),
+        level: 'custom',
+        allowPackageScriptExecution: true,
+      },
     });
     const localEvents = new ChatEventBus();
     const localMock = new MockProvider({ name: 'llama-cpp' });

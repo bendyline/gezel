@@ -175,7 +175,10 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
     }
 
     try {
-      const manifest = await resolveImageModelManifest(ctx, provider, req.model);
+      const manifest =
+        providerKind(provider.name) === 'local'
+          ? await resolveImageModelManifest(ctx, provider, req.model)
+          : undefined;
       const recommended = manifest?.recommendedSteps;
       const resolvedSteps =
         req.steps !== undefined && req.capStepsAtRecommended && recommended
@@ -183,6 +186,7 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
           : (req.steps ?? recommended);
       const size = requestedImageSize(req, manifest, providerKind(provider.name));
       const out = await provider.generate({
+        signal: c.req.raw.signal,
         prompt: req.prompt,
         ...(req.negativePrompt ? { negativePrompt: req.negativePrompt } : {}),
         ...(req.model ? { model: req.model } : {}),
@@ -234,9 +238,11 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
       // — distinct from the artifact's timestamped filename. Small models
       // can't reliably echo a 32-char timestamped path back into HTML;
       // they'll invent a clean name like `logo.png` and produce a broken
-      // `<img>` ref. The seed-only name is unique within a session and
-      // short enough that the model copies it verbatim.
-      const workspaceRel = saveAs ?? `assets/generated/image-${out.meta.seed}.png`;
+      // `<img>` ref. Cloud providers do not return a seed, so give their
+      // copies a short unique suffix to avoid overwriting earlier images.
+      const workspaceSuffix =
+        providerKind(provider.name) === 'cloud' ? randomUUID().slice(0, 8) : out.meta.seed;
+      const workspaceRel = saveAs ?? `assets/generated/image-${workspaceSuffix}.png`;
       let workspacePath: string | null = null;
       try {
         if (!harness) {
@@ -427,6 +433,8 @@ async function resolveInputImages(
 function providerLabel(provider: string): string {
   if (provider === 'google-ai') return 'Google Nano Banana';
   if (provider === 'openai') return 'OpenAI GPT Image';
+  if (provider === 'copilot') return 'GitHub Copilot';
+  if (provider === 'codex-cli') return 'OpenAI Codex';
   return provider;
 }
 

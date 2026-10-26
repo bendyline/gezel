@@ -215,6 +215,11 @@ export async function wireTaskCreation({
     step: TaskCraftbookStep,
     reviewed: TaskCraftbookStep | undefined,
   ): Promise<void> => {
+    // The trusted module `gezel do` launched owns a CLI workflow's steps and
+    // completes them itself. Its card invited an Approve that force-completes
+    // a step the module is still running, and a media collection left 3,771
+    // of them pending, one per batch (tasks/service-card-withdrawal.ts).
+    if (task.craftbook.cliWorkflow) return;
     const existing = await store.listProjectQuestions(task.projectId).catch(() => []);
     if (
       existing.some(

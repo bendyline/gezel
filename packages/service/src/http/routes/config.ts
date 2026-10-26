@@ -462,9 +462,17 @@ export function configRoutes(ctx: ServiceContext): Hono {
     // credential the cloud branches consult is touched. Scoped narrower
     // than the chat reset above so an unrelated webhook credential
     // change doesn't churn the image provider.
-    const imageResetFields: Array<keyof typeof body> = ['imageProvider', 'defaultImageModel'];
+    const imageResetFields: Array<keyof typeof body> = [
+      'imageProvider',
+      'defaultImageModel',
+      'codexCli',
+    ];
     const imageCredsTouched = changedCredentials.some(
-      (n) => n === 'googleAiApiKey' || n === 'openaiApiKey' || n === 'openaiOrganization',
+      (n) =>
+        n === 'googleAiApiKey' ||
+        n === 'openaiApiKey' ||
+        n === 'openaiOrganization' ||
+        n === 'githubToken',
     );
     if (imageCredsTouched || imageResetFields.some((f) => body[f] !== undefined)) {
       await ctx.imageProvider.reset();

@@ -306,7 +306,12 @@ describe('Windows machine-service installer security', () => {
   // leaves it out, deciding on the helper's own pinned handles.
   it('leaves a still-sealed, attested service tree out of the upgrade repair', () => {
     expect(hook).toContain('!define GEZEL_SERVICE_TREE "${GEZEL_DATA_DIR}\\service"');
-    expect(hook).toContain(`${dataRootSweep} "existing machine-service data" "service" SkipNssm`);
+    // The data root holds two trust zones besides its private tree: the shared
+    // tree every local account writes, and the published service code. A hard
+    // link may not join names across them (ResetTreeAcl.cs RequireOneZone).
+    expect(hook).toContain(
+      `${dataRootSweep} "existing machine-service data" "service" "shared,service" SkipNssm`,
+    );
     expect(hook.match(/!insertmacro SanitizeDescendantsKeepingSealedTree /g)).toHaveLength(1);
 
     // The old uninstaller an upgrade runs deletes the whole state key before
@@ -323,7 +328,8 @@ describe('Windows machine-service installer security', () => {
     const uninstall = hook.slice(uninstallStart, hook.indexOf('!macroend', uninstallStart));
     expect(uninstall).toContain('DeleteRegKey SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}"');
 
-    // No attestation, no exception: the plain repair runs.
+    // No attestation, no exception: the plain repair runs. Either way the
+    // zones go with it, or an in-zone link would refuse the whole upgrade.
     const keeping = hook.slice(
       position('!macro SanitizeDescendantsKeepingSealedTree '),
       hook.indexOf('!macroend', position('!macro SanitizeDescendantsKeepingSealedTree ')),
@@ -332,10 +338,10 @@ describe('Windows machine-service installer security', () => {
     const otherwise = keeping.indexOf('${Else}');
     expect(noRecord).toBeGreaterThanOrEqual(0);
     expect(keeping.slice(noRecord, otherwise)).toContain(
-      '!insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" "" ${FAILURE_LABEL}',
+      `!insertmacro RepairTreeAcl "\${PATH}" "\${SUBJECT}" ' -SeparateZones "\${ZONES}"' \${FAILURE_LABEL}`,
     );
     expect(keeping.slice(otherwise)).toContain(
-      `' -KeepSealedChild "\${TREE}" -SealedSha "$GezelPublishedTreeSha"'`,
+      `' -SeparateZones "\${ZONES}" -KeepSealedChild "\${TREE}" -SealedSha "$GezelPublishedTreeSha"'`,
     );
   });
 

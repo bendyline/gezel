@@ -791,9 +791,12 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
         const skipped = res.meta.img2imgSkippedReason
           ? `This image engine can't edit images (${res.meta.img2imgSkippedReason}), so it ignored inputImages and made a new image from the prompt alone. To change an image, describe the whole picture you want. `
           : '';
+        const settings = res.meta.settingsNotes?.length
+          ? `Image settings: ${res.meta.settingsNotes.join(' ')} `
+          : '';
         content.push({
           type: 'text',
-          text: `${skipped}Saved to ${saved} (${res.meta.widthPx}x${res.meta.heightPx}, ${res.meta.model}). Copy it into the folder with your own file tools if it belongs there.`,
+          text: `${skipped}${settings}Saved to ${saved} (${res.meta.widthPx}x${res.meta.heightPx}, ${res.meta.model}). Copy it into the folder with your own file tools if it belongs there.`,
         });
         return { content };
       }),

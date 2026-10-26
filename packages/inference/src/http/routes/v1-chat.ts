@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { type ProviderName, createLogger, isLocalProvider } from '@bendyline/gezel';
+import {
+  type ProviderName,
+  createLogger,
+  isLocalProvider,
+  toolCallBlockedHistoryEntry,
+} from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { ZodError } from 'zod';
@@ -35,6 +40,7 @@ import {
   snapshotStreamingDiagnostics,
 } from '../openai-compat/streaming-telemetry.js';
 import { runNonStreaming, runStreaming } from '../openai-compat/streaming.js';
+import { createToolCallScreen } from '../openai-compat/tool-call-screen.js';
 import {
   type ChatCompletionRequest,
   ChatCompletionRequestSchema,
@@ -530,6 +536,17 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
         ctx.chat.recordExternalUsage?.(target.provider, u);
       });
       const appId = c.get('auth')?.appId ?? 'unauthenticated';
+      const toolCallScreen = createToolCallScreen((tool, indicators) => {
+        const entry = toolCallBlockedHistoryEntry({
+          tool,
+          surface: 'openai',
+          indicators,
+          appId,
+          ...(externalTurn ? { sessionId: externalTurn.sessionId } : {}),
+        });
+        log.warn(`${entry.summary} (app ${appId})`);
+        void ctx.history?.log(entry).catch(() => {});
+      });
       const logCompletion = (): void => {
         void ctx.history
           ?.log({
@@ -620,6 +637,7 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
                 ...(opts.keepaliveIntervalMs !== undefined
                   ? { keepaliveIntervalMs: opts.keepaliveIntervalMs }
                   : {}),
+                toolCallScreen,
                 ...(opts.streamToolCallDeltas === true ? { streamToolCallDeltas: true } : {}),
                 ...(opts.streamToolCallDeltas === true && externalTools
                   ? { toolCallNames: externalTools.map((tool) => tool.name) }
@@ -729,6 +747,7 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
           ...(attachments.length > 0 ? { attachments } : {}),
           sendOptions: { queue, timeoutMs: turnTimeoutMs },
           ...(lengthCapTokens !== undefined ? { lengthCapTokens } : {}),
+          toolCallScreen,
         },
       );
       const choice = response.choices[0];

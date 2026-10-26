@@ -29,6 +29,12 @@ vi.mock('../components/ImageModelManager.js', () => ({
 vi.mock('../components/ImageGeneratorGezelHint.js', () => ({
   ImageGeneratorGezelHint: () => <div data-testid="gezel-hint">hint</div>,
 }));
+vi.mock('../components/useCopilotAvailability.js', () => ({
+  useCopilotAvailability: () => ({ available: true, source: 'path', cliPath: '/usr/bin/copilot' }),
+}));
+vi.mock('../components/CopilotLoginCommand.js', () => ({
+  CopilotLoginCommand: () => <div>Sign in to Copilot</div>,
+}));
 
 const { ImageEngineSettings } = await import('./ImageEngineSettings.js');
 const { api } = await import('../api.js');
@@ -143,6 +149,33 @@ describe('ImageEngineSettings', () => {
       expect(api.updateConfig).toHaveBeenCalledWith({ googleAiApiKey: 'AIzaABCDEF' });
     });
   });
+
+  it.each(['copilot', 'codex-cli'])(
+    'selects %s and reports account access without requesting an API key',
+    async (imageProvider) => {
+      render(<ImageEngineSettings />);
+      await screen.findByText('Ready');
+      vi.mocked(api.getConfig).mockResolvedValue({ imageProvider } as never);
+      vi.mocked(api.getImageEngineStatus).mockResolvedValue({
+        engine: {
+          status: 'not-configured',
+          kind: 'cloud',
+          error: 'Image generation is not available for this account.',
+        },
+        modelCount: 0,
+      } as never);
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: imageProvider } });
+      await screen.findByRole('alert');
+      expect(api.updateConfig).toHaveBeenCalledWith({ imageProvider });
+      expect(screen.getByRole('alert')).toHaveTextContent('not available for this account');
+      expect(screen.getByText(/No separate image API key/)).toBeInTheDocument();
+      expect(screen.queryByPlaceholderText('sk-…')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('image-model-manager')).not.toBeInTheDocument();
+      const checks = vi.mocked(api.getImageEngineStatus).mock.calls.length;
+      await userEvent.click(screen.getByRole('button', { name: 'Check availability' }));
+      await waitFor(() => expect(api.getImageEngineStatus).toHaveBeenCalledTimes(checks + 1));
+    },
+  );
 
   it('with openai provider, saving an API key uses openaiApiKey', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({

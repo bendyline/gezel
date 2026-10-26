@@ -173,6 +173,15 @@ export const HistoryEventKindSchema = z.enum([
    */
   'v1.chat.completion',
   /**
+   * Gezel refused a tool call before it ran because it named a cloud
+   * metadata service, a link-local address, a data-drop or tunnel host, or a
+   * Linux namespace tool (core `security/egress-indicators.ts`). `details`
+   * carries `{ tool, surface, indicators: [{ kind, match }], sessionId?,
+   * appId? }`; `surface` is where the call was stopped: `gezel-tool`,
+   * `mcp-toolset`, `openai`, `responses`, or `ollama`.
+   */
+  'security.tool-call-blocked',
+  /**
    * A Keurmeester consult produced a verdict. `details` carries
    * `{ caseId, trigger, failureClass, action, applied, taskRef?, stepId? }`
    * — the full case record (prompt sizes, signals, debug payloads)

@@ -4151,12 +4151,18 @@ export class GezelClient {
     opts?: {
       projectId?: string;
       pending?: boolean;
+      /**
+       * Only questions attached to these tasks. A daemon that predates the
+       * filter ignores it and returns every match, so callers still filter.
+       */
+      taskRefs?: readonly string[];
     },
     signal?: AbortSignal,
   ): Promise<ListQuestionsResponse> {
     const params = new URLSearchParams();
     if (opts?.projectId) params.set('project', opts.projectId);
     if (opts?.pending) params.set('pending', 'true');
+    for (const ref of opts?.taskRefs ?? []) params.append('taskRef', ref);
     const qs = params.toString();
     return this.request('GET', `/api/questions${qs ? `?${qs}` : ''}`, undefined, undefined, signal);
   }

@@ -1,4 +1,4 @@
-import type { CodexPermissionModeCompat, ProviderName } from '@bendyline/gezel';
+import type { CodexPermissionModeCompat, EgressIndicator, ProviderName } from '@bendyline/gezel';
 import type {
   ActiveCraftbookStep,
   CompactionRequester,
@@ -560,6 +560,12 @@ export interface ToolCallEvent {
   durationMs: number;
   success: boolean;
   errorMessage?: string;
+  /**
+   * Set when Gezel refused the call before it ran because it named a cloud
+   * metadata service, link-local address, data-drop or tunnel host, or
+   * namespace tool. The consumer records it in History.
+   */
+  egressIndicators?: EgressIndicator[];
   /**
    * Text returned by the tool when the provider exposes it. Producers must
    * redact known secrets before firing the event. ChatManager bounds this

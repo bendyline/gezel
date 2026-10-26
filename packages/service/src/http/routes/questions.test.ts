@@ -298,6 +298,67 @@ describe('POST /api/questions/:id/answer — schedule-approval intent', () => {
   });
 });
 
+describe('GET /api/questions — task filter and runtime card lifecycle', () => {
+  it('returns only the questions attached to the named tasks', async () => {
+    const project = await svc.context.store.createProject({ name: 'Filtered Cards' });
+    const refs = [`${project.id}/1`, `${project.id}/2`, `${project.id}/3`];
+    for (const [index, taskRef] of [...refs, undefined].entries()) {
+      await svc.context.store.writeQuestion({
+        id: `filter-${index}`,
+        projectId: project.id,
+        gezelId: 'imara',
+        sessionId: `s-${index}`,
+        prompt: `Question ${index}`,
+        ...(taskRef ? { taskRef } : {}),
+        createdAt: new Date(Date.UTC(2026, 9, 26, 10, index)).toISOString(),
+      });
+    }
+    const res = await api(
+      'GET',
+      `/api/questions?project=${project.id}&pending=true&taskRef=${refs[0]}&taskRef=${refs[2]}`,
+    );
+    const body = (await res.json()) as { questions: Question[] };
+    expect(body.questions.map((q) => q.id)).toEqual(['filter-2', 'filter-0']);
+    expect((await pendingFor(project.id)).map((q) => q.id)).toHaveLength(4);
+  });
+
+  it('withdraws a pause card once its task is running again', async () => {
+    const project = await svc.context.store.createProject({ name: 'Resumed Run' });
+    const task = await svc.context.tasks.create(project.id, {
+      title: 'Resumable Run',
+      description: 'Paused on its first step, then resumed from the task page.',
+      assignee: { kind: 'user' },
+      steps: [
+        { id: 'collect', name: 'Collect' },
+        { id: 'finish', name: 'Finish', terminal: true },
+      ],
+    });
+    await svc.context.tasks.setStatus(project.id, task.num, 'paused');
+    await svc.context.store.writeQuestion({
+      id: crypto.randomUUID(),
+      projectId: project.id,
+      gezelId: '',
+      sessionId: '',
+      prompt: `Task ${task.ref} paused for help at step \`collect\`.`,
+      choices: ['Dismiss', 'Try again'],
+      allowWriteIn: false,
+      taskRef: task.ref,
+      intent: {
+        kind: 'task-paused',
+        taskRef: task.ref,
+        stepId: 'collect',
+        reason: 'gate_exhausted',
+      },
+      createdAt: new Date().toISOString(),
+    });
+    expect(await pendingFor(project.id)).toHaveLength(1);
+    await svc.context.tasks.setStatus(project.id, task.num, 'active');
+    await vi.waitFor(async () => expect(await pendingFor(project.id)).toHaveLength(0));
+    const all = await svc.context.store.listProjectQuestions(project.id);
+    expect(all[0]?.answer).toMatchObject({ silentSkip: true, withdrawn: true });
+  });
+});
+
 describe('POST /api/questions/:id/answer — task-paused card', () => {
   async function pausedTaskCard(name: string) {
     const project = await svc.context.store.createProject({ name });

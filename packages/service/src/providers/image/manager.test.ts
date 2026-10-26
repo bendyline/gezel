@@ -150,6 +150,8 @@ describe('ImageProviderManager', () => {
   it.each([
     ['openai', 'gpt-image-2'],
     ['google-ai', 'gemini-3.1-flash-image-preview'],
+    ['copilot', 'copilot-image-model'],
+    ['codex-cli', 'codex-image'],
   ] as const)('keeps configured %s generation in the user daemon', async (imageProvider, model) => {
     await store.writeConfig({ imageProvider });
     const mgr = new ImageProviderManager({

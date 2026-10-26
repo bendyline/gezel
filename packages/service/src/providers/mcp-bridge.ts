@@ -30,11 +30,14 @@ import {
 
 export { redactObject, redactString };
 import {
+  type EgressIndicator,
   type HookPhase,
   type HookResult,
   type HookSpec,
   createAwakeTimeout,
   createLogger,
+  egressIndicatorRefusal,
+  findEgressIndicatorsInValue,
 } from '@bendyline/gezel';
 import type {
   ResolvedBehaviorEntry,
@@ -911,6 +914,7 @@ export class McpBridge {
      * standing in its way.
      */
     let blockedByLedger = false;
+    let egressIndicators: EgressIndicator[] = [];
     const images: Array<{ base64: string; mimeType: string }> = [];
     const audios: Array<{
       base64: string;
@@ -938,6 +942,20 @@ export class McpBridge {
         rejected = ledgerBlock;
         blockedByLedger = true;
         log.info(`call_tool ${toolName} blocked by unresolved-failure ledger`);
+      }
+      // A third-party or browser toolset has no Gezel sink behind it, so
+      // this is the only place its call can be read before it runs. Gezel's
+      // own tools are checked at their service sinks instead, which see what
+      // actually runs (a package.json script, a Playwright file) and leave the
+      // text a gezel writes into files alone.
+      if (rejected === null && !this.servesGezelMcp) {
+        egressIndicators = findEgressIndicatorsInValue(callArgs);
+        if (egressIndicators.length > 0) {
+          rejected = egressIndicatorRefusal(egressIndicators);
+          log.warn(
+            `call_tool ${toolName} blocked: names ${egressIndicators.map((hit) => hit.match).join(', ')}`,
+          );
+        }
       }
       if (rejected === null && this.shouldEvaluateHooks()) {
         const verdict = await this.evaluateHooks('PreToolUse', toolName, effectiveArgs);
@@ -1095,7 +1113,10 @@ export class McpBridge {
       // — that is what the model saw and reacted to, so it is the right
       // thing to compare for "identical failure". A success here clears
       // the tool. See unresolved-tool-failure-ledger.ts.
-      if (!blockedByLedger) this.failureLedger?.record(toolName, combined, isError);
+      // A refusal is policy, not a validation failure the model could fix.
+      if (!blockedByLedger && egressIndicators.length === 0) {
+        this.failureLedger?.record(toolName, combined, isError);
+      }
       // Persist images to the project's artifacts/ tree before firing the
       // event so the persisted paths can ride along on the ToolCallEvent.
       // A persister failure must NOT poison the tool result — log and
@@ -1185,6 +1206,7 @@ export class McpBridge {
             success: !isError,
             ...(!isError ? { deliveredResultTruncated } : {}),
             ...(redactedError ? { errorMessage: redactedError } : {}),
+            ...(egressIndicators.length > 0 ? { egressIndicators } : {}),
             ...(redactedResult ? { resultText: redactedResult } : {}),
             ...(persistedImages.length > 0 ? { images: persistedImages } : {}),
             ...(persistedAudios.length > 0 ? { audios: persistedAudios } : {}),

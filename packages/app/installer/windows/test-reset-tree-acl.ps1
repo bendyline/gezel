@@ -133,10 +133,47 @@ Assert ((AclText $marker) -eq $markerAcl) 'Root-link target changed'
 # A file hard link aliases an outside security descriptor too.
 $hard = Fixture 'hard-link'
 New-Item -ItemType HardLink -Path (Join-Path $hard 'alias.txt') -Target $marker | Out-Null
-$refused = $false
-try { Repair $hard | Out-Null } catch { $refused = $true }
-Assert $refused 'Hard-linked file was accepted'
+$refused = $null
+try { Repair $hard | Out-Null } catch { $refused = $_.Exception.ToString() }
+Assert ($refused -and $refused.Contains('a name outside the tree')) "Hard-linked file was accepted: $refused"
 Assert ((AclText $marker) -eq $markerAcl) 'Hard-link target ACL changed'
+
+# The machine engine links within its own tree on purpose: the speech-model
+# store and uv's cache. Names that all stay in one zone are repaired like any
+# file; refusing them failed every upgrade over a downloaded speech model.
+$inTree = Fixture 'hard-link-in-tree'
+New-Item -ItemType Directory -Path (Join-Path $inTree 'store'), (Join-Path $inTree 'models') | Out-Null
+$blob = Join-Path $inTree 'store\blob.bin'
+Set-Content -LiteralPath $blob -Value 'model bytes'
+$installed = Join-Path $inTree 'models\model.bin'
+New-Item -ItemType HardLink -Path $installed -Target $blob | Out-Null
+Assert ((Repair $inTree) -eq 5) 'An in-tree hard link was not repaired'
+Assert ((AclText $installed) -eq (AclText $blob)) 'The names of one file report different ACLs'
+Assert ((Get-Content -LiteralPath $installed).Trim() -eq 'model bytes') 'Linked bytes changed'
+
+# A zone is a child every local account can write (shared) or the published
+# service code. A link joining it to the private tree would hand the private
+# file to that zone's grants, so it is refused before the file is changed.
+function RepairZones([string]$path, [string[]]$zones) {
+    [Gezel.Installer.ResetTreeAcl]::Run($path, $testOwner, $null, $null, $zones, $null)
+}
+$zoned = Fixture 'hard-link-zones'
+New-Item -ItemType Directory -Path (Join-Path $zoned 'private'), (Join-Path $zoned 'shared') | Out-Null
+$secret = Join-Path $zoned 'private\secret.txt'
+Set-Content -LiteralPath $secret -Value 'private data'
+New-Item -ItemType HardLink -Path (Join-Path $zoned 'shared\alias.txt') -Target $secret | Out-Null
+$secretAcl = AclText $secret
+$refused = $null
+try { RepairZones $zoned @('shared', 'service') | Out-Null } catch { $refused = $_.Exception.ToString() }
+Assert ($refused -and $refused.Contains('cross trust zones')) "A hard link across trust zones was accepted: $refused"
+Assert ((AclText $secret) -eq $secretAcl) 'A cross-zone hard link changed its file before refusal'
+
+$sharedOnly = Fixture 'hard-link-shared-zone'
+New-Item -ItemType Directory -Path (Join-Path $sharedOnly 'shared') | Out-Null
+$first = Join-Path $sharedOnly 'shared\first.txt'
+Set-Content -LiteralPath $first -Value 'shared data'
+New-Item -ItemType HardLink -Path (Join-Path $sharedOnly 'shared\second.txt') -Target $first | Out-Null
+Assert ((RepairZones $sharedOnly @('shared', 'service')) -eq 4) 'A hard link inside one zone was refused'
 
 # A mutable handle acquired before us is a closed failure, not a reason to
 # drop sharing restrictions or invoke the old recursive fallback.

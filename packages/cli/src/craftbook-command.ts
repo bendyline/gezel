@@ -270,11 +270,14 @@ export async function waitForTask(
         if (!task.craftbook.cliWorkflow) for (const child of tasks) refs.add(child.ref);
       }
       if (client.listQuestions) {
+        // Server-side task filter: the whole pending list once reached
+        // 4,600 cards, downloaded every second by each observer.
         const { questions } = await read(() =>
           client.listQuestions!(
             {
               projectId: task.projectId,
               pending: true,
+              taskRefs: [...refs],
             },
             signal,
           ),

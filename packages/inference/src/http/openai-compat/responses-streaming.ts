@@ -8,6 +8,7 @@ import type {
 } from '../../providers/types.js';
 import { engineFailure } from './engine-failure.js';
 import { unwrapCustomToolInput } from './responses-translate.js';
+import type { ToolCallScreen } from './tool-call-screen.js';
 
 export type ResponsesToolKind = 'function' | 'custom';
 
@@ -252,6 +253,12 @@ export interface ResponsesSerializerOptions {
   toolNamespaces?: Record<string, string>;
   echo?: ResponsesRequestEcho;
   limits?: ResponsesSerializerLimits;
+  /**
+   * Withholds calls that name an egress indicator; see tool-call-screen.ts.
+   * A withheld call that was already announced closes `incomplete` with no
+   * arguments, since Responses clients run a call from its `done` item.
+   */
+  toolCallScreen?: ToolCallScreen;
 }
 
 interface ActiveMessage {
@@ -349,6 +356,7 @@ export class ResponsesStreamSerializer {
   private readonly toolNamespaces: Record<string, string>;
   private readonly echo: ResponsesRequestEcho;
   private readonly limits: Required<ResponsesSerializerLimits>;
+  private readonly toolCallScreen: ToolCallScreen | undefined;
 
   private started = false;
   private terminal = false;
@@ -375,6 +383,7 @@ export class ResponsesStreamSerializer {
     this.toolNamespaces = options.toolNamespaces ?? {};
     this.echo = options.echo ?? {};
     this.limits = { ...DEFAULT_LIMITS, ...options.limits };
+    this.toolCallScreen = options.toolCallScreen;
   }
 
   get isTerminal(): boolean {
@@ -457,6 +466,7 @@ export class ResponsesStreamSerializer {
       const calls = this.echo.parallelToolCalls === false ? toolCalls.slice(0, 1) : toolCalls;
       events.push(...this.reconcileToolCalls(calls));
       events.push(...this.reconcileFinalText(text));
+      events.push(...this.pushTextDelta(this.toolCallScreen?.notice() ?? ''));
       events.push(...this.finalizeActive());
 
       this.terminal = true;
@@ -744,6 +754,7 @@ export class ResponsesStreamSerializer {
     const events: ResponsesStreamEvent[] = [];
     const finalRaw = finalArguments ?? state.rawArguments;
     this.assertToolCapacity(finalRaw.length);
+    if (this.toolCallScreen?.blocks(state.localName, finalRaw)) return this.withholdTool(state);
 
     if (!state.announced) events.push(...this.announceTool(state));
     if (!state.item || state.outputIndex === null) return events;
@@ -819,6 +830,25 @@ export class ResponsesStreamSerializer {
     return events;
   }
 
+  /**
+   * Close a screened call so no client can run it. One never announced stays
+   * out of the output; an announced one ends `incomplete` with no arguments.
+   */
+  private withholdTool(state: ActiveTool): ResponsesStreamEvent[] {
+    state.completed = true;
+    if (!state.announced || !state.item || state.outputIndex === null) return [];
+    if (state.item.type === 'function_call') state.item.arguments = '';
+    else state.item.input = '';
+    state.item.status = 'incomplete';
+    return [
+      this.event({
+        type: 'response.output_item.done',
+        output_index: state.outputIndex,
+        item: cloneOutputItem(state.item),
+      }),
+    ];
+  }
+
   private reconcileToolCalls(calls: ExternalToolCall[]): ResponsesStreamEvent[] {
     const events: ResponsesStreamEvent[] = [];
     const matched = new Set<ActiveTool>();
@@ -836,6 +866,8 @@ export class ResponsesStreamSerializer {
         continue;
       }
 
+      // Never streamed, so a withheld call need not appear at all.
+      if (this.toolCallScreen?.blocks(call.name, call.arguments)) continue;
       if (this.active) events.push(...this.finalizeActive());
       events.push(...this.openTool(call.name, call.id));
       const state = this.active;
@@ -976,6 +1008,7 @@ function serializerOptions(
     ...(options.toolKinds ? { toolKinds: options.toolKinds } : {}),
     ...(options.toolNamespaces ? { toolNamespaces: options.toolNamespaces } : {}),
     ...(options.limits ? { limits: options.limits } : {}),
+    ...(options.toolCallScreen ? { toolCallScreen: options.toolCallScreen } : {}),
     echo: {
       ...options.echo,
       ...(options.echo?.maxOutputTokens === undefined && options.lengthCapTokens !== undefined

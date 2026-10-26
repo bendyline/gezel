@@ -19,10 +19,12 @@ const SIZE_MULTIPLE = 64;
 
 export function normalizeGenerateImageToolArgs<T extends GenerateImageToolArgs>(
   args: T,
+  kind: 'local' | 'cloud' = 'local',
 ): {
   args: T;
   note?: string;
 } {
+  if (kind === 'cloud') return { args: { ...args } };
   const next = { ...args };
   const changes: string[] = [];
   const originalSize =

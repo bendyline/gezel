@@ -1,4 +1,4 @@
-import { externalGezelModelId } from '@bendyline/gezel';
+import { createLogger, externalGezelModelId, toolCallBlockedHistoryEntry } from '@bendyline/gezel';
 import { appendCallerOwnedActionLedger } from '@bendyline/gezel-inference/internal/http/openai-compat/action-ledger';
 import { profileForCallerOwnedInference } from '@bendyline/gezel-inference/internal/http/openai-compat/caller-owned-profile';
 import type { ChatTarget } from '@bendyline/gezel-inference/internal/http/openai-compat/chat-target';
@@ -11,6 +11,7 @@ import {
   type OllamaRequestOptions,
   overlayOllamaRequestTuning,
 } from '@bendyline/gezel-inference/internal/http/openai-compat/request-tuning';
+import { createToolCallScreen } from '@bendyline/gezel-inference/internal/http/openai-compat/tool-call-screen';
 import {
   type ChatCompletionRequest,
   flattenTranscriptIntoPrompt,
@@ -31,6 +32,8 @@ import { Hono } from 'hono';
 import { stream as honoStream } from 'hono/streaming';
 import { ZodError, z } from 'zod';
 import type { ServiceContext } from '../context.js';
+
+const log = createLogger('ollama-compat');
 
 /**
  * `/ollama/v1/*` — Ollama-compatible facade.
@@ -751,13 +754,19 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       ctx.chat.recordExternalUsage(target.provider, u);
     });
     const appId = c.get('auth')?.appId ?? 'unauthenticated';
+    const toolCallScreen = createToolCallScreen((tool, indicators) => {
+      const entry = toolCallBlockedHistoryEntry({ tool, surface: 'ollama', indicators, appId });
+      log.warn(`${entry.summary} (app ${appId})`);
+      void ctx.history?.log(entry).catch(() => {});
+    });
 
     const streamingRequested = parsed.stream !== false;
 
     if (!streamingRequested) {
       try {
-        const content = await session.sendAndWait(prompt, sendOpts);
-        const captured = session.capturedToolCalls?.() ?? [];
+        const reply = await session.sendAndWait(prompt, sendOpts);
+        const captured = toolCallScreen.admit(session.capturedToolCalls?.() ?? []);
+        const content = `${reply}${toolCallScreen.notice() ?? ''}`;
         logCompletion(appId, parsed.model, target.provider, usageRef.value, actionReceiptCount);
         return c.json({
           model: parsed.model,
@@ -796,8 +805,18 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
 
       try {
         await session.sendAndWait(prompt, sendOpts);
-        const captured = session.capturedToolCalls?.() ?? [];
+        const captured = toolCallScreen.admit(session.capturedToolCalls?.() ?? []);
         logCompletion(appId, parsed.model, target.provider, usageRef.value, actionReceiptCount);
+        const notice = toolCallScreen.notice();
+        if (notice) {
+          const noticeLine: OllamaChatStreamChunk = {
+            model: parsed.model,
+            created_at: new Date().toISOString(),
+            message: { role: 'assistant', content: notice },
+            done: false,
+          };
+          await writer.write(`${JSON.stringify(noticeLine)}\n`);
+        }
         if (captured.length > 0) {
           const toolLine: OllamaChatStreamChunk = {
             model: parsed.model,

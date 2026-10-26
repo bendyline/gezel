@@ -171,11 +171,12 @@ export function buildDispatcher(deps: DispatcherDeps): {
     'fs.write': {
       capability: 'workspace.write',
       handler: async (ctx, params) => {
-        await store.writeProjectWorkspaceFile(
-          ctx.projectId,
-          requireParam<string>(params, 'path'),
-          requireParam<string>(params, 'content'),
-        );
+        const path = requireParam<string>(params, 'path');
+        const content = requireParam<string>(params, 'content');
+        if (ctx.initiatedByGezel) {
+          await store.assertGezelPackageScriptEdit(ctx.projectId, path, content);
+        }
+        await store.writeProjectWorkspaceFile(ctx.projectId, path, content);
       },
     },
     'fs.list': {

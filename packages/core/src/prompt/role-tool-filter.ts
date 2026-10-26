@@ -1320,6 +1320,19 @@ export const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Package scripts and installed package binaries, gated by
+ * `allowPackageScriptExecution` alone. They sit in the `code-execution`
+ * group but are a different execution class: unsandboxed, as the person's
+ * account, with the network. So `allowScriptExecution`, which governs the
+ * sandboxed scripts gezels write, neither grants nor withholds them.
+ */
+export const PACKAGE_SCRIPT_TOOLS: ReadonlySet<string> = new Set([
+  'list_package_scripts',
+  'run_package_script',
+  'run_npx',
+]);
+
+/**
  * Apply the centralized security posture plus the per-project workspace
  * writability to a resolved tool surface. This is a hard ceiling — it
  * fires in {@link computeToolAllowlist} regardless of `toolFilterMode`,
@@ -1341,7 +1354,10 @@ function applySecurityPolicyGates(
 ): Set<string> {
   const policyClear =
     !policy ||
-    (policy.allowExternalServices && policy.allowScriptExecution && policy.allowModelGit);
+    (policy.allowExternalServices &&
+      policy.allowScriptExecution &&
+      policy.allowModelGit &&
+      policy.allowPackageScriptExecution);
   if (policyClear && !stripWorkspaceWrite) {
     return allow;
   }
@@ -1351,7 +1367,9 @@ function applySecurityPolicyGates(
   }
   if (!policy) return next;
   if (!policy.allowScriptExecution) {
-    for (const name of expandToolsetGroups(['code-execution'])) next.delete(name);
+    for (const name of expandToolsetGroups(['code-execution'])) {
+      if (!PACKAGE_SCRIPT_TOOLS.has(name)) next.delete(name);
+    }
     // Scripted Playwright is arbitrary user-authored Node execution even
     // though it lives in the browser-automation group. Keep interactive
     // browser tools available for local-preview policy exceptions, but hide
@@ -1360,6 +1378,9 @@ function applySecurityPolicyGates(
   }
   if (!policy.allowExternalServices) {
     for (const name of EXTERNAL_SERVICE_TOOLS) next.delete(name);
+  }
+  if (!policy.allowPackageScriptExecution) {
+    for (const name of PACKAGE_SCRIPT_TOOLS) next.delete(name);
   }
   if (!policy.allowModelGit) {
     for (const name of GITHUB_REMOTE_TOOLS) next.delete(name);

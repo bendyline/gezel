@@ -730,7 +730,7 @@ export type ExternalFolders = z.infer<typeof ExternalFoldersSchema>;
 
 /**
  * Centralized security & compliance policy. The `level` is the
- * user-facing slider position; the five booleans are the authoritative
+ * user-facing slider position; the capability booleans are the authoritative
  * capability set the rest of the system enforces. A preset level
  * (`super-lockdown` / `lockdown` / `free`) keeps the booleans in lockstep
  * with {@link SECURITY_PRESETS}; `custom` is set automatically when the
@@ -754,6 +754,19 @@ export const SecurityPolicySchema = z.object({
   allowScriptExecution: z.boolean(),
   /** Desktop-shell network gate: updater/background traffic and renderer-originated off-daemon requests. */
   allowAppNetwork: z.boolean(),
+  /**
+   * Allow gezels to change the `scripts` of a package manifest (`package.json`,
+   * `package.json5`, `package.yaml`) anywhere in a workspace. Absent on a
+   * policy saved before the switch existed; `resolveSecurityPolicy` derives it.
+   */
+  allowPackageScriptEdits: z.boolean().optional(),
+  /**
+   * Allow gezels to run package scripts and installed package binaries
+   * (`run_package_script`, `run_npx`). These run outside the script sandbox,
+   * as the person's account, with network access. Absent on a policy saved
+   * before the switch existed; `resolveSecurityPolicy` derives it.
+   */
+  allowPackageScriptExecution: z.boolean().optional(),
 });
 export type SecurityPolicy = z.infer<typeof SecurityPolicySchema>;
 
@@ -1128,9 +1141,12 @@ export const GezelConfigSchema = z.object({
   /**
    * Image-generation provider selection. `'sd-cpp'` (default) uses the
    * local stable-diffusion.cpp sidecar; `'google-ai'` and `'openai'`
-   * route to cloud APIs. `'mock'` is for tests and headless flows.
+   * route to cloud APIs. `'copilot'` uses the user's Copilot runtime and
+   * cloud account. `'mock'` is for tests and headless flows.
    */
-  imageProvider: z.enum(['sd-cpp', 'google-ai', 'openai', 'mock']).optional(),
+  imageProvider: z
+    .enum(['sd-cpp', 'google-ai', 'openai', 'copilot', 'codex-cli', 'mock'])
+    .optional(),
   /**
    * Default model id per image provider. `'sd-cpp'` names one of the
    * locally installed models; when unset (or naming a model that is no

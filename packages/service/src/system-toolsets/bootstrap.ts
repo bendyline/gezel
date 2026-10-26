@@ -599,6 +599,12 @@ export async function* installSystemToolsetStreaming(
     }
     if (installedPkg.devDependencies) delete installedPkg.devDependencies;
     if (installedPkg.scripts) delete installedPkg.scripts;
+    if (entry.additionalDependencies) {
+      installedPkg.dependencies = {
+        ...(installedPkg.dependencies as Record<string, string> | undefined),
+        ...entry.additionalDependencies,
+      };
+    }
     await writeFile(pkgJsonPath, `${JSON.stringify(installedPkg, null, 2)}\n`);
     await writeFile(join(pkgDir, 'pnpm-lock.yaml'), lockfile);
 

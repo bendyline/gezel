@@ -46,7 +46,6 @@ interface ActivePull {
    */
   verifying?: string;
   error?: string;
-  controller: AbortController;
   retrying?: {
     attempt: number;
     maxAttempts: number;
@@ -88,6 +87,9 @@ export function VideoModelManager({
   const [fitConfirm, setFitConfirm] = useState<{ id: string; message: string } | null>(null);
   const pullsRef = useRef(pulls);
   pullsRef.current = pulls;
+  const subscriptions = useRef(new Map<string, AbortController>());
+  const onModelsChangedRef = useRef(onModelsChanged);
+  onModelsChangedRef.current = onModelsChanged;
 
   const refresh = useCallback(async () => {
     try {
@@ -100,22 +102,25 @@ export function VideoModelManager({
     }
   }, []);
 
+  // Keep listener ownership synchronous; parent refreshes must not open more streams.
   const attachSubscription = useCallback(
     (
       id: string,
       subscribe: (cb: (e: VideoModelPullEvent) => void, signal: AbortSignal) => Promise<void>,
     ) => {
+      if (subscriptions.current.has(id)) return;
       const controller = new AbortController();
+      subscriptions.current.set(id, controller);
       setPulls((prev) => {
         const next = new Map(prev);
         const cur = next.get(id);
         next.set(id, {
           ...(cur ?? { id, bytesWritten: 0, totalBytes: 0 }),
-          controller,
         });
         return next;
       });
       void subscribe((event) => {
+        if (controller.signal.aborted) return;
         if (event.type === 'progress') {
           setPulls((prev) => {
             const next = new Map(prev);
@@ -163,13 +168,15 @@ export function VideoModelManager({
           });
         } else if (event.type === 'done') {
           setTimeout(() => {
+            if (controller.signal.aborted) return;
+            subscriptions.current.delete(id);
             setPulls((prev) => {
               const next = new Map(prev);
               next.delete(id);
               return next;
             });
             void refresh();
-            onModelsChanged?.();
+            onModelsChangedRef.current?.();
           }, 800);
         }
       }, controller.signal).catch((err) => {
@@ -182,10 +189,11 @@ export function VideoModelManager({
         });
       });
     },
-    [refresh, onModelsChanged],
+    [refresh],
   );
 
   useEffect(() => {
+    const controllers = subscriptions.current;
     void refresh();
     let cancelled = false;
     void api
@@ -201,7 +209,6 @@ export function VideoModelManager({
               id: snapshot.id,
               bytesWritten: snapshot.bytesWritten,
               totalBytes: snapshot.totalBytes,
-              controller: new AbortController(),
               ...(snapshot.retrying ? { retrying: snapshot.retrying } : {}),
               ...(snapshot.error ? { error: snapshot.error } : {}),
             });
@@ -217,6 +224,8 @@ export function VideoModelManager({
       });
     return () => {
       cancelled = true;
+      for (const controller of controllers.values()) controller.abort();
+      controllers.clear();
     };
   }, [refresh, attachSubscription]);
 
@@ -233,7 +242,8 @@ export function VideoModelManager({
       // A failed row remains in pullsRef until React renders the queued
       // deletion. Bypass startPull's duplicate guard for this deliberate
       // replacement, otherwise Retry removes the row but starts no request.
-      pullsRef.current.get(id)?.controller.abort();
+      subscriptions.current.get(id)?.abort();
+      subscriptions.current.delete(id);
       setPulls((prev) => {
         const next = new Map(prev);
         next.delete(id);
@@ -245,8 +255,8 @@ export function VideoModelManager({
   );
 
   const cancelPull = useCallback((id: string) => {
-    const pull = pullsRef.current.get(id);
-    pull?.controller.abort();
+    subscriptions.current.get(id)?.abort();
+    subscriptions.current.delete(id);
     setPulls((prev) => {
       const next = new Map(prev);
       next.delete(id);

@@ -10,6 +10,7 @@ import {
   resolveGezelWorkspaceAccess,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
+  securityCapabilitiesOf,
   securityPolicyForLevel,
 } from './policy.js';
 
@@ -72,9 +73,50 @@ describe('resolveSecurityPolicy', () => {
     expect(resolved.allowModelGit).toBe(true);
     // Mail also rides on external services → off under lockdown.
     expect(resolved.allowMail).toBe(false);
+    // Package scripts run unsandboxed with the network, so they stay off too.
+    expect(resolved.allowPackageScriptExecution).toBe(false);
+    expect(resolved.allowPackageScriptEdits).toBe(false);
   });
 
-  it('treats the five stored booleans as authoritative over the label', () => {
+  it('turns the package-script switches on only under free', () => {
+    expect(SECURITY_PRESETS['super-lockdown'].allowPackageScriptExecution).toBe(false);
+    expect(SECURITY_PRESETS.free.allowPackageScriptExecution).toBe(true);
+    expect(SECURITY_PRESETS.free.allowPackageScriptEdits).toBe(true);
+  });
+
+  it('derives the package-script switches for a policy saved before they existed', () => {
+    const legacy = (level: 'lockdown' | 'free' | 'custom', services: boolean, scripts: boolean) =>
+      resolveSecurityPolicy({
+        securityPolicy: {
+          level,
+          allowFileEdits: true,
+          allowExternalChat: true,
+          allowExternalServices: services,
+          allowScriptExecution: scripts,
+          allowAppNetwork: true,
+        },
+      });
+    expect(legacy('lockdown', false, true).allowPackageScriptExecution).toBe(false);
+    expect(legacy('lockdown', false, true).allowPackageScriptEdits).toBe(false);
+    expect(legacy('free', true, true).allowPackageScriptExecution).toBe(true);
+    expect(legacy('free', true, true).allowPackageScriptEdits).toBe(true);
+    expect(legacy('custom', true, false).allowPackageScriptExecution).toBe(false);
+  });
+
+  it('keeps the package-script switches independent of each other and of scripts', () => {
+    const resolved = resolveSecurityPolicy({
+      securityPolicy: {
+        ...securityPolicyForLevel('super-lockdown'),
+        level: 'custom',
+        allowPackageScriptExecution: true,
+      },
+    });
+    expect(resolved.allowScriptExecution).toBe(false);
+    expect(resolved.allowPackageScriptExecution).toBe(true);
+    expect(resolved.allowPackageScriptEdits).toBe(false);
+  });
+
+  it('treats the stored booleans as authoritative over the label', () => {
     // A hand-tampered "free" label with edits actually off must NOT grant edits.
     const resolved = resolveSecurityPolicy({
       securityPolicy: {
@@ -211,5 +253,19 @@ describe('classifySecurityLevel', () => {
         allowFileEdits: true,
       }),
     ).toBe('custom');
+  });
+
+  it('reads lockdown plus package scripts as custom, not a preset', () => {
+    expect(
+      classifySecurityLevel({ ...SECURITY_PRESETS.lockdown, allowPackageScriptExecution: true }),
+    ).toBe('custom');
+  });
+
+  it('round-trips a resolved policy through securityCapabilitiesOf', () => {
+    const caps = securityCapabilitiesOf(
+      resolveSecurityPolicy({ securityPolicy: securityPolicyForLevel('free') }),
+    );
+    expect(caps).toEqual(SECURITY_PRESETS.free);
+    expect(classifySecurityLevel(caps)).toBe('free');
   });
 });

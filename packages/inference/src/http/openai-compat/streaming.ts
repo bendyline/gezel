@@ -13,6 +13,7 @@ import {
   noteStreamingOutbound,
   noteStreamingProviderActivity,
 } from './streaming-telemetry.js';
+import { type ToolCallScreen, screenableArgumentsPrefix } from './tool-call-screen.js';
 import { ToolCallStreamFilter } from './tool-call-stream-filter.js';
 
 /**
@@ -181,6 +182,8 @@ export interface RunNonStreamingOpts {
   sendOptions?: Omit<SendAndWaitOpts, 'attachments'>;
   /** Effective output-token cap — reaching it reports `finish_reason: 'length'`. */
   lengthCapTokens?: number;
+  /** Withholds calls that name an egress indicator; see tool-call-screen.ts. */
+  toolCallScreen?: ToolCallScreen;
 }
 
 export async function runNonStreaming(
@@ -190,7 +193,7 @@ export async function runNonStreaming(
   nowSeconds: () => number,
   opts: RunNonStreamingOpts = {},
 ): Promise<NonStreamingChatResult> {
-  const { attachments, sendOptions, lengthCapTokens } = opts;
+  const { attachments, sendOptions, lengthCapTokens, toolCallScreen } = opts;
   // Wrapped so TypeScript's control-flow narrowing doesn't infer
   // `usage` as `never` after the post-callback null check — closures
   // that assign to a captured variable confuse the analyzer.
@@ -207,8 +210,10 @@ export async function runNonStreaming(
             ...(attachments && attachments.length > 0 ? { attachments } : {}),
           }
         : undefined;
-    const content = await session.sendAndWait(prompt, sendOpts);
-    const captured = session.capturedToolCalls?.() ?? [];
+    const reply = await session.sendAndWait(prompt, sendOpts);
+    const rawCaptured = session.capturedToolCalls?.() ?? [];
+    const captured = toolCallScreen ? toolCallScreen.admit(rawCaptured) : rawCaptured;
+    const content = `${reply}${toolCallScreen?.notice() ?? ''}`;
     const hasToolCalls = captured.length > 0;
     return {
       id: `chatcmpl-${randomUUID()}`,
@@ -304,6 +309,12 @@ export interface RunStreamingOpts {
   streamToolCallDeltas?: boolean;
   /** Tool names supplied by the caller; gates early textual-call detection. */
   toolCallNames?: readonly string[];
+  /**
+   * Withholds calls that name an egress indicator; see tool-call-screen.ts.
+   * With live tool-call deltas on, each call's closing tail is held back
+   * until the call is screened, so the client cannot run it early.
+   */
+  toolCallScreen?: ToolCallScreen;
 }
 
 export interface RunStreamingResult {
@@ -350,6 +361,7 @@ export async function runStreaming(
     onToolArgsDelta,
     streamToolCallDeltas = false,
     toolCallNames = [],
+    toolCallScreen,
   } = opts;
   const id = `chatcmpl-${randomUUID()}`;
   if (diagnostics) diagnostics.responseId = id;
@@ -381,8 +393,13 @@ export async function runStreaming(
     index: number;
     id: string;
     name: string;
+    /** What the client has been sent. */
     arguments: string;
+    /** What the provider has streamed; ahead of `arguments` by any held-back tail. */
+    received: string;
   }
+  const sendableArguments = (received: string): string =>
+    toolCallScreen ? screenableArgumentsPrefix(received) : received;
   const liveToolCalls: LiveToolCall[] = [];
   let activeLiveToolCall: LiveToolCall | undefined;
   let unnamedToolArguments = '';
@@ -434,7 +451,8 @@ export async function runStreaming(
       index: meta.index ?? nextLiveToolIndex(),
       id: meta.id ?? `call_${randomUUID()}`,
       name,
-      arguments: argumentsChunk,
+      arguments: sendableArguments(argumentsChunk),
+      received: argumentsChunk,
     };
     liveToolCalls.push(call);
     activeLiveToolCall = call;
@@ -468,9 +486,13 @@ export async function runStreaming(
     );
     return call;
   };
-  const appendLiveToolArguments = (call: LiveToolCall, chunk: string): void => {
+  const appendLiveToolArguments = (call: LiveToolCall, received: string): void => {
+    if (!received) return;
+    call.received += received;
+    const next = sendableArguments(call.received);
+    const chunk = next.slice(call.arguments.length);
     if (!chunk) return;
-    call.arguments += chunk;
+    call.arguments = next;
     enqueueSSE(
       {
         data: JSON.stringify({
@@ -734,8 +756,29 @@ export async function runStreaming(
       );
     }
 
-    const captured = session.capturedToolCalls?.() ?? [];
-    if (diagnostics) diagnostics.capturedToolCalls = captured.length;
+    const rawCaptured = session.capturedToolCalls?.() ?? [];
+    if (diagnostics) diagnostics.capturedToolCalls = rawCaptured.length;
+    // A withheld call's live stream stops short of its closing tail, so the
+    // client is left holding arguments it cannot parse.
+    const captured = toolCallScreen ? toolCallScreen.admit(rawCaptured) : rawCaptured;
+    const notice = toolCallScreen?.notice();
+    if (notice) {
+      visibleContent += notice;
+      onContentDelta?.(notice);
+      await writeSSE(
+        {
+          data: JSON.stringify({
+            id,
+            object: 'chat.completion.chunk',
+            created,
+            model: echoModel,
+            choices: [{ index: 0, delta: { content: notice }, finish_reason: null }],
+            ...nullUsage,
+          }),
+        },
+        'content',
+      );
+    }
     const hasToolCalls = captured.length > 0;
 
     if (hasToolCalls) {
@@ -774,6 +817,18 @@ export async function runStreaming(
         // any suffix that did not arrive live; never replay the complete
         // arguments, which would make clients concatenate invalid JSON.
         const matchedLive = new Set<LiveToolCall>();
+        // Take the withheld calls' streams out of the running first, so an
+        // admitted call of the same tool name cannot be matched onto one.
+        for (const call of rawCaptured) {
+          if (captured.includes(call)) continue;
+          const live = liveToolCalls.find(
+            (candidate) =>
+              !matchedLive.has(candidate) &&
+              (candidate.id === call.id ||
+                (candidate.name === call.name && call.arguments.startsWith(candidate.arguments))),
+          );
+          if (live) matchedLive.add(live);
+        }
         for (const call of captured) {
           const live = liveToolCalls.find(
             (candidate) =>
@@ -789,6 +844,7 @@ export async function runStreaming(
               id: call.id,
               name: call.name,
               arguments: call.arguments,
+              received: call.arguments,
             });
             await writeSSE(
               {

@@ -135,6 +135,8 @@ export interface ImageGenerationMeta {
    * forward it untouched.
    */
   img2imgSkippedReason?: string;
+  /** Provider limits or adjustments to the requested image settings. */
+  settingsNotes?: string[];
 }
 
 export interface ImageGenerationOutput {

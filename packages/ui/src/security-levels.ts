@@ -28,13 +28,13 @@ export const SECURITY_LEVEL_PRESETS: ReadonlyArray<SecurityLevelPreset> = [
     id: 'lockdown',
     label: 'Lockdown',
     description:
-      'A posture for trusted work. Edit files directly, run scripts, use cloud chat providers, and do GitHub read/write.\n\nCloud chat providers like Claude and ChatGPT are available to use; keep in mind that cloud chat providers are not really constrained in what they can do, if you decide to use them.\n\nConnectors that you can use to pass data locally to your gezellen are allowed — they sync when you ask, not on their own. Auto-update is allowed.',
+      'A posture for trusted work. Edit files directly, run sandboxed scripts, use cloud chat providers, and do GitHub read/write. Package scripts such as npm run test stay off, because they run outside the sandbox with network access. Settings can turn them on by themselves.\n\nCloud chat providers like Claude and ChatGPT are available to use; keep in mind that cloud chat providers are not really constrained in what they can do, if you decide to use them.\n\nConnectors that you can use to pass data locally to your gezellen are allowed — they sync when you ask, not on their own. Auto-update is allowed.',
     recommended: true,
   },
   {
     id: 'free',
     label: 'Unrestricted',
     description:
-      'Everything: internet research, the full toolset gallery, cloud providers, scripts, and file edits. The most capable posture — choose it when you trust the work and the gezellen.',
+      'Everything: internet research, the full toolset gallery, cloud providers, scripts and package scripts, and file edits. The most capable posture — choose it when you trust the work and the gezellen.',
   },
 ];

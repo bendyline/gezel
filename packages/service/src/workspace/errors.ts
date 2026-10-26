@@ -1,4 +1,8 @@
-import { MANAGED_WORKSPACE_WRITE_SETTING_LABEL } from '@bendyline/gezel';
+import {
+  MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
+  type PackageScriptsEdit,
+  packageScriptsEditRefusal,
+} from '@bendyline/gezel';
 
 /**
  * Thrown when a workspace-mutating op (`write_file`, `delete_path`, `make_dir`,
@@ -35,6 +39,21 @@ export class WorkspaceWriteDeniedError extends Error {
     this.name = 'WorkspaceWriteDeniedError';
     this.reason = info.reason;
     this.workingDir = info.workingDir;
+  }
+}
+
+/**
+ * Thrown when a gezel's write would add or change a package manifest's
+ * `scripts` while the `allowPackageScriptEdits` capability is off. A policy
+ * failure like {@link WorkspaceWriteDeniedError}, mapped to 403.
+ */
+export class PackageScriptEditDeniedError extends Error {
+  readonly code = 'package-script-edit-denied' as const;
+  readonly path: string;
+  constructor(path: string, edit: PackageScriptsEdit) {
+    super(packageScriptsEditRefusal(path, edit));
+    this.name = 'PackageScriptEditDeniedError';
+    this.path = path;
   }
 }
 

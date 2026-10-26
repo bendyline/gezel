@@ -3,7 +3,14 @@ import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CommandApprovalScope, Question } from '@bendyline/gezel';
-import { nowIso } from '@bendyline/gezel';
+import {
+  createLogger,
+  egressIndicatorRefusal,
+  findEgressIndicatorsInValue,
+  nowIso,
+  resolveSecurityPolicy,
+  toolCallBlockedHistoryEntry,
+} from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import { resolvePnpmCommand } from '../packages/pnpm.js';
@@ -17,6 +24,8 @@ import {
 import { fingerprintCommandInputs } from './command-inputs.js';
 import { type RunWorkspaceCommandResult, runWorkspaceCommand } from './command.js';
 import { WorkspaceWriteDeniedError } from './errors.js';
+
+const log = createLogger('workspace');
 
 /**
  * Thin glue between the HTTP routes and `runWorkspaceCommand`. Owns
@@ -78,6 +87,7 @@ export interface RunCommandOutcome {
 }
 
 export async function runPackageScript(opts: RunPackageScriptOptions): Promise<RunCommandOutcome> {
+  if (!(await packageScriptsAllowed(opts.store))) return failure(PACKAGE_SCRIPTS_DISABLED);
   const gate = await opts.store.assertWorkspaceWritable(opts.projectId);
   if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
 
@@ -89,6 +99,10 @@ export async function runPackageScript(opts: RunPackageScriptOptions): Promise<R
         `Known scripts: ${Object.keys(scripts).join(', ') || '(none)'}.`,
     );
   }
+  // The command lives in package.json, not in the call, so this is the one
+  // place it can be read before it runs.
+  const blocked = await egressRefusal(opts, 'run_package_script', [body, ...(opts.args ?? [])]);
+  if (blocked) return blocked;
 
   const approvals = await readCommandApprovals(opts.home, opts.projectId);
   const inputFiles = await fingerprintCommandInputs({
@@ -122,11 +136,14 @@ export async function runPackageScript(opts: RunPackageScriptOptions): Promise<R
 }
 
 export async function runNpx(opts: RunNpxOptions): Promise<RunCommandOutcome> {
+  if (!(await packageScriptsAllowed(opts.store))) return failure(PACKAGE_SCRIPTS_DISABLED);
   const gate = await opts.store.assertWorkspaceWritable(opts.projectId);
   if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
   await opts.store.ensureWorkspaceTemplate(opts.projectId);
 
   const bin = opts.bin.trim();
+  const blocked = await egressRefusal(opts, 'run_npx', [bin, ...(opts.args ?? [])]);
+  if (blocked) return blocked;
   if (!bin || /[\\\/]/.test(bin)) {
     return failure(
       `Invalid npx bin "${opts.bin}" — pass a bare binary name (e.g. "vitest"), not a path.`,
@@ -212,6 +229,8 @@ export async function checkPlaywrightApproval(
       `Could not read ${opts.scriptPath}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+  const blocked = await egressRefusal(opts, 'run_playwright_script', body);
+  if (blocked) return blocked;
   if (body.length > MAX_PLAYWRIGHT_REVIEW_CHARS) {
     return failure(
       `${opts.scriptPath} is too large to show the user for approval (${body.length} characters; the limit is ${MAX_PLAYWRIGHT_REVIEW_CHARS}). Split it into smaller scripts.`,
@@ -437,6 +456,34 @@ async function resolveBinPath(workspaceDir: string, bin: string): Promise<string
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
+const PACKAGE_SCRIPTS_DISABLED =
+  'Gezels may not run package scripts or installed package binaries here ("Run package scripts" is off in Settings → Security & Compliance). They run outside the script sandbox, with the network. Do not retry; tell the person which command you need run.';
+
+async function packageScriptsAllowed(store: Store): Promise<boolean> {
+  return resolveSecurityPolicy(await store.readConfig()).allowPackageScriptExecution;
+}
+
+/** Refuse a command that names an egress indicator, and record it in History. */
+async function egressRefusal(
+  opts: RunScriptsOptions,
+  tool: string,
+  command: unknown,
+): Promise<RunCommandOutcome | undefined> {
+  const indicators = findEgressIndicatorsInValue(command);
+  if (indicators.length === 0) return undefined;
+  const entry = toolCallBlockedHistoryEntry({
+    tool,
+    surface: 'gezel-tool',
+    indicators,
+    projectId: opts.projectId,
+    ...(opts.gezelId ? { gezelId: opts.gezelId } : {}),
+    ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+  });
+  log.warn(`${entry.summary} (project ${opts.projectId})`);
+  await opts.history?.log(entry).catch(() => undefined);
+  return failure(egressIndicatorRefusal(indicators));
+}
+
 function failure(message: string): RunCommandOutcome {
   return {
     ok: false,
@@ -530,6 +577,9 @@ export async function ensureCommandApprovalQuestions(opts: {
   requestedBy?: string;
 }): Promise<void> {
   if (opts.needs.length === 0) return;
+  // An approval for a command gezels may not run would only teach the
+  // person to click Approve on something that will never happen.
+  if (!(await packageScriptsAllowed(opts.store))) return;
   let workspaceDir: string;
   try {
     workspaceDir = await opts.store.projectWorkspaceDir(opts.projectId);

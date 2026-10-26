@@ -2,7 +2,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { ImageProvider } from '../../providers/image/types.js';
 import { type RunningService, startService } from '../../service.js';
 import {
   renderedModelPromptGuide,
@@ -105,6 +106,30 @@ describe('POST /api/image-gen/generate', () => {
       join(home, 'projects', 'default', 'artifacts', body.artifactPath),
     );
     expect(bytes.equals(artifactBytes)).toBe(true);
+  });
+
+  it('keeps separate workspace copies when cloud images have no seed', async () => {
+    const mock = await svc.context.imageProvider.current();
+    const output = await mock.generate({ prompt: 'cloud fixture', width: 8, height: 8 });
+    const routing = vi.spyOn(svc.context.imageProvider, 'providerForModel').mockResolvedValue({
+      name: 'copilot',
+      generate: async () => ({ ...output, meta: { ...output.meta, seed: 0 } }),
+    } as unknown as ImageProvider);
+    try {
+      const paths: string[] = [];
+      for (const prompt of ['first', 'second']) {
+        const res = await api('POST', '/api/image-gen/generate', { prompt });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { workspacePath: string };
+        paths.push(body.workspacePath);
+        expect(
+          await readFile(join(home, 'projects', 'default', 'workspace', body.workspacePath)),
+        ).toEqual(output.png);
+      }
+      expect(paths[0]).not.toBe(paths[1]);
+    } finally {
+      routing.mockRestore();
+    }
   });
 
   it("holds an agent's steps at the model's recommendation and fits the size to its range", async () => {
@@ -398,4 +423,24 @@ describe('image generation for an outside AI app', () => {
       await svc.context.store.writeConfig({ harnessTools: {} });
     }
   });
+
+  it.each(['copilot', 'codex-cli'])(
+    'treats %s as cloud for outside-app permissions',
+    async (name) => {
+      const generate = vi.fn();
+      const routing = vi.spyOn(svc.context.imageProvider, 'providerForModel').mockResolvedValue({
+        name,
+        generate,
+      } as unknown as ImageProvider);
+      try {
+        await svc.context.store.writeConfig({ harnessTools: { images: 'local' } });
+        const res = await harnessCall({ prompt: 'a tiny compass', projectId: 'default' });
+        expect(res.status).toBe(403);
+        expect(generate).not.toHaveBeenCalled();
+      } finally {
+        routing.mockRestore();
+        await svc.context.store.writeConfig({ harnessTools: {} });
+      }
+    },
+  );
 });

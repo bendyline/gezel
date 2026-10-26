@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { ImageGeneratorGezelHint } from '../components/ImageGeneratorGezelHint.js';
 import { ImageModelManager } from '../components/ImageModelManager.js';
+import { CodexImageSettings } from './CodexImageSettings.js';
+import { CopilotImageSettings } from './CopilotImageSettings.js';
 
 interface Props {
   onModelsChanged?: () => void;
@@ -22,7 +24,7 @@ type ProviderChoice = NonNullable<ConfigResponse['imageProvider']>;
 /**
  * Settings subsection for image generation. Lets the user pick between
  * the local stable-diffusion.cpp engine and cloud providers (Google
- * Nano Banana 2 / OpenAI GPT Image 2), enter the appropriate API key,
+ * Nano Banana 2 / OpenAI GPT Image 2 / Copilot / Codex), configure access,
  * and decide whether each cloud generation should prompt for
  * confirmation.
  */
@@ -65,7 +67,7 @@ export function ImageEngineSettings({ onModelsChanged }: Props) {
   const provider: ProviderChoice = config?.imageProvider ?? 'sd-cpp';
   const engineKind: 'local' | 'cloud' =
     'status' in probe ? (probe.status.engine.kind ?? 'local') : 'local';
-  const isCloud = provider === 'google-ai' || provider === 'openai';
+  const isCloud = ['google-ai', 'openai', 'copilot', 'codex-cli'].includes(provider);
 
   const onProviderChange = useCallback(async (next: ProviderChoice) => {
     setStatus('switching engine…');
@@ -169,6 +171,8 @@ export function ImageEngineSettings({ onModelsChanged }: Props) {
           <option value="sd-cpp">Local (Stable Diffusion)</option>
           <option value="google-ai">Google Nano Banana 2 (cloud)</option>
           <option value="openai">OpenAI GPT Image 2 (cloud)</option>
+          <option value="copilot">GitHub Copilot CLI (cloud, experimental)</option>
+          <option value="codex-cli">OpenAI Codex CLI (cloud, experimental)</option>
         </select>
       </label>
 
@@ -263,6 +267,24 @@ export function ImageEngineSettings({ onModelsChanged }: Props) {
           onSaveKey={onSaveKey}
           onClearKey={onClearKey}
           probe={probe}
+        />
+      )}
+
+      {provider === 'copilot' && (
+        <CopilotImageSettings
+          engine={'status' in probe ? probe.status.engine : undefined}
+          error={probe.kind === 'probe-failed' ? probe.error : undefined}
+          checking={probe.kind === 'probing'}
+          onRefresh={() => void refresh()}
+        />
+      )}
+
+      {provider === 'codex-cli' && (
+        <CodexImageSettings
+          engine={'status' in probe ? probe.status.engine : undefined}
+          error={probe.kind === 'probe-failed' ? probe.error : undefined}
+          checking={probe.kind === 'probing'}
+          onRefresh={() => void refresh()}
         />
       )}
 
