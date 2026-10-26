@@ -45,7 +45,6 @@ import {
   taskPersonName,
   taskTranscriptCompatible,
   todayIso,
-  toolCallBlockedHistoryEntry,
   turnStateWanted,
   withCharacterChatCap,
   withCurrentDateTimeLine,
@@ -554,6 +553,7 @@ import {
   type TaskBudgetSnapshot,
   TaskBudgetTracker,
 } from './task-budget.js';
+import { logToolCallHistory } from './tool-call-history.js';
 import { craftbookStartCardForTask, extractToolCard } from './tool-cards.js';
 import {
   deliverableIsExistingSubstantialFile,
@@ -16011,7 +16011,6 @@ export class ChatManager extends LocalEngineRuntime {
       // separately from the model-supplied path. Persist and render the file
       // that was actually opened; keep the request in argsFull/history.
       const path = resolvedReadPath ?? (typeof rawPath === 'string' ? rawPath : paths[0]);
-      const researchTarget = researchTargetForToolCall(info.name, info.args);
       // Non-nerdy one-liner (falls back to the key:value summary for
       // tools we have no template for); plus the full, capped args for
       // the UI's expand + copy so a handoff's real content is verifiable.
@@ -16151,57 +16150,19 @@ export class ChatManager extends LocalEngineRuntime {
           ...(card ? { card } : {}),
         },
       );
-      if (historyManager && info.egressIndicators?.length) {
-        await historyManager.log(
-          toolCallBlockedHistoryEntry({
-            tool: info.name,
-            surface: 'mcp-toolset',
-            indicators: info.egressIndicators,
-            projectId: record.projectId,
-            gezelId: record.gezelId,
-            sessionId: record.id,
-          }),
-        );
-      }
       if (historyManager) {
-        await historyManager.log({
-          kind: 'tool.called',
-          projectId: record.projectId,
-          gezelId: record.gezelId,
-          summary: info.success
-            ? `Tool ${info.name} ran (${info.durationMs}ms)`
-            : `Tool ${info.name} failed: ${info.errorMessage ?? 'unknown error'}`,
-          details: {
-            name: info.name,
-            ...(info.providerToolName ? { providerToolName: info.providerToolName } : {}),
-            sessionId: record.id,
-            ...(record.taskRef ? { taskRef: record.taskRef } : {}),
-            ...(record.stepId ? { stepId: record.stepId } : {}),
-            // A teammate's reads count toward the task it works for.
-            ...(!record.taskRef && record.subagentFor
-              ? { taskRef: record.subagentFor.taskRef, subagent: true }
-              : {}),
-            argKeys: info.argKeys,
-            durationMs: info.durationMs,
-            success: info.success,
-            ...(info.deliveredResultTruncated !== undefined
-              ? { deliveredResultTruncated: info.deliveredResultTruncated }
-              : {}),
-            ...(path ? { path } : {}),
-            ...(info.name === 'read_image_as_base64'
-              ? { imageArtifact: info.args?.artifact === true || info.args?.artifact === 'true' }
-              : {}),
-            ...(paths.length > 0 ? { paths } : {}),
-            ...(resolvedReadPath ? { resolvedPath: resolvedReadPath } : {}),
-            ...(requestedReadPath ? { requestedPath: requestedReadPath } : {}),
-            ...(readFuzzy !== undefined ? { fuzzy: readFuzzy } : {}),
-            ...(readSlices.length > 0 ? { artifactReadSlices: readSlices } : {}),
-            ...(researchTarget ? { researchTarget } : {}),
-            ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
-            ...(diff !== undefined ? { diff } : {}),
-            ...(addedLines !== undefined ? { addedLines } : {}),
-            ...(removedLines !== undefined ? { removedLines } : {}),
-          },
+        await logToolCallHistory(historyManager, {
+          info,
+          session: record,
+          path,
+          paths,
+          resolvedReadPath,
+          requestedReadPath,
+          readFuzzy,
+          readSlices,
+          diff,
+          addedLines,
+          removedLines,
         });
       }
     };
@@ -17183,36 +17144,6 @@ const REPLY_LISTENER_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
  */
 const HOOK_ASK_TIMEOUT_MS = 5 * 60 * 1000;
 const HOOK_ASK_POLL_MS = 500;
-
-/**
- * Retain a compact, non-secret proof that a successful tool call was aimed at
- * source acquisition. Full arguments already live on the session turn; the
- * history event only needs enough to distinguish an external lookup from a
- * local preview/navigation call when a research gate completes mid-turn.
- */
-function researchTargetForToolCall(
-  name: string,
-  args: Record<string, unknown> | undefined,
-): string | undefined {
-  if (!args) return undefined;
-  if (name === 'web_search' || name === 'wikipedia_search') {
-    const query = typeof args.query === 'string' ? args.query.trim() : '';
-    return query ? `query:${query.slice(0, 240)}` : undefined;
-  }
-  if (name === 'wikipedia_read') {
-    const title = typeof args.title === 'string' ? args.title.trim() : '';
-    return title ? `article:${title.slice(0, 240)}` : undefined;
-  }
-  if (name === 'fetch_url' || name === 'browser_navigate') {
-    const url = typeof args.url === 'string' ? args.url.trim() : '';
-    return /^https?:\/\//i.test(url) ? url.slice(0, 500) : undefined;
-  }
-  if (name === 'run_playwright_script') {
-    const path = typeof args.path === 'string' ? args.path.trim() : '';
-    return path ? `script:${path.slice(0, 240)}` : 'scripted-browser-run';
-  }
-  return undefined;
-}
 
 /**
  * Eval-only provider lock accepted from the harness. Deliberately limited to

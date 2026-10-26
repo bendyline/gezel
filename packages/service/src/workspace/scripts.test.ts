@@ -126,7 +126,10 @@ describe('runPackageScript', () => {
       script: 'probe',
       gezelId: 'g',
       sessionId: 's',
-      history: { log: async (event) => void logged.push(event) } as never,
+      history: {
+        log: async (event: { kind: string; details?: Record<string, unknown> }) =>
+          void logged.push(event),
+      } as never,
     });
     expect(res.ok).toBe(false);
     expect(res.error).toContain('Blocked by Gezel');
