@@ -13,8 +13,6 @@ import {
   GILDE_PACKAGE_NAME,
   compareRelease,
   fetchGildeReleases,
-  gildeDataDir,
-  gildePackageRoot,
   isGildeReleaseVersion,
   pickGildePatchUpdate,
   publishStagedNpmInstall,
@@ -30,6 +28,7 @@ import {
 } from '@bendyline/gezel/paths';
 import { z } from 'zod';
 import type { HistoryManager } from '../history/manager.js';
+import { bundledGildeDataDir, bundledGildePackageRoot } from './bundled-gilde.js';
 
 /**
  * Opt-in live gilde content updates. Owns the `~/.gezel/gilde/` carve-out:
@@ -72,7 +71,7 @@ export interface GildeUpdateManagerOptions {
   registry?: string;
   /** Test seam; default read from the installed `@bendyline/gilde`. */
   bundledVersion?: string;
-  /** Test seam; default `gildeDataDir()` (the installed package's data). */
+  /** Test seam; default `bundledGildeDataDir()` (the pinned package's data). */
   bundledDataDir?: string;
   intervalMs?: number;
   startupDelayMs?: number;
@@ -114,7 +113,7 @@ export class GildeUpdateManager {
     this.startupDelayMs = opts.startupDelayMs ?? STARTUP_DELAY_MS;
     this.now = opts.now ?? (() => new Date());
     const fixedBundledDataDir = opts.bundledDataDir;
-    this.bundledDataDirFn = fixedBundledDataDir ? () => fixedBundledDataDir : gildeDataDir;
+    this.bundledDataDirFn = fixedBundledDataDir ? () => fixedBundledDataDir : bundledGildeDataDir;
     this.bundledVersion = bundledVersion;
     this.state = state;
   }
@@ -146,7 +145,7 @@ export class GildeUpdateManager {
    * `link:gilde`, evals).
    */
   contentDataDir(): string {
-    if (envOverride()) return gildeDataDir();
+    if (envOverride()) return bundledGildeDataDir();
     const active = this.state.activeVersion;
     if (active) return join(gildeLiveVersionDir(this.home, active), 'package', 'data');
     return this.bundledDataDirFn();
@@ -493,7 +492,7 @@ function envOverride(): boolean {
 
 async function readBundledGildeVersion(): Promise<string | null> {
   try {
-    const raw = await readFile(join(gildePackageRoot(), 'package.json'), 'utf8');
+    const raw = await readFile(join(bundledGildePackageRoot(), 'package.json'), 'utf8');
     const parsed = JSON.parse(raw) as { version?: unknown };
     return typeof parsed.version === 'string' && isGildeReleaseVersion(parsed.version)
       ? parsed.version

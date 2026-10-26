@@ -48,6 +48,27 @@ it('offers keyboard navigation and carries reading selection and a previously sa
   expect(document.getElementById('startup-home')).toBeNull();
 });
 
+it('hands over the saved reading position while the remounted reader is still loading', async () => {
+  vi.useFakeTimers();
+  const host = bridge();
+  host.state.tab = 'tour';
+  host.state.scroll = 240;
+  mountStartup(host);
+  const accept = vi.fn(async () => {});
+  window.__GEZEL_STARTUP__!.connect(accept);
+  expect(accept).toHaveBeenCalledWith(expect.objectContaining({ tab: 'tour', scroll: 240 }));
+  expect(host.save).toHaveBeenCalledWith(expect.objectContaining({ scroll: 240 }));
+  await vi.runAllTimersAsync();
+});
+
+it('records where the person scrolled the reader', () => {
+  mountStartup(bridge());
+  const reading = document.getElementById('startup-reading')!;
+  Object.defineProperty(reading, 'scrollTop', { configurable: true, value: 90 });
+  reading.dispatchEvent(new Event('scroll'));
+  expect(window.__GEZEL_STARTUP__!.state().scroll).toBe(90);
+});
+
 it('keeps the reader and draft usable if saving to the live app fails', async () => {
   const host = bridge();
   host.state.draft = 'Do not lose this';

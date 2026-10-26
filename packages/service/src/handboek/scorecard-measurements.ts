@@ -43,7 +43,7 @@ function tables(scores: ModelScore[]) {
   return [
     {
       title: 'Task performance',
-      note: 'Native engine-log measurements across all attempted trials, including failures. Values are per-trial medians (minimum–maximum; sample count), not admission probes. Wall time includes tools. System RSS and GPU memory are separate peak measurements; do not add their medians. Periods remain separate because hardware performance can change.',
+      note: 'Task measurements across all attempted trials, including failures. Measurement methods and limits are stated in period labels and round notes. Values are per-trial medians (minimum–maximum; sample count), not admission probes. Wall time includes tools. System RSS and GPU memory are separate peak measurements; do not add their medians. Periods remain separate because hardware performance can change.',
       headers: [
         'Model',
         'Period',

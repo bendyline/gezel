@@ -7,6 +7,7 @@ import { CatalogService } from '@bendyline/gezel-catalog';
 import {
   OG_CARD_HEIGHT,
   OG_CARD_WIDTH,
+  bundledGildeDataDir,
   createHandboekEngine,
   findHandboekContent,
   ogKicker,
@@ -149,7 +150,7 @@ export async function runHandboekExport(
       'no handboek content tree found — run from a gezel checkout or install, or set GEZEL_HANDBOEK_DIR',
     );
   }
-  const catalog = new CatalogService();
+  const catalog = new CatalogService(undefined, { contentRoot: bundledGildeDataDir });
   const engine = createHandboekEngine({
     catalog,
     device: siteDeviceInfo,
@@ -215,7 +216,9 @@ export async function runHandboekExport(
       continue;
     }
     const depth = entry.id.split('/').length;
-    const markdown = rewriteSiteLinks(article.markdown, entry.id, ids, byStem);
+    const markdown = rewriteSiteLinks(article.markdown, entry.id, ids, byStem, (asset) =>
+      existsSync(join(contentDir, asset)),
+    );
     const parsed = parseMarkdown(markdown);
 
     const demo = demos.get(entry.id);
@@ -343,13 +346,16 @@ function normalizeBase(base: string | undefined): string | undefined {
  * Rewrite intra-handboek links for the static layout. Articles link two
  * ways — relative `.md` paths in curated prose, bare article ids in
  * generated tables — and both must land on `<root>/<target-id>/` from a
- * page nested at `<root>/<page-id>/`.
+ * page nested at `<root>/<page-id>/`. An asset this content tree does not
+ * carry (an npm install leaves out the scorecard evidence) links to its
+ * gezel.com copy, as the in-app Handboek does.
  */
 export function rewriteSiteLinks(
   markdown: string,
   pageId: string,
   ids: Set<string>,
   byStem: Map<string, string>,
+  hasAsset: (path: string) => boolean = () => true,
 ): string {
   const prefix = up(pageId.split('/').length);
   return markdown.replace(/\]\(([^()\s]+)\)/g, (whole, rawTarget: string) => {
@@ -363,7 +369,9 @@ export function rewriteSiteLinks(
     const [path, suffix = ''] = splitLinkSuffix(rawTarget);
     const candidate = path.replace(/^(\.\.?\/)+/, '');
     if (candidate.startsWith('assets/')) {
-      return `](${prefix}${candidate}${suffix})`;
+      return hasAsset(candidate)
+        ? `](${prefix}${candidate}${suffix})`
+        : `](${PUBLISHED_HANDBOEK}${candidate}${suffix})`;
     }
     const article = candidate.replace(/\.md$/, '');
     const target = ids.has(article) ? article : byStem.get(article.split('/').pop() ?? '');
@@ -376,6 +384,8 @@ function splitLinkSuffix(raw: string): [string, string] {
   const idx = raw.search(/[?#]/);
   return idx === -1 ? [raw, ''] : [raw.slice(0, idx), raw.slice(idx)];
 }
+
+const PUBLISHED_HANDBOEK = 'https://gezel.com/docs/';
 
 const up = (depth: number): string => '../'.repeat(depth);
 

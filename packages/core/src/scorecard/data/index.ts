@@ -71,6 +71,9 @@ import run_2026_10_20_rtx5070ti_nanbeige_core_32k from './runs/2026-10-20-rtx507
 import run_2026_10_21_m5max_ornith_observed_subset from './runs/2026-10-21-m5max-ornith-observed-subset.json' with {
   type: 'json',
 };
+import run_2026_10_25_m5max_bolt_five from './runs/2026-10-25-m5max-bolt-five.json' with {
+  type: 'json',
+};
 
 /** Every recorded sweep. Merged (and ordered by recency) by ../index.ts. */
 export const RUN_SHARDS: ScorecardDataset[] = [
@@ -98,4 +101,5 @@ export const RUN_SHARDS: ScorecardDataset[] = [
   run_2026_10_20_rtx5070ti_core_original_64k as unknown as ScorecardDataset,
   run_2026_10_20_rtx5070ti_nanbeige_core_32k as unknown as ScorecardDataset,
   run_2026_10_21_m5max_ornith_observed_subset as unknown as ScorecardDataset,
+  run_2026_10_25_m5max_bolt_five as unknown as ScorecardDataset,
 ];

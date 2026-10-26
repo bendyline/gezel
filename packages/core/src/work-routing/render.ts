@@ -10,7 +10,7 @@ import type { SuggestWorkResult, WorkActionOption, WorkGuidance } from '../schem
  */
 
 const START_LINE =
-  'Call start_work({ option: "<id>" }) with the id that fits. The request and destination are already bound; you do not need to restate them.';
+  'Use the exact start_work call shown for the option that fits. The request and destination are already bound; you do not need to restate them.';
 const ORDINAL_START_LINE =
   'Call start_work({ option: "<number>" }) with the number of the one that fits. The request and destination are already bound; you do not need to restate them.';
 
@@ -72,7 +72,7 @@ export function renderWorkOptionsPrelude(
 ): string | null {
   if (result.question) return null;
   if (result.options.length === 0 && !handsOff(result)) return null;
-  return `(System note for this turn: suggest_work already ran for this message.\n${renderSuggestWorkResult(result, opts)})`;
+  return `(System note for this turn: ranked work options for this request:\n${renderSuggestWorkResult(result, opts)})`;
 }
 
 /**
@@ -112,7 +112,8 @@ function optionLine(option: WorkActionOption, ordinal: boolean): string {
   const description = option.description ? ` — ${shortDescription(option.description)}` : '';
   const setup = option.kind === 'craftbook' ? setupNote(option) : '';
   const id = ordinal ? '' : `[${option.id}] `;
-  return `${id}${option.name}${description}${setup}`;
+  const call = ordinal ? '' : `; start_work({ option: ${JSON.stringify(option.id)} })`;
+  return `${id}${option.name}${description}${setup}${call}`;
 }
 
 function setupNote(option: Extract<WorkActionOption, { kind: 'craftbook' }>): string {

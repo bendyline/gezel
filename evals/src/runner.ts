@@ -1175,6 +1175,12 @@ export async function runTrial(
       // Eval prompts must be deterministic. Retrieval scenarios may enable
       // the embedding engine above, but no trial gets unsolicited recall.
       autoRecall: { enabled: false },
+      // These idle reports are unrelated to the scenario. Their one-shot
+      // inference contaminates token/timing totals and resets the engine
+      // progress watchdog after the actual task has stalled. Keep ordinary
+      // task execution enabled; report-specific scenarios can opt in during setup.
+      meesterStatus: { enabled: false },
+      digest: { enabled: false },
       ...(llamaEvalLaunch?.config ? llamaEvalLaunch.config : {}),
       ...(reasoningEffortConfig ? reasoningEffortConfig : {}),
       ...(evalLlamaSpecType ? { llamaCppSpecType: evalLlamaSpecType } : {}),

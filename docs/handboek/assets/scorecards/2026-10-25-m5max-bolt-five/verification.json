@@ -1,0 +1,27 @@
+{
+  "sourceReportSha256": "badb8e13850c24617c1bbc389286364daba9cfd0fe42bf949e51d86e4f4463a2",
+  "counts": {
+    "planned": 165,
+    "recorded": 165,
+    "reviewed": 165,
+    "passed": 110,
+    "noArtifact": 7,
+    "excludedPriorJudgments": 6,
+    "failed": 55,
+    "scoredArtifacts": 158,
+    "pendingReviews": 0
+  },
+  "uniqueCells": 165,
+  "uniqueTrials": 165,
+  "modelScenarioCells": 55,
+  "repetitions": 3,
+  "evidenceFilesVerified": 952,
+  "originalEvidenceModified": false,
+  "classificationCorrections": 0,
+  "newInferenceCalls": 0,
+  "schemas": [
+    "ScorecardDatasetSchema v1"
+  ],
+  "judgments": "Exact frozen axes, justifications, review ranges and artifact hashes; four separate rubrics; seven explicit noArtifact/null records.",
+  "performance": "Task observations with sample counts, medians and ranges. MLX decode estimates are labeled; token streams remain separate; no throughput fallback or invented admission probes."
+}

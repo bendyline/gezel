@@ -20,26 +20,39 @@ def digest(path):
         for block in iter(lambda: stream.read(1024 * 1024), b''): value.update(block)
     return value.hexdigest()
 
-def source(name, fetch):
-    pin = PINS[name]
-    path = CACHE / pin['file']
+def verified(url, path, sha256, name, fetch):
     if not path.is_file():
         if not fetch: raise ValueError('Missing ' + name + '; run with --fetch after approving dependencies.')
-        CACHE.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + '.partial')
-        subprocess.run(['curl', '-fL', '--retry', '2', pin['url'], '-o', str(temporary)], check=True)
-        if digest(temporary) != pin['sha256']: raise ValueError('Checksum mismatch: ' + name)
+        subprocess.run(['curl', '-fL', '--retry', '2', url, '-o', str(temporary)], check=True)
+        if digest(temporary) != sha256: raise ValueError('Checksum mismatch: ' + name)
         temporary.replace(path)
-    if digest(path) != pin['sha256']: raise ValueError('Checksum mismatch: ' + name)
+    if digest(path) != sha256: raise ValueError('Checksum mismatch: ' + name)
     return path
 
-def extract(archive, destination, skip=()):
+def source(name, fetch):
+    pin = PINS[name]
+    return verified(pin['url'], CACHE / pin['file'], pin['sha256'], name, fetch)
+
+def source_files(name, fetch):
+    # Loose files at a fixed upstream revision. A release tag can be re-uploaded
+    # under the same URL (sherpa-onnx's tts-models was, 2026-10-26); a commit
+    # URL always serves the same bytes or nothing.
+    pin = PINS[name]
+    files = {}
+    for file, sha256 in pin['files'].items():
+        relative = PurePosixPath(file)
+        if relative.is_absolute() or '..' in relative.parts or '\\' in file: raise ValueError('Unsafe pinned path')
+        files[file] = verified(pin['url'] + file, CACHE / pin['dir'] / file, sha256, name + '/' + file, fetch)
+    return files
+
+def extract(archive, destination):
     # Only ordinary files: upstream symlinks, devices, and paths outside the
     # destination cannot enter the compiled payload or model package.
     def output(name):
         path = PurePosixPath(name)
         if path.is_absolute() or '..' in path.parts or '\\' in name: raise ValueError('Unsafe archive path')
-        if any(part in skip for part in path.parts): return None
         target = destination / name
         target.parent.mkdir(parents=True, exist_ok=True)
         return target
@@ -48,16 +61,12 @@ def extract(archive, destination, skip=()):
             for member in packed.infolist():
                 if member.is_dir(): continue
                 if (member.external_attr >> 16) & 0o170000 == 0o120000: continue
-                target = output(member.filename)
-                if target is None: continue
-                with packed.open(member) as src, target.open('wb') as dst: shutil.copyfileobj(src, dst)
+                with packed.open(member) as src, output(member.filename).open('wb') as dst: shutil.copyfileobj(src, dst)
     else:
         with tarfile.open(archive) as packed:
             for member in packed:
                 if not member.isfile(): continue
-                target = output(member.name)
-                if target is None: continue
-                with packed.extractfile(member) as src, target.open('wb') as dst: shutil.copyfileobj(src, dst)
+                with packed.extractfile(member) as src, output(member.name).open('wb') as dst: shutil.copyfileobj(src, dst)
 
 def run(argv):
     subprocess.run([str(value) for value in argv], check=True)
@@ -130,9 +139,12 @@ def main():
     if args.models:
         models = payload / 'models'; models.mkdir()
         shutil.copy2(source('whisper-model', args.fetch), models / 'whisper-tiny.bin')
-        # espeak-ng-data is GPL-3 and only the retired eSpeak frontend read it.
-        extract(source('kokoro-model', args.fetch), models, skip=('espeak-ng-data',))
-        (models / 'kokoro-int8-multi-lang-v1_0').rename(models / 'kokoro')
+        # The pin leaves out espeak-ng-data: it is GPL-3 and only the retired
+        # eSpeak frontend read it.
+        for file, path in source_files('kokoro-model', args.fetch).items():
+            target = models / 'kokoro' / file
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
     manifest = {'pins': PINS, 'bridge': {str(file.relative_to(HERE)): digest(file) for file in HERE.rglob('*') if file.suffix in ['.h', '.cpp', '.txt', '.py', '.json']},
                 'files': {str(file.relative_to(payload)): digest(file) for file in payload.rglob('*') if file.is_file()}}
     (payload / 'speech-build.json').write_text(json.dumps(manifest, indent=2) + '\n')
