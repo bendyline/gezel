@@ -1237,7 +1237,7 @@
 }
 
 /* Gezel screen → Chat tab. The ProjectTimeline + ChatComposer fill the
-   tab body; the project dropdown is a slim header row above them.
+   tab body; the project dropdown rides in the tab row beside Chat.
    `flex: 1` + `min-height: 0` (rather than `height: 100%`) lets the
    composer sit at the bottom while the inner `.chat-timeline` scrolls. */
 .gezel-chat-tab {
@@ -1257,6 +1257,29 @@
 
 .gezel-chat-project-select {
   min-width: 240px;
+}
+
+/* Contents-only, so the slot adds no list gap before the picker lands. */
+.gezel-chat-project-slot {
+  display: contents;
+}
+
+/* A fixed width keeps the tabs after it still when the project changes;
+   a long name ends in an ellipsis instead of wrapping the row. */
+.gz-tabs-list .gezel-chat-project-select {
+  flex: 0 0 auto;
+  width: 15rem;
+  min-width: 0;
+  max-width: 50vw;
+  align-self: center;
+  margin-inline: 0.25rem 0.75rem;
+  white-space: nowrap;
+}
+
+.gz-tabs-list .gezel-chat-project-select > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Same self-contained compose surface project chat and Home already use:

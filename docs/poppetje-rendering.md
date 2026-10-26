@@ -29,31 +29,54 @@ in the material and lighting layers, not in a new identity model.
 The target is painted wood seen in soft window or studio light:
 
 1. A broad, asymmetric light source from the upper left.
-2. Rounded edge falloff that describes a turned head and torso.
-3. A shallow contact shadow where the head meets the body.
+2. Light that follows the turned profile. Each volume shows a lit side, a core
+   shadow toward the lower right, and a band of bounce light just inside the
+   shadow-side rim. The bounce is what makes an edge read as turning away
+   rather than as a painted outline.
+3. A shallow contact shadow where the head meets the body, and a tight, dark
+   one where the foot meets the ground.
 4. Clearly varied wood fibers and whorls visible through paint, softened as
    if below a finish. Material families must remain distinguishable at the
    compact sheet's 88px figure width, not just in a large close-up.
-5. Broad satin lighting rather than a separate white highlight dot.
+5. A satin lacquer finish: one soft sheen on each turned sphere (head, hat,
+   hood) and a narrow, soft specular streak down the body. Never a hard white
+   dot, and never strong enough to read as glossy plastic.
 6. Generous heads, shorter turned bodies, rounded shoulders, and a continuous
    curved foot. The base meets a soft ground shadow without a floating disc.
-7. Simple painted facial marks that remain legible at 16–40px.
+7. Simple painted facial marks that remain legible at 16–40px. Eyes are
+   painted in gloss, so at legible sizes each carries a small catchlight on
+   the light's side; blush is a soft dab, not a flat ellipse.
 
 Avoid literal lumber texture, outline-heavy clip art, airbrushed 3D character
 rendering, photorealistic faces, and per-slot lighting directions. Grain is a
 supporting material cue; silhouette, color, and face geometry carry identity.
+Anything drawn on a face must read as a feature or as paint: grain rings and
+knots there read as targets, bruises, or birthmarks.
 
 ## Rendering stack
 
 The drawing order is deliberate:
 
-1. Ground shadow and turned base lip.
-2. Body silhouette with a cylindrical paint gradient, vertical depth glaze,
-   and clipped garment paint.
-3. Head/body contact shadow and body-level garments.
-4. Head with radial volume, deterministic grain, and a soft satin bloom.
-5. Hair and hats using the same light direction and material vocabulary.
-6. Face, facial hair, wearables, marks, and the foreground hood.
+1. Ground shadow, foot contact shadow, and turned base lip.
+2. Body silhouette with a cylindrical paint gradient, drawn grain figure,
+   clipped garment paint, profile light bands, and a vertical depth glaze.
+3. Head/body contact shadow, body-level garments, then the body's specular
+   streak over paint and garments alike.
+4. Head with radial volume (core shadow, then a chin bounce tinted by the
+   shirt), deterministic grain, and temple knots.
+5. Hair, then the head's sheen; or a hat with its own sheen. The sheen
+   belongs to the sphere, so it crosses the hairline instead of stopping at
+   it.
+6. Face (eyes, catchlights, mouth, blush), facial hair, wearables, marks, and
+   the foreground hood with its sheen.
+
+Body light is drawn as bands between fractions of the local half-width
+(`buildProfileBand` in `geometry.ts`). Every body control point sits at
+`40 ± w / 2`, so scaling the widths maps the profile curve itself and each
+band follows a pinched waist or flared hip. A bounding-box gradient cannot:
+across a curvy waist it samples only its middle, and the edge shading
+disappears. The bands are blurred and clipped to the body. Tiny icon crops
+(below 36px) skip them along with turbulence and keep the plain gradient.
 
 The default `wavy` grain uses displaced, directionally softened noise at
 controlled opacity beneath the paint. Material contrast is deliberately lower than
@@ -65,9 +88,14 @@ softness, and displacement inside that character, so a crew looks cut from
 related but non-identical pieces of wood. Wider seeded opacity, fiber-width,
 and softness ranges make the difference visible at ordinary figure sizes.
 Sparse flow lines, open cathedral arches, and elongated torso knots supplement
-noise so those families survive downsampling. Knots appear on both the turned
-head and the side grain of the torso; their count and placement stay keyed to
-the same individual. Exactly one quarter of keys are
+noise so those families survive downsampling. Drawn figure sits below the
+paint: a slight blur, and each growth line drawn as a soft latewood band with
+a denser edge rather than a uniform pen stroke. A side-grain knot is a dark,
+elongated heart with the fibers bending around it; concentric rings read as a
+thumbprint at this scale. Knots appear on the side grain of the torso and at
+the turned head's temple edge, where the sphere foreshortens them; their
+count and placement stay keyed to the same individual. The cathedral figure
+stays on the torso. Exactly one quarter of keys are
 knotty, preserving the established whorl invariant; half of those receive a
 second knot. More forceful finish presets remain available for intentionally
 strong character. Tiny icon crops below 36px skip turbulence entirely: the
@@ -115,6 +143,19 @@ node packages/ui/scripts/poppetje-review.mjs groups
 pnpm --filter @bendyline/gezel-ui run poppetje:eval
 ```
 
+For lighting and material work, iterate with the close-up studio first. It
+takes seconds rather than minutes, and it shows what the compact sheet hides
+at 88px:
+
+```sh
+node packages/ui/scripts/poppetje-review.mjs studio [seeds] [outDir]
+```
+
+It writes `tmp/poppetjes/studio/`: `hero.png` (twelve seeded figures),
+`zoom.png` (four of them large), `heads.png`, and `icons.png` /
+`icons-zoom.png` (real 24–56px crops on light and dark surfaces, then those
+1x pixels enlarged). Pass a second `outDir` to keep a before/after pair.
+
 Outputs land in `tmp/poppetjes/`:
 
 - `index.html` / `overview.png` — the entire visual matrix.
@@ -146,7 +187,11 @@ well, and noisy literal grain can increase edge metrics while looking worse.
 ## Review checklist
 
 - Does the full crew look like one photographed product family?
-- Are head and torso volumes readable without an outline?
+- Are head and torso volumes readable without an outline, and does the light
+  wrap the curvy and slender waists as well as the straight pegs?
+- Is the shine satin rather than glossy plastic, on saturated shirts too?
+- Does anything on a face read as a mark, a bruise, or a second mouth or
+  nose? Check facial hair in light colors on deep skin.
 - Are default grain families visibly different at compact sheet size while
   staying quieter than facial features and garment paint?
 - Do pale and deep skin tones preserve facial contrast and modeled volume?

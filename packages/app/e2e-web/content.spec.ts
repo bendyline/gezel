@@ -40,12 +40,15 @@ test.describe('craftbooks', () => {
 
     if (world?.craftbookId) {
       await openTab(page, { kind: 'craftbook', id: world.craftbookId, source: 'local' });
-      const editor = page.getByTestId('craftbook-editor');
+      // The craftbooks view auto-selects a book and renders its own editor, which
+      // stays visible until the tab replaces it; an unscoped locator could bind to
+      // that one and see it detach mid-screenshot.
+      const editor = page.locator('.craftbook-tab').getByTestId('craftbook-editor');
       await expect(editor).toBeVisible();
       await shot(page, 'editor', {
         area: 'craftbooks',
         clip: editor,
-        selector: '[data-testid=craftbook-editor]',
+        selector: '.craftbook-tab [data-testid=craftbook-editor]',
         description: 'Craftbook editor — the seeded "Fixture Craftbook" steps',
       });
     }

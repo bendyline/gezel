@@ -9,6 +9,7 @@ const entries = {
   gallery: 'poppetje-gallery.tsx',
   groups: 'poppetje-groups.ts',
   eval: 'poppetje-eval.ts',
+  studio: 'poppetje-studio.tsx',
 };
 if (mode !== 'review' && !Object.hasOwn(entries, mode)) {
   throw new Error(`Unknown poppetje review mode: ${mode}`);

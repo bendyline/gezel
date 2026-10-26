@@ -81,6 +81,7 @@ export function GezelDetail({
   const [applyingAbout, setApplyingAbout] = useState(false);
   const [aboutRev, setAboutRev] = useState(0);
   const [detailTab, setDetailTab] = useState<DetailTab>('chat');
+  const [projectPickerSlot, setProjectPickerSlot] = useState<HTMLSpanElement | null>(null);
   const [showIterate, setShowIterate] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [renaming, setRenaming] = useState(false);
@@ -352,6 +353,9 @@ export function GezelDetail({
         <Tabs.Root value={activeDetailTab} onValueChange={(v) => setDetailTab(v as DetailTab)}>
           <Tabs.List>
             <Tabs.Trigger value="chat">Chat</Tabs.Trigger>
+            {activeDetailTab === 'chat' && (
+              <span ref={setProjectPickerSlot} className="gezel-chat-project-slot" />
+            )}
             <Tabs.Trigger value="about">About</Tabs.Trigger>
             <Tabs.Trigger value="appearance">Appearance</Tabs.Trigger>
             {growthVisible && (
@@ -498,6 +502,7 @@ export function GezelDetail({
           engineLabel={generationEngineLabel}
           workingProjectIds={workingProjectIds}
           activeTurnsReady={activeTurnsReady}
+          projectPickerSlot={projectPickerSlot}
         />
       )}
       {!isFixedFunction && activeDetailTab === 'memories' && (
