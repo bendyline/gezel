@@ -136,6 +136,9 @@ if (existsSync(out)) {
 }
 await mkdir(out, { recursive: true });
 
+// Render from the docs tree, not the CLI's packaged copy: the published service
+// package leaves out assets/scorecards/, and the site is where those downloads live.
+process.env.GEZEL_HANDBOEK_DIR ??= join(repoRoot, 'docs', 'handboek');
 run('rendering handboek', process.execPath, [
   cliEntry,
   'handboek',

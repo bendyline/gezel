@@ -225,11 +225,16 @@ export default defineConfig({
     }
     // The root README.md is the authors' guide (skills, macros, conventions),
     // not an article: the loader never reads it, so it stays out of the
-    // published package.
-    const authoringGuide = resolve(handboekSrc, 'README.md');
+    // published package. So does assets/scorecards/, the evidence behind each
+    // published scorecard: the in-app Handboek links it on gezel.com, and each
+    // run adds 300-500 KB packed to a package that has a size budget.
+    const excluded = new Set([
+      resolve(handboekSrc, 'README.md'),
+      resolve(handboekSrc, 'assets', 'scorecards'),
+    ]);
     cpSync(handboekSrc, 'dist/handboek-content', {
       recursive: true,
-      filter: (source) => resolve(source) !== authoringGuide,
+      filter: (source) => !excluded.has(resolve(source)),
     });
     // Build the Handboek catalog: a build product, never committed. A fast
     // input hash on every build; a re-render when its sources moved (docs,

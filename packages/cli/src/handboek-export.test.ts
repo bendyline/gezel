@@ -49,6 +49,15 @@ describe('rewriteSiteLinks', () => {
     expect(out).toContain('](../assets/results/README.md)');
     expect(out).toContain('](../assets/results/data.json)');
   });
+
+  it('links an asset the content tree does not carry to its gezel.com copy', () => {
+    const src = '[data](../assets/scorecards/run/details.json) [logo](../assets/mark.png)';
+    const out = rewriteSiteLinks(src, 'technical/model-scorecard', ids, byStem, (asset) =>
+      asset.endsWith('.png'),
+    );
+    expect(out).toContain('](https://gezel.com/docs/assets/scorecards/run/details.json)');
+    expect(out).toContain('](../../assets/mark.png)');
+  });
 });
 
 describe('extractBody', () => {
