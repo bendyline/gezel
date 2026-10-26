@@ -1,3 +1,10 @@
+## @bendyline/gezel-knowledge [1.2.9](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-knowledge%401.2.8...%40bendyline%2Fgezel-knowledge%401.2.9) (2026-10-26)
+
+
+### Dependencies
+
+* **@bendyline/gezk:** upgraded to 1.0.5
+
 ## @bendyline/gezel-knowledge [1.2.8](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-knowledge%401.2.7...%40bendyline%2Fgezel-knowledge%401.2.8) (2026-10-23)
 
 ## @bendyline/gezel-knowledge [1.2.7](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-knowledge%401.2.6...%40bendyline%2Fgezel-knowledge%401.2.7) (2026-10-19)
