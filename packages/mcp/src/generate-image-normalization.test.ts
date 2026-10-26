@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { normalizeGenerateImageToolArgs } from './generate-image-normalization.js';
 
 describe('normalizeGenerateImageToolArgs', () => {
+  it('preserves exact cloud dimensions for the provider to apply', () => {
+    const args = { width: 1536, height: 1024, steps: 20 };
+    expect(normalizeGenerateImageToolArgs(args, 'cloud')).toEqual({ args });
+  });
   it('keeps modest requests unchanged', () => {
     const actual = normalizeGenerateImageToolArgs({ prompt: 'sunset', width: 512, steps: 4 });
 

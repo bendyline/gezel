@@ -1128,9 +1128,12 @@ export const GezelConfigSchema = z.object({
   /**
    * Image-generation provider selection. `'sd-cpp'` (default) uses the
    * local stable-diffusion.cpp sidecar; `'google-ai'` and `'openai'`
-   * route to cloud APIs. `'mock'` is for tests and headless flows.
+   * route to cloud APIs. `'copilot'` uses the user's Copilot runtime and
+   * cloud account. `'mock'` is for tests and headless flows.
    */
-  imageProvider: z.enum(['sd-cpp', 'google-ai', 'openai', 'mock']).optional(),
+  imageProvider: z
+    .enum(['sd-cpp', 'google-ai', 'openai', 'copilot', 'codex-cli', 'mock'])
+    .optional(),
   /**
    * Default model id per image provider. `'sd-cpp'` names one of the
    * locally installed models; when unset (or naming a model that is no

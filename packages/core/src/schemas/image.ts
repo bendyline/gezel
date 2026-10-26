@@ -163,6 +163,8 @@ export const ImageGenerationMetaSchema = z.object({
    * believes an edit happened when a fresh generation did.
    */
   img2imgSkippedReason: z.string().optional(),
+  /** Provider limits or adjustments to the requested image settings. */
+  settingsNotes: z.array(z.string()).optional(),
 });
 export type ImageGenerationMeta = z.infer<typeof ImageGenerationMetaSchema>;
 

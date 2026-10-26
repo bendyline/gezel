@@ -618,6 +618,42 @@ describe('the tools', () => {
     expect(textOf(result)).toMatch(/can't edit images .* made a new image from the prompt alone/);
   });
 
+  it('forwards image settings and references, and surfaces provider adjustments', async () => {
+    const fake = fakeGezel(() => connectResponse({ images: 'any' }));
+    fake.routes.set('POST /api/image-gen/generate', () => ({
+      artifactPath: 'generated/cat.png',
+      workspacePath: null,
+      meta: {
+        model: 'copilot-image',
+        seed: 0,
+        widthPx: 1536,
+        heightPx: 1024,
+        settingsNotes: ['Requested 16:9; used 1536x1024.'],
+      },
+    }));
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    await writeFile(join(folder, 'cat.png'), bytes);
+    const client = await harness(fake);
+    const result = await client.callTool({
+      name: 'generate_image',
+      arguments: {
+        prompt: 'A cat on a boat',
+        aspectRatio: '16:9',
+        quality: 'high',
+        negativePrompt: 'text',
+        inputImages: ['cat.png'],
+      },
+    });
+    expect(fake.requests.at(-1)?.body).toMatchObject({
+      prompt: 'A cat on a boat',
+      aspectRatio: '16:9',
+      quality: 'high',
+      negativePrompt: 'text',
+      inputImages: [{ data: bytes.toString('base64'), mimeType: 'image/png' }],
+    });
+    expect(textOf(result)).toContain('Requested 16:9; used 1536x1024.');
+  });
+
   it('describes an image in the folder from its bytes, never one outside it', async () => {
     const fake = fakeGezel();
     fake.routes.set('POST /api/recognition/describe', () => ({

@@ -195,7 +195,7 @@ export class CopilotProvider implements LLMProvider {
       opts?: Record<string, unknown>,
     ) => CopilotClientHandle;
     const clientOpts: Record<string, unknown> = {};
-    if (this.githubToken) clientOpts.githubToken = this.githubToken;
+    if (this.githubToken) clientOpts.gitHubToken = this.githubToken;
     // `COPILOT_CLI_PATH` rather than a `RuntimeConnection.forStdio({ path })`
     // override: it feeds both the spawned-child and in-process FFI code
     // paths, and leaves the caller's choice of connection kind alone.

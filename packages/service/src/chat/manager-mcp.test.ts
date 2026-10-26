@@ -11,9 +11,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Question, Task } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
+import { MockImageProvider } from '../providers/image/mock.js';
+import type { ImageProvider } from '../providers/image/types.js';
 import { MockProvider } from '../providers/mock.js';
 import { type RunningService, startService } from '../service.js';
 import { ChatEventBus } from './events.js';
@@ -810,6 +812,69 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
       bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
     ).toBe(true);
   }, 30_000);
+
+  it.each(['copilot', 'codex-cli'] as const)(
+    'preserves %s image settings through chat and MCP, including provider notes',
+    async (imageProvider) => {
+      await store.writeConfig({
+        imageProvider,
+        imageGenerationConfirmation: 'always-allow',
+      });
+      const imageMock = new MockImageProvider();
+      const output = await imageMock.generate({ prompt: 'test', width: 8, height: 8 });
+      const note = 'Copilot manages sampling steps; the requested step count was not applied.';
+      const generate = vi.fn(async () => ({
+        ...output,
+        meta: { ...output.meta, settingsNotes: [note] },
+      }));
+      const provider = { name: imageProvider, generate } as unknown as ImageProvider;
+      const routing = vi
+        .spyOn(svc.context.imageProvider, 'providerForModel')
+        .mockResolvedValue(provider);
+      try {
+        const session = await manager.createSession({ gezelId: 'ada' });
+        mock.scriptToolCalls([
+          {
+            name: 'generate_image',
+            arguments: {
+              prompt: 'A compass',
+              width: 1536,
+              height: 1024,
+              aspectRatio: '3:2',
+              quality: 'high',
+              negativePrompt: 'text',
+              seed: 31,
+              steps: 25,
+              strength: 0.4,
+              inputImages: [{ data: output.png.toString('base64'), mimeType: 'image/png' }],
+            },
+          },
+        ]);
+        mock.script('Here is your compass.');
+        await manager.send(session.id, 'Make a high quality landscape compass with no text.');
+        expect(generate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            prompt: 'A compass',
+            width: 1536,
+            height: 1024,
+            aspectRatio: '3:2',
+            quality: 'high',
+            negativePrompt: 'text',
+            seed: 31,
+            steps: 25,
+            strength: 0.4,
+            inputImages: [{ data: output.png, mimeType: 'image/png' }],
+          }),
+        );
+        expect(
+          mock.toolCallOutputs.find((call) => call.name === 'generate_image')?.output,
+        ).toContain(note);
+      } finally {
+        routing.mockRestore();
+      }
+    },
+    30_000,
+  );
 
   it('captures a failed tool call onto the assistant message for the post-stream expando', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });

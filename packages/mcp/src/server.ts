@@ -10502,7 +10502,11 @@ server.tool(
   },
   async (args) => {
     try {
-      const normalized = normalizeGenerateImageToolArgs(args);
+      const config = await api.getConfig();
+      const cloud =
+        !args.model?.startsWith('remote:') &&
+        ['copilot', 'codex-cli', 'google-ai', 'openai'].includes(config.imageProvider ?? 'sd-cpp');
+      const normalized = normalizeGenerateImageToolArgs(args, cloud ? 'cloud' : 'local');
       const imageArgs = normalized.args;
       const saveAs = imageArgs.saveAs || inferGeneratedImageSaveAs(imageArgs.prompt);
       const res = await api.generateImage({
@@ -10570,6 +10574,9 @@ server.tool(
         ? `\n\nTo display this image in HTML, copy this exact tag verbatim — do not add any prefix, do not change the filename:\n\`<img src="${workspacePath}">\`\n\nIf you are working on a website/logo task and an HTML file already exists, your next tool call should patch that HTML with this exact tag using \`replace_in_file\` or \`write_file\`. Do not call \`generate_image\` again for the same missing image; the image asset already exists.`
         : '\n\nNOTE: workspace copy was skipped (project has an external workingDir not approved for writes). To reference from HTML, copy the image into the workspace yourself first via `write_file`.';
       const normalizedLine = normalized.note ? ` ${normalized.note}` : '';
+      const settingsLine = meta.settingsNotes?.length
+        ? ` Image settings: ${meta.settingsNotes.join(' ')}`
+        : '';
       // When the resolved model can't do img2img the provider dropped the
       // source images and generated from the prompt alone — say so up
       // front, or the model reports an "edit" that never happened.
@@ -10583,7 +10590,7 @@ server.tool(
           ? ` For your next prompt: ${promptGuide}`
           : '';
       if (promptGuide) promptGuidesShown.add(meta.model);
-      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${normalizedLine}${skippedLine}${guideLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
+      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${normalizedLine}${settingsLine}${skippedLine}${guideLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
       const content: Array<
         { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
       > = [{ type: 'text' as const, text: summary }];

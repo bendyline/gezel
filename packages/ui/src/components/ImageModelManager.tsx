@@ -43,7 +43,6 @@ interface ActivePull {
   bytesWritten: number;
   totalBytes: number;
   error?: string;
-  controller: AbortController;
   /**
    * Most-recent `retrying` SSE event. Present when the shared
    * downloader is waiting between attempts. Cleared on the next
@@ -89,6 +88,9 @@ export function ImageModelManager({
   const [fitConfirm, setFitConfirm] = useState<{ id: string; message: string } | null>(null);
   const pullsRef = useRef(pulls);
   pullsRef.current = pulls;
+  const subscriptions = useRef(new Map<string, AbortController>());
+  const onModelsChangedRef = useRef(onModelsChanged);
+  onModelsChangedRef.current = onModelsChanged;
 
   const refresh = useCallback(async () => {
     try {
@@ -102,27 +104,27 @@ export function ImageModelManager({
   }, []);
 
   /**
-   * Attach an SSE subscription for a single in-flight pull. Returns the
-   * AbortController used for the fetch, recorded on the pulls map so the
-   * Cancel/Retry/unmount paths can detach without cancelling the actual
-   * download — the registry owns the pull, this is just a listener.
+   * Own one listener per pull, independently of React's queued state updates.
+   * The service owns the download; detaching a listener does not cancel it.
    */
   const attachSubscription = useCallback(
     (
       id: string,
       subscribe: (cb: (e: ImageModelPullEvent) => void, signal: AbortSignal) => Promise<void>,
     ) => {
+      if (subscriptions.current.has(id)) return;
       const controller = new AbortController();
+      subscriptions.current.set(id, controller);
       setPulls((prev) => {
         const next = new Map(prev);
         const cur = next.get(id);
         next.set(id, {
           ...(cur ?? { id, bytesWritten: 0, totalBytes: 0 }),
-          controller,
         });
         return next;
       });
       void subscribe((event) => {
+        if (controller.signal.aborted) return;
         if (event.type === 'progress') {
           setPulls((prev) => {
             const next = new Map(prev);
@@ -163,13 +165,15 @@ export function ImageModelManager({
           // Brief grace window lets the bar stay at 100% before the
           // entry collapses into the Installed list above.
           setTimeout(() => {
+            if (controller.signal.aborted) return;
+            subscriptions.current.delete(id);
             setPulls((prev) => {
               const next = new Map(prev);
               next.delete(id);
               return next;
             });
             void refresh();
-            onModelsChanged?.();
+            onModelsChangedRef.current?.();
           }, 800);
         }
       }, controller.signal).catch((err) => {
@@ -182,10 +186,11 @@ export function ImageModelManager({
         });
       });
     },
-    [refresh, onModelsChanged],
+    [refresh],
   );
 
   useEffect(() => {
+    const controllers = subscriptions.current;
     void refresh();
     // Re-attach to any pull the registry started in a previous mount.
     // Without this, leaving Settings → Image generation mid-download and
@@ -204,7 +209,6 @@ export function ImageModelManager({
               id: snapshot.id,
               bytesWritten: snapshot.bytesWritten,
               totalBytes: snapshot.totalBytes,
-              controller: new AbortController(),
               ...(snapshot.retrying ? { retrying: snapshot.retrying } : {}),
               ...(snapshot.error ? { error: snapshot.error } : {}),
             });
@@ -220,6 +224,8 @@ export function ImageModelManager({
       });
     return () => {
       cancelled = true;
+      for (const controller of controllers.values()) controller.abort();
+      controllers.clear();
     };
   }, [refresh, attachSubscription]);
 
@@ -238,7 +244,8 @@ export function ImageModelManager({
       // this React tick and return without starting anything, even after a
       // queued setPulls(delete). Attach directly so the fresh subscription
       // is enqueued immediately; React applies these state updates in order.
-      pullsRef.current.get(id)?.controller.abort();
+      subscriptions.current.get(id)?.abort();
+      subscriptions.current.delete(id);
       setPulls((prev) => {
         const next = new Map(prev);
         next.delete(id);
@@ -253,8 +260,8 @@ export function ImageModelManager({
     // Tell the registry to actually abort the download. We optimistically
     // remove the row; the SSE will close shortly after with an error
     // event that we ignore since the entry is already gone.
-    const pull = pullsRef.current.get(id);
-    pull?.controller.abort();
+    subscriptions.current.get(id)?.abort();
+    subscriptions.current.delete(id);
     setPulls((prev) => {
       const next = new Map(prev);
       next.delete(id);

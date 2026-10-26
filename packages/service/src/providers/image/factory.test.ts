@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
 import type { SecretKey, SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { CodexImageProvider } from './codex-image.js';
 import {
   type ResolvedInstalledModel,
   buildSdServerArgs,
@@ -123,6 +124,21 @@ describe('createImageProvider selection rules', () => {
     expect(provider).toBeInstanceOf(GoogleAiImageProvider);
     const health = await provider.health();
     expect(health.status).toBe('not-configured');
+  });
+
+  it('uses the Codex CLI provider without reading image API credentials', async () => {
+    const secrets = fakeSecrets({});
+    const provider = await createImageProvider({
+      home,
+      env: {},
+      config: {
+        imageProvider: 'codex-cli',
+        codexCli: { binaryPath: '/custom/codex' },
+      } as GezelConfig,
+      secrets,
+    });
+    expect(provider).toBeInstanceOf(CodexImageProvider);
+    expect(provider.name).toBe('codex-cli');
   });
 
   it('returns OpenAIImageProvider when imageProvider=openai', async () => {

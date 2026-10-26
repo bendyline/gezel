@@ -24,12 +24,14 @@ export function imageModelRoutes(ctx: EngineContext): Hono {
   /** List installed image models (not the catalog — installed weights on disk). */
   app.get('/models', proxy, async (c) => {
     const provider = await ctx.imageProvider.current();
-    const models = await provider.listInstalledModels();
+    const [models, defaultModel] = await Promise.all([
+      provider.listInstalledModels(),
+      provider.resolveDefaultModelId?.().catch(() => undefined),
+    ]);
     const kind = providerKind(provider.name);
-    // Cloud image APIs are all edit-capable; local models resolve through
+    // Cloud providers can report account-specific edit support; local models resolve through
     // the explicit-field → assessment-map → weights-kind ladder so the UI
     // and MCP callers can tell which installed models can edit an image.
-    const defaultModel = await provider.resolveDefaultModelId?.().catch(() => undefined);
     return c.json({
       ...(defaultModel ? { defaultModel } : {}),
       models: await Promise.all(
@@ -38,7 +40,7 @@ export function imageModelRoutes(ctx: EngineContext): Hono {
           kind,
           supportsImg2Img:
             kind === 'cloud'
-              ? true
+              ? (m.supportsImg2Img ?? true)
               : resolveImg2ImgSupport({
                   modelId: m.id,
                   explicit: m.supportsImg2Img,
@@ -209,7 +211,7 @@ function withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void 
   return { promise, resolve };
 }
 export function providerKind(name: string): 'local' | 'cloud' {
-  return name === 'google-ai' || name === 'openai' ? 'cloud' : 'local';
+  return ['google-ai', 'openai', 'copilot', 'codex-cli'].includes(name) ? 'cloud' : 'local';
 }
 
 /** Size and prompting facts a client needs to describe a local model's render. */

@@ -147,7 +147,8 @@
     }
   },
   "devDependencies": {
-    "@github/copilot-sdk": "^1.0.7",
+    "@github/copilot": "1.0.103",
+    "@github/copilot-sdk": "1.0.26",
     "@huggingface/transformers": "^4.3.1",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^24.13.3",

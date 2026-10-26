@@ -10,8 +10,12 @@
  *   3. `config.imageProvider === 'openai'` → `OpenAIImageProvider`
  *      (GPT Image 2). Same shape: lazy, missing key surfaces via
  *      `health()`.
- *   4. `config.imageProvider === 'mock'` → `MockImageProvider`.
- *   5. Otherwise the local engine, which inference owns so hosted inference
+ *   4. `config.imageProvider === 'copilot'` → `CopilotImageProvider`, using
+ *      the user's Copilot sign-in or configured GitHub token.
+ *   5. `config.imageProvider === 'codex-cli'` → `CodexImageProvider`, using
+ *      the installed CLI and its existing ChatGPT sign-in.
+ *   6. `config.imageProvider === 'mock'` → `MockImageProvider`.
+ *   7. Otherwise the local engine, which inference owns so hosted inference
  *      serves the same provider (`createLocalImageProvider`).
  */
 // patient-fetch-exempt: the local engine's builder (inference's createLocalImageProvider) passes patientFetch(); the cloud providers built here call remote APIs that should time out.
@@ -20,6 +24,8 @@ import type { GezelConfig } from '@bendyline/gezel';
 import type { GpuArbiter } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
 import { createLocalImageProvider } from '@bendyline/gezel-inference/internal/providers/image/local-factory';
 import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
+import { CodexImageProvider } from './codex-image.js';
+import { CopilotImageProvider } from './copilot-image.js';
 import { GoogleAiImageProvider } from './google-ai.js';
 import { MockImageProvider } from './mock.js';
 import { OpenAIImageProvider } from './openai-image.js';
@@ -59,6 +65,20 @@ export async function createImageProvider(
   }
 
   const choice = opts.localOnly ? undefined : opts.config?.imageProvider;
+  if (choice === 'codex-cli') {
+    return new CodexImageProvider({ binaryPath: opts.config?.codexCli?.binaryPath, env });
+  }
+  if (choice === 'copilot') {
+    const githubToken = await opts.secrets?.get({
+      kind: 'providerCredential',
+      name: 'githubToken',
+    });
+    return new CopilotImageProvider({
+      home: opts.home,
+      githubToken: githubToken ?? undefined,
+      env,
+    });
+  }
   if (choice === 'google-ai') {
     const apiKey = opts.secrets
       ? await opts.secrets.get({ kind: 'providerCredential', name: 'googleAiApiKey' })
