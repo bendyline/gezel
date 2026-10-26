@@ -48,6 +48,7 @@ import {
   parseCraftbookTestSpec,
 } from '@bendyline/gezel';
 import { CatalogService, renderGildeSchemaFiles, renderSchema } from '@bendyline/gezel-catalog';
+import { bundledGildeDataDir } from '../gilde-updates/bundled-gilde.js';
 import { validateCraftbookScripts } from '../scripts/source.js';
 import { parseCron } from '../tasks/cron.js';
 import {
@@ -1375,7 +1376,8 @@ async function validateAnalyzedSource(
     return { analysis, manifest: null, dependencies: [] };
   }
 
-  const catalog = opts?.catalog ?? new CatalogService();
+  const catalog =
+    opts?.catalog ?? new CatalogService(undefined, { contentRoot: bundledGildeDataDir });
   const lock = await resolveGezappDependencyLock(catalog, lockInputsFrom(analysis));
   for (const problem of lock.problems) {
     analysis.findings.push({

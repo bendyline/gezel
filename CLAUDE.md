@@ -210,7 +210,13 @@ standalone users of its default source install `@bendyline/gilde` explicitly.
 Inference supplies a model-only snapshot generated from the same content via
 `dataDir`, so it needs neither the full Gilde payload nor a second loader.
 Default content is resolved at runtime through `gildeDataDir()` in
-[packages/catalog/src/gilde-data.ts](packages/catalog/src/gilde-data.ts).
+[packages/catalog/src/gilde-data.ts](packages/catalog/src/gilde-data.ts),
+except in the service, which owns the pin: it resolves Gilde from its own
+folder (`bundledGildeDataDir()` in
+[gilde-updates/bundled-gilde.ts](packages/service/src/gilde-updates/bundled-gilde.ts))
+and passes that to every catalog it builds. The catalog's own lookup fails
+when it is installed globally beside the service, because Gilde is only its
+optional peer.
 `GEZEL_GILDE_DATA_DIR` overrides resolution for tests/evals/operators;
 authoring scripts locate the sibling checkout via `GILDE_DIR` (default
 `../gilde`).

@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 /**
  * Stage the Kokoro pronunciation assets the desktop daemon ships.
  *
@@ -11,10 +10,10 @@ import { execFileSync } from 'node:child_process';
  * NG is GPL-3 and Gezel is MIT.
  *
  * Usage:
- *   node scripts/build-kokoro-lexicon.mjs [--pack <kokoro tarball>]
+ *   node scripts/build-kokoro-lexicon.mjs [--pack <folder of pinned voice-pack files>]
  *
- * With no argument the pinned pack already fetched by
- * native/mobile/speech/build.py is used.
+ * With no argument the pinned files already fetched by
+ * native/mobile/speech/build.py are used.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -23,7 +22,9 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
 const repo = dirname(dirname(fileURLToPath(import.meta.url)));
-const pins = JSON.parse(readFileSync(join(repo, 'native/mobile/speech/pins.json'), 'utf8'));
+const pin = JSON.parse(readFileSync(join(repo, 'native/mobile/speech/pins.json'), 'utf8'))[
+  'kokoro-model'
+];
 const destination = join(repo, 'packages/inference/assets/kokoro');
 /** Voice-pack members the desktop daemon needs; the rest stay mobile-only. */
 const WANTED = ['lexicon-us-en.txt', 'lexicon-gb-en.txt'];
@@ -31,28 +32,30 @@ const WANTED = ['lexicon-us-en.txt', 'lexicon-gb-en.txt'];
 function packPath() {
   const explicit = process.argv.indexOf('--pack');
   if (explicit >= 0) return process.argv[explicit + 1];
-  return join(repo, 'native/mobile/.build/speech-deps', pins['kokoro-model'].file);
+  return join(repo, 'native/mobile/.build/speech-deps', pin.dir);
 }
 
 const pack = packPath();
-if (!pack || !existsSync(pack)) {
-  throw new Error(
-    `Voice pack not found at ${pack}. Fetch it first with:
+/** One voice-pack file, refused unless it matches its pin. */
+function member(name) {
+  const file = join(pack, name);
+  if (!existsSync(file)) {
+    throw new Error(
+      `Voice pack file not found at ${file}. Fetch the pack first with:
   python3 native/mobile/speech/build.py android --fetch --models
-or pass one with --pack.`,
-  );
+or pass its folder with --pack.`,
+    );
+  }
+  const bytes = readFileSync(file);
+  if (createHash('sha256').update(bytes).digest('hex') !== pin.files[name])
+    throw new Error(`Voice pack checksum mismatch for ${file}`);
+  return bytes;
 }
-const digest = createHash('sha256').update(readFileSync(pack)).digest('hex');
-if (digest !== pins['kokoro-model'].sha256)
-  throw new Error(`Voice pack checksum mismatch for ${pack}`);
 
 mkdirSync(destination, { recursive: true });
 const inventory = {};
 for (const name of WANTED) {
-  // Read one member straight out of the archive; never unpack the whole pack.
-  const text = execFileSync('tar', ['-xjOf', pack, `kokoro-int8-multi-lang-v1_0/${name}`], {
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  const text = member(name);
   const packed = gzipSync(text, { level: 9 });
   writeFileSync(join(destination, `${name}.gz`), packed);
   inventory[`${name}.gz`] = {
@@ -67,13 +70,16 @@ for (const name of WANTED) {
 }
 // The dictionaries are Apache-2.0 data; redistribution must carry the pack's
 // license text beside them.
-const license = execFileSync('tar', ['-xjOf', pack, 'kokoro-int8-multi-lang-v1_0/LICENSE']);
+const license = member('LICENSE');
 writeFileSync(join(destination, 'LICENSE'), license);
 writeFileSync(
   join(destination, 'manifest.json'),
   `${JSON.stringify(
     {
-      source: pins['kokoro-model'],
+      source: {
+        url: pin.url,
+        files: Object.fromEntries([...WANTED, 'LICENSE'].map((name) => [name, pin.files[name]])),
+      },
       license: { file: 'LICENSE', sha256: createHash('sha256').update(license).digest('hex') },
       files: inventory,
     },

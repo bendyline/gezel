@@ -7,6 +7,7 @@ import { CatalogService } from '@bendyline/gezel-catalog';
 import {
   OG_CARD_HEIGHT,
   OG_CARD_WIDTH,
+  bundledGildeDataDir,
   createHandboekEngine,
   findHandboekContent,
   ogKicker,
@@ -149,7 +150,7 @@ export async function runHandboekExport(
       'no handboek content tree found — run from a gezel checkout or install, or set GEZEL_HANDBOEK_DIR',
     );
   }
-  const catalog = new CatalogService();
+  const catalog = new CatalogService(undefined, { contentRoot: bundledGildeDataDir });
   const engine = createHandboekEngine({
     catalog,
     device: siteDeviceInfo,

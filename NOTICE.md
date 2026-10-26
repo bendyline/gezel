@@ -465,10 +465,10 @@ Unlike the desktop models below, these ship inside the mobile app bundle.
 | Asset | Used for | License | Source |
 |---|---|---|---|
 | **Whisper `tiny`** (multilingual GGML) | on-device speech-to-text | MIT | [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) |
-| **Kokoro-82M int8 multi-lang v1.0** voice pack (model, voices, tokens) | on-device text-to-speech | Apache-2.0 | [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) release asset |
+| **Kokoro-82M int8 multi-lang v1.0** voice pack (model, voices, tokens) | on-device text-to-speech | Apache-2.0 | [csukuangfj/kokoro-int8-multi-lang-v1_0](https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_0), the sherpa-onnx maintainer's copy of its [`tts-models`](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) release asset, pinned by revision |
 | **Kokoro pronunciation dictionaries** (`lexicon-us-en`, `lexicon-gb-en`, `lexicon-zh`) | turning text into phonemes | Apache-2.0 | same voice pack; English entries derive from [hexgrad/misaki](https://github.com/hexgrad/misaki) |
 
-The voice pack is published on the sherpa-onnx release page but is data, not
+The voice pack is published by the sherpa-onnx project but is data, not
 sherpa-onnx code, and it is still used now that the library is gone. The two
 English dictionaries are **also redistributed with the desktop daemon**, gzipped,
 under `packages/inference/assets/kokoro/` beside the voice pack's Apache-2.0

@@ -18,6 +18,9 @@ import { type GeneratedSummary, buildGeneratedBody, listGeneratedSummaries } fro
 import { type HandboekCatalog, expandMacros } from './macros.js';
 
 export type { CuratedArticle, ReleaseNoteEntry } from './content.js';
+// The CLI's site export builds its catalog over this: the catalog cannot find
+// Gilde on its own when it is installed globally beside the service.
+export { bundledGildeDataDir } from '../gilde-updates/bundled-gilde.js';
 export {
   HANDBOEK_KNOWLEDGE_CATALOG,
   HANDBOEK_KNOWLEDGE_PUBLISHER,

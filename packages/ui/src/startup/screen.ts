@@ -27,7 +27,7 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   document.documentElement.dataset.sidebarSide = snapshot?.sidebar || 'right';
   if (snapshot?.theme && snapshot.theme !== 'system')
     document.documentElement.dataset.theme = snapshot.theme;
-  let view: StartupHomeView = {
+  const view: StartupHomeView = {
     ...bridge.state,
     tab: bridge.state.tab === 'chat' ? ('greeting' as const) : bridge.state.tab,
     focused: false,
@@ -86,22 +86,25 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   root.append(layout);
 
   function current(): StartupHomeView {
-    return { ...view, scroll: readingScroll() };
-  }
-  function readingScroll() {
-    return content.querySelector('.home-intro-doc')?.scrollTop || content.scrollTop;
+    return { ...view };
   }
   // Navigation uses a synchronous, bounded IPC copy. Disk writes stay asynchronous.
   const save = () => {
-    view = current();
-    bridge.save(view);
+    bridge.save(current());
   };
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   const deferSave = () => {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(save, 120);
   };
-  content.addEventListener('scroll', deferSave, { passive: true, capture: true });
+  // The position comes from scroll events, never from the DOM at handoff: on the
+  // service page the reader remounts behind a lazy chunk, and until that lands
+  // the DOM reports 0 for a page the person left part-way down.
+  const recordScroll = () => {
+    view.scroll = content.querySelector('.home-intro-doc')?.scrollTop || content.scrollTop;
+    deferSave();
+  };
+  content.addEventListener('scroll', recordScroll, { passive: true, capture: true });
   window.addEventListener('pagehide', save);
   window.addEventListener('beforeunload', save);
 
@@ -248,7 +251,6 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   window.__GEZEL_STARTUP__ = {
     state: current,
     reading() {
-      view = current();
       const copy = element(
         'section',
         'home-workshop-greeting-cols startup-reading startup-reading-live',
