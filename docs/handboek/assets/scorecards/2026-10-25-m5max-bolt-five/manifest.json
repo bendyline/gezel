@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "publicationId": "2026-10-25-m5max-bolt-five",
+  "sourceReportSha256": "badb8e13850c24617c1bbc389286364daba9cfd0fe42bf949e51d86e4f4463a2",
+  "regenerate": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-bolt-five-scorecard.mjs",
+  "check": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-bolt-five-scorecard.mjs --check",
+  "files": [
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-10-25-m5max-bolt-five.json",
+      "bytes": 21484,
+      "sha256": "e3ecb1a6bc871e7e39b20f95fc10ec0e4a8f7cafaae39efb2deeab8684a9daec"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-25-m5max-bolt-five/runs/2026-10-25-m5max-bolt-five.json",
+      "bytes": 21484,
+      "sha256": "e3ecb1a6bc871e7e39b20f95fc10ec0e4a8f7cafaae39efb2deeab8684a9daec"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-25-m5max-bolt-five/scorecard.json",
+      "bytes": 21484,
+      "sha256": "e3ecb1a6bc871e7e39b20f95fc10ec0e4a8f7cafaae39efb2deeab8684a9daec"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-25-m5max-bolt-five/scorecard-details.json",
+      "bytes": 1961540,
+      "sha256": "8479afb979a4a896df7acb14e430423b5485ff040dfeb338f7e46850ea225d4b"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-25-m5max-bolt-five/verification.json",
+      "bytes": 940,
+      "sha256": "535f35344e153ac2e54a40b8b3119c214db6df12610e9588d5a52196a2121d46"
+    }
+  ]
+}

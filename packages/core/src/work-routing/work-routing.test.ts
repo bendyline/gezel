@@ -379,8 +379,8 @@ describe('renderSuggestWorkResult', () => {
       }),
     );
     expect(text.split('\n')).toEqual([
-      '1. [type:trip-planner] Trip planner — A board',
-      expect.stringContaining('Call start_work({ option: "<id>" })'),
+      '1. [type:trip-planner] Trip planner — A board; start_work({ option: "type:trip-planner" })',
+      expect.stringContaining('Use the exact start_work call shown'),
       'If none of these fits, answer in chat yourself. If you need help, you have consult_researcher.',
     ]);
   });
@@ -391,6 +391,23 @@ describe('renderSuggestWorkResult', () => {
     );
     expect(text.startsWith('This reads as a question: answer it yourself in chat.')).toBe(true);
     expect(text).not.toContain('start_work({');
+  });
+
+  it('provides an exact callable id for each typed and generic project option', () => {
+    const result = rankWorkOptions({
+      ...DEFAULT_INPUT,
+      projectTypes: [{ typeId: 'trip-planner', name: 'Trip planner' }],
+      newProject: true,
+    });
+    const text = renderSuggestWorkResult(result);
+    const ids = [...text.matchAll(/start_work\(\{ option: ("[^"\n]+") \}\)/g)].map(
+      (match) => JSON.parse(match[1]!) as string,
+    );
+    expect(ids).toEqual(['type:trip-planner', 'new-project']);
+    expect(ids.map(parseWorkOptionId)).toEqual([
+      { kind: 'project-type', typeId: 'trip-planner' },
+      { kind: 'new-project' },
+    ]);
   });
 
   it('writes an ask verdict as a ready ask_user_question call', () => {
@@ -413,15 +430,18 @@ describe('renderWorkOptionsPrelude', () => {
     ).toBeNull();
   });
 
-  it('frames the list as already looked up', () => {
+  it('provides ranked options with callable ids without referring to an unseen tool result', () => {
     const text = renderWorkOptionsPrelude(
       rankWorkOptions({
         ...DEFAULT_INPUT,
         projectTypes: [{ typeId: 'trip-planner', name: 'Trip planner' }],
       }),
     );
-    expect(text ?? '').toMatch(/^\(System note for this turn: suggest_work already ran/);
+    expect(text ?? '').toMatch(/^\(System note for this turn: ranked work options/);
     expect(text ?? '').toContain('[type:trip-planner]');
+    expect(text ?? '').toContain('start_work({ option: "type:trip-planner" })');
+    expect(text ?? '').not.toContain('suggest_work already ran');
+    expect(text ?? '').not.toContain('"<id>"');
   });
 
   it('carries a hand-off with nothing to start, without pointing at a missing list', () => {

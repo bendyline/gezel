@@ -1,0 +1,769 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "2026-10-25-m5max-bolt-five",
+      "provenance": {
+        "startedAt": "2026-10-25T20:26:28.111Z",
+        "device": {
+          "label": "Mac · Apple M5 Max",
+          "platform": "darwin",
+          "arch": "arm64",
+          "memoryGb": 128,
+          "osRelease": "darwin 27.0.0",
+          "cpuModel": "Apple M5 Max",
+          "gpuModel": "Apple M5 Max (integrated GPU)"
+        },
+        "harnessCommit": "4f2c5491d9a1cbf6cdd645e708dd674a22615d15",
+        "sourceHash": "9a450db82dc4f35a01a775abda206f9aa61fad61730dd6e47eec2db1acc3ee63",
+        "serviceBuildHash": "28641a7c84a3c68e2016c48c3c74dc043eb3ce8779ccaf7ae971cd5cf918472f",
+        "catalogHash": "5fab736ac045d2e078269e503f9fda37a0b58b1d2197de43e0872f2e14a8f8bb",
+        "gildeVersion": "0.3.0",
+        "count": 3,
+        "judgeModelId": null,
+        "engineBuilds": {
+          "llama-cpp": "Metal build 11669 / 620d2225cc436ab0b001e3200e590e3b286ef9ab"
+        }
+      },
+      "scope": "suite",
+      "memoryCoverage": "full",
+      "suites": [
+        "core"
+      ],
+      "scenariosBySuite": {
+        "core": [
+          "tictactoe",
+          "petshop",
+          "tankcombat",
+          "schema-migration",
+          "failing-tests-spec",
+          "symptom-debug",
+          "data-wrangle",
+          "incident-postmortem",
+          "ops-runbook-anomaly",
+          "plan-and-estimate",
+          "conflict-synthesis"
+        ]
+      },
+      "note": "Complete five-model core comparison: 165 trials, 110 raw passes, 55 task failures; 158 artifact reviews and seven missing outputs. Bolt uses llama.cpp Metal; Gemma and Qwen use MLX. Four advisory rubrics remain separate. Bolt decode is request-derived; MLX output is an active-stream estimate and prefill is unavailable. Task observations include failed attempts and recovery, not admission probes. Known framework and evaluator defects remain in the frozen raw results; a gate pass does not certify artifact quality. See the October 25 M5 Max Bolt comparison JSON download for all judgments, performance coverage and 32 findings. Earlier old-build and interrupted trials are excluded."
+    }
+  ],
+  "results": [
+    {
+      "modelId": "nemotron3.5-bolt-e4b-q4",
+      "label": "Nemotron 3.5 Bolt (E4B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "quantization": "Q4_K_M",
+      "runId": "2026-10-25-m5max-bolt-five",
+      "suiteId": "core",
+      "taskMeasurements": [
+        {
+          "id": "isolated",
+          "label": "Frozen run · llama.cpp request timings",
+          "trials": 33,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 33,
+            "median": 72,
+            "min": 59.18,
+            "max": 90.14
+          },
+          "prefillTokensPerSec": {
+            "samples": 33,
+            "median": 2513.96,
+            "min": 1977.37,
+            "max": 3492.57
+          },
+          "durationMs": {
+            "samples": 33,
+            "median": 153624,
+            "min": 27505,
+            "max": 1553646
+          },
+          "peakRssMb": {
+            "samples": 33,
+            "median": 10279,
+            "min": 8802,
+            "max": 20279
+          },
+          "judgments": [
+            {
+              "meanScore": 2.5833333333333335,
+              "artifacts": 6,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 4.777777777777778,
+              "artifacts": 9,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 4,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            },
+            {
+              "meanScore": 4.166666666666667,
+              "artifacts": 12,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-doc-v1"
+            }
+          ],
+          "noArtifact": 3,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 65662
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 125739
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 255582
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 210151
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1012999
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 37985
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 129535
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 168923
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 97974
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 47961
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 159179
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-e4b-q4",
+      "label": "Gemma 4 (E4B, Q4)",
+      "engine": "mlx",
+      "tier": "small",
+      "quantization": "oQ4",
+      "runId": "2026-10-25-m5max-bolt-five",
+      "suiteId": "core",
+      "taskMeasurements": [
+        {
+          "id": "isolated",
+          "label": "Frozen run · MLX sampled decode estimate",
+          "trials": 33,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 33,
+            "median": 79,
+            "min": 55,
+            "max": 103
+          },
+          "durationMs": {
+            "samples": 33,
+            "median": 138279,
+            "min": 32529.000000000004,
+            "max": 1165787
+          },
+          "peakRssMb": {
+            "samples": 33,
+            "median": 8301,
+            "min": 8171,
+            "max": 17557
+          },
+          "judgments": [
+            {
+              "meanScore": 2.5555555555555554,
+              "artifacts": 9,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 4.84375,
+              "artifacts": 8,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 4.5,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            },
+            {
+              "meanScore": 4.020833333333333,
+              "artifacts": 12,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-doc-v1"
+            }
+          ],
+          "noArtifact": 1,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 50442
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 104874
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 179807
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 214736
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 176141
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 67899
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 259260
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 249378
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 72938
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 37910
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 178657
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-e2b-q4",
+      "label": "Gemma 4 (E2B, Q4)",
+      "engine": "mlx",
+      "tier": "tiny",
+      "quantization": "4bit",
+      "runId": "2026-10-25-m5max-bolt-five",
+      "suiteId": "core",
+      "taskMeasurements": [
+        {
+          "id": "isolated",
+          "label": "Frozen run · MLX sampled decode estimate",
+          "trials": 33,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 32,
+            "median": 115.5,
+            "min": 96,
+            "max": 136
+          },
+          "durationMs": {
+            "samples": 33,
+            "median": 99085,
+            "min": 27596,
+            "max": 1194707
+          },
+          "peakRssMb": {
+            "samples": 33,
+            "median": 7278,
+            "min": 7196,
+            "max": 10627
+          },
+          "judgments": [
+            {
+              "meanScore": 2.25,
+              "artifacts": 8,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 4.138888888888889,
+              "artifacts": 9,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 2.5,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            },
+            {
+              "meanScore": 3.7291666666666665,
+              "artifacts": 12,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-doc-v1"
+            }
+          ],
+          "noArtifact": 1,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 41678
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 120372
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 136741
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 143889
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 99085
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 32808
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 420304
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 153456
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 82995
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 47580
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 92958
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "mlx",
+      "tier": "medium",
+      "quantization": "MXFP4",
+      "runId": "2026-10-25-m5max-bolt-five",
+      "suiteId": "core",
+      "taskMeasurements": [
+        {
+          "id": "isolated",
+          "label": "Frozen run · MLX sampled decode estimate",
+          "trials": 33,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 33,
+            "median": 38,
+            "min": 30,
+            "max": 49
+          },
+          "durationMs": {
+            "samples": 33,
+            "median": 254274,
+            "min": 43088,
+            "max": 1153612
+          },
+          "peakRssMb": {
+            "samples": 33,
+            "median": 10930,
+            "min": 10562,
+            "max": 14556
+          },
+          "judgments": [
+            {
+              "meanScore": 3.1944444444444446,
+              "artifacts": 9,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 4.5,
+              "artifacts": 9,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 4.75,
+              "artifacts": 2,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            },
+            {
+              "meanScore": 4.083333333333333,
+              "artifacts": 12,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-doc-v1"
+            }
+          ],
+          "noArtifact": 1,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 112113
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 965770
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 102776
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 345759
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 307037
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 441551
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 355948
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 430684
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 99069
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 43159
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 63277
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.5-9b-q4",
+      "label": "Qwen 3.5 (9B, Q4)",
+      "engine": "mlx",
+      "tier": "small",
+      "quantization": "4bit",
+      "runId": "2026-10-25-m5max-bolt-five",
+      "suiteId": "core",
+      "taskMeasurements": [
+        {
+          "id": "isolated",
+          "label": "Frozen run · MLX sampled decode estimate",
+          "trials": 33,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 30,
+            "median": 63.5,
+            "min": 30,
+            "max": 87
+          },
+          "durationMs": {
+            "samples": 33,
+            "median": 158474,
+            "min": 43043,
+            "max": 2672199
+          },
+          "peakRssMb": {
+            "samples": 33,
+            "median": 8158,
+            "min": 7373,
+            "max": 21304
+          },
+          "judgments": [
+            {
+              "meanScore": 2.7777777777777777,
+              "artifacts": 9,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 3.6666666666666665,
+              "artifacts": 9,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 2.625,
+              "artifacts": 2,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            },
+            {
+              "meanScore": 4.0625,
+              "artifacts": 12,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-doc-v1"
+            }
+          ],
+          "noArtifact": 1,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 56611
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 692836
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 343941
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 114316
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 166850
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 133330
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1049612
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 289462
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 88031
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 43197
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 264248
+        }
+      ]
+    }
+  ]
+}
