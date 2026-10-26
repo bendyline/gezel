@@ -1,4 +1,4 @@
-import { type GezelSummary, displayName } from '@bendyline/gezel';
+import { type GezelSummary, displayName, roleForMatching } from '@bendyline/gezel';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { ChatComposer } from './ChatComposer.js';
@@ -43,11 +43,11 @@ export function CraftbookChatPane({
     setSessionId('');
   }, [craftbookId]);
 
-  // The voorman authors craftbooks; fall back to the Meester, then anyone.
+  // The crew lead authors craftbooks; fall back to the Meester, then anyone.
   const gezel = useMemo(
     () =>
-      gezels.find((g) => g.role === 'voorman') ??
-      gezels.find((g) => g.role === 'meester') ??
+      gezels.find((g) => roleForMatching(g.role)?.toLowerCase() === 'voorman') ??
+      gezels.find((g) => g.role?.toLowerCase() === 'meester') ??
       gezels[0],
     [gezels],
   );
@@ -70,7 +70,7 @@ export function CraftbookChatPane({
   if (!gezel) {
     return (
       <div className="craftbook-chat-pane muted small">
-        No gezel available yet. Create a voorman or the Meester first, then come back.
+        No gezel available yet. Create a crew lead or the Meester first, then come back.
       </div>
     );
   }

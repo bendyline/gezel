@@ -102,7 +102,7 @@ Craftbooks also have two homes. A procedure private to this app lives embedded a
 | Part | What it contributes |
 | --- | --- |
 | Project type | Identity, version, setup params, project templates, crew roster, and references to every other part |
-| Gezel role templates | Each crew member's name, role, and `about.md` working character; one entry can be the voorman, or a solo type presents its one gezel under a custom `leadLabel`. Browse the [role collection](https://gezel.com/docs/role-catalog/) before writing a new one |
+| Gezel role templates | Each crew member's name, role, and `about.md` working character; one entry can be the crew lead (`voorman: true`), or a solo type presents its one gezel under a custom `leadLabel`. Browse the [role collection](https://gezel.com/docs/role-catalog/) before writing a new one |
 | Craftbooks | Repeatable procedures installed into each project — embedded (type-private) or referenced catalog items |
 | Scripts and tools | Capability-declared TypeScript run in Gezel's sandbox; a `tools` entry exposes a script as a schema-validated tool for a gezel or the page |
 | Output page | A read-limited HTML/CSS/JS experience pinned into the project's Output tab |
@@ -149,7 +149,7 @@ Add `params` only for choices the person needs to make. `nameTemplate`, `aboutTe
 
 ## Add a crew and repeatable work
 
-A custom role is a `gezel-templates` item with an identity manifest, a version manifest, and an `about.md`. Reference its template id in `gezels[]`, marking the lead with `voorman: true` when appropriate. Reuse a suitable existing role before adding a new one. A role template defines expertise, temperament, working style, and boundaries; it does not define one person's project brief. Keep tool listings out of its prose because Gezel injects the actual available tools at runtime.
+A custom role is a `gezel-templates` item with an identity manifest, a version manifest, and an `about.md`. Reference its template id in `gezels[]`, marking the crew lead with `voorman: true` when appropriate. Reuse a suitable existing role before adding a new one. A role template defines expertise, temperament, working style, and boundaries; it does not define one person's project brief. Keep tool listings out of its prose because Gezel injects the actual available tools at runtime.
 
 A custom craftbook turns a job into a sequence that can be checked. Define its input parameters, a valid `entryStepId`, unique step ids, the role responsible for each step, concrete outputs, and success gates. Use a script for calculation or mechanical file manipulation and a gezel for judgment. Do not ask a model to reconstruct data already available to a script. Use `{{task.dir}}` for task-owned outputs instead of inventing global paths. See [Craftbooks](../conceptual/craftbooks-overview.md), [the script SDK](writing-scripts-with-gezel-sdk.md), and the complete [Reading Circle sample](https://github.com/bendyline/gezel/tree/main/examples/apps/example-reading-circle) for a crew with both embedded and reusable craftbooks.
 

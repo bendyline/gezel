@@ -42,7 +42,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     id: 'workspace-fs-read',
     name: 'Workspace File Reading',
     description:
-      "Read, list, search, and diff files in the project workspace, and retrieve a referenced Boekwachter issue's durable metadata. Mirrors Node's `fs` reads plus content/glob search. Diagnose-only — pair with `workspace-fs-write` to actually mutate.",
+      "Read, list, search, and diff files in the project workspace, and retrieve a referenced tracked issue's durable metadata. Mirrors Node's `fs` reads plus content/glob search. Diagnose-only — pair with `workspace-fs-write` to actually mutate.",
     tools: [
       'list_dir',
       'read_file',
@@ -117,7 +117,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     id: 'workspace-fs-write',
     name: 'Workspace File Writing',
     description:
-      'Create, write, surgically edit, rename, and delete files in the project workspace. Always paired with `workspace-fs-read` for the roles that build (developer, designer, reviewer); split out so coordinator roles (voorman) can investigate without being tempted to do the building themselves.',
+      'Create, write, surgically edit, rename, and delete files in the project workspace. Always paired with `workspace-fs-read` for the roles that build (developer, designer, reviewer); split out so coordinator roles (crew lead) can investigate without being tempted to do the building themselves.',
     tools: [
       'write_file',
       'append_to_file',
@@ -229,7 +229,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     id: 'tasks-readonly',
     name: 'Task Visibility',
     description:
-      'Read-only task surface for delegation roles — list tasks, inspect a specific task, read its notes. The "ping projects to see status" subset, without any of the mutation tools (create, update, assign, status, advance) that belong to the assignee or voorman. Pair with `team-management` for a complete delegation surface.',
+      'Read-only task surface for delegation roles — list tasks, inspect a specific task, read its notes. The "ping projects to see status" subset, without any of the mutation tools (create, update, assign, status, advance) that belong to the assignee or crew lead. Pair with `team-management` for a complete delegation surface.',
     tools: ['list_tasks', 'get_task', 'list_craftbooks', 'suggest_craftbook', 'read_task_notes'],
   },
   {
@@ -404,7 +404,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     id: 'role-delegation',
     name: 'Role Delegation (downward)',
     description:
-      'Hand work to a teammate by ROLE instead of by name: `delegate_<role>` (async hand-off) and `consult_<role>` (sync question) for each doer role — developer, designer, reviewer, planner, researcher, builder, writer, image-generator. The target lives in the tool identity (no free-text `gezel`/`role` argument), which small/medium local models route far more reliably. Each resolves to the project gezel of that role, creating one on demand. Orchestrator (meester/voorman) surface; gated by the `tools.gezels-as-roles` behavior.',
+      'Hand work to a teammate by ROLE instead of by name: `delegate_<role>` (async hand-off) and `consult_<role>` (sync question) for each doer role — developer, designer, reviewer, planner, researcher, builder, writer, image-generator. The target lives in the tool identity (no free-text `gezel`/`role` argument), which small/medium local models route far more reliably. Each resolves to the project gezel of that role, creating one on demand. Orchestrator (Meester/crew lead) surface; gated by the `tools.gezels-as-roles` behavior.',
     tools: [
       'delegate_developer',
       'consult_developer',
@@ -428,7 +428,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     id: 'role-delegation-escalation',
     name: 'Role Delegation (escalation)',
     description:
-      'Reach a coordination role by ROLE: `delegate_voorman` / `consult_voorman` and `delegate_meester` / `consult_meester`. The escalation counterpart to `role-delegation` — lets a specialist hand work or questions UP to their voorman or the meester. Gated by the `tools.gezels-as-roles` behavior.',
+      'Reach a coordination role by ROLE: `delegate_voorman` / `consult_voorman` (the crew lead) and `delegate_meester` / `consult_meester`. The escalation counterpart to `role-delegation` — lets a specialist hand work or questions UP to their crew lead or the Meester. Gated by the `tools.gezels-as-roles` behavior.',
     tools: ['delegate_voorman', 'consult_voorman', 'delegate_meester', 'consult_meester'],
   },
 ];

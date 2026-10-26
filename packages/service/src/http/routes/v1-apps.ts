@@ -140,7 +140,10 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
    * Open a new grant request. The app supplies its identity (`appId`,
    * `appName`) and the scope set it needs. If an app with the same
    * `appId` already has a token, returns 409 — the app must
-   * explicitly call `DELETE /v1/apps/:appId/token` first to rotate.
+   * explicitly call `DELETE /v1/apps/:appId/token` first to rotate —
+   * unless it presents that token and asks for every scope it holds plus
+   * more. That opens an upgrade grant: the current token keeps working
+   * until the person approves, and approval swaps it for the larger one.
    *
    * When `GEZEL_AUTOAPPROVE_APPS` lists `appId`, the grant arrives
    * already `approved` and the response carries the token immediately
@@ -217,14 +220,25 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
         return c.json(openaiEndpointsDisabledBody, 403);
       }
 
-      if (ctx.tokenStore.list().some((r) => r.appId === body.appId)) {
-        return c.json(
-          {
-            error: 'already_connected',
-            hint: "DELETE /v1/apps/:appId/token first to rotate this app's token",
-          },
-          409,
-        );
+      const existing = ctx.tokenStore.list().find((r) => r.appId === body.appId);
+      let upgradeFrom: string[] | undefined;
+      if (existing) {
+        // Only the holder of the current token may ask to widen it, or any
+        // local process could collect a larger token issued in that app's name.
+        const presented = c.req.header('authorization')?.replace(/^Bearer\s+/i, '') ?? '';
+        const holder = presented ? ctx.tokenStore.lookup(presented) : null;
+        const keepsEvery = existing.scopes.every((scope) => body.scopes.includes(scope));
+        const addsOne = body.scopes.some((scope) => !existing.scopes.includes(scope));
+        if (holder?.appId !== body.appId || !keepsEvery || !addsOne || existing.kind === 'device') {
+          return c.json(
+            {
+              error: 'already_connected',
+              hint: "DELETE /v1/apps/:appId/token first to rotate this app's token, or present it to add scopes",
+            },
+            409,
+          );
+        }
+        upgradeFrom = [...existing.scopes];
       }
 
       let grant: GrantRequest;
@@ -238,6 +252,7 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
           ...(body.iconUrl ? { iconUrl: body.iconUrl } : {}),
           ...(body.kind ? { kind: body.kind } : {}),
           ...(body.deviceIdentityPubKey ? { deviceIdentityPubKey: body.deviceIdentityPubKey } : {}),
+          ...(upgradeFrom ? { upgradeFrom } : {}),
         });
         grant = created.grant;
         verificationCode = created.verificationCode;
@@ -488,6 +503,7 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
         ...(g.decidedAt ? { decidedAt: g.decidedAt } : {}),
         ...(g.kind ? { kind: g.kind } : {}),
         ...(g.verificationRequired ? { verificationRequired: true } : {}),
+        ...(g.upgradeFrom ? { upgradeFrom: g.upgradeFrom } : {}),
       })),
     });
   });

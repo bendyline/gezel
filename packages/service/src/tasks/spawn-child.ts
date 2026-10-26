@@ -7,7 +7,11 @@ import {
   type TaskVariation,
   taskRef as buildTaskRef,
 } from '@bendyline/gezel';
-import { interpolateStepsContext, snapshotCraftbookForTask } from './craftbook-instantiation.js';
+import {
+  interpolateContextDeep,
+  interpolateStepsContext,
+  snapshotCraftbookForTask,
+} from './craftbook-instantiation.js';
 import { bumpStepActivation } from './step-runtime.js';
 
 /**
@@ -40,6 +44,7 @@ export function snapshotSpawnCraftbook(
           completedAt: _co,
           attemptCount: _ac,
           lastActivatedAt: _la,
+          evidenceSince: _since,
           onEnterCompletedAt: _entered,
           ...recipe
         } = s;
@@ -47,6 +52,7 @@ export function snapshotSpawnCraftbook(
         void _co;
         void _ac;
         void _la;
+        void _since;
         void _entered;
         return recipe;
       }),
@@ -70,6 +76,9 @@ export function snapshotSpawnCraftbook(
   };
   if (Object.keys(shardContext).length > 0) {
     interpolateStepsContext(craftbook.steps, shardContext);
+    if (craftbook.contract) {
+      craftbook.contract = interpolateContextDeep(craftbook.contract, shardContext);
+    }
   }
   craftbook.steps = bumpStepActivation(craftbook.steps, craftbook.entryStepId, now);
   const entryStep = craftbook.steps.find((s) => s.id === craftbook.entryStepId)!;
@@ -130,6 +139,7 @@ export function buildSpawnedChildTask(opts: {
     assignee,
     // Same run, same mode — never re-resolved for a child.
     ...(parent.executionMode ? { executionMode: parent.executionMode } : {}),
+    ...(parent.strategy ? { strategy: parent.strategy } : {}),
     craftbook,
     ...(parent.cliTrustedScriptHashes
       ? { cliTrustedScriptHashes: parent.cliTrustedScriptHashes }

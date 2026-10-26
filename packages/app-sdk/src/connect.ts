@@ -2,6 +2,7 @@ import { GezelApp } from './client.js';
 import { assertCompatibleDaemon } from './compat.js';
 import { readRuntimeForConnect } from './detect.js';
 import { GezelSdkError, errorFromResponse } from './errors.js';
+import { assertImagesSupported, pollUntilDecided } from './grant-flow.js';
 import { scopeNeedsVerificationCode } from './scopes.js';
 import type { SdkTransport } from './tls.js';
 import type { AuthorizedConnection, ConnectInput } from './types.js';
@@ -57,6 +58,9 @@ async function authorizeWithTransport(
     input.scopes,
     input.requireVerificationCode,
   );
+  // A Gezel that predates `images` refuses the whole registration, and only
+  // after a stale token was revoked. Ask before anything changes.
+  if (input.scopes.includes('images')) await assertImagesSupported(baseUrlAndFetch);
 
   // Try a token the caller already has (env, keychain, prior session).
   let existing =
@@ -185,12 +189,18 @@ async function tokenHasRequestedScopes(opts: {
   if (opts.scopes.includes('openai')) paths.add('/v1/models');
   if (opts.scopes.includes('knowledge')) paths.add('/v1/knowledge/state');
   if (opts.scopes.includes('remote-inference')) paths.add('/v1/remote/models');
+  if (opts.scopes.includes('images')) paths.add('/v1/images/models');
   if (paths.size === 0) return true;
 
   for (const path of paths) {
     const response = await opts.fetch(`${opts.baseUrl}${path}`, {
       headers: { Authorization: `Bearer ${opts.token}` },
     });
+    // A Gezel without the route may answer an unknown path with its UI page.
+    if (response.ok && !(response.headers.get('content-type') ?? '').includes('json')) {
+      await response.body?.cancel();
+      return false;
+    }
     if (response.status === 401) {
       await response.body?.cancel();
       return false;
@@ -242,51 +252,4 @@ async function resolveBaseUrlAndFetch(
     fetch: discovered.fetch,
     close: discovered.close,
   };
-}
-
-/**
- * Long-poll the grant endpoint until status flips out of `pending`.
- * The server supports `?wait=N` for native long-polling (up to 30s);
- * we chain those calls until either the user decides or the global
- * timeout expires.
- */
-async function pollUntilDecided(opts: {
-  baseUrl: string;
-  grantRequestId: string;
-  fetch: typeof fetch;
-  timeoutMs: number;
-}): Promise<string> {
-  const deadline = Date.now() + opts.timeoutMs;
-  while (Date.now() < deadline) {
-    const remainingMs = deadline - Date.now();
-    const waitSec = Math.min(30, Math.max(1, Math.floor(remainingMs / 1000)));
-    const res = await opts.fetch(
-      `${opts.baseUrl}/v1/apps/grant/${opts.grantRequestId}?wait=${waitSec}`,
-    );
-    if (!res.ok) {
-      throw await errorFromResponse(res);
-    }
-    const body = (await res.json()) as {
-      status: 'pending' | 'approved' | 'denied' | 'expired';
-      token?: string;
-    };
-    if (body.status === 'approved' && body.token) return body.token;
-    if (body.status === 'denied') {
-      throw new GezelSdkError('The user declined the connection.', {
-        code: 'user_denied',
-        status: 403,
-      });
-    }
-    if (body.status === 'expired') {
-      throw new GezelSdkError('The connection request expired before it was approved.', {
-        code: 'grant_expired',
-        status: 410,
-      });
-    }
-    // status === 'pending' → loop and re-poll.
-  }
-  throw new GezelSdkError(
-    `The user did not approve the connection within ${opts.timeoutMs / 1000} seconds.`,
-    { code: 'approval_timeout', status: 408 },
-  );
 }

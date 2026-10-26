@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { plainRoleTitle } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { projectScriptFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -206,7 +207,7 @@ describe.each(WAVE1)('Wave-1 bundled project type: $typeId', (row) => {
     expect(applied.gezelsCreated).toHaveLength(1);
     expect(applied.gezelsCreated[0]?.voorman).toBe(true);
     const gezel = await store.getGezel(applied.gezelsCreated[0]!.id);
-    expect(gezel?.role).toBe(row.role);
+    expect(gezel?.role).toBe(plainRoleTitle(row.role));
 
     expect(applied.scriptsInstalled).toEqual([row.script]);
     const scriptBody = await readFile(projectScriptFile(home, project.id, row.script), 'utf8');

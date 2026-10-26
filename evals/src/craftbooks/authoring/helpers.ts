@@ -63,7 +63,7 @@ export const AUTHORING_TOOL_STEER =
  * toolset" THREE runs in a row — with both tools verifiably present in
  * its post-cap tool list. A worker whose whole persona IS craftbook
  * authorship removes that friction; the A/B measures document emission,
- * not persona wrangling. Role 'Voorman' keeps the craftbooks toolset
+ * not persona wrangling. Role 'Crew Lead' (the voorman) keeps the craftbooks toolset
  * group + a generous cap on medium tiers.
  */
 const AUTHORING_WORKER_ABOUT = [
@@ -83,7 +83,7 @@ export async function ensureAuthoringWorker(ctx: EvalContext, name: string): Pro
   try {
     const created = await ctx.client.createGezel({
       name,
-      role: 'Voorman',
+      role: 'Crew Lead',
       description: 'Authors and runs reusable craftbooks.',
       about: AUTHORING_WORKER_ABOUT,
     });

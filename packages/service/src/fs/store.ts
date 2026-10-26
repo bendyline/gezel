@@ -105,14 +105,18 @@ import {
   deriveThreadTitleFromMessages,
   encodeProjectGezelId,
   inferGenderForName,
+  isLegacyRoleTitle,
   isSafeEntityId,
   isScheduledRunSession,
   isSharedLibraryProject,
   isValidKokoroVoice,
   legacyDensityToGeneralistMode,
+  legacyRoleKey,
   nowIso,
   parseGezelMarkdown,
   pickKokoroVoiceForGender,
+  plainRoleProse,
+  plainRoleTitle,
   projectManagedWorkspaceWritePolicy,
   resolveFactualWriting,
   resolveSharedProjectId,
@@ -651,6 +655,7 @@ export class Store {
     if (emptyHome) await this.stampFirstUse();
     await this.adoptMachineSharedGezelPrivateState();
     await this.ensureMachineSharedProjectPrivateState();
+    await this.migrateLegacyRoleTitles();
     await this.backfillRoleBasedNames();
     await this.backfillVoices();
     await this.backfillCharacters();
@@ -898,6 +903,53 @@ export class Store {
     if (cleaned > 0) {
       log.info(`[store] cleaned ${cleaned} stale workspace bootstrap dir(s)`);
     }
+  }
+
+  /**
+   * Rewrite each Dutch role title ("Boekwachter") to its plain-English one
+   * ("Librarian") once, re-deriving `roleBasedName` from it, and the same
+   * title where the gezel's about.md names itself ("You are the **Klerk**").
+   * Only exact titles move — "Senior Voorman" is the person's own words.
+   * Every role predicate reads the two titles as one role, so no tool kit
+   * changes.
+   */
+  private async migrateLegacyRoleTitles(): Promise<void> {
+    let all: GezelSummary[];
+    try {
+      all = await this.listGezels();
+    } catch {
+      return;
+    }
+    const renamed = all.filter((g) => legacyRoleKey(g.role));
+    if (renamed.length === 0) return;
+    const taken = new Set<string>(all.map((g) => g.roleBasedName).filter((s): s is string => !!s));
+    let migrated = 0;
+    for (const g of [...renamed].sort((a, b) => a.id.localeCompare(b.id))) {
+      const detail = await this.tryGetGezel(g.id);
+      if (!detail?.role || !legacyRoleKey(detail.role)) continue;
+      const dir = gezelDir(this.home, g.id, this.external);
+      try {
+        if (isLegacyRoleTitle(detail.role)) {
+          const role = plainRoleTitle(detail.role);
+          if (detail.roleBasedName) taken.delete(detail.roleBasedName);
+          const roleBasedName = pickRoleBasedName(role, taken);
+          taken.add(roleBasedName);
+          const updated = {
+            ...detail.parsed,
+            frontmatter: { ...detail.parsed.frontmatter, role, roleBasedName },
+          };
+          await writeFileAtomic(join(dir, 'gezel.md'), serializeGezelMarkdown(updated));
+          migrated++;
+        }
+        const about = plainRoleProse(detail.about, detail.role);
+        if (!detail.parsed.frontmatter.fixedFunction && about !== detail.about) {
+          await writeFileAtomic(join(dir, 'about.md'), about);
+        }
+      } catch {
+        /* best-effort — the next boot retries */
+      }
+    }
+    if (migrated > 0) log.info(`[store] migrated legacy role titles on ${migrated} gezels`);
   }
 
   /**
@@ -1480,7 +1532,7 @@ export class Store {
     const chosen = name?.trim() || randomKlerkName();
     const created = await this.createGezel({
       name: chosen,
-      role: 'Klerk',
+      role: 'Scribe',
       about: KLERK_ABOUT_MD,
       // Klerk owns one-shot rewrites + summaries — short, decisive,
       // no chain-of-thought needed. `instruct` profile (no thinking,
@@ -1512,7 +1564,7 @@ export class Store {
     const chosen = name?.trim() || randomKeurmeesterName();
     const created = await this.createGezel({
       name: chosen,
-      role: 'Keurmeester',
+      role: 'Inspector',
       about: KEURMEESTER_ABOUT_MD,
       // No suggestedTuningProfile: the Keurmeester runs on a frontier
       // provider (config.keurmeester.providerName/model), not a local
@@ -1688,7 +1740,7 @@ export class Store {
     return out;
   }
 
-  async createGezel(input: {
+  async createGezel(rawInput: {
     name: string;
     description?: string;
     role?: string;
@@ -1728,6 +1780,12 @@ export class Store {
      */
     frontmatter?: Partial<import('@bendyline/gezel').GezelFrontmatter>;
   }): Promise<GezelDetail> {
+    // A Dutch title from an older catalog or model lands as its plain one.
+    const input = {
+      ...rawInput,
+      ...(rawInput.role ? { role: plainRoleTitle(rawInput.role) } : {}),
+      ...(rawInput.about ? { about: plainRoleProse(rawInput.about, rawInput.role) } : {}),
+    };
     const id = await this.uniqueGezelId(slugify(input.name) || randomUUID().slice(0, 8));
     // Creation is always private. In particular, never let the shared-path
     // resolver turn a same-name create into an overwrite of a migrated gezel.
@@ -1984,11 +2042,18 @@ export class Store {
     const roleChanged = detail.role !== oldRole;
     const roleBasedNameMissing = !detail.roleBasedName;
     if (roleChanged || roleBasedNameMissing) {
-      const recomputed = await this.computeRoleBasedName(detail.role, id);
-      if (recomputed !== detail.roleBasedName) {
+      // A Dutch title written into the markdown lands as its plain one.
+      const role =
+        roleChanged && isLegacyRoleTitle(detail.role) ? plainRoleTitle(detail.role!) : detail.role;
+      const recomputed = await this.computeRoleBasedName(role, id);
+      if (recomputed !== detail.roleBasedName || role !== detail.role) {
         const updated = {
           ...detail.parsed,
-          frontmatter: { ...detail.parsed.frontmatter, roleBasedName: recomputed },
+          frontmatter: {
+            ...detail.parsed.frontmatter,
+            ...(role ? { role } : {}),
+            roleBasedName: recomputed,
+          },
         };
         await writeFileAtomic(path, serializeGezelMarkdown(updated));
         detail = await this.getGezel(id);
@@ -2560,7 +2625,7 @@ export class Store {
    */
   async createProjectGezel(
     projectId: string,
-    input: {
+    rawInput: {
       name: string;
       localId?: string;
       canonical?: boolean;
@@ -2573,6 +2638,11 @@ export class Store {
       frontmatter?: Partial<GezelFrontmatter>;
     },
   ): Promise<GezelDetail> {
+    const input = {
+      ...rawInput,
+      ...(rawInput.role ? { role: plainRoleTitle(rawInput.role) } : {}),
+      ...(rawInput.about ? { about: plainRoleProse(rawInput.about, rawInput.role) } : {}),
+    };
     const gate = await this.assertWorkspaceWritable(projectId);
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const ws = gate.workspaceDir;
@@ -3544,8 +3614,8 @@ export class Store {
         kind: 'project.voorman.changed',
         projectId: id,
         summary: voormanName
-          ? `Set voorman of "${detail.name}" to ${voormanName}`
-          : `Cleared voorman of "${detail.name}"`,
+          ? `Set crew lead of "${detail.name}" to ${voormanName}`
+          : `Cleared crew lead of "${detail.name}"`,
         details: {
           previousVoormanGezelId: meta.voormanGezelId,
           voormanGezelId: patch.voormanGezelId,

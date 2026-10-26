@@ -1363,7 +1363,7 @@ describe('consolidated MCP tools', () => {
     expect(text).toContain('does not exist');
     expect(text).toContain('[runtime: non-retryable]');
     expect(text).toContain('Project ids and exact display names are both accepted');
-    expect(text).toContain('Call `list_projects`');
+    expect(text).toContain('For an existing project, use one of the ids above');
     expect(text).not.toContain('not the display name');
   });
 

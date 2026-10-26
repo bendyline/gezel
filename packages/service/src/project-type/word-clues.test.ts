@@ -65,7 +65,7 @@ describe('word clues', () => {
     const roles = await Promise.all(
       applied.gezelsCreated.map(async (g) => (await store.getGezel(g.id))?.role),
     );
-    expect(roles).toEqual(['Woordsmid', 'Puzzelaar']);
+    expect(roles).toEqual(['Clue Giver', 'Puzzler']);
     // A template's character is the gezel's character.
     const woordsmid = await store.getGezel(applied.gezelsCreated[0]!.id);
     expect(woordsmid?.character).toMatchObject({ temperament: 'lively', quirk: 'storyteller' });

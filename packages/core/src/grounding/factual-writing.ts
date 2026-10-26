@@ -188,9 +188,15 @@ export interface FactualWritingInput {
   roleBasedName?: string;
   /** Names of the tools this session can call. */
   toolNames?: Iterable<string>;
+  /**
+   * The session works a task whose contract asks for grounded claims. Turns
+   * the rule on whoever holds the work, so a generalist or outcome owner is
+   * held to it the way a stepwise researcher is.
+   */
+  taskGrounded?: boolean;
 }
 
-export type FactualWritingReason = 'override' | 'role' | 'document' | 'off';
+export type FactualWritingReason = 'override' | 'role' | 'task' | 'document' | 'off';
 
 /** Whether this session writes under the citation rule, and why. */
 export function resolveFactualWriting(input: FactualWritingInput): {
@@ -201,6 +207,7 @@ export function resolveFactualWriting(input: FactualWritingInput): {
     return { on: input.override, reason: input.override ? 'override' : 'off' };
   if (isFactualRole(input.role) || isFactualRole(input.roleBasedName))
     return { on: true, reason: 'role' };
+  if (input.taskGrounded) return { on: true, reason: 'task' };
   for (const name of input.toolNames ?? []) {
     if (DOCUMENT_WRITE_TOOLS.has(name)) return { on: true, reason: 'document' };
   }

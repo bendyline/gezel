@@ -13,6 +13,8 @@ import { GezelSdkError } from './errors.js';
 export async function* readSseDataChunks(
   body: ReadableStream<Uint8Array>,
   signal?: AbortSignal,
+  /** Largest frame accepted. A finished image arrives as one frame, so its stream raises this. */
+  maxFrameBytes = 4 * 1024 * 1024,
 ): AsyncIterable<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder('utf-8');
@@ -33,7 +35,7 @@ export async function* readSseDataChunks(
       // buffer.
       const frames = buffer.split(/\r?\n\r?\n/);
       buffer = frames.pop() ?? '';
-      if ([buffer, ...frames].some((frame) => frame.length > 4 * 1024 * 1024))
+      if ([buffer, ...frames].some((frame) => frame.length > maxFrameBytes))
         throw new GezelSdkError('SSE frame exceeds its size limit', { code: 'invalid_response' });
       for (const frame of frames) {
         const lines = frame.split(/\r?\n/);

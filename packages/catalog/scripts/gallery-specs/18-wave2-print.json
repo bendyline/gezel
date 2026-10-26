@@ -167,7 +167,7 @@
       {
         "id": "scope",
         "name": "Lock the facts",
-        "role": "ceremoniemeester",
+        "role": "event planner",
         "summary": "fact checklist from the event record, look brief",
         "prompt": "Lock the facts before any design. Step 1: read event.json from the workspace — the occasion, date, time, venue, host, and RSVP instructions — and guests.json for who the invitation must speak to. Step 2: confirm the look brief with the owner — the mood of the day, colors or motifs that matter, and anything the honoree would hate. Step 3: write the fact checklist: date, time, venue, and RSVP line exactly as the event record has them, character for character — the invitation may be creative about everything except these. Step 4: write an acceptance-criteria checklist ('every fact matches event.json exactly', 'the RSVP instruction is present and actionable — who to tell, how, by when', 'the file is print-ready — @page setup, honest margins, one sheet', 'the look fits the brief'). Call write_task_note with the occasion + the fact list + checklist and write notes/scope.md.",
         "produces": {
@@ -234,7 +234,7 @@
       {
         "id": "scope",
         "name": "Scope the sweep",
-        "role": "ceremoniemeester",
+        "role": "event planner",
         "summary": "gift and helper roster, coverage rule, tracking rule",
         "prompt": "Define the sweep before drafting. Step 1: read gifts.json from the workspace — who gave what — and guests.json for the people who helped without a gift attached: setup, kitchen, driving, cleanup. Step 2: lock the coverage rule with the owner: every giver AND every helper gets a note, one personal detail each — the actual gift for givers, the actual deed for helpers — and helpers never get a gift-shaped form note. Step 3: settle how notes go out and what 'tracked to sent' means in the event's books. Step 4: write an acceptance-criteria checklist ('every giver and every helper covered or explicitly deferred with a reason', 'each note names the specific gift or deed from the record', 'no two notes interchangeable', 'every note recorded drafted and tracked to sent'). Call write_task_note with the giver + helper counts and the checklist, and write notes/scope.md.",
         "produces": {

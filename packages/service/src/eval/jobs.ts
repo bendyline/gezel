@@ -314,8 +314,12 @@ export class EvalJobManager {
       return;
     }
 
-    if (prepared.needsDevice && !(await this.waitForDevice(state))) {
-      target.status = 'cancelled';
+    if (
+      state.cancelRequested ||
+      this.stopping ||
+      (prepared.needsDevice && !(await this.waitForDevice(state)))
+    ) {
+      target.status = state.cancelRequested ? 'cancelled' : 'interrupted';
       return;
     }
 
@@ -326,6 +330,12 @@ export class EvalJobManager {
       return;
     }
     await mkdir(target.runDir, { recursive: true });
+    // Cancel/shutdown can arrive during preparation or directory creation,
+    // before there is a process for stopProcess to signal.
+    if (state.cancelRequested || this.stopping) {
+      target.status = state.cancelRequested ? 'cancelled' : 'interrupted';
+      return;
+    }
     this.update(state, 'running');
 
     const args = [...harnessArgs(job.spec, target), ...prepared.args];

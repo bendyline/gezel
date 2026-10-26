@@ -6,6 +6,7 @@ import {
 } from '@bendyline/gezel-inference/internal/fs/security-json';
 import { pendingGrantsFile as defaultPendingGrantsFile } from '@bendyline/gezel/paths';
 import {
+  KNOWN_SCOPES,
   type TokenStore,
   assertGrantableAppToken,
   assertPublicGrantableAppToken,
@@ -69,6 +70,12 @@ export interface GrantRequest {
   kind?: 'app' | 'device';
   /** The paired device's identity public key (SPKI PEM), captured at register. */
   deviceIdentityPubKey?: string;
+  /**
+   * Present when an app that already holds a token asks for more scopes: the
+   * scopes it holds now. Approval swaps its token for one carrying `scopes`;
+   * until then, and after a denial, the current token keeps working.
+   */
+  upgradeFrom?: string[];
 }
 
 export type GrantEvent =
@@ -84,6 +91,8 @@ export interface GrantRequestInput {
   iconUrl?: string;
   kind?: 'app' | 'device';
   deviceIdentityPubKey?: string;
+  /** The scopes the app holds now, when this request adds to an existing grant. */
+  upgradeFrom?: string[];
 }
 
 export interface GrantRequestCreated {
@@ -323,13 +332,19 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
     await persist();
     let issued: ReturnType<TokenStore['list']>[number];
     try {
-      issued = await opts.tokenStore.issue({
+      const input = {
         appId: grant.appId,
         appName: grant.appName,
         scopes: grant.scopes,
         token: grant.issuingToken,
         ...(grant.kind === 'device' ? { kind: 'device' as const, deviceId: grant.appId } : {}),
-      });
+      };
+      // An upgrade whose app was disconnected meanwhile becomes a fresh grant.
+      const holdsToken = opts.tokenStore.list().some((t) => t.appId === grant.appId);
+      issued =
+        grant.upgradeFrom && holdsToken
+          ? await opts.tokenStore.replace(input)
+          : await opts.tokenStore.issue(input);
     } catch (err) {
       delete grant.issuingToken;
       await persist().catch(() => undefined);
@@ -408,6 +423,7 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
           ...(input.deviceIdentityPubKey
             ? { deviceIdentityPubKey: input.deviceIdentityPubKey }
             : {}),
+          ...(input.upgradeFrom ? { upgradeFrom: [...input.upgradeFrom] } : {}),
           status: 'pending',
           createdAt,
           expiresAt: createdAt + PENDING_GRANT_TTL_MS,
@@ -708,6 +724,10 @@ function decodePersisted(raw: string): GrantRequest[] {
       throw new Error(`unknown grant status: ${status}`);
     }
     const scopes = e.scopes as string[];
+    // A grant a newer build recorded with a scope this one does not know is
+    // dropped whole: approving a narrower grant than the one shown is wrong,
+    // and treating the whole file as corrupt would lose every other grant.
+    if (scopes.some((scope) => !(KNOWN_SCOPES as readonly string[]).includes(scope))) continue;
     try {
       assertGrantableAppToken({ appId: e.appId, scopes });
     } catch (error) {
@@ -770,6 +790,10 @@ function decodePersisted(raw: string): GrantRequest[] {
       ...(e.kind === 'app' || e.kind === 'device' ? { kind: e.kind } : {}),
       ...(typeof e.deviceIdentityPubKey === 'string'
         ? { deviceIdentityPubKey: e.deviceIdentityPubKey }
+        : {}),
+      ...(Array.isArray(e.upgradeFrom) &&
+      e.upgradeFrom.every((scope): scope is string => typeof scope === 'string')
+        ? { upgradeFrom: e.upgradeFrom }
         : {}),
     });
   }

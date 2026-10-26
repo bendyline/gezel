@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
 import { MEMORY_KINDS } from '../runtime/memory-markdown.js';
+import { OUTCOME_TEAMMATE_SLUGS } from '../task-strategy.js';
 import {
   AmbientDashboardDisplayTargetSchema,
   AmbientDashboardResolutionSchema,
@@ -331,6 +332,13 @@ export const HealthResponseSchema = z.object({
       current: z.number().int(),
     })
     .optional(),
+  /**
+   * Local image generation for apps (`/v1/images/*`). Present on hosts that
+   * serve those routes; `available` says whether an engine can render here.
+   * An app asks for the `images` scope only when the field is present, so a
+   * daemon predating it never sees a scope it would refuse.
+   */
+  images: z.object({ available: z.boolean() }).optional(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 
@@ -877,6 +885,24 @@ export const LlamaCppBackendHealthResponseSchema = z.object({
       detail: z.string().optional(),
       /** ISO 8601. */
       at: z.string(),
+    })
+    .optional(),
+  /**
+   * Windows: the on-device engines cannot start because this PC lacks the
+   * Microsoft Visual C++ runtime they all import, which only the desktop
+   * installer provides. Read from the engine's import table, so installing
+   * the runtime clears it without a restart.
+   */
+  missingRuntime: z
+    .object({
+      /** The engines' architecture, which picks the download. */
+      arch: z.enum(['arm64', 'x64']),
+      /** The first runtime DLL Windows could not load. */
+      dll: z.string(),
+      /** Microsoft's redistributable installer for `arch`. */
+      downloadUrl: z.string(),
+      /** Technical explanation, for a "Technical details" disclosure. */
+      detail: z.string(),
     })
     .optional(),
   /** Linux's out-of-memory killer stopped the engine since the engine owner started. */
@@ -2925,6 +2951,14 @@ export const GezelConfigSchema = z.object({
    */
   generalistMode: z.enum(['auto', 'on', 'off']).optional(),
   /**
+   * How much of a craftbook's recipe a task imposes: `stepwise`,
+   * `generalist`, or `outcome` (one owner held to the book's contract, the
+   * recipe as advice). Outranks the task half of `generalistMode`; `auto`
+   * (the default, including when unset) defers to it. `generalistMode`
+   * still decides the Meester's kickoff shape. See docs/task-strategies.md.
+   */
+  taskStrategy: z.enum(['auto', 'stepwise', 'generalist', 'outcome']).optional(),
+  /**
    * @deprecated Pre-v2 name for `generalistMode` (`flat` ≙ `on`, `scaffold`
    * ≙ `off`). Still declared so `Store.ensureLayout` can read and migrate a
    * config written by an older daemon — this schema is non-strict and would
@@ -3874,6 +3908,23 @@ export const RequestAskResponseSchema = z.discriminatedUnion('outcome', [
   }),
 ]);
 export type RequestAskResponse = z.infer<typeof RequestAskResponseSchema>;
+
+/**
+ * `POST /api/projects/:id/tasks/:num/teammates` — an outcome task's owner
+ * hands a self-contained piece of the task to a teammate and waits for the
+ * answer. Answered with {@link RequestAskResponseSchema}. The teammate's
+ * session works for the task (its reads and runs count toward the task's
+ * evidence) without being a task session.
+ */
+export const TaskTeammateRequestSchema = z.object({
+  fromGezelId: z.string().min(1),
+  fromSessionId: z.string().min(1),
+  role: z.enum(OUTCOME_TEAMMATE_SLUGS),
+  question: z.string().min(1),
+  /** Idle budget (ms), clamped like an ask's. */
+  timeoutMs: z.number().int().positive().optional(),
+});
+export type TaskTeammateRequest = z.infer<typeof TaskTeammateRequestSchema>;
 
 /**
  * `POST /api/questions/:id/answer` — user submits a structured answer.

@@ -286,8 +286,8 @@ fi
 
 # ── 5. macOS: stage Metal shader sources (NOT self-contained) ──────
 # ds4-server links only system frameworks, BUT it is not self-contained: it
-# compiles its Metal shaders from `./metal/*.metal` (19 source files) at
-# runtime, resolved relative to the WORKING DIRECTORY. Without them it aborts
+# compiles its Metal shaders from `./metal/*.metal` at runtime, resolved
+# relative to the WORKING DIRECTORY. Without them it aborts
 # with "metal backend unavailable; aborting startup". So the bundle must carry
 # the `metal/` dir next to the binary, and the supervisor launches ds4-server
 # with cwd = this dir (see buildDs4Provider). No dylib / @rpath fixup is needed
@@ -299,6 +299,9 @@ if [[ "$os" == "Darwin" ]]; then
   fi
   rm -rf "$out_dir/metal"
   cp -R "$src/metal" "$out_dir/metal"
+  # Upstream keeps the generator scripts for its lookup tables beside the
+  # shaders. They run at development time, never at ours, so they do not ship.
+  find "$out_dir/metal" -name '*.py' -type f -delete
   echo "[build] staged $(ls "$out_dir/metal"/*.metal 2>/dev/null | wc -l | tr -d ' ') Metal shader sources → $out_dir/metal/"
   echo "[build] darwin linkage (only system frameworks; shaders load from ./metal at runtime):"
   otool -L "$out_dir/$server_name" | sed 's/^/[build]   /'

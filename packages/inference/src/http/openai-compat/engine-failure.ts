@@ -74,11 +74,14 @@ function internalCode(err: unknown): EngineFailureCode | undefined {
     const code = (current as { code?: unknown }).code;
     const wire = typeof code === 'string' ? WIRE_CODES.get(code) : undefined;
     // A crash the out-of-memory killer caused is a capacity fact, not a fault.
-    if (
-      wire === 'engine_crashed' &&
-      (current as { panicKind?: unknown }).panicKind === 'host-out-of-memory'
-    ) {
+    const panicKind = (current as { panicKind?: unknown }).panicKind;
+    if (wire === 'engine_crashed' && panicKind === 'host-out-of-memory') {
       return 'engine_out_of_memory';
+    }
+    // A runtime the machine lacks: the engine never started, and retrying
+    // cannot help until it is installed.
+    if (wire === 'engine_crashed' && panicKind === 'missing-runtime') {
+      return 'engine_launch_failed';
     }
     if (wire) return wire;
     current = (current as { cause?: unknown }).cause;

@@ -11,11 +11,57 @@
  */
 
 import type { LlamaCppBackendHealthResponse } from '@bendyline/gezel';
-import { readLlamaCudaBlocker } from '@bendyline/gezel/native';
+import {
+  missingMachineRuntime,
+  readLlamaCudaBlocker,
+  vcRedistributableUrl,
+} from '@bendyline/gezel/native';
 import type { GpuUnused } from './gpu-startup-watch.js';
 
 type GpuUnusedState = NonNullable<LlamaCppBackendHealthResponse['gpuUnused']>;
 type OutOfMemoryState = NonNullable<LlamaCppBackendHealthResponse['outOfMemory']>;
+type MissingRuntimeState = NonNullable<LlamaCppBackendHealthResponse['missingRuntime']>;
+
+/**
+ * Reading an engine's import tables takes tens of milliseconds of synchronous
+ * file reads, and the answer only changes when someone installs the runtime.
+ */
+const RUNTIME_CHECK_TTL_MS = 60_000;
+let runtimeCheck: { binary: string; at: number; value: MissingRuntimeState | null } | null = null;
+
+/**
+ * Windows: whether this PC can load the runtime every engine imports, read from
+ * the first engine binary discovery found. One is enough: they all link the
+ * same runtime.
+ */
+export function readMissingRuntime(
+  now: number = Date.now(),
+  platform: NodeJS.Platform = process.platform,
+): MissingRuntimeState | null {
+  if (platform !== 'win32') return null;
+  const binary = [
+    process.env.GEZEL_LLAMA_SERVER_BIN,
+    process.env.GEZEL_SD_SERVER_BIN,
+    process.env.GEZEL_WHISPER_SERVER_BIN,
+  ].find((path): path is string => Boolean(path));
+  if (!binary) return null;
+  if (runtimeCheck?.binary === binary && now - runtimeCheck.at < RUNTIME_CHECK_TTL_MS) {
+    return runtimeCheck.value;
+  }
+  const failure = missingMachineRuntime(binary, process.env);
+  const arch = failure?.arch === 'arm64' || failure?.arch === 'x64' ? failure.arch : null;
+  const value =
+    failure && arch
+      ? {
+          arch,
+          dll: failure.dll ?? 'VCRUNTIME140.dll',
+          downloadUrl: vcRedistributableUrl(arch),
+          detail: `${binary}: ${failure.reason}`,
+        }
+      : null;
+  runtimeCheck = { binary, at: now, value };
+  return value;
+}
 
 let gpuUnused: GpuUnusedState | null = null;
 let outOfMemory: OutOfMemoryState | null = null;
@@ -64,10 +110,12 @@ export function llamaBackendHealthView(): LlamaCppBackendHealthResponse {
   // A verdict about a build the process has since moved off (a quarantine
   // fallback, a lifted quarantine) no longer describes what runs.
   const unused = gpuUnused && gpuUnused.backend === running ? gpuUnused : null;
+  const missingRuntime = readMissingRuntime();
   return {
     ...(running ? { running } : {}),
     ...(cudaBlocker ? { cudaBlocker } : {}),
     ...(unused ? { gpuUnused: unused } : {}),
+    ...(missingRuntime ? { missingRuntime } : {}),
     ...(outOfMemory ? { outOfMemory } : {}),
   };
 }
@@ -75,4 +123,5 @@ export function llamaBackendHealthView(): LlamaCppBackendHealthResponse {
 export function __resetLlamaBackendHealthForTest(): void {
   gpuUnused = null;
   outOfMemory = null;
+  runtimeCheck = null;
 }

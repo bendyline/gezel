@@ -17,6 +17,7 @@
 import { type GezelConfig, createLogger } from '@bendyline/gezel';
 import type { ConfigStore } from '@bendyline/gezel-inference/internal/fs/config-store';
 import type { GpuArbiter } from '@bendyline/gezel-inference/internal/providers/gpu-arbiter';
+import { createLocalImageProvider } from '@bendyline/gezel-inference/internal/providers/image/local-factory';
 import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import type { RemotesRegistry } from '../../remotes/registry.js';
 import { ProviderLifecycle } from '../provider-lifecycle.js';
@@ -53,6 +54,8 @@ export class ImageProviderManager {
   private readonly localOnly: boolean;
 
   private readonly local = new ProviderLifecycle<ImageProvider>(new Set(['generate']));
+  /** The on-device engine while the person renders with a cloud provider. */
+  private readonly onDevice = new ProviderLifecycle<ImageProvider>(new Set(['generate']));
   private remotes: RemotesRegistry | undefined;
   private machineEngineRemoteId?: () => string | null;
   private readonly remoteCache = new Map<
@@ -158,16 +161,57 @@ export class ImageProviderManager {
     );
   }
 
+  /**
+   * The on-device provider, whatever the person picked for their own renders.
+   * Apps get local models only, and catalog downloads are always local
+   * weights. When the configured provider is the local engine it is shared,
+   * so one engine owns the GPU.
+   */
+  async localProvider(): Promise<ImageProvider> {
+    const env = this.env ?? process.env;
+    const config = await this.store.readConfig();
+    if (env.GEZEL_MOCK_PROVIDER === '1' || isMachineImageProvider(config, env)) {
+      return this.current();
+    }
+    const defaultModelId = config.defaultImageModel?.['sd-cpp'];
+    return this.onDevice.current(() =>
+      createLocalImageProvider({
+        home: this.home,
+        env,
+        ...(defaultModelId ? { defaultModelId } : {}),
+        ...(this.arbiter ? { arbiter: this.arbiter } : {}),
+      }),
+    );
+  }
+
+  /** Whether an on-device engine can render here: a binary, a server URL, or the mock. */
+  localAvailable(): boolean {
+    const env = this.env ?? process.env;
+    return Boolean(
+      env.GEZEL_MOCK_PROVIDER === '1' || env.GEZEL_SD_SERVER_BIN || env.GEZEL_SD_SERVER_URL,
+    );
+  }
+
+  /** Whether apps' local image work belongs on the machine broker, whatever the person's own pick. */
+  appsUseMachineEngine(): boolean {
+    if ((this.env ?? process.env).GEZEL_MOCK_PROVIDER === '1') return false;
+    return Boolean(this.machineEngineRemoteId?.());
+  }
+
   async reset(): Promise<void> {
-    await this.local.reset().catch((err: unknown) => {
-      log.warn(
-        '[image-provider] shutdown during reset failed:',
-        err instanceof Error ? err.message : String(err),
-      );
-    });
+    const results = await Promise.allSettled([this.local.reset(), this.onDevice.reset()]);
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        log.warn(
+          '[image-provider] shutdown during reset failed:',
+          result.reason instanceof Error ? result.reason.message : String(result.reason),
+        );
+      }
+    }
   }
 
   async retireLocalForMachineBroker(): Promise<void> {
+    await this.onDevice.retireForMachineBroker();
     const config = await this.store.readConfig();
     if (isMachineImageProvider(config, this.env ?? process.env))
       await this.local.retireForMachineBroker();

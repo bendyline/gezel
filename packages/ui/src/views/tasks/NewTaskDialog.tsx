@@ -15,6 +15,7 @@ import {
   interestAreasForCraftbook,
   mainContentParamKey,
   orderByInterests,
+  plainRoleTitle,
   planBriefLabel,
   planDisplayName,
   planLaunchFormSchema,
@@ -1617,7 +1618,9 @@ export function NewTaskDialog({
                               <li key={item.id}>
                                 {item.name}
                                 {item.suggestedRole && (
-                                  <span className="gz-ntd-step-role">{item.suggestedRole}</span>
+                                  <span className="gz-ntd-step-role">
+                                    {plainRoleTitle(item.suggestedRole)}
+                                  </span>
                                 )}
                               </li>
                             ))}

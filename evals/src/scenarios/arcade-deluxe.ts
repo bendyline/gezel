@@ -199,7 +199,7 @@ export const arcadeDeluxeScenario: EvalScenario = {
   id: 'arcade-deluxe',
   requires: ['chromium'],
   description:
-    'HARD multi-phase probe: Meester → voorman → team ship a POLISHED multi-screen arcade game (title → gameplay → game-over → restart) in one HTML file, gated on the full cycle working. The A/B probe for the craftbook stack (steered vs GEZEL_DISABLE_CRAFTBOOK_HINT=1 baseline).',
+    'HARD multi-phase probe: Meester → crew lead → team ship a POLISHED multi-screen arcade game (title → gameplay → game-over → restart) in one HTML file, gated on the full cycle working. The A/B probe for the craftbook stack (steered vs GEZEL_DISABLE_CRAFTBOOK_HINT=1 baseline).',
   prompt:
     'Create a new project for this work (e.g. `Arcade Deluxe`) and build a POLISHED, multi-screen arcade ' +
     'game there as a single self-contained file at `workspace/index.html` (HTML + inline `<style>` + inline ' +

@@ -1,4 +1,5 @@
 import type { GateScriptRef } from '../schemas/gate.js';
+import { roleForMatching } from './plain-names.js';
 import type { ModelTier } from './tier.js';
 import { tierAtLeast } from './tier.js';
 
@@ -178,7 +179,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
   // tier cap so its REAL tools (tasks/craftbooks/delegation) aren't evicted.
   voorman: {
     id: 'voorman',
-    label: 'Voorman',
+    label: 'Crew Lead',
     summary: 'Foreman: triages, diagnoses, and routes work to specialists; read-only investigator.',
     toolsetGroups: [
       'team-management',
@@ -557,9 +558,20 @@ export const DEFAULT_TOOLSET_GROUPS: readonly string[] = [
  * wins (web-flavored dev titles must precede the generic `developer`
  * matcher; image-generator must follow `design`). Consulted via substring
  * on the normalized role string only when the exact-id lookup misses.
+ *
+ * `wholeWord` entries match only a whole word. "Meester" is one: as a
+ * substring it also caught every Dutch compound ending in -meester
+ * (Keurmeester, Penningmeester, Kantoormeester, …), which handed an
+ * inspector, a household treasurer and an office administrator the
+ * coordinator's kit — no workspace writes, so the Inspector could not
+ * produce the deliverable of a step it took over.
  */
-export const ROLE_ALIASES: ReadonlyArray<{ contains: string; canonical: RoleId }> = [
-  { contains: 'meester', canonical: 'meester' },
+export const ROLE_ALIASES: ReadonlyArray<{
+  contains: string;
+  canonical: RoleId;
+  wholeWord?: boolean;
+}> = [
+  { contains: 'meester', canonical: 'meester', wholeWord: true },
   { contains: 'voorman', canonical: 'voorman' },
   { contains: 'foreman', canonical: 'voorman' },
   // Coach-titled roles (Loopbaancoach, Fitness Coach, …) run their project's
@@ -634,17 +646,26 @@ export const ROLE_ALIASES: ReadonlyArray<{ contains: string; canonical: RoleId }
  * Resolve a free-form role/job-title to a canonical role id. Reproduces
  * the old `canonicalRoleKey` exactly:
  *   1. exact case-insensitive match against a canonical id, else
- *   2. first substring match in {@link ROLE_ALIASES}, else
+ *   2. first match in {@link ROLE_ALIASES} (substring, or a whole word
+ *      where the entry says so), else
  *   3. null (caller falls back to {@link DEFAULT_TOOLSET_GROUPS}).
  */
 export function resolveRoleId(role: string | undefined): RoleId | null {
   if (!role) return null;
-  const key = role.toLowerCase().trim();
+  // A renamed title resolves exactly as its Dutch key does ("Trip Planner"
+  // as "Reisleider"), so renaming never changes a gezel's tools.
+  const key = roleForMatching(role).toLowerCase().trim();
   if (key in ROLES) return key as RoleId;
   for (const alias of ROLE_ALIASES) {
-    if (key.includes(alias.contains)) return alias.canonical;
+    if (alias.wholeWord ? hasWord(key, alias.contains) : key.includes(alias.contains)) {
+      return alias.canonical;
+    }
   }
   return null;
+}
+
+function hasWord(text: string, word: string): boolean {
+  return new RegExp(String.raw`(?<![\p{L}\p{N}])${word}(?![\p{L}\p{N}])`, 'u').test(text);
 }
 
 /** The full role definition for a free-form role, or null if unrecognized. */

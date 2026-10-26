@@ -219,9 +219,10 @@ sets `c.var.auth = { appId, scopes, projectId?, gezelId?, team? }`.
 | Token | `scopes` | Persisted? | Reach |
 |---|---|---|---|
 | **root** | `['root']` | no; process memory only | full `/api/*` + `/v1/*` |
-| **desktop client** | `['ui','openai','knowledge']` | no; written to `runtime/auth-token` | first-party product API + local OpenAI facade + `/v1/knowledge/*` |
+| **desktop client** | `['ui','openai','knowledge','images']` | no; written to `runtime/auth-token` | first-party product API + local OpenAI facade + `/v1/knowledge/*` + `/v1/images/*` |
 | **web-ui** | `['ui']` | no (ephemeral) | first-party product API; never daemon root |
 | **inference app** (`/v1/apps/register`) | `['openai']` | yes (`tokens.json`, 0600) | only `/v1/*` inference, gated by `requireScope('openai')` |
+| **image app** (`/v1/apps/register`) | `['images']` (beside `openai`/`knowledge`) | yes (`tokens.json`, 0600) | `/v1/images/*`: on-device image generation and its model downloads, gated by `requireScope('images')`, never the Integrations switch; on-device models only, on the machine broker once one is adopted |
 | **product app** (`/v1/apps/register`) | `['product']` (+ `openai` when needed) | yes (`tokens.json`, 0600) | ordinary `/api/*` product access; never first-party app-grant administration |
 | **CLI** (`/v1/apps/register`) | `['cli']` | yes (`tokens.json`, 0600) | ordinary `/api/*` product access with CLI-specific consent copy |
 | **session** (a gezel's MCP subprocess) | `['session']` + `projectId`/`gezelId`/`team` | **no** (ephemeral, dies with daemon) | deny-by-default MCP route allowlist + ownership guards |
@@ -231,11 +232,24 @@ sets `c.var.auth = { appId, scopes, projectId?, gezelId?, team? }`.
 tokens). `issueSession()` mints an ephemeral, never-persisted, upsert-on-respawn token;
 `revokeSession()` drops it. The root token comparison is a `Map` lookup of a high-entropy secret.
 
-Stateful app scopes (`product`, `cli`, and future non-inference scopes) require a
-daemon-generated six-character requester code in addition to the detailed consent prompt.
+Stateful app scopes (`product`, `cli`, `knowledge`, `images`, and future non-inference
+scopes) require a daemon-generated six-character requester code in addition to the detailed
+consent prompt.
 The requester receives and displays the plaintext once; the daemon persists only a salted
 hash, and the Gezel approval surface never displays the code. Inference-only scopes may opt
 into the same handshake.
+
+A connected app may widen its own grant without disconnecting: it registers again,
+presenting its current token, with every scope it holds plus the new ones. That opens an
+upgrade grant (`upgradeFrom` on the grant record) with the same consent and code. The
+current token keeps working until approval, when `TokenStore.replace` swaps it for the
+wider one in one write; a denial or expiry leaves it as it was. Only the token's holder can
+ask, so no other local process can collect a wider token issued in that app's name.
+
+A grant recorded by a newer build with a scope this build does not know keeps its known
+scopes (a pending grant carrying one is dropped whole), rather than failing the whole
+token file as corrupt. Known internal scopes (`root`, `ui`, `session`) in a durable
+record still fail closed.
 
 One exception, for Gezel's own local add-ins (Office, LibreOffice, VS Code): an add-in that
 proves it runs as the daemon's owner gets its fixed grant without the code

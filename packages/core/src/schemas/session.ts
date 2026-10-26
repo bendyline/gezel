@@ -330,6 +330,14 @@ export const ChatSessionSchema = z.object({
    */
   consultationMode: z.boolean().optional(),
   /**
+   * Set on a consultation an outcome task's owner opened to hand a teammate
+   * part of the work. The task is credited with what this session reads and
+   * runs (`tool.called` and script receipts carry its ref), but the session
+   * is not a task session: it gets no task context or task tools and cannot
+   * advance, pause or close the task.
+   */
+  subagentFor: z.object({ taskRef: z.string(), ownerSessionId: z.string() }).optional(),
+  /**
    * Set when this session belongs to an anonymous VISITOR of an app-serve
    * site, not to the signed-in user. Triggers at session build: (a) the
    * tool surface is stripped to nothing — no MCP toolsets, no script

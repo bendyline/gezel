@@ -40,7 +40,7 @@ import type { BuiltInstructions } from '../prompt/instructions.js';
 import { IN_APP_WEB_PREVIEW_GUIDANCE } from '../prompt/web-preview.js';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../question-format.js';
 import { parseRemoteModelId, remoteChatFetch } from '../remote/index.js';
-import { resolveRoleId } from '../roles/index.js';
+import { resolveRoleId, roleForMatching } from '../roles/index.js';
 import {
   type AnswerQuestionRequest,
   AskQuestionRequestSchema,
@@ -1392,7 +1392,7 @@ export class PortableProductService {
               `Project crew: ${context.crew.map((member) => `${member.name}${member.role ? ` (${member.role})` : ''}`).join(', ')}.`,
             context.project.voormanGezelId &&
               context.crew.some((member) => member.id === context.project.voormanGezelId) &&
-              `The voorman of this project is ${context.crew.find((member) => member.id === context.project.voormanGezelId)!.name}.`,
+              `The crew lead of this project is ${context.crew.find((member) => member.id === context.project.voormanGezelId)!.name}.`,
             renderProjectBrief(context.project, footprint.projectBriefMaxChars),
             this.capabilities.htmlPreview &&
               inventoryTools.some((tool) => tool.name === 'write_file') &&
@@ -2347,7 +2347,7 @@ export class PortableProductService {
         !member.fixedFunction &&
         (resolveRoleId(role)
           ? resolveRoleId(member.role) === resolveRoleId(role)
-          : member.role?.toLowerCase() === role.toLowerCase()),
+          : roleForMatching(member.role)?.toLowerCase() === roleForMatching(role).toLowerCase()),
     );
     if (existing) return existing;
     return this.createGezel({
@@ -2700,8 +2700,8 @@ export class PortableProductService {
               if (snapshot.running > 0 || snapshot.queuedInteractive > 0) onQueued();
               return this.engine.acquire({
                 lane: 'interactive',
-                actorLabel: 'Klerk',
-                job: `Klerk · ${kind}`,
+                actorLabel: 'Scribe',
+                job: `Scribe · ${kind}`,
                 signal,
               });
             },

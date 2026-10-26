@@ -18,7 +18,9 @@ import {
   type ModelTier,
   type ProviderName,
   effectiveCapabilityFloor,
+  resolveRoleId,
   resolveSecurityPolicy,
+  roleForMatching,
   securityPolicyForLevel,
   tierAtLeast,
 } from '@bendyline/gezel';
@@ -148,9 +150,9 @@ function toolStrategiesFor(
     id: 'default' | 'coordinator-tool-diet';
     coordinatorToolDiet: boolean;
   }> = [{ id: 'default', coordinatorToolDiet: false }];
-  const normalizedRole = role.toLowerCase();
+  const normalizedRole = roleForMatching(role).toLowerCase();
   const coordinator =
-    normalizedRole.includes('meester') ||
+    resolveRoleId(role) === 'meester' ||
     normalizedRole.includes('voorman') ||
     normalizedRole.includes('foreman');
   if ((tier === 'medium' || tier === 'large') && coordinator) {

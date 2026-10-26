@@ -819,13 +819,25 @@ async function dispatchCraftbookTask(
   if (spec.success.deliverables?.[0]?.path && craftbookParams.outputPath === undefined) {
     craftbookParams.outputPath = spec.success.deliverables[0].path;
   }
+  // A strategy arm states the request the way the product does: the harness
+  // wording ("run this craftbook end to end") would tell an outcome owner to
+  // walk the recipe it is meant to be free of.
+  const strategy = ctx.taskStrategy;
   const task = await ctx.client.createTask(projectId, {
     title: spec.title,
-    description: craftbookTaskDescription(spec),
+    description: craftbookTaskDescription(
+      strategy ? { ...spec, launchDescription: 'product' } : spec,
+    ),
     craftbookId: spec.craftbookId,
     ...(Object.keys(craftbookParams).length > 0 ? { craftbookParams } : {}),
     assignee: { kind: 'gezel', gezelId: workerId },
     dispatchEntry: true,
+    ...(strategy
+      ? {
+          strategy: strategy.strategy,
+          ...(strategy.options ? { strategyOptions: strategy.options } : {}),
+        }
+      : {}),
   });
   ctx.log(
     `[craftbook:${spec.craftbookId}] created + dispatched workflow craftbook task ${task.ref} in project ${projectId}`,
@@ -984,6 +996,111 @@ async function taskNotesTextForSpec(
   };
 }
 
+function normalizedPath(path: string): string {
+  return path
+    .trim()
+    .replace(/^\.?\/+/, '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+}
+
+/**
+ * A strategy arm is judged on results, not on the files its recipe writes
+ * along the way: an outcome run that never writes `repro.md` has not failed.
+ * Process files are the files the book's own steps write or gate on
+ * (`advanceWhen`, gate checks) that its contract does not declare as
+ * deliverables. The test's deliverables and checks that read one are
+ * dropped, with the other ways a test grades the recipe being followed: the
+ * task-notes requirement, History evidence, and required tool calls (a
+ * deck's `preview_document`). The seeded-read requirement is the scenario's
+ * to report. Everything else stays, including request-log assertions,
+ * oracle checks on source files, and hidden tests.
+ */
+export function contractScopedSpec(
+  spec: CraftbookEvalSpec,
+  task: Pick<Task, 'craftbook' | 'num' | 'artifactDir'>,
+): { spec: CraftbookEvalSpec; dropped: string[] } {
+  const contract = task.craftbook.contract;
+  if (!contract) return { spec, dropped: [] };
+  // The task's steps are interpolated; the test's paths may still say
+  // `{{task.dir}}/repro.md`. Compared raw they never matched, and outcome
+  // runs were failed for skipping process files (pilot, 2026-10-23).
+  const tokens = {
+    'task.dir': task.artifactDir ?? `tasks/${task.num}`,
+    'task.num': String(task.num),
+  };
+  const resolved = (path: string) => interpolateTaskTokens(path, tokens);
+  const declared = contract.deliverables
+    .flatMap((d) => [d.path, d.textSource?.path])
+    .filter((p): p is string => typeof p === 'string')
+    .map(normalizedPath)
+    .filter(Boolean);
+  const isDeclared = (path: string) => {
+    const p = normalizedPath(path);
+    return declared.some((d) => p === d || p.startsWith(`${d}/`));
+  };
+  // The fields a check names a produced file by. Inputs (`sourceFiles`,
+  // `sourcePath`) are left out: a recipe gate that cites the brief must not
+  // make the brief a process file.
+  const filesOf = (check: object): string[] => {
+    const c = check as Record<string, unknown>;
+    return [
+      ...['file', 'outlineFile', 'batchesFile'].flatMap((key) =>
+        typeof c[key] === 'string' ? [c[key] as string] : [],
+      ),
+      ...(Array.isArray(c.files) ? c.files.filter((f): f is string => typeof f === 'string') : []),
+    ];
+  };
+  const recipe = task.craftbook.sourceSteps?.length
+    ? task.craftbook.sourceSteps
+    : task.craftbook.steps;
+  const processFiles = new Set<string>();
+  for (const step of recipe) {
+    const written = [
+      ...(step.advanceWhen?.file ? [step.advanceWhen.file] : []),
+      ...(step.gate && 'checks' in step.gate ? (step.gate.checks ?? []).flatMap(filesOf) : []),
+    ];
+    for (const file of written) if (!isDeclared(file)) processFiles.add(normalizedPath(file));
+  }
+  const isProcess = (path: string) => processFiles.has(normalizedPath(resolved(path)));
+  const readsProcess = (check: object) => filesOf(check).some(isProcess);
+  const dropped: string[] = [];
+  const deliverables = (spec.success.deliverables ?? []).flatMap((d) => {
+    if (isProcess(d.path)) {
+      dropped.push(d.path);
+      return [];
+    }
+    if (!d.checks?.some(readsProcess)) return [d];
+    dropped.push(...d.checks.flatMap((check) => filesOf(check).filter(isProcess)));
+    return [{ ...d, checks: d.checks.filter((check) => !readsProcess(check)) }];
+  });
+  const checks = spec.success.checks?.filter((check) => {
+    if (!readsProcess(check)) return true;
+    dropped.push(...filesOf(check).filter(isProcess));
+    return false;
+  });
+  const requiredTools = (spec.success.mocks ?? []).flatMap((m) => m.requiredTools ?? []);
+  if (requiredTools.length > 0) dropped.push(`required tool calls (${requiredTools.join(', ')})`);
+  const mocks = spec.success.mocks?.map(({ requiredTools: _process, ...rest }) => rest);
+  if (spec.success.history?.length) {
+    dropped.push(`History evidence (${spec.success.history.map((h) => h.kind).join(', ')})`);
+  }
+  if (spec.success.taskNotes) dropped.push('task notes');
+  const { taskNotes: _notes, history: _history, ...success } = spec.success;
+  return {
+    spec: {
+      ...spec,
+      success: {
+        ...success,
+        ...(spec.success.deliverables ? { deliverables } : {}),
+        ...(checks ? { checks } : {}),
+        ...(mocks ? { mocks } : {}),
+      },
+    },
+    dropped: [...new Set(dropped)],
+  };
+}
+
 function taskMatchesCraftbook(task: Task, spec: CraftbookEvalSpec): boolean {
   const sourceIds = task.sourceCraftbookIds?.map((source) => source.catalogId) ?? [];
   return task.craftbook.id === spec.craftbookId || sourceIds.includes(spec.craftbookId);
@@ -1110,6 +1227,7 @@ async function taskGraphTextForSpec(
   client: GezelClient,
   projectId: string,
   spec: CraftbookEvalSpec,
+  opts: { requireFinished?: boolean } = {},
 ): Promise<{
   text: string;
   progress: string;
@@ -1120,6 +1238,8 @@ async function taskGraphTextForSpec(
   workflowRunning: boolean;
   /** Set for workflow / terminal-step specs; see `craftbookStepMilestones`. */
   stepMilestones?: number;
+  /** The book's task status, when it has stopped short of finishing. */
+  stoppedAs?: 'paused' | 'canceled';
 }> {
   const listed = await client.listProjectTasks(projectId);
   const matching = listed.tasks.filter((task) => taskMatchesCraftbook(task, spec));
@@ -1133,7 +1253,17 @@ async function taskGraphTextForSpec(
       `no task sourced from craftbook ${spec.craftbookId}; saw ${listed.tasks.length} task(s)`,
     );
   }
-  if (requireTerminalStep && matching.length > 0) {
+  // A strategy arm finishes when the task does: its own gates have accepted
+  // the result. "The terminal step is active" is not that for an outcome
+  // task, whose only step is terminal from the start, so judging on it
+  // stopped outcome runs before their contract gate ever ran.
+  if (opts.requireFinished && matching.length > 0) {
+    if (!matching.some((task) => task.status === 'complete')) {
+      failures.push(
+        `task sourced from craftbook ${spec.craftbookId} has not finished: its gates have not accepted the result yet`,
+      );
+    }
+  } else if (requireTerminalStep && matching.length > 0) {
     const reachedTerminal = matching.some((task) => {
       if (task.status === 'complete') return true;
       const active = task.craftbook.steps.find((step) => step.id === task.activeStepId);
@@ -1145,6 +1275,7 @@ async function taskGraphTextForSpec(
       );
     }
   }
+  const stopped = matching.find((task) => task.status === 'paused' || task.status === 'canceled');
 
   const authoringTask = matching[0];
   let draftTask: Task | null = null;
@@ -1233,6 +1364,7 @@ async function taskGraphTextForSpec(
     failures,
     taskCount: listed.tasks.length,
     matchingCraftbookTaskCount: matching.length,
+    ...(stopped ? { stoppedAs: stopped.status as 'paused' | 'canceled' } : {}),
     // An ACTIVE task is a running workflow, full stop — terminal-ness of the
     // active step says where the workflow is, not whether it is still working.
     //
@@ -1287,7 +1419,7 @@ async function resolveTaskTokens(
 }
 
 /** Rewrite `{{task.*}}` tokens in every path-bearing field of a check set. */
-function interpolateTaskTokens<T>(value: T, tokens: Record<string, string>): T {
+export function interpolateTaskTokens<T>(value: T, tokens: Record<string, string>): T {
   const sub = (raw: string): string =>
     raw.replace(/\{\{\s*(task\.(?:dir|num))\s*\}\}/g, (whole, key: string) => tokens[key] ?? whole);
   const walk = (node: unknown): unknown => {
@@ -2022,7 +2154,9 @@ async function approvePendingCommandQuestions(
   }
 }
 
-export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario {
+export function craftbookScenarioFromSpec(bookSpec: CraftbookEvalSpec): EvalScenario {
+  // Reassigned once by a strategy arm's success check (contractScopedSpec).
+  let spec = bookSpec;
   if (!spec.prompt) {
     throw new Error(`craftbook eval ${spec.scenarioId} needs a prompt`);
   }
@@ -2034,6 +2168,10 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
    */
   let virtualTargetPlateau = { score: -1, polls: 0 };
   let pollsSeen = 0;
+  let strategyScoped = false;
+  // Set with the contract scoping: whether the seeded inputs were read is
+  // reported, not judged, since a result check already reads the result.
+  let seededReadsReportOnly = false;
   // Advisory judge wiring from the book's test.json rubric: --llm-judge
   // scores these axes against the primary artifact. Never affects
   // pass/fail — deterministic checks alone decide that.
@@ -2162,6 +2300,27 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       const projectId = await findProjectId(ctx.client, projectName);
       if (!projectId) return { done: false };
       await approvePendingCommandQuestions(ctx, projectId, spec);
+      if (ctx.taskStrategy && !strategyScoped) {
+        const listed = await ctx.client.listProjectTasks(projectId).catch(() => null);
+        const task = listed?.tasks.find((t) => taskMatchesCraftbook(t, spec) && !t.parentTaskRef);
+        if (task) {
+          strategyScoped = true;
+          if (task.craftbook.contract) {
+            const scoped = contractScopedSpec(spec, task);
+            // Every closure in this scenario reads `spec`, so the narrowing
+            // reaches the deliverable reads and repair routing alike.
+            spec = scoped.spec;
+            seededReadsReportOnly = true;
+            ctx.log(
+              scoped.dropped.length > 0
+                ? `[strategy] not judging the recipe's process files: ${scoped.dropped.join(', ')}`
+                : '[strategy] the test judges results only; nothing dropped',
+            );
+          } else {
+            ctx.log(`[strategy] ${task.ref} carries no contract; judging the test unchanged`);
+          }
+        }
+      }
 
       const taskTokens = await resolveTaskTokens(ctx.client, projectId, spec);
       const rawChecks = successChecksForSpec(spec);
@@ -2199,6 +2358,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
             authoringGezelId?: string;
             workflowRunning: boolean;
             stepMilestones?: number;
+            stoppedAs?: 'paused' | 'canceled';
           }
         | undefined;
       let gateWorkspace = workspace;
@@ -2215,8 +2375,18 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         virtualFiles.set('task-notes.md', taskNotes.text);
       }
       if (spec.mode === 'workflow' || spec.success.taskGraph) {
-        taskGraph = await taskGraphTextForSpec(ctx.client, projectId, spec);
+        taskGraph = await taskGraphTextForSpec(ctx.client, projectId, spec, {
+          requireFinished: Boolean(ctx.taskStrategy),
+        });
         virtualFiles.set('task-graph.md', taskGraph.text);
+        // A strategy arm's task that paused for help or failed has stopped:
+        // nobody will press Try again, so polling on only burns the clock.
+        if (ctx.taskStrategy && taskGraph.stoppedAs) {
+          ctx.requestTerminalFailure?.({
+            reason: `the ${spec.craftbookId} task ${taskGraph.stoppedAs === 'paused' ? 'paused for help' : 'was canceled'} before finishing`,
+            failureMode: 'model-stuck',
+          });
+        }
       }
       if (virtualFiles.size > 0) {
         gateWorkspace = {
@@ -2265,7 +2435,12 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         )),
       );
       const unreadSeededPaths = await missingSeededReads(ctx.client, projectId, spec);
-      if (unreadSeededPaths.length > 0) {
+      if (unreadSeededPaths.length > 0 && seededReadsReportOnly) {
+        ctx.logChanged(
+          `craftbook:${spec.scenarioId}:seeded-reads`,
+          `[strategy] process: seeded input(s) not read: ${unreadSeededPaths.join(', ')}`,
+        );
+      } else if (unreadSeededPaths.length > 0) {
         failures.unshift(
           `seeded workspace input(s) have not been read yet: ${unreadSeededPaths.join(', ')}`,
         );

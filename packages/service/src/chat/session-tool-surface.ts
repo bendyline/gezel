@@ -3,6 +3,8 @@ import {
   type ChatSession,
   type GezelConfig,
   LEAN_PROFILE_BUILTIN_TOOLS,
+  OUTCOME_TEAMMATE_TOOLS,
+  type PromptTaskContext,
   type ProviderName,
   type ResolvedSecurityPolicy,
   type TaskCraftbookStep,
@@ -14,8 +16,12 @@ import {
   factualLookupTools,
   isLocalProvider,
   normalizeScriptRefs,
+  outcomeTaskHasSubagents,
   resolveRoleId,
+  roleForMatching,
   taskInputReadTools,
+  taskSurfaceSteps,
+  withInferredConsumes,
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import type { LocalModelTier } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
@@ -241,6 +247,13 @@ export interface ResolveSessionToolSurfaceOptions {
    */
   generalistSteps?: ReadonlyArray<NonNullable<ResolveSessionToolSurfaceOptions['activeStep']>>;
   /**
+   * `consult_<role>` tools of an outcome task's owner. They reach teammates
+   * through the task's own route rather than the coordinator ones, so they
+   * are granted here after the coordinator-only subtraction and kept
+   * through the tier cap.
+   */
+  taskTeammateTools?: readonly string[];
+  /**
    * The task's craftbook inputs. Their read tools count as mandated by the
    * active step, so they survive the kit and every clamp; the book's own
    * step `toolPolicy` still has the last word.
@@ -253,6 +266,29 @@ export interface ResolveSessionToolSurfaceOptions {
 }
 
 type StepSurfaceInput = NonNullable<ResolveSessionToolSurfaceOptions['activeStep']>;
+
+/**
+ * The task-step options of a session's tool surface. The prompt and bridge
+ * surfaces both take them from here, so the tools the prompt lists are the
+ * tools the bridge wires.
+ */
+export function taskStepSurfaceOptions(
+  taskContext: PromptTaskContext | undefined,
+): Pick<
+  ResolveSessionToolSurfaceOptions,
+  'activeStep' | 'generalistSteps' | 'taskTeammateTools' | 'taskInputs'
+> {
+  if (!taskContext) return {};
+  const { task, step } = taskContext;
+  return {
+    ...(step ? { activeStep: withInferredConsumes(task, step) } : {}),
+    ...(step && task.executionMode === 'generalist'
+      ? { generalistSteps: taskSurfaceSteps(task.craftbook) }
+      : {}),
+    ...(step && outcomeTaskHasSubagents(task) ? { taskTeammateTools: OUTCOME_TEAMMATE_TOOLS } : {}),
+    ...(task.inputs ? { taskInputs: Object.values(task.inputs) } : {}),
+  };
+}
 
 export interface ResolvedSessionToolSurface {
   allowlist: Set<string> | null;
@@ -626,6 +662,10 @@ export async function resolveSessionToolSurface(
   if (!coordinatorScope && rawAllowlist) {
     rawAllowlist = withoutCoordinatorOnlyTools(rawAllowlist, allModelFacingBuiltinTools);
   }
+  const teammateTools = opts.taskTeammateTools ?? [];
+  if (teammateTools.length > 0 && rawAllowlist) {
+    rawAllowlist = new Set([...rawAllowlist, ...teammateTools]);
+  }
 
   const allowlistBeforeStepPolicy = rawAllowlist;
   rawAllowlist = applyActiveStepToolPolicy(rawAllowlist, opts.activeStep);
@@ -641,6 +681,7 @@ export async function resolveSessionToolSurface(
     stepMandatedTools: new Set([
       ...mandatedStepTools,
       ...conditionallyReferencedStepTools,
+      ...teammateTools,
       ...(opts.factualWriting && rawAllowlist ? factualSourceTools(rawAllowlist) : []),
     ]),
     ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),
@@ -928,7 +969,9 @@ export async function resolveSessionToolSurface(
   // and an unfiltered (`null`) surface, which the step policy and the
   // orchestration clamp expand to the whole inventory.
   if (!coordinatorScope) {
+    const teammatesKept = teammateTools.filter((name) => allowlist?.has(name));
     allowlist = withoutCoordinatorOnlyTools(allowlist, allModelFacingBuiltinTools);
+    if (teammatesKept.length > 0) allowlist = new Set([...allowlist, ...teammatesKept]);
   }
 
   return { allowlist, projectOrchestrationConstrained, exactCraftbookConstrained };
@@ -1271,7 +1314,7 @@ const GENERIC_TOOL_CAP_FALLBACK: readonly string[] = [
 ];
 
 function isImplementationRole(role: string | undefined): boolean {
-  const normalized = role?.toLowerCase().trim() ?? '';
+  const normalized = roleForMatching(role)?.toLowerCase().trim() ?? '';
   return (
     normalized.includes('builder') ||
     normalized.includes('generalist') ||
@@ -1380,11 +1423,11 @@ function coordinatorToolDietCap(
 
 /** Curated orchestration-list length for coordinator roles, else null. */
 function coordinatorPriorityLength(role: string | undefined): number | null {
-  const normalized = role?.toLowerCase().trim() ?? '';
+  const normalized = roleForMatching(role)?.toLowerCase().trim() ?? '';
   if (normalized.includes('voorman') || normalized.includes('foreman')) {
     return VOORMAN_TOOL_CAP_PRIORITY.length;
   }
-  if (normalized.includes('meester')) return MEESTER_TOOL_CAP_PRIORITY.length;
+  if (resolveRoleId(role) === 'meester') return MEESTER_TOOL_CAP_PRIORITY.length;
   return null;
 }
 
@@ -1392,14 +1435,15 @@ function toolCapPriorityForRole(
   role: string | undefined,
   deliverableKind?: import('@bendyline/gezel').DeliverableKind,
 ): readonly string[] {
-  const normalized = role?.toLowerCase().trim() ?? '';
-  const base = normalized.includes('meester')
-    ? MEESTER_TOOL_CAP_PRIORITY
-    : normalized.includes('voorman') || normalized.includes('foreman')
-      ? VOORMAN_TOOL_CAP_PRIORITY
-      : isImplementationRole(role)
-        ? IMPLEMENTATION_TOOL_CAP_PRIORITY
-        : [];
+  const normalized = roleForMatching(role)?.toLowerCase().trim() ?? '';
+  const base =
+    resolveRoleId(role) === 'meester'
+      ? MEESTER_TOOL_CAP_PRIORITY
+      : normalized.includes('voorman') || normalized.includes('foreman')
+        ? VOORMAN_TOOL_CAP_PRIORITY
+        : isImplementationRole(role)
+          ? IMPLEMENTATION_TOOL_CAP_PRIORITY
+          : [];
   // Deliverable-aware prefix: the active step's producing tools rank
   // first so the tiny cap never trims them in favor of generic breadth
   // (e.g. derive_file ranked 10th would fall below a 15-tool cut on a
@@ -1509,8 +1553,8 @@ function shouldConstrainToProjectOrchestration(opts: {
   latestUserMessage: string | undefined;
 }): boolean {
   if (!isLocalProvider(opts.provider)) return false;
-  const normalizedRole = opts.role?.toLowerCase().trim() ?? '';
-  if (!normalizedRole.includes('meester') && !normalizedRole.includes('voorman')) return false;
+  const normalizedRole = roleForMatching(opts.role)?.toLowerCase().trim() ?? '';
+  if (resolveRoleId(opts.role) !== 'meester' && !normalizedRole.includes('voorman')) return false;
   const text = opts.latestUserMessage?.toLowerCase() ?? '';
   if (!text.trim()) return false;
   // Procedure/recipe asks have their own Meester prelude and tool surface.
@@ -1604,9 +1648,9 @@ export function projectOrchestrationConstraintActive(opts: {
   provider: ProviderName;
   latestUserMessage: string | undefined;
 }): boolean {
-  const normalizedRole = opts.role?.toLowerCase().trim() ?? '';
+  const normalizedRole = roleForMatching(opts.role)?.toLowerCase().trim() ?? '';
   if (
-    normalizedRole.includes('meester') &&
+    resolveRoleId(opts.role) === 'meester' &&
     isLocalProvider(opts.provider) &&
     sessionContainsRemoteRepoIntakeRequest(opts.record, opts.latestUserMessage)
   ) {

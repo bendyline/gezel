@@ -37,6 +37,7 @@ export type SystemNoticeId =
   | 'update-check-failed'
   | 'engine-backend-quarantined'
   | 'engine-gpu-unused'
+  | 'engine-runtime-missing'
   | 'engine-out-of-memory'
   | 'child-process-denied';
 
@@ -470,6 +471,31 @@ function gpuUnusedTechnical(unused: NonNullable<LlamaCppBackendHealthResponse['g
 }
 
 /**
+ * Windows: the on-device engines cannot start at all, because this PC lacks
+ * the Microsoft Visual C++ runtime they all import. The desktop installer
+ * provides it; an npm or CLI install never runs that installer. Unlike most
+ * engine notices this one is the person's to fix, in a minute, so it reaches
+ * the rail with Microsoft's download as its link.
+ */
+export function engineRuntimeNotice(input: {
+  health?: LlamaCppBackendHealthResponse | null;
+}): SystemNotice | null {
+  const missing = input.health?.missingRuntime;
+  if (!missing) return null;
+  const label = missing.arch === 'arm64' ? 'ARM64' : 'x64';
+  return {
+    id: 'engine-runtime-missing',
+    railLabel: 'Install a Windows component',
+    title: 'On-device models need a free component from Microsoft.',
+    body: `Gezel’s on-device chat, images and transcription use the Microsoft Visual C++ Redistributable (${label}), which is not installed on this PC, so they cannot start. Install it from Microsoft, then try again. You do not need to restart Gezel.`,
+    technical: missing.detail,
+    link: { href: missing.downloadUrl, label: `Download the ${label} installer` },
+    reportable: false,
+    settingsSection: LLAMA_SETTINGS_SECTION,
+  };
+}
+
+/**
  * Linux's out-of-memory killer stopped the engine. An event rather than a
  * standing condition, so it never reaches the rail — the failed chat already
  * said so. The engine's Settings tab keeps it in view for someone who comes
@@ -550,6 +576,9 @@ export function railSystemNotices(input: {
       ...(input.platform ? { platform: input.platform } : {}),
     }),
     serviceNotice(input),
+    // Ahead of the backend and GPU notices: with the runtime missing, no
+    // build starts, so the others describe symptoms of this one.
+    engineRuntimeNotice({ health: input.backendHealth ?? null }),
     engineBackendNotice({
       ...(input.quarantinedBackends ? { quarantined: input.quarantinedBackends } : {}),
       ...(input.runningBackend ? { running: input.runningBackend } : {}),

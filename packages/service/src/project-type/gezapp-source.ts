@@ -1133,7 +1133,7 @@ function checkComposition(analysis: SourceAnalysis): void {
         file: manifestFile,
         pointer: `/tools/${index}/reaction/gezel`,
         rule: 'reaction-unknown-gezel',
-        message: `reaction names "${tool.reaction.gezel}", which is not a gezels[].templateId — the runtime will fall back to the project voorman`,
+        message: `reaction names "${tool.reaction.gezel}", which is not a gezels[].templateId — the runtime will fall back to the project crew lead`,
       });
     }
   }

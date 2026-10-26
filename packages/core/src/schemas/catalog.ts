@@ -5,6 +5,7 @@ import { ProjectIconIdSchema } from '../project-icons.js';
 import { TaskAssigneeSchema } from './assignee.js';
 import { IdRegex } from './catalog-id.js';
 import { SemverRegex } from './catalog-semver.js';
+import { CraftbookContractSchema } from './craftbook-contract.js';
 import {
   CraftbookBasedOnSchema,
   CraftbookCommandNeedSchema,
@@ -841,6 +842,8 @@ export const CraftbookTemplateManifestSchema = z.object({
   diffpackCapable: z.boolean().optional(),
   /** Whole-book model-tier floor (mirrored from the version manifest). */
   capabilityFloor: ModelTierSchema.optional(),
+  /** The book's contract (mirrored from the version manifest). */
+  contract: CraftbookContractSchema.optional(),
 });
 export type CraftbookTemplateManifest = z.infer<typeof CraftbookTemplateManifestSchema>;
 

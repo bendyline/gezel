@@ -41,6 +41,7 @@ import { classifyMalformedJsonBody } from './json-body.js';
 import { enginesRoutes } from '@bendyline/gezel-inference/internal/http/routes/engines';
 import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import { modelBundleRoutes } from '@bendyline/gezel-inference/internal/http/routes/model-bundles';
+import { v1ImagesRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-images';
 import { v1KnowledgeRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-knowledge';
 import { mimeTypeForPath } from './mime.js';
 import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
@@ -497,6 +498,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       apiCompat: { floor: GEZEL_API_GENERATION_FLOOR, current: GEZEL_API_GENERATION },
       serviceRole: ctx.serviceRole,
       ...(ctx.machineEngine ? { machineEngineConnected: ctx.machineEngine.isConnected() } : {}),
+      // Its presence tells an app this daemon grants the `images` scope.
+      images: {
+        available: ctx.imageProvider.localAvailable() || ctx.imageProvider.appsUseMachineEngine(),
+      },
       startedAt: ctx.startedAt,
       nodeVersion: process.versions.node,
       platform: process.platform,
@@ -692,6 +697,35 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.use('/v1/knowledge/*', denyRemoteInferenceScope());
   app.use('/v1/knowledge/*', requireScope('knowledge'));
   app.route('/v1/knowledge', v1KnowledgeRoutes(ctx));
+
+  // Local image generation for apps. Consent to the `images` scope is the
+  // gate, not the Integrations switch: nothing OpenAI-compatible is served.
+  // Apps get on-device models only, on the machine broker once one is
+  // adopted, whatever provider the person renders with themselves.
+  app.use('/v1/images/*', openAiErrorEnvelope());
+  app.use('/v1/images/*', bearerAuth(ctx.tokenStore));
+  app.use('/v1/images/*', denyRemoteInferenceScope());
+  app.use('/v1/images/*', requireScope('images'));
+  app.use(
+    '/v1/images/*',
+    machineEngineProxy(ctx, '/v1/images', '/v1/remote/manage/images', [], () =>
+      ctx.imageProvider.appsUseMachineEngine(),
+    ),
+  );
+  app.route(
+    '/v1/images',
+    v1ImagesRoutes({
+      home: ctx.home,
+      catalog: ctx.catalog,
+      store: ctx.store,
+      images: {
+        available: () => ctx.imageProvider.localAvailable(),
+        current: () => ctx.imageProvider.localProvider(),
+        reset: () => ctx.imageProvider.reset(),
+        pulls: ctx.imagePulls,
+      },
+    }),
+  );
 
   // `/v1/openapi.json` describes the public contract — served unauth
   // so app authors browsing the schema don't need a token first.

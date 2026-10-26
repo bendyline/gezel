@@ -165,7 +165,7 @@ describe('McpValidateIdsStrict', () => {
     expect(typeof w.seedFromText).toBe('function');
     w.seedFromText!(
       'You are working in the project "Tank Combat Arcade Game".\n' +
-        'The voorman of this project is **Okan**.\n' +
+        'The crew lead of this project is **Okan**.\n' +
         '### Tasks assigned to you in this project (1)\n' +
         '- **tank-combat-arcade-game/2** — "Build Tank Combat Arcade Game"\n',
     );

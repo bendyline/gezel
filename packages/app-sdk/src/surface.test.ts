@@ -33,6 +33,7 @@ describe('published surface', () => {
       [
         'GezelApp',
         'GezelSdkError',
+        'ImagesClient',
         'KnowledgeClient',
         'authorize',
         'authorizeLocal',
@@ -43,6 +44,7 @@ describe('published surface', () => {
         'createTrustingFetch',
         'detectGezel',
         'registerAppTools',
+        'requestScopes',
         'scopeNeedsVerificationCode',
         ...shared,
       ].sort(),
@@ -54,7 +56,14 @@ describe('published surface', () => {
     // hosting all need the filesystem and are deliberately absent here. App
     // tools need only fetch and streams, so a token-holding renderer gets them.
     expect(Object.keys(browser).sort()).toEqual(
-      ['GezelApp', 'GezelSdkError', 'KnowledgeClient', 'registerAppTools', ...shared].sort(),
+      [
+        'GezelApp',
+        'GezelSdkError',
+        'ImagesClient',
+        'KnowledgeClient',
+        'registerAppTools',
+        ...shared,
+      ].sort(),
     );
   });
 

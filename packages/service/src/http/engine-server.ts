@@ -7,6 +7,7 @@ import {
 } from '@bendyline/gezel';
 import { enginesRoutes } from '@bendyline/gezel-inference/internal/http/routes/engines';
 import { modelBundleRoutes } from '@bendyline/gezel-inference/internal/http/routes/model-bundles';
+import { v1ImagesRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-images';
 import { v1ModelsEnsureRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-models-ensure';
 import { Hono } from 'hono';
 import { ZodError } from 'zod';
@@ -126,6 +127,20 @@ export function buildEngineApp(
   app.route('/v1/remote/manage/model-fitness', modelFitnessRoutes(ctx));
   app.route('/v1/remote/manage/model-bundles', modelBundleRoutes(ctx));
   app.route('/v1/remote/manage/image-gen', imageModelRoutes(ctx));
+  app.route(
+    '/v1/remote/manage/images',
+    v1ImagesRoutes({
+      home: ctx.home,
+      catalog: ctx.catalog,
+      store: ctx.store,
+      images: {
+        available: () => ctx.imageProvider.localAvailable(),
+        current: () => ctx.imageProvider.localProvider(),
+        reset: () => ctx.imageProvider.reset(),
+        pulls: ctx.imagePulls,
+      },
+    }),
+  );
   app.route('/v1/remote/manage/video-gen', videoModelRoutes(ctx));
   app.route('/v1/remote/manage/audio', audioModelRoutes(ctx));
   app.route('/v1/remote/manage/serving', remoteServingManageRoutes(ctx));

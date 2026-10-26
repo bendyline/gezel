@@ -26,13 +26,31 @@ Three words that should describe any screen:
    years, not a product surfacing the month's design trend. Typography,
    proportion, and materials over novelty and chrome. Nothing that would
    look dated in 2031.
-3. **Historic** — Gezel is a guild. The vocabulary (gezel, meester, voorman)
-   is Dutch apprenticeship terminology; the visuals should echo the world
-   those words come from. A guild hall, an apprentice's bench, a master's
-   ledger — not a SaaS dashboard. The plural follows the Dutch: **gezellen**
-   (possessive "gezellen's") in anything a person reads. Technical names keep
-   **gezels** — the `gezels/` folder, routes, ids, API and tool names — and so
-   does text written only for a model.
+3. **Historic** — Gezel is a guild. The vocabulary (gezel, meester) is Dutch
+   apprenticeship terminology; the visuals should echo the world those words
+   come from. A guild hall, an apprentice's bench, a master's ledger — not a
+   SaaS dashboard. The plural follows the Dutch: **gezellen** (possessive
+   "gezellen's") in anything a person reads. Technical names keep **gezels** —
+   the `gezels/` folder, routes, ids, API and tool names — and so does text
+   written only for a model.
+
+   **Roles are plain English; the Meester is the one Dutch title.** A
+   newcomer met a crew of Voormannen and Ceremoniemeesters and could not tell
+   who did what. Whatever a person or a model reads names the role plainly:
+
+   | Internal key (code, config, ids) | Shown as |
+   | --- | --- |
+   | `voorman` | Crew Lead (prose: crew lead) |
+   | `boekwachter` | Librarian |
+   | `klerk` | Scribe |
+   | `keurmeester` | Inspector |
+   | `meester` | Meester |
+
+   Catalog roles follow the same rule (Reisleider is a Trip Planner). The
+   full table lives in `core/src/roles/plain-names.ts`; route role text
+   through `roleForMatching` before any logic, never compare it to a Dutch
+   string. Identifiers keep their Dutch keys (`voormanGezelId`,
+   `boekwachterGezelId`, `BW-n` issue ids).
 
 What this *doesn't* mean: kitsch, pastiche, or literal skeuomorphism. The one place a
 *vaguely* skeuomorphic cue is welcome is physicality on things you press:
@@ -195,7 +213,7 @@ Rules:
   `role="toolbar"` (or `role="presentation"` when the group needs no name)
   instead of a radiogroup, with nothing latched. Reach for it when a compact
   row of verbs repeats down a list and the words would out-shout the content
-  they act on: the Boekwachter issue rows are the reference, where *Mark
+  they act on: the tracked-issue rows are the reference, where *Mark
   read · Not an issue · Mark resolved · Fix* sat as four text links beside
   every issue and left the message wrapping four words to a line. Three rules
   travel with it. Put the tray on its own row under the content rather than
@@ -692,7 +710,7 @@ and the meester's lines in the chat register (serif body). Rules:
   running workshop and join once there is one.
 - **Static, never a model turn.** The welcome is written copy, so it is on
   screen before anything can answer and never puts words in the meester's
-  mouth. The helpers made at boot (the Klerk, the Boekwachter) are
+  mouth. The helpers made at boot (the Scribe, the Librarian) are
   introduced by name in one small line, so no name in the sidebar is a
   stranger. The tour ("Take the 1-minute tour") opens in place.
 - A conversation that already has history when the model goes missing keeps
@@ -761,9 +779,8 @@ What the meester's thread shows after the person asks for something:
 
 - **The crew arrives as cards** (`CrewIntroCard`, a `crew-introduction`
   message carrying `crewIntroduction`): a headshot, the name in the serif,
-  the guild role beside its plain words from `roleWithGloss` ("Reisleider —
-  trip planner", "Voorman — crew lead"; a plain role carries no gloss), what
-  they start with, and **Say hello**, which opens their chat. The lead and
+  their role in plain words ("Trip Planner", "Crew Lead"), what they start
+  with, and **Say hello**, which opens their chat. The lead and
   whoever starts the work are introduced as the task begins; a gezel hired
   for a later step is introduced when they start. Each gezel is introduced
   once per thread.
@@ -951,6 +968,7 @@ Words we show on starter cards, launch forms, the composer strip, and task cards
 | craftbook | plan |
 | default assignee / entry-step role | Choose automatically |
 | voorman | crew lead, when relevant |
+| boekwachter | Librarian |
 | gezel | gezel |
 | Meester | Meester |
 
@@ -1157,7 +1175,7 @@ rewritten.
 opens the same right-hand pane (`FileInspector`) beside it: the name and path
 with an Open key, the file's summary, the facts the view already knows (plus
 chips only that view can say — the Village's town style, a pull request's
-change), the findings tray, the Boekwachter review card with its tracked
+change), the findings tray, the Librarian's review card with its tracked
 `BW-n` issues, and the file itself. A view adds to the pane through its
 extras, never by forking it. The selection belongs to the Views tab, not the
 view, so switching views keeps the file selected. The split is a fraction
@@ -1376,7 +1394,7 @@ an adapter with no `mkdir` gets no New folder key, one with `canWrite: false`
 no `reveal` gets no Open button. Anything genuinely specific to a surface
 arrives as a slot — `headerExtra`, `notices`, `trailingForEntry`,
 `detailForEntry`, `customList`, `extraPane` — which is how the Workspace hangs its index state,
-issue badges, triage lists, and Boekwachter pane off the shared panel without
+issue badges, triage lists, and Librarian pane off the shared panel without
 forking it. **Every file editor autosaves** through
 `useSerializedAutosave` with the dirty state in the status bar; a Save button
 in a file pane is a bug, because a mutation elsewhere in the panel flushes the
@@ -1810,7 +1828,7 @@ Photos is where a describer is fetched; a chat turn never starts a download.
 **Watching cameras.** A camera connected to a project (Connections → Webcam)
 watches continuously, so watching must always be visible and stopping it is
 one click. While any camera is on, the titlebar shows a "Camera on" pill
-(`WatchingIndicator`, the Boekwachter pill's recipe with a danger-red dot);
+(`WatchingIndicator`, the Librarian pill's (`BoekwachterPill`) recipe with a danger-red dot);
 its menu pauses each camera where the person noticed it. The camera's card
 shows a small live view that refreshes only while the card is on screen and
 is served from memory, a status line in plain words ("Something is in view.",
@@ -2085,7 +2103,7 @@ editor toolbar's single transform button opens the transformation dialog
 (`TransformDialog`, `gz-transform-*` block in
 [styles/catalog.css](../packages/ui/src/styles/catalog.css)):
 an instruction
-field, a "Transform with {Klerk}" row that shows the Klerk's poppetje
+field, a "Transform with {Scribe}" row that shows the Scribe's poppetje
 pulsing plus a quiet live metacommentary feed while the model works, and a
 result area toggling (bare key tray) between an editable Before/After view
 and a Monaco diff. Nothing touches the document until the user presses
@@ -2734,7 +2752,7 @@ shows last night's albums and this day in earlier years; a folder without
 either shows nothing extra. Titlebar search gives a workspace photo hit a 3rem
 tile beside its text, like Knowledge results.
 
-**A file says what it is, one line above it.** When the Boekwachter has
+**A file says what it is, one line above it.** When the Librarian has
 summarized a file, its project viewer and the Documents area show that
 summary's first prose paragraph as one muted line above the file
 (`FileAboutLine`): "About this file · …", truncated to the line, the whole
@@ -2839,7 +2857,7 @@ and its composer. The thread picker lists only that document's threads; task
 threads, other gezels' chats and the project tabs stay out of it. The project
 is one key away and comes with a **Back to <document>** key, so the person
 never loses the way back. Gezels that run background services (the
-Boekwachter, the Klerk) are not offered as someone to write with.
+Librarian, the Scribe) are not offered as someone to write with.
 
 **A narrow conversation gives up the role first.** Wherever a chat timeline is
 narrower than 560px — the pane, a side panel, a phone — a bubble header drops
@@ -3100,7 +3118,7 @@ finishes. The rooftop fire reflects open and in-progress findings only, so it
 goes out when the last one is resolved and relights if a later scan finds a true
 regression.
 
-Below the findings tray, a reviewed file carries a **Boekwachter review card**
+Below the findings tray, a reviewed file carries a **Librarian review card**
 on the same tray recipe but a neutral surface: the 1–10 health score with its
 one-line reason, the reviewer's cliffs notes as read-only markdown prose, and
 durable issue rows identified by a short project-scoped reference (`BW-12`).
@@ -3124,7 +3142,7 @@ progress and links to that task until completion resolves it. Review severities
 severities and never borrow their colors or badge treatment. The card closes on
 a one-line reminder that these are leads from a background model pass — an
 opinion, not a verdict — and a muted provenance footer naming the model, gezel,
-and date. A file the boekwachter hasn't reached yet gets one muted "not reviewed
+and date. A file the Librarian hasn't reached yet gets one muted "not reviewed
 yet" line, no spinner.
 
 The findings tray and the review card are sections of the shared file

@@ -105,18 +105,19 @@ const DELIVERABLE_GATE_VERBS = [
 const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
   {
     // A Meester can claim the project more indirectly by saying the lead
-    // exists. The Ypres incident used "recruited a `voorman`" after only
+    // exists. Models say "voorman" (the crew lead's old title) as well as
+    // "crew lead". The Ypres incident used "recruited a `voorman`" after only
     // suggest_craftbook calls; no gezel/project mutation had happened.
     pattern: new RegExp(
       String.raw`\bI(?:'ve|\s+have|\s+just|\s+already)?\s+(?:` +
         VOORMAN_RECRUITMENT_VERBS +
-        String.raw`)\s+(?:(?:the|a|an|our|your)\s+)?(?:new\s+)?[*"'\x60_]*voorman\b[*"'\x60_]*`,
+        String.raw`)\s+(?:(?:the|a|an|our|your)\s+)?(?:new\s+)?[*"'\x60_]*(?:voorman|crew\s+lead)\b[*"'\x60_]*`,
       'i',
     ),
     requiredTools: ['create_gezel', 'ensure_gezel', 'start_project'],
     claim: 'recruited a voorman',
     nudge:
-      'You told the user you recruited a voorman, but you did not call `create_gezel`, `ensure_gezel`, ' +
+      'You told the user you recruited a crew lead, but you did not call `create_gezel`, `ensure_gezel`, ' +
       'or `start_project` this turn. Call the right one now, and only report recruitment after it succeeds.',
   },
   {
@@ -341,11 +342,11 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
     // accepts up to four words (the gezel name with optional markdown
     // marks) plus "as your/the/our" between the verb and "voorman".
     pattern:
-      /\bI(?:'ve|\s+have|\s+just|\s+already)?\s+(?:assigned|set)\s+(?:(?:the\s+)?voorman\b|(?:[*"`_]*[\w'-]+[*"`_]*\s+){1,4}as\s+(?:the|your|our|a|an)\s+voorman\b)/i,
+      /\bI(?:'ve|\s+have|\s+just|\s+already)?\s+(?:assigned|set)\s+(?:(?:the\s+)?(?:voorman|crew\s+lead)\b|(?:[*"`_]*[\w'-]+[*"`_]*\s+){1,4}as\s+(?:the|your|our|a|an)\s+(?:voorman|crew\s+lead)\b)/i,
     requiredTools: ['update_project', 'start_project'],
     claim: 'assigned the voorman',
     nudge:
-      'You told the user you set the voorman, but you did not call `update_project` ' +
+      'You told the user you set the crew lead, but you did not call `update_project` ' +
       "(or it didn't succeed — re-check the tool result). Call it now with the new gezel's id.",
   },
 ];

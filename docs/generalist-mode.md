@@ -4,6 +4,9 @@
 (see §8). Supersedes `frontier-adaptive-execution.md`, whose original spec is
 kept as an appendix below.
 
+Generalist is one of three task strategies; [task-strategies.md](task-strategies.md)
+covers the strategy setting, the `outcome` strategy and book contracts.
+
 ## 1. What it is
 
 One switch, `config.generalistMode: 'auto' | 'on' | 'off'`, decides how much

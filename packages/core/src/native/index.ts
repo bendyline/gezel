@@ -51,6 +51,23 @@ export {
 } from './llama-quarantine.js';
 export type { EngineExit, StartupCrashVerdict, UnrunnableBuild } from './unrunnable-build.js';
 export { formatExitCode, unrunnableBuildExit } from './unrunnable-build.js';
+export type {
+  DllCheck,
+  DllFiles,
+  DllLoadFailure,
+  DllLoadFailureKind,
+  MissingDll,
+  PeArch,
+} from './missing-dll.js';
+export {
+  WINDOWS_DLL_LOAD_STATUSES,
+  checkEngineDlls,
+  diagnoseDllLoadFailure,
+  explainDllLoadFailure,
+  missingMachineRuntime,
+  vcRedistributableUrl,
+  windowsPathDirs,
+} from './missing-dll.js';
 export type { LlamaBuildCheck } from './llama-build-check.js';
 export {
   LLAMA_CUDA_BLOCKER_ENV,

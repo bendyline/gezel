@@ -26,7 +26,13 @@ export {
   warmEmbeddings,
 } from '@bendyline/gezel-inference/internal/memory/embeddings';
 export { embedModelId } from '@bendyline/gezel-inference/internal/memory/embed-core';
-export { evaluateGate, gateCheckLabel, taskSuppliedCitationPaths } from './tasks/gate-eval.js';
+export {
+  evaluateGate,
+  gateCheckLabel,
+  taskGivenText,
+  taskSuppliedCitationPaths,
+} from './tasks/gate-eval.js';
+export { gateHistoryEvidence } from './tasks/gate-history.js';
 export { bundledDocblocksToolset } from './toolsets/bundled-docblocks.js';
 export {
   docblocksBrowserRequirement,

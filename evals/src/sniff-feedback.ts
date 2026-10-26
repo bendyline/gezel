@@ -2129,11 +2129,11 @@ function targetScoreForFile(role: string | null, filePath: string): number {
   if (/\.(?:md|markdown|txt)$/i.test(filePath)) {
     if (/developer|builder|engineer|generalist/.test(role)) return 4;
     if (/review|research|writer|copy|sre|operator/.test(role)) return 3;
-    if (/voorman|foreman/.test(role)) return 1;
+    if (/voorman|crew[\s-]?lead|foreman/.test(role)) return 1;
     return 0;
   }
   if (/developer|builder|engineer|generalist|frontend|front-end|web/.test(role)) return 3;
-  if (/voorman|foreman/.test(role)) return 1;
+  if (/voorman|crew[\s-]?lead|foreman/.test(role)) return 1;
   return 0;
 }
 

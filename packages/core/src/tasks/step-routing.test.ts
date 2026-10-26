@@ -84,6 +84,13 @@ describe('bumpStepActivation', () => {
     )[0]!;
     expect(a.gateAttempts).toBe(2);
   });
+  it('keeps where the evidence window opened for a self-loop, and only then', () => {
+    const visited = [{ id: 'a', name: 'A', lastActivatedAt: 't0' }] as never[];
+    const once = bumpStepActivation(visited, 'a', 't1', { preserveGateBudget: true });
+    const twice = bumpStepActivation(once, 'a', 't2', { preserveGateBudget: true });
+    expect(twice[0]).toMatchObject({ lastActivatedAt: 't2', evidenceSince: 't0' });
+    expect(bumpStepActivation(twice, 'a', 't3')[0]).not.toHaveProperty('evidenceSince');
+  });
 });
 
 describe('an explicit jump a model left blank', () => {

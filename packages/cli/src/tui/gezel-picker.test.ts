@@ -45,8 +45,18 @@ describe('buildGezelPickerItems', () => {
       memberIds: [],
     });
     const boekwachter = items.find((item) => item.value === 'template:boekwachter');
-    expect(boekwachter?.label).toBe('Boekwachter');
+    expect(boekwachter?.label).toBe('Librarian');
     expect(boekwachter?.hint).toContain('index-keeper');
+  });
+
+  it('counts a migrated role as filling its Dutch-titled template', () => {
+    const lead = gezel({ id: 'g3', name: 'Oier', role: 'Crew Lead', roleBasedName: 'crew-lead' });
+    const items = buildGezelPickerItems({
+      gezels: [lead],
+      templates: TEMPLATES,
+      memberIds: ['g3'],
+    });
+    expect(items.map((item) => item.value)).not.toContain('template:voorman');
   });
 
   it('puts project members first and offers the rest of the gilde after', () => {
@@ -149,6 +159,18 @@ describe('resolveGezelArg', () => {
     expect(resolveGezelArg('voorman', inputs)).toEqual({ kind: 'template', templateId: 'voorman' });
   });
 
+  it('reads a renamed role by either title', () => {
+    const lead = gezel({ id: 'g3', name: 'Oier', role: 'Crew Lead', roleBasedName: 'crew-lead' });
+    const withLead = { gezels: [BUILDER, lead], templates: TEMPLATES };
+    expect(resolveGezelArg('voorman', withLead)).toEqual({ kind: 'gezel', gezelId: 'g3' });
+    expect(resolveGezelArg('crew lead', withLead)).toEqual({ kind: 'gezel', gezelId: 'g3' });
+    expect(resolveGezelArg('crew lead', inputs)).toEqual({
+      kind: 'template',
+      templateId: 'voorman',
+    });
+    expect(resolveGezelArg('scribe', inputs)).toEqual({ kind: 'gezel', gezelId: 'g2' });
+  });
+
   it('is case-insensitive', () => {
     expect(resolveGezelArg('VOORMAN', inputs)).toEqual({ kind: 'template', templateId: 'voorman' });
   });
@@ -163,7 +185,7 @@ describe('resolveGezelArg', () => {
   it('reports the candidates instead of guessing on an ambiguous prefix', () => {
     const resolved = resolveGezelArg('re', inputs);
     expect(resolved.kind).toBe('ambiguous');
-    expect(resolved).toMatchObject({ labels: ['Reviewer', 'Reisleider'] });
+    expect(resolved).toMatchObject({ labels: ['Reviewer', 'Trip Planner'] });
   });
 
   it('reports unknown for a role nobody has', () => {

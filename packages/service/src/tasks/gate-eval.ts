@@ -2,6 +2,7 @@ import { posix } from 'node:path';
 import {
   type GateCheck,
   type GateWorkspaceReader,
+  type Task,
   evaluateDeclarativeCheck,
   gateCheckLabel,
   isSharedGateCheck,
@@ -14,6 +15,7 @@ import {
   type WorkspaceLike,
   buildJudgePrompt,
   citationsResolve,
+  claimsGrounded,
   containsPattern,
   cssMinBytes,
   esmImports,
@@ -236,7 +238,49 @@ export interface GateCheckResult {
  * check. When absent (pure tests, non-service callers) `nodeRuns`
  * fail-closes with an explanatory rejection rather than silently passing.
  */
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+/**
+ * What a task was handed: its title, request and launch parameters, and the
+ * day it runs. A `claimsGrounded` check takes a detail found here as given,
+ * the way a chat takes the person's own words: a deck dated today, or one that
+ * restates the audience the request named, invents nothing.
+ */
+export function taskGivenText(
+  task: Pick<Task, 'title' | 'description' | 'craftbookParams'>,
+  now: Date,
+): string {
+  const day = (d: Date) => [
+    d.toISOString().slice(0, 10),
+    `${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`,
+    `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
+  ];
+  return [
+    task.title,
+    task.description ?? '',
+    ...Object.values(task.craftbookParams ?? {}).map(String),
+    ...day(now),
+  ]
+    .filter((part) => part.trim().length > 0)
+    .join('\n');
+}
+
 export interface GateEvalDeps {
+  /** {@link taskGivenText} for the judged task. */
+  givenText?: string;
   /** Successful scoped image reads in this task, step and activation. */
   imageEvidence?: (artifact?: boolean) => Promise<{ observable: boolean; paths: string[] }>;
   sandboxExec?: (
@@ -266,6 +310,8 @@ export interface GateEvalDeps {
     sourcePath?: string;
     tools: string[];
     minSuccessful: number;
+    /** `task`: count the whole task since it was created, not this activation. */
+    window?: 'activation' | 'task';
   }) => Promise<{
     observable: boolean;
     matches: Array<{ tool: string; path?: string; target?: string; at?: string }>;
@@ -286,6 +332,8 @@ export interface GateEvalDeps {
     name: string;
     args: string[];
     minRuns: number;
+    /** `task`: count the whole task since it was created, not this activation. */
+    window?: 'activation' | 'task';
   }) => Promise<{
     observable: boolean;
     /** The judged task drafts a change proposal — see the check's `onDraft`. */
@@ -729,6 +777,35 @@ async function evalCheckInner(
         },
       };
     }
+    case 'claimsGrounded': {
+      // Cited sources live on either surface, like citationsResolve: a
+      // workspace deck cites a drawer-side sources.md, a drawer report cites
+      // workspace files. The document itself reads from the surface it names.
+      const claimsReader: WorkspaceLike = {
+        read: async (f) =>
+          usesArtifact
+            ? ((await artifactReader.read(f)) ?? (await ws.read(f)))
+            : ((await ws.read(f)) ?? (await artifactReader.read(f))),
+        list: async () => [...(await ws.list()), ...(await artifactReader.list())],
+      };
+      const r = await claimsGrounded(claimsReader, c.file, {
+        ...(c.sources ? { sources: c.sources } : {}),
+        ...(c.maxUnsupported !== undefined ? { maxUnsupported: c.maxUnsupported } : {}),
+        ...(c.maxBadCitations !== undefined ? { maxBadCitations: c.maxBadCitations } : {}),
+        ...(c.maxUncited !== undefined ? { maxUncited: c.maxUncited } : {}),
+        ...(deps?.givenText ? { given: deps.givenText } : {}),
+      });
+      return {
+        ok: r.ok,
+        detail: r.detail,
+        evidence: {
+          counts: r.counts,
+          read: capList(r.sources.read),
+          missing: capList(r.sources.missing),
+          unverifiable: capList(r.sources.unverifiable),
+        },
+      };
+    }
     case 'imageEvidence': {
       if (!deps?.imageEvidence)
         return { ok: false, detail: 'Image delivery evidence is unavailable (fail-closed).' };
@@ -789,6 +866,7 @@ async function evalCheckInner(
         ...(c.sourcePath !== undefined ? { sourcePath: c.sourcePath } : {}),
         tools: c.tools,
         minSuccessful,
+        ...(c.window ? { window: c.window } : {}),
       });
       if (!result.observable) {
         if (missingExternalAllowed) {
@@ -854,7 +932,13 @@ async function evalCheckInner(
         };
       }
       const minRuns = c.minRuns ?? 1;
-      const result = await deps.commandEvidence({ scope, name, args, minRuns });
+      const result = await deps.commandEvidence({
+        scope,
+        name,
+        args,
+        minRuns,
+        ...(c.window ? { window: c.window } : {}),
+      });
       if (!result.observable) {
         return {
           ok: false,

@@ -301,7 +301,7 @@ const DELEGATION_ROLE_LABELS: Record<string, string> = {
   builder: 'builder',
   writer: 'writer',
   image_generator: 'image maker',
-  voorman: 'voorman',
+  voorman: 'crew lead',
   meester: 'Meester',
 };
 

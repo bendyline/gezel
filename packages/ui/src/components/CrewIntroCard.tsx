@@ -3,9 +3,8 @@ import { CrewMemberCard } from './CrewMemberCard.js';
 
 /**
  * The crew a task brought, introduced in the thread that launched it: one
- * card per gezel with their portrait, their role in plain words beside the
- * guild name ("Reisleider — trip planner"), what they start with, and a way
- * to say hello. It replaced a line of prose that named people the reader
+ * card per gezel with their portrait, their role in plain words ("Trip
+ * Planner"), what they start with, and a way to say hello. It replaced a line of prose that named people the reader
  * had never met and could not see.
  */
 export function CrewIntroCard({

@@ -28,7 +28,7 @@ const COOKBOOK_ROWS: ReadonlyArray<{ tools: readonly string[]; row: string }> = 
   },
   {
     tools: ['ensure_gezel'],
-    row: `| "create a gezel" / "make a designer / reviewer / voorman" (the gezel will own a phase or deliverable, not just answer one question) | \`ensure_gezel({ jobTitle })\` |`,
+    row: `| "create a gezel" / "make a designer / reviewer / crew lead" (the gezel will own a phase or deliverable, not just answer one question) | \`ensure_gezel({ jobTitle })\` |`,
   },
   {
     tools: ['update_gezel'],
@@ -40,7 +40,7 @@ const COOKBOOK_ROWS: ReadonlyArray<{ tools: readonly string[]; row: string }> = 
   },
   {
     tools: ['update_project'],
-    row: `| "assign a voorman to this project" | \`update_project({ id, voormanGezelId })\` |`,
+    row: `| "assign a crew lead to this project" | \`update_project({ id, voormanGezelId })\` |`,
   },
   {
     tools: ['ask_gezel'],

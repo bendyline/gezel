@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { legacyRoleKey, plainRoleTitle } from '../roles/plain-names.js';
+import { slugifyEntityName } from '../runtime/entities.js';
 import { type TaskAssignee, UserTaskInstructionsSchema } from '../schemas/assignee.js';
 import { coerceJsonObject } from './coerce.js';
 
@@ -92,6 +94,17 @@ export function normalizeAssigneeArg(
 type RosterGezel = { id: string; name: string; roleBasedName?: string };
 
 /**
+ * The role-based name a Dutch one became when its role was renamed:
+ * "voorman" → "crew-lead". Models and people still type the old slug, so
+ * every resolver tries this after an exact match fails. Undefined for any
+ * reference that is not a renamed role.
+ */
+export function renamedRoleBasedName(ref: string): string | undefined {
+  const lc = ref.trim().toLowerCase();
+  return legacyRoleKey(lc) ? slugifyEntityName(plainRoleTitle(lc)) : undefined;
+}
+
+/**
  * The roster member a gezel reference names: its id, display name, or
  * role-based name, case-insensitively. Undefined when none matches.
  */
@@ -102,12 +115,15 @@ export function findGezelInRoster<T extends RosterGezel>(
   const exact = gezels.find((g) => g.id === input);
   if (exact) return exact;
   const lc = input.trim().toLowerCase();
-  return gezels.find(
+  const match = gezels.find(
     (g) =>
       g.id.toLowerCase() === lc ||
       g.name.toLowerCase() === lc ||
       g.roleBasedName?.toLowerCase() === lc,
   );
+  if (match) return match;
+  const renamed = renamedRoleBasedName(lc);
+  return renamed ? gezels.find((g) => g.roleBasedName?.toLowerCase() === renamed) : undefined;
 }
 
 /** The roster as a model reads it when a reference names no one. */

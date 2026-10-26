@@ -105,3 +105,18 @@ describe('sessionRouteGuard — stale task-step sessions', () => {
     expect(lookup).not.toHaveBeenCalled();
   });
 });
+
+describe('sessionRouteGuard — outcome teammate requests', () => {
+  const TEAMMATES = '/api/projects/proj-a/tasks/1/teammates';
+
+  it('admits a request whose origin is the calling session, and nothing else', async () => {
+    const app = appWith(session());
+    const own = { fromGezelId: 'rusudan', fromSessionId: 'sess-reviewer', role: 'reviewer' };
+    expect((await app.request(TEAMMATES, post({ ...own, question: 'q' }))).status).toBe(200);
+    const forged = await app.request(
+      TEAMMATES,
+      post({ ...own, fromSessionId: 'sess-owner', question: 'q' }),
+    );
+    expect(forged.status).toBe(403);
+  });
+});

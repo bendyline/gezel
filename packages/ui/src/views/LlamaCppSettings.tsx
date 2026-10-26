@@ -12,7 +12,12 @@ import { EngineBudgetStrip } from '../components/EngineBudgetStrip.js';
 import { EngineClonePicker } from '../components/EngineClonePicker.js';
 import { LlamaCppModelManager } from '../components/LlamaCppModelManager.js';
 import { MachineHealthSettings } from '../components/MachineHealthSettings.js';
-import { engineBackendLabel, engineGpuNotice, engineOutOfMemoryNotice } from '../system-notices.js';
+import {
+  engineBackendLabel,
+  engineGpuNotice,
+  engineOutOfMemoryNotice,
+  engineRuntimeNotice,
+} from '../system-notices.js';
 import { SystemNoticeNote } from './SettingsSystemStatus.js';
 import { localEngineSettingsLabel } from './local-engine-label.js';
 
@@ -641,6 +646,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
   const outOfMemoryNotice = hasExternalBaseUrl
     ? null
     : engineOutOfMemoryNotice({ health: backendHealth });
+  const runtimeNotice = hasExternalBaseUrl ? null : engineRuntimeNotice({ health: backendHealth });
 
   return (
     <div>
@@ -682,7 +688,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
             starts a model, and switches it off again only if it keeps failing to start.
           </output>
         )}
-        {[gpuNotice, outOfMemoryNotice].map(
+        {[runtimeNotice, gpuNotice, outOfMemoryNotice].map(
           (notice) =>
             notice && (
               <SystemNoticeNote key={notice.id} notice={notice} style={{ marginTop: '0.75rem' }} />

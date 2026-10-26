@@ -337,7 +337,7 @@ export function CommandsPanel({
         const res = await api.invokeProjectSkill(projectId, skill.source);
         setToast(
           res.started
-            ? `${res.assigneeName ?? 'The voorman'} is looking at ${skill.name} — task ${res.task.ref}`
+            ? `${res.assigneeName ?? 'The crew lead'} is looking at ${skill.name} — task ${res.task.ref}`
             : `Queued ${skill.name} as task ${res.task.ref} — nobody has picked it up yet`,
         );
       } catch (err) {

@@ -906,7 +906,7 @@ describe('buildEnrichDeps enricher override', () => {
       expect.objectContaining({
         providerName: 'mlx',
         model: 'big-executor',
-        actorLabel: 'Boekwachter',
+        actorLabel: 'Librarian',
         tuningProfileId: 'instruct',
       }),
     );
@@ -998,7 +998,7 @@ describe('buildEnrichDeps enricher override', () => {
       expect.objectContaining({
         providerName: 'mlx',
         model: 'big-executor',
-        actorLabel: 'Boekwachter',
+        actorLabel: 'Librarian',
         jobLabel: 'index review',
         tuningProfileId: 'instruct',
       }),

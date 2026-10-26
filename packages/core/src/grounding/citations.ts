@@ -246,6 +246,21 @@ const CLOCK_TIME = /(?<![\d:.])((?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)(?![\d:]
 const APPROXIMATE =
   /(?:[~≈]\s*|\b(?:about|around|roughly|approximately|approx\.|nearly|almost|circa|some)\s+)(?:\d[\d,.]*\s*(?:[-–—]|to)\s*)?$/i;
 
+/** "Step 2", "Slide 4", "#1", "§5": a position in the text, not a figure. */
+const ENUMERATOR_LABEL =
+  /(?:\b(?:step|phase|slide|part|stage|round|option|item|section|chapter|no\.)\s*|[#§]\s*)$/i;
+
+/**
+ * A number that orders the text rather than stating a fact: a labelled
+ * position, or a list marker opening the sentence ("**1. Map the sources").
+ * Decks number their steps; "Step 1 — customer submits the photo" was counted
+ * as a claim the source never made.
+ */
+function isEnumerator(before: string, after: string, value: number): boolean {
+  if (ENUMERATOR_LABEL.test(before)) return true;
+  return value < 100 && /^[\s*_#>-]*$/.test(before) && /^[.)](?:\s|\*|$)/.test(after);
+}
+
 /** The checkable details a sentence states. */
 export function extractClaims(text: string): Claim[] {
   // Code spans, link targets and file references name things in a workspace
@@ -290,6 +305,7 @@ export function extractClaims(text: string): Claim[] {
     const digits = (m[1] ?? '').replace(/,/g, '');
     const value = Number(digits);
     const at = m.index ?? 0;
+    if (isEnumerator(numeric.slice(0, at), numeric.slice(at + m[0].length), value)) continue;
     // No one writes a year with a thousands separator: "~1,270 rps" is a rate.
     if (/^(1[0-9]{3}|20[0-9]{2})$/.test(digits) && !(m[1] ?? '').includes(',')) add('year', digits);
     else if (Number.isFinite(value))
@@ -669,8 +685,8 @@ function checkAgainst(claims: readonly Claim[], text: string): ClaimCheck[] {
  * A number the sentence derives from two of its own sourced numbers: "the
  * 30,000 EUR gap between 240,000 and 210,000" shows its working, so the gap
  * is not an invention even though no source states it (2026-10-07,
- * conflict-synthesis). Only a sum or difference of two numbers the same
- * sentence states and the evidence holds counts.
+ * conflict-synthesis). Only a sum, difference or percent change of two
+ * numbers the same sentence states and the evidence holds counts.
  */
 function withShownArithmetic(checks: ClaimCheck[]): ClaimCheck[] {
   const sourced = checks
@@ -678,13 +694,39 @@ function withShownArithmetic(checks: ClaimCheck[]): ClaimCheck[] {
     .map((c) => Number(c.value))
     .filter(Number.isFinite);
   if (sourced.length < 2) return checks;
-  const derived = (value: number) =>
-    sourced.some((a, i) =>
-      sourced.some((b, j) => j > i && a !== b && (a + b === value || Math.abs(a - b) === value)),
-    );
   return checks.map((c) =>
-    c.kind === 'number' && !c.found && derived(Number(c.value)) ? { ...c, found: true } : c,
+    c.kind === 'number' && !c.found && isDerivedNumber(c.value, sourced)
+      ? { ...c, found: true }
+      : c,
   );
+}
+
+/**
+ * Whether `value` is a sum, difference, ratio, share or percent change of two
+ * of `sourced`, at the precision `value` is written to. Precision matters:
+ * 14.2 - 8.9 is 5.299999999999999 in floating point, and a deck rounds
+ * 18 h → 6 h to "66%" or "67%". Both rounding and truncation count.
+ */
+export function isDerivedNumber(value: string, sourced: readonly number[]): boolean {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return false;
+  const decimals = value.includes('.') ? value.split('.')[1]!.length : 0;
+  const scale = 10 ** decimals;
+  const writtenAs = (x: number) =>
+    Math.abs(Math.round(x * scale) - v * scale) < 1e-6 ||
+    Math.abs(Math.trunc(x * scale + 1e-9) - v * scale) < 1e-6;
+  for (let i = 0; i < sourced.length; i++) {
+    for (let j = 0; j < sourced.length; j++) {
+      if (i === j) continue;
+      const a = sourced[i]!;
+      const b = sourced[j]!;
+      if (a === b) continue;
+      if (j > i && (writtenAs(a + b) || writtenAs(Math.abs(a - b)))) return true;
+      if (a !== 0 && writtenAs((Math.abs(a - b) / Math.abs(a)) * 100)) return true;
+      if (b !== 0 && (writtenAs(a / b) || writtenAs((a / b) * 100))) return true;
+    }
+  }
+  return false;
 }
 
 /** "I could not verify…", "…is unconfirmed": the honest answer the rule asks for. */
@@ -785,6 +827,22 @@ export function groundingProblems(grounding: TextGrounding): SentenceGrounding[]
   return grounding.sentences
     .filter((s) => rank[s.status] !== undefined)
     .sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9));
+}
+
+/**
+ * Whether a problem sentence is worth a rewrite on its own: a citation to
+ * evidence that does not exist, or an unsupported year, number, month or
+ * quotation, or a year set beside the wrong person. A sentence missing only
+ * names, or a plain number away from a name (a PR number, a count), is noted
+ * rather than counted: capitalized-word heuristics are the noisiest part of
+ * the check. The write-time refusal and the `claimsGrounded` gate share it,
+ * so a document is judged the same way while it is written and when its task
+ * is checked.
+ */
+export function isBlockingGroundingProblem(sentence: SentenceGrounding): boolean {
+  if (sentence.status === 'bad-citation') return true;
+  if (sentence.checks.some((check) => !check.found && check.kind !== 'name')) return true;
+  return sentence.missing.some((detail) => /^(?:1\d{3}|20\d{2}) next to /.test(detail));
 }
 
 /** One line per problem sentence, for a tool error or a repair prompt. */

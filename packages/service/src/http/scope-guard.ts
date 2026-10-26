@@ -325,6 +325,13 @@ async function isSessionRouteAllowed(
         return sessionDeny('resuming a paused task needs the user to ask for it in this turn');
       }
     }
+    // A teammate request names the asking session; it must be this one.
+    if (method === 'POST' && /^\/tasks\/[^/]+\/teammates\/?$/.test(rest)) {
+      const body = await readJsonSafe(c);
+      if (body?.fromGezelId !== auth.gezelId || body?.fromSessionId !== sessionId(auth)) {
+        return sessionDeny('teammate request origin does not match the session token');
+      }
+    }
     // `force` skips the step's gate and is recorded as the user's own
     // "Complete anyway"; `advance_task_step` never sends it.
     if (method === 'POST' && /^\/tasks\/[^/]+\/steps\/[^/]+\/complete\/?$/.test(rest)) {

@@ -4,10 +4,13 @@
  *
  * A non-zero exit is acceptable because GPU-backed engines may report a
  * missing device on CI. A silent launch is not: that is how missing loader
- * dependencies can surface on Windows and macOS.
+ * dependencies can surface on Windows and macOS. Neither is a crash that
+ * printed something first: native-v0.1.53's CUDA whisper-server printed its
+ * CUDA device and a GGML_ASSERT, aborted, and passed as "produced output".
  */
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -70,6 +73,31 @@ async function captureHelp(binary, timeoutMs, maxOutputBytes) {
   });
 }
 
+// NTSTATUS error codes: 0xC0000409 fail-fast/abort, 0xC0000005 access
+// violation, 0xC000001D illegal instruction, 0xC0000135 DLL not found.
+const WINDOWS_CRASH_STATUS = 0xc0000000;
+const CRASH_SIGNALS = new Set(['SIGABRT', 'SIGBUS', 'SIGFPE', 'SIGILL', 'SIGSEGV', 'SIGTRAP']);
+const FATAL_OUTPUT =
+  /GGML_ASSERT\(|GGML_ABORT|terminate called|Assertion failed|Assertion `[^`]*' failed/;
+
+/** Why a captured `--help` run fails the smoke contract, or null when it passes. */
+export function helpSmokeFailure(result, { binary, timeoutMs, maxOutputBytes }) {
+  if (result.timedOut) return `${binary} did not finish --help within ${timeoutMs}ms`;
+  if (result.outputExceeded) {
+    return `${binary} produced more than ${maxOutputBytes} bytes of --help output`;
+  }
+  if (!/\S/.test(result.output)) {
+    return `${binary} produced no --help output (status=${result.status}, signal=${result.signal})`;
+  }
+  const fatal = result.output.split(/\r?\n/).find((line) => FATAL_OUTPUT.test(line));
+  if (fatal) return `${binary} hit a fatal error during --help: ${fatal.trim()}`;
+  if (typeof result.status === 'number' && result.status >= WINDOWS_CRASH_STATUS) {
+    return `${binary} crashed during --help (status=0x${result.status.toString(16).toUpperCase()})`;
+  }
+  if (CRASH_SIGNALS.has(result.signal)) return `${binary} crashed during --help (${result.signal})`;
+  return null;
+}
+
 async function main() {
   const [binaryArgument, ...extraArguments] = process.argv.slice(2);
   if (!binaryArgument || extraArguments.length > 0) {
@@ -89,20 +117,13 @@ async function main() {
   const preview = result.output.split(/\r?\n/).slice(0, 20).join('\n');
   if (preview) process.stdout.write(`${preview}\n`);
 
-  if (result.timedOut) {
-    throw new Error(`${binary} did not finish --help within ${timeoutMs}ms`);
-  }
-  if (result.outputExceeded) {
-    throw new Error(`${binary} produced more than ${maxOutputBytes} bytes of --help output`);
-  }
-  if (!/\S/.test(result.output)) {
-    throw new Error(
-      `${binary} produced no --help output (status=${result.status}, signal=${result.signal})`,
-    );
-  }
+  const failure = helpSmokeFailure(result, { binary, timeoutMs, maxOutputBytes });
+  if (failure) throw new Error(failure);
 }
 
-main().catch((error) => {
-  console.error(`\u2717 native help smoke failed: ${error.message}`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  main().catch((error) => {
+    console.error(`\u2717 native help smoke failed: ${error.message}`);
+    process.exitCode = 1;
+  });
+}

@@ -200,6 +200,15 @@ describe('SearchService.quickOpen', () => {
     expect(byName[0]?.title).toBe('Ulrike');
   });
 
+  it('finds a renamed role by its plain title and by its old Dutch one', async () => {
+    const svc = makeService({
+      gezels: [{ id: 'g2', name: 'Senga', role: 'Librarian', roleBasedName: 'librarian' }],
+    });
+    expect((await svc.quickOpen('librarian'))[0]?.title).toBe('Senga');
+    expect((await svc.quickOpen('boekwachter'))[0]?.title).toBe('Senga');
+    expect((await svc.quickOpen('boekwachter'))[0]?.subtitle).toBe('Librarian');
+  });
+
   it('ranks an exact name match above another gezel matched by role', async () => {
     const svc = makeService({
       gezels: [

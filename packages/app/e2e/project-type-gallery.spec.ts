@@ -151,12 +151,17 @@ test('gallery creates a Job Hunt project: two-gezel crew and the pipeline board'
   await expect(outputFrame.getByText('Screening')).toBeVisible();
   await expect(outputFrame.getByText('Interview', { exact: true })).toBeVisible();
   await expect(outputFrame.getByText('Offer', { exact: true })).toBeVisible();
-  await expect(outputFrame.getByText(/tell your Loopbaancoach/)).toBeVisible();
+  // Gilde 0.3 names the roles in plain English; either line passes.
+  await expect(outputFrame.getByText(/tell your (?:Loopbaancoach|career coach)/)).toBeVisible();
   await expect(outputFrame.getByText('{{')).toHaveCount(0);
 
   // The two-gezel crew materialized: coach voorman + mock interviewer both
   // land on the sidebar roster.
-  await expect(page.locator('[data-testid="app-sidebar"]')).toContainText('Loopbaancoach');
-  await expect(page.locator('[data-testid="app-sidebar"]')).toContainText('Oefen-interviewer');
+  await expect(page.locator('[data-testid="app-sidebar"]')).toContainText(
+    /Loopbaancoach|Career Coach/,
+  );
+  await expect(page.locator('[data-testid="app-sidebar"]')).toContainText(
+    /Oefen-interviewer|Mock Interviewer/,
+  );
   await captureScreenshot(page, { path: '/tmp/gezel-job-hunt-dashboard.png', fullPage: false });
 });

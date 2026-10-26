@@ -6,6 +6,7 @@
  * here, so the two hosts cannot drift apart.
  */
 import type { TerminalToolPolicy } from '../local-loop/provider-contract.js';
+import { roleForMatching } from '../roles/plain-names.js';
 import { type ModelTier, tierAtLeast } from '../roles/tier.js';
 import type {
   ProjectTypeManifest,
@@ -102,8 +103,9 @@ export type ProjectTypeCrewCandidate = Pick<
   'id' | 'name' | 'role' | 'templateId' | 'fixedFunction'
 >;
 
+/** A role as one key; a renamed role's Dutch and English titles are one. */
 function roleKey(role: string | undefined): string {
-  return (role ?? '')
+  return (roleForMatching(role) ?? '')
     .trim()
     .toLocaleLowerCase()
     .replace(/[^a-z0-9]+/g, '-')

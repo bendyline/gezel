@@ -510,7 +510,7 @@ export class KeurmeesterManager {
     };
     const prompt = buildConsultPrompt(bundle, CHAT_ACTIONS);
     const caseId = randomUUID();
-    const jobLabel = `keurmeester · ${ctx.sessionId.slice(0, 8)}`;
+    const jobLabel = `inspector · ${ctx.sessionId.slice(0, 8)}`;
     const caseCtx: CaseWriteCtx = {
       trigger: ctx.trigger,
       sessionId: ctx.sessionId,
@@ -869,7 +869,7 @@ export class KeurmeesterManager {
     };
     const prompt = buildConsultPrompt(bundle, allowed);
     const caseId = randomUUID();
-    const jobLabel = `keurmeester · ${args.taskRef}`;
+    const jobLabel = `inspector · ${args.taskRef}`;
     const caseCtx: CaseWriteCtx = {
       trigger: args.trigger,
       ...(args.sessionId ? { sessionId: args.sessionId } : {}),
@@ -1101,7 +1101,7 @@ export class KeurmeesterManager {
         providerName: target.providerName,
         ...(target.model ? { model: target.model } : {}),
         useKeurmeester: true,
-        jobLabel: 'keurmeester · craftbook repair',
+        jobLabel: 'inspector · craftbook repair',
       });
       const second = attempt(repaired);
       if (!('errors' in second)) return second;
@@ -1325,8 +1325,8 @@ export class KeurmeesterManager {
       gezelId: ctx.gezelId,
       ...(ctx.projectId ? { projectId: ctx.projectId } : {}),
       summary: applied
-        ? `Keurmeester ${keurmeesterName} stepped in (${verdict.action.kind}): ${verdict.diagnosis}`
-        : `Keurmeester ${keurmeesterName} stood down: ${verdict.diagnosis}`,
+        ? `Inspector ${keurmeesterName} stepped in (${verdict.action.kind}): ${verdict.diagnosis}`
+        : `Inspector ${keurmeesterName} stood down: ${verdict.diagnosis}`,
       details: {
         caseId,
         trigger: ctx.trigger,

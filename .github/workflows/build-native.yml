@@ -128,7 +128,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Test native release contracts
         run: |
-          node --test scripts/assert-arm64-baseline.test.mjs scripts/native-payload.test.mjs scripts/verify-vulkan-payload.test.mjs
+          node --test scripts/assert-arm64-baseline.test.mjs scripts/native-payload.test.mjs scripts/verify-vulkan-payload.test.mjs scripts/smoke-native-help.test.mjs
           python3 -m unittest discover -s native/runtime -p 'test_*.py'
 
   mobile:
@@ -1091,9 +1091,10 @@ jobs:
             # help is ~52 KiB, and macOS's Bash 3.2 can spend hours applying
             # a global character-class replacement to it. The Node helper
             # enforces a 60-second timeout, caps output, prints 20 lines, and
-            # accepts non-zero exits only when the process produced output.
+            # accepts non-zero exits only when the process produced output
+            # and neither crashed nor hit a GGML_ASSERT/abort along the way.
             if ! node scripts/smoke-native-help.mjs "$bin"; then
-              echo "::error::$bin produced no --help output — likely a startup DLL load failure (0xC0000135 / dlopen). The bundle is missing a runtime dependency."
+              echo "::error::$bin failed its --help smoke test (see the reason above): no output is a startup DLL load failure (0xC0000135 / dlopen); an assertion or crash status is a startup abort."
               exit 1
             fi
             # Linux: verify the bundle is self-contained. ldd resolves
@@ -1327,8 +1328,9 @@ jobs:
                 echo "::error::$(basename "$f") imports OpenSSL. Engines are built with -DLLAMA_OPENSSL=OFF; do not reinstate the Git-for-Windows DLL scavenge."
                 bad=1
               fi
-              # The installers' Visual C++ redistributable is x64 only, so the
-              # ARM64 extension links its C runtime statically.
+              # The extension loads into any Node process, including npm and
+              # CLI installs that never ran the Visual C++ redistributable, so
+              # the ARM64 extension links its C runtime statically.
               if [[ "${{ matrix.engine }}" == sqlite-vec ]] && grep -qiE 'VCRUNTIME[0-9]*\.DLL|MSVCP[0-9]*\.DLL' <<<"$deps"; then
                 echo "::error::$(basename "$f") imports the Visual C++ runtime; build it with the static CRT (CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded)"
                 bad=1
@@ -1542,7 +1544,9 @@ jobs:
       # (checked against NVIDIA's own sha256 manifests for 12.4.1, whose
       # copies in native-v0.1.18 and v0.1.50 are byte-identical to theirs,
       # and for 12.8.1, whose cudart/cublas/cublasLt are equally unsigned).
-      # Nothing signs them now, which is the intent.
+      # The CUDA 13.4.1 windows-arm64 trio in win32-arm64-cuda is the
+      # exception: NVIDIA signs it. We ship it byte-identical either way.
+      # Nothing of ours signs them, which is the intent.
       #
       # macOS is the deliberate exception and cannot follow this policy:
       # Apple's notary service rejects any executable in the bundle that is

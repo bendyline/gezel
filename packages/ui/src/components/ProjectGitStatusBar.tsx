@@ -66,7 +66,7 @@ interface Props {
 }
 
 const STATUS_TOOLTIP =
-  'Active — the Meester nudges the voorman, phase handoffs auto-start, and scheduled tasks tick. ' +
+  'Active — the Meester nudges the crew lead, phase handoffs auto-start, and scheduled tasks tick. ' +
   'Read-only or Inactive — ambient gezel work pauses. Chat still works.';
 
 const WRITES_TOOLTIP =
@@ -620,7 +620,7 @@ export function ProjectGitStatusBar({
       setFullScanError(null);
     } catch (err) {
       setFullScanError({
-        message: err instanceof Error ? err.message : 'Couldn’t add the Boekwachter. Try again.',
+        message: err instanceof Error ? err.message : 'Couldn’t add the Librarian. Try again.',
       });
     } finally {
       setBoekwachterAddBusy(false);
@@ -1278,8 +1278,8 @@ export function ProjectGitStatusBar({
                           onClick={() => void addBoekwachter()}
                         >
                           {boekwachterAddBusy
-                            ? 'Adding Boekwachter…'
-                            : 'Add a Boekwachter to this project crew'}
+                            ? 'Adding the Librarian…'
+                            : 'Add the Librarian to this project crew'}
                         </button>{' '}
                         to enable AI summaries, reviews, and semantic enrichment.
                       </>

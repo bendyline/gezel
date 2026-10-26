@@ -164,7 +164,7 @@ export function ProjectOverviewView({
 
       {!map?.indexed && !indexingDisabled && (
         <p className="muted">
-          The boekwachter hasn't scanned this workspace yet. The map, folder notes, and architecture
+          The Librarian hasn't scanned this workspace yet. The map, folder notes, and architecture
           summary appear here once indexing runs.
         </p>
       )}
@@ -177,7 +177,7 @@ export function ProjectOverviewView({
       {map?.indexed && !map.architecture && (
         <RailSection label="Architecture">
           <p className="muted small">
-            Not written yet — the boekwachter distills an architecture note after it has summarized
+            Not written yet — the Librarian distills an architecture note after it has summarized
             the files (idle time or Night Shift).
           </p>
         </RailSection>
@@ -201,7 +201,7 @@ export function ProjectOverviewView({
           </div>
           {reviewPending > 0 && (
             <p className="muted small">
-              The boekwachter is still reviewing — {reviewPending} file
+              The Librarian is still reviewing — {reviewPending} file
               {reviewPending === 1 ? '' : 's'} to go. Scores are its opinion, not a verdict.
             </p>
           )}

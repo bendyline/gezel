@@ -3,6 +3,7 @@ import { type EmbeddingConnection, type EmbeddingOptions, createEmbedding } from
 import { GezelSdkError } from './errors.js';
 import { connectOrHost } from './gezel.js';
 import type { ConnectOrHostInput, EnsureModelEngine } from './host-types.js';
+import type { ImagesClient } from './images-client.js';
 import { type ModelProgress, createHttpModelManager, createModelManager } from './model-manager.js';
 
 export interface DesktopEmbeddingOptions
@@ -12,11 +13,43 @@ export interface DesktopEmbeddingOptions
   knowledge?: boolean;
   /** Optional narrower set for the application's native distribution. */
   hostedEngines?: readonly EnsureModelEngine[];
+  /**
+   * Offer on-device image generation when this Gezel serves it. Never part
+   * of the first consent: a standalone Gezel grants it later, from an
+   * explicit `images.requestAccess()`, so connecting never asks for more
+   * than chat needs. Hosted inference has it whenever an engine is present.
+   */
+  images?: boolean;
+}
+
+/**
+ * - `granted`: image calls work.
+ * - `needs-approval`: a standalone Gezel serves images but this app's grant
+ *   lacks them; ask with `requestAccess()`.
+ * - `no-engine`: this Gezel serves images but cannot render on this computer.
+ * - `unsupported`: this Gezel predates image generation for apps.
+ */
+export type DesktopImageAccess = 'granted' | 'needs-approval' | 'no-engine' | 'unsupported';
+
+export interface DesktopEmbeddingImages
+  extends Pick<
+    ImagesClient,
+    'models' | 'ensure' | 'ensureEvents' | 'cancelEnsure' | 'remove' | 'generate'
+  > {
+  access(opts?: { signal?: AbortSignal }): Promise<DesktopImageAccess>;
+  /**
+   * Ask the person to allow image generation. Shows Gezel's approval prompt;
+   * the app shows the code. The current grant keeps working throughout.
+   * A no-op on hosted inference.
+   */
+  requestAccess(opts: { onVerificationCode(code: string): Promise<void> | void }): Promise<void>;
 }
 
 export interface DesktopEmbeddingConnection extends EmbeddingConnection {
   app: GezelApp;
   mode: 'installed' | 'hosted';
+  /** Present when requested with `images: true`. */
+  images?: DesktopEmbeddingImages;
   /** Withdraw a standalone grant and remove its saved token. Hosted connections have no grant. */
   revoke(): Promise<void>;
 }
@@ -32,11 +65,13 @@ export async function connectDesktopEmbedding(
     host,
     knowledge,
     hostedEngines,
+    images,
     ...connection
   } = options;
+  const scopes = knowledge ? ['openai', 'knowledge'] : ['openai'];
   const gezel = await connectOrHost({
     ...connection,
-    scopes: knowledge ? ['openai', 'knowledge'] : ['openai'],
+    scopes,
     requireVerificationCode: true,
     ...(request.interactive && onVerificationCode ? { onVerificationCode } : {}),
     ...(host
@@ -101,10 +136,47 @@ export async function connectDesktopEmbedding(
       })
     : createHttpModelManager(gezel.openai);
   let closing: Promise<void> | undefined;
+  const client = gezel.openai.images;
+  const imageSurface: DesktopEmbeddingImages = {
+    models: (opts) => client.models(opts),
+    ensure: (model, opts) => client.ensure(model, opts),
+    ensureEvents: (jobId, opts) => client.ensureEvents(jobId, opts),
+    cancelEnsure: (jobId, opts) => client.cancelEnsure(jobId, opts),
+    remove: (model, opts) => client.remove(model, opts),
+    generate: (input, opts) => client.generate(input, opts),
+    async access(opts = {}) {
+      const support = await client.support(opts);
+      if (!support.supported) return 'unsupported';
+      if (!support.available) return 'no-engine';
+      if (gezel.hosting) return 'granted';
+      try {
+        await client.models(opts);
+        return 'granted';
+      } catch (error) {
+        if (error instanceof GezelSdkError && error.code === 'missing_scope:images') {
+          return 'needs-approval';
+        }
+        throw error;
+      }
+    },
+    async requestAccess({ onVerificationCode: showCode }) {
+      if (gezel.hosting) return;
+      await gezel.openai.requestScopes({
+        appId: options.appId,
+        appName: options.appName,
+        scopes: [...scopes, 'images'],
+        onVerificationCode: showCode,
+        ...(options.iconUrl ? { iconUrl: options.iconUrl } : {}),
+        ...(options.approvalTimeoutSec ? { approvalTimeoutSec: options.approvalTimeoutSec } : {}),
+        ...(options.tokenStorage ? { tokenStorage: options.tokenStorage } : {}),
+      });
+    },
+  };
   return {
     app: gezel.openai,
     models,
     ...(knowledge ? { knowledge: gezel.openai.knowledge } : {}),
+    ...(images ? { images: imageSurface } : {}),
     mode: gezel.hosting ? 'hosted' : 'installed',
     async revoke() {
       if (gezel.hosting) return;

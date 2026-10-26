@@ -52,6 +52,25 @@ const FULL_BOOK: Craftbook = {
   scripts: { guard: 'export {};\n' },
   diffpackCapable: true,
   capabilityFloor: 'medium',
+  contract: {
+    goal: 'A cited summary of the region the person picked.',
+    deliverables: [
+      {
+        id: 'summary',
+        path: 'out/summary.md',
+        kind: 'markdown-report',
+        description: 'The summary',
+      },
+    ],
+    criteria: [
+      {
+        id: 'grounded',
+        kind: 'quality',
+        text: 'Every figure appears in the cited source',
+        checks: [{ kind: 'claimsGrounded', file: 'out/summary.md' }],
+      },
+    ],
+  },
   spawn: {
     overFile: 'data/items.json',
     entryStepId: 'child',

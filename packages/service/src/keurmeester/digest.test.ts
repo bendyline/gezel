@@ -125,7 +125,7 @@ describe('KeurmeesterDigestGenerator', () => {
     const files = await readdir(keurmeesterDigestsDir(home));
     expect(files).toEqual(['2026-07-06.md']);
     const digest = await readFile(join(keurmeesterDigestsDir(home), '2026-07-06.md'), 'utf8');
-    expect(digest).toContain('Keurmeester digest — 2026-07-06');
+    expect(digest).toContain('Inspector digest — 2026-07-06');
     expect(digest).toContain('Systemic recommendations');
     expect(digest).toContain('Tighten the scope step');
     expect(oneShotCalls[0]).toContain('RECOMMENDATIONS');

@@ -48,8 +48,25 @@ export interface EvalRepairActionSnapshot {
   inflight: boolean;
 }
 
+/**
+ * A strategy-benchmark arm (docs/task-strategies.md): the task strategy the
+ * craftbook task is created with, and the variant label it is reported under.
+ */
+export interface TrialTaskStrategy {
+  /** `stepwise`, `generalist`, `outcome`, `outcome-solo`, `outcome-bare`. */
+  arm: string;
+  strategy: 'stepwise' | 'generalist' | 'outcome';
+  options?: { procedure?: 'advisory' | 'none'; subagents?: boolean };
+}
+
 export interface EvalContext {
   client: GezelClient;
+  /**
+   * The strategy arm this trial runs. Craftbook scenarios create their task
+   * with it, describe the request the way the product does, and judge only the
+   * deliverables the book's contract declares.
+   */
+  taskStrategy?: TrialTaskStrategy;
   meesterId: string;
   /**
    * Per-trial state shared by the one-shot setup hook and every polled
@@ -473,6 +490,12 @@ export interface TrialOptions {
    */
   generalistMode?: 'auto' | 'on' | 'off';
   /**
+   * The strategy-benchmark arm. Sets the daemon's `config.taskStrategy`,
+   * creates craftbook tasks with this strategy and its options, and turns
+   * tier-collapse off so it cannot differ between arms.
+   */
+  taskStrategy?: TrialTaskStrategy;
+  /**
    * Retrieval arm for the annotated-work A/B (`bin/ab-retrieval.ts`).
    * Omitted ⇒ the eval default every scorecard was measured under: no
    * per-turn indexed context, no embeddings unless the scenario needs them.
@@ -656,6 +679,8 @@ export interface TrialResult {
    * parsing `log.txt`. Absent when the run left the daemon default.
    */
   generalistMode?: 'auto' | 'on' | 'off';
+  /** The strategy-benchmark arm the trial ran, when it was one. */
+  taskStrategy?: TrialTaskStrategy;
   /** The retrieval arm the trial ran under (`--retrieval` and friends). */
   retrievalArm?: TrialRetrievalArm;
   /**

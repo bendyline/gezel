@@ -9,6 +9,7 @@ import {
   renderProjectTypeTemplate,
   seedParamDefaults,
 } from '../project-types/composition.js';
+import { plainRoleTitle } from '../roles/plain-names.js';
 import {
   type AppliedProjectType,
   type CreateTypedProjectRequest,
@@ -206,7 +207,10 @@ export async function planPortableTypedProject(args: {
       slot,
       input: {
         name,
-        role: template.manifest.role,
+        // An older catalog's Dutch title lands as its plain one, as on create.
+        role: template.manifest.role
+          ? plainRoleTitle(template.manifest.role)
+          : template.manifest.role,
         about: template.about ?? '',
         gender,
         templateId: ref.templateId,

@@ -76,7 +76,7 @@
     "tsx": "^4.23.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10",
-    "@bendyline/gilde": "0.2.7"
+    "@bendyline/gilde": "0.3.0"
   },
   "peerDependencies": {
     "@bendyline/gilde": "*"

@@ -3,6 +3,7 @@ import { assertSafeEntityId, isSafeEntityId } from '../entity-id.js';
 import { parseGezelMarkdown, serializeGezelMarkdown } from '../markdown/gezel-md.js';
 import { type Poppetje, PoppetjeSchema } from '../poppetje/schema.js';
 import { initialPoppetjeForGezel, poppetjeFromSeed } from '../poppetje/seed.js';
+import { plainRoleProse, plainRoleTitle } from '../roles/plain-names.js';
 import {
   type CreateGezelRequest,
   CreateGezelRequestSchema,
@@ -110,7 +111,15 @@ export async function createGezel(
   repo: PortableRepository,
   raw: PortableCreateGezelInput,
 ): Promise<GezelDetail> {
-  const input = CreateGezelRequestSchema.parse(raw);
+  const parsed = CreateGezelRequestSchema.parse(raw);
+  // A Dutch title from an older catalog or model lands as its plain one.
+  const input = parsed.role
+    ? {
+        ...parsed,
+        role: plainRoleTitle(parsed.role),
+        ...(parsed.about ? { about: plainRoleProse(parsed.about, parsed.role) } : {}),
+      }
+    : parsed;
   if (!input.name.trim()) throw new Error('A gezel name is required');
   const id = await repo.uniqueId('gezels', slugifyEntityName(input.name) || repo.createId());
   const taken = new Set(

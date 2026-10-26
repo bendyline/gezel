@@ -449,6 +449,7 @@ import type {
   TaskAssignee,
   TaskOutputsResponse,
   TaskStatus,
+  TaskTeammateRequest,
   TerminalThread,
   TimelineBucketRequest,
   TimelineBucketResponse,
@@ -3956,6 +3957,23 @@ export class GezelClient {
    */
   askGezel(body: RequestAskRequest): Promise<RequestAskResponse> {
     return this.request('POST', '/api/asks/request-and-wait', body);
+  }
+
+  /**
+   * An outcome task's owner hands a piece of the task to a teammate and
+   * waits for the answer. Used by the `consult_<role>` MCP tools in an
+   * outcome task's session.
+   */
+  askTaskTeammate(
+    projectId: string,
+    num: number,
+    body: TaskTeammateRequest,
+  ): Promise<RequestAskResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}/teammates`,
+      body,
+    );
   }
 
   /**

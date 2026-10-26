@@ -113,6 +113,15 @@ export type NativeEnginePanicKind =
    */
   | 'host-out-of-memory'
   /**
+   * Windows: the engine could not load a runtime DLL the whole machine
+   * provides, most often the Microsoft Visual C++ runtime, which nothing
+   * installs for an npm or CLI install. Inferred from a silent DLL load
+   * status (missing-dll.ts), never printed. The machine's, not the build's:
+   * every build needs the same runtime, so it never counts toward a
+   * quarantine, and installing the runtime is the fix.
+   */
+  | 'missing-runtime'
+  /**
    * SIGILL. Every other kind is recognized from a line the engine
    * printed; this one is inferred from the signal, because a binary
    * whose instructions the CPU cannot decode usually dies without
@@ -141,6 +150,16 @@ export interface NativeEngineExitSnapshot {
   expectedReason?: string;
   panicKind?: NativeEnginePanicKind;
   panicLine?: string;
+  /**
+   * Windows: the DLL an engine could not load at startup, and what a person
+   * can do about it. Present only when the import check named one.
+   */
+  dllLoadFailure?: {
+    kind: 'vc-runtime' | 'graphics-driver' | 'engine-files' | 'other';
+    dll?: string;
+    /** For the person. */
+    summary: string;
+  };
   /**
    * False when the engine died during startup, before it ever answered
    * on its readiness endpoint. The distinction decides whether a crash

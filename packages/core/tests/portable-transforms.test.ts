@@ -91,7 +91,7 @@ describe('the shared editor transform API on an offline product host', () => {
     expect(id).toBeTruthy();
     await run(f.client);
     expect((await f.store.readConfig()).klerkGezelId).toBe(id);
-    expect((await f.store.listGezels()).filter((g) => g.role === 'Klerk')).toHaveLength(1);
+    expect((await f.store.listGezels()).filter((g) => g.role === 'Scribe')).toHaveLength(1);
   });
 
   it.each([

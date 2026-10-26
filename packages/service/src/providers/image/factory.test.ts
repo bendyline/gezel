@@ -257,6 +257,16 @@ describe('buildSdServerArgs — aux role mapping', () => {
     expect(args[args.indexOf('--steps') + 1]).toBe('12');
   });
 
+  it('keeps flash attention off the text encoder for every other model', () => {
+    // ggml's CPU flash attention sums in FP16, which FLUX.2 klein's Qwen
+    // encoder overflows; the render came back as garbage with a 200.
+    for (const id of ['flux-2-klein-4b-q4', 'sd-turbo', 'krea-2-turbo-q4']) {
+      const args = buildSdServerArgs({ ...modelWithAux([]), id }, 8765);
+      expect(args[args.indexOf('--flash-attn') + 1]).toBe('auto,te=off');
+      expect(args).not.toContain('--diffusion-fa');
+    }
+  });
+
   it('skips --vae-tiling for models whose VAE seams under tiling (Krea)', () => {
     // Krea 2's Qwen-Image VAE shows tile-boundary streaks under
     // --vae-tiling, so the flag is gated off for it.
@@ -277,6 +287,7 @@ describe('buildSdServerArgs — aux role mapping', () => {
     expect(args[args.indexOf('--llm') + 1]).toBe('/tmp/iris/qwen3-vl.gguf');
     expect(args[args.indexOf('--steps') + 1]).toBe('50');
     expect(args).toContain('--diffusion-fa');
+    expect(args).not.toContain('--flash-attn');
     expect(args[args.indexOf('--tensor-type-rules') + 1]).toBe('^model\\.diffusion_model\\.=bf16');
     expect(args).not.toContain('--type');
     expect(args).not.toContain('--vae');

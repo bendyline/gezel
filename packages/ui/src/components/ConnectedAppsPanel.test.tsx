@@ -247,8 +247,8 @@ describe('ConnectedAppsPanel', () => {
     const desktopRow = within(table).getByText('Gezel Desktop').closest('tr');
     expect(desktopRow).not.toBeNull();
     expect(within(desktopRow!).getByText('desktop-client')).toBeInTheDocument();
-    expect(within(desktopRow!).getByText('ui')).toBeInTheDocument();
-    expect(within(desktopRow!).getByText('openai')).toBeInTheDocument();
+    expect(within(desktopRow!).getByTitle('ui')).toBeInTheDocument();
+    expect(within(desktopRow!).getByTitle('openai')).toBeInTheDocument();
     expect(within(desktopRow!).getByLabelText('Revoke Gezel Desktop')).toBeInTheDocument();
     expect(within(table).queryByText('session:chat-1')).not.toBeInTheDocument();
     expect(within(table).queryByText('harness:cursor:repo')).not.toBeInTheDocument();

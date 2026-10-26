@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { MIN_TASK_DESCRIPTION_LENGTH } from '../craftbook-launch.js';
 import { TASK_EXECUTION_MODES } from '../generalist-mode.js';
+import { TASK_STRATEGIES } from '../task-strategy.js';
 import { TaskAssigneeSchema } from './assignee.js';
+import { CraftbookContractSchema } from './craftbook-contract.js';
 import {
   AdvanceWhenSchema,
   CraftbookBasedOnSchema,
@@ -35,6 +37,17 @@ export type { TaskAssignee } from './assignee.js';
 
 /** Wire twin of `TaskExecutionMode` (core/generalist-mode.ts). */
 export const TaskExecutionModeSchema = z.enum(TASK_EXECUTION_MODES);
+
+/** Wire twin of `TaskStrategy` (core/task-strategy.ts). */
+export const TaskStrategySchema = z.enum(TASK_STRATEGIES);
+
+/** Variants of the outcome strategy. See `TaskStrategyOptions`. */
+export const TaskStrategyOptionsSchema = z
+  .object({
+    procedure: z.enum(['advisory', 'none']).optional(),
+    subagents: z.boolean().optional(),
+  })
+  .strict();
 
 /**
  * Task workflow status. "Active" tasks are what the scheduler ticks.
@@ -146,6 +159,14 @@ export const TaskCraftbookStepSchema = CraftbookStepSchema.extend({
   completedAt: z.string().optional(),
   attemptCount: z.number().int().nonnegative().optional(),
   lastActivatedAt: z.string().optional(),
+  /**
+   * Where this step's evidence checks start reading receipts, when that is
+   * earlier than `lastActivatedAt`. A gate that routes its rejections back
+   * to its own step starts a fresh pass each time; the step is still the
+   * same piece of work, so a test run or source read from an earlier pass
+   * still counts. Unset means `lastActivatedAt`.
+   */
+  evidenceSince: z.string().optional(),
   /**
    * Activation timestamp whose `onEnter` hooks completed successfully.
    * Compared to `lastActivatedAt` so overlapping kickoff/retry paths can
@@ -322,6 +343,8 @@ export const TaskCraftbookSchema = z.object({
   diffpackCapable: z.boolean().optional(),
   /** Whole-book model-tier floor snapshotted from the source craftbook. */
   capabilityFloor: ModelTierSchema.optional(),
+  /** The book's contract, snapshotted so the task is held to the bar it launched with. */
+  contract: CraftbookContractSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   /**
@@ -332,6 +355,17 @@ export const TaskCraftbookSchema = z.object({
    * steps.
    */
   renderedForTier: ModelTierSchema.optional(),
+  /**
+   * Set when the book was folded into one outcome step for the `outcome`
+   * strategy. A reader that does not know it sees a one-step book.
+   */
+  renderedAs: z.enum(['outcome']).optional(),
+  /**
+   * The recipe's own steps (and fanout template steps), kept by the outcome
+   * render so the tools its procedure names stay on the session's surface.
+   * Never walked: `steps` is the book the task runs.
+   */
+  sourceSteps: z.array(TaskCraftbookStepSchema).optional(),
 });
 export type TaskCraftbook = z.infer<typeof TaskCraftbookSchema>;
 
@@ -491,6 +525,14 @@ export const TaskSchema = z.object({
    * specialist per `suggestedRole`, a fresh session per gezel change.
    */
   executionMode: TaskExecutionModeSchema.optional(),
+  /**
+   * The strategy this task runs under, resolved with `executionMode` and
+   * never re-evaluated. `outcome` runs with `executionMode: 'generalist'`
+   * and an outcome-rendered book. Absent on records that predate it, where
+   * `executionMode` is the strategy.
+   */
+  strategy: TaskStrategySchema.optional(),
+  strategyOptions: TaskStrategyOptionsSchema.optional(),
   craftbook: TaskCraftbookSchema,
   spawnsCraftbook: TaskCraftbookSchema.optional(),
   sourceCraftbookIds: z.array(TaskCraftbookSourceSchema).optional(),
@@ -812,6 +854,13 @@ export const CreateTaskRequestSchema = z
      * model must not pick its own mode.
      */
     executionMode: z.enum(['auto', 'generalist', 'stepwise']).optional(),
+    /**
+     * Per-invocation strategy, outranking `executionMode`. A launcher's lever
+     * like `executionMode`, never on a model-facing tool schema. Asking for
+     * `outcome` on a book that cannot be folded into one step is an error.
+     */
+    strategy: z.enum(['auto', ...TASK_STRATEGIES]).optional(),
+    strategyOptions: TaskStrategyOptionsSchema.optional(),
     /**
      * Enqueue the entry-step handoff immediately after create — the
      * single-channel kickoff (there is no "tell a gezel about work"

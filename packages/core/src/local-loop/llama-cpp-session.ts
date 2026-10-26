@@ -213,22 +213,35 @@ export class NativeEngineCrashedError extends Error {
     // An out-of-memory kill says nothing about the build, and a plain
     // "it will restart" invites the same retry into the same shortage.
     const outOfMemory = snapshot.panicKind === 'host-out-of-memory';
-    const outcome = outOfMemory
-      ? 'The computer ran out of memory, so Linux stopped the engine. It will restart on the next request; if this keeps happening, close programs that use a lot of memory, or choose a smaller model or a shorter context.'
-      : !unrunnable || !verdict
-        ? 'It will restart on the next request.'
+    const strikeOutcome =
+      !unrunnable || !verdict
+        ? ''
         : verdict.kind === 'quarantined'
-          ? `${unrunnable.summary} Gezel will ${
+          ? ` Gezel will ${
               verdict.switchedTo
                 ? 'switch to another engine backend on the next request.'
                 : 'use another engine backend the next time it starts.'
             }`
-          : `It will restart on the next request. If it fails to start ${remaining} more ${
+          : ` If it fails to start ${remaining} more ${
               remaining === 1 ? 'time' : 'times'
             } in a row, Gezel will switch to another engine backend.`;
+    // A DLL Windows could not load fails every start the same way; the
+    // summary names it and says what to install. A missing machine-wide
+    // runtime is classified, so it carries no strike sentence.
+    const dllFailure = snapshot.dllLoadFailure;
+    const outcome = outOfMemory
+      ? 'The computer ran out of memory, so Linux stopped the engine. It will restart on the next request; if this keeps happening, close programs that use a lot of memory, or choose a smaller model or a shorter context.'
+      : dllFailure
+        ? `${dllFailure.summary}${strikeOutcome}`
+        : !unrunnable || !verdict
+          ? 'It will restart on the next request.'
+          : verdict.kind === 'quarantined'
+            ? `${unrunnable.summary}${strikeOutcome}`
+            : `It will restart on the next request.${strikeOutcome}`;
     super(
-      `[llama-cpp] on-device engine ${outOfMemory ? 'ran out of memory' : 'crashed'}${detail}; incident=${snapshot.incidentId}. ` +
-        `${outcome}${causeMessage ? ` Transport reported: ${causeMessage}` : ''}`,
+      `[llama-cpp] on-device engine ${outOfMemory ? 'ran out of memory' : dllFailure ? 'could not start' : 'crashed'}${detail}; incident=${snapshot.incidentId}. ` +
+        // The supervisor's own error repeats the DLL summary; say it once.
+        `${outcome}${causeMessage && !dllFailure ? ` Transport reported: ${causeMessage}` : ''}`,
       { cause },
     );
     this.name = 'NativeEngineCrashedError';
@@ -5443,7 +5456,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             isProjectStartingCall(call.function.name, args) &&
             startedProjectOrJobThisTurn
           ) {
-            output = `You already called \`${startedProjectOrJobThisTurn.tool}\` earlier in this turn — the kickoff is in flight. Do NOT call another project-start tool to brainstorm names or scopes; each call creates a real project, voorman, and kickoff task. END YOUR TURN NOW — tell the user one sentence about the project that's spinning up. The voorman picks the work up from here.`;
+            output = `You already called \`${startedProjectOrJobThisTurn.tool}\` earlier in this turn — the kickoff is in flight. Do NOT call another project-start tool to brainstorm names or scopes; each call creates a real project, crew lead, and kickoff task. END YOUR TURN NOW — tell the user one sentence about the project that's spinning up. The voorman picks the work up from here.`;
           } else if (directFileWorkScriptHelperUnchangedRewrite) {
             output = buildDirectFileWorkUnchangedHelperError(
               directFileWorkScriptHelperFailure ?? 'The previous helper execution failed.',

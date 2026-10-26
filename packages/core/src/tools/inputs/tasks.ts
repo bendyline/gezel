@@ -50,13 +50,13 @@ export const CreateTaskInputSchema = z
         "The job-to-be-done. State the problem from the user's perspective — what does success look like? " +
           'Bad: "set up the website". Good: "Eliza wants an online shop for her pet care services so walk-in ' +
           'customers can book appointments online; success means a working checkout flow by end of month." ' +
-          "The voorman landing on this task later reads this and needs to actually know what they're solving.",
+          "The crew lead landing on this task later reads this and needs to actually know what they're solving.",
       ),
     plan: z
       .string()
       .optional()
       .describe(
-        "The voorman's approach. Usually omitted at creation and filled in later via update_task once the " +
+        "The crew lead's approach. Usually omitted at creation and filled in later via update_task once the " +
           'work has been scoped. Distinct from per-step notes (the progress log) — this is the plan.',
       ),
     assignee: TaskAssigneeSchema.optional(),

@@ -31,7 +31,7 @@ import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { awakeNow, createLogger } from '@bendyline/gezel';
 import { listProcessSnapshots } from '@bendyline/gezel-client/node';
-import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
+import { diagnoseDllLoadFailure, windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import {
   type NativeCapacityLease,
   type NativeCapacityOptions,
@@ -433,6 +433,14 @@ export class NativeEngineSupervisor {
   // swallowed so a buggy parser can't take down the supervisor.
   private readonly logListeners = new Set<(line: string) => void>();
   private recentStarts: number[] = [];
+  /**
+   * The {@link recentStarts} entry for the child running now. A child that
+   * became ready and was then stopped on purpose (idle, memory pressure, a
+   * model swap) was not a crash, so its start is returned to the budget.
+   * Otherwise an engine asked to swap models or yield memory three times in
+   * a minute would refuse the fourth start as a crash loop.
+   */
+  private currentStartAt: number | undefined;
   private lastUsedAt = 0;
   /**
    * The same mark on the awake clock. Every idle/pressure DECISION reads this
@@ -722,7 +730,11 @@ export class NativeEngineSupervisor {
     const { child } = this.state;
     if (this.state.kind === 'running' && reason !== 'health-restart') {
       await this.runBeforeStop(reason, this.state.launch.baseUrl);
+      const index =
+        this.currentStartAt === undefined ? -1 : this.recentStarts.indexOf(this.currentStartAt);
+      if (index >= 0) this.recentStarts.splice(index, 1);
     }
+    this.currentStartAt = undefined;
     this.pressureDeadlineAt = undefined;
     this.expectedExitReason = reason;
     this.state = { kind: 'stopped' };
@@ -826,7 +838,9 @@ export class NativeEngineSupervisor {
         },
       );
     }
-    this.recentStarts.push(Date.now());
+    const startedAt = Date.now();
+    this.recentStarts.push(startedAt);
+    this.currentStartAt = startedAt;
     let child: ChildProcess;
     try {
       child = this.spawn(launch.command, launch.args, {
@@ -1289,6 +1303,21 @@ export class NativeEngineSupervisor {
     // when RAM is what ran out.
     const oomKilled =
       signal === 'SIGKILL' && !expected ? this.oomKillsSince(this.currentOomKills) : null;
+    // Windows reports a DLL the engine could not load only as a status, before
+    // the engine prints a word. Name the DLL. A missing machine-wide runtime is
+    // a panic of its own, so no build is quarantined for it (missing-dll.ts).
+    const dllFailure =
+      process.platform === 'win32' &&
+      priorState.kind === 'starting' &&
+      !expected &&
+      !this.currentReachedReady &&
+      !this.currentPanic
+        ? diagnoseDllLoadFailure(code, priorState.launch.command, {
+            ...process.env,
+            ...(priorState.launch.env ?? {}),
+          })
+        : null;
+    if (dllFailure) this.onLog(`${this.logPrefix} startup DLL check: ${dllFailure.reason}`);
     const panic = oomKilled
       ? {
           kind: 'host-out-of-memory' as const,
@@ -1300,7 +1329,9 @@ export class NativeEngineSupervisor {
               kind: 'illegal-instruction' as const,
               line: 'engine terminated by SIGILL (illegal instruction) with no diagnostic output',
             }
-          : undefined));
+          : dllFailure?.machineWide
+            ? { kind: 'missing-runtime' as const, line: dllFailure.summary }
+            : undefined));
     const snapshot: NativeEngineExitSnapshot = {
       incidentId: `native-${pid ?? 'unknown'}-${exitedAt}`,
       ...(pid !== undefined ? { pid } : {}),
@@ -1313,6 +1344,15 @@ export class NativeEngineSupervisor {
       reachedReady: this.currentReachedReady,
       ...(expectedReason ? { expectedReason } : {}),
       ...(panic ? { panicKind: panic.kind, panicLine: panic.line } : {}),
+      ...(dllFailure
+        ? {
+            dllLoadFailure: {
+              kind: dllFailure.kind,
+              ...(dllFailure.dll ? { dll: dllFailure.dll } : {}),
+              summary: dllFailure.summary,
+            },
+          }
+        : {}),
       outputTail: this.currentOutput,
       ...(this.currentDiagnostics ? { diagnostics: { ...this.currentDiagnostics } } : {}),
     };
@@ -1378,9 +1418,17 @@ export class NativeEngineSupervisor {
     // exception line slightly before the kernel reports the exit).
     if (this.startupAbort && priorState.kind === 'starting') {
       this.startupAbort.abort(
-        new Error(
-          `${this.logPrefix} child exited (code=${code} signal=${signal ?? 'none'}) before becoming ready`,
-        ),
+        dllFailure
+          ? Object.assign(new Error(`${this.logPrefix} could not start: ${dllFailure.summary}`), {
+              // The engine never came up, and the summary says what to do, so
+              // callers pass it through unchanged.
+              code: ENGINE_LAUNCH_ERROR_CODE,
+              isActionable: true,
+              ...(panic?.kind === 'missing-runtime' ? { panicKind: panic.kind } : {}),
+            })
+          : new Error(
+              `${this.logPrefix} child exited (code=${code} signal=${signal ?? 'none'}) before becoming ready`,
+            ),
       );
     }
     this.state = { kind: 'stopped' };

@@ -1429,12 +1429,12 @@ describe('SettingsView', () => {
     });
   });
 
-  it('shows the designated Boekwachter and explains project-level opt-in', async () => {
+  it('shows the designated Librarian and explains project-level opt-in', async () => {
     render(<SettingsView />);
     fireEvent.click(await screen.findByTestId('settings-nav-team'));
 
     expect(await screen.findByTestId('boekwachter-settings')).toHaveTextContent(
-      'A project with a Boekwachter on its assigned crew',
+      'A project with a Librarian on its assigned crew',
     );
     expect(screen.getByTestId('boekwachter-settings')).toHaveTextContent('Noor');
   });

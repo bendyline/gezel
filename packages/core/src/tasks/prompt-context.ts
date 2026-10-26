@@ -13,11 +13,17 @@ import { describeInputSize } from '../craftbook-inputs.js';
  * volatile band unchanged.
  */
 import { outputMediaForStep, outputMediumForStep } from '../craftbook-output-media.js';
+import {
+  type CraftbookContract,
+  criterionEnforce,
+  deliverableRole,
+} from '../schemas/craftbook-contract.js';
 import type { CraftbookStep } from '../schemas/craftbook.js';
 import { normalizeStepGate } from '../schemas/gate.js';
 import { normalizeScriptRefs } from '../schemas/script.js';
 import type { TaskInputRecord } from '../schemas/task-inputs.js';
 import type { Task, TaskCraftbookStep, TaskReferences } from '../schemas/task.js';
+import { isOutcomeTask } from '../task-strategy.js';
 import { stepCheckedArtifactPaths } from '../tools/results.js';
 import { squisqAuthoringNote } from '../transform/squisq-dialect.js';
 import { renderGateHandoffBlock } from './gate-handoff.js';
@@ -141,6 +147,65 @@ export function renderTaskOutline(
 }
 
 /**
+ * The book's contract: the outcome the finished task is held to, rendered the
+ * same way under every strategy so none of them knows the goal better than
+ * another. Criteria marked eval-only are measurement, not instructions, and
+ * stay out of the prompt.
+ */
+export function renderTaskContractBlock(
+  contract: CraftbookContract,
+  opts: { stepwise?: boolean } = {},
+): string {
+  const lines = ['### Task contract', '', `Goal: ${contract.goal.trim()}`, '', 'Deliverables:'];
+  for (const d of contract.deliverables) {
+    const drawer = d.artifact ? ' (artifacts drawer)' : '';
+    const role = deliverableRole(d) === 'supporting' ? ' (supporting)' : '';
+    const source = d.textSource
+      ? ` Written from \`${d.textSource.path}\`${d.textSource.artifact ? ' (artifacts drawer)' : ''}, which the checks read.`
+      : '';
+    lines.push(`- \`${d.path}\`${drawer}${role} — ${d.description.trim()}.${source}`);
+  }
+  const inputs = contract.inputs ?? [];
+  if (inputs.length > 0) {
+    lines.push('', 'Inputs:');
+    for (const input of inputs) {
+      const drawer = input.artifact ? ' (artifacts drawer)' : '';
+      lines.push(`- \`${input.path}\`${drawer}${input.required ? ' (required)' : ''}`);
+    }
+  }
+  const shown = contract.criteria.filter((c) => criterionEnforce(c) !== 'eval-only');
+  if (shown.length > 0) {
+    lines.push('', 'Quality bar:');
+    for (const c of shown) {
+      const checked = criterionEnforce(c) === 'gate' ? ' [checked]' : '';
+      lines.push(`- ${c.text.trim()}${checked}`);
+    }
+  }
+  if (contract.grounding) {
+    const sources = contract.grounding.sources?.length
+      ? contract.grounding.sources.map((src) => `\`${src}\``).join(', ')
+      : 'the sources you read';
+    const style =
+      contract.grounding.citationStyle === 'numbered'
+        ? 'number each citation like [1] and list the sources under a Sources heading'
+        : contract.grounding.citationStyle === 'inline-path'
+          ? 'cite each one inline as (source: <path>)'
+          : 'cite each one, inline as (source: <path>) or as [n] with a Sources list';
+    lines.push(
+      '',
+      `Sources: ground every name, number, date and quote in ${sources}; ${style}. A claim the sources do not show fails the check.`,
+    );
+  }
+  lines.push(
+    '',
+    opts.stepwise
+      ? 'This is what the finished task must meet. The runtime checks the [checked] items before the task can finish; your step is your part of it.'
+      : 'The runtime checks the [checked] items before the task can finish and names anything unmet.',
+  );
+  return lines.join('\n');
+}
+
+/**
  * The whole task section. `availableToolNames` undefined means every tool is
  * wired; a set narrows the guidance to the tools this turn actually has.
  */
@@ -200,10 +265,18 @@ export function renderTaskContextBlock(
   // step: without it a fresh session cannot tell what the steps after it
   // will need from its files, which is half of why generalist led the
   // paired runs (2026-10-06 review).
-  if (t.executionMode === 'generalist' || (step && t.craftbook.steps.length > 1)) {
+  const outcome = isOutcomeTask(t);
+  if (!outcome && (t.executionMode === 'generalist' || (step && t.craftbook.steps.length > 1))) {
     lines.push(
       renderTaskOutline(t, step, {
         advanceWired: wired('advance_task_step'),
+        stepwise: t.executionMode !== 'generalist',
+      }),
+    );
+  }
+  if (t.craftbook.contract) {
+    lines.push(
+      renderTaskContractBlock(t.craftbook.contract, {
         stepwise: t.executionMode !== 'generalist',
       }),
     );
@@ -319,7 +392,9 @@ export function renderTaskContextBlock(
     if (step.authoring) lines.push(squisqAuthoringNote(step.authoring));
     const handoffBlock = renderGateHandoffBlock(t, step.id);
     if (handoffBlock) lines.push(handoffBlock);
-    const outputMedium = outputMediumForStep(step);
+    // An outcome task's deliverables may span both drawers; the Task
+    // contract names each one's drawer.
+    const outputMedium = outcome ? null : outputMediumForStep(step);
     if (outputMedium) {
       const target = step.advanceWhen?.file ? ` \`${step.advanceWhen.file}\`` : '';
       const allowedMedia = outputMediaForStep(step);
@@ -388,7 +463,15 @@ export function renderTaskContextBlock(
         );
       }
     }
-    if (activeStepIsGate) {
+    if (activeStepIsGate && outcome) {
+      const attemptNote =
+        (step.gateAttempts ?? 0) > 0
+          ? ' A previous check found gaps; fix exactly what it named rather than starting over.'
+          : '';
+      lines.push(
+        `#### Contract check\n\nFinishing is checked against the **Task contract**: ${wired('advance_task_step') ? '`advance_task_step`' : 'finishing'} is rejected with the unmet criteria named until they are met.${attemptNote}`,
+      );
+    } else if (activeStepIsGate) {
       const attemptNote =
         activeStepAttempt > 1
           ? ` You are on **attempt ${activeStepAttempt}** of this step — a previous pass did not clear the gate, so fix the specific gap named in the notes rather than starting over.`

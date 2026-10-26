@@ -31,7 +31,7 @@ describe('autonomous project roles', () => {
     const project = await store.createProject({ name: 'Atlas' });
     const boekwachter = await ensureDefaultBoekwachter(store, catalog);
 
-    expect(boekwachter.role).toBe('Boekwachter');
+    expect(boekwachter.role).toBe('Librarian');
     expect(boekwachter.templateId).toBe('boekwachter');
     expect(boekwachter.about).toContain("crew's index-keeper");
     expect((await store.readConfig()).boekwachterGezelId).toBe(boekwachter.id);
@@ -58,7 +58,7 @@ describe('autonomous project roles', () => {
 
     const ensured = await ensureDefaultBoekwachter(store, catalog);
     expect(ensured.id).toBe(existing.id);
-    expect((await store.listGezels()).filter((gezel) => gezel.role === 'Boekwachter')).toHaveLength(
+    expect((await store.listGezels()).filter((gezel) => gezel.role === 'Librarian')).toHaveLength(
       1,
     );
   });

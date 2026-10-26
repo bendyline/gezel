@@ -186,7 +186,7 @@ describe('Flashcards bundled project type', () => {
 
     expect(applied.gezelsCreated).toHaveLength(1);
     const buddy = await store.getGezel(applied.gezelsCreated[0]!.id);
-    expect(buddy?.role).toBe('Studiemaat');
+    expect(buddy?.role).toBe('Study Partner');
 
     const workspaceDir = await store.projectWorkspaceDir(project.id);
     const deck = JSON.parse(await readFile(join(workspaceDir, 'deck.json'), 'utf8'));

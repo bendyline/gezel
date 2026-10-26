@@ -10,8 +10,10 @@ import {
   getProjectType,
   initialPoppetjeForGezel,
   pickRandomNameWithGender,
+  plainRoleTitle,
   poppetjeFromSeed,
   resolveProjectTypeId,
+  roleForMatching,
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
@@ -47,8 +49,20 @@ function isGezelTemplate(item: CatalogItemSummary): item is GezelTemplateItem {
   return item.manifest.kind === 'gezel-template';
 }
 
+/**
+ * A role's identity across spellings: catalog templates may still carry a
+ * Dutch title ("Boekwachter") while the roster's gezels carry its plain
+ * English one ("Librarian"), and both must name the same role.
+ */
 function roleIdentity(value: string | undefined): string {
-  return (value ?? '').toLocaleLowerCase().replaceAll(/[^a-z0-9]+/g, '');
+  return roleForMatching(value ?? '')
+    .toLocaleLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, '');
+}
+
+/** The template's name as a person reads it (a Dutch title in plain English). */
+function templateTitle(template: GezelTemplateItem): string {
+  return plainRoleTitle(template.manifest.name);
 }
 
 function gezelMatchesQuery(
@@ -64,7 +78,9 @@ function gezelMatchesQuery(
 function templateMatchesQuery(template: GezelTemplateItem, query: string): boolean {
   return [
     template.manifest.name,
+    templateTitle(template),
     template.manifest.role,
+    plainRoleTitle(template.manifest.role),
     template.manifest.description,
     ...template.manifest.tags,
   ].some((value) => value.toLocaleLowerCase().includes(query));
@@ -206,7 +222,7 @@ export function ProjectAddGezelDialog({
             !createdRoleIdentities.has(roleIdentity(item.manifest.role)) &&
             !createdRoleIdentities.has(roleIdentity(item.manifest.name)),
         )
-        .sort((a, b) => a.manifest.name.localeCompare(b.manifest.name)),
+        .sort((a, b) => templateTitle(a).localeCompare(templateTitle(b))),
     [createdRoleIdentities, createdTemplateIds, templates],
   );
   const affinityForGezel = useCallback(
@@ -238,11 +254,11 @@ export function ProjectAddGezelDialog({
         a.affinity.rank - b.affinity.rank ||
         (a.kind === 'existing'
           ? displayName(a.gezel, roleBasedNameOnlyMode)
-          : a.template.manifest.name
+          : templateTitle(a.template)
         ).localeCompare(
           b.kind === 'existing'
             ? displayName(b.gezel, roleBasedNameOnlyMode)
-            : b.template.manifest.name,
+            : templateTitle(b.template),
         ),
     );
   }, [
@@ -340,7 +356,7 @@ export function ProjectAddGezelDialog({
 
   const chooseTemplate = (template: GezelTemplateItem) => {
     if (roleBasedNameOnlyMode) {
-      void createTemplate(template, { name: template.manifest.name });
+      void createTemplate(template, { name: templateTitle(template) });
       return;
     }
     const picked = pickRandomNameWithGender();
@@ -372,12 +388,12 @@ export function ProjectAddGezelDialog({
         <Dialog.Content className="project-add-gezel-dialog">
           <Dialog.Title asChild>
             <h3>
-              {selectedTemplate ? `Customize ${selectedTemplate.manifest.name}` : 'Add Gezel'}
+              {selectedTemplate ? `Customize ${templateTitle(selectedTemplate)}` : 'Add Gezel'}
             </h3>
           </Dialog.Title>
           <Dialog.Description className="muted small">
             {selectedTemplate
-              ? `Give this new ${selectedTemplate.manifest.role} a name and appearance before adding them to ${project.name}.`
+              ? `Give this new ${plainRoleTitle(selectedTemplate.manifest.role)} a name and appearance before adding them to ${project.name}.`
               : `Choose someone from your workshop or add a new role to ${project.name}.`}
           </Dialog.Description>
 
@@ -420,7 +436,7 @@ export function ProjectAddGezelDialog({
                   Reroll appearance
                 </button>
                 <p className="muted small">
-                  Their role and working style come from the {selectedTemplate.manifest.name}{' '}
+                  Their role and working style come from the {templateTitle(selectedTemplate)}{' '}
                   template.
                 </p>
               </div>
@@ -510,12 +526,12 @@ export function ProjectAddGezelDialog({
                                   `project-role:${option.template.manifest.id}`,
                                   option.template.manifest.name,
                                 )}
-                                name={option.template.manifest.name}
+                                name={templateTitle(option.template)}
                                 size={36}
                               />
                               <span className="project-add-gezel-option-copy">
                                 <span className="project-add-gezel-option-name">
-                                  {option.template.manifest.name}
+                                  {templateTitle(option.template)}
                                 </span>
                                 <span className="muted small">{option.affinity.reason}</span>
                               </span>
@@ -588,12 +604,12 @@ export function ProjectAddGezelDialog({
                                 `project-role:${template.manifest.id}`,
                                 template.manifest.name,
                               )}
-                              name={template.manifest.name}
+                              name={templateTitle(template)}
                               size={36}
                             />
                             <span className="project-add-gezel-option-copy">
                               <span className="project-add-gezel-option-name">
-                                {template.manifest.name}
+                                {templateTitle(template)}
                               </span>
                               <span className="muted small">{template.manifest.description}</span>
                             </span>

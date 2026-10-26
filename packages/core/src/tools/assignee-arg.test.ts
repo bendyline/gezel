@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { assigneeArg, normalizeAssigneeArg } from './assignee-arg.js';
+import {
+  assigneeArg,
+  findGezelInRoster,
+  normalizeAssigneeArg,
+  renamedRoleBasedName,
+} from './assignee-arg.js';
 
 describe('normalizeAssigneeArg', () => {
   it('treats a bare string as a gezel reference', () => {
@@ -68,5 +73,29 @@ describe('assigneeArg schema', () => {
 
   it('accepts an object that omits gezelId', () => {
     expect(schema.parse({ kind: 'gezel' })).toEqual({ kind: 'gezel' });
+  });
+});
+
+describe('findGezelInRoster after the role rename', () => {
+  const roster = [
+    { id: 'oier', name: 'Oier', roleBasedName: 'crew-lead' },
+    { id: 'nel', name: 'Nel', roleBasedName: 'scribe' },
+  ];
+
+  it('maps a Dutch role-based name to the one it became', () => {
+    expect(renamedRoleBasedName('voorman')).toBe('crew-lead');
+    expect(renamedRoleBasedName(' Oefen-Interviewer ')).toBe('mock-interviewer');
+    expect(renamedRoleBasedName('developer')).toBeUndefined();
+  });
+
+  it('still finds a migrated gezel by its old role-based name', () => {
+    expect(findGezelInRoster(roster, 'voorman')?.id).toBe('oier');
+    expect(findGezelInRoster(roster, 'Klerk')?.id).toBe('nel');
+    expect(findGezelInRoster(roster, 'crew-lead')?.id).toBe('oier');
+  });
+
+  it('prefers an exact match over the renamed one', () => {
+    const named = [...roster, { id: 'voorman', name: 'Voorman' }];
+    expect(findGezelInRoster(named, 'voorman')?.id).toBe('voorman');
   });
 });

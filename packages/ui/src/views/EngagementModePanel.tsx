@@ -102,8 +102,8 @@ export function EngagementModePanel({
         <div className="workshop-tempo">
           <h4 className="workshop-tempo-heading">Tempo</h4>
           <p className="muted small" style={{ margin: '0 0 0.5rem' }}>
-            How frenetic the meester and voormannen feel. Adjusts check-in intervals and the tone of
-            the meester's nudges.
+            How frenetic the Meester and crew leads feel. Adjusts check-in intervals and the tone of
+            the Meester's nudges.
           </p>
           <div
             className="workshop-tempo-switch gz-tray gz-tray--described"

@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { EvalJob, EvalJobSpec } from '@bendyline/gezel/eval';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EvalHarness } from './harness.js';
 import { EvalJobManager, type EvalJobManagerOptions, harnessArgs } from './jobs.js';
 
@@ -249,6 +249,43 @@ describe('EvalJobManager', () => {
     await waitFor(jobs, first.id, terminal);
     expect(existsSync(join(second.dir, '01-mlx-qwen3.5-4b-q4', 'argv.json'))).toBe(false);
   });
+
+  it.each(['cancel', 'shutdown'] as const)(
+    'does not launch a harness when %s happens during target preparation',
+    async (action) => {
+      let markPreparing!: () => void;
+      let finishPreparing!: () => void;
+      const preparing = new Promise<void>((resolve) => {
+        markPreparing = resolve;
+      });
+      const prepared = new Promise<void>((resolve) => {
+        finishPreparing = resolve;
+      });
+      const spawnImpl = vi.fn(() => {
+        throw new Error('A stopped job must not spawn a harness');
+      });
+      const jobs = manager('hang', {
+        baseEnv: () => ({}),
+        prepareTarget: async () => {
+          markPreparing();
+          await prepared;
+          return { args: [], env: {}, needsDevice: false };
+        },
+        spawnImpl,
+      });
+      const created = await jobs.create(SPEC);
+      await preparing;
+      if (action === 'cancel') await jobs.cancel(created.id);
+      else await jobs.shutdown();
+      finishPreparing();
+
+      const job = await waitFor(jobs, created.id, terminal);
+      expect(spawnImpl).not.toHaveBeenCalled();
+      expect(job.status).toBe(action === 'cancel' ? 'cancelled' : 'interrupted');
+      expect(job.targets[0]?.status).toBe(job.status);
+      await waitForPersisted(job.dir, job.status);
+    },
+  );
 
   it('waits while another eval holds the device, then runs', async () => {
     let holder: string | null = 'another eval (pid 42)';

@@ -33,7 +33,7 @@ import type { Behavior } from '../types.js';
  */
 const DEFAULTS = {
   projectAbout:
-    'Project created from a chat conversation. The user (or a voorman gezel) should update this with the actual scope, target audience, and out-of-scope items via update_project once the project direction is clear.',
+    'Project created from a chat conversation. The user (or the crew lead) should update this with the actual scope, target audience, and out-of-scope items via update_project once the project direction is clear.',
   projectMissionObjectives:
     'Initial setup — define concrete success criteria via update_project once scope is clear.',
   taskDescription:

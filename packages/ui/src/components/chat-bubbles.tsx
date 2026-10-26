@@ -14,6 +14,7 @@ import type {
   ToolCallVideo,
 } from '@bendyline/gezel';
 import type { TaskHandoffNote } from '@bendyline/gezel';
+import { roleForMatching } from '@bendyline/gezel';
 import {
   handoffContextLine,
   handoffHeadline,
@@ -578,7 +579,7 @@ export function authorTitle(role: string | undefined, tooltip: string | undefine
 
 export function RoleSuffix({ role }: { role?: string }) {
   if (!role) return null;
-  const key = role.toLowerCase().trim();
+  const key = roleForMatching(role).toLowerCase().trim();
   let glyph: string | null = null;
   if (key === 'meester') glyph = '🎩';
   else if (key === 'voorman') glyph = '⭐';

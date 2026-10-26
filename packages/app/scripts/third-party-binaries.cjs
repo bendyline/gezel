@@ -48,7 +48,8 @@ const THIRD_PARTY_PATTERNS = [
   // Authenticode signature at all (verified against NVIDIA's own sha256
   // manifests for 12.4.1 and 12.8.1). The runtime trio also ships in
   // `win32-arm64-cuda` (RTX Spark, CUDA 13.4.1's windows-arm64 archives) and
-  // nowhere else on Windows-on-ARM.
+  // nowhere else on Windows-on-ARM. NVIDIA does sign those arm64 copies; they
+  // are listed for the same reason: we ship them as published, never re-signed.
   {
     pattern:
       '(?:^|/)(?:native-bin|native/build)/win32-(?:x64(?:-[^/]+)?|arm64-cuda)/cudart64_\\d+\\.dll$',

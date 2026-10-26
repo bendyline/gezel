@@ -93,7 +93,9 @@ export function isExpectedAvailabilityError(detail?: ChatTurnErrorDetail): boole
     detail?.code === 'model-not-ready' ||
     detail?.code === 'engine-not-ready' ||
     // Linux stopped the engine because the computer ran out of memory.
-    detail?.panicKind === 'host-out-of-memory'
+    detail?.panicKind === 'host-out-of-memory' ||
+    // Windows lacks the runtime the engines need; the message says what to install.
+    detail?.panicKind === 'missing-runtime'
   );
 }
 

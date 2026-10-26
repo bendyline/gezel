@@ -129,9 +129,9 @@ function runPrompt(skill: DiscoveredSkill): string {
   return [
     `Run the workspace skill **${skill.name}**, defined in \`${source}\`.${companionLine}`,
     '',
-    'Start with `read_task_notes` — the voorman assessed this skill and recorded which outputs are expected of you.',
+    'Start with `read_task_notes` — the crew lead assessed this skill and recorded which outputs are expected of you.',
     '',
-    "The skill's own procedure follows. Work it as written; when it is done, `write_task_note` naming each file you produced (with its path) and `advance_task_step` so the voorman can verify.",
+    "The skill's own procedure follows. Work it as written; when it is done, `write_task_note` naming each file you produced (with its path) and `advance_task_step` so the crew lead can verify.",
     '',
     '---',
     '',
@@ -222,7 +222,7 @@ export async function invokeWorkspaceSkill(
   const task = await deps.tasks.create(projectId, {
     title: `${skill.name} (workspace skill)`,
     description:
-      `Run the workspace skill "${skill.name}" (${source}) against this project. The voorman assesses it first and assigns the craftsman.${
+      `Run the workspace skill "${skill.name}" (${source}) against this project. The crew lead assesses it first and assigns the craftsman.${
         skill.description ? ` ${skill.description}` : ''
       }`.slice(0, 2000),
     steps: skillInvocationSteps(skill, {

@@ -125,8 +125,8 @@ on-device model listing, model installation, OpenAI-compatible inference and
 embeddings without running a second copy of the Gezel product.
 `@bendyline/gezel-inference` owns it, and both host modes serve the same
 surface: `/v1/chat`, `/v1/responses`, `/v1/embeddings`, `/v1/models`,
-`/v1/models/ensure`, `/v1/knowledge`, the engine and model-bundle routes, and a
-narrow `/api/config`. There is no product API, no scheduler or background work,
+`/v1/models/ensure`, `/v1/knowledge`, `/v1/images` (on-device image generation
+and its models), the engine and model-bundle routes, and a narrow `/api/config`. There is no product API, no scheduler or background work,
 no machine-service discovery, no secret store (nothing reaches the OS keychain
 or a secrets file in the app's home), no device identity, and no pairing,
 `/v1/identity`, `/v1/remote` or LAN-serving endpoint. Chat and Responses serve

@@ -1851,7 +1851,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               ) : (
                 <span
                   className="workspace-tree-issue-count"
-                  title={`${agg.total} Boekwachter issue${agg.total === 1 ? '' : 's'} in this file`}
+                  title={`${agg.total} tracked issue${agg.total === 1 ? '' : 's'} in this file`}
                 >
                   {agg.total}
                 </span>
@@ -2703,7 +2703,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                   }
                                 />
                                 <span className="muted small">
-                                  When this project has both a Boekwachter and a developer, the
+                                  When this project has both a Librarian and a developer, the
                                   developer works through open issues during the night shift. Your
                                   files aren’t touched — fixes arrive as change proposals in the
                                   Proposals tab for you to review and apply.
@@ -2833,7 +2833,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             <small className="muted">
                               {selected.mode === 'solo'
                                 ? 'The single gezel who handles this entire job — the Builder. Mentioned in the system prompt for any chat scoped here. Team-management tools are stripped from their thread.'
-                                : 'The gezel who acts as voorman (foreman) of this project. Mentioned in the system prompt for any chat scoped here.'}
+                                : 'The gezel who leads this project’s crew. Mentioned in the system prompt for any chat scoped here.'}
                             </small>
                           </label>
 
@@ -3166,7 +3166,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               return count > 0 ? (
                                 <span
                                   className="workspace-tree-issue-count"
-                                  title={`${count} Boekwachter issue${count === 1 ? '' : 's'} ${entry.isDirectory ? 'in this folder' : 'in this file'}`}
+                                  title={`${count} tracked issue${count === 1 ? '' : 's'} ${entry.isDirectory ? 'in this folder' : 'in this file'}`}
                                   aria-label={`${count} indexing issue${count === 1 ? '' : 's'}`}
                                 >
                                   {count}

@@ -34,6 +34,7 @@ import {
   factualLookupTools,
   groundText,
   groundingProblems,
+  isBlockingGroundingProblem,
   isEvidenceTool,
   isProseFile,
   parseCitationNumbers,
@@ -56,17 +57,9 @@ export const MAX_WRITE_REFUSALS = 1;
  */
 const NAME_ONLY_REFUSAL_THRESHOLD = 3;
 
-/**
- * Whether a problem sentence is worth a rewrite on its own: a citation to
- * evidence that does not exist, or an unsupported year, number, month or
- * quotation, or a year set beside the wrong person. A sentence missing only
- * names, or a plain number away from a name (a PR number, a count), is noted
- * rather than refused.
- */
+/** Whether a problem sentence refuses a write on its own; see `isBlockingGroundingProblem`. */
 export function blocksWrite(sentence: SentenceGrounding): boolean {
-  if (sentence.status === 'bad-citation') return true;
-  if (sentence.checks.some((check) => !check.found && check.kind !== 'name')) return true;
-  return sentence.missing.some((detail) => /^(?:1\d{3}|20\d{2}) next to /.test(detail));
+  return isBlockingGroundingProblem(sentence);
 }
 
 const EXCERPT_CHARS = 600;

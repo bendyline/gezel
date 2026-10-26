@@ -15,7 +15,7 @@ Every project can carry:
 
 - **About** — a plain-language description of what the project is. Your gezellen read it before every conversation, so they always have context.
 - **Mission objectives** — the success criteria. Write these like you'd brief a team.
-- **A voorman** — the gezel in charge, if you name one.
+- **A crew lead** — the gezel in charge, if you name one.
 
 ## Threads
 

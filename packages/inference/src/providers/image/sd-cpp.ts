@@ -1,0 +1,1020 @@
+/**
+ * StableDiffusionCppProvider — talks to a local `sd-server` binary over
+ * HTTP. The server speaks an OpenAI-compatible `/v1/images/generations`
+ * shape with a few extensions (seed, sample_steps, negative_prompt,
+ * cfg_scale) supported by upstream sd.cpp.
+ *
+ * Lifecycle of the server itself is not the provider's concern — an
+ * Electron-side supervisor (Phase 3) spawns / idle-stops the binary and
+ * the provider simply hits whichever URL is configured. If the server
+ * isn't reachable, {@link generate} surfaces a clear error so the UI
+ * can prompt the user to enable image generation in Settings.
+ *
+ * Model management is filesystem-only: weights live under
+ * `<modelsRoot>/<id>/weights.*` alongside a resolved copy of the
+ * catalog manifest (so local state is self-describing even if the
+ * catalog entry later disappears).
+ */
+
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { createAwakeTimeout, createLogger, imageModelDefaultSide } from '@bendyline/gezel';
+import { resolveModelDirectory } from '../../models/model-id.js';
+import {
+  MODEL_HASH_READ_BUFFER_BYTES,
+  type ModelStorageRoots,
+  assertModelStorePathSafe,
+  findModelRoot,
+  hashModelPayloadFiles,
+  listOverlayModelIds,
+  makeSharedModelReadable,
+  modelExistsOnlyReadOnly,
+  readOnlyModelError,
+  verifyReadOnlyModelPayload,
+} from '../../models/storage-roots.js';
+import { downloadWithRetry } from '../../utils/download-with-retry.js';
+import { readImageMeta } from '../../utils/image-meta.js';
+import type { GpuArbiter } from '../gpu-arbiter.js';
+import type { NativeEngineSupervisor } from '../native/supervisor.js';
+import { resolveImg2ImgSupport } from './img2img-support.js';
+import {
+  ImageCapacityError,
+  type ImageEngineHealth,
+  ImageGenerationCancelledError,
+  type ImageGenerationInput,
+  type ImageGenerationOutput,
+  type ImageGenerationProgress,
+  type ImageModelAuxiliaryPullSpec,
+  type ImageModelPullEvent,
+  type ImageModelPullSpec,
+  type ImageProvider,
+  type InstalledImageModelInfo,
+} from './types.js';
+
+const log = createLogger('image');
+
+export interface StableDiffusionCppProviderOptions {
+  /** Base URL of the running sd-server (no trailing slash). */
+  baseUrl: string;
+  /** Absolute path to `~/.gezel/engines/sd-cpp/models`. */
+  modelsRoot: string;
+  /** Optional read-only machine-store overlay. */
+  storageRoots?: ModelStorageRoots;
+  /** Awake-time budget for one render request, in ms. Defaults to 30 minutes. */
+  timeoutMs?: number;
+  /** Injected for tests. Defaults to global fetch. */
+  fetchImpl?: typeof fetch;
+  /**
+   * Optional lifecycle manager. When supplied, the provider calls
+   * `ensureRunning()` before each generate and uses the returned
+   * baseUrl (overriding `baseUrl`) — so lazy-start / idle-stop /
+   * health-watch all work transparently. Omit for "user runs
+   * sd-server themselves" deployments.
+   */
+  supervisor?: NativeEngineSupervisor;
+  /**
+   * Whether the factory had a real engine wiring (an explicit URL or a
+   * spawnable binary) at construction. The default-loopback fallback
+   * sets this to false so `health()` can return `not-configured`
+   * instead of `unreachable` — distinct UI state, distinct guidance.
+   */
+  configured?: boolean;
+  /**
+   * Cross-engine GPU coordinator. When supplied alongside a
+   * supervisor, the provider acquires the `'image'` slot before each
+   * generate (which evicts the local LLM in `swap` mode) and
+   * registers its supervisor's `stop()` as the `'image'` evictor so
+   * the LLM can evict us back symmetrically.
+   */
+  arbiter?: GpuArbiter;
+  /**
+   * Shared, mutable holder the supervised path uses to tell the
+   * factory's `resolveLaunch` which installed model to spawn sd-server
+   * with. sd-server serves one model per process, so when a request
+   * targets a different installed model than the one loaded, the
+   * provider updates `modelId` here and stops the running server — the
+   * next `ensureRunning()` relaunches with the requested model instead
+   * of always serving whichever model sorts first.
+   */
+  launchState?: { modelId: string | undefined };
+  /**
+   * The user's configured default model (`config.defaultImageModel['sd-cpp']`,
+   * Settings -> Image generation). Read on every generate that names no model
+   * of its own. A configured id that is no longer installed falls through to
+   * the first installed model, which is what every install did before this
+   * setting existed.
+   */
+  defaultModelId?: string;
+}
+
+const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+const DEFAULT_SAMPLE_STEPS = 20;
+/**
+ * Model-specific step counts, from fast distilled models to the 50 of MOSS
+ * and Iris. Shared with `buildSdServerArgs`, which sets
+ * the same server launch default for endpoints that ignore request steps.
+ */
+export const MODEL_SAMPLE_STEP_DEFAULTS = new Map<string, number>([
+  // FLUX.1 is still in the pinned catalog and on people's disks: keep its
+  // settings until no supported catalog offers it.
+  ['flux-1-schnell-q4', 4],
+  ['flux-2-klein-4b-q4', 4],
+  ['sd-turbo', 4],
+  ['sdxl-lightning-4step', 4],
+  ['sdxl-turbo', 4],
+  // Krea 2 Turbo is an 8-step distilled model. Setting the launch
+  // `--steps` default matters more than for the others: the pinned
+  // sd-server doesn't honor the per-request `sample_steps`/`steps`
+  // override for these models, so without this the server falls back to
+  // its built-in 20-step default — 5× the render time for no quality
+  // gain, and on CPU that overruns the generate timeout entirely.
+  ['krea-2-turbo-q4', 8],
+  ['krea-2-turbo-q6', 8],
+  ['krea-2-turbo-q8', 8],
+  ['ming-image-0.1-design-bf16', 12],
+  ['moss-image-sft-q4', 50],
+  // The publisher recommends 100; 50 renders the same at half the time
+  // (300 s to 148 s per 1024px image on a DGX Spark, image bench 2026-10-19).
+  ['iris-3b-f32', 50],
+]);
+
+/**
+ * Classifier-free guidance (CFG) scale per model, applied to the
+ * `/sdapi/v1/txt2img` request. Distilled / Flux-flow models are trained
+ * to run at CFG 1 — their guidance is baked in (turbo/lightning) or
+ * carried by the separate Flux distilled-guidance value. Applying
+ * sd-server's higher default CFG to them blows out color and contrast
+ * (the oversaturated, "burned" look Krea 2 Turbo had before this).
+ * Models absent from the map (traditional SD 1.x / SDXL checkpoints)
+ * omit `cfg_scale` and inherit the server default, preserving their
+ * established behavior.
+ */
+export const MODEL_CFG_DEFAULTS = new Map<string, number>([
+  ['krea-2-turbo-q4', 1],
+  ['krea-2-turbo-q6', 1],
+  ['krea-2-turbo-q8', 1],
+  ['flux-1-schnell-q4', 1],
+  ['flux-1-dev-q4', 1],
+  ['flux-2-klein-4b-q4', 1],
+  ['sd-turbo', 1],
+  ['sdxl-turbo', 1],
+  ['sdxl-lightning-4step', 1],
+  ['ming-image-0.1-design-bf16', 1],
+  ['moss-image-sft-q4', 3],
+  ['iris-3b-f32', 3],
+  // The model card's recommendation; the server's 7 over-saturates it.
+  ['animagine-xl-4', 5],
+]);
+
+/**
+ * Whether the engine runs this model with guidance that reads a negative
+ * prompt. At CFG 1 the unconditional pass that carries it is skipped.
+ * Models absent from the map run at the server's default of 7.
+ */
+export function sdCppHonorsNegativePrompt(modelId: string): boolean {
+  const cfg = MODEL_CFG_DEFAULTS.get(modelId);
+  return cfg === undefined || cfg > 1;
+}
+
+/** Pin samplers validated with the native engine for these models. */
+export const MODEL_SAMPLER_DEFAULTS = new Map<string, string>([
+  ['ming-image-0.1-design-bf16', 'Euler'],
+  ['moss-image-sft-q4', 'Euler'],
+  ['iris-3b-f32', 'Euler'],
+]);
+
+/**
+ * Models whose VAE shows visible tile-boundary seams under
+ * stable-diffusion.cpp's `--vae-tiling` (Krea 2's Qwen-Image VAE is the
+ * known case — rainbow column streaks at ≤512px). `--vae-tiling` is a
+ * launch-time, size-agnostic flag: sd-server serves every request size
+ * from one process, so we can't gate it per-request on image size as
+ * we'd ideally like — we gate it per-model instead and skip it here.
+ * The trade-off is that very large renders of these models could hit a
+ * VAE allocation cap on memory-constrained GPUs; acceptable given these
+ * are high-VRAM models and seam-free output matters more.
+ */
+export const VAE_TILING_INCOMPATIBLE_MODELS = new Set<string>([
+  'krea-2-turbo-q4',
+  'krea-2-turbo-q6',
+  'krea-2-turbo-q8',
+]);
+
+/**
+ * The launch choices that change what sd-server holds in memory for one
+ * model. Read by the launch argv and by memory pricing, so the price is for
+ * the process that actually starts.
+ */
+export interface SdServerLoadProfile {
+  vaeDecode: 'tiled' | 'untiled' | 'none';
+  /** The default render size, which working memory follows more than the weights do. */
+  defaultSidePx: number;
+  /** A `--tensor-type-rules` pattern whose tensors load as bfloat16. */
+  bf16TensorPattern?: string;
+  diffusionFlashAttention: boolean;
+  /**
+   * Reuse a diffusion transformer's output across steps whose input barely
+   * changed (`--cache-mode easycache`). Only for a model whose renders it was
+   * measured not to change.
+   */
+  stepCache?: 'easycache';
+}
+
+/**
+ * Models that render the same with EasyCache step reuse. MOSS took 205 s per
+ * 1024px image at 50 steps on a DGX Spark and 93 s with it, with renders a
+ * person could not tell apart (image bench, 2026-10-19). cache-dit and spectrum
+ * were as fast but changed text and detail.
+ */
+const EASYCACHE_MODELS = new Set<string>(['moss-image-sft-q4']);
+
+export function sdServerLoadProfile(modelId: string): SdServerLoadProfile {
+  const stepCache = EASYCACHE_MODELS.has(modelId) ? { stepCache: 'easycache' as const } : {};
+  if (modelId === 'iris-3b-f32') {
+    // Iris generates pixels directly: no VAE to tile. Upstream's Iris recipe
+    // enables diffusion flash attention for the 1024px sequence. The
+    // publisher stores F32 but runs with BF16 autocast, so only the diffusion
+    // weights convert at load, preserving the quantized encoder.
+    return {
+      vaeDecode: 'none',
+      defaultSidePx: imageModelDefaultSide(modelId),
+      bf16TensorPattern: '^model\\.diffusion_model\\.',
+      diffusionFlashAttention: true,
+      ...stepCache,
+    };
+  }
+  // Tiling avoids VAE-decode OOM on large images, but produces visible
+  // tile-boundary seams with some VAEs — see VAE_TILING_INCOMPATIBLE_MODELS.
+  return {
+    vaeDecode: VAE_TILING_INCOMPATIBLE_MODELS.has(modelId) ? 'untiled' : 'tiled',
+    defaultSidePx: imageModelDefaultSide(modelId),
+    diffusionFlashAttention: false,
+    ...stepCache,
+  };
+}
+
+export class StableDiffusionCppProvider implements ImageProvider {
+  readonly name = 'sd-cpp';
+  private readonly baseUrl: string;
+  private readonly modelsRoot: string;
+  private readonly storageRoots: ModelStorageRoots;
+  private readonly timeoutMs: number;
+  private readonly fetchImpl: typeof fetch;
+  private readonly supervisor?: NativeEngineSupervisor;
+  private readonly configured: boolean;
+  private readonly arbiter?: GpuArbiter;
+  private readonly launchState?: { modelId: string | undefined };
+  private readonly defaultModelId?: string;
+  private renderTail: Promise<void> = Promise.resolve();
+  private pendingRenders = 0;
+
+  constructor(opts: StableDiffusionCppProviderOptions) {
+    this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
+    this.modelsRoot = opts.modelsRoot;
+    this.storageRoots = opts.storageRoots ?? {
+      writableRoot: opts.modelsRoot,
+      readOnlyRoots: [],
+    };
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.supervisor = opts.supervisor;
+    // Default true — historically the provider had no concept of
+    // "unconfigured", and most call sites pass an explicit URL or
+    // supervisor. The factory's loopback fallback flips this off.
+    this.configured = opts.configured ?? true;
+    this.launchState = opts.launchState;
+    this.defaultModelId = opts.defaultModelId;
+    // Only register an evictor when we own a supervisor. External-URL
+    // mode targets an sd-server the user runs themselves; we don't
+    // get to stop their process.
+    if (opts.arbiter && opts.supervisor) {
+      this.arbiter = opts.arbiter;
+      this.arbiter.registerEvictor('image', () => opts.supervisor!.stop());
+    }
+  }
+
+  async generate(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
+    if (input.signal?.aborted) throw new ImageGenerationCancelledError();
+    // One render at a time: sd-server holds one model and renders serially,
+    // and cancelling a running render stops the engine, which must never
+    // take a second caller's render down with it. Each caller waits for
+    // every earlier caller, including one that left the queue early.
+    const previous = this.renderTail;
+    let release!: () => void;
+    const mine = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.renderTail = previous.then(() => mine);
+    const waiting = this.pendingRenders++ > 0;
+    try {
+      if (waiting) {
+        emitProgress(input, { phase: 'queued', step: 0, totalSteps: 0 });
+        await untilTurn(previous, input.signal);
+      }
+      return this.supervisor
+        ? await this.supervisor.withRequest(() => this.generateInner(input), input.signal)
+        : await this.generateInner(input);
+    } catch (err) {
+      if (input.signal?.aborted && !(err instanceof ImageGenerationCancelledError)) {
+        throw new ImageGenerationCancelledError();
+      }
+      throw err;
+    } finally {
+      this.pendingRenders--;
+      release();
+    }
+  }
+
+  private async generateInner(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
+    const { signal } = input;
+    if (signal?.aborted) throw new ImageGenerationCancelledError();
+    const modelId = input.model ?? (await this.resolveDefaultModelId());
+    const defaultDimension = imageModelDefaultSide(modelId);
+    const width = input.width ?? defaultDimension;
+    const height = input.height ?? defaultDimension;
+    const steps = input.steps ?? (await this.defaultSampleSteps(modelId));
+    const seed = input.seed ?? Math.floor(Math.random() * 2_147_483_647);
+    const started = Date.now();
+    log.info(
+      `[sd-cpp] generate model=${modelId ?? 'default'} steps=${steps} explicitSteps=${input.steps !== undefined} size=${width}x${height}`,
+    );
+
+    // Model selection: sd-server serves one model per process. When a
+    // request targets a different installed model than the one currently
+    // loaded, point resolveLaunch at it (via the shared launchState) and
+    // stop the running server so the next ensureRunning relaunches with
+    // the requested model — instead of always serving whichever model
+    // sorts first. A no-op on the first generate (nothing running yet).
+    if (this.supervisor && this.launchState && modelId && this.launchState.modelId !== modelId) {
+      this.launchState.modelId = modelId;
+      await this.supervisor.stop();
+    }
+
+    // A render the caller abandons keeps running inside sd-server, which
+    // cannot interrupt one it has started, so cancelling stops the engine.
+    const request = new AbortController();
+    const stopRender = () => {
+      request.abort();
+      if (this.supervisor) void this.supervisor.stop().catch(() => {});
+    };
+    signal?.addEventListener('abort', stopRender, { once: true });
+
+    let baseUrl = this.baseUrl;
+    // Engine log lines drive progress (sd-server's `|==> | 3/20 - 18.20s/it`
+    // bars) and explain a failed render. Only meaningful when we own the
+    // supervisor (external-URL mode has no log stream).
+    const recentLines: string[] = [];
+    let unsubscribeLogs: (() => void) | undefined;
+    if (this.supervisor) {
+      const track = input.onProgress ? progressTracker((p) => emitProgress(input, p)) : undefined;
+      unsubscribeLogs = this.supervisor.subscribeLogLines((line) => {
+        recentLines.push(line);
+        if (recentLines.length > RECENT_ENGINE_LINES) recentLines.shift();
+        track?.(line);
+      });
+    }
+    let releaseGpu: (() => void) | undefined;
+    let timeout: ReturnType<typeof createAwakeTimeout> | undefined;
+    try {
+      if (this.supervisor) {
+        // Acquire the GPU slot BEFORE asking the supervisor to start.
+        // In `swap` policy this evicts a running llama-server so its
+        // VRAM is freed by the time sd-server tries to load weights.
+        // In `coexist` policy the call returns immediately. The arbiter
+        // is only set on the supervised path (see constructor).
+        if (this.arbiter) releaseGpu = await this.arbiter.acquireLease('image');
+        if (!this.supervisor.currentBaseUrl()) {
+          emitProgress(input, { phase: 'loading_model', step: 0, totalSteps: 0 });
+        }
+        const launch = await this.supervisor.ensureRunning();
+        baseUrl = launch.baseUrl.replace(/\/+$/, '');
+      }
+      if (signal?.aborted) throw new ImageGenerationCancelledError();
+
+      // Drive sd-server's A1111-compatible endpoints (`/sdapi/v1/txt2img`
+      // and `/sdapi/v1/img2img`). Unlike the OpenAI `/v1/images/*` shape
+      // — which reads only prompt/n/size and takes steps/seed/cfg from the
+      // server's launch defaults — these honor per-request `steps`,
+      // `seed`, `cfg_scale`, and `negative_prompt`, so caller overrides
+      // actually take effect. `cfg_scale` is set per model (distilled /
+      // Flux-flow models need CFG 1; others inherit the server default).
+      const cfg = modelId ? MODEL_CFG_DEFAULTS.get(modelId) : undefined;
+      let inputImages = input.inputImages ?? [];
+      // Capability gate: models whose architecture doesn't honor init
+      // latents on the pinned sd-server fall back to txt2img instead of
+      // silently producing an "edit" that never saw the source. The skip
+      // is reported on meta so every caller (route, MCP tool, chat
+      // bubble) can say so honestly.
+      let img2imgSkippedReason: string | undefined;
+      if (inputImages.length > 0) {
+        const installed = await this.readInstalledManifestFields(modelId);
+        const verdict = resolveImg2ImgSupport({
+          modelId,
+          explicit: installed?.supportsImg2Img,
+          weightsKind: installed?.weightsKind,
+        });
+        if (!verdict.supported) {
+          img2imgSkippedReason = verdict.reason ?? 'model does not support image editing (img2img)';
+          log.info(
+            `[sd-cpp] dropping ${inputImages.length} input image(s): ${img2imgSkippedReason}`,
+          );
+          inputImages = [];
+        }
+      }
+      const body: Record<string, unknown> = {
+        prompt: input.prompt,
+        negative_prompt: input.negativePrompt ?? '',
+        width,
+        height,
+        steps,
+        seed,
+        batch_size: 1,
+      };
+      if (cfg !== undefined) body.cfg_scale = cfg;
+      const sampler = modelId ? MODEL_SAMPLER_DEFAULTS.get(modelId) : undefined;
+      if (sampler) body.sampler_name = sampler;
+      let endpoint = `${baseUrl}/sdapi/v1/txt2img`;
+      // Img2img: a single source image drives `/sdapi/v1/img2img` via
+      // `init_images` (base64). stable-diffusion.cpp's img2img path takes
+      // one image, so we use the first and warn for any extras.
+      if (inputImages.length > 0) {
+        if (inputImages.length > 1) {
+          log.info(
+            `[sd-cpp] received ${inputImages.length} input images; img2img uses the first only`,
+          );
+        }
+        const first = inputImages[0]!;
+        body.init_images = [Buffer.from(first.data).toString('base64')];
+        if (typeof input.strength === 'number') body.denoising_strength = input.strength;
+        endpoint = `${baseUrl}/sdapi/v1/img2img`;
+      }
+
+      // The budget counts awake time only: a render that spans a laptop nap
+      // has not used the time the nap took.
+      timeout = createAwakeTimeout(this.timeoutMs);
+      const deadline = timeout.signal;
+      deadline.addEventListener('abort', stopRender, { once: true });
+      let res: Response;
+      try {
+        res = await this.fetchImpl(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: request.signal,
+        });
+      } catch (err) {
+        if (signal?.aborted) throw new ImageGenerationCancelledError();
+        if (deadline.aborted) {
+          throw new Error(`sd-server did not respond within ${this.timeoutMs / 1000}s`);
+        }
+        throw new Error(
+          `sd-server unreachable at ${baseUrl}. Is the image engine enabled in Settings? (${err instanceof Error ? err.message : String(err)})`,
+        );
+      }
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        const shortfall = recentLines.find((line) => ENGINE_MEMORY_SHORTFALL.test(line));
+        if (shortfall) {
+          // The engine keeps the weights it loaded; stop it so the next
+          // launch is admitted against what is actually free.
+          if (this.supervisor) await this.supervisor.stop().catch(() => {});
+          throw new ImageCapacityError(
+            shortfall
+              .replace(/^\[[^\]]+\]\s*/, '')
+              .trim()
+              .slice(0, 200),
+          );
+        }
+        throw new Error(
+          `sd-server returned ${res.status} ${res.statusText}: ${text.slice(0, 300)}`,
+        );
+      }
+
+      // A1111 txt2img/img2img return `{ images: [<base64 PNG>], … }`.
+      const payload = (await res.json()) as { images?: string[] };
+      const b64 = payload.images?.[0];
+      if (!b64) throw new Error('sd-server response missing images[0]');
+      const png = Buffer.from(b64, 'base64');
+      // The engine rounds a size its network cannot take (SDXL to 64), so the
+      // picture's own header is the size the person got.
+      const rendered = readImageMeta(png);
+
+      return {
+        png,
+        meta: {
+          model: modelId ?? 'unknown',
+          seed,
+          steps,
+          widthPx: rendered?.width || width,
+          heightPx: rendered?.height || height,
+          durationMs: Date.now() - started,
+          ...(img2imgSkippedReason ? { img2imgSkippedReason } : {}),
+        },
+      };
+    } catch (err) {
+      if (signal?.aborted && !(err instanceof ImageGenerationCancelledError)) {
+        throw new ImageGenerationCancelledError();
+      }
+      throw err;
+    } finally {
+      timeout?.dispose();
+      signal?.removeEventListener('abort', stopRender);
+      this.supervisor?.markUsed();
+      unsubscribeLogs?.();
+      releaseGpu?.();
+    }
+  }
+
+  async listInstalledModels(): Promise<InstalledImageModelInfo[]> {
+    const entries = await listOverlayModelIds(this.storageRoots);
+    const out: InstalledImageModelInfo[] = [];
+    for (const id of entries) {
+      const root = await findModelRoot(this.storageRoots, id);
+      if (!root) continue;
+      const metaPath = join(root, id, 'manifest.json');
+      try {
+        const raw = await readFile(metaPath, 'utf8');
+        const parsed = JSON.parse(raw) as {
+          id?: string;
+          name?: string;
+          approxSizeBytes?: number;
+          installedAt?: string;
+          weightsKind?: 'checkpoint' | 'diffusion-model';
+          supportsImg2Img?: boolean;
+          fileSha256?: Record<string, string>;
+        };
+        if (!parsed.id || !parsed.name || !parsed.approxSizeBytes || !parsed.installedAt) continue;
+        if (!(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256))) {
+          continue;
+        }
+        out.push({
+          id: parsed.id,
+          name: parsed.name,
+          approxSizeBytes: parsed.approxSizeBytes,
+          installedAt: parsed.installedAt,
+          ...(parsed.weightsKind ? { weightsKind: parsed.weightsKind } : {}),
+          ...(typeof parsed.supportsImg2Img === 'boolean'
+            ? { supportsImg2Img: parsed.supportsImg2Img }
+            : {}),
+        });
+      } catch {
+        /* skip malformed entries */
+      }
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  }
+
+  async *pullModel(
+    id: string,
+    spec: ImageModelPullSpec,
+    signal?: AbortSignal,
+  ): AsyncIterable<ImageModelPullEvent> {
+    const itemDir = join(this.modelsRoot, id);
+    await mkdir(this.modelsRoot, { recursive: true });
+    await assertModelStorePathSafe(this.modelsRoot, itemDir);
+    await mkdir(itemDir, { recursive: true });
+    await assertModelStorePathSafe(this.modelsRoot, itemDir);
+
+    // Total bytes across the unet + every auxiliary file. Driving the UI
+    // progress bar from this aggregate keeps multi-file pulls visually
+    // identical to single-file ones.
+    const totalAllBytes =
+      spec.approxSizeBytes + spec.auxiliaryFiles.reduce((n, f) => n + f.approxSizeBytes, 0);
+    let writtenAll = 0;
+
+    const weightsFilename = extractFilename(spec.downloadUrl);
+    const weightsPath = join(itemDir, weightsFilename);
+
+    const downloadResult = yield* this.downloadFile({
+      url: spec.downloadUrl,
+      destPath: weightsPath,
+      expectedSha256: spec.sha256,
+      approxSizeBytes: spec.approxSizeBytes,
+      writtenSoFar: writtenAll,
+      totalAllBytes,
+      ...(signal ? { signal } : {}),
+    });
+    if (downloadResult.kind === 'error') {
+      yield { type: 'error', error: downloadResult.error };
+      yield { type: 'done', id };
+      return;
+    }
+    writtenAll = downloadResult.writtenAll;
+    const weightsActualSize = downloadResult.actualSize;
+
+    // Auxiliary files (VAE / clip_l / clip_g / t5xxl). Streamed sequentially
+    // so we don't fight the host's bandwidth across N parallel HF connections.
+    const auxiliaryRecords: Array<{ role: string; filename: string }> = [];
+    for (const aux of spec.auxiliaryFiles) {
+      const auxFilename = auxFilenameFor(aux);
+      const auxPath = join(itemDir, auxFilename);
+      const auxResult = yield* this.downloadFile({
+        url: aux.downloadUrl,
+        destPath: auxPath,
+        expectedSha256: aux.sha256,
+        approxSizeBytes: aux.approxSizeBytes,
+        writtenSoFar: writtenAll,
+        totalAllBytes,
+        ...(signal ? { signal } : {}),
+      });
+      if (auxResult.kind === 'error') {
+        yield { type: 'error', error: `${aux.role}: ${auxResult.error}` };
+        yield { type: 'done', id };
+        return;
+      }
+      writtenAll = auxResult.writtenAll;
+      auxiliaryRecords.push({ role: aux.role, filename: auxFilename });
+    }
+
+    const fileSha256 = await hashModelPayloadFiles(itemDir);
+    await writeFile(
+      join(itemDir, 'manifest.json'),
+      JSON.stringify(
+        {
+          id,
+          name: spec.name,
+          approxSizeBytes: totalAllBytes,
+          weightsFilename,
+          weightsKind: spec.weightsKind,
+          ...(spec.supportsImg2Img !== undefined ? { supportsImg2Img: spec.supportsImg2Img } : {}),
+          weightsSizeBytes: weightsActualSize,
+          sha256: spec.sha256.toLowerCase(),
+          auxiliaryFiles: auxiliaryRecords,
+          fileSha256,
+          installedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+    await makeSharedModelReadable(itemDir);
+
+    yield { type: 'progress', bytesWritten: writtenAll, totalBytes: totalAllBytes };
+    yield { type: 'done', id };
+  }
+
+  /**
+   * Stream a single URL to disk with sha256 verification, reporting cumulative
+   * progress against `totalAllBytes` so multi-file pulls share one bar.
+   *
+   * Delegates the network plumbing to `downloadWithRetry` — that handles
+   * Range-based resume, exponential backoff, chunk-stall timeouts, and
+   * friendly error messages. This wrapper only owns the
+   * provider-specific concerns: sha256 verification, the
+   * `writtenSoFar`-aware progress translation, and the atomic rename
+   * after verify.
+   */
+  private async *downloadFile(opts: {
+    url: string;
+    destPath: string;
+    expectedSha256: string;
+    approxSizeBytes: number;
+    writtenSoFar: number;
+    totalAllBytes: number;
+    signal?: AbortSignal;
+  }): AsyncGenerator<
+    ImageModelPullEvent,
+    { kind: 'ok'; writtenAll: number; actualSize: number } | { kind: 'error'; error: string }
+  > {
+    const { url, destPath, expectedSha256, approxSizeBytes, totalAllBytes, signal } = opts;
+    const baseWritten = opts.writtenSoFar;
+
+    const gen = downloadWithRetry({
+      url,
+      destPath,
+      approxSizeBytes,
+      fetchImpl: this.fetchImpl,
+      ...(signal ? { signal } : {}),
+    });
+    let writtenThisFile = 0;
+    while (true) {
+      const next = await gen.next();
+      if (next.done) {
+        if (next.value.kind === 'ok') {
+          writtenThisFile = next.value.bytesWritten;
+          break;
+        }
+        if (next.value.kind === 'aborted') {
+          // Leave .partial in place so a follow-up pull resumes.
+          return { kind: 'error', error: 'download aborted' };
+        }
+        return { kind: 'error', error: next.value.error };
+      }
+      const ev = next.value;
+      if (ev.type === 'progress') {
+        // Reproject per-file progress onto the multi-file aggregate.
+        writtenThisFile = ev.bytesWritten;
+        yield {
+          type: 'progress',
+          bytesWritten: baseWritten + ev.bytesWritten,
+          totalBytes: totalAllBytes,
+        };
+      } else if (ev.type === 'retrying') {
+        yield {
+          type: 'retrying',
+          attempt: ev.attempt,
+          maxAttempts: ev.maxAttempts,
+          delayMs: ev.delayMs,
+          reason: ev.reason,
+        };
+      }
+    }
+
+    // sha256 check — stream the .partial through the hasher rather than
+    // hashing while we write. Slightly more disk I/O on success, but it
+    // means the hasher stays correct across resume (Range requests
+    // would otherwise corrupt a per-chunk hasher with mid-file resumed
+    // bytes).
+    const partialPath = `${destPath}.partial`;
+    const hasher = createHash('sha256');
+    await new Promise<void>((resolve, reject) => {
+      // Big read buffer so the hash doesn't starve in the busy daemon event
+      // loop. See MODEL_HASH_READ_BUFFER_BYTES.
+      const stream = createReadStream(partialPath, {
+        highWaterMark: MODEL_HASH_READ_BUFFER_BYTES,
+      });
+      stream.on('data', (chunk) => hasher.update(chunk));
+      stream.on('end', () => resolve());
+      stream.on('error', reject);
+    });
+    const actual = hasher.digest('hex');
+    if (actual !== expectedSha256.toLowerCase()) {
+      await rm(partialPath, { force: true });
+      return {
+        kind: 'error',
+        error: `sha256 mismatch: expected ${expectedSha256}, got ${actual}`,
+      };
+    }
+
+    await rm(destPath, { force: true });
+    await rename(partialPath, destPath);
+    return { kind: 'ok', writtenAll: baseWritten + writtenThisFile, actualSize: writtenThisFile };
+  }
+
+  async deleteModel(id: string): Promise<void> {
+    const itemDir = resolveModelDirectory(this.modelsRoot, id);
+    if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
+      throw readOnlyModelError(id);
+    }
+    await rm(itemDir, { recursive: true, force: true });
+  }
+
+  async health(): Promise<ImageEngineHealth> {
+    // The factory's default-loopback branch flips `configured: false` so
+    // we can return a distinct state instead of confusing the user with
+    // a generic "unreachable" — the engine isn't unreachable, it was
+    // never wired up. Without a binary or external URL, the provider
+    // points at 127.0.0.1:9081 by default; nothing's going to answer.
+    if (!this.configured) {
+      return {
+        status: 'not-configured',
+        baseUrl: this.baseUrl,
+        error:
+          'The image engine is not installed yet. Install it with `gezel native install` ' +
+          '(or from the desktop app), or set GEZEL_SD_SERVER_URL to a running sd-server.',
+      };
+    }
+
+    // When a supervisor is wired the engine is "configured but lazy" —
+    // the binary will spawn on the first generate. We could call
+    // ensureRunning() here, but probing eagerly defeats the lazy-start
+    // pattern and would cost a cold-start every time the user opens
+    // Settings. Surface ok and rely on the supervisor's internal
+    // health-watch.
+    if (this.supervisor) {
+      return { status: 'ok', baseUrl: this.baseUrl };
+    }
+
+    // Probe the configured URL with a short HEAD-style fetch. Most
+    // sd-server builds answer the root with a quick 404; what we care
+    // about is whether anything's listening at all. A network-level
+    // throw (ECONNREFUSED) is the unreachable signal.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2000);
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}/`, {
+        method: 'GET',
+        signal: ctrl.signal,
+      });
+      // Any HTTP response — 200, 404, 405 — proves something is listening.
+      void res.body?.cancel?.().catch(() => {});
+      return { status: 'ok', baseUrl: this.baseUrl };
+    } catch (err) {
+      const message = ctrl.signal.aborted
+        ? `sd-server did not respond within 2s at ${this.baseUrl}`
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      return {
+        status: 'unreachable',
+        baseUrl: this.baseUrl,
+        error: message,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async shutdown(): Promise<void> {
+    await this.supervisor?.stop();
+  }
+
+  /**
+   * The configured default when it is installed, else the first installed
+   * model id, else undefined. Stable ordering matches
+   * {@link listInstalledModels} so the default is deterministic.
+   */
+  async resolveDefaultModelId(): Promise<string | undefined> {
+    const models = await this.listInstalledModels();
+    if (this.defaultModelId && models.some((m) => m.id === this.defaultModelId)) {
+      return this.defaultModelId;
+    }
+    return models[0]?.id;
+  }
+
+  private async defaultSampleSteps(modelId: string | undefined): Promise<number> {
+    if (!modelId) return DEFAULT_SAMPLE_STEPS;
+    const fields = await this.readInstalledManifestFields(modelId);
+    if (
+      typeof fields?.recommendedSteps === 'number' &&
+      Number.isInteger(fields.recommendedSteps) &&
+      fields.recommendedSteps > 0
+    ) {
+      return fields.recommendedSteps;
+    }
+    return MODEL_SAMPLE_STEP_DEFAULTS.get(modelId) ?? DEFAULT_SAMPLE_STEPS;
+  }
+
+  /**
+   * Read the installed `manifest.json` fields that steer per-model
+   * behavior. Returns null for unknown ids and unreadable/legacy
+   * metadata — callers fall back to their per-field defaults. (Older
+   * installed metadata did not persist catalog generation defaults or
+   * the img2img capability.)
+   */
+  private async readInstalledManifestFields(modelId: string | undefined): Promise<{
+    recommendedSteps?: number;
+    weightsKind?: 'checkpoint' | 'diffusion-model';
+    supportsImg2Img?: boolean;
+  } | null> {
+    if (!modelId) return null;
+    try {
+      const root = await findModelRoot(this.storageRoots, modelId);
+      if (!root) return null;
+      const raw = await readFile(join(root, modelId, 'manifest.json'), 'utf8');
+      const parsed = JSON.parse(raw) as {
+        recommendedSteps?: unknown;
+        weightsKind?: unknown;
+        supportsImg2Img?: unknown;
+      };
+      return {
+        ...(typeof parsed.recommendedSteps === 'number'
+          ? { recommendedSteps: parsed.recommendedSteps }
+          : {}),
+        ...(parsed.weightsKind === 'checkpoint' || parsed.weightsKind === 'diffusion-model'
+          ? { weightsKind: parsed.weightsKind }
+          : {}),
+        ...(typeof parsed.supportsImg2Img === 'boolean'
+          ? { supportsImg2Img: parsed.supportsImg2Img }
+          : {}),
+      };
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * Parse a single line of sd-server's sampling progress output. The
+ * upstream stable-diffusion.cpp server prints lines shaped like:
+ *
+ *     |==>                                               | 1/20 - 18.20s/it
+ *     |====>                                             | 2/25 - 7.18it/s
+ *
+ * sometimes with a leading log prefix from our supervisor ("[sd-server] ").
+ * The rate flips to `it/s` once a step takes under a second, which on a
+ * fast GPU is every step of a turbo or SD 1.5 render. Returns the extracted
+ * step / total / per-step seconds when the line matches; otherwise null.
+ * Anchored on the fraction-with-suffix shape (`N/M - X.Ys/it`) so unrelated
+ * log noise, including the `MB/s` weight-load bar, can never trip a false
+ * match.
+ */
+/** Engine lines kept while a render runs, to explain a failure. */
+const RECENT_ENGINE_LINES = 40;
+
+/**
+ * sd-server's report that the render did not fit in graphics memory. It
+ * answers the request with a bare `generate_image returned no results`.
+ */
+const ENGINE_MEMORY_SHORTFALL =
+  /cannot make enough memory available|out of (?:device )?memory|ErrorOutOfDeviceMemory|failed to allocate/i;
+
+function emitProgress(input: ImageGenerationInput, progress: ImageGenerationProgress): void {
+  try {
+    input.onProgress?.(progress);
+  } catch {
+    /* listener errors are not load-bearing — drop silently */
+  }
+}
+
+/** Resolve when `previous` settles, or reject when `signal` aborts first. */
+function untilTurn(previous: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return previous;
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(new ImageGenerationCancelledError());
+    if (signal.aborted) return onAbort();
+    signal.addEventListener('abort', onAbort, { once: true });
+    void previous.then(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    });
+  });
+}
+
+/**
+ * Parse one line of sd-server's weight-load bar, which it prints inside the
+ * first request after a launch because it loads weights lazily:
+ *
+ *     |#########                                         | 49/298 - 435.57MB/s
+ */
+export function parseWeightLoadProgress(line: string): ImageGenerationProgress | null {
+  const m = line.match(/(\d+)\s*\/\s*(\d+)\s*-\s*[\d.]+\s*(?:[KMG]?B)\/s/);
+  if (!m) return null;
+  const step = Number.parseInt(m[1]!, 10);
+  const totalSteps = Number.parseInt(m[2]!, 10);
+  if (!Number.isFinite(step) || !Number.isFinite(totalSteps) || totalSteps <= 0) return null;
+  return { phase: 'loading_model', step, totalSteps };
+}
+
+/**
+ * Classify sd-server's progress bars into phases. Weight loads print a
+ * bytes-per-second bar. The first iteration bar is sampling; once it
+ * completes, the next is the tiled VAE decode, which reports tiles rather
+ * than steps. The step count the engine prints is used rather than the one
+ * requested, because some launch defaults override a request's steps.
+ */
+export function progressTracker(
+  emit: (progress: ImageGenerationProgress) => void,
+): (line: string) => void {
+  let sampling = false;
+  let sampled = false;
+  return (line) => {
+    const load = parseWeightLoadProgress(line);
+    // The VAE's weights load lazily just before decoding; reporting that
+    // as loading the model would send the progress back a phase.
+    if (load) return sampling ? undefined : emit(load);
+    const bar = parseSamplingProgress(line);
+    if (!bar) return;
+    sampling = true;
+    emit({ ...bar, phase: sampled ? 'decoding' : 'sampling' });
+    if (!sampled && bar.step >= bar.totalSteps) sampled = true;
+  };
+}
+
+export function parseSamplingProgress(line: string): ImageGenerationProgress | null {
+  const m = line.match(/(\d+)\s*\/\s*(\d+)\s*-\s*([\d.]+)(s\/it|it\/s)/);
+  if (!m) return null;
+  const step = Number.parseInt(m[1]!, 10);
+  const totalSteps = Number.parseInt(m[2]!, 10);
+  const rate = Number.parseFloat(m[3]!);
+  if (!Number.isFinite(step) || !Number.isFinite(totalSteps) || totalSteps <= 0) return null;
+  const out: ImageGenerationProgress = { step, totalSteps };
+  const secondsPerStep = m[4] === 'it/s' ? 1 / rate : rate;
+  if (Number.isFinite(secondsPerStep) && secondsPerStep > 0) out.secondsPerStep = secondsPerStep;
+  return out;
+}
+
+function extractFilename(url: string): string {
+  try {
+    const u = new URL(url);
+    const last = u.pathname.split('/').filter(Boolean).pop();
+    return last && last.length > 0 ? last : 'weights.bin';
+  } catch {
+    return 'weights.bin';
+  }
+}
+
+/**
+ * Filename used on disk for an auxiliary file. We want a deterministic
+ * `<role>.<ext>` shape (e.g. `vae.safetensors`) so the supervisor can build
+ * launch args without re-hitting the HF URL — but we still respect the
+ * upstream file extension so the engine sniffs the right format.
+ */
+function auxFilenameFor(aux: ImageModelAuxiliaryPullSpec): string {
+  const upstream = extractFilename(aux.downloadUrl);
+  const dot = upstream.lastIndexOf('.');
+  const ext = dot > 0 ? upstream.slice(dot) : '';
+  return `${aux.role}${ext}`;
+}
+
+// Local type to describe what Node's fetch returns — avoids importing dom types.
+interface ReadableStream<T> {
+  getReader(): {
+    read(): Promise<{ value: T | undefined; done: boolean }>;
+  };
+}

@@ -458,7 +458,7 @@ describe('ProjectsView', () => {
     const roster = await screen.findByRole('region', { name: 'Assigned gezellen' });
     expect(within(roster).getAllByRole('listitem')).toHaveLength(2);
     expect(within(roster).getByText('Tomas')).toBeInTheDocument();
-    expect(within(roster).getByText('⭐ voorman')).toBeInTheDocument();
+    expect(within(roster).getByText('⭐ crew lead')).toBeInTheDocument();
     expect(within(roster).getByText('Yusuf')).toBeInTheDocument();
     expect(within(roster).getByText('Developer')).toBeInTheDocument();
   });
@@ -1194,7 +1194,7 @@ describe('ProjectsView', () => {
     );
   });
 
-  it('shows workspace indexing issues and toggles the Boekwachter results pane', async () => {
+  it('shows workspace indexing issues and toggles the index results pane', async () => {
     const editableProject = {
       id: 'pj-alpha',
       ...CODE_TYPE,
@@ -1276,12 +1276,12 @@ describe('ProjectsView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'audit.md' }));
     const toggle = await screen.findByRole('button', {
-      name: 'Show Boekwachter index pane, 1 issue in this file',
+      name: 'Show index pane, 1 issue in this file',
     });
     expect(toggle.closest('[data-testid="editor-toolbar-right"]')).not.toBeNull();
     fireEvent.click(toggle);
 
-    const pane = await screen.findByRole('complementary', { name: 'Boekwachter index results' });
+    const pane = await screen.findByRole('complementary', { name: 'Index results' });
     expect(within(pane).getByText('8')).toBeInTheDocument();
     expect(
       within(pane).getByText('Clear and useful, with one actionable omission.'),
@@ -1320,12 +1320,12 @@ describe('ProjectsView', () => {
       expect(editorMocks.focus).toHaveBeenCalled();
     });
 
-    fireEvent.click(within(pane).getByRole('button', { name: 'Close Boekwachter index pane' }));
-    expect(screen.queryByRole('complementary', { name: 'Boekwachter index results' })).toBeNull();
+    fireEvent.click(within(pane).getByRole('button', { name: 'Close index pane' }));
+    expect(screen.queryByRole('complementary', { name: 'Index results' })).toBeNull();
 
     fireEvent.click(toggle);
     const reopenedPane = await screen.findByRole('complementary', {
-      name: 'Boekwachter index results',
+      name: 'Index results',
     });
     fireEvent.click(within(reopenedPane).getByRole('button', { name: 'Fix' }));
     const dialog = await screen.findByRole('dialog');
@@ -1527,7 +1527,7 @@ describe('ProjectsView', () => {
     ]);
   });
 
-  it('opens the file with the Boekwachter pane when a triage row badge is clicked', async () => {
+  it('opens the file with the index pane when a triage row badge is clicked', async () => {
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
       ...CODE_TYPE,
@@ -1585,7 +1585,7 @@ describe('ProjectsView', () => {
     const badge = await screen.findByText('1 major · 1 minor');
     fireEvent.click(badge);
 
-    const pane = await screen.findByRole('complementary', { name: 'Boekwachter index results' });
+    const pane = await screen.findByRole('complementary', { name: 'Index results' });
     expect(
       await within(pane).findByText('Clear and useful, with one actionable omission.'),
     ).toBeInTheDocument();
@@ -1966,7 +1966,7 @@ describe('ProjectsView', () => {
     expect(within(tray).queryByRole('radio', { name: 'Files by criticality' })).toBeNull();
   });
 
-  it('offers a Boekwachter fix when Codex Edit can write past the scoped workspace gate', async () => {
+  it('offers a tracked-issue fix when Codex Edit can write past the scoped workspace gate', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({ provider: 'codex-cli' } as never);
     vi.mocked(api.getProject).mockResolvedValue({
       id: 'pj-alpha',
@@ -2035,11 +2035,11 @@ describe('ProjectsView', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'audit.md' }));
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'Show Boekwachter index pane, 1 issue in this file',
+        name: 'Show index pane, 1 issue in this file',
       }),
     );
 
-    const pane = await screen.findByRole('complementary', { name: 'Boekwachter index results' });
+    const pane = await screen.findByRole('complementary', { name: 'Index results' });
     const codexModeSelect = screen
       .getAllByTestId('mock-select')
       .find((select) => within(select).queryByRole('option', { name: 'Plan' }));

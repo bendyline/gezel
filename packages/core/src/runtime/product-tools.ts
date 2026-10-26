@@ -20,6 +20,7 @@ import type { ScriptScope } from '../schemas/script.js';
 import type { ChatSession } from '../schemas/session.js';
 import { type CreateTaskRequest, CreateTaskRequestSchema, parseTaskRef } from '../schemas/task.js';
 import { inferScriptScope } from '../scripts/errors.js';
+import { taskSurfaceSteps } from '../task-strategy.js';
 import { roleHasTeamScope, roleToolNames } from '../tools/access.js';
 import { describeToolArgumentError } from '../tools/argument-errors.js';
 import {
@@ -255,7 +256,7 @@ export async function portableToolSurface(
     // tells the model to call stays callable.
     const kit =
       task.executionMode === 'generalist'
-        ? unionStepKit(step, task.craftbook.steps)
+        ? unionStepKit(step, taskSurfaceSteps(task.craftbook))
         : stepToolKit(step);
     if (kit) {
       const keep = new Set([

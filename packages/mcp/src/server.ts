@@ -25,6 +25,8 @@ import {
   MIN_TASK_DESCRIPTION_LENGTH,
   ManageTaskInputSchema,
   MessageGezelInputSchema,
+  OUTCOME_TEAMMATE_SLUGS,
+  type OutcomeTeammateSlug,
   ReadDocumentInputSchema,
   ReadTaskNotesInputSchema,
   ReplaceInFileInputSchema,
@@ -43,23 +45,18 @@ import {
   WriteTaskNoteInputSchema,
   craftbookInputParams,
   fillProjectTypeParams,
-  findGezelInRoster,
-  findProjectByReference,
   formatMediaClock,
   gezelNamesInUse,
-  gezelNotFoundMessage,
-  gezelRosterHint,
   isAnswerEnvelope,
   isOrdinalWorkOptionId,
   matchProjectTypeForBrief,
   normalizeArtifactPath,
   parseWorkOptionId,
+  plainRoleTitle,
   projectNameFromRequest,
-  projectNotFoundMessage,
   projectTypeNamedByBrief,
   projectTypesMentionedByBrief,
   renderSuggestWorkResult,
-  roleWithGloss,
   routingRequestText,
 } from '@bendyline/gezel';
 /**
@@ -142,7 +139,6 @@ import {
   inferScriptScope,
   isOwnerStep,
   isReservedShadowArtifactPath,
-  isSafeEntityId,
   isTrustedConstrainedToolset,
   listArtifactsText,
   listDirMissingText,
@@ -227,6 +223,7 @@ import {
   isBinaryDocumentOutputPath,
   normalizeDocumentOutputPath,
 } from './document-routing.js';
+import { createEntityResolvers } from './entity-resolvers.js';
 import { normalizeGenerateImageToolArgs } from './generate-image-normalization.js';
 import { registerGitHubTools } from './github-tools.js';
 import {
@@ -282,7 +279,6 @@ import {
   retargetGateLayers,
 } from './solo-loop-policy.js';
 import { validateSourceContent } from './source-validation.js';
-import { resolveTaskRef } from './task-ref.js';
 import {
   sessionReboundToCurrentPass,
   staleTaskStepRefusal,
@@ -371,6 +367,11 @@ const sessionTaskNamingMode = {
 // the task tools default to / recover toward the current task when the
 // model omits or mangles the ref. Empty for lobby sessions.
 const sessionTaskRef = process.env.GEZEL_TASK_REF ?? '';
+// The task a teammate's helper session works for: its script runs are that
+// task's receipts, but the session is not a task session.
+const receiptTaskRef = sessionTaskRef || (process.env.GEZEL_RECEIPT_TASK_REF ?? '');
+// The owner of an outcome task reaches teammates through the task's route.
+const taskTeammates = process.env.GEZEL_TASK_TEAMMATES === '1';
 // The craftbook TEMPLATE this session is scoped to (`record.craftbookRef`),
 // if any — set when the explicit Craftbook editor opens an AI-assist
 // session. Lets the unified craftbook_* tools default their target to the
@@ -404,6 +405,11 @@ const fetchImpl: typeof fetch =
   (certPath ? createTrustingFetch({ cert: readFileSync(certPath, 'utf8') }) : createPatientFetch());
 
 const api = new GezelClient({ baseUrl, token, fetch: fetchImpl });
+const { resolveProjectId, resolveGezelId, availableGezelsHint, parseRef } = createEntityResolvers({
+  api,
+  projectId,
+  sessionTaskRef,
+});
 
 /**
  * A random first name no gezel on the install has yet. A failed roster read
@@ -644,10 +650,17 @@ function draftEditApi(client: GezelClient, packId: string): WorkspaceEditApi {
  */
 const sessionTaskArtifactDir = (process.env.GEZEL_TASK_ARTIFACT_DIR ?? '').replace(/\/+$/, '');
 
+/** The path, normalized, when it falls in this session's task folder. */
+function sessionTaskArtifactPath(path: string): string | null {
+  if (!sessionTaskArtifactDir) return null;
+  const p = path.replace(/\\/g, '/').replace(/^\.\//, '');
+  return p === sessionTaskArtifactDir || p.startsWith(`${sessionTaskArtifactDir}/`) ? p : null;
+}
+
 function assertNotTaskArtifactNamespace(target: ConcreteWorkspaceTarget): void {
-  if (!sessionTaskArtifactDir || target.kind !== 'current') return;
-  const p = target.path.replace(/\\/g, '/').replace(/^\.\//, '');
-  if (p === sessionTaskArtifactDir || p.startsWith(`${sessionTaskArtifactDir}/`)) {
+  if (target.kind !== 'current') return;
+  const p = sessionTaskArtifactPath(target.path);
+  if (p) {
     throw new Error(
       `\`${p}\` is this task's working folder in the ARTIFACTS DRAWER, not the project workspace. Write it with \`write_artifact({ path: ${JSON.stringify(p)}, ... })\` and read it back with \`read_artifact\` — the workspace file tools cannot reach the drawer.`,
     );
@@ -2206,6 +2219,20 @@ server.tool(
   async ({ path, content }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
+    // A whole-file write into this task's folder can only mean the drawer
+    // copy. Refusing it taught nothing: Qwen 3.8 27B repeated the same
+    // write_file ten times past an error naming write_artifact, and the
+    // step paused (refactor-module, 2026-10-25). Edit tools keep the
+    // refusal, since the drawer has no partial-edit equivalent.
+    const drawerPath = sessionTaskArtifactPath(path);
+    if (drawerPath && toolIsAuthorizedForThisSession('write_artifact')) {
+      const written = await writeArtifactToolCall({ path: drawerPath, content });
+      const notice = `[Rerouted write_file → write_artifact]\n${JSON.stringify(drawerPath)} is this task's working folder in the artifacts drawer, so it was written there. Use write_artifact and read_artifact for files in this folder.`;
+      return {
+        ...written,
+        content: [{ type: 'text' as const, text: notice }, ...written.content],
+      };
+    }
     const raster = rasterImageWriteRefusal(path);
     if (raster) return raster;
     const scoped = await taskScopedWriteRefusal(path, 'workspace');
@@ -2980,7 +3007,7 @@ server.tool(
         ...(sessionId ? { sessionId } : {}),
         // Receipt attribution for commandEvidence gates — env-derived, so a
         // model cannot stamp another step's receipt.
-        ...(sessionTaskRef ? { taskRef: sessionTaskRef } : {}),
+        ...(receiptTaskRef ? { taskRef: receiptTaskRef } : {}),
         ...(sessionStepId ? { stepId: sessionStepId } : {}),
       });
       return commandToolResult(`npm run ${script}`, res);
@@ -3011,7 +3038,7 @@ server.tool(
         ...(timeoutMs ? { timeoutMs } : {}),
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
-        ...(sessionTaskRef ? { taskRef: sessionTaskRef } : {}),
+        ...(receiptTaskRef ? { taskRef: receiptTaskRef } : {}),
         ...(sessionStepId ? { stepId: sessionStepId } : {}),
       });
       return commandToolResult(`npx ${bin}`, res);
@@ -4085,149 +4112,161 @@ server.tool(
         "Bypass the workspace-collision and source-code-extension guards. Only set when you deliberately want to stash a code-looking file in artifacts (rare — a mock, a scratch experiment you're not shipping).",
       ),
   }).shape,
-  async ({ path, content: rawContent, jsonContent, force }) => {
-    const stale = await staleStepMutationResult();
-    if (stale) return stale;
-    const raster = rasterImageWriteRefusal(path);
-    if (raster) return raster;
-    const scoped = await taskScopedWriteRefusal(path, 'artifacts');
-    if (scoped) return scoped;
-    if ((rawContent === undefined) === (jsonContent === undefined)) {
-      return errorResult(
-        'Supply exactly one of content or jsonContent. Use jsonContent for a structured JSON report.',
-      );
-    }
-    const value = jsonContent ?? rawContent;
-    const content = typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`;
-    const clean = normalizeArtifactPath(path);
-    if (isReservedShadowArtifactPath(clean)) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: "artifacts/shadow/ is gezel's derived shadow-file cache (converted documents, image descriptions, transcripts), regenerated automatically by indexing — anything written there would be overwritten or swept. Write your artifact elsewhere, e.g. at the artifacts root or under reports/.",
-          },
-        ],
-        isError: true,
-      };
-    }
-    if (isProtectedConnectorArtifactPath(clean)) {
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: 'The artifacts/data directory contains read-only connector mirrors. Editing a synced record can cause permanent data loss because its cursor has already advanced. Write analysis elsewhere in artifacts, or use draft_connector_action to propose a source change for the user.',
-          },
-        ],
-        isError: true,
-      };
-    }
-    if (!force) {
-      const redirected = await redirectExpectedDeliverableWriteToWorkspace(
-        clean,
-        content,
-        'write_artifact',
-      );
-      if (redirected) return redirected;
-    }
-    const verdict = !force ? classifyArtifactPath(clean) : { ok: true as const };
-    if (!verdict.ok) {
-      const normalizedContent = normalizeWorkspaceWriteContent(clean, content);
-      const syntax = validateSourceContent(clean, normalizedContent);
-      if (syntax && !syntax.ok) {
-        return {
-          content: [{ type: 'text' as const, text: syntax.message }],
-          isError: true,
-        };
-      }
-      try {
-        await api.writeProjectWorkspaceFile(projectId, {
-          path: clean,
-          content: normalizedContent,
-          ...(gezelId ? { gezelId } : {}),
-          ...(sessionId ? { sessionId } : {}),
-        });
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Wrote ${clean} to the project workspace. Note: write_artifact is for scratch artifacts; use write_file directly for app/source deliverables.`,
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
-          isError: true,
-        };
-      }
-    }
-    if (!force) {
-      const workspaceCollision = await workspaceCollisionForArtifactPath(clean);
-      if (workspaceCollision) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Refusing write_artifact({ path: "${clean}", ... }) because a workspace ${workspaceCollision.kind} already exists at that path. write_artifact would create a side-drawer copy, not update the project. Use write_file if you have workspace write access, or hand off to a developer. Set force: true only if you intentionally want an artifact copy with the same path.`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    }
-    // Syntax-check HTML/JS/TS exactly like `write_file`. `force: true`
-    // bypasses the check (matching the extension-guard escape hatch):
-    // if the model deliberately wants to stash an in-progress/broken
-    // source-code file as a scratch note, force lets it.
-    if (!force) {
-      const syntax = validateSourceContent(clean, content);
-      if (syntax && !syntax.ok) {
-        return {
-          content: [{ type: 'text' as const, text: syntax.message }],
-          isError: true,
-        };
-      }
-    }
-    // Artifact writes are whole-file replacements. Reject malformed JSON
-    // before crossing the store boundary so a tool call cut off by a local
-    // model's output cap cannot replace the last complete ledger with a
-    // syntactically broken prefix. This is intentionally extension-scoped:
-    // scratch Markdown/source artifacts retain their existing validation and
-    // `force` semantics, while a `.json` artifact is never useful malformed.
-    if (clean.toLowerCase().endsWith('.json')) {
-      try {
-        JSON.parse(content);
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Refusing to replace ${clean}: the new content is not valid JSON (${err instanceof Error ? err.message : String(err)}). The previous artifact was left unchanged. Re-emit one complete valid JSON value; if it cannot fit in one tool call, split the deliverable or use a deterministic script to assemble it.`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    }
-    // normalizeMarkdown collapses single newlines inside non-fenced paragraphs into
-    // spaces — correct for prose .md, catastrophic for source code. An end-of-line
-    // `// comment` would eat the next statement when collapsed onto one line
-    // (observed corrupting inline JS in the tictactoe eval).
-    const stored = clean.endsWith('.md') ? normalizeMarkdown(content) : content;
-    await api.writeProjectArtifact(projectId, clean, stored, {
-      ...(gezelId ? { gezelId } : {}),
-      ...(sessionId ? { sessionId } : {}),
-    });
-    const completionHint =
-      sessionTaskRef && sessionStepId
-        ? artifactCompletionHint(sessionStepCompletion, {
-            checkedByStep: sessionStepCheckedArtifacts.includes(clean),
-          })
-        : '';
-    return { content: [{ type: 'text' as const, text: `Wrote ${clean}${completionHint}` }] };
-  },
+  (args) => writeArtifactToolCall(args),
 );
+
+async function writeArtifactToolCall({
+  path,
+  content: rawContent,
+  jsonContent,
+  force,
+}: {
+  path: string;
+  content?: string | Record<string, unknown> | unknown[] | undefined;
+  jsonContent?: unknown;
+  force?: boolean | undefined;
+}) {
+  const stale = await staleStepMutationResult();
+  if (stale) return stale;
+  const raster = rasterImageWriteRefusal(path);
+  if (raster) return raster;
+  const scoped = await taskScopedWriteRefusal(path, 'artifacts');
+  if (scoped) return scoped;
+  if ((rawContent === undefined) === (jsonContent === undefined)) {
+    return errorResult(
+      'Supply exactly one of content or jsonContent. Use jsonContent for a structured JSON report.',
+    );
+  }
+  const value = jsonContent ?? rawContent;
+  const content = typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`;
+  const clean = normalizeArtifactPath(path);
+  if (isReservedShadowArtifactPath(clean)) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: "artifacts/shadow/ is gezel's derived shadow-file cache (converted documents, image descriptions, transcripts), regenerated automatically by indexing — anything written there would be overwritten or swept. Write your artifact elsewhere, e.g. at the artifacts root or under reports/.",
+        },
+      ],
+      isError: true,
+    };
+  }
+  if (isProtectedConnectorArtifactPath(clean)) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: 'The artifacts/data directory contains read-only connector mirrors. Editing a synced record can cause permanent data loss because its cursor has already advanced. Write analysis elsewhere in artifacts, or use draft_connector_action to propose a source change for the user.',
+        },
+      ],
+      isError: true,
+    };
+  }
+  if (!force) {
+    const redirected = await redirectExpectedDeliverableWriteToWorkspace(
+      clean,
+      content,
+      'write_artifact',
+    );
+    if (redirected) return redirected;
+  }
+  const verdict = !force ? classifyArtifactPath(clean) : { ok: true as const };
+  if (!verdict.ok) {
+    const normalizedContent = normalizeWorkspaceWriteContent(clean, content);
+    const syntax = validateSourceContent(clean, normalizedContent);
+    if (syntax && !syntax.ok) {
+      return {
+        content: [{ type: 'text' as const, text: syntax.message }],
+        isError: true,
+      };
+    }
+    try {
+      await api.writeProjectWorkspaceFile(projectId, {
+        path: clean,
+        content: normalizedContent,
+        ...(gezelId ? { gezelId } : {}),
+        ...(sessionId ? { sessionId } : {}),
+      });
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Wrote ${clean} to the project workspace. Note: write_artifact is for scratch artifacts; use write_file directly for app/source deliverables.`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: explainWriteFailure(err) }],
+        isError: true,
+      };
+    }
+  }
+  if (!force) {
+    const workspaceCollision = await workspaceCollisionForArtifactPath(clean);
+    if (workspaceCollision) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Refusing write_artifact({ path: "${clean}", ... }) because a workspace ${workspaceCollision.kind} already exists at that path. write_artifact would create a side-drawer copy, not update the project. Use write_file if you have workspace write access, or hand off to a developer. Set force: true only if you intentionally want an artifact copy with the same path.`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+  // Syntax-check HTML/JS/TS exactly like `write_file`. `force: true`
+  // bypasses the check (matching the extension-guard escape hatch):
+  // if the model deliberately wants to stash an in-progress/broken
+  // source-code file as a scratch note, force lets it.
+  if (!force) {
+    const syntax = validateSourceContent(clean, content);
+    if (syntax && !syntax.ok) {
+      return {
+        content: [{ type: 'text' as const, text: syntax.message }],
+        isError: true,
+      };
+    }
+  }
+  // Artifact writes are whole-file replacements. Reject malformed JSON
+  // before crossing the store boundary so a tool call cut off by a local
+  // model's output cap cannot replace the last complete ledger with a
+  // syntactically broken prefix. This is intentionally extension-scoped:
+  // scratch Markdown/source artifacts retain their existing validation and
+  // `force` semantics, while a `.json` artifact is never useful malformed.
+  if (clean.toLowerCase().endsWith('.json')) {
+    try {
+      JSON.parse(content);
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Refusing to replace ${clean}: the new content is not valid JSON (${err instanceof Error ? err.message : String(err)}). The previous artifact was left unchanged. Re-emit one complete valid JSON value; if it cannot fit in one tool call, split the deliverable or use a deterministic script to assemble it.`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+  // normalizeMarkdown collapses single newlines inside non-fenced paragraphs into
+  // spaces — correct for prose .md, catastrophic for source code. An end-of-line
+  // `// comment` would eat the next statement when collapsed onto one line
+  // (observed corrupting inline JS in the tictactoe eval).
+  const stored = clean.endsWith('.md') ? normalizeMarkdown(content) : content;
+  await api.writeProjectArtifact(projectId, clean, stored, {
+    ...(gezelId ? { gezelId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+  });
+  const completionHint =
+    sessionTaskRef && sessionStepId
+      ? artifactCompletionHint(sessionStepCompletion, {
+          checkedByStep: sessionStepCheckedArtifacts.includes(clean),
+        })
+      : '';
+  return { content: [{ type: 'text' as const, text: `Wrote ${clean}${completionHint}` }] };
+}
 
 server.tool(
   'run_playwright_script',
@@ -4553,7 +4592,7 @@ server.tool(
 
 server.tool(
   'apply_project_type',
-  'Apply a custom project type to an EXISTING project — renders its about/mission, creates its gezel(s) and sets the voorman, installs its scripts, and seeds its workspace. Use this to retrofit a plain project into a typed one. To create a fresh typed project in one call, use start_project_from_type instead.',
+  'Apply a custom project type to an EXISTING project — renders its about/mission, creates its gezel(s) and sets the crew lead, installs its scripts, and seeds its workspace. Use this to retrofit a plain project into a typed one. To create a fresh typed project in one call, use start_project_from_type instead.',
   {
     typeId: z.string().describe('Project type id (from list_project_types).'),
     project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
@@ -4572,7 +4611,7 @@ server.tool(
       const gz = applied.gezelsCreated
         .map(
           (g) =>
-            `${g.name}${g.voorman ? ' (voorman)' : ''}${g.reused ? ' (already on the crew)' : ''}`,
+            `${g.name}${g.voorman ? ' (crew lead)' : ''}${g.reused ? ' (already on the crew)' : ''}`,
         )
         .join(', ');
       return {
@@ -4596,7 +4635,7 @@ server.tool(
 
 server.tool(
   'start_project_from_type',
-  'Create a fresh project from a custom project type in one call: makes the project, applies the type (its gezel becomes the voorman, its scripts/seed/dashboard are installed), and notifies the voorman to greet the user. Use when the user\'s goal matches a type from list_project_types (e.g. "I want to learn Spanish" → the language-trainer type). For a generic build of any size, use start_project.',
+  'Create a fresh project from a custom project type in one call: makes the project, applies the type (its gezel becomes the crew lead, its scripts/seed/dashboard are installed), and notifies the crew lead to greet the user. Use when the user\'s goal matches a type from list_project_types (e.g. "I want to learn Spanish" → the language-trainer type). For a generic build of any size, use start_project.',
   {
     name: z.string().describe('Project name, e.g. "Learn Spanish".'),
     typeId: z.string().describe('Project type id (from list_project_types).'),
@@ -4607,7 +4646,7 @@ server.tool(
     kickoffMessage: z
       .string()
       .optional()
-      .describe('Optional first message to send the voorman after setup.'),
+      .describe('Optional first message to send the crew lead after setup.'),
   },
   async ({ name, typeId, params, kickoffMessage }) => {
     let manifestName = typeId;
@@ -4640,14 +4679,14 @@ server.tool(
       if (voorman) {
         const text =
           kickoffMessage ??
-          `You're the voorman of the new "${name}" project (${manifestName}). Greet the user warmly, explain what you'll help with, and get them started.`;
+          `You're the crew lead of the new "${name}" project (${manifestName}). Greet the user warmly, explain what you'll help with, and get them started.`;
         await api.messageGezel(voorman.id, {
           fromGezelId: gezelId,
           ...(sessionId ? { fromSessionId: sessionId } : {}),
           projectId: project.id,
           text,
         });
-        voormanNote = ` ${voorman.name} is the voorman and will greet the user in the next turn.`;
+        voormanNote = ` ${voorman.name} is the crew lead and will greet the user in the next turn.`;
       }
       return {
         content: [
@@ -6118,7 +6157,7 @@ server.tool(
 
 server.tool(
   'export_task_craftbook',
-  "Promote a task's embedded craftbook into a reusable LOCAL craftbook template (the inverse of invoke_craftbook). Strips per-instance lifecycle state and mints a fresh template id. Use after the voorman has shaped a good craftbook on a task and you want to reuse it.",
+  "Promote a task's embedded craftbook into a reusable LOCAL craftbook template (the inverse of invoke_craftbook). Strips per-instance lifecycle state and mints a fresh template id. Use after the crew lead has shaped a good craftbook on a task and you want to reuse it.",
   {
     task: z.string().optional().describe('Task ref. Omit → session task.'),
     id: z.string().optional().describe('Preferred template id (slugified; deduped on collision).'),
@@ -6140,7 +6179,7 @@ server.tool(
 
 server.tool(
   'list_project_local_gezels',
-  "List this project's own gezels — the `@project` gezel derived from the workspace AGENTS.md/CLAUDE.md (the project's default voorman) plus any others defined in the workspace `.gezel/` folder. Address the canonical one as `@project` in ask_gezel / message_gezel. These never appear in the global list_gezels roster.",
+  "List this project's own gezels — the `@project` gezel derived from the workspace AGENTS.md/CLAUDE.md (the project's default crew lead) plus any others defined in the workspace `.gezel/` folder. Address the canonical one as `@project` in ask_gezel / message_gezel. These never appear in the global list_gezels roster.",
   {
     project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
   },
@@ -6568,7 +6607,7 @@ const ROLE_TO_JOB_TITLE: Record<z.infer<typeof SPECIALIST_ROLES>, string> = {
   writer: 'Copywriter',
   planner: 'Planner',
   reviewer: 'Reviewer',
-  voorman: 'Voorman',
+  voorman: 'Crew Lead',
   // Must match the `image-generator` template's role string verbatim
   // so the role-tool-filter map keys hit and the gezel gets the
   // `images` group. Display name renders as "Image Generator" in
@@ -6578,10 +6617,10 @@ const ROLE_TO_JOB_TITLE: Record<z.infer<typeof SPECIALIST_ROLES>, string> = {
 
 server.tool(
   'ask_specialist',
-  "Quick role-shaped consultation. Picks (or auto-creates) a gezel matching `role` and synchronously asks them `question` — their answer comes back as the tool result, ready to use inline within this turn. ONE call replaces the `ensure_gezel` → `ask_gezel` sequence. Use this for domain answers you need to keep working: 'researcher' for facts and prior art, 'designer' for visual / UX feedback, 'developer' or 'builder' for technical implementation calls, 'writer' for copy, 'planner' for breaking work down, 'reviewer' for QA on a draft, 'voorman' for project-status questions. Do NOT use this for shippable file or image deliverables (`index.html`, `review.md`, `logo.png`): first call `ensure_gezel`, then `message_gezel` with `expectedDeliverable: { kind: \"file\", filePath: \"<path>\" }` so the specialist works asynchronously and writes/renders the file. `ask_specialist` rejects file-shaped expectedDeliverable hints. The chosen specialist auto-joins your current project so the user can switch to their chat for follow-ups. For a specific known gezel use `ask_gezel`; for fan-out / fire-and-forget pings use `message_gezel`.",
+  "Quick role-shaped consultation. Picks (or auto-creates) a gezel matching `role` and synchronously asks them `question` — their answer comes back as the tool result, ready to use inline within this turn. ONE call replaces the `ensure_gezel` → `ask_gezel` sequence. Use this for domain answers you need to keep working: 'researcher' for facts and prior art, 'designer' for visual / UX feedback, 'developer' or 'builder' for technical implementation calls, 'writer' for copy, 'planner' for breaking work down, 'reviewer' for QA on a draft, 'voorman' (the crew lead) for project-status questions. Do NOT use this for shippable file or image deliverables (`index.html`, `review.md`, `logo.png`): first call `ensure_gezel`, then `message_gezel` with `expectedDeliverable: { kind: \"file\", filePath: \"<path>\" }` so the specialist works asynchronously and writes/renders the file. `ask_specialist` rejects file-shaped expectedDeliverable hints. The chosen specialist auto-joins your current project so the user can switch to their chat for follow-ups. For a specific known gezel use `ask_gezel`; for fan-out / fire-and-forget pings use `message_gezel`.",
   {
     role: SPECIALIST_ROLES.describe(
-      'researcher = long-form analysis / facts / prior art (files a written report to disk by default), developer = team-oriented engineering, builder = solo product engineer, generalist = one gezel for a whole multi-step task of any craft, designer = visual/UX advice (does NOT render images), writer = copy/content, planner = strategy/decomposition, reviewer = QA/feedback (short structured verification reply by default), voorman = current-project lead, image-generator = render an actual PNG via generate_image (use this when you need a real image asset, not just visual feedback).',
+      'researcher = long-form analysis / facts / prior art (files a written report to disk by default), developer = team-oriented engineering, builder = solo product engineer, generalist = one gezel for a whole multi-step task of any craft, designer = visual/UX advice (does NOT render images), writer = copy/content, planner = strategy/decomposition, reviewer = QA/feedback (short structured verification reply by default), voorman = crew lead of the current project, image-generator = render an actual PNG via generate_image (use this when you need a real image asset, not just visual feedback).',
     ),
     question: z
       .string()
@@ -6781,12 +6820,56 @@ const DELEGATION_ROLE_SPECS: ReadonlyArray<{
   },
   {
     slug: 'voorman',
-    jobTitle: 'Voorman',
-    label: 'voorman',
+    jobTitle: 'Crew Lead',
+    label: 'crew lead',
     hint: 'project lead / coordination / status',
   },
   { slug: 'meester', jobTitle: 'Meester', label: 'meester', hint: 'top-level orchestration' },
 ];
+
+function isOutcomeTeammateSlug(slug: string): slug is OutcomeTeammateSlug {
+  return (OUTCOME_TEAMMATE_SLUGS as readonly string[]).includes(slug);
+}
+
+/**
+ * An outcome task's owner hands a piece of the task to a teammate. The
+ * service checks this session owns the task; the teammate works in the
+ * task's project and its reads count toward the task.
+ */
+async function consultTaskTeammate(
+  slug: OutcomeTeammateSlug,
+  label: string,
+  question: string,
+  timeoutMs: number | undefined,
+) {
+  const parsed = await parseRef(sessionTaskRef);
+  const ask = await api.askTaskTeammate(parsed.projectId, parsed.num, {
+    fromGezelId: gezelId,
+    fromSessionId: sessionId,
+    role: slug,
+    question,
+    ...(typeof timeoutMs === 'number' ? { timeoutMs } : {}),
+  });
+  if (ask.outcome === 'reply') {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `${ask.toGezelName} (${label}) answered:\n\n${ask.text}\n\nCheck any file they say they wrote before you rely on it.`,
+        },
+      ],
+    };
+  }
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify({ outcome: 'error', reason: ask.reason, message: ask.message }),
+      },
+    ],
+    isError: true,
+  };
+}
 
 for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
   server.tool(
@@ -6866,7 +6949,9 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
 
   server.tool(
     `consult_${slug}`,
-    `Ask a project's ${label} (${hint}) a question and get their answer back synchronously, this turn. Auto-creates a ${label} if none exists. For a project you created from Default, pass \`project\` so the answer uses the right files and memory. For handing off actual work or files, use \`delegate_${slug}\` instead.`,
+    taskTeammates && isOutcomeTeammateSlug(slug)
+      ? `Hand a self-contained piece of your task to a ${label} (${hint}) and get their answer back this turn. Auto-creates a ${label} if none exists. They work in this project and see only what you write here: name the files to read and the file to write. You stay responsible for the result, so check what they wrote.`
+      : `Ask a project's ${label} (${hint}) a question and get their answer back synchronously, this turn. Auto-creates a ${label} if none exists. For a project you created from Default, pass \`project\` so the answer uses the right files and memory. For handing off actual work or files, use \`delegate_${slug}\` instead.`,
     {
       question: z
         .string()
@@ -6906,6 +6991,9 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
         };
       }
       try {
+        if (taskTeammates && sessionTaskRef && isOutcomeTeammateSlug(slug)) {
+          return await consultTaskTeammate(slug, label, question, timeoutMs);
+        }
         const resolvedProject = project ? await resolveProjectId(project) : projectId;
         const repoGuard = await repoIntakeGuardForProject({
           tool: `consult_${slug}`,
@@ -7695,7 +7783,7 @@ async function runPromotedStartJobAsProject(input: {
           dispatchEntry: true,
         });
     const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as voorman. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
+    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as crew lead. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult('start_project', brief.name, project.id, resultText);
     return {
       content: [
@@ -7966,7 +8054,7 @@ async function runTypedKickoff(
       dispatchEntry: true,
     });
     const role = (await api.getGezel(lead.id).catch(() => null))?.role;
-    const resultText = `Started "${project.name}" (${project.id}) as a ${type.name} project. ${lead.name}${role ? ` (${roleWithGloss(role)})` : ''} leads it and is making the first draft now in a task-scoped session (task ${task.ref}); the project's Output page shows it as it fills in. No reply lands in this thread. Tell the person in a sentence or two that ${lead.name} is on it. ${PLAIN_WORDS_RELAY}`;
+    const resultText = `Started "${project.name}" (${project.id}) as a ${type.name} project. ${lead.name}${role ? ` (${plainRoleTitle(role)})` : ''} leads it and is making the first draft now in a task-scoped session (task ${task.ref}); the project's Output page shows it as it fills in. No reply lands in this thread. Tell the person in a sentence or two that ${lead.name} is on it. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult(opts.cacheTool, brief.name, project.id, resultText);
     return { content: [{ type: 'text' as const, text: resultText }] };
   } catch (err) {
@@ -8047,7 +8135,7 @@ async function runStartProject(
       content: [
         {
           type: 'text' as const,
-          text: `[runtime] A \`${idempotent.tool}\` call for "${brief.name}" completed moments ago — replaying the original result instead of creating a duplicate. END YOUR TURN; the voorman from the original call is already on it.\n\n${idempotent.resultText}`,
+          text: `[runtime] A \`${idempotent.tool}\` call for "${brief.name}" completed moments ago — replaying the original result instead of creating a duplicate. END YOUR TURN; the crew lead from the original call is already on it.\n\n${idempotent.resultText}`,
         },
       ],
     };
@@ -8127,7 +8215,7 @@ async function runStartProject(
           dispatchEntry: true,
         });
     const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as voorman. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
+    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as crew lead. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult(tool, brief.name, project.id, resultText);
     return {
       content: [
@@ -8345,7 +8433,7 @@ server.tool(
     // The ranking binds a request to a project it names, and the prelude tells
     // the model the destination is bound, so an omitted `project` takes it.
     const resolvedProject = project
-      ? await resolveProjectId(project)
+      ? await resolveProjectId(project, ['start_work'])
       : ((await rankingForTurn(projectId, said).catch(() => null))?.projectId ?? projectId);
     const parsed =
       parseWorkOptionId(option) ?? (await resolveBareWorkOption(option, resolvedProject, said));
@@ -8904,7 +8992,7 @@ server.tool(
 
 server.tool(
   'remove_gezel_from_project',
-  "Drop a gezel from a project's roster. Advisory only — doesn't tear down their existing chat sessions, task assignments, or the project's voorman pointer; the gezel just stops showing up in the project's team list. Re-add via `add_gezel_to_project` (or any of the auto-add triggers will pull them back in).",
+  "Drop a gezel from a project's roster. Advisory only — doesn't tear down their existing chat sessions, task assignments, or the project's crew lead pointer; the gezel just stops showing up in the project's team list. Re-add via `add_gezel_to_project` (or any of the auto-add triggers will pull them back in).",
   {
     gezel: z.string().describe('Gezel id or display name'),
     project: z
@@ -9312,7 +9400,7 @@ server.tool(
     plan: z
       .string()
       .optional()
-      .describe("The voorman's evolving approach. Overwrites the existing plan."),
+      .describe("The crew lead's evolving approach. Overwrites the existing plan."),
     assignee: assigneeArg().optional(),
     cron: z.string().optional(),
     cronOverlap: cronOverlapEnum.optional(),
@@ -10081,97 +10169,6 @@ server.tool(
     );
   },
 );
-
-/**
- * Resolve whatever the model passed as a project reference to a real id.
- * Accepts the id directly OR a case-insensitive match against the
- * project's display name — models routinely reach for the pretty name
- * ("Pet Store Prototype") they see in the chat instead of the slug id
- * ("pet-store-prototype"). On total miss, throw a helpful error listing
- * the actual ids so the model can self-correct on the next tool call.
- */
-async function resolveProjectId(input: string): Promise<string> {
-  try {
-    const p = await api.getProject(input);
-    return p.id;
-  } catch {
-    /* fall through to name lookup */
-  }
-  let all: Awaited<ReturnType<typeof api.listProjects>>['projects'];
-  try {
-    all = (await api.listProjects()).projects;
-  } catch (err) {
-    // Project-confined sessions (worker-scoped tokens) may not list
-    // projects at all. The only project such a session can touch is its
-    // own, so resolve any project arg — usually the current project's
-    // display name — to the session scope instead of dying on the 403.
-    // Wild-caught (craftbook-ship live-mock pilot): the model passed
-    // `project: "Ship Eval"` and run_script 403'd on GET /api/projects.
-    if (/\b403\b/.test(err instanceof Error ? err.message : String(err))) {
-      return projectId;
-    }
-    throw err;
-  }
-  const match = findProjectByReference(all, input);
-  if (match) return match.id;
-  throw new Error(projectNotFoundMessage(input, all));
-}
-
-/**
- * Resolve a gezel id-or-name to a canonical id: the roster is consulted
- * first (exact id, then a case-insensitive id / display name /
- * role-based name), and `getGezel` is the fallback for gezels the roster
- * does not list, such as the encoded project-local ids. Same shape as
- * `resolveProjectId` — kept terse here because tools that take a gezel
- * arg never need partial / fuzzy matching.
- *
- * The roster has to come first because `getGezel` echoes the id it was
- * asked for, and on a case-insensitive filesystem `getGezel("Ada")`
- * happily reads `gezels/ada/`. Returning "Ada" there would persist a
- * reference that no `===` against the real id matches — the drift
- * `ChatManager.resolveGezelIdRef` exists to undo.
- */
-async function resolveGezelId(input: string): Promise<string> {
-  const all = (await api.listGezels()).gezels;
-  const match = findGezelInRoster(all, input);
-  if (match) return match.id;
-  try {
-    const g = await api.getGezel(input);
-    return g.id;
-  } catch {
-    /* not a listed gezel and not directly readable */
-  }
-  throw new Error(gezelNotFoundMessage(input, all));
-}
-
-async function availableGezelsHint(): Promise<string> {
-  try {
-    return gezelRosterHint((await api.listGezels()).gezels);
-  } catch {
-    return 'Call `list_gezels` for the roster.';
-  }
-}
-
-// Tolerant ref resolution: accepts the canonical `projectId/num` but
-// also recovers small-model mangles (`#`/`:` separators, stray
-// backticks, a truncated projectId) by falling back to the session's
-// own task. See `task-ref.ts` for the resolution order and the
-// wild-caught failures that motivated it.
-async function parseRef(ref: string): Promise<{ projectId: string; num: number }> {
-  const parsed = resolveTaskRef(ref, sessionTaskRef);
-  // The projectId half of a ref gets the same tolerance every `project`
-  // argument already gets. `resolveProjectId` exists because models reach
-  // for the display name they see in chat instead of the slug, and ~40
-  // tools honor that — but a ref went through verbatim, so
-  // `list_tasks({ project: "PowerPoint Grounding Eval" })` worked while
-  // `read_task_notes({ ref: "PowerPoint Grounding Eval/1" })` 400'd on
-  // `invalid entity id` with no remedy in the message. Observed in 11
-  // distinct eval sessions; each one stopped using the task tools
-  // entirely afterwards. Only refs whose project half cannot be an id at
-  // all pay the extra lookup.
-  if (isSafeEntityId(parsed.projectId)) return parsed;
-  return { ...parsed, projectId: await resolveProjectId(parsed.projectId) };
-}
 
 // ── History (audit log search) ──
 
@@ -11183,7 +11180,7 @@ server.tool(
 
 server.tool(
   'file_review',
-  "The boekwachter's cliffs notes + health review for one file: what it does and how it flows, issues spotted (severity/category/message/line), and a 1-10 health score with its reason, judged against a per-file-type rubric. Call before deep-diving an unfamiliar file, or when outline_file shows low health. Issues are LEADS from a background model pass, not confirmed problems — verify each in the code.",
+  "The Librarian's notes + health review for one file: what it does and how it flows, issues spotted (severity/category/message/line), and a 1-10 health score with its reason, judged against a per-file-type rubric. Call before deep-diving an unfamiliar file, or when outline_file shows low health. Issues are LEADS from a background model pass, not confirmed problems — verify each in the code.",
   {
     path: z.string().min(1).describe('Workspace-relative file path, e.g. src/server.ts.'),
   },
@@ -11209,7 +11206,7 @@ server.tool(
           res.eligible === false
             ? 'this file type is not reviewed (no rubric covers its kind — e.g. data files, caches, media)'
             : res.pending
-              ? 'the boekwachter has not reviewed this file yet (it studies files when idle or during Night Shift)'
+              ? 'the Librarian has not reviewed this file yet (it studies files when idle or during Night Shift)'
               : 'file is not in the index';
         return {
           content: [{ type: 'text' as const, text: `file_review: no review — ${why}.` }],
@@ -11246,7 +11243,7 @@ server.tool(
 
 server.tool(
   'get_file_issue',
-  'Retrieve the durable metadata for one Boekwachter issue by its BW reference: path, previous/current line state, lifecycle, read state, and linked task. Use this when a prompt or task mentions BW-N.',
+  'Retrieve the durable metadata for one tracked issue by its BW reference: path, previous/current line state, lifecycle, read state, and linked task. Use this when a prompt or task mentions BW-N.',
   {
     ref: z
       .string()
@@ -11283,7 +11280,7 @@ server.tool(
 
 server.tool(
   'set_file_issue_status',
-  'Update a tracked Boekwachter issue by BW reference. Read/unread is independent of lifecycle. Use dismissed + not_an_issue only after verifying that the review lead is invalid; task completion normally resolves issues automatically.',
+  'Update a tracked issue by BW reference. Read/unread is independent of lifecycle. Use dismissed + not_an_issue only after verifying that the review lead is invalid; task completion normally resolves issues automatically.',
   {
     ref: z
       .string()
@@ -11808,7 +11805,7 @@ server.tool(
 
 server.tool(
   'list_file_issues',
-  'Quality issues the boekwachter review pass spotted across files (likely bugs, code smells, unclear naming; grammar/clarity in docs), filterable by severity, category, or path prefix. Severities are info|minor|major — a quality vocabulary, unrelated to security severities; use scan_findings for vulnerabilities. These are LEADS from a background model pass, not confirmed problems; verify each in the code.',
+  "Quality issues the Librarian's review pass spotted across files (likely bugs, code smells, unclear naming; grammar/clarity in docs), filterable by severity, category, or path prefix. Severities are info|minor|major — a quality vocabulary, unrelated to security severities; use scan_findings for vulnerabilities. These are LEADS from a background model pass, not confirmed problems; verify each in the code.",
   {
     severity: z.enum(['info', 'minor', 'major']).optional(),
     category: z.string().optional().describe('e.g. bug, smell, error-handling, grammar, clarity.'),

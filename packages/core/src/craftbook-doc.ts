@@ -365,6 +365,7 @@ export function craftbookFromDoc(
     ...(doc.spawn ? { spawn: doc.spawn } : {}),
     ...(doc.diffpackCapable !== undefined ? { diffpackCapable: doc.diffpackCapable } : {}),
     ...(doc.capabilityFloor ? { capabilityFloor: doc.capabilityFloor } : {}),
+    ...(doc.contract ? { contract: doc.contract } : {}),
     createdAt: opts.createdAt ?? doc.releasedAt ?? opts.now,
     updatedAt: opts.now,
   };
@@ -514,6 +515,7 @@ export function docFromCraftbook(book: Craftbook): CraftbookDoc {
     ...(book.spawn ? { spawn: book.spawn } : {}),
     ...(book.diffpackCapable !== undefined ? { diffpackCapable: book.diffpackCapable } : {}),
     ...(book.capabilityFloor ? { capabilityFloor: book.capabilityFloor } : {}),
+    ...(book.contract ? { contract: book.contract } : {}),
     steps: book.steps,
     ...(book.scripts ? { scripts: book.scripts } : {}),
     ...(book.version ? { version: book.version } : {}),

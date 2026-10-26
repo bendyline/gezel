@@ -109,6 +109,17 @@ describe('an on-device engine failure on /v1/chat/completions', () => {
     expect(await res.json()).toMatchObject({ error: { code: 'engine_out_of_memory' } });
   });
 
+  it('reports a missing Windows runtime as a launch failure, not a crash to retry', async () => {
+    const missing = Object.assign(
+      coded('[llama-cpp] on-device engine could not start', 'native-engine-crash'),
+      { panicKind: 'missing-runtime' },
+    );
+    running = await startFailingEngine(missing);
+    const res = await post(chat);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: { code: 'engine_launch_failed' } });
+  });
+
   it('finds the code on a wrapped cause', async () => {
     const launch = coded('spawn EPERM', 'engine-launch');
     running = await startFailingEngine(new Error('engine start failed', { cause: launch }));

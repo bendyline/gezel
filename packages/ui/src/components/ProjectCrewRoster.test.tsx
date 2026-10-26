@@ -26,7 +26,7 @@ function project(gezelIds: string[]): ProjectDetail {
 }
 
 describe('ProjectCrewRoster autonomous roles', () => {
-  it('offers the designated Boekwachter when AI indexing is off', async () => {
+  it('offers the designated Librarian when AI indexing is off', async () => {
     const onAddGezel = vi.fn().mockResolvedValue(undefined);
     render(
       <ProjectCrewRoster
@@ -54,7 +54,7 @@ describe('ProjectCrewRoster autonomous roles', () => {
     );
 
     expect(screen.getByText('AI indexing on')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Boekwachter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Librarian' }));
     await waitFor(() => expect(onRemoveGezel).toHaveBeenCalledWith('noor'));
   });
 });

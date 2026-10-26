@@ -51,7 +51,7 @@ const GateJsonScalarSchema = z.union([z.string(), z.number(), z.boolean(), z.nul
  * Evaluated in-process — zero sandbox spawns — so a gate should keep a
  * cheap `checks` floor even when it also carries scripts.
  */
-export const GateCheckSchema = z.discriminatedUnion('kind', [
+const GateCheckVariants = [
   /** A single file is at least `bytes` long (workspace, or the artifacts drawer when `artifact`). */
   z.object({
     kind: z.literal('minBytes'),
@@ -308,6 +308,25 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
    * unless `corpus` is given, in which case cited paths AND URLs must be
    * corpus members. Optional `minCitations` floors the citation count.
    */
+  /**
+   * The facts in `file` appear in the sources it cites: every number, date,
+   * month and quotation in a citing sentence is found in the cited file
+   * (`[n]` through a Sources list, or inline `(source: path)`). Cited URLs and
+   * `knowledge://` refs count as cited but unverifiable offline. `sources`
+   * adds material the facts may come from uncited (the supplied brief). The
+   * "cited and verified" half of a research book's quality bar; pair it with
+   * `citationsResolve` for a minimum citation count.
+   */
+  z.object({
+    kind: z.literal('claimsGrounded'),
+    file: z.string().min(1),
+    artifact: z.boolean().optional(),
+    sources: z.array(z.string().min(1)).optional(),
+    maxUnsupported: z.number().int().nonnegative().optional(),
+    maxBadCitations: z.number().int().nonnegative().optional(),
+    maxUncited: z.number().int().nonnegative().optional(),
+    label: z.string().min(1).optional(),
+  }),
   z.object({
     kind: z.literal('citationsResolve'),
     file: z.string().min(1),
@@ -332,6 +351,13 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     tools: z.array(z.string().min(1)).min(1),
     minSuccessful: z.number().int().positive().optional(),
     externalOptional: z.boolean().optional(),
+    /**
+     * Which tool calls count. `activation` (default): this step's current
+     * pass, so a retry starts over. `task`: anything the task did since it was
+     * created, which is how a book's contract judges the whole run whatever
+     * strategy carried it out.
+     */
+    window: z.enum(['activation', 'task']).optional(),
   }),
   /** Require image delivery for each {path}; artifact selects the manifest and image surface. */
   z.object({
@@ -367,6 +393,13 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     minRuns: z.number().int().positive().optional(),
     onDraft: z.enum(['defer', 'require']).optional(),
     label: z.string().min(1).optional(),
+    /**
+     * Which tool calls count. `activation` (default): this step's current
+     * pass, so a retry starts over. `task`: anything the task did since it was
+     * created, which is how a book's contract judges the whole run whatever
+     * strategy carried it out.
+     */
+    window: z.enum(['activation', 'task']).optional(),
   }),
   /**
    * A PR-review coverage ledger must name every changed path materialized in
@@ -558,7 +591,17 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     doneWhenMinChars: z.number().int().positive().optional(),
     artifact: z.boolean().optional(),
   }),
-]);
+] as const;
+/**
+ * Named so the declarations that embed a check (every gate, and so every step,
+ * task and craftbook) print this name rather than the whole union again. They
+ * held 65 copies, about 800 KB of the shared `.d.ts` chunk. The name is
+ * re-exported from ./craftbook.js: a consumer whose own schema embeds a gate
+ * check cannot emit its declarations without it (TS2883).
+ */
+export interface GateCheckZodSchema
+  extends z.ZodDiscriminatedUnion<typeof GateCheckVariants, 'kind'> {}
+export const GateCheckSchema: GateCheckZodSchema = z.discriminatedUnion('kind', GateCheckVariants);
 export type GateCheck = z.infer<typeof GateCheckSchema>;
 
 /**

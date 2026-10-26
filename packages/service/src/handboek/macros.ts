@@ -24,6 +24,7 @@ import {
   buildSuiteScoreboard,
   createLogger,
   describeProvenance,
+  plainRoleTitle,
   provenanceDifferences,
   resolveRoleId,
   scoreModel,
@@ -246,7 +247,7 @@ function rosterCard(
 ): string {
   const id = filterRoleId ?? resolveRoleId(gezel.role);
   const role = id ? ROLES[id] : null;
-  const roleLabel = role?.label ?? gezel.role?.trim();
+  const roleLabel = role?.label ?? (gezel.role?.trim() ? plainRoleTitle(gezel.role) : undefined);
   const parts = [figureRef(ctx, gezel, roleLabel), `**${gezel.name}**`];
   if (roleLabel) parts.push(`*${roleLabel}*`);
   if (role && !filterRoleId) parts.push(role.summary);
@@ -1186,7 +1187,7 @@ async function projectTypeComposition(
       (g) => `| ${g.templateId} | ${g.voorman ? 'Yes — leads the project' : 'No'} |`,
     );
     parts.push(
-      ['**Crew it sets up**', '', '| Gezel template | Voorman |', '| --- | --- |', ...rows].join(
+      ['**Crew it sets up**', '', '| Gezel template | Crew lead |', '| --- | --- |', ...rows].join(
         '\n',
       ),
     );
@@ -1233,7 +1234,7 @@ async function suggestedWork(attrs: Record<string, string>, ctx: MacroContext): 
           ? 'Night Shift, once per night'
           : `on schedule (\`${suggestion.cron}\`)`;
       rows.push(
-        `| ${manifest.name} (${manifest.role}) | \`${suggestion.craftbookId}\` | ${cadence} |`,
+        `| ${manifest.name} (${plainRoleTitle(manifest.role)}) | \`${suggestion.craftbookId}\` | ${cadence} |`,
       );
     }
   }

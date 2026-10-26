@@ -576,12 +576,12 @@ export function FileInspector({
         </section>
       )}
       {(review || trackedIssues.length > 0 || reviewPending || reviewIneligible) && (
-        <section className="filemap-review" aria-label="Boekwachter review">
+        <section className="filemap-review" aria-label="Librarian’s review">
           {review || trackedIssues.length > 0 ? (
             <>
               {review && (
                 <div className="filemap-review-heading">
-                  <strong>Boekwachter review · {review.health}/10</strong>
+                  <strong>Librarian’s review · {review.health}/10</strong>
                   <span className="filemap-review-reason">{review.healthReason}</span>
                 </div>
               )}
@@ -660,7 +660,7 @@ export function FileInspector({
             <p className="filemap-review-pending">This file type isn’t reviewed.</p>
           ) : (
             <p className="filemap-review-pending">
-              Not reviewed yet — the boekwachter studies files when idle or during Night Shift.
+              Not reviewed yet — the Librarian studies files when idle or during Night Shift.
             </p>
           )}
         </section>

@@ -14,7 +14,7 @@ Every workshop needs someone who knows the whole guild. The **Meester** (Dutch f
 ## What the Meester is for
 
 - **Building your crew.** Describe the work in plain words and the Meester creates the gezel for it — role, character, and toolkit included.
-- **Setting up projects.** The Meester can create projects, write their mission, and put a voorman in charge.
+- **Setting up projects.** The Meester can create projects, write their mission, and put a crew lead in charge.
 - **Routing.** Not sure who to ask? Ask the Meester. Coordination is the craft; the Meester delegates real work to specialists rather than doing it directly.
 
 ## Their character

@@ -1,4 +1,4 @@
-import type { CatalogItemSummary } from '@bendyline/gezel';
+import { type CatalogItemSummary, plainRoleTitle, roleForMatching } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Dialog } from '../primitives/index.js';
@@ -58,15 +58,16 @@ export function GezelTemplatePicker({
       (i): i is CatalogItemSummary & { manifest: TemplateSummary } =>
         i.manifest.kind === 'gezel-template',
     );
-    const normalizedRole = gezelRole?.toLowerCase().trim();
+    const normalizedRole = gezelRole ? roleForMatching(gezelRole).toLowerCase().trim() : undefined;
     const suggestedId = gezelTemplateId
       ? templates.find((t) => t.manifest.id === gezelTemplateId)?.manifest.id
       : undefined;
     const roleMatchId =
       suggestedId ??
       (normalizedRole
-        ? templates.find((t) => t.manifest.role.toLowerCase().trim() === normalizedRole)?.manifest
-            .id
+        ? templates.find(
+            (t) => roleForMatching(t.manifest.role).toLowerCase().trim() === normalizedRole,
+          )?.manifest.id
         : undefined);
     return templates
       .map((t) => ({
@@ -143,8 +144,8 @@ export function GezelTemplatePicker({
                   return (
                     <li key={m.id} className={isSuggested ? 'suggested' : undefined}>
                       <div className="gezel-template-head">
-                        <strong>{m.name}</strong>
-                        <span className="muted small">{m.role}</span>
+                        <strong>{plainRoleTitle(m.name)}</strong>
+                        <span className="muted small">{plainRoleTitle(m.role)}</span>
                         {isSuggested && (
                           <span className="gezel-template-badge">
                             {isOriginal ? 'Original' : 'Matches role'}

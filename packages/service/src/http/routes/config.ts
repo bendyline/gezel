@@ -345,8 +345,8 @@ export function configRoutes(ctx: ServiceContext): Hono {
       await ctx.history.log({
         kind: 'klerk.changed',
         summary: body.klerkGezelId
-          ? `Klerk set to ${await designationName(body.klerkGezelId)}`
-          : 'Klerk cleared',
+          ? `Scribe set to ${await designationName(body.klerkGezelId)}`
+          : 'Scribe cleared',
         details: {
           previousGezelId: previous.klerkGezelId,
           gezelId: body.klerkGezelId,
@@ -365,7 +365,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       await ensureIndexingJobTask(ctx.store, ctx.tasks);
       await ctx.history.log({
         kind: 'boekwachter.changed',
-        summary: `Boekwachter set to ${await designationName(body.boekwachterGezelId)}`,
+        summary: `Librarian set to ${await designationName(body.boekwachterGezelId)}`,
         details: {
           previousGezelId: previous.boekwachterGezelId,
           gezelId: body.boekwachterGezelId,
@@ -379,8 +379,8 @@ export function configRoutes(ctx: ServiceContext): Hono {
       await ctx.history.log({
         kind: 'keurmeester.changed',
         summary: body.keurmeesterGezelId
-          ? `Keurmeester set to ${body.keurmeesterGezelId}`
-          : 'Keurmeester cleared',
+          ? `Inspector set to ${body.keurmeesterGezelId}`
+          : 'Inspector cleared',
         details: {
           previousGezelId: previous.keurmeesterGezelId,
           gezelId: body.keurmeesterGezelId,
@@ -647,13 +647,13 @@ export function configRoutes(ctx: ServiceContext): Hono {
     await ctx.history.log({
       kind: 'gezel.created',
       gezelId: created.id,
-      summary: `Created Klerk "${created.name}"`,
-      details: { name: created.name, role: 'Klerk', source: 'klerk.new' },
+      summary: `Created Scribe "${created.name}"`,
+      details: { name: created.name, role: 'Scribe', source: 'klerk.new' },
     });
     if (previous.klerkGezelId !== created.id) {
       await ctx.history.log({
         kind: 'klerk.changed',
-        summary: `Klerk set to ${created.name}`,
+        summary: `Scribe set to ${created.name}`,
         details: {
           previousGezelId: previous.klerkGezelId,
           gezelId: created.id,
@@ -694,7 +694,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
     await ensureIndexingJobTask(ctx.store, ctx.tasks);
     await ctx.history.log({
       kind: 'boekwachter.changed',
-      summary: `Boekwachter set to ${created.name}`,
+      summary: `Librarian set to ${created.name}`,
       details: {
         previousGezelId: previous.boekwachterGezelId,
         gezelId: created.id,
@@ -734,13 +734,13 @@ export function configRoutes(ctx: ServiceContext): Hono {
     await ctx.history.log({
       kind: 'gezel.created',
       gezelId: created.id,
-      summary: `Created Keurmeester "${created.name}"`,
-      details: { name: created.name, role: 'Keurmeester', source: 'keurmeester.new' },
+      summary: `Created Inspector "${created.name}"`,
+      details: { name: created.name, role: 'Inspector', source: 'keurmeester.new' },
     });
     if (previous.keurmeesterGezelId !== created.id) {
       await ctx.history.log({
         kind: 'keurmeester.changed',
-        summary: `Keurmeester set to ${created.name}`,
+        summary: `Inspector set to ${created.name}`,
         details: {
           previousGezelId: previous.keurmeesterGezelId,
           gezelId: created.id,

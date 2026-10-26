@@ -60,6 +60,46 @@ describe('NativeEngineCrashedError', () => {
     expect(error.panicKind).toBe('host-out-of-memory');
   });
 
+  it('says a missing Windows runtime stops every start, once, and promises no restart or switch', () => {
+    const summary =
+      "This PC does not have the Microsoft Visual C++ Redistributable (ARM64), which Gezel's on-device engines need. Install it from https://aka.ms/vs/17/release/vc_redist.arm64.exe, then try again.";
+    const error = new NativeEngineCrashedError(
+      {
+        ...silentStartupCrash,
+        code: 0xc0000135,
+        signal: null,
+        panicKind: 'missing-runtime',
+        panicLine: summary,
+        dllLoadFailure: { kind: 'vc-runtime', dll: 'VCRUNTIME140.dll', summary },
+      },
+      new Error(`[llama-cpp] could not start: ${summary}`),
+    );
+    expect(error.message).toMatch(/^\[llama-cpp\] on-device engine could not start/);
+    expect(error.message.split(summary)).toHaveLength(2);
+    expect(error.message).not.toMatch(/restart|switch|Transport reported/);
+  });
+
+  it.runIf(process.platform === 'win32')(
+    'keeps the strike count for a DLL the build itself lacks',
+    () => {
+      const summary =
+        "The on-device engine's files are incomplete: ggml-cuda.dll is missing. Reinstall Gezel to restore it.";
+      const error = new NativeEngineCrashedError(
+        {
+          ...silentStartupCrash,
+          code: 0xc0000135,
+          signal: null,
+          panicKind: undefined,
+          dllLoadFailure: { kind: 'engine-files', dll: 'ggml-cuda.dll', summary },
+        },
+        undefined,
+        { kind: 'strike', strikes: 1, threshold: 3 },
+      );
+      expect(error.message).toContain(summary);
+      expect(error.message).toContain('fails to start 2 more times in a row');
+    },
+  );
+
   it('promises nothing it was not told', () => {
     const error = new NativeEngineCrashedError(silentStartupCrash);
     expect(error.message).toContain('It will restart on the next request.');

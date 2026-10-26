@@ -293,7 +293,7 @@ export function GezelChatTab({
 function projectLabel(p: ProjectForGezel): string {
   switch (p.precedence) {
     case 'voorman':
-      return `${p.projectName} — voorman`;
+      return `${p.projectName} — crew lead`;
     case 'assignment':
       return `${p.projectName} — assigned`;
     case 'session':

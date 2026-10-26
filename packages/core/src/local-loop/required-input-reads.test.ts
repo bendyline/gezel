@@ -20,6 +20,39 @@ describe('promptReadInputs', () => {
     ]);
   });
 
+  it('recognizes plain filenames and reading/opening instructions without swallowing outputs', () => {
+    expect(
+      paths(
+        'Start by reading src/domain.ts, src/repository.ts, and tsconfig.json. ' +
+          'Update the sources and write src/convert.ts and CHANGELOG.md.',
+      ),
+    ).toEqual(['src/domain.ts', 'src/repository.ts', 'tsconfig.json']);
+    expect(paths('Begin by opening data/raw.csv before writing out/result.json.')).toEqual([
+      'data/raw.csv',
+    ]);
+    expect(paths('Read deploy.log,hotfix.diff; then write summary.md.')).toEqual([
+      'deploy.log',
+      'hotfix.diff',
+    ]);
+  });
+
+  it('keeps mixed quoted/plain inputs in order and ignores URLs and property names', () => {
+    expect(paths('Read inputs/a.json, `inputs/b.json`, and inputs/a.json.')).toEqual([
+      'inputs/a.json',
+      'inputs/b.json',
+    ]);
+    expect(paths('Read https://example.org/data.json and record.name.')).toEqual([]);
+    expect(paths('Write summary.md without reading notes.md.')).toEqual([]);
+  });
+
+  it('does not interpret words inside file paths as read or write instructions', () => {
+    expect(
+      paths('Read src/edit.ts, `src/update.ts`, and build/config.json; write result.md.'),
+    ).toEqual(['src/edit.ts', 'src/update.ts', 'build/config.json']);
+    expect(paths('Write src/read.md and output/result.json.')).toEqual([]);
+    expect(paths('Create `open.md` and `summary.md`.')).toEqual([]);
+  });
+
   it('ignores prompts that only ask for a write, and negated reads', () => {
     expect(paths('Write `index.html` now.')).toEqual([]);
     expect(paths("Don't read `notes.md`; write `summary.md` now.")).toEqual([]);

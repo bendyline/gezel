@@ -679,6 +679,46 @@ describe('MCP tool name alias dispatch', () => {
   });
 });
 
+describe('MCP project-reference recovery', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('offers a valid start_work retry when the legacy launcher is unavailable', async () => {
+    const server = await loadServer({
+      GEZEL_MCP_ALLOW: 'start_work',
+      GEZEL_SESSION_ID: '',
+    });
+    expect(server._registeredTools.start_project).toBeUndefined();
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', async (url: string | URL, init?: RequestInit) => {
+      expect(init?.method ?? 'GET').toBe('GET');
+      const path = new URL(url).pathname;
+      requests.push(path);
+      return path === '/api/projects'
+        ? Response.json({ projects: [{ id: 'default', name: 'Default' }] })
+        : Response.json({ error: 'not found' }, { status: 404 });
+    });
+
+    const result = await callToolHandler(server)('start_work', {
+      option: 'craftbook:1',
+      project: 'Fresh Work',
+      name: 'Fresh Work',
+      details: 'Create a new project and build a browser game.',
+    });
+    expect(result).toContain('project "Fresh Work" does not exist');
+    expect(result).not.toContain('start_project');
+    expect(result).toContain('without a `project` argument');
+    const retry = result.match(/start_work\((\{[^}]+\})\)/)?.[1];
+    expect(retry).toBeDefined();
+    expect(
+      server._registeredTools.start_work?.inputSchema?.safeParse(JSON.parse(retry!)).success,
+    ).toBe(true);
+    expect(requests).toContain('/api/projects');
+  });
+});
+
 describe('MCP legacy naming mode (GEZEL_MCP_TOOL_NAMING=legacy)', () => {
   afterEach(() => {
     vi.unstubAllEnvs();

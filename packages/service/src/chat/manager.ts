@@ -17,6 +17,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
   type CrewMember,
+  type GezelSummary,
   MINIMAL_FOOTPRINT_MAX_WINDOW,
   PROMPT_FOOTPRINT_POLICY,
   type TaskDeliverable,
@@ -27,14 +28,15 @@ import {
   isAnswerEnvelope,
   isOwnerStep,
   leanSession,
+  plainRoleTitle,
   projectLeadGezelId,
   projectTypeTurnRules,
+  renamedRoleBasedName,
   renderCurrentDateTimeLine,
   renderTurnStatePrelude,
   resolveFactualWriting,
   resolvePromptFootprint,
   resolveSocialMode,
-  roleGloss,
   routingRequestText,
   selectPersonNotes,
   stateAnswerTool,
@@ -101,6 +103,7 @@ import {
   type TurnCancelReason,
   appToolsToolsetId,
   buildStepDispatchSeed,
+  contractAsksForGrounding,
   createAwakeTimeout,
   createLogger,
   decodeProjectGezelId,
@@ -119,6 +122,7 @@ import {
   normalizeCodexPermissionMode,
   nowIso,
   oneShotSystemMessage,
+  outcomeTaskHasSubagents,
   parseGezelMentionId,
   parseTaskRef,
   profileKind,
@@ -140,7 +144,6 @@ import {
   turnCancelledMessage,
   validateScriptInput,
   withEffectiveTaskStatuses,
-  withInferredConsumes,
 } from '@bendyline/gezel';
 import type { MessageImageDigest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -542,6 +545,7 @@ import {
   resolveSessionToolSurface,
   stepAllowsOnlyBuiltinTools,
   taskStepContextualBuiltinTools,
+  taskStepSurfaceOptions,
   toolCapForTierAndRole,
 } from './session-tool-surface.js';
 import {
@@ -3160,6 +3164,12 @@ export class ChatManager extends LocalEngineRuntime {
     return readTaskWithEffectiveStatus(this.store, projectId, num).catch(() => null);
   }
 
+  /** The task a teammate's helper session works for, or null for any other session. */
+  private async subagentTask(record: ChatSession): Promise<Task | null> {
+    const parsed = record.subagentFor ? parseTaskRef(record.subagentFor.taskRef) : null;
+    return parsed ? this.readEffectiveTask(parsed.projectId, parsed.num) : null;
+  }
+
   private async shouldReleaseAfterMutationTurnForValidation(
     record: ChatSession,
     prompt: string,
@@ -3475,6 +3485,8 @@ export class ChatManager extends LocalEngineRuntime {
      * prompt. See ChatSession.consultationMode for the full contract.
      */
     consultationMode?: boolean;
+    /** The outcome task this consultation works for. See ChatSession.subagentFor. */
+    subagentFor?: { taskRef: string; ownerSessionId: string };
     /**
      * Mark the session as belonging to an anonymous app-serve visitor:
      * zero tools at session build, a visitor-context prompt addendum, and
@@ -3576,6 +3588,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(args.craftbookRef ? { craftbookRef: args.craftbookRef } : {}),
       ...(args.subject ? { subject: args.subject } : {}),
       ...(args.consultationMode ? { consultationMode: true } : {}),
+      ...(args.subagentFor ? { subagentFor: args.subagentFor } : {}),
       ...(args.visitorAccess ? { visitorAccess: true as const } : {}),
       ...(args.roleBasedNameOnlyMode !== undefined
         ? { roleBasedNameOnlyMode: args.roleBasedNameOnlyMode }
@@ -5053,7 +5066,10 @@ export class ChatManager extends LocalEngineRuntime {
     // gezel names resolve against the asker's project.
     const fromRec = await this.getSessionRecord(args.fromSessionId).catch(() => null);
     const projectId = args.projectId ?? fromRec?.projectId ?? DEFAULT_PROJECT_ID;
-    const taskRef = args.taskRef ?? fromRec?.taskRef;
+    // A teammate on an outcome task works for the task without being a task
+    // session: it never inherits the owner's task, so it cannot see or move
+    // the task's steps.
+    const taskRef = args.subagentFor ? undefined : (args.taskRef ?? fromRec?.taskRef);
     const stepId = args.stepId ?? (taskRef === fromRec?.taskRef ? fromRec?.stepId : undefined);
 
     const target = await this.resolveGezel(args.toGezelIdOrName, projectId);
@@ -5129,6 +5145,7 @@ export class ChatManager extends LocalEngineRuntime {
       // into "let me ask a designer about this myself", which is
       // exactly the pattern wild-caught on gemma4-26b Planner sessions.
       consultationMode: true,
+      ...(args.subagentFor ? { subagentFor: args.subagentFor } : {}),
       ...(expectedDeliverable ? { expectedDeliverable } : {}),
     });
 
@@ -5446,27 +5463,29 @@ export class ChatManager extends LocalEngineRuntime {
     // Within a project, accept the canonical `@project` alias and the
     // names of any project-local gezels — resolved against the project's
     // own `.gezel/` roster, which the global list never contains.
+    let locals: GezelSummary[] = [];
     if (projectId && projectId !== DEFAULT_PROJECT_ID) {
       if (lc === '@project' || lc === 'project') {
         const canonical = await this.store.getGezel(projectGezelId(projectId));
         if (canonical) return canonical;
       }
-      const locals = await this.store.listProjectGezels(projectId).catch(() => []);
-      const localMatch = locals.find(
-        (g) =>
-          g.id.toLowerCase() === lc ||
-          g.name.toLowerCase() === lc ||
-          g.roleBasedName?.toLowerCase() === lc,
-      );
-      if (localMatch) return this.store.getGezel(localMatch.id);
+      locals = await this.store.listProjectGezels(projectId).catch(() => []);
     }
+    const exact = (g: GezelSummary) =>
+      g.id.toLowerCase() === lc ||
+      g.name.toLowerCase() === lc ||
+      g.roleBasedName?.toLowerCase() === lc;
+    const localMatch = locals.find(exact);
+    if (localMatch) return this.store.getGezel(localMatch.id);
     const all = await this.store.listGezels();
-    const match = all.find(
-      (g) =>
-        g.id.toLowerCase() === lc ||
-        g.name.toLowerCase() === lc ||
-        g.roleBasedName?.toLowerCase() === lc,
-    );
+    // A migrated gezel's role-based name is its plain title ("crew-lead");
+    // the old one ("voorman") still finds it once nothing matches exactly.
+    const renamed = renamedRoleBasedName(lc);
+    const match =
+      all.find(exact) ??
+      (renamed
+        ? [...locals, ...all].find((g) => g.roleBasedName?.toLowerCase() === renamed)
+        : undefined);
     if (!match) return null;
     return this.store.getGezel(match.id);
   }
@@ -8971,7 +8990,7 @@ export class ChatManager extends LocalEngineRuntime {
               // convention as the context-loop halt.
               const noticeMessage: ChatMessage = {
                 role: 'assistant',
-                content: `[Keurmeester ${consult.keurmeesterName} stepped in: ${consult.diagnosis}]`,
+                content: `[Inspector ${consult.keurmeesterName} stepped in: ${consult.diagnosis}]`,
                 at: nowIso(),
                 synthetic: 'keurmeester-notice',
               };
@@ -9129,7 +9148,7 @@ export class ChatManager extends LocalEngineRuntime {
               if (consult?.correctivePrompt) {
                 const noticeMessage: ChatMessage = {
                   role: 'assistant',
-                  content: `[Keurmeester ${consult.keurmeesterName} stepped in: ${consult.diagnosis}]`,
+                  content: `[Inspector ${consult.keurmeesterName} stepped in: ${consult.diagnosis}]`,
                   at: nowIso(),
                   synthetic: 'keurmeester-notice',
                 };
@@ -11591,7 +11610,7 @@ export class ChatManager extends LocalEngineRuntime {
     const config = await wait(this.store.readConfig());
     let personaAbout: string | undefined;
     if (opts.useKlerk) {
-      actorLabel ??= 'Klerk';
+      actorLabel ??= 'Scribe';
       if (config.klerkGezelId) {
         const klerk = await wait(this.store.getGezel(config.klerkGezelId).catch(() => null));
         if (klerk) {
@@ -11601,7 +11620,7 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
     if (opts.useKeurmeester) {
-      actorLabel ??= 'Keurmeester';
+      actorLabel ??= 'Inspector';
       if (config.keurmeesterGezelId) {
         const keurmeester = await wait(
           this.store.getGezel(config.keurmeesterGezelId).catch(() => null),
@@ -11969,14 +11988,12 @@ export class ChatManager extends LocalEngineRuntime {
       if (id === thread.gezelId || introduced.has(id)) continue;
       const gezel = await this.store.getGezel(id).catch(() => null);
       if (!gezel) continue;
-      const role = gezel.role?.trim();
-      const gloss = roleGloss(role);
+      const role = gezel.role?.trim() ? plainRoleTitle(gezel.role) : undefined;
       const purpose = firstSentence(gezel.description);
       members.push({
         gezelId: id,
         name: gezel.name,
         ...(role ? { role } : {}),
-        ...(gloss ? { gloss } : {}),
         ...(purpose ? { purpose } : {}),
         ...(id === gezelId ? { stepName: step.name } : {}),
       });
@@ -15193,6 +15210,9 @@ export class ChatManager extends LocalEngineRuntime {
           ...(gezel?.role ? { role: gezel.role } : {}),
           ...(gezel?.roleBasedName ? { roleBasedName: gezel.roleBasedName } : {}),
           toolNames: appToolNames,
+          taskGrounded: contractAsksForGrounding(
+            (taskContext?.task ?? (await this.subagentTask(record)))?.craftbook.contract,
+          ),
         });
     const factualLookupPreference: FactualLookupPreference =
       project?.knowledgeCatalogs?.mode === 'off'
@@ -15237,13 +15257,7 @@ export class ChatManager extends LocalEngineRuntime {
         ? { effectiveContextWindow: runtime.effectiveContextWindow }
         : {}),
       latestUserMessage: latestUserTextForToolFilter,
-      ...(taskContext?.step
-        ? { activeStep: withInferredConsumes(taskContext.task, taskContext.step) }
-        : {}),
-      ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
-        ? { generalistSteps: taskContext.task.craftbook.steps }
-        : {}),
-      ...(taskContext?.task.inputs ? { taskInputs: Object.values(taskContext.task.inputs) } : {}),
+      ...taskStepSurfaceOptions(taskContext),
       forceDirectFileWork: directFileWorkConstrained,
       existingSubstantialFileForImmediate: readExistingSubstantialFileForImmediate,
       onCapTrim: ({ before, after }) => {
@@ -16150,6 +16164,10 @@ export class ChatManager extends LocalEngineRuntime {
             sessionId: record.id,
             ...(record.taskRef ? { taskRef: record.taskRef } : {}),
             ...(record.stepId ? { stepId: record.stepId } : {}),
+            // A teammate's reads count toward the task it works for.
+            ...(!record.taskRef && record.subagentFor
+              ? { taskRef: record.subagentFor.taskRef, subagent: true }
+              : {}),
             argKeys: info.argKeys,
             durationMs: info.durationMs,
             success: info.success,
@@ -16285,6 +16303,15 @@ export class ChatManager extends LocalEngineRuntime {
         // the current task when a small model omits or mangles the ref
         // (e.g. `arcade-game#1` for `space-war-arcade-game/1`).
         ...(record.taskRef ? { GEZEL_TASK_REF: record.taskRef } : {}),
+        // A teammate's script runs are receipts for the task it works for,
+        // without making its session a task session.
+        ...(!record.taskRef && record.subagentFor
+          ? { GEZEL_RECEIPT_TASK_REF: record.subagentFor.taskRef }
+          : {}),
+        // The owner of an outcome task reaches teammates through the task.
+        ...(taskContext?.step && outcomeTaskHasSubagents(taskContext.task)
+          ? { GEZEL_TASK_TEAMMATES: '1' }
+          : {}),
         // Scope the task's artifact folder: workspace WRITES into this
         // namespace are redirected with an actionable error — the folder
         // lives in the artifacts drawer, and `write_file` there is the
@@ -16885,13 +16912,7 @@ export class ChatManager extends LocalEngineRuntime {
         ? { effectiveContextWindow: runtime.effectiveContextWindow }
         : {}),
       latestUserMessage: latestUserTextForToolFilter,
-      ...(taskContext?.step
-        ? { activeStep: withInferredConsumes(taskContext.task, taskContext.step) }
-        : {}),
-      ...(taskContext?.step && taskContext.task.executionMode === 'generalist'
-        ? { generalistSteps: taskContext.task.craftbook.steps }
-        : {}),
-      ...(taskContext?.task.inputs ? { taskInputs: Object.values(taskContext.task.inputs) } : {}),
+      ...taskStepSurfaceOptions(taskContext),
       forceDirectFileWork: directFileWorkConstrained,
       existingSubstantialFileForImmediate: readExistingSubstantialFileForImmediate,
       ...(requiredBridgeTool ? { requiredTool: requiredBridgeTool } : {}),

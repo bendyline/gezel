@@ -8,9 +8,7 @@ export const UpdateProjectInputSchema = z
     voormanGezelId: z
       .string()
       .optional()
-      .describe(
-        'Gezel id that acts as voorman (foreman) of this project, or empty string to clear',
-      ),
+      .describe('Gezel id that acts as crew lead of this project, or empty string to clear'),
     about: z
       .string()
       .optional()

@@ -226,7 +226,7 @@ describe('catalog project types on the portable host', () => {
     expect(opponent).toMatchObject({ templateId: 'checkers-player', voorman: true });
     expect(project.voormanGezelId).toBe(opponent!.id);
     expect(project.gezelIds).toEqual([opponent!.id]);
-    expect((await store.getGezel(opponent!.id))?.role).toBe('Damspeler');
+    expect((await store.getGezel(opponent!.id))?.role).toBe('Checkers Player');
     expect(await store.readFile('workspace', project.id, 'game.json')).toContain('"peppy"');
     const script = await store.readScriptSource(
       { scope: 'project', projectId: project.id },

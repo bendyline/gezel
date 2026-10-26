@@ -1,6 +1,6 @@
 import { type CrewMember, type Task, taskPersonName } from '@bendyline/gezel';
 
-/** "Reisleider — trip planner", "Planner", or nothing. */
+/** "Trip Planner", "Planner", or nothing. */
 function crewRoleLabel(member: CrewMember): string {
   if (!member.role) return '';
   return member.gloss ? `${member.role} — ${member.gloss}` : member.role;

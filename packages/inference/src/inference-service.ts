@@ -27,6 +27,7 @@ import { enginesRoutes } from './http/routes/engines.js';
 import { modelBundleRoutes } from './http/routes/model-bundles.js';
 import { v1ChatRoutes } from './http/routes/v1-chat.js';
 import { v1EmbeddingsRoutes } from './http/routes/v1-embeddings.js';
+import { v1ImagesRoutes } from './http/routes/v1-images.js';
 import { v1KnowledgeRoutes } from './http/routes/v1-knowledge.js';
 import { v1ModelsEnsureRoutes } from './http/routes/v1-models-ensure.js';
 import { v1ModelsRoutes } from './http/routes/v1-models.js';
@@ -36,6 +37,8 @@ import { KnowledgeManager } from './knowledge/manager.js';
 import { createWorkerCatalogHost } from './knowledge/worker-host.js';
 import { embeddingsHealth, openEmbeddings, shutdownEmbeddings } from './memory/embeddings.js';
 import { AppleFoundationModelsProvider } from './providers/apple-foundation-models/provider.js';
+import { LocalImageEngine } from './providers/image/local-engine.js';
+import type { ImageProvider } from './providers/image/types.js';
 import { EngineInference } from './providers/native/inference.js';
 import { resolveModelSessionDefaults } from './providers/session-defaults.js';
 import type { LLMProvider } from './providers/types.js';
@@ -60,6 +63,8 @@ export interface InferenceServiceOptions {
   home?: string;
   /** Host-provided local providers, useful for testing without downloading weights. */
   providers?: ReadonlyMap<ProviderName, LLMProvider>;
+  /** Host-provided image provider in place of the local engine, for tests. */
+  imageProvider?: ImageProvider;
   onUnexpectedHttpError?: (event: InferenceHttpErrorEvent) => void;
   /**
    * Where log records go while this host runs; restored on `stop()`. An app
@@ -200,7 +205,25 @@ export async function startService(
     await knowledge.start();
     const relevance = new RelevanceModelManager({ home, readConfig: () => store.readConfig() });
     cleanup.push(() => relevanceScorer().dispose());
-    const context = { home, store, catalog, chat, knowledge, relevance, ...components };
+    const images = new LocalImageEngine({
+      home,
+      catalog,
+      arbiter: components.gpuArbiter,
+      readConfig: () => store.readConfig(),
+      ...(options.imageProvider ? { provider: options.imageProvider } : {}),
+    });
+    cleanup.push(() => images.shutdown());
+    const context = {
+      home,
+      store,
+      catalog,
+      chat,
+      knowledge,
+      relevance,
+      images,
+      imageProvider: images,
+      ...components,
+    };
     const clientToken = randomBytes(32).toString('base64url');
     const tokenBytes = Buffer.from(clientToken);
     const app = new Hono();
@@ -234,13 +257,14 @@ export async function startService(
         nodeVersion: process.versions.node,
         platform: process.platform,
         embeddings: embeddingsHealth(),
+        images: { available: images.available() },
       }),
     );
     app.use('*', async (c, next) => {
       const candidate = Buffer.from(c.req.header('authorization')?.replace(/^Bearer /, '') ?? '');
       if (candidate.length !== tokenBytes.length || !timingSafeEqual(candidate, tokenBytes))
         return c.json({ error: 'Unauthorized' }, 401);
-      c.set('auth', { appId: 'host', scopes: ['openai', 'knowledge'] });
+      c.set('auth', { appId: 'host', scopes: ['openai', 'knowledge', 'images'] });
       return next();
     });
     const allowedProviders = ['llama-cpp', 'mlx', 'ds4', 'apple-foundation-models'] as const;
@@ -251,6 +275,7 @@ export async function startService(
     app.route('/v1/models/ensure', v1ModelsEnsureRoutes(context));
     app.route('/v1/models', v1ModelsRoutes(context, { localOnly: true }));
     app.route('/v1/knowledge', v1KnowledgeRoutes(context));
+    app.route('/v1/images', v1ImagesRoutes(context));
     app.route('/api/engines', enginesRoutes(context));
     app.route('/api/model-bundles', modelBundleRoutes(context));
     for (const [engine, manager] of [

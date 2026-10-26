@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { recordSuspensionForTests, resetSuspendClockForTests } from '@bendyline/gezel';
 import type { NativeEngineExitSnapshot as InferenceNativeEngineExitSnapshot } from '@bendyline/gezel-inference/internal/providers/native/supervisor';
 import {
@@ -622,6 +625,29 @@ not a process row
       await expect(sup.ensureRunning()).rejects.toThrow();
     }
     await expect(sup.ensureRunning()).rejects.toThrow(/crashed too many times|failed repeatedly/);
+  });
+
+  it('does not charge deliberate stops of a ready engine to the restart budget', async () => {
+    const fakeSpawn = (() =>
+      makeFakeChild() as unknown as ReturnType<
+        typeof import('node:child_process').spawn
+      >) as unknown as typeof import('node:child_process').spawn;
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({ command: 'fake', args: [], baseUrl: 'http://127.0.0.1:3' }),
+      spawn: fakeSpawn,
+      fetchImpl: async () => new Response('ok'),
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 10_000_000,
+      idleTimeoutMs: 0,
+      onLog: () => {},
+    });
+
+    for (const reason of ['stop', 'idle', 'memory-pressure', 'stop', 'stop'] as const) {
+      await sup.ensureRunning();
+      await sup.stop(reason);
+    }
+    await expect(sup.ensureRunning()).resolves.toMatchObject({ baseUrl: 'http://127.0.0.1:3' });
+    await sup.stop();
   });
 
   it('uses the configured logPrefix in log output', async () => {
@@ -1436,6 +1462,109 @@ not a process row
       expected: false,
       reachedReady: false,
       panicKind: 'illegal-instruction',
+    });
+  });
+
+  describe.runIf(process.platform === 'win32')('a DLL Windows could not load at startup', () => {
+    /** A minimal PE32+ engine whose only section holds its import directory. */
+    function syntheticEngine(imports: string[]): Uint8Array {
+      const names = imports.map((name) => [...Buffer.from(`${name}\0`, 'latin1')]);
+      const descriptors = 20 * (imports.length + 1);
+      const size = descriptors + names.reduce((sum, n) => sum + n.length, 0);
+      const bytes = new Uint8Array(0x200 + size);
+      const v = new DataView(bytes.buffer);
+      bytes.set([0x4d, 0x5a]);
+      v.setUint32(0x3c, 0x40, true);
+      v.setUint32(0x40, 0x00004550, true);
+      v.setUint16(0x44, process.arch === 'arm64' ? 0xaa64 : 0x8664, true);
+      v.setUint16(0x46, 1, true);
+      v.setUint16(0x54, 240, true);
+      v.setUint16(0x58, 0x20b, true);
+      v.setUint32(0x58 + 108, 16, true);
+      v.setUint32(0x58 + 120, 0x1000, true);
+      v.setUint32(0x58 + 124, descriptors, true);
+      const section = 0x58 + 240;
+      v.setUint32(section + 8, size, true);
+      v.setUint32(section + 12, 0x1000, true);
+      v.setUint32(section + 16, size, true);
+      v.setUint32(section + 20, 0x200, true);
+      let at = descriptors;
+      names.forEach((name, i) => {
+        v.setUint32(0x200 + 20 * i + 12, 0x1000 + at, true);
+        bytes.set(name, 0x200 + at);
+        at += name.length;
+      });
+      return bytes;
+    }
+
+    async function startDying(imports: string[], env: Record<string, string>, status: number) {
+      const dir = mkdtempSync(join(tmpdir(), 'gezel-dll-'));
+      const command = join(dir, 'gezel-test-server.exe');
+      writeFileSync(command, syntheticEngine(imports));
+      const child = makeFakeChild(51833);
+      let markSpawned: () => void;
+      const spawned = new Promise<void>((resolve) => {
+        markSpawned = resolve;
+      });
+      const exits: InferenceNativeEngineExitSnapshot[] = [];
+      const sup = new NativeEngineSupervisor({
+        resolveLaunch: async () => ({ command, args: [], env, baseUrl: 'http://127.0.0.1:9999' }),
+        spawn: ((): unknown => {
+          queueMicrotask(() => markSpawned());
+          return child;
+        }) as unknown as typeof import('node:child_process').spawn,
+        fetchImpl: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+        startupTimeoutMs: 2_000,
+        healthIntervalMs: 10_000_000,
+        idleTimeoutMs: 0,
+        onLog: () => {},
+        onExit: (snapshot) => void exits.push(snapshot),
+        psRunner: async () => [],
+      });
+      const started = sup.ensureRunning().then(
+        () => null,
+        (err: unknown) => err as Error & Record<string, unknown>,
+      );
+      await spawned;
+      child.emitExit(status, null);
+      const error = await started;
+      rmSync(dir, { recursive: true, force: true });
+      return { error, exit: exits[0] };
+    }
+
+    it('blames a missing Visual C++ runtime on the machine and says what to install', async () => {
+      // A PC with no runtime anywhere: an empty System32 and nothing on PATH.
+      const { error, exit } = await startDying(
+        ['VCRUNTIME140.dll', 'KERNEL32.dll'],
+        { SystemRoot: join(tmpdir(), 'gezel-no-windows'), PATH: '' },
+        0xc0000135,
+      );
+      expect(exit).toMatchObject({
+        reachedReady: false,
+        panicKind: 'missing-runtime',
+        dllLoadFailure: { kind: 'vc-runtime', dll: 'VCRUNTIME140.dll' },
+      });
+      expect(error?.message).toContain('Microsoft Visual C++ Redistributable');
+      expect(error).toMatchObject({
+        code: 'engine-launch',
+        isActionable: true,
+        panicKind: 'missing-runtime',
+      });
+    });
+
+    it('calls a missing engine DLL incomplete files, and leaves the build to the quarantine', async () => {
+      const { error, exit } = await startDying(['ggml-base.dll'], {}, 0xc0000135);
+      expect(exit?.panicKind).toBeUndefined();
+      expect(exit?.dllLoadFailure).toMatchObject({ kind: 'engine-files', dll: 'ggml-base.dll' });
+      expect(error?.message).toContain('files are incomplete: ggml-base.dll is missing');
+    });
+
+    it('keeps the plain exit message for a status that is not a DLL failure', async () => {
+      const { error, exit } = await startDying(['ggml-base.dll'], {}, 1);
+      expect(exit?.dllLoadFailure).toBeUndefined();
+      expect(error?.message).toContain('before becoming ready');
     });
   });
 

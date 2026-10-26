@@ -172,7 +172,7 @@ describe('handboek engine', () => {
     expect(bookIndex!.markdown).not.toContain('gezelgilde.com');
     const book = await engine.article('craftbook/status-report', { mode: 'site' });
     expect(book!.title).toBe('Status Report');
-    expect(book!.markdown).toContain('| 1 | Collect | Voorman |');
+    expect(book!.markdown).toContain('| 1 | Collect | Crew Lead |');
     const ptIndex = await engine.article('project-types-index', { mode: 'site' });
     expect(ptIndex!.markdown).not.toContain('gezelgilde.com');
     const pt = await engine.article('project-type/web-shop', { mode: 'site' });

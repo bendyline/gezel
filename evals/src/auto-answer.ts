@@ -270,6 +270,8 @@ export type AutoAnswerOptions = {
   defaultAnswer?: string;
   /** Abort signal — stops the loop without needing the returned fn. */
   signal?: AbortSignal;
+  /** Overrides `evalPauseRetries()`: how many times a paused task gets "Try again". */
+  maxPauseRetries?: number;
 };
 
 /** One stateful poll, shared by daemon and packaged-native eval transports. */
@@ -280,7 +282,7 @@ export function createAutoAnswerPoller(opts: AutoAnswerOptions): () => Promise<v
     'Use your best judgment — make the call you think fits this project best, document it in your reply, and proceed. Treat any open question as your call. No need to wait for further input.';
   const seenStructured = new Set<string>();
   const pauseRetries = new Map<string, number>();
-  const maxPauseRetries = evalPauseRetries();
+  const maxPauseRetries = opts.maxPauseRetries ?? evalPauseRetries();
   let lastInlineRepliedToMessageAt: string | null = null;
 
   function messageText(content: unknown): string {

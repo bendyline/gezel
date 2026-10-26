@@ -687,7 +687,7 @@ program
 program
   .command('run [prompt...]')
   .description('Run a prompt through a gezel and print the reply (use - to read stdin)')
-  .option('-g, --gezel <ref>', "gezel id or name (default: this project's voorman)")
+  .option('-g, --gezel <ref>', "gezel id or name (default: this project's crew lead)")
   .addHelpText(
     'after',
     '\nExamples:\n  gezel run "Summarize this project"\n  printf \'Summarize these notes:\\nThe launch is Friday.\\n\' | gezel run -\n  gezel run - < prompt.txt\n\nA sole - reads UTF-8 stdin to EOF. Empty input is rejected.\nReplies go to stdout; diagnostics go to stderr.',

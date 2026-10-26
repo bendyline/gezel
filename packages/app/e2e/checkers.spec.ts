@@ -93,8 +93,9 @@ test('checkers: create from gallery, move on the board, the reaction summons the
   // selection is identified by the detail header rather than the (now
   // unmounted) gallery card.
   await expect(page.getByRole('heading', { name: 'Checkers' })).toBeVisible();
+  // Gilde 0.3 renamed the Damspeler to the Checkers Player; either line passes.
   await expect(page.getByRole('textbox', { name: /^Name/ })).toHaveValue(
-    'Checkers vs the Damspeler',
+    /^(?:Checkers vs the Damspeler|Checkers Table)$/,
   );
   await expect(page.getByRole('button', { name: 'Opponent', exact: true })).toHaveAttribute(
     'aria-pressed',
@@ -158,13 +159,15 @@ test('checkers: create from gallery, move on the board, the reaction summons the
   // the reaction summons the Damspeler; the mock provider never plays a
   // move back, so the thinking state persists.
   await expect(board.locator('[data-square="d4"] .piece.red')).toBeVisible({ timeout: 15_000 });
-  await expect(board.getByText('Damspeler is thinking')).toBeVisible();
+  await expect(board.getByText(/^(?:Damspeler|Checkers player) is thinking/)).toBeVisible();
   await expect(board.getByText('Red c3-d4')).toBeVisible();
   // The machine-authored reaction seed stays out of the transcript, while
   // the Damspeler's resulting turn renders beside the board. Wait for the
   // mock reply to finish so this background turn cannot leak into teardown.
   const timeline = page.getByTestId('chat-timeline');
-  const damspelerTurns = timeline.locator('.msg-assistant').filter({ hasText: 'Damspeler' });
+  const damspelerTurns = timeline
+    .locator('.msg-assistant')
+    .filter({ hasText: /Damspeler|Checkers Player/ });
   await expect(damspelerTurns.first()).toBeVisible({ timeout: 20_000 });
   await expect(timeline.locator('.msg-user')).toHaveCount(0);
   // Hidden machine-authored reactions must bypass auto-recall. Otherwise the

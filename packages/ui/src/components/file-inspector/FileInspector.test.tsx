@@ -87,7 +87,7 @@ function renderInspector(path = 'src/a.ts') {
 }
 
 describe('FileInspector', () => {
-  it('shows tracked Boekwachter issues and acts on them', async () => {
+  it('shows tracked Librarian issues and acts on them', async () => {
     vi.mocked(api.toolFileReview)
       .mockResolvedValueOnce(reviewWith([ISSUE]))
       .mockResolvedValue(reviewWith([{ ...ISSUE, status: 'resolved', seen: true }]));
@@ -95,7 +95,7 @@ describe('FileInspector', () => {
     renderInspector();
 
     expect(await screen.findByText('BW-12')).toBeInTheDocument();
-    expect(screen.getByText('Boekwachter review · 7/10')).toBeInTheDocument();
+    expect(screen.getByText('Librarian’s review · 7/10')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Mark resolved' }));
 
     await waitFor(() =>

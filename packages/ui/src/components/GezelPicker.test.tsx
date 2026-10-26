@@ -15,7 +15,7 @@ const GEZELS = [
   {
     id: 'tomas',
     name: 'Tomas',
-    role: 'Voorman',
+    role: 'Crew Lead',
     poppetje: initialPoppetjeForGezel('tomas', 'Tomas'),
   },
   {
@@ -55,15 +55,15 @@ describe('GezelPicker', () => {
       <GezelPicker
         gezels={GEZELS}
         value="tomas"
-        noneLabel="(no voorman)"
-        ariaLabel="Voorman"
+        noneLabel="(no crew lead)"
+        ariaLabel="Crew Lead"
         onValueChange={onValueChange}
       />,
     );
 
-    const trigger = screen.getByRole('combobox', { name: 'Voorman' });
+    const trigger = screen.getByRole('combobox', { name: 'Crew Lead' });
     expect(trigger).toHaveTextContent('Tomas');
-    expect(trigger).toHaveTextContent('Voorman');
+    expect(trigger).toHaveTextContent('Crew Lead');
     expect(container.querySelector('.gezel-picker-trigger .gezel-icon-poppetje')).not.toBeNull();
 
     await user.click(trigger);
@@ -83,14 +83,14 @@ describe('GezelPicker', () => {
       <GezelPicker
         gezels={GEZELS}
         value="tomas"
-        noneLabel="(no voorman)"
-        ariaLabel="Voorman"
+        noneLabel="(no crew lead)"
+        ariaLabel="Crew Lead"
         onValueChange={onValueChange}
       />,
     );
 
-    await user.click(screen.getByRole('combobox', { name: 'Voorman' }));
-    await user.click(await screen.findByRole('option', { name: '(no voorman)' }));
+    await user.click(screen.getByRole('combobox', { name: 'Crew Lead' }));
+    await user.click(await screen.findByRole('option', { name: '(no crew lead)' }));
 
     expect(onValueChange).toHaveBeenCalledWith(null);
   });
@@ -105,18 +105,18 @@ describe('GezelPicker', () => {
       <GezelPicker
         gezels={BORING_GEZELS}
         value="tomas"
-        ariaLabel="Voorman"
+        ariaLabel="Crew Lead"
         onValueChange={vi.fn()}
       />,
     );
 
-    const trigger = screen.getByRole('combobox', { name: 'Voorman' });
-    await waitFor(() => expect(trigger).toHaveTextContent('voorman'));
+    const trigger = screen.getByRole('combobox', { name: 'Crew Lead' });
+    await waitFor(() => expect(trigger).toHaveTextContent('crew lead'));
     expect(trigger).not.toHaveTextContent('Tomas');
 
     await user.click(trigger);
 
     const options = await screen.findAllByRole('option');
-    expect(options.map((o) => o.textContent)).toEqual(['voorman', 'developer']);
+    expect(options.map((o) => o.textContent)).toEqual(['crew lead', 'developer']);
   });
 });

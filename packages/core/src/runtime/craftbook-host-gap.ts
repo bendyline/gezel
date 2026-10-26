@@ -1,3 +1,4 @@
+import { contractGateChecks } from '../schemas/craftbook-contract.js';
 import { normalizeStepGate } from '../schemas/gate.js';
 import type { Craftbook } from '../schemas/index.js';
 import { normalizeScriptRefs } from '../schemas/script.js';
@@ -127,6 +128,11 @@ export function craftbookHostGap(book: Craftbook, host: CraftbookHost): string |
         return 'Checks its work in a way this device cannot yet.';
       }
     }
+  }
+  // The contract joins the last step's gate when the task is created.
+  const contractChecks = book.contract ? contractGateChecks(book.contract) : [];
+  if (contractChecks.some((check) => !host.gateCheckKinds.has(check.kind))) {
+    return 'Checks its work in a way this device cannot yet.';
   }
   return null;
 }

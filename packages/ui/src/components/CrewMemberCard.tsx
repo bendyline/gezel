@@ -1,11 +1,13 @@
-import type { CrewMember, GezelSummary } from '@bendyline/gezel';
+import { type CrewMember, type GezelSummary, plainRoleTitle } from '@bendyline/gezel';
 import { GezelIcon } from './GezelIcon.js';
 import { navigateToTab } from './nav-actions.js';
 
 /**
  * One gezel on a crew: portrait, their role in plain words, what they start
  * with, and a way to say hello. Shared by the crew introduction in a thread
- * and a request tracker's "Who's helping?".
+ * and a request tracker's "Who's helping?". An introduction saved before
+ * roles were plain English still carries the Dutch title (and a gloss), so
+ * the role goes through `plainRoleTitle` rather than printing as stored.
  */
 export function CrewMemberCard({ member, gezel }: { member: CrewMember; gezel?: GezelSummary }) {
   return (
@@ -19,12 +21,7 @@ export function CrewMemberCard({ member, gezel }: { member: CrewMember; gezel?: 
       />
       <div className="msg-crew-card-text">
         <span className="msg-crew-card-name">{member.name}</span>
-        {member.role && (
-          <span className="msg-crew-card-role">
-            {member.role}
-            {member.gloss ? ` — ${member.gloss}` : ''}
-          </span>
-        )}
+        {member.role && <span className="msg-crew-card-role">{plainRoleTitle(member.role)}</span>}
         {member.stepName ? (
           <span className="msg-crew-card-purpose">Starts with “{member.stepName}”</span>
         ) : member.purpose ? (

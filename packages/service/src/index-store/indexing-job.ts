@@ -3,7 +3,7 @@ import type { Store } from '../fs/store.js';
 import type { TaskManager } from '../tasks/manager.js';
 
 /**
- * The boekwachter's control surface: a service-installed system task that
+ * The Librarian's (internally, the boekwachter's) control surface: a service-installed system task that
  * makes background indexing visible, pausable, and auditable in the ordinary
  * Tasks UI. The task never dispatches to a model (assignee is the user, so
  * the runner skips it) — the actual work runs in the service loops
@@ -14,10 +14,19 @@ import type { TaskManager } from '../tasks/manager.js';
 
 const log = createLogger('indexing-job');
 
-/** Stable sentinel title — inline craftbooks get generated ids, so the title
- *  is the durable "already installed" marker (same as the oversight task). */
-export const INDEXING_JOB_TITLE = 'Boekwachter: workspace indexing & enrichment';
+/** Inline craftbooks get generated ids, so the job is found by its origin's
+ *  `jobId`, and by title for tasks installed before origins were stamped. */
+export const INDEXING_JOB_TITLE = 'Librarian: workspace indexing & enrichment';
+/** The title before the Boekwachter became the Librarian. */
+const LEGACY_INDEXING_JOB_TITLE = 'Boekwachter: workspace indexing & enrichment';
 export const INDEXING_JOB_ID = 'boekwachter-indexing';
+const INDEXING_JOB_DESCRIPTION =
+  'System job: the Librarian indexes project workspaces in the background — symbols and search while idle, AI summaries, folder rollups, and weekly digests in bulk during Night Shift. Pausing this task stops the AI passes; the cheap structural scan keeps search working. Sources of truth are never modified.';
+
+function isIndexingJob(task: Task): boolean {
+  if (task.origin?.kind === 'system-job' && task.origin.jobId === INDEXING_JOB_ID) return true;
+  return task.title === INDEXING_JOB_TITLE || task.title === LEGACY_INDEXING_JOB_TITLE;
+}
 const STEP_ID = 'index';
 const PAUSE_CACHE_MS = 15_000;
 
@@ -38,7 +47,7 @@ async function resolveJobHome(
   const candidates = shared && shared !== 'default' ? [shared, 'default'] : ['default'];
   for (const projectId of candidates) {
     const tasks = await store.listProjectTasks(projectId).catch(() => []);
-    const task = tasks.find((t) => t.title === INDEXING_JOB_TITLE);
+    const task = tasks.find(isIndexingJob);
     if (task) return { homeId: shared ?? 'default', installed: { projectId, task } };
   }
   return { homeId: shared ?? 'default', installed: null };
@@ -66,10 +75,13 @@ export async function ensureIndexingJobTask(store: Store, tasks: TaskManager): P
       installed.assignee.kind !== 'user' ||
       (installed.status !== 'active' && installed.status !== 'paused') ||
       JSON.stringify(installed.origin) !== JSON.stringify(origin) ||
+      installed.title !== INDEXING_JOB_TITLE ||
       stepsPinned
     ) {
+      const retitled = installed.title !== INDEXING_JOB_TITLE;
       await store.writeTask({
         ...installed,
+        ...(retitled ? { title: INDEXING_JOB_TITLE, description: INDEXING_JOB_DESCRIPTION } : {}),
         // Keep the system loop out of TaskRunner while surfacing the real
         // gezel through provenance in the UI.
         assignee: { kind: 'user' },
@@ -96,8 +108,7 @@ export async function ensureIndexingJobTask(store: Store, tasks: TaskManager): P
       homeId,
       {
         title: INDEXING_JOB_TITLE,
-        description:
-          'System job: the boekwachter indexes project workspaces in the background — symbols and search while idle, AI summaries, folder rollups, and weekly digests in bulk during Night Shift. Pausing this task stops the AI passes; the cheap structural scan keeps search working. Sources of truth are never modified.',
+        description: INDEXING_JOB_DESCRIPTION,
         assignee: { kind: 'user' },
         steps: [
           {

@@ -12,6 +12,7 @@ import { OfficeSetupCard } from './OfficeSetupCard.js';
 import { OpenCodeSetupCard } from './OpenCodeSetupCard.js';
 import { PiSetupCard } from './PiSetupCard.js';
 import { VSCodeSetupCard } from './VSCodeSetupCard.js';
+import { addedAppScopes, describeAppScope } from './app-scopes.js';
 import {
   approvalErrorMessage,
   formatVerificationCode,
@@ -63,6 +64,8 @@ interface PendingGrant {
   decidedAt?: number;
   kind?: 'app' | 'device';
   verificationRequired?: boolean;
+  /** Scopes the app already holds, when this request adds to its grant. */
+  upgradeFrom?: string[];
 }
 
 interface ConnectedAppsResponse {
@@ -366,7 +369,7 @@ export function ConnectedAppsPanel() {
                         ? `${g.appId} — wants command-line control of this Gezel service`
                         : g.scopes.includes('product')
                           ? `${g.appId} — wants access to Gezel features and data`
-                          : `${g.appId} — wants: ${g.scopes.join(', ')}`}
+                          : `${g.appId} — ${g.upgradeFrom ? 'also wants' : 'wants'}: ${addedAppScopes(g).map(describeAppScope).join('; ')}`}
                   </div>
                 </div>
                 <div className="connected-app-actions">
@@ -582,7 +585,9 @@ export function ConnectedAppsPanel() {
                           {app.scopes.length > 0 ? (
                             <ul className="connected-apps-scopes">
                               {app.scopes.map((scope) => (
-                                <li key={scope}>{scope}</li>
+                                <li key={scope} title={scope}>
+                                  {describeAppScope(scope)}
+                                </li>
                               ))}
                             </ul>
                           ) : (

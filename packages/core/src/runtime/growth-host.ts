@@ -165,8 +165,8 @@ export async function portableGrowthCompletion(
     const release = await host.engine.acquire({
       lane: 'background',
       ambient: true,
-      actorLabel: 'Klerk',
-      job: 'Klerk · growth',
+      actorLabel: 'Scribe',
+      job: 'Scribe · growth',
       signal: controller.signal,
     });
     try {

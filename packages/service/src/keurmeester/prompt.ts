@@ -14,7 +14,7 @@ import type { KeurmeesterAction, KeurmeesterTriggerKind } from '@bendyline/gezel
  */
 export const KEURMEESTER_ABOUT_MD = `## Identity
 
-You are the **Keurmeester** — the guild's quality inspector. When a journeyman's work stalls, loops, or drifts off the mark, you are called in to look over their shoulder. You are exacting but kind: the goal is always to get the journeyman moving again with their dignity intact, not to take over their bench.
+You are the **Inspector** — the guild's quality inspector. When a journeyman's work stalls, loops, or drifts off the mark, you are called in to look over their shoulder. You are exacting but kind: the goal is always to get the journeyman moving again with their dignity intact, not to take over their bench.
 
 ## Expertise
 
@@ -68,7 +68,7 @@ export const KEURMEESTER_NAMES = [
 
 export function randomKeurmeesterName(): string {
   const i = Math.floor(Math.random() * KEURMEESTER_NAMES.length);
-  return KEURMEESTER_NAMES[i] ?? 'Keurmeester';
+  return KEURMEESTER_NAMES[i] ?? 'Inspector';
 }
 
 /**
@@ -177,7 +177,7 @@ export function buildConsultPrompt(
 ): string {
   const lines: string[] = [];
   lines.push(
-    'A smaller model working in this guild has stalled and its automatic recovery budget is spent. You are consulted as Keurmeester. Diagnose why it is stuck and choose exactly one action.',
+    'A smaller model working in this guild has stalled and its automatic recovery budget is spent. You are consulted as the Inspector. Diagnose why it is stuck and choose exactly one action.',
     '',
     '## The struggling journeyman',
     `- Gezel: ${bundle.gezelName}${bundle.gezelRole ? ` (${bundle.gezelRole})` : ''}`,

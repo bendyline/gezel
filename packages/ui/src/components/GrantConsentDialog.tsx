@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { AlertDialog } from '../primitives/index.js';
+import { addedAppScopes, describeAppScope } from './app-scopes.js';
 import {
   approvalErrorMessage,
   formatVerificationCode,
@@ -29,6 +30,8 @@ interface PendingGrant {
   createdAt: number;
   kind?: 'app' | 'device';
   verificationRequired?: boolean;
+  /** Scopes the app already holds, when this request adds to its grant. */
+  upgradeFrom?: string[];
 }
 
 interface ConnectedAppsResponse {
@@ -132,26 +135,34 @@ export function GrantConsentDialog() {
         <AlertDialog.Overlay />
         <AlertDialog.Content>
           <AlertDialog.Title asChild>
-            <h3>{grant.appName} wants to connect</h3>
+            <h3>
+              {grant.upgradeFrom
+                ? `${grant.appName} wants more access`
+                : `${grant.appName} wants to connect`}
+            </h3>
           </AlertDialog.Title>
           <AlertDialog.Description asChild>
             <div>
               <p className="muted small">
                 {grant.kind === 'device'
                   ? 'Another Gezel device is asking to use models served by this computer.'
-                  : grant.scopes.includes('cli')
-                    ? 'The Gezel command line is asking to use this service.'
-                    : grant.scopes.includes('product')
-                      ? 'An application is asking to use Gezel features and data.'
-                      : 'An application on this computer or local network is asking to connect to Gezel.'}
+                  : grant.upgradeFrom
+                    ? 'This connected app is asking for access it does not have yet. What it has now keeps working whatever you choose.'
+                    : grant.scopes.includes('cli')
+                      ? 'The Gezel command line is asking to use this service.'
+                      : grant.scopes.includes('product')
+                        ? 'An application is asking to use Gezel features and data.'
+                        : 'An application on this computer or local network is asking to connect to Gezel.'}
               </p>
               <dl className="grant-consent-details">
                 <dt>App ID</dt>
                 <dd>
                   <code>{grant.appId}</code>
                 </dd>
-                <dt>Scopes</dt>
-                <dd>{grant.scopes.join(', ')}</dd>
+                <dt>{grant.upgradeFrom ? 'Adds' : 'Access'}</dt>
+                {addedAppScopes(grant).map((scope) => (
+                  <dd key={scope}>{describeAppScope(scope)}</dd>
+                ))}
               </dl>
               {grant.scopes.includes('cli') && (
                 <p className="small" role="alert">
