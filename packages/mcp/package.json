@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-mcp",
-  "version": "1.2.8",
+  "version": "1.2.9",
   "description": "Gezel's Model Context Protocol server: gives gezels and other MCP clients access to memory, workspace files, artifacts, tasks, and team tools.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "mcp", "model-context-protocol", "tools"],
