@@ -50,6 +50,7 @@ import {
   effectiveCapabilityFloor,
   getEngagementMode,
   isTaskWorkAllowed,
+  parseTaskRef,
   projectAllowsAmbientWork,
   taskEffectiveStatus,
 } from '@bendyline/gezel';
@@ -616,10 +617,13 @@ export class TaskRunner {
   }
 
   /** Resume can uncover dormant descendants; closing/pausing only prunes work.
-   * Waking is detached because a transition can originate inside our own tick. */
-  async reconcileStatusChange(task: Pick<Task, 'projectId' | 'status'>): Promise<void> {
+   * Only the changed task's own subtree can have changed, so only it is
+   * re-read: rescanning the project held every resume of a 115k-task batch
+   * open for minutes. Waking is detached because a transition can originate
+   * inside our own tick. */
+  async reconcileStatusChange(task: Pick<Task, 'projectId' | 'status' | 'ref'>): Promise<void> {
     if (task.status === 'active' || task.status === 'draft') {
-      await this.rehydrateFromStore({ projectId: task.projectId });
+      await this.rehydrateFromStore({ projectId: task.projectId, rootTaskRef: task.ref });
     }
     void this.wake();
   }
@@ -633,9 +637,17 @@ export class TaskRunner {
    * Safe to call more than once — duplicates are filtered via the
    * (taskRef, stepId, gezelId) triple before dispatch inside
    * `tick`, so a double-enqueue won't produce two handoff sessions.
+   *
+   * `rootTaskRef` (with `projectId`) limits the pass to that task and its
+   * descendants, found through the store's lineage index instead of a scan.
    */
   async rehydrateFromStore(
-    opts: { nightShiftOnly?: boolean; projectId?: string; afterRestart?: boolean } = {},
+    opts: {
+      nightShiftOnly?: boolean;
+      projectId?: string;
+      rootTaskRef?: string;
+      afterRestart?: boolean;
+    } = {},
   ): Promise<TaskRehydrationResult> {
     const result: TaskRehydrationResult = {
       taskRefs: [],
@@ -653,7 +665,11 @@ export class TaskRunner {
       // Concurrent reconciliations must retain live work, not all history.
       const tasks: Task[] = [];
       try {
-        for await (const stored of this.store.iterateProjectTasks(proj.id)) {
+        const candidates =
+          opts.rootTaskRef && opts.projectId
+            ? this.iterateTaskTree(proj.id, opts.rootTaskRef)
+            : this.store.iterateProjectTasks(proj.id);
+        for await (const stored of candidates) {
           if (stored.status !== 'active') continue;
           const task = await readTaskWithEffectiveStatus(this.store, proj.id, stored.num);
           if (task && taskEffectiveStatus(task) === 'active') tasks.push(task);
@@ -736,6 +752,39 @@ export class TaskRunner {
       }
     }
     return result;
+  }
+
+  /**
+   * Yield a task and every descendant in its project, breadth first. Each
+   * child is re-read and must still name its parent: the lineage index can
+   * hold an entry that outlived its task.
+   */
+  private async *iterateTaskTree(projectId: string, rootRef: string): AsyncGenerator<Task> {
+    const root = parseTaskRef(rootRef);
+    if (!root || root.projectId !== projectId) return;
+    // The queue holds task numbers, never tasks: a collection root's subtree
+    // can be the whole project, and keeping every visited task alive ran a
+    // 117k-task project out of heap two minutes after boot (2026-10-26).
+    const queue: Array<{ num: number; parentRef: string | null }> = [
+      { num: root.num, parentRef: null },
+    ];
+    const seen = new Set([root.num]);
+    let head = 0;
+    while (head < queue.length) {
+      const next = queue[head++] as { num: number; parentRef: string | null };
+      if (head >= 4096) {
+        queue.splice(0, head);
+        head = 0;
+      }
+      const task = await this.store.readTask(projectId, next.num);
+      if (!task || (next.parentRef !== null && task.parentTaskRef !== next.parentRef)) continue;
+      yield task;
+      for (const num of await this.store.listChildTaskNums(projectId, task.ref)) {
+        if (seen.has(num)) continue;
+        seen.add(num);
+        queue.push({ num, parentRef: task.ref });
+      }
+    }
   }
 
   /**

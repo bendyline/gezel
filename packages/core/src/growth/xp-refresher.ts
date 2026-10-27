@@ -3,6 +3,14 @@
  * A large task corpus can take longer to scan than the debounce delay; keep
  * only one follow-up per gezel instead of filling the engine's lock queue.
  * Disposal drops queued work without interrupting an already durable refresh.
+ *
+ * A refresh rescans the gezel's history and every task, so its cost grows
+ * with the home. Each gezel therefore waits out a cooldown proportional to
+ * its last refresh before the next one: in a small home that is a few seconds,
+ * and XP still follows finished work almost at once. In a bulk workflow home
+ * (1.4M history events, 117k tasks) one refresh took 3–8 minutes; completions
+ * every second kept them running back to back, a fifth of the daemon's main
+ * thread for XP nobody was watching (2026-10-27).
  */
 import { createLogger } from '../log.js';
 
@@ -10,6 +18,13 @@ const log = createLogger('growth');
 
 /** Long enough to fold a gate loop's burst of step completions into one refresh. */
 export const XP_REFRESH_DELAY_MS = 3_000;
+
+/**
+ * The share of time one gezel's refreshes may take: after a refresh that ran
+ * for `d`, the next one for that gezel waits until `d / XP_REFRESH_DUTY_CYCLE`
+ * has passed since it started.
+ */
+export const XP_REFRESH_DUTY_CYCLE = 0.02;
 
 export interface XpRefresher {
   /** Schedule a refresh for the gezel credited with finished work. */
@@ -31,8 +46,23 @@ export function createXpRefresher(opts: {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const delay = opts.delayMs ?? XP_REFRESH_DELAY_MS;
   const pending = new Set<string>();
+  /** When each gezel may refresh again, from its last refresh's cost. */
+  const readyAt = new Map<string, number>();
   let running = false;
   let disposed = false;
+  const schedule = (gezelId: string, waitMs: number): void => {
+    // Work noted while a refresh is already scheduled folds into it.
+    if (timers.has(gezelId)) return;
+    const timer = setTimeout(() => {
+      timers.delete(gezelId);
+      pending.add(gezelId);
+      void drain();
+    }, waitMs);
+    timer.unref?.();
+    timers.set(gezelId, timer);
+  };
+  const cooldownLeft = (gezelId: string): number =>
+    Math.max(0, (readyAt.get(gezelId) ?? 0) - Date.now());
   const drain = async (): Promise<void> => {
     if (running || disposed) return;
     running = true;
@@ -40,11 +70,21 @@ export function createXpRefresher(opts: {
       while (!disposed && pending.size > 0) {
         const gezelId = pending.values().next().value!;
         pending.delete(gezelId);
+        // Work that arrived during this gezel's last refresh waits out the
+        // cooldown that refresh earned.
+        const wait = cooldownLeft(gezelId);
+        if (wait > 0) {
+          schedule(gezelId, wait);
+          continue;
+        }
+        const startedAt = Date.now();
         try {
           const state = await opts.refresh(gezelId);
           if (!disposed) opts.onRefreshed(gezelId, state.xp);
         } catch (err) {
           log.warn(`[growth] xp refresh failed for ${gezelId}: ${String(err)}`);
+        } finally {
+          readyAt.set(gezelId, startedAt + (Date.now() - startedAt) / XP_REFRESH_DUTY_CYCLE);
         }
       }
     } finally {
@@ -54,14 +94,7 @@ export function createXpRefresher(opts: {
   return {
     note(gezelId) {
       if (!gezelId || disposed) return;
-      clearTimeout(timers.get(gezelId));
-      const timer = setTimeout(() => {
-        timers.delete(gezelId);
-        pending.add(gezelId);
-        void drain();
-      }, delay);
-      timer.unref?.();
-      timers.set(gezelId, timer);
+      schedule(gezelId, Math.max(delay, cooldownLeft(gezelId)));
     },
     dispose() {
       disposed = true;

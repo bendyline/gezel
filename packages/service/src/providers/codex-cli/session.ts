@@ -34,6 +34,7 @@ import {
   type CodexRuntimeConfig,
   writeRuntimeCodexHome,
 } from './runtime-files.js';
+import { withCodexToolGuide } from './tool-guide.js';
 
 export interface CodexSessionDeps {
   binaryPath: string;
@@ -298,7 +299,7 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
       // type-level backstop.
     }
     const config: CodexRuntimeConfig = {
-      instructions: this.deps.systemMessage,
+      instructions: withCodexToolGuide(this.deps.systemMessage, this.getRegisteredToolNames()),
       model: this.deps.model,
       mcpServers,
       // Default codex's built-in rollout compactor + per-tool-output

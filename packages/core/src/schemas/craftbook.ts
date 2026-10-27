@@ -406,6 +406,21 @@ export const CraftbookStepSchema = z.object({
   authoring: CraftbookStepAuthoringSchema.optional(),
   /** Per-step subtractive tool and output-surface policy. */
   toolPolicy: CraftbookStepToolPolicySchema.optional(),
+  /**
+   * Ceiling, in seconds, on one model turn of this step. Wins over the
+   * provider's default (two hours for cloud providers, the configured local
+   * ceilings otherwise), in either direction. A turn that hits it fails like
+   * any other provider error, so the handoff's bounded retries still apply.
+   * Short, bounded steps set it so one stuck turn cannot hold a provider slot
+   * for long: media review's healthy turns take under a minute, while a
+   * runaway reached the Codex output limit after 10 minutes (2026-10-26).
+   */
+  turnTimeoutSec: z
+    .number()
+    .int()
+    .min(30)
+    .max(4 * 60 * 60)
+    .optional(),
   /** See {@link CraftbookStepStageSchema}; absent, `stepStage` infers it. */
   stage: CraftbookStepStageSchema.optional(),
   /**
@@ -1210,6 +1225,13 @@ export const NewCraftbookStepSchema = z.object({
   authoring: CraftbookStepAuthoringSchema.optional(),
   /** See {@link CraftbookStepSchema.shape.toolPolicy}. */
   toolPolicy: CraftbookStepToolPolicySchema.optional(),
+  /** See {@link CraftbookStepSchema.shape.turnTimeoutSec}. */
+  turnTimeoutSec: z
+    .number()
+    .int()
+    .min(30)
+    .max(4 * 60 * 60)
+    .optional(),
   /** See {@link CraftbookStepSchema.shape.stage}. */
   stage: CraftbookStepStageSchema.optional(),
   /** See {@link CraftbookStepSchema.shape.personLabel}. */
@@ -1452,6 +1474,7 @@ export function resolveSteps(blueprints: NewCraftbookStep[]): CraftbookStep[] {
       ...(s.promptProfile ? { promptProfile: s.promptProfile } : {}),
       ...(s.authoring ? { authoring: s.authoring } : {}),
       ...(s.toolPolicy ? { toolPolicy: s.toolPolicy } : {}),
+      ...(s.turnTimeoutSec ? { turnTimeoutSec: s.turnTimeoutSec } : {}),
       ...(s.stage ? { stage: s.stage } : {}),
       ...(s.personLabel ? { personLabel: s.personLabel } : {}),
       ...(s.assignee ? { assignee: s.assignee } : {}),

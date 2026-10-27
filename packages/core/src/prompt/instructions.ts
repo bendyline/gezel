@@ -56,6 +56,7 @@ import { SQUISQ_DIALECT_BRIEF } from './squisq-dialect.js';
 import { type AvailableToolInfo, renderAvailableToolsBlock } from './tools-block.js';
 import { IN_APP_WEB_PREVIEW_GUIDANCE } from './web-preview.js';
 import {
+  WORKSPACE_LISTING_TOOLS,
   WORKSPACE_PROMPT_ENTRY_CAP,
   filterWorkspaceFilesForPrompt,
   roleGetsWorkspaceOrientation,
@@ -736,7 +737,17 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   const body = about.trim().length > 0 ? about.trim() : '(no about.md written yet)';
   const workspaceOrientationEnabled = roleGetsWorkspaceOrientation(role);
   const workspacePromptFiles = filterWorkspaceFilesForPrompt(workspaceFiles ?? [], role);
-  const workspaceListingRendered = Boolean(project && workspacePromptFiles.length > 0);
+  // The listing orients a turn that can act on the files: read or search
+  // them, write them, or hand work on them to someone who can. A turn wired
+  // with none of those (a workflow step whose input and output both live in
+  // the artifacts drawer) carried ~100 listing lines per prompt that it was
+  // told it could not use (media review, 2026-10-27). An unknown roster keeps it.
+  const canActOnWorkspace =
+    availableTools === undefined ||
+    WORKSPACE_LISTING_TOOLS.some((name) => availableToolNameSet.has(name));
+  const workspaceListingRendered = Boolean(
+    project && workspacePromptFiles.length > 0 && canActOnWorkspace,
+  );
   // Stable-prefix band: traits (identity) then lessons (experience) sit
   // right after the about body so the gezel's earned behaviors and
   // accumulated cross-project knowledge read as part of who it is, not

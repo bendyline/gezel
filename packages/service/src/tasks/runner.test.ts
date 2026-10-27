@@ -1312,6 +1312,87 @@ describe('TaskRunner — startup rehydration', () => {
     expect(runner.snapshot().pendingByGezel).toEqual({ bea: 2, cid: 1 });
   });
 
+  it("rehydrates a resumed task's own subtree without reading the rest of the project", async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    const write = (num: number, parentTaskRef?: string) =>
+      store.writeTask({
+        projectId: 'p1',
+        num,
+        ref: `p1/${num}`,
+        title: `task ${num}`,
+        status: 'active',
+        assignee: { kind: 'gezel', gezelId: 'bea' },
+        craftbook: fixtureCraftbook([
+          { id: 'plan', name: 'plan', assignee: { kind: 'gezel', gezelId: 'bea' }, createdAt: now },
+        ]),
+        activeStepId: 'plan',
+        ...(parentTaskRef ? { parentTaskRef } : {}),
+        createdAt: now,
+        updatedAt: now,
+        createdBy: { kind: 'user' },
+      });
+    await write(1);
+    await write(2, 'p1/1');
+    await write(3, 'p1/2');
+    await write(4);
+
+    const runner = new TaskRunner({ store, dispatcher: new FakeDispatcher(new Map()) });
+    // Boot lists the project once, which completes the lineage index.
+    expect((await runner.rehydrateFromStore({ projectId: 'p1' })).taskRefs.sort()).toEqual([
+      'p1/1',
+      'p1/2',
+      'p1/3',
+      'p1/4',
+    ]);
+
+    const reads = vi.spyOn(store, 'readTask');
+    const tree = await runner.rehydrateFromStore({ projectId: 'p1', rootTaskRef: 'p1/2' });
+    expect(tree.taskRefs.sort()).toEqual(['p1/2', 'p1/3']);
+    expect(reads.mock.calls.map(([, num]) => num)).not.toContain(4);
+
+    // A child created after boot is found; one moved to another parent is not.
+    await write(5, 'p1/2');
+    const moved = await store.readTask('p1', 3);
+    if (!moved) throw new Error('task p1/3 missing');
+    await store.writeTask({ ...moved, parentTaskRef: 'p1/4' });
+    const after = await runner.rehydrateFromStore({ projectId: 'p1', rootTaskRef: 'p1/2' });
+    expect(after.taskRefs.sort()).toEqual(['p1/2', 'p1/5']);
+  });
+
+  it('walks a subtree wider than its queue compaction step once per task, breadth first', async () => {
+    // A collection root's subtree is the whole project: the walk keeps task
+    // numbers rather than tasks and compacts its queue as it goes.
+    const level1 = Array.from({ length: 5000 }, (_, i) => i + 2);
+    const children = new Map([
+      ['p1/1', level1],
+      ['p1/5001', [6000, 6001]],
+    ]);
+    const parentOf = (num: number) => (num === 1 ? undefined : num < 6000 ? 'p1/1' : 'p1/5001');
+    const stub = {
+      readTask: async (_projectId: string, num: number) => ({
+        projectId: 'p1',
+        num,
+        ref: `p1/${num}`,
+        parentTaskRef: parentOf(num),
+      }),
+      listChildTaskNums: async (_projectId: string, ref: string) => children.get(ref) ?? [],
+    };
+    const runner = new TaskRunner({
+      store: stub as unknown as Store,
+      dispatcher: new FakeDispatcher(new Map()),
+    });
+    const walk = (
+      runner as unknown as {
+        iterateTaskTree(projectId: string, rootRef: string): AsyncGenerator<{ num: number }>;
+      }
+    ).iterateTaskTree('p1', 'p1/1');
+    const nums: number[] = [];
+    for await (const task of walk) nums.push(task.num);
+    expect(nums).toEqual([1, ...level1, 6000, 6001]);
+  });
+
   it('stops resuming a step that has never survived a restart, and holds it', async () => {
     // Wild-caught: one review step was resumed four times across ~50
     // minutes of restarts. Each resume re-read 48k tokens before doing any
@@ -2500,7 +2581,7 @@ describe('TaskRunner — provider-busy starvation bound', () => {
   });
 });
 
-it('only resumes rescan history; completion and pause wake the targeted pruning pass', async () => {
+it("only resumes rehydrate, and only the resumed task's subtree; completion and pause just wake", async () => {
   const runner = new TaskRunner({ store, dispatcher: new FakeDispatcher(new Map()) });
   const hydrate = vi.spyOn(runner, 'rehydrateFromStore').mockResolvedValue({
     taskRefs: [],
@@ -2509,11 +2590,11 @@ it('only resumes rescan history; completion and pause wake the targeted pruning 
   });
   const wake = vi.spyOn(runner, 'wake').mockResolvedValue();
   for (const status of ['complete', 'paused', 'canceled'] as const) {
-    await runner.reconcileStatusChange({ projectId: 'p1', status });
+    await runner.reconcileStatusChange({ projectId: 'p1', status, ref: 'p1/7' });
   }
   expect(hydrate).not.toHaveBeenCalled();
   expect(wake).toHaveBeenCalledTimes(3);
-  await runner.reconcileStatusChange({ projectId: 'p1', status: 'active' });
-  expect(hydrate).toHaveBeenCalledWith({ projectId: 'p1' });
+  await runner.reconcileStatusChange({ projectId: 'p1', status: 'active', ref: 'p1/7' });
+  expect(hydrate).toHaveBeenCalledWith({ projectId: 'p1', rootTaskRef: 'p1/7' });
   expect(wake).toHaveBeenCalledTimes(4);
 });

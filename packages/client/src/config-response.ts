@@ -359,6 +359,12 @@ export interface ConfigResponse {
    */
   aiEngagementMode?: 'proactive' | 'scheduled' | 'reactive' | 'off';
   /**
+   * Gezel growth: XP and the level-ups it offers. Off computes no XP (a home
+   * running bulk workflows can switch it off with `gezel growth off`).
+   * Materialized on GET; default on. Optional for older daemons.
+   */
+  growth?: { enabled: boolean };
+  /**
    * Whether the desktop app shows a persistent system-tray icon.
    * Materialized on GET (defaults to `true` when unset) so the Settings
    * UI can bind directly. Consumed by the Electron main process.

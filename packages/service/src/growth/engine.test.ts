@@ -1,12 +1,15 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Task } from '@bendyline/gezel';
+import { XP_WEIGHTS, countTaskWork } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
+import { TaskFilesStore } from '../fs/task-files-store.js';
 import { HistoryManager } from '../history/manager.js';
 import { MemoryManager } from '../memory/manager.js';
+import { TaskManager } from '../tasks/manager.js';
 import { GrowthEngine } from './engine.js';
+import { GrowthHistoryTally } from './history-tally.js';
 
 vi.mock('@bendyline/gezel-inference/internal/memory/embeddings', () => {
   const vectorFor = (text: string): number[] => {
@@ -47,6 +50,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await rm(home, { recursive: true, force: true }).catch(() => {});
 });
 
@@ -168,25 +172,73 @@ describe('GrowthEngine.refresh', () => {
   });
 });
 
-// Large histories must affect tally time, not the number of retained task bodies.
-it('streams completed work without loading the entire task corpus', async () => {
-  const bulk = vi
-    .spyOn(store, 'listAllTasks')
-    .mockRejectedValue(new Error('full listing forbidden'));
-  let yielded = 0;
-  vi.spyOn(store, 'iterateAllTasks').mockImplementation(async function* () {
-    for (let i = 0; i < 20_000; i++) {
-      yielded++;
-      yield {
-        status: i % 2 === 0 ? 'complete' : 'active',
-        assignee: { kind: 'gezel', gezelId: 'sprout' },
-        craftbook: { steps: [{ completedAt: '2026-10-06T00:00:00Z', suggestedGezelId: 'sprout' }] },
-      } as Task;
-    }
+// Task work and history counts are kept, not rescanned: a refresh after the
+// first reads neither the task corpus nor the audit log.
+describe('GrowthEngine live inputs', () => {
+  const work = (gezelId: string) => store.listAllTasks().then((all) => countTaskWork(all, gezelId));
+
+  async function finishTask(tasks: TaskManager, title: string): Promise<void> {
+    const task = await tasks.create('default', {
+      title,
+      assignee: { kind: 'gezel', gezelId: 'sprout' },
+      steps: [{ name: 'Main', terminal: true }],
+    });
+    await tasks.completeStep('default', task.num, task.activeStepId!);
+  }
+
+  it('credits finished work and new events without re-reading old tasks or the log', async () => {
+    const tasks = new TaskManager(store);
+    await finishTask(tasks, 'First');
+    await finishTask(tasks, 'Second');
+    await history.log({ kind: 'memory.lessons-updated', gezelId: 'sprout', summary: 'lessons' });
+    const e = engine();
+    const first = await e.refresh('sprout', { allowKlerk: false, createPending: false });
+    const before = await work('sprout');
+    expect(before.completedTasks).toBe(2);
+    expect(first.signals.taskXp).toBe(
+      before.completedSteps * XP_WEIGHTS.stepCompleted + 2 * XP_WEIGHTS.taskCompleted,
+    );
+    expect(first.signals.lessonsXp).toBe(XP_WEIGHTS.lessonsUpdate);
+
+    const scans = vi.spyOn(HistoryManager.prototype, 'iterateEvents');
+    const reads = vi.spyOn(TaskFilesStore.prototype, 'readTask');
+    await finishTask(tasks, 'Third');
+    await history.log({ kind: 'memory.lessons-updated', gezelId: 'sprout', summary: 'again' });
+    await history.log({ kind: 'gezel.message.delivered', gezelId: 'sprout', summary: 'sent' });
+    await history.log({ kind: 'memory.lessons-updated', gezelId: 'other', summary: 'not ours' });
+    reads.mockClear();
+    const second = await e.refresh('sprout', { allowKlerk: false, createPending: false });
+    expect(scans).not.toHaveBeenCalled();
+    expect(reads).not.toHaveBeenCalled();
+    const after = await work('sprout');
+    expect(after.completedTasks).toBe(3);
+    expect(second.signals.taskXp).toBe(
+      after.completedSteps * XP_WEIGHTS.stepCompleted + 3 * XP_WEIGHTS.taskCompleted,
+    );
+    expect(second.signals.lessonsXp).toBe(2 * XP_WEIGHTS.lessonsUpdate);
+    expect(second.signals.consultXp).toBe(XP_WEIGHTS.consultationDelivered);
   });
-  const state = await engine().refresh('sprout', { allowKlerk: false, createPending: false });
-  expect(yielded).toBe(20_000);
-  expect(bulk).not.toHaveBeenCalled();
-  expect(state.signals.taskXp).toBe(450_000);
-  expect(state.pendingLevelUp).toBeUndefined();
+
+  it('counts an event appended while the first pass runs exactly once', async () => {
+    await history.log({ kind: 'memory.lessons-updated', gezelId: 'sprout', summary: 'old' });
+    const tally = new GrowthHistoryTally(history);
+    const iterate = history.iterateEvents.bind(history);
+    vi.spyOn(history, 'iterateEvents').mockImplementation(async function* (opts) {
+      // Append mid-pass: the pass may or may not reach it; either way it counts once.
+      await history.log({ kind: 'memory.lessons-updated', gezelId: 'sprout', summary: 'mid' });
+      yield* iterate(opts);
+    });
+    expect((await tally.countsFor('sprout')).lessonsUpdates).toBe(2);
+    await history.log({ kind: 'memory.lessons-updated', gezelId: 'sprout', summary: 'late' });
+    expect((await tally.countsFor('sprout')).lessonsUpdates).toBe(3);
+  });
+
+  it('rebuilds after a redaction removes events from a gezel', async () => {
+    await history.log({ kind: 'memory.lessons-updated', gezelId: 'sprout', summary: 'one' });
+    await history.log({ kind: 'memory.lessons-updated', gezelId: 'sprout', summary: 'two' });
+    const tally = new GrowthHistoryTally(history);
+    expect((await tally.countsFor('sprout')).lessonsUpdates).toBe(2);
+    await history.redactEvents({ fields: ['identifiers'] });
+    expect((await tally.countsFor('sprout')).lessonsUpdates).toBe(0);
+  });
 });

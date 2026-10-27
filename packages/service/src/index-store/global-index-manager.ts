@@ -31,9 +31,20 @@ import { isTransientIndexError } from './sqlite-driver.js';
 const log = createLogger('global-index');
 
 const DEBOUNCE_MS = 3_000;
+/**
+ * A changed session is re-indexed once its writes have gone quiet, or after
+ * the longest wait if it never does. Every re-index rewrites all of the
+ * session's chunks, and a streaming turn writes its session every few
+ * seconds: at 40 concurrent task sessions those rewrites took 30% of the
+ * daemon's main thread (2026-10-27).
+ */
+const SESSION_QUIET_MS = 15_000;
+const SESSION_MAX_WAIT_MS = 120_000;
 const STARTUP_DELAY_MS = 15_000;
 const RECONCILE_INTERVAL_MS = 6 * 60 * 60_000;
 const MAX_TRANSCRIPT_CHUNK_CHARS = 4_000;
+/** Events per reconcile transaction; the API thread runs between batches. */
+const HISTORY_RECONCILE_BATCH = 2_000;
 
 export type { DocumentChangeEvent };
 
@@ -58,9 +69,12 @@ export class GlobalIndexManager {
   private readonly reconcileIntervalMs: number;
 
   private readonly dirtySessions = new Map<string, SessionChangeEvent>();
+  /** When each dirty session first and last changed (ms), for the quiet period. */
+  private readonly sessionChangedAt = new Map<string, { first: number; last: number }>();
   private pendingHistory: HistoryEvent[] = [];
 
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private flushDueAt = 0;
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private reconcileTimer: ReturnType<typeof setInterval> | null = null;
   private flushing = false;
@@ -99,7 +113,13 @@ export class GlobalIndexManager {
   }
 
   enqueueSession(ev: SessionChangeEvent): void {
-    this.dirtySessions.set(`${ev.gezelId}/${ev.sessionId}`, ev);
+    const key = `${ev.gezelId}/${ev.sessionId}`;
+    this.dirtySessions.set(key, ev);
+    const now = Date.now();
+    this.sessionChangedAt.set(key, {
+      first: this.sessionChangedAt.get(key)?.first ?? now,
+      last: now,
+    });
     this.scheduleFlush();
   }
 
@@ -116,18 +136,33 @@ export class GlobalIndexManager {
    */
   enqueueDocument(_ev: DocumentChangeEvent): void {}
 
-  private scheduleFlush(): void {
+  /**
+   * Flush within `delayMs`. An earlier pending flush is kept: under a steady
+   * stream of changes a pure trailing debounce would never fire.
+   */
+  private scheduleFlush(delayMs = this.debounceMs): void {
     if (this.stopped) return;
-    if (this.flushTimer) clearTimeout(this.flushTimer);
+    const dueAt = Date.now() + delayMs;
+    if (this.flushTimer) {
+      if (this.flushDueAt <= dueAt) return;
+      clearTimeout(this.flushTimer);
+    }
+    this.flushDueAt = dueAt;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
-      void this.flush().catch((err) => log.warn(`flush failed: ${describe(err)}`));
-    }, this.debounceMs);
+      void this.flush({ quietSessionsOnly: true }).catch((err) =>
+        log.warn(`flush failed: ${describe(err)}`),
+      );
+    }, delayMs);
     unref(this.flushTimer);
   }
 
-  /** Exposed for tests: drain all dirty queues now. */
-  async flush(): Promise<void> {
+  /**
+   * Drain the dirty queues. The debounce timer passes `quietSessionsOnly` and
+   * leaves sessions still being written for a later flush; called directly
+   * (tests, reconcile) it drains everything now.
+   */
+  async flush(opts: { quietSessionsOnly?: boolean } = {}): Promise<void> {
     if (this.flushing) {
       this.flushQueued = true;
       return;
@@ -137,9 +172,22 @@ export class GlobalIndexManager {
     try {
       const gates = await this.gates();
       if (this.dirtySessions.size > 0) {
-        const batch = [...this.dirtySessions.values()];
-        this.dirtySessions.clear();
-        if (gates.sessions) {
+        const now = Date.now();
+        const batch: SessionChangeEvent[] = [];
+        for (const [key, ev] of this.dirtySessions) {
+          const changed = this.sessionChangedAt.get(key);
+          const due =
+            !opts.quietSessionsOnly ||
+            ev.type === 'delete' ||
+            !changed ||
+            now - changed.last >= SESSION_QUIET_MS ||
+            now - changed.first >= SESSION_MAX_WAIT_MS;
+          if (!due) continue;
+          batch.push(ev);
+          this.dirtySessions.delete(key);
+          this.sessionChangedAt.delete(key);
+        }
+        if (gates.sessions && batch.length > 0) {
           try {
             await this.flushSessions(batch);
           } catch (error) {
@@ -172,8 +220,21 @@ export class GlobalIndexManager {
       if (this.flushQueued) {
         this.flushQueued = false;
         this.scheduleFlush();
+      } else if (this.dirtySessions.size > 0) {
+        this.scheduleFlush(this.nextSessionDueMs());
       }
     }
+  }
+
+  /** Milliseconds until the earliest waiting session becomes due. */
+  private nextSessionDueMs(): number {
+    const now = Date.now();
+    let next = SESSION_MAX_WAIT_MS;
+    for (const changed of this.sessionChangedAt.values()) {
+      const due = Math.min(changed.last + SESSION_QUIET_MS, changed.first + SESSION_MAX_WAIT_MS);
+      next = Math.min(next, Math.max(0, due - now));
+    }
+    return Math.max(next, this.debounceMs);
   }
 
   /** Exposed for tests: full drift check against the plain-file sources. */
@@ -304,16 +365,40 @@ export class GlobalIndexManager {
     }
   }
 
+  /**
+   * Insert whatever the JSONL source holds that the mirror lacks. Under a live
+   * workload the mirror always trails the file by the events waiting for the
+   * next flush, so a count mismatch is the normal case, not drift. Replacing
+   * all 1.4M events on every mismatch held the API thread for 73 s at boot and
+   * every six hours, long enough for clients' connections to time out
+   * (2026-10-27). Inserts skip ids already present; small transactions with a
+   * yield between them keep the thread responsive. Only a mirror holding more
+   * events than the source (a deletion it never saw) is rebuilt.
+   */
   private async reconcileHistory(): Promise<void> {
     const index = await openGlobalCollection(this.store.homePath, 'history');
     if (!index) return;
     try {
-      // No `q` in the filter, so this never routes back through the FTS
-      // backend — it's the plain JSONL scan, the source of truth.
-      const events = await this.history.listEvents({});
-      if (index.historyCount() !== events.length) {
-        index.replaceHistoryEvents(events);
-        log.info(`history backfill: ${events.length} events mirrored`);
+      const mirrored = index.historyCount();
+      let seen = 0;
+      let added = 0;
+      let batch: HistoryEvent[] = [];
+      const put = async (): Promise<void> => {
+        added += index.putHistoryEvents(batch);
+        batch = [];
+        await new Promise((resolve) => setImmediate(resolve));
+      };
+      for await (const event of this.history.iterateEvents()) {
+        seen += 1;
+        batch.push(event);
+        if (batch.length >= HISTORY_RECONCILE_BATCH) await put();
+      }
+      await put();
+      if (mirrored + added > seen) {
+        await this.rebuildHistoryMirror();
+        log.info(`history mirror rebuilt: ${mirrored + added - seen} events no longer in the log`);
+      } else if (added > 0) {
+        log.info(`history backfill: ${added} events mirrored`);
       }
       index.setMeta(HISTORY_BACKFILL_META_KEY, nowIso());
     } finally {

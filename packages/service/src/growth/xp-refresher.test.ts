@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createXpRefresher } from './xp-refresher.js';
+import { XP_REFRESH_DUTY_CYCLE, createXpRefresher } from './xp-refresher.js';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -71,7 +71,10 @@ it('serializes slow refreshes across gezels and coalesces work arriving in fligh
   await vi.advanceTimersByTimeAsync(0);
   expect(refresh).toHaveBeenCalledTimes(2);
   releases.shift()!();
+  // Ada's follow-up waits out the cooldown her 200 ms refresh earned.
   await vi.advanceTimersByTimeAsync(0);
+  expect(refresh).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(200 / XP_REFRESH_DUTY_CYCLE);
   expect(refresh).toHaveBeenCalledTimes(3);
   releases.shift()!();
   await vi.advanceTimersByTimeAsync(0);
@@ -100,4 +103,31 @@ it('disposal during a refresh discards its notification and queued follow-ups', 
   await vi.advanceTimersByTimeAsync(100);
   expect(refresh).toHaveBeenCalledTimes(1);
   expect(onRefreshed).not.toHaveBeenCalled();
+});
+
+it("spaces a gezel's refreshes by their cost, so XP never crowds out the work it counts", async () => {
+  vi.useFakeTimers();
+  // A bulk home's refresh rescans 1.4M history events and 117k tasks; one took
+  // minutes, and completions every second kept them running back to back.
+  const refresh = vi.fn(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    return { xp: 5 };
+  });
+  const refresher = createXpRefresher({ refresh, onRefreshed: vi.fn(), delayMs: 10 });
+  refresher.note('ada');
+  await vi.advanceTimersByTimeAsync(10 + 1_000);
+  expect(refresh).toHaveBeenCalledTimes(1);
+  const cooldown = 1_000 / XP_REFRESH_DUTY_CYCLE;
+  for (let i = 0; i < 20; i++) {
+    refresher.note('ada');
+    await vi.advanceTimersByTimeAsync(1_000);
+  }
+  expect(refresh).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(cooldown);
+  expect(refresh).toHaveBeenCalledTimes(2);
+  // A gezel with no expensive history refreshes after the usual delay.
+  refresher.note('bo');
+  await vi.advanceTimersByTimeAsync(10);
+  expect(refresh).toHaveBeenCalledTimes(3);
+  refresher.dispose();
 });

@@ -817,3 +817,72 @@ describe('Store session listings reuse unchanged summaries', () => {
     expect(moved.messages.map((m) => m.content)).toEqual(['moved']);
   });
 });
+
+describe('Store.listTaskSessions', () => {
+  it("answers a task's sessions from its index, matching a filtered full listing", async () => {
+    await store.createGezel({ name: 'Boz', role: 'Researcher' });
+    await store.writeSession(
+      sessionFixture({
+        id: 's1',
+        taskRef: 'default/7',
+        stepId: 'a',
+        lastActivityAt: '2026-04-14T10:01:00Z',
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 's2',
+        taskRef: 'default/7',
+        stepId: 'b',
+        lastActivityAt: '2026-04-14T10:02:00Z',
+      }),
+    );
+    await store.writeSession(sessionFixture({ id: 's3', gezelId: 'boz', taskRef: 'default/7' }));
+    await store.writeSession(sessionFixture({ id: 's4', taskRef: 'default/8' }));
+    await store.writeSession(sessionFixture({ id: 's5' }));
+
+    expect((await store.listTaskSessions('default/7')).map((s) => s.id)).toEqual([
+      's2',
+      's1',
+      's3',
+    ]);
+    expect(
+      (await store.listTaskSessions('default/7', { gezelId: 'ada' })).map((s) => s.id),
+    ).toEqual(['s2', 's1']);
+    expect(await store.listTaskSessions('default/7', { projectId: 'elsewhere' })).toEqual([]);
+    const full = (await store.listSessions()).filter((s) => s.taskRef === 'default/7');
+    expect(await store.listTaskSessions('default/7')).toEqual(full);
+
+    // Rebinding and deleting are seen without another full listing.
+    await store.writeSession(sessionFixture({ id: 's1', taskRef: 'default/8', stepId: 'a' }));
+    await store.deleteSession('boz', 's3');
+    const scans = vi.spyOn(store, 'listSessions');
+    expect((await store.listTaskSessions('default/7')).map((s) => s.id)).toEqual(['s2']);
+    expect((await store.listTaskSessions('default/8')).map((s) => s.id).sort()).toEqual([
+      's1',
+      's4',
+    ]);
+    expect(scans).not.toHaveBeenCalled();
+  });
+
+  it('lists a gezel once to find sessions written before this process started', async () => {
+    await store.writeSession(sessionFixture({ id: 'old', taskRef: 'default/3' }));
+    // A fresh store over the same home has noted nothing yet.
+    const restarted = new Store({ home });
+    const scans = vi.spyOn(restarted, 'listSessions');
+    expect((await restarted.listTaskSessions('default/3')).map((s) => s.id)).toEqual(['old']);
+    expect((await restarted.listTaskSessions('default/3')).map((s) => s.id)).toEqual(['old']);
+    // One listing per gezel the first time; none after.
+    expect(scans.mock.calls.length).toBeGreaterThan(0);
+    const first = scans.mock.calls.length;
+    await restarted.listTaskSessions('default/3', { gezelId: 'ada' });
+    expect(scans.mock.calls.length).toBe(first);
+  });
+
+  it('drops an indexed session whose file disappeared behind the store', async () => {
+    await store.writeSession(sessionFixture({ id: 'gone', taskRef: 'default/4' }));
+    await store.listSessions();
+    await rm(store.sessionRecordPath('ada', 'gone'));
+    expect(await store.listTaskSessions('default/4')).toEqual([]);
+  });
+});

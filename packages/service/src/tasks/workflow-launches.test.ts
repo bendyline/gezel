@@ -69,6 +69,33 @@ describe('durable workflow task requests', () => {
     expect(store.iterateProjectTasks).toHaveBeenCalledTimes(2);
   });
 
+  it('launches different keys concurrently and still finds each afterwards', async () => {
+    const { tasks, store, launches } = fixture();
+    let inFlight = 0;
+    let most = 0;
+    const slow = async (origin: NonNullable<Task['origin']>) => {
+      inFlight++;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inFlight--;
+      const task = {
+        projectId: 'p',
+        num: tasks.length + 1,
+        ref: `p/${tasks.length + 1}`,
+        origin,
+      } as Task;
+      tasks.push(task);
+      return { task, reused: false };
+    };
+    const keys = ['b', 'c', 'd'].map((c) => `workflow-v1:${c.repeat(64)}`);
+    const first = await Promise.all(keys.map((k) => launches.launch('p', k, {}, slow)));
+    expect(most).toBe(3);
+    const again = await Promise.all(keys.map((k) => launches.launch('p', k, {}, slow)));
+    expect(again.map((r) => r.reused)).toEqual([true, true, true]);
+    expect(again.map((r) => r.task.ref)).toEqual(first.map((r) => r.task.ref));
+    expect(store.iterateProjectTasks).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a missing cached identity and ambiguous persisted keys', async () => {
     const { tasks, store, create, launches } = fixture();
     await launches.launch('p', key, {}, create);

@@ -1,7 +1,11 @@
 import type { GezelClient } from '@bendyline/gezel-client';
 import { Command } from 'commander';
 import { describe, expect, it, vi } from 'vitest';
-import { registerProjectSettingsCommands, registerSecurityCommands } from './settings-command.js';
+import {
+  registerGrowthCommand,
+  registerProjectSettingsCommands,
+  registerSecurityCommands,
+} from './settings-command.js';
 
 function program(): Command {
   return new Command().exitOverride().configureOutput({
@@ -92,6 +96,48 @@ describe('explicit settings commands', () => {
         projectId: 'project-one',
         indexingEnabled: false,
       });
+    } finally {
+      output.mockRestore();
+    }
+  });
+
+  it('shows growth as on by default and switches it off for the home', async () => {
+    const client = {
+      getConfig: vi.fn().mockResolvedValue({}),
+      updateConfig: vi.fn().mockResolvedValue({ growth: { enabled: false } }),
+    };
+    const connect = vi.fn().mockResolvedValue(client);
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const read = program();
+      registerGrowthCommand(
+        read,
+        connect as () => Promise<Pick<GezelClient, 'getConfig' | 'updateConfig'>>,
+      );
+      await read.parseAsync(['growth'], { from: 'user' });
+      expect(output.mock.calls[0]?.[0]).toBe('Growth (XP and level-ups): on');
+      expect(client.updateConfig).not.toHaveBeenCalled();
+
+      output.mockClear();
+      const update = program();
+      registerGrowthCommand(
+        update,
+        connect as () => Promise<Pick<GezelClient, 'getConfig' | 'updateConfig'>>,
+      );
+      await update.parseAsync(['growth', 'off', '--json'], { from: 'user' });
+      expect(client.updateConfig).toHaveBeenCalledWith({ growth: { enabled: false } });
+      expect(JSON.parse(String(output.mock.calls[0]?.[0]))).toEqual({ growthEnabled: false });
+
+      const ambiguous = program();
+      const unused = vi.fn();
+      registerGrowthCommand(
+        ambiguous,
+        unused as () => Promise<Pick<GezelClient, 'getConfig' | 'updateConfig'>>,
+      );
+      await expect(ambiguous.parseAsync(['growth', 'no'], { from: 'user' })).rejects.toThrow(
+        'Use on or off',
+      );
+      expect(unused).not.toHaveBeenCalled();
     } finally {
       output.mockRestore();
     }

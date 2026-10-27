@@ -216,7 +216,7 @@ describe('POST /api/projects/:id/run-playwright', () => {
         const result = await runPlaywright('scripts/real-browser.ts');
 
         expect(result.status).toBe(200);
-        expect(result.body).toMatchObject({ ok: true });
+        expect(result.body, result.body.log).toMatchObject({ ok: true });
         expect(result.body.log).toContain(
           '{"status":"open","viewport":{"width":375,"height":812}}',
         );
