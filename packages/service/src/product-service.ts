@@ -1227,7 +1227,16 @@ export async function startProductService(
   });
   const runtimeActivation = { store, tasks, scriptRunner, history };
   tasks.setStepActivatedHook(async ({ projectId, task, newStep, completedStep, kind }) => {
-    if (kind !== 'entry' && kind !== 'redispatch' && completedStep.completedAt) {
+    // Steps of keyed automation launches (bulk workflows) are left to the
+    // daily XP sweep: a media review finished steps every second, and each
+    // first refresh after a restart rescanned 1.4M history events and 117k
+    // tasks per gezel, a quarter of the main thread for half an hour.
+    if (
+      kind !== 'entry' &&
+      kind !== 'redispatch' &&
+      completedStep.completedAt &&
+      task.origin?.kind !== 'workflow-invocation'
+    ) {
       xpRefresher.note(stepCreditedGezelId(completedStep));
     }
     // The pass that asked is over, including an earlier pass of this same

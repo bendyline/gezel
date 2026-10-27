@@ -92,6 +92,7 @@ import {
   type Task,
   type TaskNote,
   TaskNoteSchema,
+  type TaskWorkCredit,
   type TerminalMessage,
   type TerminalThread,
   TerminalThreadSchema,
@@ -256,6 +257,8 @@ import {
 import { isViewStateOnlyPatch } from './project-view-state.js';
 import { StartupHomeCache } from './startup-home.js';
 import { TaskFilesStore } from './task-files-store.js';
+import { TaskSessionIndex } from './task-session-index.js';
+import type { LiveTaskStatus, ProjectTaskSummary } from './task-status-index.js';
 import {
   type WalkDirResult,
   findHtmlPages,
@@ -439,6 +442,9 @@ export class Store {
     { mtimeMs: number; ctimeMs: number; size: number; ino: number; summary: ChatSessionSummary }
   >();
   private readonly timelineSessionCache = new FileSnapshotCache<ChatSession>();
+  /** Task ref → bound sessions, so a task's sessions never need a full listing. */
+  private readonly taskSessions = new TaskSessionIndex();
+  private readonly questionsCache = new Map<string, { identity: string; questions: Question[] }>();
 
   /**
    * Notified after every session persist/delete — the single choke point all
@@ -5605,6 +5611,7 @@ export class Store {
     // the application's perspective: either the old session or the
     // new one is at the target path, never an in-between zeroed file.
     await writeFileAtomic(path, `${JSON.stringify(session, null, 2)}\n`);
+    this.taskSessions.note(session.gezelId, session.id, session.taskRef);
     this.notifySessionChange({ type: 'write', gezelId: session.gezelId, sessionId: session.id });
     if (!this.engineOnly) await this.startupHome.cacheSession(session).catch(() => {});
   }
@@ -5780,6 +5787,7 @@ export class Store {
       /* already gone */
     }
     await this.deleteSessionWireTranscript(gezelId, sessionId);
+    this.taskSessions.forget(gezelId, sessionId);
     this.notifySessionChange({ type: 'delete', gezelId, sessionId });
   }
 
@@ -5845,14 +5853,42 @@ export class Store {
         if (!file.endsWith('.json')) continue;
         const scanned = await this.scanSessionFile(join(dir, file), `${gezelId}/${file}`);
         if (!scanned) continue;
+        this.taskSessions.note(gezelId, scanned.summary.id, scanned.summary.taskRef);
         if (opts?.projectId && scanned.summary.projectId !== opts.projectId) continue;
         summaries.push({ ...scanned.summary });
       }
+      this.taskSessions.markComplete(gezelId);
     }
-    summaries.sort((a, b) =>
-      a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0,
-    );
-    return summaries;
+    return sortSessionSummaries(summaries);
+  }
+
+  /**
+   * Summaries of the sessions bound to `taskRef`, newest activity first,
+   * optionally narrowed to one gezel or project: what {@link listSessions}
+   * filtered by `taskRef` returns, from the task-session index rather than a
+   * walk of every session file. A gezel not yet listed in full by this process
+   * is listed once first.
+   */
+  async listTaskSessions(
+    taskRef: string,
+    opts: { gezelId?: string; projectId?: string } = {},
+  ): Promise<ChatSessionSummary[]> {
+    const gezelIds = opts.gezelId
+      ? [opts.gezelId]
+      : await safeReaddir(gezelPaths(this.home, this.external).gezels);
+    await this.taskSessions.completeGezels(gezelIds, (gezelId) => this.listSessions({ gezelId }));
+    const wanted = new Set(gezelIds);
+    const summaries: ChatSessionSummary[] = [];
+    for (const { gezelId, sessionId } of this.taskSessions.sessionsFor(taskRef)) {
+      if (!wanted.has(gezelId)) continue;
+      const path = gezelSessionFile(this.home, gezelId, sessionId, this.external);
+      const scanned = await this.scanSessionFile(path, `${gezelId}/${sessionId}.json`);
+      this.taskSessions.note(gezelId, sessionId, scanned?.summary.taskRef);
+      if (!scanned || scanned.summary.taskRef !== taskRef) continue;
+      if (opts.projectId && scanned.summary.projectId !== opts.projectId) continue;
+      summaries.push({ ...scanned.summary });
+    }
+    return sortSessionSummaries(summaries);
   }
 
   /**
@@ -6833,6 +6869,30 @@ export class Store {
     return this.taskFiles.iterateProjectTasks(projectId);
   }
 
+  /** Tasks with this own status, newest first, from the status index (see `TaskFilesStore`). */
+  iterateProjectTasksWithStatus(projectId: string, status: LiveTaskStatus): AsyncIterable<Task> {
+    return this.taskFiles.iterateProjectTasksWithStatus(projectId, status);
+  }
+
+  iterateAllTasksWithStatus(status: LiveTaskStatus): AsyncIterable<Task> {
+    return this.taskFiles.iterateAllTasksWithStatus(status);
+  }
+
+  /** A gezel's completed task work across the home, from the task-work index. */
+  async taskWorkFor(gezelId: string): Promise<TaskWorkCredit> {
+    return this.taskFiles.taskWorkFor(gezelId);
+  }
+
+  /** A project's task count and newest `updatedAt`, without reading its tasks. */
+  async projectTaskSummary(projectId: string): Promise<ProjectTaskSummary> {
+    return this.taskFiles.projectTaskSummary(projectId);
+  }
+
+  /** Child task numbers of `parentRef` in `projectId` (see `TaskFilesStore.listChildTaskNums`). */
+  async listChildTaskNums(projectId: string, parentRef: string): Promise<number[]> {
+    return this.taskFiles.listChildTaskNums(projectId, parentRef);
+  }
+
   async listProjectTasks(projectId: string): Promise<Task[]> {
     return this.taskFiles.listProjectTasks(projectId);
   }
@@ -6874,7 +6934,9 @@ export class Store {
   ): Promise<void> {
     const file = projectQuestionsFile(this.home, projectId);
     await this.questionWriteLocks.run(projectId, async () => {
-      const existing = await this.listProjectQuestions(projectId);
+      // A copy: `change` may edit questions in place, and the listing's are
+      // shared with its cache even when the change is abandoned.
+      const existing = structuredClone(await this.listProjectQuestions(projectId));
       if (!change(existing)) return;
       await mkdir(dirname(file), { recursive: true });
       await writeFileAtomic(file, `${JSON.stringify(existing, null, 2)}\n`);
@@ -6887,17 +6949,24 @@ export class Store {
   }
 
   /**
-   * Newest-first list of every question in the project. Returns `[]`
-   * when the file is missing or unreadable — callers can render empty
-   * panels without try/catch boilerplate.
+   * A project's questions, newest first, or `[]` when the file is missing or
+   * unreadable. The parse is reused while the file is
+   * unchanged: hooks on every task create, step and status change read it, and
+   * re-parsing a 3.4 MB file each time took 13% of a bulk run's main thread
+   * (2026-10-27). The array is fresh; the questions are shared, so read only.
    */
   async listProjectQuestions(projectId: string): Promise<Question[]> {
     const file = projectQuestionsFile(this.home, projectId);
     try {
-      const raw = await readFile(file, 'utf8');
-      const parsed = JSON.parse(raw) as Question[];
+      const info = await stat(file);
+      const identity = `${info.ino}:${info.mtimeMs}:${info.ctimeMs}:${info.size}`;
+      const cached = this.questionsCache.get(projectId);
+      if (cached?.identity === identity) return [...cached.questions];
+      const parsed = JSON.parse(await readFile(file, 'utf8')) as Question[];
       if (!Array.isArray(parsed)) return [];
-      return sortQuestionsNewestFirst(parsed);
+      const questions = sortQuestionsNewestFirst(parsed);
+      this.questionsCache.set(projectId, { identity, questions });
+      return [...questions];
     } catch {
       return [];
     }
@@ -7484,4 +7553,11 @@ function dropScheduledRunSessions(sessions: ChatSession[]): void {
   for (let i = sessions.length - 1; i >= 0; i--) {
     if (isHidden(sessions[i]!, new Set([sessions[i]!.id]))) sessions.splice(i, 1);
   }
+}
+
+/** Newest activity first: the order every session listing returns. */
+function sortSessionSummaries(summaries: ChatSessionSummary[]): ChatSessionSummary[] {
+  return summaries.sort((a, b) =>
+    a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0,
+  );
 }

@@ -1,13 +1,14 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatMessage, ChatSession } from '@bendyline/gezel';
-import { gezelSessionsDir, globalIndexDbFile } from '@bendyline/gezel/paths';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { gezelSessionsDir, globalHistoryFile, globalIndexDbFile } from '@bendyline/gezel/paths';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import { GlobalIndexManager, chunkTranscript } from './global-index-manager.js';
 import { GlobalIndex, openGlobalCollection } from './global-index.js';
+import { IndexStore } from './index-store.js';
 import { openIndexDatabase } from './sqlite-driver.js';
 
 let home: string;
@@ -106,6 +107,25 @@ describe('GlobalIndexManager sessions', () => {
     expect(hits[0]?.title).toBe('Chat about widgets');
     expect(hits[0]?.messageStart).toBe(1);
     expect(hits[0]?.lastActivityAt).toBe('2026-04-05T10:22:00Z');
+  });
+
+  it('waits for a session to go quiet before the debounce re-indexes it', async () => {
+    if (!ftsAvailable) return;
+    // Each re-index rewrites all of a session's chunks; a streaming turn
+    // writes its session every few seconds.
+    const quick = new GlobalIndexManager({ store, history, debounceMs: 10 });
+    const unsubscribe = store.onSessionChange((ev) => quick.enqueueSession(ev));
+    try {
+      await store.writeSession(makeSession());
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(await globalIndex.searchSessions('frobnicate')).toHaveLength(0);
+      // A direct flush (reconcile, shutdown) still drains everything.
+      await quick.flush();
+      expect(await globalIndex.searchSessions('frobnicate')).toHaveLength(1);
+    } finally {
+      unsubscribe();
+      quick.stop();
+    }
   });
 
   it('filters by gezel and project', async () => {
@@ -306,6 +326,35 @@ describe('GlobalIndexManager history mirror', () => {
     const events = await history.listEvents({ q: 'Ada', limit: 5 });
     expect(events).toHaveLength(2);
     expect(events[0]?.kind).toBe('gezel.renamed');
+  });
+
+  it('adds only the events the mirror lacks, without rewriting it', async () => {
+    if (!ftsAvailable) return;
+    for (const name of ['Ada', 'Bea', 'Cid']) {
+      await history.log({ kind: 'gezel.created', summary: `Created "${name}" crewmate` });
+    }
+    await manager.reconcile();
+    // Logged with no subscription: the mirror trails the file, as it does
+    // under any live workload between flushes.
+    await history.log({ kind: 'gezel.created', summary: 'Created "Dov" crewmate' });
+    await history.log({ kind: 'gezel.created', summary: 'Created "Eli" crewmate' });
+    const replace = vi.spyOn(IndexStore.prototype, 'replaceHistoryEvents');
+    await manager.reconcile();
+    expect(replace).not.toHaveBeenCalled();
+    expect(await globalIndex.searchHistory({ q: 'crewmate' })).toHaveLength(5);
+    replace.mockRestore();
+  });
+
+  it('rebuilds when the mirror holds events the log no longer has', async () => {
+    if (!ftsAvailable) return;
+    await history.log({ kind: 'gezel.created', summary: 'Created "Ada" crewmate' });
+    await history.log({ kind: 'gezel.created', summary: 'Created "Bea" crewmate' });
+    await manager.reconcile();
+    const file = globalHistoryFile(home);
+    const [kept] = (await readFile(file, 'utf8')).split('\n');
+    await writeFile(file, `${kept}\n`);
+    await manager.reconcile();
+    expect(await globalIndex.searchHistory({ q: 'crewmate' })).toHaveLength(1);
   });
 });
 

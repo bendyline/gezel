@@ -103,7 +103,7 @@ export function collectTaskOutputs(
 
 export type TaskOutputStore = Pick<
   Store,
-  | 'listSessions'
+  | 'listTaskSessions'
   | 'getSession'
   | 'listProjectArtifactsRecursive'
   | 'projectArtifactSize'
@@ -123,10 +123,11 @@ export async function loadTaskOutputs(
 ): Promise<ReferencedFile[]> {
   const artifactDir = task.artifactDir ?? `tasks/${task.num}`;
   const inputsPrefix = `${artifactDir}/inputs/`;
-  const summaries = await store.listSessions({ projectId: task.projectId }).catch(() => []);
+  const summaries = await store
+    .listTaskSessions(task.ref, { projectId: task.projectId })
+    .catch(() => []);
   const sessions: ChatSession[] = [];
   for (const summary of summaries) {
-    if (summary.taskRef !== task.ref) continue;
     const session = await store.getSession(summary.gezelId, summary.id).catch(() => null);
     if (session) sessions.push(session);
   }
@@ -339,14 +340,15 @@ export function closingQuestion(text: string): string | undefined {
  * on; the owner, told the plan was done, never saw the question.
  */
 export async function loadMakerQuestion(
-  store: Pick<Store, 'listSessions' | 'getSession'>,
+  store: Pick<Store, 'listTaskSessions' | 'getSession'>,
   task: Task,
   makerGezelId: string,
 ): Promise<string | undefined> {
-  const summaries = await store.listSessions({ projectId: task.projectId }).catch(() => []);
+  const summaries = await store
+    .listTaskSessions(task.ref, { gezelId: makerGezelId, projectId: task.projectId })
+    .catch(() => []);
   let latest: { at: string; content: string } | undefined;
   for (const summary of summaries) {
-    if (summary.taskRef !== task.ref || summary.gezelId !== makerGezelId) continue;
     const session = await store.getSession(summary.gezelId, summary.id).catch(() => null);
     for (const message of session?.messages ?? []) {
       if (message.role !== 'assistant' || message.synthetic || !message.content?.trim()) continue;

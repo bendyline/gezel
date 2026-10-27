@@ -482,11 +482,14 @@ export function renderTaskContextBlock(
       // as actionable feedback, not a tool malfunction.
       const hasCompletionGate =
         step.gate !== undefined && normalizeStepGate(step.gate).at === 'completion';
-      const enforcementNote = hasCompletionGate
-        ? ' This gate is enforced automatically: `advance_task_step` will be REJECTED with a verdict naming the unmet criteria until they are genuinely met — read the rejection message and fix exactly what it names.'
-        : '';
+      // An enforced gate checks the deliverable itself. Asking the model to
+      // verify it first made one review in seven read back the file it had
+      // just written: a whole extra model call (media review, 2026-10-27).
+      const verifyNote = hasCompletionGate
+        ? 'This gate is enforced automatically: `advance_task_step` checks the deliverable itself and is REJECTED with a verdict naming the unmet criteria until they are genuinely met. Call it once the deliverable is written — there is no need to read back what you just saved — then read any rejection message and fix exactly what it names.'
+        : 'Before you `advance_task_step` forward, verify those criteria against the deliverable and the task notes.';
       lines.push(
-        `#### Phase gate\n\nThis phase is a **gate**: it does not advance until its exit criteria are actually met. Before you \`advance_task_step\` forward, verify those criteria against the deliverable and the task notes. If any criterion is unmet, route as the procedure says (loop back / re-run the gate) and address the named gap — do **not** advance to a "finish"/"ship" step with anything unmet. Under-delivering is the failure this gate exists to catch.${enforcementNote}${attemptNote}`,
+        `#### Phase gate\n\nThis phase is a **gate**: it does not advance until its exit criteria are actually met. ${verifyNote} If any criterion is unmet, route as the procedure says (loop back / re-run the gate) and address the named gap — do **not** advance to a "finish"/"ship" step with anything unmet. Under-delivering is the failure this gate exists to catch.${attemptNote}`,
       );
     }
   }

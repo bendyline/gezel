@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import type { ProjectSearchResponse } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
@@ -52,23 +53,30 @@ describe.skipIf(!built)('project search', () => {
   }, 30_000);
 
   it('answers from the Handboek in the Default project', async () => {
-    const res = await httpFetch(`${baseUrl}/api/projects/default/tools/search`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${svc.context.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ query: 'What is gezel?', maxResults: 10 }),
-    });
-    expect(res.status).toBe(200);
-    const { results } = (await res.json()) as {
-      results: Array<{ catalogId?: string; uri?: string }>;
-    };
-    expect(
-      results.some(
-        (hit) =>
-          hit.catalogId === 'handboek' && hit.uri?.startsWith('knowledge://bendyline/handboek/'),
-      ),
-    ).toBe(true);
+    let response: ProjectSearchResponse;
+    const isHandboekHit = (hit: ProjectSearchResponse['results'][number]) =>
+      hit.catalogId === 'handboek' && hit.uri?.startsWith('knowledge://bendyline/handboek/');
+    // Search returns a partial answer after its 600ms scope budget. A cold
+    // catalog under full-suite contention may miss that first budget; retry
+    // only incomplete responses, never a complete answer missing the manual.
+    await expect
+      .poll(
+        async () => {
+          const res = await httpFetch(`${baseUrl}/api/projects/default/tools/search`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${svc.context.token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ query: 'What is gezel?', maxResults: 10 }),
+          });
+          expect(res.status).toBe(200);
+          response = (await res.json()) as ProjectSearchResponse;
+          return response.results.some(isHandboekHit) || !response.sourcesIncomplete;
+        },
+        { timeout: 15_000, interval: 250 },
+      )
+      .toBe(true);
+    expect(response!.results.some(isHandboekHit), JSON.stringify(response!)).toBe(true);
   }, 120_000);
 });

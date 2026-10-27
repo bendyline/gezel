@@ -486,17 +486,16 @@ export class TaskManager {
         )
           return;
       }
-      // Task completion is frequent in bulk workflows. Stop at the first
-      // live task instead of retaining the project's entire completed history.
+      // Task completion is frequent in bulk workflows: read only the tasks the
+      // status index holds as active or draft, never the completed history.
       // A draft is pending work and blocks stabilization just like an active task.
-      let foundTask = false;
-      for await (const task of this.store.iterateProjectTasks(projectId)) {
-        foundTask = true;
-        if (task.status !== 'active' && task.status !== 'draft') continue;
-        const effective = taskEffectiveStatus(await this.withEffectiveStatus(task));
-        if (effective === 'active' || effective === 'draft') return;
+      for (const status of ['active', 'draft'] as const) {
+        for await (const task of this.store.iterateProjectTasksWithStatus(projectId, status)) {
+          if (taskEffectiveStatus(await this.withEffectiveStatus(task)) === status) return;
+        }
       }
-      if (foundTask) await this.store.updateProject(projectId, { status: 'stable' });
+      const { taskCount } = await this.store.projectTaskSummary(projectId);
+      if (taskCount > 0) await this.store.updateProject(projectId, { status: 'stable' });
     } catch (err) {
       log.error('[tasks] maybeStabilizeProject failed:', err);
     }
@@ -1476,15 +1475,15 @@ export class TaskManager {
   ): Promise<Task[]> {
     let tasks: Task[];
     if (filter.status === 'active' || filter.status === 'draft') {
-      // Ancestors can only mask a child with paused/complete/canceled. A
-      // scheduler asking for active work never needs terminal task bodies.
+      // Ancestors can only mask a child with paused/complete/canceled, so the
+      // tasks whose own status matches are the only candidates. The status
+      // index names them: a scheduler asking for active work reads those, not
+      // the project's whole history (132k tasks, 17-minute ticks: 2026-10-27).
       tasks = [];
       const source = filter.projectId
-        ? this.store.iterateProjectTasks(filter.projectId)
-        : this.store.iterateAllTasks();
-      for await (const task of source) {
-        if (task.status === filter.status) tasks.push(await this.withEffectiveStatus(task));
-      }
+        ? this.store.iterateProjectTasksWithStatus(filter.projectId, filter.status)
+        : this.store.iterateAllTasksWithStatus(filter.status);
+      for await (const task of source) tasks.push(await this.withEffectiveStatus(task));
       if (!filter.projectId) tasks.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     } else {
       const stored = filter.projectId
@@ -4255,9 +4254,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
   }
 
   async listSessions(projectId: string, num: number): Promise<ChatSessionSummary[]> {
-    const ref = buildTaskRef(projectId, num);
-    const all = await this.store.listSessions({ projectId });
-    return all.filter((s) => s.taskRef === ref);
+    return this.store.listTaskSessions(buildTaskRef(projectId, num), { projectId });
   }
 
   // ── Children / spawn / fanout ──────────────────────────────────
@@ -4269,8 +4266,11 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     const parsed = parseTaskRef(parentRef);
     if (!parsed) return [];
     let children: Task[] = [];
-    for await (const task of this.store.iterateProjectTasks(parsed.projectId)) {
-      if (task.parentTaskRef !== parentRef) continue;
+    // The lineage index names the children; each is re-read and must still
+    // name this parent, since an entry can outlive its task.
+    for (const num of await this.store.listChildTaskNums(parsed.projectId, parentRef)) {
+      const task = await this.store.readTask(parsed.projectId, num);
+      if (task?.parentTaskRef !== parentRef) continue;
       if ((opts.status === 'active' || opts.status === 'draft') && task.status !== opts.status)
         continue;
       const child = await this.withEffectiveStatus(task);

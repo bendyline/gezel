@@ -7,6 +7,7 @@ import {
   type ChatSession,
   type HistoryEntry,
   type HistoryEvent,
+  type HistoryEventKind,
   type HistoryFilter,
   type HistorySessionEntry,
   PERSON_FACING_HISTORY_KINDS,
@@ -69,6 +70,16 @@ export class HistoryManager {
   private queryBackend: ((filter: HistoryFilter) => Promise<HistoryEvent[] | null>) | null = null;
   private rewriteBackend: (() => Promise<void>) | null = null;
   private mutationChain: Promise<void> = Promise.resolve();
+  private rewrites = 0;
+
+  /**
+   * Bumped by every delete or redaction that changed an event. A tally kept
+   * from {@link subscribe} plus one {@link iterateEvents} pass is valid while
+   * this stays the value it was built at: appends never change it.
+   */
+  get rewriteGeneration(): number {
+    return this.rewrites;
+  }
 
   /** Serialize appends and whole-file privacy rewrites so neither can lose data. */
   private mutate<T>(fn: () => Promise<T>): Promise<T> {
@@ -154,7 +165,10 @@ export class HistoryManager {
           mode: 0o600,
         });
       }
-      if (changed > 0) await this.rewriteBackend?.();
+      if (changed > 0) {
+        this.rewrites++;
+        await this.rewriteBackend?.();
+      }
       return changed;
     });
   }
@@ -295,6 +309,33 @@ export class HistoryManager {
     }
     events.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
     return filter.limit ? events.slice(0, filter.limit) : events;
+  }
+
+  /**
+   * Every stored event, file by file in write order: what an unfiltered
+   * `listEvents` returns, without holding the whole log in memory or sorting
+   * it. The search mirror's reconcile reads 1.4M events this way. `kinds`
+   * narrows the stream, and lines that cannot be one of them are never parsed.
+   */
+  async *iterateEvents(opts: { kinds?: HistoryEventKind[] } = {}): AsyncGenerator<HistoryEvent> {
+    const kindNeedles = opts.kinds?.map((kind) => JSON.stringify(kind));
+    for (const path of await this.eventFiles()) {
+      try {
+        for await (const line of readLinesForward(path)) {
+          if (!line.trim()) continue;
+          if (kindNeedles && !kindNeedles.some((needle) => line.includes(needle))) continue;
+          let event: HistoryEvent;
+          try {
+            event = JSON.parse(line) as HistoryEvent;
+          } catch {
+            continue; // a torn line: listEvents skips it too
+          }
+          if (!opts.kinds || opts.kinds.includes(event.kind)) yield event;
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+    }
   }
 
   /** Unified stream: events + derived session entries, newest-first. */

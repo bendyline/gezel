@@ -14,13 +14,13 @@ import {
   projectAllowsAmbientWork,
   projectManagedWorkspaceWritable,
   stepOwnerGezelId,
-  taskEffectiveStatus,
   workshopTempoDefaults,
 } from '@bendyline/gezel';
 import { beginPerfWork } from '@bendyline/gezel-inference/internal/perf/responsiveness';
 import type { ChatManager } from '../chat/manager.js';
 import type { ActivityTracker } from '../fs/activity-tracker.js';
 import type { Store } from '../fs/store.js';
+import type { ProjectTaskSummary } from '../fs/task-status-index.js';
 import {
   buildPlateauDiagnosisNote,
   buildStageOneNudge,
@@ -678,7 +678,7 @@ export class TaskScheduler {
     if (!this.store) return { taskSessionLastMs: 0, landingPoisoned: false };
     let sessions: ChatSessionSummary[] = [];
     try {
-      sessions = await this.store.listSessions({ gezelId: assignee });
+      sessions = await this.store.listTaskSessions(task.ref, { gezelId: assignee });
     } catch {
       return { taskSessionLastMs: 0, landingPoisoned: false };
     }
@@ -883,24 +883,29 @@ export class TaskScheduler {
       trace(`skip meester nudge — voorman ${project.voormanGezelId} is mid-turn elsewhere`);
       return;
     }
-    // One task listing serves three gates: the at-rest self-heal and the
-    // delegate-busy guard here, plus the organic-activity scan further
-    // down that drives the rapid-nudge backoff.
-    let projectTasks: Task[] = [];
+    // The task gates need the project's active and draft tasks, whether it
+    // has any tasks at all, and when one last changed (the organic-activity
+    // scan further down). The status index answers all of that without
+    // loading the project's history: a 132k-task project once held 5 GB of
+    // heap here just to count drafts (2026-10-27).
+    let activeTasks: Task[] = [];
+    let hasDrafts = false;
+    let taskSummary: ProjectTaskSummary = { taskCount: 0 };
     try {
-      projectTasks = await this.manager.list({ projectId: project.id });
+      activeTasks = await this.manager.list({ projectId: project.id, status: 'active' });
+      hasDrafts = (await this.manager.list({ projectId: project.id, status: 'draft' })).length > 0;
+      taskSummary = await this.store.projectTaskSummary(project.id);
     } catch {
       // Best-effort — without the task list the task-driven gates simply
       // don't trigger, and the remaining gates decide.
     }
-    const activeTasks = projectTasks.filter((task) => taskEffectiveStatus(task) === 'active');
 
     // A freshly-created project has a voorman but no job yet. Ambient
     // check-ins are meant to resume owned work, not turn an empty project
     // (or a casual greeting in its first chat) into a fabricated brief.
     // The user's next message can create the first task; until then there is
     // nothing deterministic for the scheduler to advance.
-    if (projectTasks.length === 0) {
+    if (taskSummary.taskCount === 0) {
       trace('skip meester nudge — project has no tasks to advance');
       return;
     }
@@ -914,11 +919,11 @@ export class TaskScheduler {
     // Without this check the meester nudges a finished project forever
     // (wild-caught, qwen3.6 "Space Shooter Arcade"): bring it
     // to rest instead of nudging.
-    if (projectTasks.length > 0 && activeTasks.length === 0) {
+    if (activeTasks.length === 0) {
       // A draft is pending work awaiting the user's activation, not a
       // finished project: don't stabilize it, and don't nudge the voorman
       // about a plan that isn't running yet — just skip this tick.
-      if (projectTasks.some((task) => taskEffectiveStatus(task) === 'draft')) {
+      if (hasDrafts) {
         trace(
           'skip meester nudge — only draft task(s) await activation; not nudging or stabilizing',
         );
@@ -1131,10 +1136,8 @@ export class TaskScheduler {
       Number.isFinite(projectUpdatedMs) ? projectUpdatedMs : 0,
       lastHumanMs,
     );
-    for (const t of projectTasks) {
-      const tu = Date.parse(t.updatedAt);
-      if (Number.isFinite(tu) && tu > lastOrganicMs) lastOrganicMs = tu;
-    }
+    const latestTaskMs = Date.parse(taskSummary.latestUpdatedAt ?? '');
+    if (Number.isFinite(latestTaskMs) && latestTaskMs > lastOrganicMs) lastOrganicMs = latestTaskMs;
     let consecutiveRapidNudges = project.nudgeState?.consecutiveRapidNudges ?? 0;
     if (lastOrganicMs > lastNudgedMs) {
       consecutiveRapidNudges = 0;

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -93,7 +93,8 @@ describe('the launcher', () => {
     const run = (env: NodeJS.ProcessEnv) =>
       execFileAsync(process.execPath, [path], { env }).then((r) => r.stdout);
     const { GEZEL_HOME: _ignored, ...inherited } = process.env;
-    expect(await run(inherited)).toBe(home);
+    // Node resolves the launcher's URL through symlinks, including macOS /var → /private/var.
+    expect(await run(inherited)).toBe(await realpath(home));
     expect(await run({ ...inherited, GEZEL_HOME: join(root, 'other') })).toBe(join(root, 'other'));
   });
 

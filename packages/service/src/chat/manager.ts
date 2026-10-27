@@ -548,6 +548,7 @@ import {
   taskStepSurfaceOptions,
   toolCapForTierAndRole,
 } from './session-tool-surface.js';
+import { stepTurnTimeoutMs } from './step-turn-timeout.js';
 import {
   type TaskBudgetLimits,
   type TaskBudgetSnapshot,
@@ -3704,7 +3705,7 @@ export class ChatManager extends LocalEngineRuntime {
     stepId?: string;
     parentSession?: SessionParent;
   }): Promise<ChatSession> {
-    const existing = await this.store.listSessions({
+    const existing = await this.store.listTaskSessions(args.taskRef, {
       gezelId: args.gezelId,
       projectId: args.projectId,
     });
@@ -4095,7 +4096,9 @@ export class ChatManager extends LocalEngineRuntime {
       ? currentStepActivation(taskRecord, dispatchStepId)
       : undefined;
     const candidates =
-      args.kind === 'entry' ? [] : await this.store.listSessions({ projectId: args.projectId });
+      args.kind === 'entry'
+        ? []
+        : await this.store.listTaskSessions(args.taskRef, { projectId: args.projectId });
     const previous = candidates.find(
       (candidate) =>
         !candidate.archived &&
@@ -4164,7 +4167,7 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
     if (args.resumeExisting) {
-      const summaries = await this.store.listSessions({
+      const summaries = await this.store.listTaskSessions(args.taskRef, {
         gezelId: args.gezelId,
         projectId: args.projectId,
       });
@@ -8023,6 +8026,8 @@ export class ChatManager extends LocalEngineRuntime {
       // or stack ordinary nudges on top of the corrective prompt.
       let keurmeesterConsultedThisSend = false;
       let keurmeesterCaseToClose: string | null = null;
+      // A task step can cap its own turns (`turnTimeoutSec`); read it once.
+      const stepTurnLimitMs = await stepTurnTimeoutMs(this.store, state.record);
 
       while (true) {
         const debugOn = this.debug?.isEnabled() === true;
@@ -8180,6 +8185,8 @@ export class ChatManager extends LocalEngineRuntime {
           const profileTimeout = resolveProfileTurnTimeoutMs(state);
           if (profileTimeout !== null) turnTimeoutMs = profileTimeout;
         }
+        // The step knows its own work best: its ceiling wins over the above.
+        if (stepTurnLimitMs !== null) turnTimeoutMs = stepTurnLimitMs;
         // User-driven send: `interactive` lane so it preempts any
         // queued background work (memory extraction, handoff
         // dispatches, idle nudges) for this provider. Emit `queued`

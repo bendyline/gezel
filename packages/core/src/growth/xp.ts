@@ -92,18 +92,46 @@ export function countTaskWork(
   let completedSteps = 0;
   let completedTasks = 0;
   for (const task of tasks) {
-    if (
-      task.status === 'complete' &&
-      task.assignee.kind === 'gezel' &&
-      task.assignee.gezelId === gezelId
-    ) {
-      completedTasks++;
-    }
-    for (const step of task.craftbook.steps) {
-      if (step.completedAt && stepCreditedGezelId(step) === gezelId) completedSteps++;
-    }
+    const credit = taskWorkCredits(task).get(gezelId);
+    completedSteps += credit?.completedSteps ?? 0;
+    completedTasks += credit?.completedTasks ?? 0;
   }
   return { completedSteps, completedTasks };
+}
+
+/** Completed task work, as {@link countTaskWork} counts it. */
+export interface TaskWorkCredit {
+  completedSteps: number;
+  completedTasks: number;
+}
+
+/**
+ * The work one task credits, per gezel: each completed step to the gezel it
+ * credits, and the task itself to its gezel assignee once it is complete.
+ * Summing these over every task gives {@link countTaskWork} for each gezel;
+ * the service keeps that sum current as tasks change instead of re-reading
+ * the corpus.
+ */
+export function taskWorkCredits(
+  task: Pick<Task, 'status' | 'assignee' | 'craftbook'>,
+): Map<string, TaskWorkCredit> {
+  const credits = new Map<string, TaskWorkCredit>();
+  const credit = (gezelId: string): TaskWorkCredit => {
+    let entry = credits.get(gezelId);
+    if (!entry) {
+      entry = { completedSteps: 0, completedTasks: 0 };
+      credits.set(gezelId, entry);
+    }
+    return entry;
+  };
+  if (task.status === 'complete' && task.assignee.kind === 'gezel') {
+    credit(task.assignee.gezelId).completedTasks++;
+  }
+  for (const step of task.craftbook.steps) {
+    const gezelId = step.completedAt ? stepCreditedGezelId(step) : undefined;
+    if (gezelId) credit(gezelId).completedSteps++;
+  }
+  return credits;
 }
 
 /** The gezel a completed step's XP goes to: its assignee, else its suggested gezel. */
