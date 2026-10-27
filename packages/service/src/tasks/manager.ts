@@ -4255,9 +4255,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
   }
 
   async listSessions(projectId: string, num: number): Promise<ChatSessionSummary[]> {
-    const ref = buildTaskRef(projectId, num);
-    const all = await this.store.listSessions({ projectId });
-    return all.filter((s) => s.taskRef === ref);
+    return this.store.listTaskSessions(buildTaskRef(projectId, num), { projectId });
   }
 
   // ── Children / spawn / fanout ──────────────────────────────────

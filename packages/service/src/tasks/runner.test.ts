@@ -1361,6 +1361,38 @@ describe('TaskRunner — startup rehydration', () => {
     expect(after.taskRefs.sort()).toEqual(['p1/2', 'p1/5']);
   });
 
+  it('walks a subtree wider than its queue compaction step once per task, breadth first', async () => {
+    // A collection root's subtree is the whole project: the walk keeps task
+    // numbers rather than tasks and compacts its queue as it goes.
+    const level1 = Array.from({ length: 5000 }, (_, i) => i + 2);
+    const children = new Map([
+      ['p1/1', level1],
+      ['p1/5001', [6000, 6001]],
+    ]);
+    const parentOf = (num: number) => (num === 1 ? undefined : num < 6000 ? 'p1/1' : 'p1/5001');
+    const stub = {
+      readTask: async (_projectId: string, num: number) => ({
+        projectId: 'p1',
+        num,
+        ref: `p1/${num}`,
+        parentTaskRef: parentOf(num),
+      }),
+      listChildTaskNums: async (_projectId: string, ref: string) => children.get(ref) ?? [],
+    };
+    const runner = new TaskRunner({
+      store: stub as unknown as Store,
+      dispatcher: new FakeDispatcher(new Map()),
+    });
+    const walk = (
+      runner as unknown as {
+        iterateTaskTree(projectId: string, rootRef: string): AsyncGenerator<{ num: number }>;
+      }
+    ).iterateTaskTree('p1', 'p1/1');
+    const nums: number[] = [];
+    for await (const task of walk) nums.push(task.num);
+    expect(nums).toEqual([1, ...level1, 6000, 6001]);
+  });
+
   it('stops resuming a step that has never survived a restart, and holds it', async () => {
     // Wild-caught: one review step was resumed four times across ~50
     // minutes of restarts. Each resume re-read 48k tokens before doing any

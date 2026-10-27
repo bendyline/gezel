@@ -678,7 +678,7 @@ export class TaskScheduler {
     if (!this.store) return { taskSessionLastMs: 0, landingPoisoned: false };
     let sessions: ChatSessionSummary[] = [];
     try {
-      sessions = await this.store.listSessions({ gezelId: assignee });
+      sessions = await this.store.listTaskSessions(task.ref, { gezelId: assignee });
     } catch {
       return { taskSessionLastMs: 0, landingPoisoned: false };
     }

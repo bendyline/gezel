@@ -22,7 +22,7 @@ export interface StepGatedEvent {
 }
 
 export async function recordStepGateOutcome(
-  store: Pick<Store, 'listSessions'>,
+  store: Pick<Store, 'listTaskSessions'>,
   history: Pick<HistoryManager, 'log'> | undefined,
   opts: StepGatedEvent,
 ): Promise<void> {
@@ -60,9 +60,9 @@ export async function recordStepGateOutcome(
   // from plain sessions) → no stamp; the aggregation skips those.
   let workingModel: { model: string; provider: string } | undefined;
   if (gezelId) {
-    const sessions = await store.listSessions({ gezelId }).catch(() => []);
+    const sessions = await store.listTaskSessions(task.ref, { gezelId }).catch(() => []);
     const working = sessions
-      .filter((s) => s.taskRef === task.ref && s.stepId === step.id)
+      .filter((s) => s.stepId === step.id)
       .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))[0];
     if (working?.model) {
       workingModel = { model: working.model, provider: working.providerName };

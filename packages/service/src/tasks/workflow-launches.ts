@@ -4,8 +4,11 @@
  * restart cannot create a second review, even after the first task finishes.
  *
  * A lazily rebuilt per-project index retains only keys and task numbers, not
- * full task histories. Project launches are serialized through dispatch;
- * a changed payload is rejected, and retries never reset task state or gates.
+ * full task histories. Launches are serialized per key, so a retry never races
+ * its original; a changed payload is rejected, and retries never reset task
+ * state or gates. Different keys launch concurrently: one lock per project
+ * queued every create behind the one before it, which capped a 40-worker media
+ * review at ~31 creates a minute (2026-10-27).
  */
 import { createHash } from 'node:crypto';
 import { KeyedLock, type Task } from '@bendyline/gezel';
@@ -60,7 +63,7 @@ export class WorkflowLaunches {
     const requestHash = createHash('sha256')
       .update(JSON.stringify(ordered(body)))
       .digest('hex');
-    return this.locks.run(projectId, async () => {
+    return this.locks.run(`${projectId}\u0000${key}`, async () => {
       const index = await this.index(projectId);
       const num = index.get(key);
       if (num !== undefined) {
@@ -78,7 +81,8 @@ export class WorkflowLaunches {
       }
       try {
         const result = await create({ kind: 'workflow-invocation', key, requestHash });
-        index.set(key, result.task.num);
+        // Another key's failure may have replaced the index while this one ran.
+        (await this.index(projectId)).set(key, result.task.num);
         return result;
       } catch (error) {
         // Persistence may have succeeded before a later dispatch/hook failed.

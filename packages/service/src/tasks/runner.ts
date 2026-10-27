@@ -762,18 +762,27 @@ export class TaskRunner {
   private async *iterateTaskTree(projectId: string, rootRef: string): AsyncGenerator<Task> {
     const root = parseTaskRef(rootRef);
     if (!root || root.projectId !== projectId) return;
-    const first = await this.store.readTask(projectId, root.num);
-    if (!first) return;
-    const seen = new Set([first.ref]);
-    const queue: Task[] = [first];
-    for (let i = 0; i < queue.length; i++) {
-      const parent = queue[i] as Task;
-      yield parent;
-      for (const num of await this.store.listChildTaskNums(projectId, parent.ref)) {
-        const child = await this.store.readTask(projectId, num);
-        if (!child || child.parentTaskRef !== parent.ref || seen.has(child.ref)) continue;
-        seen.add(child.ref);
-        queue.push(child);
+    // The queue holds task numbers, never tasks: a collection root's subtree
+    // can be the whole project, and keeping every visited task alive ran a
+    // 117k-task project out of heap two minutes after boot (2026-10-26).
+    const queue: Array<{ num: number; parentRef: string | null }> = [
+      { num: root.num, parentRef: null },
+    ];
+    const seen = new Set([root.num]);
+    let head = 0;
+    while (head < queue.length) {
+      const next = queue[head++] as { num: number; parentRef: string | null };
+      if (head >= 4096) {
+        queue.splice(0, head);
+        head = 0;
+      }
+      const task = await this.store.readTask(projectId, next.num);
+      if (!task || (next.parentRef !== null && task.parentTaskRef !== next.parentRef)) continue;
+      yield task;
+      for (const num of await this.store.listChildTaskNums(projectId, task.ref)) {
+        if (seen.has(num)) continue;
+        seen.add(num);
+        queue.push({ num, parentRef: task.ref });
       }
     }
   }

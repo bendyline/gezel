@@ -297,6 +297,28 @@ export class HistoryManager {
     return filter.limit ? events.slice(0, filter.limit) : events;
   }
 
+  /**
+   * Every stored event, file by file in write order: what an unfiltered
+   * `listEvents` returns, without holding the whole log in memory or sorting
+   * it. The search mirror's reconcile reads 1.4M events this way.
+   */
+  async *iterateEvents(): AsyncGenerator<HistoryEvent> {
+    for (const path of await this.eventFiles()) {
+      try {
+        for await (const line of readLinesForward(path)) {
+          if (!line.trim()) continue;
+          try {
+            yield JSON.parse(line) as HistoryEvent;
+          } catch {
+            /* a torn line: listEvents skips it too */
+          }
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+    }
+  }
+
   /** Unified stream: events + derived session entries, newest-first. */
   async listEntries(filter: HistoryFilter = {}): Promise<HistoryEntry[]> {
     const [events, sessions] = await Promise.all([

@@ -101,4 +101,27 @@ describe('desktop question writes', () => {
     });
     expect(await store.listAllPendingQuestions()).toEqual([]);
   });
+
+  it('reuses the parsed list until the file changes, and an abandoned edit leaks nothing', async () => {
+    const { home, store } = await desktopHome();
+    const first = await store.listProjectQuestions('default');
+    const again = await store.listProjectQuestions('default');
+    expect(again).not.toBe(first);
+    expect(again).toEqual(first);
+    await store.updateProjectQuestions('default', (questions) => {
+      for (const question of questions) question.prompt = 'edited, then abandoned';
+      return false;
+    });
+    expect((await store.listProjectQuestions('default')).map((q) => q.prompt)).toEqual([
+      'Q q3',
+      'Q q2',
+      'Q q1',
+    ]);
+    // A write from this store and one from another process are both seen.
+    await store.writeQuestion(ask('q4', 5));
+    expect((await store.listProjectQuestions('default')).map((q) => q.id)[0]).toBe('q4');
+    const other = new Store({ home });
+    await other.writeQuestion(ask('q5', 6));
+    expect((await store.listProjectQuestions('default')).map((q) => q.id)[0]).toBe('q5');
+  });
 });

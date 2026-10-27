@@ -3410,10 +3410,12 @@ export class IndexStore {
   /**
    * Insert history events, skipping ids already present (JSONL backfill and
    * live-subscription feeds overlap; the id makes replay idempotent). The FTS
-   * row is only written when the base insert actually landed.
+   * row is only written when the base insert actually landed. Returns how many
+   * events were new.
    */
-  putHistoryEvents(events: HistoryEvent[]): void {
-    if (events.length === 0) return;
+  putHistoryEvents(events: HistoryEvent[]): number {
+    if (events.length === 0) return 0;
+    let inserted = 0;
     this.db.transaction(() => {
       const ins = this.db.prepare(
         `INSERT OR IGNORE INTO history_events (id, collection_id, at, kind, project_id, gezel_id, summary, details)
@@ -3435,9 +3437,12 @@ export class IndexStore {
           ev.summary,
           ev.details ? JSON.stringify(ev.details) : null,
         );
-        if (changes > 0) fts?.run(historyFtsBody(ev), ev.id, this.collectionId);
+        if (changes === 0) continue;
+        inserted += 1;
+        fts?.run(historyFtsBody(ev), ev.id, this.collectionId);
       }
     });
+    return inserted;
   }
 
   replaceHistoryEvents(events: HistoryEvent[]): void {

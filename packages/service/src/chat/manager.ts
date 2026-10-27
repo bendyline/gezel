@@ -3705,7 +3705,7 @@ export class ChatManager extends LocalEngineRuntime {
     stepId?: string;
     parentSession?: SessionParent;
   }): Promise<ChatSession> {
-    const existing = await this.store.listSessions({
+    const existing = await this.store.listTaskSessions(args.taskRef, {
       gezelId: args.gezelId,
       projectId: args.projectId,
     });
@@ -4096,7 +4096,9 @@ export class ChatManager extends LocalEngineRuntime {
       ? currentStepActivation(taskRecord, dispatchStepId)
       : undefined;
     const candidates =
-      args.kind === 'entry' ? [] : await this.store.listSessions({ projectId: args.projectId });
+      args.kind === 'entry'
+        ? []
+        : await this.store.listTaskSessions(args.taskRef, { projectId: args.projectId });
     const previous = candidates.find(
       (candidate) =>
         !candidate.archived &&
@@ -4165,7 +4167,7 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
     if (args.resumeExisting) {
-      const summaries = await this.store.listSessions({
+      const summaries = await this.store.listTaskSessions(args.taskRef, {
         gezelId: args.gezelId,
         projectId: args.projectId,
       });
