@@ -175,8 +175,7 @@ describe('GrowthEngine.refresh', () => {
 // Task work and history counts are kept, not rescanned: a refresh after the
 // first reads neither the task corpus nor the audit log.
 describe('GrowthEngine live inputs', () => {
-  const work = (gezelId: string) =>
-    store.listAllTasks().then((all) => countTaskWork(all, gezelId));
+  const work = (gezelId: string) => store.listAllTasks().then((all) => countTaskWork(all, gezelId));
 
   async function finishTask(tasks: TaskManager, title: string): Promise<void> {
     const task = await tasks.create('default', {

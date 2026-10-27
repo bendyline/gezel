@@ -25,7 +25,11 @@ import { HttpStatusError } from '@bendyline/gezel/runtime';
 import { FileSnapshotCache } from './file-snapshot-cache.js';
 import { isSyncJunkName } from './sync-junk.js';
 import { TaskLineageIndex } from './task-lineage-index.js';
-import { type LiveTaskStatus, type ProjectTaskSummary, TaskStatusIndex } from './task-status-index.js';
+import {
+  type LiveTaskStatus,
+  type ProjectTaskSummary,
+  TaskStatusIndex,
+} from './task-status-index.js';
 import { TaskWorkIndex } from './task-work-index.js';
 
 export interface TaskFilesStoreOptions {

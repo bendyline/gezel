@@ -18,7 +18,12 @@ let store: Store;
 let tasks: TaskManager;
 
 const seed = (title: string, extra: { parentTaskRef?: string } = {}) =>
-  tasks.create('website', { title, assignee: { kind: 'user' }, steps: [{ name: 'Main' }], ...extra });
+  tasks.create('website', {
+    title,
+    assignee: { kind: 'user' },
+    steps: [{ name: 'Main' }],
+    ...extra,
+  });
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-status-listing-'));
@@ -47,10 +52,9 @@ it('lists active tasks by reading only the live ones, newest first', async () =>
   // the project once, later ones read only the active bucket.
   const restarted = new TaskManager(new Store({ home }));
   const reads = vi.spyOn(TaskFilesStore.prototype, 'readTask');
-  expect((await restarted.list({ projectId: 'website', status: 'active' })).map((t) => t.num)).toEqual([
-    newer.num,
-    older.num,
-  ]);
+  expect(
+    (await restarted.list({ projectId: 'website', status: 'active' })).map((t) => t.num),
+  ).toEqual([newer.num, older.num]);
   reads.mockClear();
   expect((await restarted.list({ status: 'active' })).map((t) => t.num).sort()).toEqual(
     [older.num, newer.num].sort(),

@@ -179,7 +179,9 @@ export class GrowthEngine {
       const noHistory: GrowthHistoryCounts = { lessonsUpdates: 0, consultationsByDay: new Map() };
       const [counts, work] = await Promise.all([
         // An unreadable log counts nothing; the ratchet keeps the XP already earned.
-        this.historyTally.countsFor(gezelId).catch(() => noHistory),
+        this.historyTally
+          .countsFor(gezelId)
+          .catch(() => noHistory),
         this.store.taskWorkFor(gezelId),
       ]);
       return computeSignals({
