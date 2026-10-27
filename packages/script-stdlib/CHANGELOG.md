@@ -1,3 +1,10 @@
+## @bendyline/gezel-script-stdlib [1.1.10](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-script-stdlib%401.1.9...%40bendyline%2Fgezel-script-stdlib%401.1.10) (2026-10-27)
+
+
+### Dependencies
+
+* **@bendyline/gezel-sdk:** upgraded to 1.1.10
+
 ## @bendyline/gezel-script-stdlib [1.1.9](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-script-stdlib%401.1.8...%40bendyline%2Fgezel-script-stdlib%401.1.9) (2026-10-26)
 
 
