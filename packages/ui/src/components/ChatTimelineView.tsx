@@ -90,6 +90,7 @@ import {
 import { liveCardsToHide } from './craftbook-card-dedupe.js';
 import { FrameCoalescedItem, FrameCoalescedLiveStickyHeader } from './frame-coalesced-item.js';
 import { FrameCoalescedStore } from './frame-coalesced-store.js';
+import { INDEXING_SWEEP_SILENCE_MS, IndexingLiveSweeps } from './indexing-live-sweep.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
 import type { QueuedTaskEntry } from './queued-task-entries.js';
 import {
@@ -583,9 +584,9 @@ export function ChatTimelineView({
    */
   const [terminalEntries, setTerminalEntries] = useState<TerminalTimelineEntry[]>([]);
   /**
-   * Observed per-file indexing one-shots. The live bubble is intentionally
-   * ephemeral; these receipts advance when work appears and coalesce a sweep
-   * into one expandable ledger row.
+   * Observed per-file indexing one-shots. The sweep's live bubble goes away
+   * when the sweep ends; these receipts advance when work appears and
+   * coalesce a sweep into one expandable ledger row.
    */
   const [indexingReceipts, setIndexingReceipts] = useState<IndexingReceipt[]>([]);
   // Bumped when a fresh terminal row's five-minute bottom-placement
@@ -652,6 +653,14 @@ export function ChatTimelineView({
   if (!liveStoreRef.current) liveStoreRef.current = new FrameCoalescedStore<LiveSlot>();
   const liveStore = liveStoreRef.current;
   const liveRef = useRef(liveStore.items);
+  const indexingSweepsRef = useRef<IndexingLiveSweeps | null>(null);
+  if (!indexingSweepsRef.current) {
+    indexingSweepsRef.current = new IndexingLiveSweeps((key) => {
+      if (liveRef.current.delete(key)) liveStore.markStructureChanged();
+    });
+  }
+  const indexingSweeps = indexingSweepsRef.current;
+  useEffect(() => () => indexingSweeps.reset(), [indexingSweeps]);
   const liveStructureVersion = useSyncExternalStore(
     liveStore.subscribeStructure,
     liveStore.getStructureSnapshot,
@@ -851,6 +860,7 @@ export function ChatTimelineView({
     registeredFileSightingsRef.current.clear();
     fullyLoadedQuestionProjectsRef.current.clear();
     liveRef.current.clear();
+    indexingSweeps.reset();
     liveStore.markStructureChanged();
     terminalLiveRef.current.clear();
     terminalLiveStore.markStructureChanged();
@@ -1520,10 +1530,18 @@ export function ChatTimelineView({
         });
         if (stopped) return;
         const active = new Set(response.inflight.map((entry) => entry.sessionId));
-        const stale = staleLiveSessionIds(liveRef.current, observed, active);
+        // One-shots are never listed as in flight. An index sweep's bubble
+        // retires on its own once the sweep ends, so only a silent one is stale.
+        const now = Date.now();
+        const stale = staleLiveSessionIds(liveRef.current, observed, active).filter(
+          (sessionId) =>
+            !indexingSweeps.isSweep(sessionId) ||
+            now - (liveRef.current.get(sessionId)?.lastActivityAt ?? 0) > INDEXING_SWEEP_SILENCE_MS,
+        );
         if (stale.length === 0) return;
         for (const sessionId of stale) {
           liveRef.current.delete(sessionId);
+          indexingSweeps.forget(sessionId);
           narrationRef.current!.forget(sessionId);
         }
         liveStore.markStructureChanged();
@@ -1541,7 +1559,13 @@ export function ChatTimelineView({
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [inflightProjectId, inflightGezelId, refreshLatest, liveStore.markStructureChanged]);
+  }, [
+    inflightProjectId,
+    inflightGezelId,
+    refreshLatest,
+    liveStore.markStructureChanged,
+    indexingSweeps,
+  ]);
 
   useEffect(() => {
     return subscribeOptimisticUserMessages((message) => {
@@ -1617,7 +1641,7 @@ export function ChatTimelineView({
 
   const handleEnvelope = useCallback(
     (env: ChatEventEnvelope) => {
-      const { sessionId, gezelId, projectId, event } = env;
+      const { sessionId: wireSessionId, gezelId, projectId, event } = env;
       // Drop envelopes outside the configured scope. The SSE stream the
       // parent picks is the *coarser* of the two filters (project, gezel,
       // or global) — when both filters apply (e.g. per-gezel tab pinned
@@ -1636,10 +1660,18 @@ export function ChatTimelineView({
       // refetch lands within a round-trip and `refreshLatest` reconciles
       // anything the gap swallowed.
       const allowlist = scopedSessionIdsRef.current;
-      if (allowlist && !allowlist.has(sessionId)) {
-        onUnknownSessionRef.current?.(sessionId);
+      if (allowlist && !allowlist.has(wireSessionId)) {
+        onUnknownSessionRef.current?.(wireSessionId);
         return;
       }
+      // Each file an index sweep reads is its own one-shot session. They
+      // share one live slot so the sweep shows one steady bubble.
+      const sessionId = indexingSweeps.liveKey(
+        wireSessionId,
+        gezelId,
+        projectId,
+        event.type === 'engine_phase' ? event.activity : undefined,
+      );
       // If a live event mentions a gezel we haven't seen (newly created
       // mid-session by the Meester, etc.), refetch the roster so the
       // bubble author label and session divider resolve to a real name
@@ -2204,7 +2236,7 @@ export function ChatTimelineView({
           const completedAt = new Date().toISOString();
           setIndexingReceipts((current) => {
             const next = recordIndexedFile(current, {
-              sessionId,
+              sessionId: wireSessionId,
               gezelId: slot.gezelId,
               projectId: slot.projectId,
               path: indexedPath,
@@ -2216,7 +2248,10 @@ export function ChatTimelineView({
             return next;
           });
         }
-        if (slot && !slot.error) {
+        if (sessionId !== wireSessionId) {
+          // The sweep's slot waits briefly for the next file.
+          indexingSweeps.finish(wireSessionId);
+        } else if (slot && !slot.error) {
           liveRef.current.delete(sessionId);
           liveStore.markStructureChanged();
         }
@@ -2287,7 +2322,7 @@ export function ChatTimelineView({
           const observedAt = new Date().toISOString();
           setIndexingReceipts((current) => {
             const next = recordIndexedFile(current, {
-              sessionId,
+              sessionId: wireSessionId,
               gezelId: slot.gezelId,
               projectId: slot.projectId,
               path: indexedPath,
@@ -2426,6 +2461,7 @@ export function ChatTimelineView({
       scopeKey,
       liveStore.markItemChanged,
       liveStore.markStructureChanged,
+      indexingSweeps,
     ],
   );
 
