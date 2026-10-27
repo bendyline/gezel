@@ -21,6 +21,7 @@
 import { Worker } from 'node:worker_threads';
 import { type KnowledgeEmbeddingProfile, createLogger, sameVectorSpace } from '@bendyline/gezel';
 import type { ModelDownloadProgress } from '@bendyline/gezel-knowledge';
+import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import { retireModelWorker } from '../utils/retire-model-worker.js';
 import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import {
@@ -170,6 +171,7 @@ function ensureWorker(): Worker | null {
     return null;
   }
   try {
+    disableOnnxRuntimeTelemetry();
     const w = new Worker(entry);
     w.on('message', onMessage);
     w.on('error', (err) => onWorkerDown(err instanceof Error ? err.message : String(err)));

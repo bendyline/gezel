@@ -209,10 +209,11 @@ packs every published package, `npm install`s the tarballs into a throwaway
 1. asserts every package resolved from a candidate tarball rather than the
    registry,
 2. enforces a 900 MiB logical `node_modules` budget,
-3. runs `npm audit --omit=dev` and fails on any critical advisory
+3. runs `npm audit --omit=dev` and fails on any high or critical advisory
    that [`scripts/npm-consumer-audit-allowlist.json`](../scripts/npm-consumer-audit-allowlist.json)
-   does not accept with a reason and an expiry — the same threshold as the
-   workspace gates; lower severities are printed, not failed, because
+   does not accept with a reason and an expiry — stricter than the workspace
+   gates, because a consumer cannot move past our exact pins; lower severities
+   are printed, not failed, because
    workspace overrides never reach this graph and advisories arrive on
    npm's schedule rather than ours,
 4. proves a clean-install macOS `node-pty` can spawn a shell,

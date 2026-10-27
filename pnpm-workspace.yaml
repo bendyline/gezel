@@ -85,7 +85,6 @@ minimumReleaseAgeExclude:
   - "electron@43.8.3"
   - "jose@6.2.4"
   - "mermaid@11.16.1"
-  - "nodemailer@10.0.12"
   - "postcss@8.5.22"
   - "tar@7.5.21"
 
@@ -111,7 +110,7 @@ overrides:
   # with the override-normalized lockfile importer and otherwise warns even
   # though a frozen install validates successfully.
   "@hono/node-server": "2.0.11"
-  "@modelcontextprotocol/sdk": "1.31.0"
+  "@modelcontextprotocol/sdk": "1.32.1"
   # plist (electron-builder) still resolves the 0.8 line.
   "@xmldom/xmldom@<0.9": "0.8.15"
   "adm-zip": "0.6.1"
@@ -122,15 +121,16 @@ overrides:
   "dompurify@>=3 <4": "3.4.17"
   "fast-uri": "3.1.8"
   "form-data": "4.0.6"
-  "hono": "4.13.9"
+  "hono": "4.13.13"
   "ip-address": "10.3.1"
   "js-yaml@<4": "3.15.2"
   "js-yaml@>=4 <5": "4.3.2"
   "mermaid@>=11 <12": "11.16.1"
   # mailparser and imapflow pin nodemailer exactly (imapflow 1.4.8 at 9.0.3), so
   # the override keeps one copy that carries the addressparser fixes. 10.0.6
-  # fixed GHSA-v53p-9fqp-m79j; 9.x has no backport.
-  "nodemailer": "10.0.12"
+  # fixed GHSA-v53p-9fqp-m79j; 9.x has no backport. 10.1.4 fixed the SMTP AUTH
+  # backtracking (GHSA-4ffr-jq9g-5ffx) and four addressparser advisories.
+  "nodemailer": "10.1.7"
   # kokoro-js 1.2.1 (the latest release) still declares Transformers.js ^3.5.1.
   # Its whole surface (StyleTextToSpeech2Model, AutoTokenizer, Tensor, RawAudio,
   # env.backends) is unchanged in 4.x, and the service hands it Tensors built

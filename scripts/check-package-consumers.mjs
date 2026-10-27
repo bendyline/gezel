@@ -506,9 +506,10 @@ try {
 
   step('auditing the npm consumer graph');
   // This graph is the one npm resolves for a consumer: the workspace's pnpm
-  // overrides never reach it. It blocks at critical only, like the workspace
-  // gates; lower severities are printed below and in the daily supply-chain
-  // report. Accepted critical advisories go in
+  // overrides never reach it. It blocks at high and critical (see
+  // npm-consumer-audit.mjs for why that is stricter than the workspace gates);
+  // lower severities are printed below and in the daily supply-chain report.
+  // Accepted advisories go in
   // scripts/npm-consumer-audit-allowlist.json with a reason and an expiry.
   const audit = runPackageManager('npm', ['audit', '--omit=dev', '--json'], { cwd: consumer });
   let auditCounts = null;
@@ -523,14 +524,14 @@ try {
     const blocking = blockingAdvisories(auditReport, readAuditAllowlist());
     if (blocking.length > 0) {
       fail(
-        `npm audit found critical advisories in the consumer graph:\n${blocking
+        `npm audit found high or critical advisories in the consumer graph:\n${blocking
           .map((a) => `    ${a.severity.padEnd(8)} ${a.id}  ${a.pkg}  ${a.title}`)
           .join(
             '\n',
           )}\n  Fix the dependency, or allowlist it with a reason and expiry in scripts/npm-consumer-audit-allowlist.json`,
       );
     } else {
-      ok('npm audit reports no un-allowlisted critical advisories');
+      ok('npm audit reports no un-allowlisted high or critical advisories');
     }
   }
   if (auditCounts) {

@@ -18,6 +18,7 @@
 
 import { createRequire } from 'node:module';
 import { PipelineLoadError } from '@bendyline/gezel-inference/internal/memory/embed-core';
+import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import { ARCFACE_SIZE, alignToArcFace } from '../index-store/face/align.js';
 import { FACE_MIN_PX } from '../index-store/face/constants.js';
 import { YUNET_INPUT, type YunetOutputs, postprocessYunet } from '../index-store/face/yunet.js';
@@ -80,6 +81,7 @@ function loadOrt(): Promise<OrtModule> {
         // onnxruntime-node is CJS and arrives alongside the optional
         // @huggingface/transformers peer; createRequire is the deterministic
         // interop (same reasoning as the decoders in image-pixels.ts).
+        disableOnnxRuntimeTelemetry();
         return createRequire(import.meta.url)('onnxruntime-node') as OrtModule;
       } catch {
         throw new PipelineLoadError(

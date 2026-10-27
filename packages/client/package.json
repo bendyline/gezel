@@ -52,7 +52,7 @@
   },
   "dependencies": {
     "@bendyline/gezel": "workspace:*",
-    "undici": "8.11.2",
+    "undici": "8.12.3",
     "yauzl": "^3.4.0",
     "zod": "^4.4.3"
   },

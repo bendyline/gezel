@@ -15,7 +15,7 @@ import {
   stopSuspendMonitor,
 } from '@bendyline/gezel';
 import { BundledSource, CatalogService } from '@bendyline/gezel-catalog';
-import { discoverNativeBinaries } from '@bendyline/gezel/native';
+import { disableOnnxRuntimeTelemetry, discoverNativeBinaries } from '@bendyline/gezel/native';
 import { gezelHome } from '@bendyline/gezel/paths';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -84,6 +84,7 @@ export interface RunningInferenceService {
 export async function startService(
   options: InferenceServiceOptions = {},
 ): Promise<RunningInferenceService> {
+  disableOnnxRuntimeTelemetry();
   const previousLogOutput = getLogOutput();
   const restoreLogOutput = () => setLogOutput(previousLogOutput);
   if (options.logOutput) setLogOutput(options.logOutput);

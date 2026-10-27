@@ -13,6 +13,16 @@
 export const TRANSFORMERS_MODULE = '@huggingface/transformers';
 
 /**
+ * Keep ONNX Runtime's telemetry off before transformers loads it. A copy of
+ * `disableOnnxRuntimeTelemetry` in core's `native/onnx-telemetry.ts`, which
+ * says why; this package must not depend on core. Effective only on the main
+ * thread, where a library caller building a catalog runs it.
+ */
+export function disableOnnxRuntimeTelemetry(env: NodeJS.ProcessEnv = process.env): void {
+  if (!env.ORT_DISABLE_TELEMETRY) env.ORT_DISABLE_TELEMETRY = '1';
+}
+
+/**
  * The specifier Node could not resolve, or null when `err` is not a
  * resolution failure. Matched on the resolver's error code, then read from
  * its message, because a failure *inside* a package also mentions that

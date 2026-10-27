@@ -42,8 +42,13 @@ corresponding dependency or workaround is removed.
 ## npm consumer boundary
 
 pnpm workspace patches do not transfer into applications that install the public
-npm packages. The separate clean npm-consumer audit retains its critical threshold
-and does not use desktop exceptions.
+npm packages. The separate clean npm-consumer audit (`pnpm check:packages`) blocks
+high and critical advisories and keeps its own allowlist,
+`scripts/npm-consumer-audit-allowlist.json`, and does not use desktop exceptions.
+Because the published packages exact-pin their dependencies, a consumer cannot take
+a fixed version on their own; bump the pin and release. It blocked critical only
+until 2026-10-27, when exact pins on the MCP SDK, undici, hono and nodemailer left
+every consumer with 12 high advisories this gate had passed.
 
 ## F1 remediation, 2026-10-10
 

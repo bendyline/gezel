@@ -1,9 +1,11 @@
 import {
   CRAFTBOOK_CATEGORY_FAMILY_META,
   CRAFTBOOK_CATEGORY_META,
+  catalogGroundFor,
   resolveCraftbookCategory,
 } from '@bendyline/gezel';
 import type {
+  CatalogGroundTone,
   CatalogItemSummary,
   CatalogKind,
   ChatModelManifest,
@@ -68,11 +70,40 @@ export interface SiteDemo {
   imports?: PageImportTarget[];
 }
 
+/**
+ * A craftbook's mark: a transparent cut-out that needs its category's ground
+ * painted behind it, as the app does (`catalogGroundFor`). Without the ground
+ * it sits on whatever the page puts there.
+ */
+export interface CraftbookArt {
+  bytes: Buffer;
+  ground: CatalogGroundTone | undefined;
+}
+
+/**
+ * How much of the catalog the site publishes, written beside the docs as
+ * `catalog-counts.json`. A landing page quotes these instead of numbers typed
+ * by hand, which drifted a little further behind the catalog every release.
+ */
+export interface SiteCatalogCounts {
+  craftbooks: number;
+  /** Chat, image and video models together, as the model catalog page lists them. */
+  models: number;
+  characters: number;
+  projectTypes: number;
+  /** Project types whose page runs in the browser. */
+  projectTypeDemos: number;
+  connectors: number;
+}
+
+export const CATALOG_COUNTS_FILE = 'catalog-counts.json';
+
 export interface SiteCatalog {
   pages: SiteCatalogPage[];
   demos: SiteDemo[];
-  /** Woodcut artwork per craftbook id, written beside each craftbook page as `logo.webp`. */
-  craftbookArt: Map<string, Buffer>;
+  /** Artwork per craftbook id, written beside each craftbook page as `logo.webp`. */
+  craftbookArt: Map<string, CraftbookArt>;
+  counts: SiteCatalogCounts;
 }
 
 export const CRAFTBOOK_ART_FILE = 'logo.webp';
@@ -129,13 +160,19 @@ export async function buildSiteCatalog(catalog: SiteCatalogSource): Promise<Site
   const craftbooks = (await manifests<CraftbookTemplateManifest>('craftbook-template')).sort(
     byName,
   );
-  const craftbookArt = new Map<string, Buffer>();
+  const craftbookArt = new Map<string, CraftbookArt>();
   for (const book of craftbooks) {
     // Only the one file name the catalog publishes, so a malformed manifest
     // cannot pull an arbitrary item file onto the site.
     if (book.logo !== CRAFTBOOK_ART_FILE) continue;
     const bytes = await catalog.readItemFile('craftbook-template', book.id, CRAFTBOOK_ART_FILE);
-    if (bytes) craftbookArt.set(book.id, bytes);
+    if (!bytes) continue;
+    const ground = catalogGroundFor({
+      kind: 'craftbook-template',
+      category: book.category,
+      tags: book.tags,
+    });
+    craftbookArt.set(book.id, { bytes, ground });
   }
   const roleAbouts = new Map<string, string>();
   for (const role of roles) {
@@ -240,7 +277,15 @@ export async function buildSiteCatalog(catalog: SiteCatalogSource): Promise<Site
     const demo = await projectTypeDemo(catalog, pt);
     if (demo) demos.push(demo);
   }
-  return { pages, demos, craftbookArt };
+  const counts: SiteCatalogCounts = {
+    craftbooks: craftbooks.length,
+    models: chat.length + images.length + videos.length,
+    characters: roles.length,
+    projectTypes: projectTypes.length,
+    projectTypeDemos: demos.length,
+    connectors: connectors.length,
+  };
+  return { pages, demos, craftbookArt, counts };
 }
 
 function modelCatalogMarkdown(
@@ -441,7 +486,7 @@ function demoteHeadings(markdown: string): string {
  */
 function craftbookGalleryHtml(
   books: CraftbookTemplateManifest[],
-  art: Map<string, Buffer>,
+  art: Map<string, CraftbookArt>,
 ): string {
   const groups = new Map<
     string,
@@ -471,8 +516,9 @@ function craftbookGalleryHtml(
 ${group.books
   .map((book) => {
     const href = `../craftbook/${encodeURIComponent(book.id)}/`;
-    const img = art.has(book.id)
-      ? `<img src="${href}${CRAFTBOOK_ART_FILE}" alt="" width="96" height="96" loading="lazy" decoding="async">`
+    const mark = art.get(book.id);
+    const img = mark
+      ? `<img src="${href}${CRAFTBOOK_ART_FILE}" alt=""${groundAttr(mark.ground)} width="96" height="96" loading="lazy" decoding="async">`
       : '';
     return `<li><a href="${href}">${img}<span class="hb-gallery-title">${escHtml(book.name)}</span><span class="hb-gallery-summary">${escHtml(clip(firstSentence(book.description) ?? '', 110))}</span></a></li>`;
   })
@@ -483,9 +529,14 @@ ${group.books
     .join('\n');
 }
 
-/** The craftbook's woodcut, placed under its title. */
-export function craftbookArtHtml(title: string): string {
-  return `<img class="hb-craftbook-art" src="${CRAFTBOOK_ART_FILE}" alt="${escHtml(title)} illustration" width="160" height="160" decoding="async">`;
+/** The craftbook's mark, placed under its title. */
+export function craftbookArtHtml(title: string, ground: CatalogGroundTone | undefined): string {
+  return `<img class="hb-craftbook-art" src="${CRAFTBOOK_ART_FILE}" alt="${escHtml(title)} illustration"${groundAttr(ground)} width="160" height="160" decoding="async">`;
+}
+
+/** The stylesheet paints the ground from this attribute (`--hb-ground-<tone>`). */
+function groundAttr(ground: CatalogGroundTone | undefined): string {
+  return ground ? ` data-ground="${ground}"` : '';
 }
 
 /** Insert right after the article's h1. */

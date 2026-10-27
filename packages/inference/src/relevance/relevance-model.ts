@@ -1,5 +1,6 @@
 import { Worker } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
+import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import { retireModelWorker } from '../utils/retire-model-worker.js';
 import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import {
@@ -280,6 +281,7 @@ class RelevanceModelHost implements RelevanceScorer {
       return null;
     }
     try {
+      disableOnnxRuntimeTelemetry();
       const worker = new Worker(entry);
       worker.on('message', (reply: WorkerReply) => {
         const pending = this.pending.get(reply.id);
