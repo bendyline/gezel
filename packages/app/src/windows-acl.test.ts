@@ -180,6 +180,18 @@ describe.skipIf(process.platform !== 'win32')('gezel-acl.exe', () => {
         expect(result.error, result.stderr).toBeUndefined();
         expect(result.status, result.stdout + result.stderr).toBe(0);
         expect(result.stdout).toContain('ACL race regression tests passed');
+        // Only an elevated token drives the helper the way the installer does.
+        // CI runners are elevated, so a skip there means the coverage is gone.
+        if (process.env.CI) {
+          for (const passed of [
+            'Elevated production launcher passed',
+            'Elevated sealed-tree launcher passed',
+            'Elevated attestation launcher passed',
+            'Elevated zone launcher passed',
+          ]) {
+            expect(result.stdout).toContain(passed);
+          }
+        }
       } finally {
         rmSync(scratch, { recursive: true, force: true });
       }

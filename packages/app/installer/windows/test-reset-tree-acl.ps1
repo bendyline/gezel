@@ -31,6 +31,13 @@ function Fixture([string]$name) {
 function Repair([string]$path, [Action[string,string]]$observe = $null) {
     [Gezel.Installer.ResetTreeAcl]::Run($path, $testOwner, $observe)
 }
+# Runs the compiled helper and keeps its exit code and both streams. Windows
+# PowerShell turns redirected stderr into error records, which 'Stop' throws.
+function Launch {
+    $ErrorActionPreference = 'Continue'
+    $text = (& $Launcher @args 2>&1 | ForEach-Object { "$_" }) -join "`n"
+    [pscustomobject]@{ Code = $LASTEXITCODE; Text = $text }
+}
 $outside = Fixture 'outside'
 $marker = Join-Path $outside 'marker.txt'
 Set-Content -LiteralPath $marker -Value 'outside data'
@@ -294,6 +301,36 @@ if ($principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administ
     Assert ($LASTEXITCODE -eq 0) 'Production launcher failed beside a sealed tree'
     Assert (($launcherOutput -join "`n").Contains("Left $publishedTree as published")) 'Production launcher repaired a sealed, attested tree'
     Write-Output 'Elevated sealed-tree launcher passed'
+
+    # -SealedSha and -SeparateZones reach the repair only through the helper's
+    # command line. An attestation that is not a sha256 must never keep the
+    # tree the launcher just kept with a real one.
+    $sealedSddl = AclText $publishedTree
+    $unattested = Launch reset-tree-acl -Root $publishedRoot -KeepSealedChild service -SealedSha not-a-sha
+    Assert ($unattested.Code -eq 0) "Production launcher failed on an unreadable attestation: $($unattested.Text)"
+    Assert ($unattested.Text.Contains('No readable attestation for service; repairing it too.')) "Production launcher did not report the unreadable attestation: $($unattested.Text)"
+    Assert (-not $unattested.Text.Contains('as published')) 'Production launcher kept a tree on an unreadable attestation'
+    Assert ((AclText $publishedTree) -ne $sealedSddl) 'Production launcher left a tree with an unreadable attestation unrepaired'
+    Write-Output 'Elevated attestation launcher passed'
+
+    # A link from the private tree into shared is refused only because the
+    # installer names shared a zone of its own. Without zones the root is one
+    # zone and the same link is repaired, so the refusal proves the option
+    # arrived, spaces after the commas included.
+    $launchZones = Fixture 'production-zones'
+    New-Item -ItemType Directory -Path (Join-Path $launchZones 'private'), (Join-Path $launchZones 'shared') | Out-Null
+    $launchSecret = Join-Path $launchZones 'private\secret.txt'
+    Set-Content -LiteralPath $launchSecret -Value 'private data'
+    New-Item -ItemType HardLink -Path (Join-Path $launchZones 'shared\alias.txt') -Target $launchSecret | Out-Null
+    $launchSecretAcl = AclText $launchSecret
+    $crossed = Launch reset-tree-acl -Root $launchZones -SeparateZones 'shared, service'
+    Assert ($crossed.Code -eq 1) "Production launcher accepted a hard link across zones (exit $($crossed.Code)): $($crossed.Text)"
+    Assert ($crossed.Text.Contains('Refusing incomplete ACL repair: Refusing hard-linked file whose names cross trust zones')) "Production launcher refused for another reason: $($crossed.Text)"
+    Assert ((AclText $launchSecret) -eq $launchSecretAcl) 'Production launcher changed a cross-zone file before refusal'
+    $oneZone = Launch reset-tree-acl -Root $launchZones
+    Assert ($oneZone.Code -eq 0) "Production launcher refused an in-tree hard link without zones: $($oneZone.Text)"
+    Assert ($oneZone.Text.Contains('Secured 5 entries without following links.')) "Production launcher reported an unexpected repair: $($oneZone.Text)"
+    Write-Output 'Elevated zone launcher passed'
 } else {
     Write-Output 'Elevated production launcher not run: current token is not elevated'
 }
