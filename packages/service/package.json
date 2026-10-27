@@ -94,9 +94,9 @@
     "@bendyline/gezel-script-runtime": "workspace:*",
     "@bendyline/gezel-script-stdlib": "workspace:*",
     "@bendyline/gezel-sdk": "workspace:*",
-    "@bendyline/squisq": "2.13.5",
-    "@bendyline/squisq-cli": "2.9.18",
-    "@bendyline/squisq-formats": "2.8.6",
+    "@bendyline/squisq": "2.13.6",
+    "@bendyline/squisq-cli": "2.9.19",
+    "@bendyline/squisq-formats": "2.8.7",
     "@hono/node-server": "2.0.11",
     "@modelcontextprotocol/sdk": "1.31.0",
     "@napi-rs/keyring": "^1.3.0",
@@ -128,7 +128,7 @@
     "yazl": "^3.3.1",
     "zod": "^4.4.3",
     "@bendyline/gezel-inference": "workspace:*",
-    "@bendyline/gilde": "0.3.0"
+    "@bendyline/gilde": "0.3.1"
   },
   "peerDependencies": {
     "@huggingface/transformers": "^4.3.1",

@@ -16,9 +16,10 @@
  */
 
 import { realpath } from 'node:fs/promises';
-import { join, posix, resolve, sep } from 'node:path';
+import { join, posix, resolve } from 'node:path';
 import type { ProjectConnectorBinding, ProviderName } from '@bendyline/gezel';
 import { isLocalProvider, parseCameraBindingConfig } from '@bendyline/gezel';
+import { isPathInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 
 type CameraProject = { connectors?: ProjectConnectorBinding[] };
 
@@ -77,9 +78,7 @@ export async function cameraBindingForFile(
   const target = await canonicalPath(file);
   for (const binding of bindings) {
     const dir = await canonicalPath(join(artifactsDir, binding.corpusDir!));
-    if (target === dir || target.startsWith(dir.endsWith(sep) ? dir : `${dir}${sep}`)) {
-      return binding;
-    }
+    if (isPathInside(target, dir)) return binding;
   }
   return undefined;
 }
