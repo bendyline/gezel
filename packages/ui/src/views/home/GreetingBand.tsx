@@ -283,9 +283,13 @@ export function GreetingBand({
                     )}
                   </>
                 )}
-                <div className="home-workshop-chips">
-                  <Chips chips={chips} />
-                </div>
+                {/* An empty row's margin would shorten the Handboek reader
+                    below the startup copy it replaces. */}
+                {chips.length > 0 && (
+                  <div className="home-workshop-chips">
+                    <Chips chips={chips} />
+                  </div>
+                )}
               </div>
 
               {/* The whole standing figure + shelf + label is a poppetje showcase;
