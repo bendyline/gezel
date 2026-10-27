@@ -121,6 +121,7 @@ export function ReportDocument({
     <div
       ref={body}
       className={className ? `report-document ${className}` : 'report-document'}
+      aria-busy={content === null && error === null}
       onClickCapture={(e) => open(e.target, e)}
       onKeyDown={(e) => {
         if (e.key === 'Enter') open(e.target, e);

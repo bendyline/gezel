@@ -44,6 +44,7 @@ import { applyGateRejection } from '../tasks/gate-accounting.js';
 import { gateHandoffNoteText, stampGateHandoff } from '../tasks/gate-handoff.js';
 import { bumpStepActivation } from '../tasks/step-activation.js';
 import { explicitStepJump, resolveNextStep, unknownTaskStepText } from '../tasks/step-routing.js';
+import { accrueTaskWork } from '../tasks/work-time.js';
 import { portableCraftbookGap } from './craftbook-host-gap.js';
 import { slugifyEntityName } from './entities.js';
 import { encodeText } from './files.js';
@@ -121,10 +122,13 @@ async function write(
   task: Task,
   extra?: Map<string, Uint8Array>,
 ): Promise<Task> {
-  const writes = taskWrites(repo, task);
+  const file = `${taskLocation(task.ref).root}/task.json`;
+  const current = await repo.tolerantRecord(file, TaskSchema, `task ${file}`);
+  const record = accrueTaskWork(current, task);
+  const writes = taskWrites(repo, record);
   for (const [path, bytes] of extra ?? []) writes.set(path, bytes);
   await repo.transactions.commit(writes);
-  return task;
+  return record;
 }
 export async function getTask(repo: PortableRepository, ref: string): Promise<Task | null> {
   const { root, projectId, num } = taskLocation(ref);
@@ -398,6 +402,7 @@ async function createTaskInternal(
     createdBy: request.createdBy ?? { kind: 'user' },
   });
   if (task.status !== 'draft') await resolvePortableTaskExecution(repo, task);
+  Object.assign(task, accrueTaskWork(null, task));
   const writes = taskWrites(repo, task);
   for (const [path, bytes] of inputsPlan?.writes ?? []) writes.set(path, bytes);
   await stageCraftbookScriptSources(repo, projectId, task.craftbook, writes);

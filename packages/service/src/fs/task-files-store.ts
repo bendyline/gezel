@@ -5,6 +5,7 @@ import {
   type Task,
   TaskSchema,
   type TaskWorkCredit,
+  accrueTaskWork,
   createLogger,
   isSafeEntityId,
 } from '@bendyline/gezel';
@@ -188,7 +189,11 @@ export class TaskFilesStore {
     // `effectiveStatus` is a runtime projection of the ancestry graph. Never
     // persist it: resuming a parent must reveal the child's unchanged own
     // status rather than a stale inherited snapshot.
-    const { description, effectiveStatus: _effectiveStatus, ...rest } = task;
+    const {
+      description,
+      effectiveStatus: _effectiveStatus,
+      ...rest
+    } = accrueTaskWork(current, task);
     void _effectiveStatus;
     const text = `${JSON.stringify({ ...rest, revision }, null, 2)}\n`;
     // The record is checked exactly as a read will check it. An inline step
