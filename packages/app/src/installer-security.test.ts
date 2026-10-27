@@ -85,17 +85,39 @@ describe('Windows machine-service installer security', () => {
   it('grants the service SID without an account lookup', () => {
     expect(hook).not.toMatch(/NT SERVICE\\\$\{GEZEL_SERVICE_NAME\}:/);
     expect(hook).not.toMatch(/icacls[^\n]*\*S-1-5-80-/);
-    expect(hook).toContain(
-      '!define GEZEL_SID_GRANT "$INSTDIR\\resources\\installer-security\\grant-service-sid.ps1"',
-    );
     const macroStart = position('!macro GrantServiceSid PATH GRANT');
     const macro = hook.slice(macroStart, hook.indexOf('!macroend', macroStart));
     expect(macro).toContain(
-      '"$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${GEZEL_SID_GRANT}"',
+      `nsExec::ExecToLog '"\${GEZEL_ACL_TOOL}" grant-service-sid -Path "\${PATH}"`,
     );
     expect(macro).toContain('-Service ${GEZEL_SERVICE_NAME}');
-    expect(macro).toContain('Pop $0');
+    expect(macro).toContain('!insertmacro PopAclToolExit');
     expect(hook.match(/!insertmacro GrantServiceSid /g)).toHaveLength(4);
+  });
+
+  // Regression: an AllSigned execution policy refuses unsigned scripts whatever
+  // -ExecutionPolicy says, and Constrained Language Mode refuses Add-Type and
+  // .NET calls, so managed machines never got the machine engine while the
+  // permission work was PowerShell. It is a compiled, signed helper now.
+  it('secures the data tree without PowerShell and fails closed when the helper never starts', () => {
+    expect(hook).toContain(
+      '!define GEZEL_ACL_TOOL "$INSTDIR\\resources\\installer-security\\gezel-acl.exe"',
+    );
+    expect(hook).not.toMatch(/powershell\.exe[^\n]*-File/i);
+    expect(hook).not.toMatch(/\.ps1\b/);
+
+    // nsExec pushes "error" when Windows never started the helper (missing, or
+    // refused by App Control). LogicLib's `!=` compares strings, so that reads
+    // as a failure; `<>` compares integers, and "error" would read as 0.
+    const popStart = position('!macro PopAclToolExit');
+    const pop = hook.slice(popStart, hook.indexOf('!macroend', popStart));
+    expect(pop).toContain('Pop $0');
+    expect(pop).toContain('${If} $0 == "error"');
+    expect(hook.match(/!insertmacro PopAclToolExit/g)).toHaveLength(2);
+    expect(
+      hook.match(/!insertmacro GrantServiceSid [^\n]*\r?\n\s*\$\{If\} \$0 != 0\r?\n/g),
+    ).toHaveLength(4);
+    expect(hook).not.toMatch(/\$\{If\} \$0 <> 0/);
   });
 
   // Regression: v1.26219.44 granted the service SID only (M) on the asset
@@ -276,8 +298,11 @@ describe('Windows machine-service installer security', () => {
         hook.indexOf('!macroend', position(`!macro ${name} `)),
       );
     const repair = macro('RepairTreeAcl');
-    expect(repair).toContain('-File "${GEZEL_ACL_REPAIR}" -Root "${PATH}"${HELPER_ARGS}');
-    expect(repair).toContain('${IfNot} ${FileExists} "${GEZEL_ACL_REPAIR}"');
+    expect(repair).toContain(
+      `nsExec::ExecToLog '"\${GEZEL_ACL_TOOL}" reset-tree-acl -Root "\${PATH}"\${HELPER_ARGS}'`,
+    );
+    expect(repair).toContain('${IfNot} ${FileExists} "${GEZEL_ACL_TOOL}"');
+    expect(repair).toContain('!insertmacro PopAclToolExit');
     expect(repair).toContain('${If} $0 != 0');
     expect(repair).toContain('Goto ${FAILURE_LABEL}');
     expect(repair).not.toContain('icacls.exe');

@@ -506,9 +506,7 @@ jobs:
             (Join-Path $installRoot 'resources/app.asar.unpacked/dist/node-bundle/node.exe'),
             (Join-Path $installRoot 'resources/app.asar.unpacked/dist/extract-service-bundle.js'),
             (Join-Path $installRoot 'resources/app.asar.unpacked/dist/neutralize-reparse-points.js'),
-            (Join-Path $installRoot 'resources/installer-security/reset-tree-acl.ps1'),
-            (Join-Path $installRoot 'resources/installer-security/grant-service-sid.ps1'),
-            (Join-Path $installRoot 'resources/installer-security/ResetTreeAcl.cs')
+            (Join-Path $installRoot 'resources/installer-security/gezel-acl.exe')
           )) {
             if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
               throw "Installed Windows payload is missing $required"
@@ -902,9 +900,12 @@ jobs:
         shell: pwsh
         run: |
           # Everything we build must be validly signed: the installer and
-          # gezel.exe (electron-builder's own pass), our engine DLLs (the
-          # afterPack sweep in scripts/after-pack.cjs), and the native engine
-          # exes + gezel-service-host.exe (signed at birth). Anything
+          # gezel.exe (electron-builder's own pass), our engine DLLs and the
+          # installer's permission helper gezel-acl.exe (the afterPack sweep
+          # in scripts/after-pack.cjs), and the native engine exes +
+          # gezel-service-host.exe (signed at birth). The helper runs elevated
+          # during the install, and an unsigned one is what an App Control
+          # policy refuses. Anything
           # Unsigned here means the sweep regressed — fail the release.
           #
           # Third-party binaries we redistribute verbatim are exempt: we sign
@@ -932,6 +933,7 @@ jobs:
           $payload = @(
             Get-Item "$unpacked/gezel.exe" -ErrorAction Stop
             Get-Item "$unpacked/gezel-service-host.exe" -ErrorAction Stop
+            Get-Item "$unpacked/resources/installer-security/gezel-acl.exe" -ErrorAction Stop
           )
           $payload += Get-ChildItem "$unpacked/resources/app.asar.unpacked" -Recurse -File -ErrorAction SilentlyContinue |
             Where-Object { $extensions -contains $_.Extension.ToLowerInvariant() }

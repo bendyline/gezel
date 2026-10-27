@@ -1,4 +1,9 @@
-param([Parameter(Mandatory = $true)][string]$Scratch)
+# -Launcher is the compiled gezel-acl.exe (scripts/build-installer-security.cjs);
+# the elevated section drives it exactly as the installer does.
+param(
+    [Parameter(Mandatory = $true)][string]$Scratch,
+    [Parameter(Mandatory = $true)][string]$Launcher
+)
 $ErrorActionPreference = 'Stop'
 # The helper reports paths in Path.GetFullPath form, which expands 8.3 names
 # under .NET Framework; the CI runner's TEMP is C:\Users\RUNNER~1\..., so the
@@ -272,7 +277,7 @@ if ($principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administ
         $lockedAcl = New-Object System.Security.AccessControl.FileSecurity
         $lockedAcl.SetSecurityDescriptorSddlForm('D:P(A;;FA;;;SY)')
         Set-Acl -LiteralPath $lockedFile -AclObject $lockedAcl
-        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'reset-tree-acl.ps1') -Root $locked
+        & $Launcher reset-tree-acl -Root $locked
         Assert ($LASTEXITCODE -eq 0) 'Production privileged launcher failed'
         Assert ((Get-Acl -LiteralPath $lockedFile).GetOwner([System.Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-544') 'Production owner was not set'
         Write-Output 'Elevated production launcher passed'
@@ -285,7 +290,7 @@ if ($principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administ
     $publishedAcl = New-Object System.Security.AccessControl.DirectorySecurity
     $publishedAcl.SetSecurityDescriptorSddlForm('O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)')
     [System.IO.Directory]::SetAccessControl($publishedTree, $publishedAcl)
-    $launcherOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'reset-tree-acl.ps1') -Root $publishedRoot -KeepSealedChild service -SealedSha $attested
+    $launcherOutput = & $Launcher reset-tree-acl -Root $publishedRoot -KeepSealedChild service -SealedSha $attested
     Assert ($LASTEXITCODE -eq 0) 'Production launcher failed beside a sealed tree'
     Assert (($launcherOutput -join "`n").Contains("Left $publishedTree as published")) 'Production launcher repaired a sealed, attested tree'
     Write-Output 'Elevated sealed-tree launcher passed'
