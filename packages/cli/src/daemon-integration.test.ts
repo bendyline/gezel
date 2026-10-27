@@ -615,6 +615,12 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
       await expect(runCli(...args, '0')).rejects.toMatchObject({ code: 1 });
       await expect(runCli(...args, '1.5')).rejects.toMatchObject({ code: 1 });
       await runCli(...args, 'auto', '--provider', 'llama-cpp');
+      expect(
+        JSON.parse((await runCli(...args, '16', '--provider', 'codex-cli', '--json')).stdout),
+      ).toEqual({ provider: 'codex-cli', slots: 16 });
+      expect((await client.getConfig()).providerConcurrency?.['codex-cli']).toBe(16);
+      await runCli(...args, 'auto', '--provider', 'codex-cli');
+      await expect(runCli(...args, '2', '--provider', 'gemini')).rejects.toMatchObject({ code: 1 });
       expect((await client.getConfig()).providerConcurrency).toEqual({
         ...before.providerConcurrency,
         openai: 7,

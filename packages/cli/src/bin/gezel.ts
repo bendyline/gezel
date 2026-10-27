@@ -2224,13 +2224,37 @@ function resolveModelProvider(raw?: string): 'mlx' | 'llama-cpp' | 'ds4' {
   return resolveOnDeviceProvider(process.platform, process.arch);
 }
 
+/**
+ * Cloud and CLI providers whose concurrent turns `model concurrency` can also
+ * set. Their slots are a rate-limit choice rather than a memory one, so they
+ * have no automatic sizing: `auto` restores the provider's default (10).
+ */
+const CONCURRENCY_SERVICE_PROVIDERS = [
+  'codex-cli',
+  'anthropic-cli',
+  'copilot',
+  'openai',
+  'anthropic',
+] as const;
+
 model
   .command('concurrency [slots]')
-  .description('Show or set local inference slots; use auto to restore automatic sizing')
-  .option('-p, --provider <engine>', 'mlx | llama-cpp | ds4 (default: platform default)')
+  .description(
+    'Show or set how many turns a provider runs at once (local inference slots, or a cloud/CLI provider such as codex-cli); auto restores the default',
+  )
+  .option(
+    '-p, --provider <engine>',
+    `mlx | llama-cpp | ds4 | ${CONCURRENCY_SERVICE_PROVIDERS.join(' | ')} (default: platform default)`,
+  )
   .option('--json', 'Output the slot override as JSON')
   .action(async (slots: string | undefined, opts: { provider?: string; json?: boolean }) => {
-    const provider = resolveModelProvider(opts.provider);
+    const service = CONCURRENCY_SERVICE_PROVIDERS.find((name) => name === opts.provider);
+    if (!service && opts.provider && !['mlx', 'llama-cpp', 'ds4'].includes(opts.provider)) {
+      throw new CliError(
+        `--provider must be one of mlx, llama-cpp, ds4, ${CONCURRENCY_SERVICE_PROVIDERS.join(', ')} (got "${opts.provider}")`,
+      );
+    }
+    const provider = service ?? resolveModelProvider(opts.provider);
     if (
       slots !== undefined &&
       slots !== 'auto' &&
@@ -2247,10 +2271,14 @@ model
       await client.updateConfig({ providerConcurrency: concurrency });
     }
     const result = { provider, slots: concurrency[provider] ?? null };
+    // A cloud/CLI provider's queue is sized when the provider starts.
+    const applies = service
+      ? 'applies after a daemon restart'
+      : 'applies when idle sessions reload';
     console.log(
       opts.json
         ? JSON.stringify(result)
-        : `${provider}: ${result.slots ?? 'auto'}${result.slots === null ? '' : ' inference slots'}${slots === undefined ? '' : ' (applies when idle sessions reload)'}`,
+        : `${provider}: ${result.slots ?? 'auto'}${result.slots === null ? '' : ` ${service ? 'concurrent turns' : 'inference slots'}`}${slots === undefined ? '' : ` (${applies})`}`,
     );
   });
 

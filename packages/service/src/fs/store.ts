@@ -6833,6 +6833,11 @@ export class Store {
     return this.taskFiles.iterateProjectTasks(projectId);
   }
 
+  /** Child task numbers of `parentRef` in `projectId` (see `TaskFilesStore.listChildTaskNums`). */
+  async listChildTaskNums(projectId: string, parentRef: string): Promise<number[]> {
+    return this.taskFiles.listChildTaskNums(projectId, parentRef);
+  }
+
   async listProjectTasks(projectId: string): Promise<Task[]> {
     return this.taskFiles.listProjectTasks(projectId);
   }

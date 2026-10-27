@@ -548,6 +548,7 @@ import {
   taskStepSurfaceOptions,
   toolCapForTierAndRole,
 } from './session-tool-surface.js';
+import { stepTurnTimeoutMs } from './step-turn-timeout.js';
 import {
   type TaskBudgetLimits,
   type TaskBudgetSnapshot,
@@ -8023,6 +8024,8 @@ export class ChatManager extends LocalEngineRuntime {
       // or stack ordinary nudges on top of the corrective prompt.
       let keurmeesterConsultedThisSend = false;
       let keurmeesterCaseToClose: string | null = null;
+      // A task step can cap its own turns (`turnTimeoutSec`); read it once.
+      const stepTurnLimitMs = await stepTurnTimeoutMs(this.store, state.record);
 
       while (true) {
         const debugOn = this.debug?.isEnabled() === true;
@@ -8180,6 +8183,8 @@ export class ChatManager extends LocalEngineRuntime {
           const profileTimeout = resolveProfileTurnTimeoutMs(state);
           if (profileTimeout !== null) turnTimeoutMs = profileTimeout;
         }
+        // The step knows its own work best: its ceiling wins over the above.
+        if (stepTurnLimitMs !== null) turnTimeoutMs = stepTurnLimitMs;
         // User-driven send: `interactive` lane so it preempts any
         // queued background work (memory extraction, handoff
         // dispatches, idle nudges) for this provider. Emit `queued`

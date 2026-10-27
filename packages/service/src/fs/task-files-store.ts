@@ -17,6 +17,7 @@ import {
 import { HttpStatusError } from '@bendyline/gezel/runtime';
 import { FileSnapshotCache } from './file-snapshot-cache.js';
 import { isSyncJunkName } from './sync-junk.js';
+import { TaskLineageIndex } from './task-lineage-index.js';
 
 export interface TaskFilesStoreOptions {
   home: string;
@@ -57,6 +58,8 @@ export class TaskFilesStore {
   private readonly invalidTasks = new Map<string, string>();
   private readonly records = new FileSnapshotCache<Task>(16 * 1024 * 1024);
   private readonly descriptions = new FileSnapshotCache<string>(8 * 1024 * 1024);
+  private readonly lineage = new TaskLineageIndex();
+  private readonly lineageBuilds = new Map<string, Promise<void>>();
 
   constructor(opts: TaskFilesStoreOptions) {
     this.home = opts.home;
@@ -185,6 +188,7 @@ export class TaskFilesStore {
     await writeFileAtomic(file, text, {
       noReplace: createOnly,
     });
+    this.lineage.note(task);
     if (description !== undefined && description.trim().length > 0) {
       await this.writeTaskAbout(task.projectId, task.num, description);
     } else {
@@ -208,6 +212,7 @@ export class TaskFilesStore {
         this.invalidTasks.delete(file);
         return null;
       }
+      this.lineage.note(cached);
       // TaskManager edits aggregates before persisting them. Keep those
       // drafts separate from the validated, immutable disk snapshot.
       const parsed = structuredClone(cached);
@@ -266,6 +271,34 @@ export class TaskFilesStore {
       const task = await this.readTask(projectId, num);
       if (task) yield task;
     }
+    // Every task file in the project has now been read (and noted); tasks
+    // created since the directory listing were noted when they were written.
+    this.lineage.markComplete(projectId);
+  }
+
+  /**
+   * Numbers of the tasks whose `parentTaskRef` is `parentRef`, from the
+   * lineage index. The first call for a project that has not been listed in
+   * full yet lists it once; later calls read only memory. Entries can be
+   * stale, so callers re-read each child and check its parent.
+   */
+  async listChildTaskNums(projectId: string, parentRef: string): Promise<number[]> {
+    if (!this.lineage.isComplete(projectId)) {
+      let build = this.lineageBuilds.get(projectId);
+      if (!build) {
+        build = (async () => {
+          const end = beginPerfWork('task history: lineage index build');
+          try {
+            for await (const _task of this.iterateProjectTasks(projectId)) void _task;
+          } finally {
+            end();
+          }
+        })().finally(() => this.lineageBuilds.delete(projectId));
+        this.lineageBuilds.set(projectId, build);
+      }
+      await build;
+    }
+    return this.lineage.childNums(projectId, parentRef);
   }
 
   async listProjectTasks(projectId: string): Promise<Task[]> {
