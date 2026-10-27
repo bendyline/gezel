@@ -92,6 +92,7 @@ import {
   type Task,
   type TaskNote,
   TaskNoteSchema,
+  type TaskWorkCredit,
   type TerminalMessage,
   type TerminalThread,
   TerminalThreadSchema,
@@ -257,6 +258,7 @@ import { isViewStateOnlyPatch } from './project-view-state.js';
 import { StartupHomeCache } from './startup-home.js';
 import { TaskFilesStore } from './task-files-store.js';
 import { TaskSessionIndex } from './task-session-index.js';
+import type { LiveTaskStatus, ProjectTaskSummary } from './task-status-index.js';
 import {
   type WalkDirResult,
   findHtmlPages,
@@ -442,7 +444,6 @@ export class Store {
   private readonly timelineSessionCache = new FileSnapshotCache<ChatSession>();
   /** Task ref → bound sessions, so a task's sessions never need a full listing. */
   private readonly taskSessions = new TaskSessionIndex();
-  private readonly taskSessionBuilds = new Map<string, Promise<unknown>>();
   private readonly questionsCache = new Map<string, { identity: string; questions: Question[] }>();
 
   /**
@@ -5875,20 +5876,7 @@ export class Store {
     const gezelIds = opts.gezelId
       ? [opts.gezelId]
       : await safeReaddir(gezelPaths(this.home, this.external).gezels);
-    await Promise.all(
-      gezelIds
-        .filter((gezelId) => !this.taskSessions.isComplete(gezelId))
-        .map((gezelId) => {
-          let build = this.taskSessionBuilds.get(gezelId);
-          if (!build) {
-            build = this.listSessions({ gezelId }).finally(() =>
-              this.taskSessionBuilds.delete(gezelId),
-            );
-            this.taskSessionBuilds.set(gezelId, build);
-          }
-          return build;
-        }),
-    );
+    await this.taskSessions.completeGezels(gezelIds, (gezelId) => this.listSessions({ gezelId }));
     const wanted = new Set(gezelIds);
     const summaries: ChatSessionSummary[] = [];
     for (const { gezelId, sessionId } of this.taskSessions.sessionsFor(taskRef)) {
@@ -6879,6 +6867,25 @@ export class Store {
 
   iterateProjectTasks(projectId: string): AsyncIterable<Task> {
     return this.taskFiles.iterateProjectTasks(projectId);
+  }
+
+  /** Tasks with this own status, newest first, from the status index (see `TaskFilesStore`). */
+  iterateProjectTasksWithStatus(projectId: string, status: LiveTaskStatus): AsyncIterable<Task> {
+    return this.taskFiles.iterateProjectTasksWithStatus(projectId, status);
+  }
+
+  iterateAllTasksWithStatus(status: LiveTaskStatus): AsyncIterable<Task> {
+    return this.taskFiles.iterateAllTasksWithStatus(status);
+  }
+
+  /** A gezel's completed task work across the home, from the task-work index. */
+  async taskWorkFor(gezelId: string): Promise<TaskWorkCredit> {
+    return this.taskFiles.taskWorkFor(gezelId);
+  }
+
+  /** A project's task count and newest `updatedAt`, without reading its tasks. */
+  async projectTaskSummary(projectId: string): Promise<ProjectTaskSummary> {
+    return this.taskFiles.projectTaskSummary(projectId);
   }
 
   /** Child task numbers of `parentRef` in `projectId` (see `TaskFilesStore.listChildTaskNums`). */

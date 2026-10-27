@@ -6,9 +6,17 @@
  * a choice is pending; only one pending exists at a time.
  *
  * Completion-triggered refreshes and the memory compactor's daily sweep
- * stream task history to keep memory bounded. The HTTP
- * refresh route calls in directly (user-initiated). Both respect
- * `config.growth.enabled`.
+ * call `refresh`; the HTTP refresh route calls in directly (user-initiated).
+ * All of them respect `config.growth.enabled` (`gezel growth off`).
+ *
+ * The live inputs are kept, not rescanned: task work comes from the store's
+ * task-work index and the two history counts from a `GrowthHistoryTally`, so
+ * after the first refresh in a process, a refresh reads only the gezel's
+ * memory. In a 132k-task, 1.4M-event home each refresh used to take 3–8
+ * minutes (2026-10-27).
+ *
+ * Related files: `history-tally.ts`, `fs/task-work-index.ts`,
+ * `core/src/growth/xp.ts` (the XP math), `xp-refresher.ts` (scheduling).
  */
 
 import {
@@ -24,8 +32,9 @@ import type { HistoryManager } from '../history/manager.js';
 import type { CompactOneShot } from '../memory/compaction.js';
 import { isMemoryKind } from '../memory/daily-markdown.js';
 import type { MemoryManager } from '../memory/manager.js';
+import { type GrowthHistoryCounts, GrowthHistoryTally } from './history-tally.js';
 import { generateProposals } from './proposals.js';
-import { computeSignals, countTaskWork, ratchetSignals, totalXp } from './xp.js';
+import { computeSignals, ratchetSignals, totalXp } from './xp.js';
 
 const log = createLogger('growth');
 
@@ -46,6 +55,7 @@ export class GrowthEngine {
   private readonly oneShot: CompactOneShot;
   private readonly announce: ((gezelId: string, toLevel: number) => Promise<void>) | undefined;
   private readonly gezelLocks = new KeyedLock();
+  private readonly historyTally: GrowthHistoryTally;
 
   constructor(opts: GrowthEngineOptions) {
     this.store = opts.store;
@@ -53,6 +63,7 @@ export class GrowthEngine {
     this.history = opts.history;
     this.oneShot = opts.oneShot;
     this.announce = opts.announce;
+    this.historyTally = new GrowthHistoryTally(opts.history);
   }
 
   /**
@@ -165,32 +176,18 @@ export class GrowthEngine {
 
     const end = beginPerfWork('growth signals');
     try {
-      const [lessonsEvents, consultEvents] = await Promise.all([
-        this.history.listEvents({ gezelId, kinds: ['memory.lessons-updated'] }).catch(() => []),
-        this.history.listEvents({ gezelId, kinds: ['gezel.message.delivered'] }).catch(() => []),
+      const noHistory: GrowthHistoryCounts = { lessonsUpdates: 0, consultationsByDay: new Map() };
+      const [counts, work] = await Promise.all([
+        // An unreadable log counts nothing; the ratchet keeps the XP already earned.
+        this.historyTally.countsFor(gezelId).catch(() => noHistory),
+        this.store.taskWorkFor(gezelId),
       ]);
-
-      const consultationsByDay = new Map<string, number>();
-      for (const e of consultEvents) {
-        const day = e.at.slice(0, 10);
-        consultationsByDay.set(day, (consultationsByDay.get(day) ?? 0) + 1);
-      }
-
-      // Completion-triggered XP refreshes must not retain every historical task.
-      let completedSteps = 0;
-      let completedTasks = 0;
-      for await (const task of this.store.iterateAllTasks()) {
-        const counts = countTaskWork([task], gezelId);
-        completedSteps += counts.completedSteps;
-        completedTasks += counts.completedTasks;
-      }
-
       return computeSignals({
         memoryEntries,
-        lessonsUpdates: lessonsEvents.length,
-        completedSteps,
-        completedTasks,
-        consultationsByDay,
+        lessonsUpdates: counts.lessonsUpdates,
+        completedSteps: work.completedSteps,
+        completedTasks: work.completedTasks,
+        consultationsByDay: counts.consultationsByDay,
       });
     } finally {
       end();

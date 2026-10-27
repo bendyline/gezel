@@ -52,6 +52,8 @@ gezel stop --keep-running   emergency brake: cancel AI work, unload engines,
                             switch to Reactive — the service keeps running
 gezel mode [mode]           show or set how active the AI may be
                             (read-only, reactive, reactive+tasks, full-play)
+gezel growth [on|off]       show or set gezel growth (XP and level-ups); off
+                            computes no XP, for homes that run bulk workflows
 gezel run "..."             one-shot: send a prompt, print the reply
 gezel doctor                check the installation
 ```

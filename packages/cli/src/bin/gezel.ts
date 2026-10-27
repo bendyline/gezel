@@ -98,7 +98,11 @@ import { resolveRunPrompt } from '../run-prompt.js';
 import { checkRunReadiness } from '../run-readiness.js';
 import { RunOutput } from '../run-reply.js';
 import { registerSecretCommands } from '../secrets-command.js';
-import { registerProjectSettingsCommands, registerSecurityCommands } from '../settings-command.js';
+import {
+  registerGrowthCommand,
+  registerProjectSettingsCommands,
+  registerSecurityCommands,
+} from '../settings-command.js';
 import { installSignalCleanup } from '../signal-cleanup.js';
 import {
   type CleanupFlags,
@@ -145,6 +149,7 @@ const cliGlobals = (): CliGlobals => program.opts() as CliGlobals;
 registerSecretCommands(program, () => connectOwned(cliGlobals()));
 registerMcpCommands(program, () => connectOwned(cliGlobals()));
 registerSecurityCommands(program, () => connectOwned(cliGlobals()));
+registerGrowthCommand(program, () => connectOwned(cliGlobals()));
 
 // Apply --home before any command runs so the daemon spawn env, readRuntime,
 // and in-proc startService all resolve the same home.

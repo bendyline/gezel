@@ -37,6 +37,7 @@ export class TaskSessionIndex {
   /** Task ref → `gezelId/sessionId` keys. */
   private readonly sessionsOf = new Map<string, Set<string>>();
   private readonly complete = new Set<string>();
+  private readonly builds = new Map<string, Promise<unknown>>();
 
   /** Record (or correct) one session's task binding as it stands on disk. */
   note(gezelId: string, sessionId: string, taskRef: string | undefined): void {
@@ -67,6 +68,29 @@ export class TaskSessionIndex {
 
   isComplete(gezelId: string): boolean {
     return this.complete.has(gezelId);
+  }
+
+  /**
+   * Run `list` (a full listing that notes every session and marks the gezel
+   * complete) for each gezel not yet complete, once per gezel however many
+   * callers are waiting on it.
+   */
+  async completeGezels(
+    gezelIds: string[],
+    list: (gezelId: string) => Promise<unknown>,
+  ): Promise<void> {
+    await Promise.all(
+      gezelIds
+        .filter((gezelId) => !this.complete.has(gezelId))
+        .map((gezelId) => {
+          let build = this.builds.get(gezelId);
+          if (!build) {
+            build = list(gezelId).finally(() => this.builds.delete(gezelId));
+            this.builds.set(gezelId, build);
+          }
+          return build;
+        }),
+    );
   }
 
   /** Sessions noted as bound to `taskRef`. */

@@ -653,6 +653,20 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
     }
   });
 
+  it('switches gezel growth off and on for the home through the CLI', async () => {
+    const before = (await client.getConfig()).growth;
+    try {
+      const off = JSON.parse((await runCli('growth', 'off', '--json')).stdout);
+      expect(off).toEqual({ growthEnabled: false });
+      expect((await client.getConfig()).growth).toEqual({ enabled: false });
+      expect((await runCli('growth')).stdout.trim()).toBe('Growth (XP and level-ups): off');
+      await runCli('growth', 'on');
+      expect((await client.getConfig()).growth).toEqual({ enabled: true });
+    } finally {
+      await client.updateConfig({ growth: { enabled: before?.enabled !== false } });
+    }
+  });
+
   it('drives status and doctor through the installed CLI entry point', async () => {
     const status = await runCli('status');
     expect(status.stderr).toBe('');

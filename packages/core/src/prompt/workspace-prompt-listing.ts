@@ -8,6 +8,28 @@ import type { ProjectFileEntry } from '../schemas/project.js';
  */
 export const WORKSPACE_PROMPT_ENTRY_CAP = 100;
 
+/**
+ * Tools that let a turn act on what the workspace listing shows: read or
+ * search the files, write them, or hand work on them to another gezel. A turn
+ * whose roster has none of them gets no listing.
+ */
+export const WORKSPACE_LISTING_TOOLS: readonly string[] = [
+  'read_file',
+  'read_files',
+  'list_dir',
+  'find_files',
+  'grep_files',
+  'search_code',
+  'search',
+  'write_file',
+  'replace_in_file',
+  'append_to_file',
+  'message_gezel',
+  'ensure_gezel',
+  'create_task',
+  'assign_task',
+];
+
 export type WorkspacePromptProfile = 'none' | 'code' | 'writing' | 'research' | 'design' | 'review';
 
 const CLUTTER_DIRECTORY_NAMES = new Set([

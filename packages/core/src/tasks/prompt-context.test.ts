@@ -103,6 +103,9 @@ describe('renderTaskContextBlock', () => {
     expect(block).toContain('#### Step procedure\n\nCheck every link.');
     expect(block).toContain('#### Handoff from the completion gate\n\nTwo links are dead');
     expect(block).toContain('#### Phase gate');
+    // The completion gate checks the deliverable itself: no read-back first.
+    expect(block).toContain('there is no need to read back what you just saved');
+    expect(block).not.toContain('verify those criteria against the deliverable');
     expect(block).toContain('attempt 2');
     expect(block).toContain('Task tools wired this turn');
   });

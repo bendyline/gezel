@@ -108,6 +108,36 @@ export function registerSecurityCommands(
   }
 }
 
+/**
+ * `gezel growth [on|off]`: gezel growth (XP, and the level-ups it offers) for
+ * the whole home. A home that runs bulk workflows can switch it off; nothing
+ * then computes XP. Switching it back on recomputes XP from the full record
+ * at the next refresh, so nothing earned meanwhile is lost.
+ */
+export function registerGrowthCommand(
+  program: Command,
+  connect: () => Promise<Pick<GezelClient, 'getConfig' | 'updateConfig'>>,
+): void {
+  program
+    .command('growth [state]')
+    .description('Show or set on/off for gezel growth: XP and the level-ups it offers')
+    .option('--json', 'Output the setting as JSON')
+    .action(async (state: string | undefined, options: { json?: boolean }) => {
+      const enabled = enabledValue(state);
+      const client = await connect();
+      const config =
+        enabled === undefined
+          ? await client.getConfig()
+          : await client.updateConfig({ growth: { enabled } });
+      const value = config.growth?.enabled !== false;
+      console.log(
+        options.json
+          ? JSON.stringify({ growthEnabled: value })
+          : `Growth (XP and level-ups): ${value ? 'on' : 'off'}`,
+      );
+    });
+}
+
 export function registerProjectSettingsCommands(
   env: Command,
   connect: () => Promise<GezelClient>,
