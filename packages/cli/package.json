@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-cli",
-  "version": "1.2.10",
+  "version": "1.2.11",
   "description": "The gezel command-line tool: chat with your gezels, run craftbooks, and manage local models from the terminal.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "cli", "terminal", "tui"],
