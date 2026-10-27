@@ -53,6 +53,9 @@ describe.skipIf(process.platform !== 'win32')('gezel-acl.exe', () => {
   beforeAll(() => {
     buildDir = mkdtempSync(join(tmpdir(), 'gezel-acl-build-'));
     helper = compileInstallerSecurity(join(buildDir, 'gezel-acl.exe'));
+    // The first launch of a freshly compiled exe pays Defender's scan and .NET
+    // startup: 8 s on a loaded machine, past a test's default 5 s.
+    spawnSync(helper, [], { timeout: 60_000, windowsHide: true });
   }, 120_000);
 
   afterAll(() => {
@@ -80,18 +83,22 @@ describe.skipIf(process.platform !== 'win32')('gezel-acl.exe', () => {
       [['reset-tree-acl', '-Root', 'C:\\a', '-Recurse', 'yes']],
       [['grant-service-sid', '-Path', 'C:\\a', '-Service', 'GezelService']],
       [['grant-service-sid', '-Path', 'C:\\a', '-Service', 'GezelService', '-Grant', '']],
-    ])('exits 2 with usage for %j', (args) => {
-      const result = run(...args);
-      expect(result.status, result.stdout + result.stderr).toBe(2);
-      expect(result.stderr).toContain('usage: gezel-acl');
-    });
+    ])(
+      'exits 2 with usage for %j',
+      (args) => {
+        const result = run(...args);
+        expect(result.status, result.stdout + result.stderr).toBe(2);
+        expect(result.stderr).toContain('usage: gezel-acl');
+      },
+      60_000,
+    );
 
     it('matches option names case-insensitively, as the PowerShell parameters did', () => {
       const missing = join(tmpdir(), `gezel-acl-missing-${process.pid}`);
       const result = run('reset-tree-acl', '-root', missing);
       expect(result.status, result.stdout + result.stderr).toBe(1);
       expect(result.stderr).toContain('[reset-tree-acl] Refusing incomplete ACL repair:');
-    });
+    }, 60_000);
   });
 
   describe('grant-service-sid', () => {

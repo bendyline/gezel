@@ -3,8 +3,11 @@
  * permission helper (gezel-acl.exe) so `win.extraFiles` can ship it.
  *
  * It runs before electron-builder copies anything, so the exe is in place
- * for the copy and the afterPack signing sweep signs it with the rest of the
- * payload. A failed compile fails the build: without the helper the
+ * for the copy. electron-builder signs an extraFiles executable as it copies
+ * it (through sign.cjs), and the afterPack sweep catches one that copy missed.
+ * Not the native release: the helper is .NET IL, the same for every arch,
+ * and its arguments must match this release's NSIS hooks.
+ * A failed compile fails the build: without the helper the
  * installer cannot secure the machine data folder and never registers the
  * machine service. See build-installer-security.cjs.
  */

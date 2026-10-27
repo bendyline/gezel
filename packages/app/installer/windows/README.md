@@ -3,9 +3,11 @@
 The installer's permission work runs in `gezel-acl.exe`, which electron-builder's
 `beforePack` hook ([scripts/before-pack.cjs](../../scripts/before-pack.cjs))
 compiles from the C# here with the .NET Framework 4 compiler every supported
-Windows ships, and the afterPack sweep Authenticode-signs with the rest of the
-payload. It ships with the Electron release, rather than the separately pinned
-engine release, under `resources\installer-security\` in the administrator-
+Windows ships, and electron-builder Authenticode-signs as it copies it into
+the payload, as it does `gezel.exe`. It ships with the Electron release,
+rather than the separately pinned engine release, because it is .NET IL, the
+same for every arch, and its arguments must match this release's NSIS hooks.
+It lives under `resources\installer-security\` in the administrator-
 protected application directory. NSIS runs it elevated:
 
     gezel-acl reset-tree-acl -Root <dir> [-KeepSealedChild <name> -SealedSha <sha256>]

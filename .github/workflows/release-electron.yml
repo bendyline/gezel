@@ -900,9 +900,9 @@ jobs:
         shell: pwsh
         run: |
           # Everything we build must be validly signed: the installer and
-          # gezel.exe (electron-builder's own pass), our engine DLLs and the
-          # installer's permission helper gezel-acl.exe (the afterPack sweep
-          # in scripts/after-pack.cjs), and the native engine exes +
+          # gezel.exe and the installer's permission helper gezel-acl.exe
+          # (electron-builder's own pass), our engine DLLs (the afterPack
+          # sweep in scripts/after-pack.cjs), and the native engine exes +
           # gezel-service-host.exe (signed at birth). The helper runs elevated
           # during the install, and an unsigned one is what an App Control
           # policy refuses. Anything

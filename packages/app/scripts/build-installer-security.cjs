@@ -5,8 +5,8 @@
  * The compiler is the C# compiler that .NET Framework 4.8 ships inside every
  * supported Windows, the same one PowerShell's Add-Type used when the
  * installer compiled this code during the install. Building it here instead
- * lets the afterPack sweep Authenticode-sign it with the rest of the payload,
- * and leaves no PowerShell in the install path for a Group Policy execution
+ * lets the release Authenticode-sign it with the rest of the payload, and
+ * leaves no PowerShell in the install path for a Group Policy execution
  * policy or App Control's Constrained Language Mode to refuse.
  *
  * Usage: node scripts/build-installer-security.cjs [outFile]
