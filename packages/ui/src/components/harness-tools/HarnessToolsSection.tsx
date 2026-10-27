@@ -272,9 +272,9 @@ export function HarnessToolsSection({
           {agentLine && agentFile && state === 'configured' && (
             <div className="harness-setup-command-row">
               <span className="muted small">
-                {label} reaches for its own search first. So it uses Gezel's, add this line near the
-                top of the <code>{agentFile}</code> file in a folder you work in. At the end of a
-                long file it gets overlooked.
+                {label} reaches for its own search first. To have it use Gezel's, add this line near
+                the top of the <code>{agentFile}</code> file in a folder you work in. At the end of
+                a long file it gets overlooked.
               </span>
               <code>{agentLine}</code>
               <button type="button" onClick={() => void copyText(agentLine, 'line')}>

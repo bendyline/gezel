@@ -58,10 +58,11 @@ async function withdrawWhere(
   deps: WithdrawalDeps,
   projectId: string,
   stale: (question: Question) => boolean,
+  read?: readonly Question[],
 ): Promise<number> {
   // Most calls find nothing: read without the write lock and only take it,
   // and rewrite the file, when there is a card to close.
-  const current = await deps.store.listProjectQuestions(projectId).catch(() => []);
+  const current = read ?? (await deps.store.listProjectQuestions(projectId).catch(() => []));
   if (!current.some(stale)) return 0;
   const at = new Date().toISOString();
   const closed: Question[] = [];
@@ -84,9 +85,17 @@ async function withdrawWhere(
 }
 
 /** Close `task`'s runtime cards that no longer describe it. */
-export async function withdrawStaleServiceCards(deps: WithdrawalDeps, task: Task): Promise<number> {
-  const count = await withdrawWhere(deps, task.projectId, (question) =>
-    serviceCardIsStale(question, task),
+export async function withdrawStaleServiceCards(
+  deps: WithdrawalDeps,
+  task: Task,
+  /** The project's questions, when the caller already read them. */
+  read?: readonly Question[],
+): Promise<number> {
+  const count = await withdrawWhere(
+    deps,
+    task.projectId,
+    (question) => serviceCardIsStale(question, task),
+    read,
   );
   if (count > 0) log.info(`[tasks] ${task.ref}: withdrew ${count} card(s) it has moved past`);
   return count;

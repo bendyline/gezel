@@ -224,7 +224,6 @@ import {
   normalizeDocumentOutputPath,
 } from './document-routing.js';
 import { createEntityResolvers } from './entity-resolvers.js';
-import { normalizeGenerateImageToolArgs } from './generate-image-normalization.js';
 import { registerGitHubTools } from './github-tools.js';
 import {
   installedScriptMissHint,
@@ -10502,29 +10501,27 @@ server.tool(
   },
   async (args) => {
     try {
-      const config = await api.getConfig();
-      const cloud =
-        !args.model?.startsWith('remote:') &&
-        ['copilot', 'codex-cli', 'google-ai', 'openai'].includes(config.imageProvider ?? 'sd-cpp');
-      const normalized = normalizeGenerateImageToolArgs(args, cloud ? 'cloud' : 'local');
-      const imageArgs = normalized.args;
-      const saveAs = imageArgs.saveAs || inferGeneratedImageSaveAs(imageArgs.prompt);
+      const saveAs = args.saveAs || inferGeneratedImageSaveAs(args.prompt);
       const res = await api.generateImage({
-        prompt: imageArgs.prompt,
-        ...(imageArgs.negativePrompt ? { negativePrompt: imageArgs.negativePrompt } : {}),
-        ...(imageArgs.model ? { model: imageArgs.model } : {}),
-        ...(imageArgs.width ? { width: imageArgs.width } : {}),
-        ...(imageArgs.height ? { height: imageArgs.height } : {}),
-        ...(imageArgs.aspectRatio ? { aspectRatio: imageArgs.aspectRatio } : {}),
-        ...(imageArgs.quality ? { quality: imageArgs.quality } : {}),
-        ...(imageArgs.steps ? { steps: imageArgs.steps } : {}),
-        ...(imageArgs.seed !== undefined ? { seed: imageArgs.seed } : {}),
-        ...(imageArgs.inputImages && imageArgs.inputImages.length > 0
-          ? { inputImages: imageArgs.inputImages }
+        prompt: args.prompt,
+        ...(args.negativePrompt ? { negativePrompt: args.negativePrompt } : {}),
+        ...(args.model ? { model: args.model } : {}),
+        ...(args.width ? { width: args.width } : {}),
+        ...(args.height ? { height: args.height } : {}),
+        ...(args.aspectRatio ? { aspectRatio: args.aspectRatio } : {}),
+        ...(args.quality ? { quality: args.quality } : {}),
+        ...(args.steps ? { steps: args.steps } : {}),
+        ...(args.seed !== undefined ? { seed: args.seed } : {}),
+        ...(args.inputImages && args.inputImages.length > 0
+          ? { inputImages: args.inputImages }
           : {}),
-        ...(imageArgs.strength !== undefined ? { strength: imageArgs.strength } : {}),
+        ...(args.strength !== undefined ? { strength: args.strength } : {}),
         ...(saveAs ? { saveAs } : {}),
         capStepsAtRecommended: true,
+        // The daemon holds the size to about a megapixel only when a local
+        // engine serves the call. Only it knows which provider that is: a
+        // session token cannot read the config.
+        capSizeForAgent: true,
         projectId,
         // Pin agent + session so the cloud-image cost-confirmation
         // gate can synthesize a question scoped to the right
@@ -10573,7 +10570,6 @@ server.tool(
       const workspaceLine = workspacePath
         ? `\n\nTo display this image in HTML, copy this exact tag verbatim — do not add any prefix, do not change the filename:\n\`<img src="${workspacePath}">\`\n\nIf you are working on a website/logo task and an HTML file already exists, your next tool call should patch that HTML with this exact tag using \`replace_in_file\` or \`write_file\`. Do not call \`generate_image\` again for the same missing image; the image asset already exists.`
         : '\n\nNOTE: workspace copy was skipped (project has an external workingDir not approved for writes). To reference from HTML, copy the image into the workspace yourself first via `write_file`.';
-      const normalizedLine = normalized.note ? ` ${normalized.note}` : '';
       const settingsLine = meta.settingsNotes?.length
         ? ` Image settings: ${meta.settingsNotes.join(' ')}`
         : '';
@@ -10590,7 +10586,7 @@ server.tool(
           ? ` For your next prompt: ${promptGuide}`
           : '';
       if (promptGuide) promptGuidesShown.add(meta.model);
-      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${normalizedLine}${settingsLine}${skippedLine}${guideLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
+      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${settingsLine}${skippedLine}${guideLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
       const content: Array<
         { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
       > = [{ type: 'text' as const, text: summary }];

@@ -202,4 +202,57 @@ describe('dns-sd codec', () => {
       }
     }
   });
+
+  // A legacy answer echoes the questions it was asked, so any name the
+  // decoder hands back must encode again. Lossy UTF-8 broke that: 22 bytes of
+  // 0xFF came back as 66 and the echo threw from the advertiser's socket
+  // handler, ending the daemon (1.26299.99).
+  it('refuses a label that is not valid UTF-8', () => {
+    const packet = Buffer.from([
+      ...header({ id: 0x1234, qd: 2 }),
+      ...label('_gezel'),
+      ...label('_tcp'),
+      ...label('local'),
+      0,
+      0,
+      DNS_TYPE_PTR,
+      0,
+      1,
+      22,
+      ...Array(22).fill(0xff),
+      0,
+      0,
+      DNS_TYPE_A,
+      0,
+      1,
+    ]);
+    expect(() => decodeDnsMessage(packet)).toThrow(/not valid UTF-8/);
+  });
+
+  it('re-encodes every question it decodes from arbitrary bytes', () => {
+    const valid = encodeDnsMessage({
+      id: 3,
+      questions: [
+        { name: '_gezel._tcp.local', type: DNS_TYPE_PTR },
+        { name: 'gezel-ab12ab12ab12ab12.local', type: DNS_TYPE_A },
+      ],
+    });
+    let seed = 7;
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed;
+    };
+    for (let i = 0; i < 3000; i++) {
+      const packet = Buffer.from(valid);
+      const flips = 1 + (rand() % 6);
+      for (let f = 0; f < flips; f++) packet[12 + (rand() % (packet.length - 12))] = rand() & 0xff;
+      let questions: ReturnType<typeof decodeDnsMessage>['questions'];
+      try {
+        questions = decodeDnsMessage(packet).questions;
+      } catch {
+        continue;
+      }
+      expect(() => encodeDnsMessage({ id: 3, isResponse: true, questions })).not.toThrow();
+    }
+  });
 });

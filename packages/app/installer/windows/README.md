@@ -1,13 +1,37 @@
 # Windows installer ACL repair
 
-`reset-tree-acl.ps1` loads `ResetTreeAcl.cs` from the installed, administrator-
-protected application directory. Both ship with the Electron release, rather
-than the separately pinned engine release. Windows PowerShell/.NET Framework
-are OS components; no download or dependency installation occurs. A blocked
-PowerShell/compiler invocation fails the machine-engine installation closed.
-The launcher restricts module loading to Windows PowerShell's own modules and
-places compiler scratch files beside the helper in the protected installation
-directory, never in the invoking user's writable TEMP directory.
+The installer's permission work runs in `gezel-acl.exe`, which electron-builder's
+`beforePack` hook ([scripts/before-pack.cjs](../../scripts/before-pack.cjs))
+compiles from the C# here with the .NET Framework 4 compiler every supported
+Windows ships, and electron-builder Authenticode-signs as it copies it into
+the payload, as it does `gezel.exe`. It ships with the Electron release,
+rather than the separately pinned engine release, because it is .NET IL, the
+same for every arch, and its arguments must match this release's NSIS hooks.
+It lives under `resources\installer-security\` in the administrator-
+protected application directory. NSIS runs it elevated:
+
+    gezel-acl reset-tree-acl -Root <dir> [-KeepSealedChild <name> -SealedSha <sha256>]
+                             [-SeparateZones <name,name>] [-OpenZones <name,name>]
+    gezel-acl grant-service-sid -Path <dir> -Service <name> -Grant <specs>
+
+Exit 0 on success, 1 when the operation was refused, 2 on a usage error. Any
+nonzero exit, or a helper Windows refused to start, fails the machine-engine
+installation closed.
+
+It replaced two PowerShell scripts that compiled the same C# with `Add-Type`
+during the install. A Group Policy `AllSigned` execution policy refuses an
+unsigned script whatever `-ExecutionPolicy` says, and App Control's
+Constrained Language Mode refuses `Add-Type` and direct .NET calls, so managed
+machines never got the machine engine. The compiled helper also leaves no
+compiler scratch files or PowerShell module loading in the elevated path.
+It needs only the .NET Framework 4 runtime, an OS component on every Windows
+Gezel supports, which the scripts already ran on.
+
+- `GezelAcl.cs`: the command line.
+- `ResetTreeAcl.cs`: the handle-based tree repair.
+- `GrantServiceSid.cs`: the service SID grants.
+- `test-reset-tree-acl.ps1`: the syscall and race suite. It is a test, not
+  part of the install.
 
 The old `icacls /setowner /T` and `/reset /T` commands could follow a junction
 inserted after the link preflight. Another preflight cannot close that race.
@@ -23,10 +47,23 @@ The replacement has these invariants:
 - Retain each ancestor handle during traversal, with neither write nor delete
   sharing. An already-open mutable object fails repair. A directory cannot be
   replaced or converted to a junction after its handle was checked.
-- Refuse multiply linked files before changing permissions, so an in-tree
-  name cannot alias a pre-existing outside file. Opening a handle pins object
+- Repair a hard-linked file only when every one of its names lies in one zone
+  of the tree (`-SeparateZones` names the root's children that are zones of
+  their own). A link is another name for the same descriptor, so a name outside
+  the tree would be taken over and a name in the shared tree would hand its
+  users the private file. The machine engine links within its private tree on
+  purpose (the speech-model store, uv's cache). Opening a handle pins object
   identity, not all names: adding a new name for that same in-tree object does
   not redirect the operation to a different object.
+- In a zone every local account can already write (`-OpenZones`, `.` for the
+  root's own zone: the machine-shared `projects` and `gezels` folders), a file
+  whose other name is outside the tree is not refused. pnpm links a project's
+  packages from the account's own store and a local git clone links its
+  objects, and refusing them dropped GezelService on upgrade. The file keeps
+  its access exactly: inherited entries become explicit and its DACL is
+  protected, so the grants NSIS publishes afterwards, which propagate to
+  inheriting children, never reach the other name. A link joining two zones is
+  still refused.
 - Use `NtSetSecurityObject` to change only the opened object. High-level ACL
   APIs can trigger their own propagation, bypassing the controlled traversal.
 - Close the root to SYSTEM/Administrators and reset descendants to inherited
@@ -34,19 +71,22 @@ The replacement has these invariants:
   the intended runtime, model, and shared-product boundary ACLs.
 - Fail on any incomplete repair. Do not fall back to recursive shell commands
   or continue with an attacker-owned/uninspectable descendant. Close programs
-  holding the affected tree and retry; hard links need separate investigation.
+  holding the affected tree and retry; a refused hard link needs separate
+  investigation.
 
 Backup and restore privileges let the elevated installer open old protected
 objects without invoking path-based `takeown` between inspection and mutation.
 The helper does not change the service's privileges or execution identity.
 
-`windows-acl.test.ts` runs the real Windows APIs against disposable fixtures,
-including deterministic swaps before/after opening, pre-existing hard links, held
-writers, root/ancestor links, cycles, normal inheritance, and outside-target
-ACL preservation. It also proves that the low-level mutation does not silently
-walk children. On an elevated runner it executes the production launcher with
-Administrators ownership and a locked-down child. Other hosts skip the syscall
-tests explicitly. The Windows release workflow runs them before packaging.
+`windows-acl.test.ts` compiles the helper, checks its command line and SID
+grants, and runs `test-reset-tree-acl.ps1`, which drives the real Windows APIs
+against disposable fixtures: deterministic swaps before/after opening, hard
+links within and across zones, held writers, root/ancestor links, cycles,
+normal inheritance, and outside-target ACL preservation. It also proves that
+the low-level mutation does not silently walk children. On an elevated runner
+it executes the compiled helper as the installer does, with Administrators
+ownership and a locked-down child. Other hosts skip the syscall tests
+explicitly. The Windows release workflow runs them before packaging.
 
 ## Keeping a sealed service tree
 
@@ -67,12 +107,12 @@ before extraction replaced the tree.
 
 ## Service SID grants
 
-`grant-service-sid.ps1` gives `GezelService`'s per-service SID its four
+`grant-service-sid` gives `GezelService`'s per-service SID its four
 directory grants (data root, `runtime`, `assets`, the published service tree).
 icacls cannot do this reliably: it looks every trustee up, even one written as
 `*S-1-5-80-...`. After an upgrade deletes and re-creates the service,
 `NT SERVICE\GezelService` can stop resolving; on Windows 11 build 28000 every
-grant failed with 1332 and the installer removed the service. The script
+grant failed with 1332 and the installer removed the service. The helper
 derives the SID from the service name (SHA-1 of the upper-cased UTF-16LE name,
 the value `sc.exe showsid` prints and the service token carries), replaces that
 SID's explicit ACEs as `/grant:r` does, and refuses a reparse point as its

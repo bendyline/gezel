@@ -185,6 +185,11 @@ asarUnpack:
 #      pinned bytes while this sweep covers DLLs its pass does not reach.
 afterPack: scripts/after-pack.cjs
 
+# On Windows, compile the installer's permission helper (installer/windows/*.cs)
+# into dist/installer-security/gezel-acl.exe for `win.extraFiles` below, which
+# signs it as it copies it. See scripts/before-pack.cjs.
+beforePack: scripts/before-pack.cjs
+
 # Electron fuses, flipped in the packaged binary by electron-builder itself
 # (PlatformPackager.doAddElectronFuses) after afterPack and before any code
 # signing, so the Authenticode and Developer ID signatures cover the flipped
@@ -292,14 +297,13 @@ win:
   extraFiles:
     - from: native-bin/win32-${arch}/gezel-service-host.exe
       to: gezel-service-host.exe
-    # Installer security code ships with this app release, independent of the
-    # native-engine pin. The signed installer protects both source and launcher.
-    - from: installer/windows
+    # The installer's permission helper ships with this app release,
+    # independent of the native-engine pin. beforePack compiles it and this
+    # copy signs it (sign.cjs), so no PowerShell runs during the install.
+    - from: dist/installer-security
       to: resources/installer-security
       filter:
-        - ResetTreeAcl.cs
-        - reset-tree-acl.ps1
-        - grant-service-sid.ps1
+        - gezel-acl.exe
 
 nsis:
   # Per-machine install (Program Files), elevates UAC at install time.

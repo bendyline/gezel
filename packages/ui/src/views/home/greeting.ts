@@ -14,12 +14,16 @@ export function greetingForHour(hour: number): string {
  */
 export const STATUS_FRESH_MS = 36 * 60 * 60_000;
 
+/** Whether a report stamped `at` is still fresh enough to headline. */
+export function isFreshStatus(at: string, now: number = Date.now()): boolean {
+  const age = now - Date.parse(at);
+  return Number.isFinite(age) && age < STATUS_FRESH_MS;
+}
+
 /** The report if it's still fresh enough to headline, else null. */
 export function freshStatusReport(
   report: MeesterStatusReport | null | undefined,
   now: number = Date.now(),
 ): MeesterStatusReport | null {
-  if (!report) return null;
-  const age = now - Date.parse(report.generatedAt);
-  return Number.isFinite(age) && age < STATUS_FRESH_MS ? report : null;
+  return report && isFreshStatus(report.generatedAt, now) ? report : null;
 }

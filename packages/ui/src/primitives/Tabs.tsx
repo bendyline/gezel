@@ -31,7 +31,7 @@ export function Trigger(props: ComponentProps<typeof RadixTabs.Trigger>) {
   );
 }
 
-export function Content(props: RadixTabs.TabsContentProps) {
+export function Content(props: ComponentProps<typeof RadixTabs.Content>) {
   const { className, ...rest } = props;
   return (
     <RadixTabs.Content

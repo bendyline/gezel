@@ -208,6 +208,14 @@ export const HealthResponseSchema = z.object({
   startedAt: z.string(),
   nodeVersion: z.string().optional(),
   platform: z.string().optional(),
+  /** The daemon's own pid; `gezel stop` compares it with `runtime/pid` before killing. */
+  pid: z.number().int().positive().optional(),
+  /**
+   * `app` when the desktop app owns this daemon's lifetime: it runs inside
+   * Electron or the supervisor spawned it. `gezel stop` brakes such a daemon
+   * instead of killing it.
+   */
+  hostedBy: z.enum(['app', 'standalone']).optional(),
   /**
    * Backend the supervisor selected for the bundled llama-server on this
    * launch — `cuda`, `vulkan`, `metal`, or `cpu`. Set by the Electron

@@ -311,14 +311,20 @@ export class ProjectArtifactsStore {
     }
   }
 
+  /** The file {@link readProjectArtifactBinary} would open, or null when it would refuse. */
+  async resolveProjectArtifactReadPath(id: string, filePath: string): Promise<string | null> {
+    const cleaned = normalizeArtifactPath(filePath);
+    if (!cleaned) return null;
+    return safeResolveRead(this.projectArtifactsDir(id), cleaned);
+  }
+
   async readProjectArtifactBinary(
     id: string,
     filePath: string,
   ): Promise<{ data: Buffer; mimeType: string } | null> {
-    const base = this.projectArtifactsDir(id);
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned) return null;
-    const full = await safeResolveRead(base, cleaned);
+    const full = await this.resolveProjectArtifactReadPath(id, filePath);
     if (!full) return null;
     try {
       const data = await readFile(full);

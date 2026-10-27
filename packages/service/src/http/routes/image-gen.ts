@@ -16,6 +16,7 @@ import {
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 
+import { capAgentImageSize } from '../../providers/image/agent-size.js';
 import { NoLocalImageModelError } from '../../providers/image/factory.js';
 import { sdCppHonorsNegativePrompt } from '../../providers/image/sd-cpp.js';
 import type { ImageInputBytes, ImageProvider } from '../../providers/image/types.js';
@@ -184,7 +185,15 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         req.steps !== undefined && req.capStepsAtRecommended && recommended
           ? Math.min(req.steps, recommended)
           : (req.steps ?? recommended);
-      const size = requestedImageSize(req, manifest, providerKind(provider.name));
+      const agentSize =
+        req.capSizeForAgent && providerKind(provider.name) === 'local'
+          ? capAgentImageSize(req)
+          : undefined;
+      const size = requestedImageSize(
+        agentSize ? { ...req, width: agentSize.width, height: agentSize.height } : req,
+        manifest,
+        providerKind(provider.name),
+      );
       const out = await provider.generate({
         signal: c.req.raw.signal,
         prompt: req.prompt,
@@ -271,7 +280,9 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
       } = {
         artifactPath: writtenPath,
         workspacePath,
-        meta: out.meta,
+        meta: agentSize?.note
+          ? { ...out.meta, settingsNotes: [agentSize.note, ...(out.meta.settingsNotes ?? [])] }
+          : out.meta,
       };
       if (req.inline) respBody.b64Png = out.png.toString('base64');
       const promptGuide = renderedModelPromptGuide(

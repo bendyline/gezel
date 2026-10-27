@@ -35,6 +35,9 @@ let archiveBytes: Buffer;
 let sumsBytes: Buffer;
 let sumsDigest: string;
 let serveTamperedArchive = false;
+// Like GitHub with an expired or revoked token: any request carrying one is refused.
+let rejectTokens = false;
+const authorizations: (string | undefined)[] = [];
 
 async function buildArchive(): Promise<Buffer> {
   if (IS_WIN) {
@@ -63,6 +66,12 @@ beforeAll(async () => {
 
   server = createServer((req, res) => {
     const url = req.url ?? '';
+    authorizations.push(req.headers.authorization);
+    if (rejectTokens && req.headers.authorization) {
+      res.statusCode = 401;
+      res.end('{"message":"Bad credentials"}');
+      return;
+    }
     if (url.includes(`/releases/tags/native-v${VERSION}`)) {
       res.setHeader('content-type', 'application/json');
       res.end(
@@ -103,11 +112,15 @@ afterAll(async () => {
 const savedEnv: Record<string, string | undefined> = {};
 afterEach(() => {
   serveTamperedArchive = false;
+  rejectTokens = false;
+  authorizations.length = 0;
   for (const k of [
     'GEZEL_LLAMA_SERVER_BIN',
     'GEZEL_NATIVE_BIN_DIR',
     'GEZEL_LLAMA_SERVER_BACKEND',
     'GEZEL_SQLITE_VEC_PATH',
+    'GEZEL_GITHUB_TOKEN',
+    'GITHUB_TOKEN',
   ]) {
     if (k in savedEnv) {
       if (savedEnv[k] === undefined) delete process.env[k];
@@ -121,6 +134,8 @@ function snapshotEnv() {
     'GEZEL_NATIVE_BIN_DIR',
     'GEZEL_LLAMA_SERVER_BACKEND',
     'GEZEL_SQLITE_VEC_PATH',
+    'GEZEL_GITHUB_TOKEN',
+    'GITHUB_TOKEN',
   ]) {
     savedEnv[k] = process.env[k];
   }
@@ -224,6 +239,60 @@ describe('resolveEngine — happy path', () => {
       expect(process.env.GEZEL_SQLITE_VEC_PATH).toBe(join(bareKey, `vec0.${ext}`));
     } finally {
       await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('resolveEngine — GitHub token', () => {
+  const resolveWithToken = (home: string, token?: string | null) =>
+    resolveEngineToCompletion({
+      engine: 'llama-server',
+      home,
+      variant: VARIANT,
+      version: VERSION,
+      githubApiBase: base,
+      ...(token === undefined ? {} : { token }),
+      expectedSha256sumsDigest: sumsDigest,
+      expectedArchiveSha256: { [ARCHIVE_NAME]: sha(archiveBytes) },
+      signaturePolicy: 'off',
+      verifyOverride,
+    });
+
+  it('drops a token GitHub rejects and finishes the public download anonymously', async () => {
+    snapshotEnv();
+    const home = await freshHome();
+    rejectTokens = true;
+    try {
+      const result = await resolveWithToken(home, 'expired');
+      expect(result.cached).toBe(false);
+      // One refused attempt with the token, then every request goes without it.
+      expect(authorizations[0]).toBe('Bearer expired');
+      expect(authorizations.slice(1).length).toBeGreaterThanOrEqual(3);
+      expect(authorizations.slice(1).every((value) => value === undefined)).toBe(true);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  // Embedding apps run this resolver; it must not borrow the user's `gh` login.
+  it('takes an optional token from the environment only, never the GitHub CLI', async () => {
+    snapshotEnv();
+    delete process.env.GEZEL_GITHUB_TOKEN;
+    delete process.env.GITHUB_TOKEN;
+    const anonymousHome = await freshHome();
+    const tokenHome = await freshHome();
+    try {
+      await resolveWithToken(anonymousHome);
+      expect(authorizations.length).toBeGreaterThanOrEqual(3);
+      expect(authorizations.every((value) => value === undefined)).toBe(true);
+
+      authorizations.length = 0;
+      process.env.GEZEL_GITHUB_TOKEN = 'from-env';
+      await resolveWithToken(tokenHome);
+      expect(authorizations.every((value) => value === 'Bearer from-env')).toBe(true);
+    } finally {
+      await rm(anonymousHome, { recursive: true, force: true });
+      await rm(tokenHome, { recursive: true, force: true });
     }
   });
 });

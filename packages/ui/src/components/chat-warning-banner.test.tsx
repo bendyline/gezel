@@ -22,7 +22,7 @@ describe('WarningBanner', () => {
           {
             type: 'warning',
             message:
-              "Updates are available for the 'qwen3.6-27b-q8' model. You can download a new model in Settings.",
+              'A newer version of Qwen 3.6 27B is available. You can download it in Settings.',
             action: { kind: 'settings', section: 'mlx' },
           },
         ]}
@@ -30,7 +30,7 @@ describe('WarningBanner', () => {
     );
 
     expect(container.querySelector('.msg-warning-banner')).toHaveTextContent(
-      "Updates are available for the 'qwen3.6-27b-q8' model. You can download a new model in Settings.",
+      'A newer version of Qwen 3.6 27B is available. You can download it in Settings.',
     );
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
 

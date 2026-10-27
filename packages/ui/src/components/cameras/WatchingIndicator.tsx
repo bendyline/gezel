@@ -56,7 +56,10 @@ export function WatchingIndicator() {
         </button>
       </Popover.Trigger>
       <Popover.Content className="camera-on-menu" align="end">
-        <p className="small muted">Watching now. Pictures stay on this computer.</p>
+        <p className="small muted">
+          Watching now. Pictures stay on this computer unless a camera is set to let cloud AI see
+          them.
+        </p>
         <ul>
           {cameras.map((c) => (
             <li key={`${c.projectId}/${c.bindingId}`}>

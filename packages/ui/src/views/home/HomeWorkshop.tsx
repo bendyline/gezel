@@ -5,6 +5,7 @@ import type {
   Poppetje as PoppetjeStruct,
   Project,
   Question,
+  StartupHomeSnapshot,
   Task,
 } from '@bendyline/gezel';
 import { isReadyQuestion } from '@bendyline/gezel';
@@ -13,7 +14,6 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { api } from '../../api.js';
 import { useActivity } from '../../components/activity-context.js';
 import { navigateToTab, openUpdates } from '../../components/nav-actions.js';
-import { queueOpenKnowledge } from '../../components/pending-open-knowledge.js';
 import { runtimeCapabilities } from '../../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../../shared-chat-events.js';
 import {
@@ -26,12 +26,14 @@ import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
 import { MakeSomething } from './MakeSomething.js';
 import { MeesterConversation } from './MeesterConversation.js';
 import type { WelcomeSetup } from './MeesterWelcome.js';
+import { startupHandover } from './StartupReadingOverlay.js';
 import {
   type HomeChip,
   type HomeNavView,
   deriveActiveProjectId,
   deriveLaunchProjectId,
   freshStatusReport,
+  isFreshStatus,
 } from './utils.js';
 
 /**
@@ -174,6 +176,7 @@ export function HomeWorkshop({
   const [startupReading, setStartupReading] = useState<{
     tab: HomeGreetingTab;
     node: HTMLElement;
+    savedStatus: StartupHomeSnapshot['status'];
   }>();
   const [startupDraftId, setStartupDraftId] = useState<string>();
   const startupTransferred = useRef(false);
@@ -194,10 +197,11 @@ export function HomeWorkshop({
               };
             })
           : Promise.resolve();
-        const keepReading =
-          view.tab !== 'greeting' ||
-          view.scroll > 0 ||
-          !!window.__GEZEL__?.startupHome?.snapshot?.status;
+        // A stale report never reached the startup screen (it showed the tip),
+        // so it is no reason to hold that copy in place.
+        const saved = window.__GEZEL__?.startupHome?.snapshot?.status;
+        const savedStatus = saved && isFreshStatus(saved.at) ? saved : null;
+        const keepReading = view.tab !== 'greeting' || view.scroll > 0 || savedStatus !== null;
         if (keepReading || draftId || view.focused) {
           startupTransferred.current = true;
           userToggledCollapse.current = true;
@@ -206,7 +210,7 @@ export function HomeWorkshop({
           const nextTab = view.tab === 'chat' ? 'greeting' : view.tab;
           setTab(nextTab);
           setCollapsed(view.tab === 'chat' || view.focused);
-          if (keepReading) setStartupReading({ tab: nextTab, node });
+          if (keepReading) setStartupReading({ tab: nextTab, node, savedStatus });
         }
         setStartupDraftId(draftId);
         await restored;
@@ -216,6 +220,21 @@ export function HomeWorkshop({
       }),
     [meesterGezelId],
   );
+  // A rolled-up band has nowhere to hold the copy.
+  useEffect(() => {
+    if (collapsed && startupReading) setStartupReading(undefined);
+  }, [collapsed, startupReading]);
+  // The copy's root belongs to the startup screen; release it once it is off
+  // the page, after this commit (a root cannot unmount during another's).
+  const startupNode = startupReading?.node;
+  useEffect(() => {
+    if (!startupNode) return;
+    return () =>
+      queueMicrotask(() => {
+        if (!startupNode.isConnected)
+          startupNode.dispatchEvent(new Event('startup-reading-dispose'));
+      });
+  }, [startupNode]);
   const selectTab = (next: HomeGreetingTab) => {
     setStartupReading(undefined);
     setTab(next);
@@ -227,10 +246,12 @@ export function HomeWorkshop({
   };
   const [status, setStatus] = useState<MeesterStatusResponse | null>(null);
   const [statusRunning, setStatusRunning] = useState(false);
+  const [statusSettled, setStatusSettled] = useState(() => !runtimeCapabilities().background);
   const [tasks, setTasks] = useState<Task[]>([]);
   const activity = useActivity();
   const hasSharedActivity = activity !== null;
   const [localQuestions, setQuestions] = useState<Question[]>([]);
+  const [localQuestionsLoaded, setLocalQuestionsLoaded] = useState(false);
   const questions = activity?.snapshot?.questions ?? localQuestions;
 
   const activeProjectId = useMemo(
@@ -243,7 +264,8 @@ export function HomeWorkshop({
     api
       .listQuestions({ pending: true })
       .then((r) => setQuestions(r.questions ?? []))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLocalQuestionsLoaded(true));
   }, [hasSharedActivity]);
 
   // Pending questions contribute to the greeting's "waiting on you" chip.
@@ -295,7 +317,8 @@ export function HomeWorkshop({
         setStatus(r);
         setStatusRunning(r.running);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setStatusSettled(true));
   }, []);
   useEffect(() => {
     refreshStatus();
@@ -340,6 +363,7 @@ export function HomeWorkshop({
   // window's end is recent (~12h) and the shift actually did something.
   const [nightReview, setNightReview] = useState<NightShiftReviewResponse | null>(null);
   const [latestReview, setLatestReview] = useState<NightShiftReviewResponse | null>(null);
+  const [reviewSettled, setReviewSettled] = useState(() => !runtimeCapabilities().background);
   useEffect(() => {
     if (!runtimeCapabilities().background) return;
     let cancelled = false;
@@ -353,7 +377,10 @@ export function HomeWorkshop({
         const hasContent = review.tasksCompleted.length > 0 || review.reports.length > 0;
         setNightReview(fresh && hasContent ? review : null);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setReviewSettled(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -389,6 +416,18 @@ export function HomeWorkshop({
     latestReview?.windowKey === morningQuestion.intent.windowKey
       ? latestReview
       : null;
+  const questionsSettled = activity
+    ? activity.snapshot !== null
+    : !runtimeCapabilities().structuredQuestions || localQuestionsLoaded;
+  const handover = startupReading
+    ? startupHandover({
+        tab: startupReading.tab,
+        savedStatus: startupReading.savedStatus,
+        liveStatus: statusReport,
+        statusSettled,
+        nightSettled: reviewSettled && questionsSettled,
+      })
+    : 'wait';
 
   const runStatusReport = useCallback(() => {
     setStatusRunning(true);
@@ -475,21 +514,10 @@ export function HomeWorkshop({
             collapsed={collapsed}
             onToggleCollapse={toggleCollapse}
             tab={tab}
-            startupReading={startupReading}
-            onLeaveStartupReading={() => {
-              if (startupReading?.tab === 'tour') {
-                const intent = {
-                  catalogId: 'handboek',
-                  documentId: startupReading.node.dataset.articleId || 'welcome',
-                };
-                queueOpenKnowledge(intent);
-                navigateToTab({ kind: 'area', area: 'knowledge' });
-                window.dispatchEvent(
-                  new CustomEvent('gezel:open-knowledge-document', { detail: intent }),
-                );
-              }
-              setStartupReading(undefined);
-            }}
+            startupReading={
+              startupReading && { tab: startupReading.tab, node: startupReading.node, handover }
+            }
+            onLeaveStartupReading={() => setStartupReading(undefined)}
             onTabChange={selectTab}
             statusReport={statusReport}
             statusRunning={statusRunning}

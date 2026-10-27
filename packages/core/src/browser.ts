@@ -194,6 +194,7 @@ export * from './tasks/gate-workspace-files.js';
 export * from './tasks/prompt-context.js';
 export * from './tasks/inferred-step-inputs.js';
 export * from './tasks/step-activation.js';
+export * from './tasks/work-time.js';
 export * from './tasks/step-turn-steering.js';
 export * from './tasks/step-dispatch-seed.js';
 export * from './tasks/step-routing.js';

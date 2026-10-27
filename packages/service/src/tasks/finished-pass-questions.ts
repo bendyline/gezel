@@ -44,8 +44,10 @@ export async function withdrawFinishedPassQuestions(
     chatEvents: Pick<ChatEventBus, 'publishProjectEvent'>;
   },
   task: Task,
+  /** The project's questions, when the caller already read them. */
+  read?: readonly Question[],
 ): Promise<number> {
-  const questions = await deps.store.listProjectQuestions(task.projectId).catch(() => []);
+  const questions = read ?? (await deps.store.listProjectQuestions(task.projectId).catch(() => []));
   let withdrawn = 0;
   for (const question of questions) {
     if (question.answer || question.intent || question.taskRef !== task.ref) continue;

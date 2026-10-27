@@ -225,3 +225,98 @@ describe('ChatManager — docblocks toolset spawn grants project roots', () => {
     expect(args.filter((a) => a === '--allow-write')).toHaveLength(1);
   });
 });
+
+describe('ChatManager — the bundled DocBlocks joins only document work', () => {
+  const now = '2026-10-27T00:00:00.000Z';
+
+  beforeEach(async () => {
+    await manager.drainBackground();
+    await manager.shutdown();
+    store = new Store({ home, bundledToolsets: [docblocksToolset(join(home, 'stub'))] });
+    manager = new ChatManager({
+      store,
+      events,
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['copilot', mock]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(home),
+    });
+  });
+
+  async function createOpts(session: { id: string }) {
+    mock.script('done');
+    await manager.send(session.id, 'hello');
+    const create = mock.calls.filter((c) => c.kind === 'create').at(-1);
+    const opts = create?.opts as { extraMcpServers?: Array<{ id: string }> } | undefined;
+    return { extras: (opts?.extraMcpServers ?? []).map((extra) => extra.id) };
+  }
+
+  // 1.26299.99 spawned it for every session: the Meester's first turn grew
+  // from 22.7k to 37.4k prompt tokens.
+  it('stays out of plain chat', async () => {
+    const { extras } = await createOpts(await manager.createSession({ gezelId: 'ada' }));
+    expect(extras).not.toContain('docblocks');
+  });
+
+  it('joins a craftbook that declares it', async () => {
+    await store.writeTask({
+      projectId: 'default',
+      num: 1,
+      ref: 'default/1',
+      title: 'PowerPoint from Content',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      craftbook: {
+        id: 'powerpoint-deck',
+        name: 'PowerPoint from Content',
+        steps: [
+          {
+            id: 'save',
+            name: 'Save the PowerPoint',
+            prompt: 'Call convert_document once, then save_artifact.',
+            createdAt: now,
+          },
+        ],
+        entryStepId: 'save',
+        toolsets: [{ toolsetId: 'docblocks', sourceId: 'bundled', autoAllow: true }],
+        createdAt: now,
+        updatedAt: now,
+      },
+      activeStepId: 'save',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+    const { extras } = await createOpts(
+      await manager.createSession({
+        gezelId: 'ada',
+        projectId: 'default',
+        taskRef: 'default/1',
+        stepId: 'save',
+      }),
+    );
+    expect(extras).toContain('docblocks');
+  });
+
+  it('joins a delegation whose deliverable is a binary document', async () => {
+    const { extras } = await createOpts(
+      await manager.createSession({
+        gezelId: 'ada',
+        consultationMode: true,
+        expectedDeliverable: { kind: 'file', filePath: 'decks/alaska.pptx' },
+      }),
+    );
+    expect(extras).toContain('docblocks');
+  });
+
+  it('still joins wherever the person installed a copy themselves', async () => {
+    await store.writeInstalledToolsets({ kind: 'gezel', gezelId: 'ada' }, [
+      docblocksToolset(join(home, 'stub')),
+    ]);
+    const { extras } = await createOpts(await manager.createSession({ gezelId: 'ada' }));
+    expect(extras).toContain('docblocks');
+  });
+});

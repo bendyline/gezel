@@ -1,4 +1,9 @@
-param([Parameter(Mandatory = $true)][string]$Scratch)
+# -Launcher is the compiled gezel-acl.exe (scripts/build-installer-security.cjs);
+# the elevated section drives it exactly as the installer does.
+param(
+    [Parameter(Mandatory = $true)][string]$Scratch,
+    [Parameter(Mandatory = $true)][string]$Launcher
+)
 $ErrorActionPreference = 'Stop'
 # The helper reports paths in Path.GetFullPath form, which expands 8.3 names
 # under .NET Framework; the CI runner's TEMP is C:\Users\RUNNER~1\..., so the
@@ -25,6 +30,13 @@ function Fixture([string]$name) {
 }
 function Repair([string]$path, [Action[string,string]]$observe = $null) {
     [Gezel.Installer.ResetTreeAcl]::Run($path, $testOwner, $observe)
+}
+# Runs the compiled helper and keeps its exit code and both streams. Windows
+# PowerShell turns redirected stderr into error records, which 'Stop' throws.
+function Launch {
+    $ErrorActionPreference = 'Continue'
+    $text = (& $Launcher @args 2>&1 | ForEach-Object { "$_" }) -join "`n"
+    [pscustomobject]@{ Code = $LASTEXITCODE; Text = $text }
 }
 $outside = Fixture 'outside'
 $marker = Join-Path $outside 'marker.txt'
@@ -175,6 +187,64 @@ Set-Content -LiteralPath $first -Value 'shared data'
 New-Item -ItemType HardLink -Path (Join-Path $sharedOnly 'shared\second.txt') -Target $first | Out-Null
 Assert ((RepairZones $sharedOnly @('shared', 'service')) -eq 4) 'A hard link inside one zone was refused'
 
+# A zone every account can already write (the machine-shared tree) holds
+# links out of the tree on purpose: pnpm's store, a local git clone's
+# objects. Refusing them dropped GezelService on upgrade. The file keeps its
+# own access and stops inheriting, so the grants NSIS publishes afterwards
+# never reach its other name; the same link anywhere else is still refused.
+function RepairOpen([string]$path, [string[]]$zones, [string[]]$open) {
+    [Gezel.Installer.ResetTreeAcl]::Run($path, $testOwner, $null, $null, $zones, $open, $null)
+}
+function AccessText([string]$path) {
+    ((Get-Acl -LiteralPath $path).Access | ForEach-Object {
+        "$($_.IdentityReference)|$($_.FileSystemRights)|$($_.AccessControlType)"
+    } | Sort-Object) -join ';'
+}
+$store = Fixture 'pnpm-store'
+$storeFile = Join-Path $store 'package.js'
+Set-Content -LiteralPath $storeFile -Value 'module.exports = 1'
+$storeAccess = AccessText $storeFile
+$openZone = Fixture 'hard-link-open-zone'
+New-Item -ItemType Directory -Path (Join-Path $openZone 'shared\projects\p\node_modules') | Out-Null
+$linkedPackage = Join-Path $openZone 'shared\projects\p\node_modules\package.js'
+New-Item -ItemType HardLink -Path $linkedPackage -Target $storeFile | Out-Null
+$leftLinked = New-Object System.Collections.Generic.List[string]
+$openCount = [Gezel.Installer.ResetTreeAcl]::Run($openZone, $testOwner, $null, $null, @('shared', 'service'), @('shared'), [Action[string,string]] {
+    param($stage, $path)
+    if ($stage -eq 'left-linked') { $leftLinked.Add($path) }
+}.GetNewClosure())
+Assert ($openCount -eq 5) "The open-zone repair secured $openCount entries"
+Assert ($leftLinked.Count -eq 1 -and $leftLinked[0] -eq $linkedPackage) 'The outside-linked file was not reported'
+Assert ((AccessText $storeFile) -eq $storeAccess) 'The outside name lost or gained access'
+Assert ((Get-Acl -LiteralPath $storeFile).AreAccessRulesProtected) 'The outside-linked file still inherits'
+Assert ((Get-Content -LiteralPath $linkedPackage).Trim() -eq 'module.exports = 1') 'Linked bytes changed'
+
+$openRoot = Fixture 'hard-link-open-root'
+New-Item -ItemType Directory -Path (Join-Path $openRoot 'projects'), (Join-Path $openRoot 'private') | Out-Null
+$rootStoreFile = Join-Path $store 'other.js'
+Set-Content -LiteralPath $rootStoreFile -Value 'other'
+New-Item -ItemType HardLink -Path (Join-Path $openRoot 'projects\other.js') -Target $rootStoreFile | Out-Null
+Assert ((RepairOpen $openRoot @('projects', 'gezels') @('projects', 'gezels')) -eq 3) 'A link out of an open zone was refused'
+New-Item -ItemType HardLink -Path (Join-Path $openRoot 'private\other.js') -Target $rootStoreFile | Out-Null
+$refused = $null
+try { RepairOpen $openRoot @('projects', 'gezels') @('projects', 'gezels') | Out-Null } catch { $refused = $_.Exception.ToString() }
+Assert ($refused -and $refused.Contains('cross trust zones')) "A link joining an open zone to the rest was accepted: $refused"
+
+$closedStoreFile = Join-Path $store 'closed.js'
+Set-Content -LiteralPath $closedStoreFile -Value 'closed'
+$closedAcl = AclText $closedStoreFile
+$closed = Fixture 'hard-link-closed-zone'
+New-Item -ItemType Directory -Path (Join-Path $closed 'service') | Out-Null
+New-Item -ItemType HardLink -Path (Join-Path $closed 'service\closed.js') -Target $closedStoreFile | Out-Null
+$refused = $null
+try { RepairOpen $closed @('shared', 'service') @('shared') | Out-Null } catch { $refused = $_.Exception.ToString() }
+Assert ($refused -and $refused.Contains('a name outside the tree')) "A link out of a closed zone was accepted: $refused"
+Assert ((AclText $closedStoreFile) -eq $closedAcl) 'A refused outside link changed its file'
+
+$refused = $false
+try { RepairOpen $closed @('shared') @('service') | Out-Null } catch { $refused = $true }
+Assert $refused 'An open zone that is not a separate zone was accepted'
+
 # A mutable handle acquired before us is a closed failure, not a reason to
 # drop sharing restrictions or invoke the old recursive fallback.
 $busy = Fixture 'busy'
@@ -272,7 +342,7 @@ if ($principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administ
         $lockedAcl = New-Object System.Security.AccessControl.FileSecurity
         $lockedAcl.SetSecurityDescriptorSddlForm('D:P(A;;FA;;;SY)')
         Set-Acl -LiteralPath $lockedFile -AclObject $lockedAcl
-        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'reset-tree-acl.ps1') -Root $locked
+        & $Launcher reset-tree-acl -Root $locked
         Assert ($LASTEXITCODE -eq 0) 'Production privileged launcher failed'
         Assert ((Get-Acl -LiteralPath $lockedFile).GetOwner([System.Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-544') 'Production owner was not set'
         Write-Output 'Elevated production launcher passed'
@@ -285,10 +355,40 @@ if ($principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administ
     $publishedAcl = New-Object System.Security.AccessControl.DirectorySecurity
     $publishedAcl.SetSecurityDescriptorSddlForm('O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)')
     [System.IO.Directory]::SetAccessControl($publishedTree, $publishedAcl)
-    $launcherOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'reset-tree-acl.ps1') -Root $publishedRoot -KeepSealedChild service -SealedSha $attested
+    $launcherOutput = & $Launcher reset-tree-acl -Root $publishedRoot -KeepSealedChild service -SealedSha $attested
     Assert ($LASTEXITCODE -eq 0) 'Production launcher failed beside a sealed tree'
     Assert (($launcherOutput -join "`n").Contains("Left $publishedTree as published")) 'Production launcher repaired a sealed, attested tree'
     Write-Output 'Elevated sealed-tree launcher passed'
+
+    # -SealedSha and -SeparateZones reach the repair only through the helper's
+    # command line. An attestation that is not a sha256 must never keep the
+    # tree the launcher just kept with a real one.
+    $sealedSddl = AclText $publishedTree
+    $unattested = Launch reset-tree-acl -Root $publishedRoot -KeepSealedChild service -SealedSha not-a-sha
+    Assert ($unattested.Code -eq 0) "Production launcher failed on an unreadable attestation: $($unattested.Text)"
+    Assert ($unattested.Text.Contains('No readable attestation for service; repairing it too.')) "Production launcher did not report the unreadable attestation: $($unattested.Text)"
+    Assert (-not $unattested.Text.Contains('as published')) 'Production launcher kept a tree on an unreadable attestation'
+    Assert ((AclText $publishedTree) -ne $sealedSddl) 'Production launcher left a tree with an unreadable attestation unrepaired'
+    Write-Output 'Elevated attestation launcher passed'
+
+    # A link from the private tree into shared is refused only because the
+    # installer names shared a zone of its own. Without zones the root is one
+    # zone and the same link is repaired, so the refusal proves the option
+    # arrived, spaces after the commas included.
+    $launchZones = Fixture 'production-zones'
+    New-Item -ItemType Directory -Path (Join-Path $launchZones 'private'), (Join-Path $launchZones 'shared') | Out-Null
+    $launchSecret = Join-Path $launchZones 'private\secret.txt'
+    Set-Content -LiteralPath $launchSecret -Value 'private data'
+    New-Item -ItemType HardLink -Path (Join-Path $launchZones 'shared\alias.txt') -Target $launchSecret | Out-Null
+    $launchSecretAcl = AclText $launchSecret
+    $crossed = Launch reset-tree-acl -Root $launchZones -SeparateZones 'shared, service'
+    Assert ($crossed.Code -eq 1) "Production launcher accepted a hard link across zones (exit $($crossed.Code)): $($crossed.Text)"
+    Assert ($crossed.Text.Contains('Refusing incomplete ACL repair: Refusing hard-linked file whose names cross trust zones')) "Production launcher refused for another reason: $($crossed.Text)"
+    Assert ((AclText $launchSecret) -eq $launchSecretAcl) 'Production launcher changed a cross-zone file before refusal'
+    $oneZone = Launch reset-tree-acl -Root $launchZones
+    Assert ($oneZone.Code -eq 0) "Production launcher refused an in-tree hard link without zones: $($oneZone.Text)"
+    Assert ($oneZone.Text.Contains('Secured 5 entries without following links.')) "Production launcher reported an unexpected repair: $($oneZone.Text)"
+    Write-Output 'Elevated zone launcher passed'
 } else {
     Write-Output 'Elevated production launcher not run: current token is not elevated'
 }

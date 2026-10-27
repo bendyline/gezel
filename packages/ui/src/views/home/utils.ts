@@ -23,7 +23,7 @@ export interface HomeChip {
   actionLabel?: string;
 }
 
-export { greetingForHour, freshStatusReport, STATUS_FRESH_MS } from './greeting.js';
+export { greetingForHour, freshStatusReport, isFreshStatus, STATUS_FRESH_MS } from './greeting.js';
 
 /** Compact relative time, e.g. "just now" · "18m ago" · "yesterday" · "2w ago". */
 export function timeAgo(iso: string | undefined, now: number = Date.now()): string {

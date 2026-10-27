@@ -72,6 +72,14 @@ export { isFileRepairTurn as isScenarioFileRepairTurn } from '@bendyline/gezel/l
 
 const log = createLogger('llama-cpp');
 
+/**
+ * How long shutdown waits for the slot caches to reach disk. The app gives
+ * the whole daemon 15 s to quit, and a save the engine never answers must
+ * not spend all of it: an unsaved or half-written slot only means a fresh
+ * prefill next time, because a restore that fails falls back to one.
+ */
+const SHUTDOWN_FLUSH_BUDGET_MS = 8_000;
+
 export class LlamaCppProvider implements LLMProvider {
   readonly name = 'llama-cpp' as const;
   readonly queue: ProviderQueue;
@@ -812,11 +820,22 @@ export class LlamaCppProvider implements LLMProvider {
     // llama-server exits the slot save endpoint is gone. flushAll is
     // best-effort; failures during shutdown shouldn't block the stop.
     if (this.cacheAdapter) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const budget = new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), SHUTDOWN_FLUSH_BUDGET_MS);
+        timer.unref?.();
+      });
       try {
-        await this.cacheAdapter.flushAll();
-      } catch {
-        // Best-effort persistence — failure here just means the next
-        // boot pays the prefill cost on resume, same as before.
+        // Best-effort persistence: a failure only means the next boot pays
+        // the prefill cost on resume.
+        const outcome = await Promise.race([this.cacheAdapter.flushAll().catch(() => 0), budget]);
+        if (outcome === 'timeout') {
+          log.warn(
+            `slot cache save still running after ${SHUTDOWN_FLUSH_BUDGET_MS}ms at shutdown; stopping the engine`,
+          );
+        }
+      } finally {
+        clearTimeout(timer);
       }
     }
     await this.supervisor?.stop();

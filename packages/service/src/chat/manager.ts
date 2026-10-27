@@ -335,6 +335,10 @@ import { aggregateModelGateEvidence } from '../tasks/gate-telemetry.js';
 import { findOwnerThread } from '../tasks/owner-thread.js';
 import { taskReferencesAsRetrieval } from '../tasks/references.js';
 import {
+  BUNDLED_DOCBLOCKS_TOOLSET_ID,
+  bundledDocblocksJoinsSession,
+} from '../toolsets/bundled-docblocks.js';
+import {
   discoverProjectMcpToolsets,
   resolveImportedMcpRuntime,
   resolveMcpDefinition,
@@ -394,7 +398,10 @@ import {
 } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
 import type { RecognitionMode } from '@bendyline/gezel-inference/internal/chat/vision-capability';
 import { nativeVisionEnabledFor } from '@bendyline/gezel-inference/internal/chat/vision-capability';
-import { cameraPixelsWithheld } from '../connectors/live/camera/frame-access.js';
+import {
+  cameraPixelsWithheld,
+  cameraPixelsWithheldForFile,
+} from '../connectors/live/camera/frame-access.js';
 import { extractReferencedTasks } from '../references/task-references.js';
 import { readTaskWithEffectiveStatus } from '../tasks/effective-status.js';
 import { artifactReadSlices } from './artifact-read-evidence.js';
@@ -7705,8 +7712,26 @@ export class ChatManager extends LocalEngineRuntime {
         provider: state.record.providerName,
         ...(turnProject?.connectors?.some((b) => b.driver === 'device')
           ? {
-              withholdPixels: (ref: string) =>
-                cameraPixelsWithheld(turnProject, state.record.providerName, ref),
+              withholdPixels: async (ref: string) => {
+                if (cameraPixelsWithheld(turnProject, state.record.providerName, ref)) return true;
+                // `artifacts/<path>` reads through the artifact store: judge
+                // the file it opens, which the string check cannot see.
+                const artifact = /^artifacts\/(.+)$/.exec(ref)?.[1];
+                const file = artifact
+                  ? await this.store.resolveProjectArtifactReadPath(
+                      state.record.projectId,
+                      artifact,
+                    )
+                  : null;
+                return file
+                  ? cameraPixelsWithheldForFile(
+                      turnProject,
+                      state.record.providerName,
+                      this.store.projectArtifactsDir(state.record.projectId),
+                      file,
+                    )
+                  : false;
+              },
             }
           : {}),
         ...(await this.resolveTurnVisionContext(state)),
@@ -14924,7 +14949,8 @@ export class ChatManager extends LocalEngineRuntime {
         };
         this.events.publish(scope, {
           type: 'warning',
-          message: `Updates are available for the '${resolvedCatalogId}' model. You can download a new model in Settings.`,
+          // The catalog's name, not its id: people never see "qwen3.8-27b-q4".
+          message: `A newer version of ${catalogDetail.manifest.name || resolvedCatalogId} is available. You can download it in Settings.`,
           action: { kind: 'settings', section: settingsSection },
         });
       }
@@ -15050,7 +15076,20 @@ export class ChatManager extends LocalEngineRuntime {
       );
     const activePerGezel = activeToolsets(perGezel);
     const activeShared = activeToolsets(shared);
-    const activeSystem = activeToolsets(system);
+    // Filtered here, before both the prompt listing and the bridge spawn read
+    // it, so the two cannot disagree about whether the tools exist.
+    const bundledDocblocksJoins = bundledDocblocksJoinsSession({
+      craftbookToolsetIds: taskContext?.task.craftbook.toolsets?.map((t) => t.toolsetId),
+      ...(record.expectedDeliverable?.kind === 'file' && record.expectedDeliverable.filePath
+        ? { expectedDeliverablePath: record.expectedDeliverable.filePath }
+        : {}),
+    });
+    const activeSystem = activeToolsets(system).filter(
+      (entry) =>
+        bundledDocblocksJoins ||
+        entry.toolsetId !== BUNDLED_DOCBLOCKS_TOOLSET_ID ||
+        !this.store.isBundledToolset(entry.toolsetId),
+    );
     const activePerProject = activeToolsets(perProject);
     if (stepDisabledToolsetIds.size > 0) {
       log.debug(

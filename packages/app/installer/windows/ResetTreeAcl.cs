@@ -238,6 +238,9 @@ namespace Gezel.Installer
             public SafeFileHandle Root;
             public string RootPath;
             public string[] SeparateZones;
+            // Zones every local account can already write ("" is the root's
+            // own zone): see KeepsOutsideName.
+            public string[] OpenZones;
         }
 
         static string FinalPath(SafeFileHandle handle, string display)
@@ -333,24 +336,68 @@ namespace Gezel.Installer
         // afterwards reach every name through inheritance. That is safe only
         // while all of them lie in one zone of this tree, which is where the
         // machine engine's speech-model store and uv's cache link on purpose.
-        // A name outside the tree, or in another zone, is refused: an outside
-        // target would be taken over, and a name in the shared tree would hand
-        // its users the private file's other name.
-        static void RequireOneZone(SafeFileHandle file, Scope scope, string display, uint links)
+        // A name in another zone is refused: a name in the shared tree would
+        // hand its users the private file's other name. A name outside the
+        // tree is refused too, since an outside target would be taken over,
+        // except in a zone every local account can already write (the
+        // machine-shared tree). There pnpm hard-links a project's packages
+        // from the account's own store and a local git clone links its
+        // objects, and refusing them dropped GezelService on upgrade
+        // (1.26299.99 audit). Returns true for such a file: the caller leaves
+        // its access as it is and only stops later grants flowing into it.
+        static bool KeepsOutsideName(SafeFileHandle file, Scope scope, string display, uint links)
         {
             List<string> names = LinkNames(file, scope, display);
             if (names.Count != links)
                 throw new IOException("Refusing hard-linked file whose names cannot all be listed: " + display);
             string first = null;
+            bool outside = false;
             foreach (string name in names)
             {
                 string zone = Zone(scope, name);
                 if (zone == null)
-                    throw new IOException("Refusing hard-linked file with a name outside the tree: " + display);
+                {
+                    outside = true;
+                    continue;
+                }
                 if (first == null) first = zone;
                 else if (zone != first)
                     throw new IOException("Refusing hard-linked file whose names cross trust zones: " + display);
             }
+            if (!outside) return false;
+            if (first != null && Array.IndexOf(scope.OpenZones, first) >= 0) return true;
+            throw new IOException("Refusing hard-linked file with a name outside the tree: " + display);
+        }
+
+        // Keep a file's access exactly as it is and stop inheritance from
+        // reaching it. NSIS grants the shared tree's boundaries with icacls
+        // afterwards, which propagates inheritable ACEs to every child that
+        // inherits; through this file's other name that would hand a user's
+        // own pnpm store file, or any file linked in from outside, to every
+        // account. Inherited ACEs become explicit copies and the DACL is
+        // protected, so no account gains or loses anything now or later.
+        static void FreezeAccess(SafeFileHandle file, string display)
+        {
+            var security = new RawSecurityDescriptor(QuerySecurity(file, DaclSecurity, display), 0);
+            RawAcl dacl = security.DiscretionaryAcl;
+            if (dacl != null)
+            {
+                var frozen = new RawAcl(dacl.Revision, dacl.Count);
+                for (int i = 0; i < dacl.Count; i++)
+                {
+                    GenericAce ace = dacl[i].Copy();
+                    ace.AceFlags &= ~AceFlags.Inherited;
+                    frozen.InsertAce(i, ace);
+                }
+                dacl = frozen;
+            }
+            var result = new RawSecurityDescriptor(
+                ControlFlags.DiscretionaryAclPresent | ControlFlags.DiscretionaryAclProtected |
+                ControlFlags.SelfRelative, null, null, null, dacl);
+            byte[] bytes = new byte[result.BinaryLength];
+            result.GetBinaryForm(bytes, 0);
+            Check(NtSetSecurityObject(file, DaclSecurity | ProtectedDacl, bytes),
+                "Cannot keep the access of " + display);
         }
 
         // An upgrade's previous service tree, still as the installer published
@@ -397,7 +444,12 @@ namespace Gezel.Installer
             bool directory = (info.Attributes & Directory) != 0;
             bool reparse = (info.Attributes & ReparsePoint) != 0;
             if (root && (!directory || reparse)) throw new IOException("Root must be a real directory");
-            if (!directory && info.Links != 1) RequireOneZone(handle, scope, display, info.Links);
+            if (!directory && info.Links != 1 && KeepsOutsideName(handle, scope, display, info.Links))
+            {
+                FreezeAccess(handle, display);
+                if (observe != null) observe("left-linked", display);
+                return 0;
+            }
             if (observe != null) observe("opened", display);
             // NtSetSecurityObject changes this object only. SetSecurityInfo and
             // icacls can initiate their own descendant propagation/traversal,
@@ -460,18 +512,34 @@ namespace Gezel.Installer
             return Run(root, owner, keepSealedChild, sealedSha, null, observe);
         }
 
+        public static int Run(string root, string owner, string keepSealedChild, string sealedSha,
+            string[] separateZones, Action<string, string> observe)
+        {
+            return Run(root, owner, keepSealedChild, sealedSha, separateZones, null, observe);
+        }
+
         // keepSealedChild names one direct child of root that is left exactly
         // as it is when IsSealedTree holds for it; any other state repairs it.
         // separateZones names direct children of root whose subtrees are trust
         // zones of their own; a hard link may not join names across zones.
+        // openZones names the zones every local account can already write,
+        // "." for the root's own zone; see KeepsOutsideName.
         public static int Run(string root, string owner, string keepSealedChild, string sealedSha,
-            string[] separateZones, Action<string, string> observe)
+            string[] separateZones, string[] openZones, Action<string, string> observe)
         {
             separateZones = separateZones ?? new string[0];
             foreach (string zone in separateZones)
                 if (string.IsNullOrEmpty(zone) || zone == "." || zone == ".." ||
                     zone.IndexOfAny(new[] { '\\', '/', ':', '\0' }) >= 0)
                     throw new ArgumentException("Each zone must be a single directory name");
+            var open = new List<string>();
+            foreach (string zone in openZones ?? new string[0])
+            {
+                if (zone == ".") open.Add("");
+                else if (Array.Exists(separateZones, z => string.Equals(z, zone, StringComparison.OrdinalIgnoreCase)))
+                    open.Add(Array.Find(separateZones, z => string.Equals(z, zone, StringComparison.OrdinalIgnoreCase)));
+                else throw new ArgumentException("An open zone must be \".\" or one of the separate zones");
+            }
             if (root == null || root.Length < 4 || !char.IsLetter(root[0]) ||
                 root[1] != ':' || root[2] != '\\' || root.IndexOf(':', 2) >= 0)
                 throw new ArgumentException("An absolute local drive directory is required");
@@ -492,7 +560,7 @@ namespace Gezel.Installer
             {
                 var scope = new Scope {
                     Root = handle, RootPath = FinalPath(handle, full).TrimEnd('\\'),
-                    SeparateZones = separateZones
+                    SeparateZones = separateZones, OpenZones = open.ToArray()
                 };
                 return Visit(handle, full, owner, true, 0, observe, keepSealedChild, sealedSha, scope);
             }

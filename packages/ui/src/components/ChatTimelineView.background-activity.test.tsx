@@ -3,9 +3,10 @@ import {
   type ListTimelineResponse,
   OFFLINE_RUNTIME_CAPABILITIES,
 } from '@bendyline/gezel';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
+import { INDEXING_SWEEP_LINGER_MS } from './indexing-live-sweep.js';
 
 const streamState = vi.hoisted(() => ({ mode: 'live' as 'live' | 'completed' }));
 
@@ -104,7 +105,23 @@ describe('ChatTimelineView — background one-shot activity', () => {
     boundsSpy.mockRestore();
     heightSpy.mockRestore();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
+
+  /** The completed stream's sweep ends; let its bubble's linger run out. */
+  async function finishSweep() {
+    await waitFor(() =>
+      expect(document.querySelector('.timeline-indexing-receipt')).toHaveTextContent(
+        'Mhairi has indexed 2 files',
+      ),
+    );
+    act(() => {
+      vi.advanceTimersByTime(INDEXING_SWEEP_LINGER_MS);
+    });
+    await waitFor(() =>
+      expect(document.querySelector('.timeline-session-divider-activity')).not.toBeInTheDocument(),
+    );
+  }
 
   it('keeps task-capable foreground hosts from querying unsupported structured questions', async () => {
     const previous = window.__GEZEL__;
@@ -130,6 +147,7 @@ describe('ChatTimelineView — background one-shot activity', () => {
   });
 
   it('keeps conversation space visible on short viewports and restores the desktop reserve on resize', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     streamState.mode = 'completed';
     heightSpy.mockReturnValue(295);
     const observers = new Set<{ targets: Set<Element>; notify: () => void }>();
@@ -162,9 +180,7 @@ describe('ChatTimelineView — background one-shot activity', () => {
         showProjectName
       />,
     );
-    await waitFor(() =>
-      expect(document.querySelector('.timeline-session-divider-activity')).not.toBeInTheDocument(),
-    );
+    await finishSweep();
     const runway = await waitFor(() => {
       const node = document.querySelector<HTMLElement>('.timeline-response-runway');
       expect(node?.style.blockSize).toBe('103px');
@@ -260,7 +276,8 @@ describe('ChatTimelineView — background one-shot activity', () => {
     expect(Number.parseFloat(runway?.style.blockSize ?? '300')).toBeLessThan(300);
   });
 
-  it('replaces completed file turns with one expandable, de-duplicated receipt', async () => {
+  it('keeps one bubble up for the whole sweep, then leaves its receipt', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     streamState.mode = 'completed';
     const onWorkspaceReference = vi.fn();
     render(
@@ -282,7 +299,12 @@ describe('ChatTimelineView — background one-shot activity', () => {
     });
     expect(receipt.open).toBe(false);
     expect(screen.queryByRole('button', { name: 'Open foo.html' })).not.toBeInTheDocument();
-    expect(document.querySelector('.timeline-session-divider-activity')).not.toBeInTheDocument();
+    // Three files ran as three one-shots; they share the sweep's one bubble,
+    // which outlives the last file in case another follows.
+    const dividers = document.querySelectorAll('.timeline-session-divider-activity');
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0]).toHaveTextContent('Mhairi · Indexing foo.html · in Website');
+    await finishSweep();
     await waitFor(() =>
       expect(
         document.querySelector<HTMLElement>('.timeline-response-runway')?.style.blockSize,

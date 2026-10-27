@@ -137,7 +137,8 @@ import { WorkspaceGrepError, grepWorkspace } from '../../workspace/grep-files.js
 import { readWorkspaceFiles } from '../../workspace/read-files.js';
 import { isFirstPartyCaller } from '../auth.js';
 import {
-  callerMaySeeArtifactPixels,
+  CAMERA_PIXELS_WITHHELD,
+  callerMaySeeFilePixels,
   callerMaySeeLocation as sharedCallerMaySeeLocation,
 } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
@@ -1483,20 +1484,15 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const project = await ctx.store.getProject(id);
     if (!project) return c.json({ error: 'project not found' }, 404);
     const body = ReadImageBase64RequestSchema.parse(await c.req.json());
-    if (body.artifact && !(await callerMaySeeArtifactPixels(ctx, c, project, body.path))) {
-      return c.json(
-        {
-          error:
-            "This camera's pictures stay on this computer: only gezels running on an on-device model may see them. Read the event record's description instead.",
-        },
-        403,
-      );
-    }
     const baseDir = body.artifact
       ? ctx.store.projectArtifactsDir(id)
       : await ctx.store.projectWorkspaceDir(id);
     const resolved = safeJoin(baseDir, body.path);
     if (!resolved) return c.json({ error: 'path traversal' }, 400);
+    // Workspace reads too: a link in the workspace can lead into a corpus.
+    if (!(await callerMaySeeFilePixels(ctx, c, project, resolved))) {
+      return c.json({ error: CAMERA_PIXELS_WITHHELD }, 403);
+    }
     let buf: Buffer;
     try {
       const st = await stat(resolved);

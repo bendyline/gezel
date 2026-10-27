@@ -222,9 +222,10 @@ jobs:
           pnpm --filter @bendyline/gezel-service test src/storage/sizes.test.ts src/storage/safe-remove.test.ts src/projects/infer-project.test.ts src/models/storage-roots.test.ts
       # The installer's link helper decides what an elevated recursive ACL sweep
       # may follow, and only Windows has junctions; a release-only run would
-      # find a regression after the merge.
-      - name: Test the installer link helper against real junctions
-        run: pnpm --filter @bendyline/gezel-app exec vitest run src/reparse-sweep.test.ts
+      # find a regression after the merge. The compiled permission helper
+      # (gezel-acl.exe) is built and driven here too, elevated, on both arches.
+      - name: Test the installer link and ACL helpers against real junctions
+        run: pnpm --filter @bendyline/gezel-app exec vitest run src/reparse-sweep.test.ts src/windows-acl.test.ts
       - name: Stage the Windows sandbox launcher
         working-directory: packages/app
         run: node scripts/fetch-mxc.mjs

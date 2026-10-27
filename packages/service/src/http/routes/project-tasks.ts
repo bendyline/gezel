@@ -189,6 +189,13 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
         );
       }
     }
+    // A task made from a gezel's session is the gezel's, whatever the body
+    // claims; the phone runtime records it the same way. The settle hook reads
+    // this to wake the step that made it (product-service.ts).
+    const creator = c.get('auth');
+    if (creator?.scopes.includes('session') && creator.gezelId) {
+      body.createdBy = { kind: 'gezel', gezelId: creator.gezelId };
+    }
     let launched: TaskLaunchResult;
     try {
       launched = await ctx.taskLauncher.launch(projectId, body, {

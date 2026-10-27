@@ -180,6 +180,15 @@ const HEALTH_FAILURES_BEFORE_RESTART = 3;
 const RESTART_BUDGET_COUNT = 3;
 const RESTART_BUDGET_WINDOW_MS = 60_000;
 const GRACEFUL_STOP_MS = 3_000;
+// Quitting gives the daemon the time its own shutdown is built around: it
+// unwinds turns and drains admitted background work (up to 15 s), saves the
+// loaded engines' prompt caches, and stops them. With a 27B model loaded that
+// took longer than 3 s on every release, so quit always ended in a forced
+// stop (exit 1), and the engine could hold its GPU memory for half a minute
+// after the app was gone (1.26299.99 audit). Restarts keep the short window:
+// they replace a daemon that is already failing. This plus the 3 s force
+// stays inside the quit coordinator's 30 s wall.
+export const QUIT_GRACEFUL_STOP_MS = 15_000;
 // First start on a clean packaged machine can spend several seconds in OS
 // verification and runtime initialization before publishing discovery files.
 // Keep routine health probes short, but give this one-time fallback path room.
@@ -728,7 +737,9 @@ export class SupervisedService extends EventEmitter {
     if (this.transitionInFlight) await this.transitionInFlight.catch(() => {});
     this.stopHealthWatch();
     const ownedChild = this.child;
-    if (this.child) await gracefullyStop(this.child, this.durableChildLogger());
+    if (this.child) {
+      await gracefullyStop(this.child, this.durableChildLogger(), QUIT_GRACEFUL_STOP_MS);
+    }
     if (this.embeddedStop) await this.embeddedStop();
     if (ownedChild) await this.handOverToAutostartOnQuit();
     await this.logRotator.close();
@@ -2621,6 +2632,8 @@ async function spawnChildFromInstall(
     ...process.env,
     GEZEL_HOME: opts.home,
     GEZEL_SERVICE_ROLE: 'user',
+    // Tells `gezel stop` this daemon is the app's (service daemon-host.ts).
+    GEZEL_HOSTED_BY_APP: '1',
   };
   if (opts.uiDir) env.GEZEL_UI_DIR = opts.uiDir;
   const result = await discoverOrSpawn({
@@ -2656,6 +2669,8 @@ async function spawnChild(opts: ConnectOptions): Promise<{
     ...process.env,
     GEZEL_HOME: opts.home,
     GEZEL_SERVICE_ROLE: 'user',
+    // Tells `gezel stop` this daemon is the app's (service daemon-host.ts).
+    GEZEL_HOSTED_BY_APP: '1',
   };
   if (process.env.GEZEL_USE_MACHINE_ENGINE !== '1') {
     env.GEZEL_DISABLE_MACHINE_ENGINE = '1';
@@ -2725,11 +2740,12 @@ export async function stopProcessByPid(
 export async function gracefullyStop(
   child: ChildProcess | undefined,
   logger: ConnectOptions['logger'],
+  graceMs = GRACEFUL_STOP_MS,
 ): Promise<void> {
   if (!child) return;
   logger?.info?.('[supervisor] stopping gezeld child...');
   await stopOwnedDaemon(child, logger, {
-    graceMs: GRACEFUL_STOP_MS,
+    graceMs,
     forceMs: GRACEFUL_STOP_MS,
   });
   if (child.exitCode == null && child.signalCode == null) {

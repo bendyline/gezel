@@ -167,23 +167,31 @@ test('local Home matches the live chrome and preserves reading across service na
     const startupReader = await readerMetrics('#startup-reading');
     await page.screenshot({ path: join(screenshots, 'startup-home-reading.png') });
     await expect(page).toHaveURL(/^https?:\/\//, { timeout: 60_000 });
-    // The startup screen mounts again on the service page to hand its reader
-    // over, then leaves. Checked before the live reader, its absence passed in
-    // the instant before that remount, and both Homes' tabs were then present.
-    await expect(page.locator('.startup-reading-live')).toBeVisible();
+    // The startup screen mounts again on the service page to hand its copy
+    // over, then leaves. The live Handboek tab reads the same article, so the
+    // copy steps aside on its own and the live reader takes its scroll
+    // position. Only that handover scrolls the live reader: the absence checks
+    // below would also pass in the instant before the remount.
+    const liveReader = '[data-testid="home-intro-article"]';
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            (host) => document.querySelector(`${host} .home-intro-doc`)?.scrollTop ?? -1,
+            liveReader,
+          ),
+        { timeout: 30_000 },
+      )
+      .toBeGreaterThan(150);
     await expect(page.locator('#startup-home')).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.locator('.startup-reading-overlay, .startup-reading')).toHaveCount(0);
     await expect(page.getByRole('tab', { name: 'Handboek', exact: true })).toHaveAttribute(
       'aria-selected',
       'true',
     );
-    expect(
-      await page
-        .locator('.startup-reading-live .home-intro-doc')
-        .evaluate((node) => node.scrollTop),
-    ).toBeGreaterThan(150);
     expect(await chrome()).toEqual(startupChrome);
     expect(await pillMetrics()).toEqual(startupPill);
-    expect(await readerMetrics('.startup-reading-live')).toEqual(startupReader);
+    expect(await readerMetrics(liveReader)).toEqual(startupReader);
     await page.screenshot({ path: join(screenshots, 'startup-home-live.png') });
     await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
     await expect(

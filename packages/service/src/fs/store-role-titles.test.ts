@@ -81,6 +81,20 @@ describe('plain role titles', () => {
     );
   });
 
+  // 1.26299.99 matched the English title too, so the rewrite ran at every
+  // boot and reverted a Dutch title the person had put back.
+  it('rewrites about.md only while migrating a Dutch role, never again', async () => {
+    const scribe = await store.createGezel({ name: 'Hanna', role: 'Scribe' });
+    await writeFile(
+      join(home, 'gezels', scribe.id, 'about.md'),
+      'You are the **Klerk**, by my own choice.',
+    );
+    await new Store({ home }).ensureLayout();
+    expect((await store.getGezel(scribe.id))?.about).toBe(
+      'You are the **Klerk**, by my own choice.',
+    );
+  });
+
   it('turns a Dutch role written into the markdown into its plain title', async () => {
     const created = await store.createGezel({ name: 'Eva', role: 'Researcher' });
     const path = join(home, 'gezels', created.id, 'gezel.md');

@@ -144,6 +144,13 @@ export const ImageGenerationRequestSchema = z.object({
    * needs 30 to 100 steps.
    */
   capStepsAtRecommended: z.boolean().optional(),
+  /**
+   * Hold an on-device render to about a megapixel. The agent tool sets this
+   * and the daemon applies it only when a local engine serves the request,
+   * because only the daemon knows which provider that is: a session token
+   * cannot read the config, and a cloud provider maps sizes itself.
+   */
+  capSizeForAgent: z.boolean().optional(),
 });
 export type ImageGenerationRequest = z.infer<typeof ImageGenerationRequestSchema>;
 

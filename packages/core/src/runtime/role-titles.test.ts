@@ -41,4 +41,18 @@ describe('plain role titles on the phone', () => {
     expect(migrated?.character).toEqual(keeper.character);
     expect((await store.getGezel(senior.id))?.role).toBe('Senior Voorman');
   });
+
+  it('leaves a Dutch title the person put back into an English-titled gezel’s about.md', async () => {
+    const { files, options, store } = portableFixture();
+    await store.ensureLayout();
+    const scribe = await store.createGezel({ name: 'Hanna', role: 'Scribe' });
+    files.entries.set(
+      `gezels/${scribe.id}/about.md`,
+      encodeText('You are the **Klerk**, by my own choice.'),
+    );
+    await new PortableStore(options).ensureLayout();
+    expect((await store.getGezel(scribe.id))?.about).toBe(
+      'You are the **Klerk**, by my own choice.',
+    );
+  });
 });

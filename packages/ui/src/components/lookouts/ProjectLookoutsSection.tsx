@@ -50,7 +50,8 @@ function outcomeWords(firing: LookoutFiring): string {
     .map((o) => {
       const what = ACTION_WORDS[o.action as LookoutAction['kind']] ?? o.action;
       if (o.status === 'done') return `${what}: done${o.reason ? ` (${o.reason})` : ''}`;
-      return `${what}: ${o.status === 'held' ? 'held' : o.status === 'skipped' ? 'skipped' : 'failed'} — ${o.reason ?? ''}`;
+      const status = o.status === 'held' ? 'held' : o.status === 'skipped' ? 'skipped' : 'failed';
+      return `${what}: ${status}${o.reason ? ` — ${o.reason}` : ''}`;
     })
     .join(' · ');
 }
@@ -309,8 +310,20 @@ export function ProjectLookoutsSection({ projectId }: { projectId: string }) {
       </div>
       {data.paused ? (
         <p className="small camera-setup-notice">
-          Every lookout is paused (Settings). Cameras keep watching, but nothing acts on what they
-          see.
+          Every lookout is paused. Cameras keep watching, but nothing acts on what they see.{' '}
+          <button
+            type="button"
+            disabled={busy === 'resume-all'}
+            onClick={() =>
+              void run(
+                'resume-all',
+                () => api.updateConfig({ lookouts: { paused: false } }),
+                'Lookouts resumed.',
+              )
+            }
+          >
+            Resume lookouts
+          </button>
         </p>
       ) : null}
       {data.lookouts.length === 0 && editing !== 'new' ? (

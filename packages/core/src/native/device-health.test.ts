@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DeviceSafetyPolicySchema } from '../schemas/api.js';
 import {
   DeviceHealthGate,
@@ -310,6 +310,35 @@ describe('DeviceHealthGate', () => {
     });
     expect(calls).toBe(2);
     expect(sleeps).toBe(1);
+  });
+
+  // 1.26299.99 read "Paused for safety" from one hot reading while a reply
+  // kept streaming. Only work that is waiting to start is held.
+  it('reports blocked only while new work is actually held', async () => {
+    let temperatureC = 106;
+    let now = 0;
+    let wake: (() => void) | undefined;
+    const gate = new DeviceHealthGate({
+      probe: { sample: async () => sample([{ vendor: 'amd', deviceId: '0', temperatureC }]) },
+      policy: { mode: 'observe', pollIntervalMs: 500, maxWaitMs: 10_000 },
+      now: () => now,
+      sleep: (ms) =>
+        new Promise<void>((resolve) => {
+          wake = () => {
+            now += ms;
+            resolve();
+          };
+        }),
+    });
+    await expect(gate.status()).resolves.toMatchObject({ state: 'warm' });
+
+    const admission = gate.admit('test');
+    await vi.waitFor(() => expect(wake).toBeDefined());
+    await expect(gate.status()).resolves.toMatchObject({ state: 'blocked' });
+
+    temperatureC = 100;
+    wake!();
+    await expect(admission).resolves.toMatchObject({ admissible: true });
   });
 
   it('surfaces a normalized warm snapshot for status UI', async () => {

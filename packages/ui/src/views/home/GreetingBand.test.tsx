@@ -1,9 +1,10 @@
 import type { MeesterStatusReport } from '@bendyline/gezel';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
+import { type StartupHandover, startupHandover } from './StartupReadingOverlay.js';
 import { freshStatusReport, greetingForHour } from './utils.js';
 
 const poppetjes = vi.hoisted(() => ({ show: false }));
@@ -44,6 +45,33 @@ const REPORT: MeesterStatusReport = {
   trigger: 'auto',
   actions: [],
 };
+
+function startupCopy(): HTMLElement {
+  const node = document.createElement('section');
+  node.textContent = 'Startup copy';
+  return node;
+}
+
+function StartupHarness({ node, handover }: { node: HTMLElement; handover: StartupHandover }) {
+  const [reading, setReading] = useState(true);
+  return (
+    <GreetingBand
+      chips={[{ dot: 'var(--sage)', label: '3 ready for you' }]}
+      meesterName="Wren"
+      meesterPoppetje={null}
+      meesterIcon={null}
+      meesterIconOverride={false}
+      collapsed={false}
+      onToggleCollapse={() => {}}
+      tab="greeting"
+      onTabChange={() => {}}
+      startupReading={reading ? { tab: 'greeting', node, handover } : undefined}
+      onLeaveStartupReading={() => setReading(false)}
+    />
+  );
+}
+
+const liveGreeting = () => screen.getByRole('tabpanel', { hidden: true });
 
 function renderBand(overrides: Partial<Parameters<typeof GreetingBand>[0]> = {}) {
   return render(
@@ -198,6 +226,38 @@ describe('GreetingBand', () => {
     expect(screen.queryByText(/off-disk/i)).not.toBeInTheDocument();
   });
 
+  it('swaps the startup copy for the live panel at once when nothing changed', () => {
+    const node = startupCopy();
+    const { rerender } = render(<StartupHarness node={node} handover="wait" />);
+    expect(node.isConnected).toBe(true);
+    expect(liveGreeting()).toHaveAttribute('inert');
+
+    rerender(<StartupHarness node={node} handover="same" />);
+    // The copy is not React's: reusing its host for another element left it
+    // on screen beside the live panel.
+    expect(node.isConnected).toBe(false);
+    expect(document.querySelector('.startup-reading-overlay-leaving')).toBeNull();
+    expect(liveGreeting()).not.toHaveAttribute('inert');
+    expect(document.querySelector('.home-workshop-chips')).toHaveTextContent(/^3 ready for you$/);
+  });
+
+  it('fades to the live panel when it has news', async () => {
+    const node = startupCopy();
+    render(<StartupHarness node={node} handover="changed" />);
+    expect(document.querySelector('.startup-reading-overlay-leaving')).not.toBeNull();
+    await waitFor(() => expect(node.isConnected).toBe(false));
+  });
+
+  it('waits for the person to finish a press in the copy', () => {
+    const node = startupCopy();
+    const { rerender } = render(<StartupHarness node={node} handover="wait" />);
+    fireEvent.pointerDown(node);
+    rerender(<StartupHarness node={node} handover="same" />);
+    expect(node.isConnected).toBe(true);
+    fireEvent.pointerUp(window);
+    expect(node.isConnected).toBe(false);
+  });
+
   it('gives the Handboek reader the full sheet instead of the meester figure', () => {
     poppetjes.show = true;
     try {
@@ -212,6 +272,39 @@ describe('GreetingBand', () => {
     } finally {
       poppetjes.show = false;
     }
+  });
+});
+
+describe('startupHandover', () => {
+  const saved = { headline: REPORT.headline, content: REPORT.report, at: REPORT.generatedAt };
+  const verdict = (overrides: Partial<Parameters<typeof startupHandover>[0]>) =>
+    startupHandover({
+      tab: 'greeting',
+      savedStatus: null,
+      liveStatus: null,
+      statusSettled: true,
+      nightSettled: true,
+      ...overrides,
+    });
+
+  it('waits for the live data the tab shows', () => {
+    expect(verdict({ statusSettled: false })).toBe('wait');
+    expect(verdict({ tab: 'night', nightSettled: false })).toBe('wait');
+  });
+
+  it('swaps silently when the greeting would read the same', () => {
+    expect(verdict({})).toBe('same');
+    expect(verdict({ savedStatus: saved, liveStatus: REPORT })).toBe('same');
+    expect(verdict({ tab: 'tour' })).toBe('same');
+  });
+
+  it('fades when the live panel has news', () => {
+    expect(verdict({ liveStatus: REPORT })).toBe('changed');
+    expect(verdict({ savedStatus: saved })).toBe('changed');
+    expect(verdict({ savedStatus: saved, liveStatus: { ...REPORT, headline: 'Newer' } })).toBe(
+      'changed',
+    );
+    expect(verdict({ tab: 'night' })).toBe('changed');
   });
 });
 

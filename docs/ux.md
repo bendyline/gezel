@@ -663,10 +663,15 @@ persisted poppetje, not a generated stand-in.
 The entry includes React and the small Home components (a 400 KB script budget).
 Squisq and the bundled Handboek introduction are lazy-loaded only when a saved
 status report or a chosen Night shift/Handboek page needs them. No project or
-session scan belongs in Electron boot. Reading content and scroll position stay
-in place during the transition; Show latest or Open in Handboek takes the reader
-to the full surface. Pending drafts from older startup versions still transfer
-before the local copy is released. Honor reduced motion and keyboard tabs.
+session scan belongs in Electron boot. When the person was reading, the copy
+stays over the live panel while it loads beneath, then steps aside on its own
+(`StartupReadingOverlay`): at once, keeping the scroll position, when the live
+panel would read the same; with a short fade when it has news. It waits while
+the person presses, selects, or scrolls in the copy, and never longer than a few
+seconds for a live panel that does not settle. Never ask the person to judge
+whether the copy is current. Pending drafts from older startup versions still
+transfer before the local copy is released. Honor reduced motion and keyboard
+tabs.
 
 ### The welcome
 

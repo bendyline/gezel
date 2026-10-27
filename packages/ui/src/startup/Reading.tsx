@@ -4,7 +4,7 @@ import { Poppetje } from '../poppetje/Poppetje.js';
 import { HomeHeadline, HomeIntroDate } from '../views/home/HomeIntroHeading.js';
 import { MeesterFigureFrame } from '../views/home/MeesterFigureFrame.js';
 import { TipOfDayPresentation } from '../views/home/TipOfDayPresentation.js';
-import { STATUS_FRESH_MS, greetingForHour } from '../views/home/greeting.js';
+import { greetingForHour, isFreshStatus } from '../views/home/greeting.js';
 
 const Documents = lazy(() =>
   import('./documents.js').then((module) => ({ default: module.StartupDocuments })),
@@ -34,10 +34,7 @@ export function StartupReading({
   const tab = view.tab === 'chat' ? 'greeting' : view.tab;
   const hour = new Date().getHours();
   const greeting = greetingForHour(hour);
-  const status =
-    snapshot?.status && Date.now() - Date.parse(snapshot.status.at) < STATUS_FRESH_MS
-      ? snapshot.status
-      : null;
+  const status = snapshot?.status && isFreshStatus(snapshot.status.at) ? snapshot.status : null;
   const meester = snapshot?.meester;
   return (
     <>
