@@ -378,14 +378,25 @@ FunctionEnd
 ; machine engine hard-links within its private tree (the speech-model store,
 ; uv's cache), and v1.26287.93 already left such links behind; refusing every
 ; hard link failed each such upgrade and dropped GezelService. A link that
-; stays inside one zone is repaired like any file; one that leaves the tree or
-; joins two zones is still refused.
-!macro SanitizeDescendantsKeepingSealedTree PATH SUBJECT TREE ZONES FAILURE_LABEL
+; stays inside one zone is repaired like any file; one that joins two zones is
+; still refused.
+;
+; OPEN names the zones every local account can already write. A file there
+; whose other name is outside the tree (pnpm's store, a local git clone's
+; objects) keeps its own access and stops inheriting, so the grants published
+; below never reach its other name; anywhere else such a file is refused.
+!macro SanitizeDescendantsKeepingSealedTree PATH SUBJECT TREE ZONES OPEN FAILURE_LABEL
   ${If} $GezelPublishedTreeSha == ""
-    !insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" ' -SeparateZones "${ZONES}"' ${FAILURE_LABEL}
+    !insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" ' -SeparateZones "${ZONES}" -OpenZones "${OPEN}"' ${FAILURE_LABEL}
   ${Else}
-    !insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" ' -SeparateZones "${ZONES}" -KeepSealedChild "${TREE}" -SealedSha "$GezelPublishedTreeSha"' ${FAILURE_LABEL}
+    !insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" ' -SeparateZones "${ZONES}" -OpenZones "${OPEN}" -KeepSealedChild "${TREE}" -SealedSha "$GezelPublishedTreeSha"' ${FAILURE_LABEL}
   ${EndIf}
+!macroend
+
+; The repair with ZONES, of which OPEN are writable by every local account, as
+; above, for a tree with no sealed child.
+!macro SanitizeDescendantsWithZones PATH SUBJECT ZONES OPEN FAILURE_LABEL
+  !insertmacro RepairTreeAcl "${PATH}" "${SUBJECT}" ' -SeparateZones "${ZONES}" -OpenZones "${OPEN}"' ${FAILURE_LABEL}
 !macroend
 
 ; nsExec pushes "error" instead of an exit code when the helper never started:
@@ -743,7 +754,7 @@ FunctionEnd
   ; Close and repair the tree before any path-based link cleanup. Ownership
   ; and ACL changes operate on the same no-follow handles that were checked,
   ; so a pre-created root or a concurrent descendant swap cannot redirect them.
-  !insertmacro SanitizeDescendantsKeepingSealedTree "${GEZEL_DATA_DIR}" "existing machine-service data" "service" "shared,service" SkipNssm
+  !insertmacro SanitizeDescendantsKeepingSealedTree "${GEZEL_DATA_DIR}" "existing machine-service data" "service" "shared,service" "shared" SkipNssm
   !insertmacro NeutralizeReparseDescendants "${GEZEL_DATA_DIR}" "Gezel machine-service data" SkipNssm "${GEZEL_SHARED_DIR}"
 
   ; Private root: SYSTEM + Administrators only until the per-service SID exists.
@@ -794,7 +805,8 @@ FunctionEnd
   ; independently of this policy check; the check does not authorize a later
   ; path-based traversal. Links inside a workspace (pnpm) remain supported.
   !insertmacro AssertReparseDescendantsClean "${GEZEL_SHARED_DIR}" "Gezel machine-shared product" SkipNssm
-  !insertmacro SanitizeDescendants "${GEZEL_SHARED_DIR}" "machine-shared product" SkipNssm
+  ; projects and gezels are the folders every account may modify (below).
+  !insertmacro SanitizeDescendantsWithZones "${GEZEL_SHARED_DIR}" "machine-shared product" "projects,gezels" "projects,gezels" SkipNssm
   nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SHARED_DIR}" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /L'
   Pop $0
   ${If} $0 != 0

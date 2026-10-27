@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   foldInflection,
+  groundingWords,
   proactiveRetrievalTerms,
   queryTerms,
   searchTokens,
+  textGroundsWords,
   textMatchesAnyTerm,
   tokenizeText,
 } from './query-terms.js';
@@ -100,6 +102,29 @@ describe('foldInflection', () => {
     }
     expect(foldInflection('boxes')).toBe('box');
     expect(foldInflection('uses')).toBe('uses');
+  });
+
+  // 1.26299.99 folded these to `part` and `stor`, which also find "partition",
+  // "storage" and "story".
+  it('never folds below the word itself', () => {
+    expect(queryTerms('parties stories')).toEqual(['parties', 'party', 'stories', 'story']);
+    expect(queryTerms('stored')).toEqual(['store']);
+    expect(queryTerms('dependencies')).toEqual(['dependenc']);
+  });
+
+  it('grounds a hit only in a word the person typed, in any of its forms', () => {
+    const words = groundingWords('Who is coming to the parties, and where is it stored?');
+    expect(textGroundsWords('The party starts at eight.', words)).toBe(true);
+    expect(textGroundsWords('Keep it in the store room.', words)).toBe(true);
+    expect(textGroundsWords('A disk partition table.', words)).toBe(false);
+    expect(textGroundsWords('Cloud storage pricing.', words)).toBe(false);
+    const heading = groundingWords('fix the heading');
+    expect(textGroundsWords('An h1 heading and its headings.', heading)).toBe(true);
+    expect(textGroundsWords('The HTTP header block.', heading)).toBe(false);
+    expect(textGroundsWords('export class Renderer {}', groundingWords('render'))).toBe(true);
+    expect(textGroundsWords('export function Transition()', groundingWords('transitions'))).toBe(
+      true,
+    );
   });
 
   it('keeps grounding in step with the search: a folded term matches the base form', () => {

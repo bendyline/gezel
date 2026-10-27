@@ -114,9 +114,36 @@ export function findEgressIndicators(text: string): EgressIndicator[] {
 const MAX_SCANNED_CHARS = 4 * 1024 * 1024;
 
 /**
+ * Argument keys whose value is text written into a document or file, not a
+ * place the call goes, compared without case, `_` or `-`. The tripwire never
+ * reads what a gezel writes (see the header), but the bridge and the `/v1`
+ * screen walk whole argument objects, so in 1.26299.99 a DocBlocks
+ * `convert_document` whose Markdown mentioned `fe80::1` or `transfer.sh`, or
+ * an editor's `new_string`, was refused with "Do not retry". Paths, URIs and
+ * commands beside them are still read.
+ */
+const CONTENT_KEYS = new Set([
+  'markdown',
+  'content',
+  'contents',
+  'text',
+  'filetext',
+  'newstring',
+  'oldstring',
+  'newtext',
+  'oldtext',
+  'patch',
+  'diff',
+]);
+
+/** A patch an app is applying (Codex `apply_patch`, a unified diff): text written into files. */
+const PATCH_TEXT = /^\s*(?:\*\*\* Begin Patch\b|diff --git |--- [^\n]*\n\+\+\+ )/;
+
+/**
  * Every indicator in a structured tool argument. Arrays of strings are also
  * scanned joined with spaces, so an argv like `["unshare", "-Urm"]` reads as
- * the command it is.
+ * the command it is. Text being written ({@link CONTENT_KEYS}, patches) is
+ * skipped.
  */
 export function findEgressIndicatorsInValue(value: unknown): EgressIndicator[] {
   const texts: string[] = [];
@@ -129,12 +156,20 @@ export function findEgressIndicatorsInValue(value: unknown): EgressIndicator[] {
   };
   const walk = (node: unknown, depth: number) => {
     if (budget <= 0 || depth > 32) return;
-    if (typeof node === 'string') take(node);
-    else if (Array.isArray(node)) {
-      if (node.length > 1 && node.every((item) => typeof item === 'string')) take(node.join(' '));
+    if (typeof node === 'string') {
+      if (!PATCH_TEXT.test(node)) take(node);
+    } else if (Array.isArray(node)) {
+      if (node.length > 1 && node.every((item) => typeof item === 'string')) {
+        take(node.filter((item) => !PATCH_TEXT.test(item)).join(' '));
+      }
       for (const item of node) walk(item, depth + 1);
     } else if (node && typeof node === 'object') {
-      for (const item of Object.values(node)) walk(item, depth + 1);
+      for (const [key, item] of Object.entries(node)) {
+        if (typeof item === 'string' && CONTENT_KEYS.has(key.toLowerCase().replace(/[_-]/g, ''))) {
+          continue;
+        }
+        walk(item, depth + 1);
+      }
     }
   };
   walk(value, 0);

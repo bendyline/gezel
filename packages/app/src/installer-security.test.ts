@@ -333,9 +333,16 @@ describe('Windows machine-service installer security', () => {
     expect(hook).toContain('!define GEZEL_SERVICE_TREE "${GEZEL_DATA_DIR}\\service"');
     // The data root holds two trust zones besides its private tree: the shared
     // tree every local account writes, and the published service code. A hard
-    // link may not join names across them (ResetTreeAcl.cs RequireOneZone).
+    // link may not join names across them, and only in the shared tree, which
+    // every account writes anyway, may a file keep a name outside the data
+    // root (ResetTreeAcl.cs KeepsOutsideName).
     expect(hook).toContain(
-      `${dataRootSweep} "existing machine-service data" "service" "shared,service" SkipNssm`,
+      `${dataRootSweep} "existing machine-service data" "service" "shared,service" "shared" SkipNssm`,
+    );
+    // pnpm links a machine-shared project's packages from the account's own
+    // store; refusing them dropped GezelService on upgrade (1.26299.99).
+    expect(hook).toContain(
+      '!insertmacro SanitizeDescendantsWithZones "${GEZEL_SHARED_DIR}" "machine-shared product" "projects,gezels" "projects,gezels" SkipNssm',
     );
     expect(hook.match(/!insertmacro SanitizeDescendantsKeepingSealedTree /g)).toHaveLength(1);
 
@@ -363,10 +370,10 @@ describe('Windows machine-service installer security', () => {
     const otherwise = keeping.indexOf('${Else}');
     expect(noRecord).toBeGreaterThanOrEqual(0);
     expect(keeping.slice(noRecord, otherwise)).toContain(
-      `!insertmacro RepairTreeAcl "\${PATH}" "\${SUBJECT}" ' -SeparateZones "\${ZONES}"' \${FAILURE_LABEL}`,
+      `!insertmacro RepairTreeAcl "\${PATH}" "\${SUBJECT}" ' -SeparateZones "\${ZONES}" -OpenZones "\${OPEN}"' \${FAILURE_LABEL}`,
     );
     expect(keeping.slice(otherwise)).toContain(
-      `' -SeparateZones "\${ZONES}" -KeepSealedChild "\${TREE}" -SealedSha "$GezelPublishedTreeSha"'`,
+      `' -SeparateZones "\${ZONES}" -OpenZones "\${OPEN}" -KeepSealedChild "\${TREE}" -SealedSha "$GezelPublishedTreeSha"'`,
     );
   });
 

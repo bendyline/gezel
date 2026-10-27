@@ -151,6 +151,11 @@ describe('area pass (deep-pass tier 2)', () => {
       await writeFile(join(dir, 'lib', 'render', `r${i}.ts`), `export const r${i} = ${i};\n`);
     }
     await writeFile(join(dir, 'lib', 'index.ts'), 'export * from "./parse/p0";\n');
+    // Documents linking a README are not code depending on it.
+    const render = join(dir, 'lib', 'render');
+    await writeFile(join(render, 'README.md'), '# Render\n\nDraws the parsed tree.\n');
+    await writeFile(join(render, 'GUIDE.md'), '# Guide\n\nSee [the overview](README.md).\n');
+    await writeFile(join(render, 'FAQ.md'), '# FAQ\n\nAlso [the overview](README.md).\n');
     // A second importer: the map lists only files more than one file leans on.
     await writeFile(
       join(dir, 'lib', 'render', 'r0.ts'),
@@ -197,6 +202,8 @@ describe('area pass (deep-pass tier 2)', () => {
     ]);
     expect(codebase.areas[0]?.keyFiles).toEqual([{ path: 'lib/index.ts', purpose: 'the entry' }]);
     expect(codebase.loadBearing.map((f) => f.path)).toContain('lib/parse/p0.ts');
+    // 1.26299.99 counted documentation links as imports.
+    expect(codebase.loadBearing.map((f) => f.path)).not.toContain('lib/render/README.md');
   });
 
   it('keeps a large test or fixture folder as one area', async () => {

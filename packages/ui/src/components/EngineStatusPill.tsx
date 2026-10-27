@@ -34,6 +34,7 @@ import type {
 import {
   CANONICAL_PROFILES,
   DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
+  DEVICE_HARD_TEMPERATURE_C,
   displayName,
   isKnownProfileId,
 } from '@bendyline/gezel';
@@ -1244,7 +1245,7 @@ function EngineStatusPillForProvider({
                       ? 'Gezel waits for safe temperature and throttle readings.'
                       : deviceSafetyMode === 'off'
                         ? 'Machine health management is off.'
-                        : 'Gezel reports machine health without pausing below the 95\u00b0C hard limit.'}
+                        : `Gezel reports machine health without pausing below the ${DEVICE_HARD_TEMPERATURE_C}\u00b0C hard limit.`}
                 </span>
                 {deviceSafetyError && (
                   <span className="engine-pill-health-policy-error" role="alert">

@@ -228,11 +228,26 @@ class Reader {
       if (pos + 1 + len > this.buf.length) throw new DnsDecodeError('label runs past the packet');
       length += len + 1;
       if (length > MAX_NAME_LENGTH) throw new DnsDecodeError('name too long');
-      labels.push(this.buf.toString('utf8', pos + 1, pos + 1 + len));
+      labels.push(decodeLabel(this.buf.subarray(pos + 1, pos + 1 + len)));
       pos += 1 + len;
     }
     this.offset = resumeAt ?? pos;
     return labels.join('.');
+  }
+}
+
+// Lossy decoding is what made a crafted name dangerous: 22 bytes of 0xFF
+// decode to 22 replacement characters, which re-encode to 66 bytes, and the
+// legacy answer that echoes the question then threw "DNS label too long"
+// from a socket handler and took the daemon down (1.26299.99). Strict UTF-8
+// (RFC 6762 §16) makes every decoded label re-encode to its own bytes.
+const LABEL_DECODER = new TextDecoder('utf-8', { fatal: true });
+
+function decodeLabel(bytes: Buffer): string {
+  try {
+    return LABEL_DECODER.decode(bytes);
+  } catch {
+    throw new DnsDecodeError('label is not valid UTF-8');
   }
 }
 

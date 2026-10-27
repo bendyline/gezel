@@ -119,6 +119,7 @@ import {
 import { runWorkspaceScript } from '../../workspace/runner.js';
 import { checkPlaywrightApproval, runNpx, runPackageScript } from '../../workspace/scripts.js';
 import { isFirstPartyCaller } from '../auth.js';
+import { CAMERA_PIXELS_WITHHELD, callerMaySeeFilePixels } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
 import { mutationActor } from '../mutation-actor.js';
 import { buildTimeline } from './timeline.js';
@@ -1887,6 +1888,13 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         { error: `invalid request: ${err instanceof Error ? err.message : String(err)}` },
         400,
       );
+    }
+    // A copy would carry a camera's keyframe out of its corpus, where no
+    // pixel check applies to a later read.
+    const project = await ctx.store.getProject(id).catch(() => null);
+    const source = await ctx.store.resolveProjectArtifactReadPath(id, body.source);
+    if (project && source && !(await callerMaySeeFilePixels(ctx, c, project, source))) {
+      return c.json({ error: CAMERA_PIXELS_WITHHELD }, 403);
     }
     try {
       const result = await ctx.store.copyProjectArtifactToWorkspace(id, body.source, body.dest, {

@@ -292,8 +292,14 @@ vi.mock('@bendyline/gezel-service', () => ({
 }));
 
 // Imports must come after vi.mock so they pick up the mocked versions.
-const { SupervisedService, connectOrStart, gracefullyStop, healthWithTimeout, stopProcessByPid } =
-  await import('./index.js');
+const {
+  QUIT_GRACEFUL_STOP_MS,
+  SupervisedService,
+  connectOrStart,
+  gracefullyStop,
+  healthWithTimeout,
+  stopProcessByPid,
+} = await import('./index.js');
 const { resolveMode, resolvePerUserMode } = await import('./mode.js');
 const { resolveAutostartNodePath } = await import('../autostart/runtime.js');
 const { resolveNativeBinaryPath, verifyLlamaBinaryAgainstCheckoutPin } = await import(
@@ -2005,6 +2011,29 @@ describe('health lifecycle', () => {
 });
 
 describe('graceful child shutdown', () => {
+  // A 27B model's save-and-stop never fit in 3 s, so every quit ended in a
+  // forced stop (1.26299.99 audit). Restarts keep the short window.
+  it('gives a quitting daemon the longer window', async () => {
+    const svc = new SupervisedService(
+      'local-spawn-dev',
+      'https://127.0.0.1:44481',
+      'token',
+      'CERT',
+      baseOpts({ devSpawn: true }),
+    );
+    const child = makeFakeChild();
+    svc.attachSpawned(child);
+    vi.mocked(stopOwnedDaemon).mockClear();
+
+    await svc.shutdown();
+
+    expect(QUIT_GRACEFUL_STOP_MS).toBeGreaterThan(3_000);
+    expect(stopOwnedDaemon).toHaveBeenCalledWith(child, expect.anything(), {
+      graceMs: QUIT_GRACEFUL_STOP_MS,
+      forceMs: 3_000,
+    });
+  });
+
   it('delegates owned-child shutdown to the shared stdin/tree lifecycle helper', async () => {
     const child = makeFakeChild();
     const logger = baseOpts().logger;

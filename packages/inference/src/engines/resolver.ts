@@ -38,7 +38,6 @@ import {
   mxcInstallDir,
   mxcTarballEntry,
   resolvePlatformKey,
-  windowsHeadlessSpawnOptions,
 } from '@bendyline/gezel/native';
 import * as tar from 'tar';
 import {
@@ -130,7 +129,7 @@ export interface ResolveEngineOptions {
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
   // ── test / dev seams ──
-  /** Pre-resolved token: `undefined` = auto-resolve; `null` = explicitly none. */
+  /** Pre-resolved token: `undefined` = from the environment; `null` = explicitly none. */
   token?: string | null;
   /** Override the source-pinned SHA256SUMS digest (tests). */
   expectedSha256sumsDigest?: string;
@@ -770,16 +769,18 @@ export async function* resolveEngine(
   // `bendyline/gezel` is public, so release metadata and assets are readable
   // anonymously. A token stays OPTIONAL and is used when present purely to
   // lift GitHub's 60-request/hour unauthenticated API rate limit. Do not
-  // reinstate a hard gate here: users who install from npm have no `gh`
-  // login, and requiring one would make on-device engines unreachable for
-  // every consumer outside this repo.
-  const token = opts.token !== undefined ? opts.token : await resolveGitHubToken();
+  // reinstate a hard gate here: users who install from npm have no token,
+  // and requiring one would make on-device engines unreachable for every
+  // consumer outside this repo.
+  const auth: GitHubAuth = {
+    token: opts.token !== undefined ? opts.token : resolveGitHubToken(),
+  };
 
   const baseFetch = opts.fetchImpl ?? globalThis.fetch;
   const tag = `native-v${version}`;
 
   // ── 1. Resolve release + assets ──
-  const release = await ghJson(`${apiBase}/repos/${REPO}/releases/tags/${tag}`, baseFetch, token);
+  const release = await ghJson(`${apiBase}/repos/${REPO}/releases/tags/${tag}`, baseFetch, auth);
   const archiveAsset = release.assets?.find((a) => a.name === archiveName);
   const sumsAsset = release.assets?.find((a) => a.name === 'SHA256SUMS');
   if (!archiveAsset) {
@@ -794,7 +795,7 @@ export async function* resolveEngine(
   }
 
   // ── 2. SHA256SUMS: verify own digest against the source pin, then parse ──
-  const sumsBytes = await ghBytes((sumsAsset as GhAsset).url, baseFetch, token);
+  const sumsBytes = await ghBytes((sumsAsset as GhAsset).url, baseFetch, auth);
   const sumsDigest = createHash('sha256').update(sumsBytes).digest('hex');
   if (!unpinned && sumsDigest !== expectedDigest) {
     yield* fail(
@@ -829,7 +830,7 @@ export async function* resolveEngine(
     url: (archiveAsset as GhAsset).url,
     destPath: archivePath,
     approxSizeBytes: (archiveAsset as GhAsset).size ?? 0,
-    fetchImpl: makeAuthedFetch(baseFetch, token),
+    fetchImpl: gitHubFetch(baseFetch, auth, 'application/octet-stream'),
     ...(opts.signal ? { signal: opts.signal } : {}),
   });
   let outcome: DownloadResult | undefined;
@@ -1053,34 +1054,45 @@ function stampEnv(
   }
 }
 
-async function resolveGitHubToken(): Promise<string | null> {
-  if (process.env.GEZEL_GITHUB_TOKEN) return process.env.GEZEL_GITHUB_TOKEN;
-  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
-  try {
-    const { execFileSync } = await import('node:child_process');
-    // Named host: a bare `gh auth token` answers for gh's default host, which
-    // can be a GitHub Enterprise server whose token must not go to github.com.
-    const out = execFileSync('gh', ['auth', 'token', '--hostname', 'github.com'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      ...windowsHeadlessSpawnOptions(),
-    });
-    return out.trim() || null;
-  } catch {
-    return null;
-  }
+/**
+ * An optional token, from the environment only. This module runs inside apps
+ * that embed Gezel, so it never borrows the user's GitHub CLI login: `gh` is
+ * not its credential to use, and a stale one used to fail public downloads.
+ */
+function resolveGitHubToken(): string | null {
+  return process.env.GEZEL_GITHUB_TOKEN || process.env.GITHUB_TOKEN || null;
 }
 
-function makeAuthedFetch(base: typeof fetch, token: string | null): typeof fetch {
-  return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
-    base(input, {
-      ...init,
-      headers: {
-        ...(init?.headers as Record<string, string> | undefined),
-        Accept: 'application/octet-stream',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    })) as typeof fetch;
+/** The token for one resolve; cleared once GitHub rejects it. */
+interface GitHubAuth {
+  token: string | null;
+}
+
+/**
+ * Fetch from GitHub with the optional token. The release is public, so a token
+ * GitHub rejects (expired, revoked) is dropped for the rest of the resolve and
+ * the request repeats anonymously instead of failing the install.
+ */
+function gitHubFetch(base: typeof fetch, auth: GitHubAuth, accept: string): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const send = () =>
+      base(input, {
+        ...init,
+        headers: {
+          ...(init?.headers as Record<string, string> | undefined),
+          Accept: accept,
+          ...(auth.token ? { Authorization: `Bearer ${auth.token}` } : {}),
+        },
+      });
+    const res = await send();
+    if (res.status !== 401 || !auth.token) return res;
+    await res.body?.cancel().catch(() => {});
+    log.warn(
+      '[engine-resolver] GitHub rejected the token from GEZEL_GITHUB_TOKEN / GITHUB_TOKEN (401); continuing anonymously',
+    );
+    auth.token = null;
+    return send();
+  }) as typeof fetch;
 }
 
 /**
@@ -1105,26 +1117,18 @@ function ghRetryLog(what: string) {
   };
 }
 
-async function ghJson(
-  url: string,
-  fetchImpl: typeof fetch,
-  token: string | null,
-): Promise<GhRelease> {
+async function ghJson(url: string, fetchImpl: typeof fetch, auth: GitHubAuth): Promise<GhRelease> {
+  const get = gitHubFetch(fetchImpl, auth, 'application/vnd.github+json');
   return retryTransient(
     async () => {
-      const res = await fetchImpl(url, {
-        headers: {
-          Accept: 'application/vnd.github+json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
+      const res = await get(url);
       if (!res.ok) {
         await res.body?.cancel().catch(() => {});
         // A transient status is thrown as HttpStatusError so retryTransient
         // takes another pass; 4xx becomes the terminal EngineUnavailableError.
         throw new HttpStatusError(
           res.status,
-          `GitHub API returned ${res.status} for ${url}${res.status === 404 ? ' (release not found — or no access while private)' : ''}`,
+          `GitHub API returned ${res.status} for ${url}${res.status === 404 ? ' (release not found)' : ''}`,
         );
       }
       return (await res.json()) as GhRelease;
@@ -1136,16 +1140,12 @@ async function ghJson(
 async function ghBytes(
   assetApiUrl: string,
   fetchImpl: typeof fetch,
-  token: string | null,
+  auth: GitHubAuth,
 ): Promise<Buffer> {
+  const get = gitHubFetch(fetchImpl, auth, 'application/octet-stream');
   return retryTransient(
     async () => {
-      const res = await fetchImpl(assetApiUrl, {
-        headers: {
-          Accept: 'application/octet-stream',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
+      const res = await get(assetApiUrl);
       if (!res.ok) {
         await res.body?.cancel().catch(() => {});
         throw new HttpStatusError(

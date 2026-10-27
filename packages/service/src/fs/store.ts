@@ -113,7 +113,6 @@ import {
   isSharedLibraryProject,
   isValidKokoroVoice,
   legacyDensityToGeneralistMode,
-  legacyRoleKey,
   nowIso,
   packageScriptsEdit,
   parseGezelMarkdown,
@@ -934,31 +933,34 @@ export class Store {
     } catch {
       return;
     }
-    const renamed = all.filter((g) => legacyRoleKey(g.role));
+    // Only a role still written in Dutch. `legacyRoleKey` also matches the
+    // English titles, which re-ran the about.md rewrite on every boot and
+    // reverted a Dutch title the person had put back (1.26299.99 audit).
+    const renamed = all.filter((g) => isLegacyRoleTitle(g.role));
     if (renamed.length === 0) return;
     const taken = new Set<string>(all.map((g) => g.roleBasedName).filter((s): s is string => !!s));
     let migrated = 0;
     for (const g of [...renamed].sort((a, b) => a.id.localeCompare(b.id))) {
       const detail = await this.tryGetGezel(g.id);
-      if (!detail?.role || !legacyRoleKey(detail.role)) continue;
+      if (!detail?.role || !isLegacyRoleTitle(detail.role)) continue;
       const dir = gezelDir(this.home, g.id, this.external);
       try {
-        if (isLegacyRoleTitle(detail.role)) {
-          const role = plainRoleTitle(detail.role);
-          if (detail.roleBasedName) taken.delete(detail.roleBasedName);
-          const roleBasedName = pickRoleBasedName(role, taken);
-          taken.add(roleBasedName);
-          const updated = {
-            ...detail.parsed,
-            frontmatter: { ...detail.parsed.frontmatter, role, roleBasedName },
-          };
-          await writeFileAtomic(join(dir, 'gezel.md'), serializeGezelMarkdown(updated));
-          migrated++;
-        }
+        // about.md first: once gezel.md carries the English title, this
+        // gezel is never selected again.
         const about = plainRoleProse(detail.about, detail.role);
         if (!detail.parsed.frontmatter.fixedFunction && about !== detail.about) {
           await writeFileAtomic(join(dir, 'about.md'), about);
         }
+        const role = plainRoleTitle(detail.role);
+        if (detail.roleBasedName) taken.delete(detail.roleBasedName);
+        const roleBasedName = pickRoleBasedName(role, taken);
+        taken.add(roleBasedName);
+        const updated = {
+          ...detail.parsed,
+          frontmatter: { ...detail.parsed.frontmatter, role, roleBasedName },
+        };
+        await writeFileAtomic(join(dir, 'gezel.md'), serializeGezelMarkdown(updated));
+        migrated++;
       } catch {
         /* best-effort — the next boot retries */
       }
@@ -4373,6 +4375,11 @@ export class Store {
     filePath: string,
   ): Promise<{ data: Buffer; mimeType: string } | null> {
     return this.artifacts.readProjectArtifactBinary(id, filePath);
+  }
+
+  /** The file {@link readProjectArtifactBinary} would open, or null when it would refuse. */
+  async resolveProjectArtifactReadPath(id: string, filePath: string): Promise<string | null> {
+    return this.artifacts.resolveProjectArtifactReadPath(id, filePath);
   }
 
   /**

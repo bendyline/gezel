@@ -325,7 +325,7 @@ export function LookoutSentenceBuilder({
                 }
               />{' '}
               Email
-              <span className="muted small"> — needs the Free security level</span>
+              <span className="muted small"> — needs the Unrestricted security level</span>
             </label>
             {d.email ? (
               <div className="lookout-builder-sub">

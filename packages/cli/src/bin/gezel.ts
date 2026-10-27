@@ -24,7 +24,9 @@ import {
   createTrustingFetch,
   discoverOrSpawn,
   isProcessAlive,
+  listProcessSnapshots,
   readRuntime,
+  requestDaemonHealth,
   resolveDaemonEntry,
   stopOwnedDaemon,
   stopProcessByPid,
@@ -68,6 +70,7 @@ import {
   shorthandEcho,
   workspaceCraftbookId,
 } from '../craftbook-shorthand.js';
+import { type DaemonStopHealth, planDaemonStop } from '../daemon-stop.js';
 import {
   CLI_ENGAGEMENT_MODE_USAGE,
   cliEngagementModeOption,
@@ -613,7 +616,10 @@ program
  * `pid=… alive=false`. Remove them only while they still name the process we
  * just stopped, so a daemon that started in between keeps its files.
  */
-async function clearStaleRuntime(stoppedPid: number): Promise<void> {
+async function clearStaleRuntime(
+  stoppedPid: number,
+  opts: { pidReused?: boolean } = {},
+): Promise<void> {
   const { readFile, rm } = await import('node:fs/promises');
   const { gezelPaths } = await import('@bendyline/gezel/paths');
   const runtime = gezelPaths().runtime;
@@ -621,7 +627,7 @@ async function clearStaleRuntime(stoppedPid: number): Promise<void> {
     (await readFile(runtime.pid, 'utf8').catch(() => '')).trim(),
     10,
   );
-  if (recorded !== stoppedPid || isProcessAlive(stoppedPid)) return;
+  if (recorded !== stoppedPid || (!opts.pidReused && isProcessAlive(stoppedPid))) return;
   await Promise.all(
     [
       runtime.pid,
@@ -653,15 +659,82 @@ async function stopUserDaemon(globals: CliGlobals): Promise<void> {
     return;
   }
   const runtime = await readRuntime();
-  if (!runtime) {
-    console.log('gezeld is not running');
-    return;
+  const plan = await planDaemonStop({
+    pid: runtime?.pid ?? null,
+    alive: isProcessAlive,
+    health: runtime ? await runtimeHealth(runtime) : null,
+    commandOf: processCommand,
+  });
+  switch (plan.kind) {
+    case 'not-running':
+      console.log('gezeld is not running');
+      return;
+    case 'stale':
+      await clearStaleRuntime(runtime!.pid);
+      console.log('gezeld is not running; removed the runtime files it left behind');
+      return;
+    case 'foreign':
+      await clearStaleRuntime(runtime!.pid, { pidReused: true });
+      console.log(
+        `gezeld is not running. Its old process id ${runtime!.pid} now belongs to another program, which was left alone; removed gezeld's leftover runtime files.`,
+      );
+      return;
+    case 'unconfirmed':
+      console.error(
+        `gezeld (pid ${runtime!.pid}) is not answering, and Gezel could not read the process list to confirm that pid is still gezeld, so it was not stopped.`,
+      );
+      process.exitCode = 1;
+      return;
+    case 'mismatch':
+      console.error(
+        `The Gezel service on port ${runtime!.port} reports pid ${plan.healthPid}, but runtime/pid says ${runtime!.pid}; stopped nothing. Run \`gezel status\` to see which is running.`,
+      );
+      process.exitCode = 1;
+      return;
+    case 'brake': {
+      const result = await (await connectOwned(globals)).emergencyStopChats();
+      console.log(
+        `This Gezel service belongs to the Gezel app, which would start it again, so it keeps running. Stopped its AI work instead (${result.cancelledTurns} active ${result.cancelledTurns === 1 ? 'chat' : 'chats'}). Quit the Gezel app to shut it down.`,
+      );
+      return;
+    }
+    case 'kill':
+      if (await stopDaemonPid(runtime!.pid)) {
+        console.log(`stopped gezeld pid=${runtime!.pid}`);
+      } else {
+        console.error(`failed to confirm gezeld pid=${runtime!.pid} stopped`);
+        process.exitCode = 1;
+      }
   }
-  if (await stopDaemonPid(runtime.pid)) {
-    console.log(`stopped gezeld pid=${runtime.pid}`);
-  } else {
-    console.error(`failed to confirm gezeld pid=${runtime.pid} stopped`);
-    process.exitCode = 1;
+}
+
+/** The fields of the recorded daemon's `/api/health`, or null when nothing answers. */
+async function runtimeHealth(
+  runtime: NonNullable<Awaited<ReturnType<typeof readRuntime>>>,
+): Promise<DaemonStopHealth | null> {
+  try {
+    const response = await requestDaemonHealth(runtime.baseUrl, {
+      fetch: runtime.cert ? createTrustingFetch({ cert: runtime.cert }) : globalThis.fetch,
+      timeoutMs: 3_000,
+    });
+    if (!response.ok) return null;
+    const body = (response.body ?? {}) as { pid?: unknown; hostedBy?: unknown };
+    return {
+      ...(typeof body.pid === 'number' ? { pid: body.pid } : {}),
+      ...(body.hostedBy === 'app' || body.hostedBy === 'standalone'
+        ? { hostedBy: body.hostedBy }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function processCommand(pid: number): Promise<string | null> {
+  try {
+    return (await listProcessSnapshots()).find((entry) => entry.pid === pid)?.command ?? '';
+  } catch {
+    return null;
   }
 }
 

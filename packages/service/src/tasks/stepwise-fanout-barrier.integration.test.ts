@@ -155,3 +155,45 @@ it('ordinary batch children settle without scanning siblings or redispatching th
     redispatch.mockRestore();
   }
 }, 30_000);
+
+// 1.26299.99 woke only spawn hosts, so a step that made subtasks with
+// create_task waited for the stuck-step sweep, eight minutes and a "stuck"
+// nudge later.
+it('wakes the step that made subtasks once the last of them settles', async () => {
+  const { store, tasks } = svc.context;
+  const project = await store.createProject({ name: 'Subtask wake' });
+  const lead = await store.createGezel({ name: 'Wake Lead', role: 'Developer' });
+  const parent = await tasks.create(project.id, {
+    title: 'Plan and split the work',
+    description: 'The lead splits the work into subtasks and merges their results.',
+    assignee: { kind: 'gezel', gezelId: lead.id },
+    createdBy: { kind: 'user' },
+    steps: [{ id: 'merge', name: 'Merge', prompt: 'Merge the subtask results.', terminal: true }],
+    entryStepId: 'merge',
+  });
+  const subtask = (title: string) =>
+    tasks.create(project.id, {
+      title,
+      description: 'One part of the lead plan, made with create_task.',
+      assignee: { kind: 'user' },
+      createdBy: { kind: 'gezel', gezelId: lead.id },
+      parentTaskRef: parent.ref,
+      steps: [{ id: 'do', name: 'Do', prompt: 'Do the part.', terminal: true }],
+      entryStepId: 'do',
+    });
+  const first = await subtask('First part');
+  const second = await subtask('Second part');
+  const redispatch = vi.spyOn(tasks, 'redispatchActiveStep');
+  try {
+    await tasks.completeStep(project.id, first.num, 'do');
+    expect(redispatch).not.toHaveBeenCalled();
+    await tasks.completeStep(project.id, second.num, 'do');
+    expect(redispatch).toHaveBeenCalledWith(
+      project.id,
+      parent.num,
+      expect.stringContaining(`last subtask ${second.ref} settled`),
+    );
+  } finally {
+    redispatch.mockRestore();
+  }
+}, 30_000);

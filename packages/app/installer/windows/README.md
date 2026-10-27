@@ -11,7 +11,7 @@ It lives under `resources\installer-security\` in the administrator-
 protected application directory. NSIS runs it elevated:
 
     gezel-acl reset-tree-acl -Root <dir> [-KeepSealedChild <name> -SealedSha <sha256>]
-                             [-SeparateZones <name,name>]
+                             [-SeparateZones <name,name>] [-OpenZones <name,name>]
     gezel-acl grant-service-sid -Path <dir> -Service <name> -Grant <specs>
 
 Exit 0 on success, 1 when the operation was refused, 2 on a usage error. Any
@@ -55,6 +55,15 @@ The replacement has these invariants:
   purpose (the speech-model store, uv's cache). Opening a handle pins object
   identity, not all names: adding a new name for that same in-tree object does
   not redirect the operation to a different object.
+- In a zone every local account can already write (`-OpenZones`, `.` for the
+  root's own zone: the machine-shared `projects` and `gezels` folders), a file
+  whose other name is outside the tree is not refused. pnpm links a project's
+  packages from the account's own store and a local git clone links its
+  objects, and refusing them dropped GezelService on upgrade. The file keeps
+  its access exactly: inherited entries become explicit and its DACL is
+  protected, so the grants NSIS publishes afterwards, which propagate to
+  inheriting children, never reach the other name. A link joining two zones is
+  still refused.
 - Use `NtSetSecurityObject` to change only the opened object. High-level ACL
   APIs can trigger their own propagation, bypassing the controlled traversal.
 - Close the root to SYSTEM/Administrators and reset descendants to inherited

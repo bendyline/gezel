@@ -185,7 +185,7 @@ export function CameraBindingCard({
           </div>
           <div className="small muted">
             {live?.review === 'no-model'
-              ? 'No image reader is installed, so it only notices movement (Settings → Artificial Intelligence).'
+              ? 'No image reader is installed, so it only notices movement (Settings → Image recognition).'
               : live?.review === 'held'
                 ? 'Recognizing waits while Gezel is set to chat only.'
                 : live?.lastEventAt
