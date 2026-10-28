@@ -409,16 +409,6 @@ FunctionEnd
   ${EndIf}
 !macroend
 
-; nsExec pushes "error" instead of an exit code when the helper never started:
-; it is missing, or App Control refused it. Callers test `$0 != 0`, a string
-; comparison, so that still fails closed; this only names the cause.
-!macro PopAclToolExit
-  Pop $0
-  ${If} $0 == "error"
-    DetailPrint "ERROR: Windows did not start ${GEZEL_ACL_TOOL}."
-  ${EndIf}
-!macroend
-
 !macro RepairTreeAcl PATH SUBJECT HELPER_ARGS FAILURE_LABEL
   ${IfNot} ${FileExists} "${GEZEL_ACL_TOOL}"
     DetailPrint "ERROR: the handle-based ACL repair tool is missing."
