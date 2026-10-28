@@ -87,6 +87,7 @@ export function defaultAgentMarkdown(params: {
           ...(ff.defaults && Object.keys(ff.defaults).length > 0
             ? [`  defaults: ${JSON.stringify(ff.defaults)}`]
             : []),
+          ...(ff.requiresInputImage ? ['  requiresInputImage: true'] : []),
         ]
       : []),
     '---',
