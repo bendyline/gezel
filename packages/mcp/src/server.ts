@@ -10414,7 +10414,7 @@ const promptGuidesShown = new Set<string>();
 
 server.tool(
   'generate_image',
-  "Generate or edit an image from a plain-sentence description; set `aspectRatio` for its shape. When called with just a prompt, produces a fresh image. When `inputImages` is supplied, the prompt acts as an edit/transform on the source(s) — e.g. 'just like this one but yellow', 'add a hat', 'compose these together'. Routes through whichever image engine the user has selected: the local stable-diffusion.cpp sidecar (default; img2img on a single source), Google Nano Banana 2 (multi-image edits / compositing), or OpenAI GPT Image 2 (edit / compositing). Output PNG is written to the project's `artifacts/generated/` folder and can be read back via `read_artifact`. If the prompt is for a logo and `saveAs` is omitted, the workspace copy defaults to `assets/logo.png` so HTML/CSS can reference a stable path. For shape and size pass `aspectRatio` ('9:16' for a phone wallpaper or story, '16:9' for a banner or slide, '4:5' for a portrait post) and `quality` ('draft' for a quick look, 'high' for a large print); the service fits both to the model. Use width and height only when the user named exact pixels, and omit steps. Write the prompt as sentences describing subject, setting, light and style; put any words the image must show in quotes. **Tip:** to iterate on an image you just generated, pass its `artifactPath` (returned by the previous call) — far cheaper than re-encoding the bytes. Cloud providers may surface a one-time confirmation card to the user before each call (the user can choose Always allow to silence it). On error the tool returns a message directing the user to the Image generation settings.",
+  "Generate or edit an image from a plain-sentence description; set `aspectRatio` for its shape. When called with just a prompt, produces a fresh image. When `inputImages` is supplied, the prompt acts as an edit/transform on the source(s) — e.g. 'just like this one but yellow', 'add a hat', 'compose these together'. Routes through whichever image engine the user has selected: the local stable-diffusion.cpp sidecar (default; an editing model such as Qwen Image Edit or FLUX.2 Klein follows the prompt as an instruction on up to three sources), Google Nano Banana 2 (multi-image edits / compositing), or OpenAI GPT Image 2 (edit / compositing). Output PNG is written to the project's `artifacts/generated/` folder and can be read back via `read_artifact`. If the prompt is for a logo and `saveAs` is omitted, the workspace copy defaults to `assets/logo.png` so HTML/CSS can reference a stable path. For shape and size pass `aspectRatio` ('9:16' for a phone wallpaper or story, '16:9' for a banner or slide, '4:5' for a portrait post) and `quality` ('draft' for a quick look, 'high' for a large print); the service fits both to the model. Use width and height only when the user named exact pixels, and omit steps. Write the prompt as sentences describing subject, setting, light and style; put any words the image must show in quotes. **Tip:** to iterate on an image you just generated, pass its `artifactPath` (returned by the previous call) — far cheaper than re-encoding the bytes. Cloud providers may surface a one-time confirmation card to the user before each call (the user can choose Always allow to silence it). On error the tool returns a message directing the user to the Image generation settings.",
   {
     prompt: z
       .string()
@@ -10482,7 +10482,7 @@ server.tool(
       )
       .optional()
       .describe(
-        'Source images for edit / reference-driven generation. Cloud providers accept multiple references for compositing; the local sd-cpp engine uses only the first (img2img). Not every local model supports img2img — when the resolved model does not, the sources are dropped and the result notes that the image was generated from the prompt alone. Prefer `artifactPath` over base64 when the image lives in the project.',
+        'Source images for edit / reference-driven generation. Cloud providers accept multiple references for compositing; the local engine picks an installed editing model, which takes up to three, and older local models use only the first (img2img). When no installed model can edit, the sources are dropped and the result notes that the image was generated from the prompt alone. Prefer `artifactPath` over base64 when the image lives in the project.',
       ),
     strength: z
       .number()
@@ -10490,7 +10490,13 @@ server.tool(
       .max(1)
       .optional()
       .describe(
-        'Edit strength when `inputImages` is supplied (0 = preserve source, 1 = ignore it). Local sd-cpp only; cloud providers ignore.',
+        'Edit strength when `inputImages` is supplied (0 = preserve source, 1 = ignore it). Local img2img models only; editing models and cloud providers ignore it.',
+      ),
+    requireEdit: z
+      .boolean()
+      .optional()
+      .describe(
+        'Set true when the result must be a change to `inputImages`: fail instead of drawing from the prompt alone when no installed model can edit.',
       ),
     saveAs: z
       .string()
@@ -10516,6 +10522,7 @@ server.tool(
           ? { inputImages: args.inputImages }
           : {}),
         ...(args.strength !== undefined ? { strength: args.strength } : {}),
+        ...(args.requireEdit ? { requireEdit: true } : {}),
         ...(saveAs ? { saveAs } : {}),
         capStepsAtRecommended: true,
         // The daemon holds the size to about a megapixel only when a local

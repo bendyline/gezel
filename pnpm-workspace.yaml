@@ -49,6 +49,13 @@ networkConcurrency: 8
 # rose to seven days on 2026-10-02 — delete those once they are a week old.
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
+  # Exact security fixes for the release audit; no package-wide age exemption.
+  - "@modelcontextprotocol/sdk@1.32.2"
+  - "body-parser@2.4.0"
+  - "hono@4.13.14"
+  - "ip-address@10.7.5"
+  - "nodemailer@10.2.1"
+  - "qs@6.16.1"
   # Required for Copilot's experimental image-generation API.
   - "@github/copilot-sdk@1.0.26"
   - "@github/copilot-sdk-darwin-arm64@1.0.26"
@@ -106,12 +113,21 @@ ignoredOptionalDependencies:
   - "@napi-rs/canvas"
 
 overrides:
+  # Security floors for the October 2026 release audit; preserve major APIs.
+  "body-parser": "2.4.0"
+  "follow-redirects": "1.16.1"
+  "markdown-it": "14.3.3"
+  "katex": "0.18.2"
+  "undici@>=6 <7": "6.29.1"
+  "undici@>=7 <8": "7.30.1"
+  "undici@>=8 <9": "8.12.3"
+  "zod@>=4 <5": "4.6.7"
   # Keep direct declarations exact when they are covered by an exact override.
   # pnpm's pre-script dependency check compares the original manifest specifier
   # with the override-normalized lockfile importer and otherwise warns even
   # though a frozen install validates successfully.
   "@hono/node-server": "2.0.11"
-  "@modelcontextprotocol/sdk": "1.31.0"
+  "@modelcontextprotocol/sdk": "1.32.2"
   # plist (electron-builder) still resolves the 0.8 line.
   "@xmldom/xmldom@<0.9": "0.8.15"
   "adm-zip": "0.6.1"
@@ -120,17 +136,17 @@ overrides:
   # major until it widens that range (GHSA-ggr8-5vv4-36mx).
   "deepmerge-ts": "8.0.1"
   "dompurify@>=3 <4": "3.4.17"
-  "fast-uri": "3.1.8"
+  "fast-uri": "3.1.9"
   "form-data": "4.0.6"
-  "hono": "4.13.9"
-  "ip-address": "10.3.1"
+  "hono": "4.13.14"
+  "ip-address": "10.7.5"
   "js-yaml@<4": "3.15.2"
   "js-yaml@>=4 <5": "4.3.2"
   "mermaid@>=11 <12": "11.16.1"
   # mailparser and imapflow pin nodemailer exactly (imapflow 1.4.8 at 9.0.3), so
   # the override keeps one copy that carries the addressparser fixes. 10.0.6
   # fixed GHSA-v53p-9fqp-m79j; 9.x has no backport.
-  "nodemailer": "10.0.12"
+  "nodemailer": "10.2.1"
   # kokoro-js 1.2.1 (the latest release) still declares Transformers.js ^3.5.1.
   # Its whole surface (StyleTextToSpeech2Model, AutoTokenizer, Tensor, RawAudio,
   # env.backends) is unchanged in 4.x, and the service hands it Tensors built
@@ -142,7 +158,7 @@ overrides:
   "protobufjs": "7.6.5"
   # express 5 still locks 2.0.7; 2.0.8 fixes GHSA-jqcg-44mw-7w3h.
   "proxy-addr": "2.0.8"
-  "qs": "6.15.2"
+  "qs": "6.16.1"
   "react-router": "7.18.1"
   # kokoro-js pulls in phonemizer, which embeds GPL-3 eSpeak NG. Gezel
   # phonemizes with @bendyline/gezel/kokoro and calls generate_from_ids, so the
@@ -156,4 +172,6 @@ overrides:
   "ws": "8.21.1"
 
 patchedDependencies:
+  "zod@4.6.7": "patches/zod@4.6.7.patch"
+  "zod@3.25.76": "patches/zod@3.25.76.patch"
   "app-builder-lib@26.15.3": "patches/app-builder-lib@26.15.3.patch"

@@ -355,3 +355,50 @@ describe('SessionCacheController — one-shot sessions', () => {
     expect(() => ctrl.markEphemeral('run-1')).not.toThrow();
   });
 });
+
+describe('cache maintenance under slow snapshot I/O', () => {
+  it('coalesces reconcile ticks until the original eviction finishes', async () => {
+    const ctrl = new SessionCacheController({ disableReconcileTimer: true });
+    const adapter = new MockAdapter('llama-cpp');
+    let release!: () => void;
+    const saving = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    adapter.reportUsageImpl = vi.fn(async () => [
+      { sessionId: 'old', tokenCount: 100000, estBytes: 10 * 1024 ** 3, lastUsedAt: 1 },
+    ]);
+    adapter.evict = vi.fn(async () => {
+      await saving;
+    });
+    ctrl.registerAdapter(adapter);
+    const first = ctrl.reconcileProvider('llama-cpp');
+    await vi.waitFor(() => expect(adapter.evict).toHaveBeenCalledTimes(1));
+    const ticks = Array.from({ length: 20 }, () => ctrl.reconcileProvider('llama-cpp'));
+    await Promise.resolve();
+    expect(adapter.reportUsageImpl).toHaveBeenCalledTimes(1);
+    expect(adapter.evict).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.all([first, ...ticks]);
+    expect(ctrl.getStats('llama-cpp')?.warmSessionCount).toBe(0);
+  });
+
+  it('ignores a late usage response from an adapter replaced during the poll', async () => {
+    const ctrl = new SessionCacheController({ disableReconcileTimer: true });
+    const old = new MockAdapter();
+    let reply!: (value: readonly EngineCacheUsage[]) => void;
+    old.reportUsageImpl = () =>
+      new Promise((resolve) => {
+        reply = resolve;
+      });
+    ctrl.registerAdapter(old);
+    const poll = ctrl.reconcileProvider('mlx');
+    await Promise.resolve();
+    const replacement = new MockAdapter();
+    ctrl.registerAdapter(replacement);
+    ctrl.recordTurn({ providerName: 'mlx', sessionId: 'new', approxPromptTokens: 10 });
+    reply([{ sessionId: 'old', tokenCount: 100000, estBytes: 10 * 1024 ** 3, lastUsedAt: 1 }]);
+    await poll;
+    expect(ctrl.getStats('mlx')?.sessions.map((s) => s.sessionId)).toEqual(['new']);
+    expect(replacement.evictCalls).toEqual([]);
+  });
+});

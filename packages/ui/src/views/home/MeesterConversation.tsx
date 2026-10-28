@@ -179,6 +179,7 @@ export function MeesterConversation({
         gezelName: activeGezelName,
         gezelGender: selectedGezel?.gender,
         fixedFunctionTool: selectedGezel?.fixedFunction?.tool,
+        fixedFunctionEdits: selectedGezel?.fixedFunction?.requiresInputImage,
       }),
     [
       activeGezelId,
@@ -186,6 +187,7 @@ export function MeesterConversation({
       meesterGezelId,
       selectedGezel?.gender,
       selectedGezel?.fixedFunction?.tool,
+      selectedGezel?.fixedFunction?.requiresInputImage,
     ],
   );
 

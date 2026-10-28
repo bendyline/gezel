@@ -120,6 +120,8 @@ interface ProviderState {
   gezelOutcomes: Map<string, { hits: number; misses: number }>;
   /** Sliding window of last 50 turn outcomes for `recentHitRate`. */
   recentOutcomes: boolean[];
+  reconciliation?: Promise<void>;
+  eviction?: Promise<void>;
 }
 
 function emptyHitsBySource(): HitsBySource {
@@ -417,6 +419,20 @@ export class SessionCacheController {
   async reconcileProvider(providerName: string): Promise<void> {
     const state = this.providers.get(providerName);
     if (!state) return;
+    if (state.reconciliation) return state.reconciliation;
+    const work = this.reconcileState(providerName, state);
+    state.reconciliation = work;
+    try {
+      await work;
+    } finally {
+      if (state.reconciliation === work) state.reconciliation = undefined;
+    }
+  }
+
+  private async reconcileState(providerName: string, state: ProviderState): Promise<void> {
+    // A slow snapshot must not be rediscovered and queued for eviction every tick.
+    await state.eviction;
+    if (this.providers.get(providerName) !== state) return;
     let usage: readonly EngineCacheUsage[];
     try {
       usage = await state.adapter.reportUsage();
@@ -424,6 +440,7 @@ export class SessionCacheController {
       this.logger.warn?.(`[cache] reportUsage failed for ${providerName}: ${err}`);
       return;
     }
+    if (this.providers.get(providerName) !== state) return;
     // Replace the entries map — adapter's view wins. We preserve
     // eviction priority across the rebuild (operator pinning shouldn't
     // be lost on reconcile).
@@ -460,6 +477,19 @@ export class SessionCacheController {
   private async enforceBudget(providerName: string): Promise<void> {
     const state = this.providers.get(providerName);
     if (!state) return;
+    if (state.eviction) return state.eviction;
+    const work = this.evictOverBudget(providerName, state);
+    if (!work) return;
+    state.eviction = work;
+    try {
+      await work;
+    } finally {
+      if (state.eviction === work) state.eviction = undefined;
+    }
+    if (this.providers.get(providerName) === state) await this.enforceBudget(providerName);
+  }
+
+  private evictOverBudget(providerName: string, state: ProviderState): Promise<void> | undefined {
     let totalBytes = 0;
     for (const entry of state.entries.values()) totalBytes += entry.bytes;
     if (totalBytes < state.budgetBytes * EVICTION_HIGH_WATERMARK) return;
@@ -488,11 +518,9 @@ export class SessionCacheController {
       `[cache] evicted ${toEvict.length} session(s) from ${providerName} ` +
         `(now ${(totalBytes / (1024 * 1024)).toFixed(1)} MB / ${(state.budgetBytes / (1024 * 1024)).toFixed(0)} MB)`,
     );
-    try {
-      await state.adapter.evict(toEvict);
-    } catch (err) {
+    return state.adapter.evict(toEvict).catch((err) => {
       this.logger.warn?.(`[cache] adapter.evict failed for ${providerName}: ${err}`);
-    }
+    });
   }
 
   private async reconcileAll(): Promise<void> {

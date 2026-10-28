@@ -75,11 +75,12 @@ export interface ImageGenerationInput {
   seed?: number;
   /**
    * Source images for image editing / reference-driven generation.
-   * Cloud providers accept multiple; sd-cpp's img2img path uses the
-   * first only (the others are dropped with a warning).
+   * Cloud providers accept multiple; a local model that reads references
+   * takes up to its limit, and sd-cpp's img2img path uses the first only
+   * (the others are dropped with a warning).
    */
   inputImages?: ImageInputBytes[];
-  /** Img2img strength (0 = keep source, 1 = ignore source). sd-cpp only. */
+  /** Img2img strength (0 = keep source, 1 = ignore source). sd-cpp img2img only. */
   strength?: number;
   /**
    * Optional callback fired as the engine advances through sampling
@@ -103,6 +104,17 @@ export class ImageGenerationCancelledError extends Error {
   constructor() {
     super('Image generation was cancelled');
     this.name = 'ImageGenerationCancelledError';
+  }
+}
+
+/** A model made only for editing was asked for a picture with nothing to edit. */
+export class ImageSourceRequiredError extends Error {
+  readonly code = 'image_source_required';
+  constructor(modelName: string) {
+    super(
+      `${modelName} changes a picture you give it. Attach the picture to change, or pick a model that draws new ones.`,
+    );
+    this.name = 'ImageSourceRequiredError';
   }
 }
 
@@ -153,6 +165,14 @@ export interface InstalledImageModelInfo {
   weightsKind?: 'checkpoint' | 'diffusion-model';
   /** Explicit catalog capability recorded at pull time; absent → resolve via the ladder. */
   supportsImg2Img?: boolean;
+  /**
+   * Resolved editing capability (see `resolveImageEditCapability`), so a
+   * caller across the machine broker or a paired server can choose a model
+   * without the engine's assessment map.
+   */
+  editMode?: 'reference' | 'img2img';
+  maxSourceImages?: number;
+  editOnly?: boolean;
 }
 
 export type ImageModelPullEvent =
@@ -202,6 +222,10 @@ export interface ImageModelPullSpec {
    * weights-kind default.
    */
   supportsImg2Img?: boolean;
+  /** Catalog `referenceImages`, persisted the same way. */
+  referenceImages?: { max: number };
+  /** Catalog `editOnly`, persisted the same way. */
+  editOnly?: boolean;
   /** Auxiliary files (VAE, text encoders) downloaded alongside the unet. */
   auxiliaryFiles: ImageModelAuxiliaryPullSpec[];
 }

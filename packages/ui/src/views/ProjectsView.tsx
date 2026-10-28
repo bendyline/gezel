@@ -56,6 +56,12 @@ import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPanePlaceholder } from '../components/ProjectPanePlaceholder.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
 import { type ProjectSectionTab, ProjectSectionTabs } from '../components/ProjectSectionTabs.js';
+import {
+  SettingCheck,
+  SettingField,
+  SettingsSection,
+  settingHintId,
+} from '../components/SettingsSection.js';
 import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import {
   createArtifactsContentContainer,
@@ -669,6 +675,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     );
   }, [projects, selected]);
   const projectLinkLimitReached = (selected?.linkedProjectIds?.length ?? 0) >= 32;
+  const showLinkedProjects =
+    selected !== null && runtimeCapabilities().index && !isSharedLibraryProject(selected);
+  const showAccessSection =
+    showLinkedProjects || runtimeCapabilities().knowledge || configuredCredentials.length > 0;
+  const showArchiveSection =
+    selected !== null && selected.id !== 'default' && !isSharedLibraryProject(selected);
 
   useEffect(() => {
     void refresh();
@@ -2526,93 +2538,135 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 <div className="project-body-content">
                   {tab === 'about' && (
                     <div className="project-about-page">
-                      <ProjectCrewRoster
-                        project={selected}
-                        gezels={gezels}
-                        boekwachterGezelId={boekwachterGezelId}
-                        recentlyAddedGezelId={recentlyAddedGezelId}
-                        onAddGezel={addProjectGezel}
-                        onCreateTemplateGezel={createProjectTemplateGezel}
-                        onRemoveGezel={removeProjectGezel}
-                      />
-
-                      <ProjectDocEditor
-                        key={`${selected.id}:about`}
-                        projectId={selected.id}
-                        resourceKey={`project:${selected.id}:about`}
-                        id="project-about-overview"
-                        label="About this project"
-                        hint="Flows into the system prompt when a chat is scoped to this project."
-                        initial={selected.about ?? ''}
-                        onSave={async (value) => {
-                          const updated = await api.updateProject(selected.id, {
-                            about: value,
-                          });
-                          setSelected((current) =>
-                            current?.id === updated.id ? { ...current, about: value } : current,
-                          );
-                          return updated;
-                        }}
-                      />
-
-                      <ProjectDocEditor
-                        key={`${selected.id}:mission`}
-                        projectId={selected.id}
-                        resourceKey={`project:${selected.id}:mission`}
-                        id="project-about-mission"
-                        label="Mission objectives"
-                        hint="A concrete list of what success looks like. Also flows into the system prompt."
-                        initial={selected.missionObjectives ?? ''}
-                        onSave={async (value) => {
-                          const updated = await api.updateProject(selected.id, {
-                            missionObjectives: value,
-                          });
-                          setSelected((current) =>
-                            current?.id === updated.id
-                              ? { ...current, missionObjectives: value }
-                              : current,
-                          );
-                          return updated;
-                        }}
-                      />
-
-                      {runtimeCapabilities().memories && (
-                        <ProjectMemoriesEditor
-                          key={`${selected.id}:memories`}
-                          projectId={selected.id}
-                          projectName={selected.name}
-                        />
-                      )}
-
-                      {runtimeCapabilities().connections && showWorkInProgressFeatures && (
-                        <section
-                          id="project-about-connections"
-                          className="project-about-section project-about-anchor"
+                      <div className="project-about-main">
+                        <ProjectCrewRoster
+                          project={selected}
+                          gezels={gezels}
+                          boekwachterGezelId={boekwachterGezelId}
+                          recentlyAddedGezelId={recentlyAddedGezelId}
+                          onAddGezel={addProjectGezel}
+                          onCreateTemplateGezel={createProjectTemplateGezel}
+                          onRemoveGezel={removeProjectGezel}
                         >
-                          <ProjectPaneBoundary>
-                            <ProjectConnectionsTab
-                              project={selected}
-                              onProjectChange={setSelected}
+                          <SettingField
+                            label={crewLeadLabel(selected)}
+                            hint={
+                              selected.mode === 'solo'
+                                ? 'The single gezel who handles this entire job — the Builder. Team-management tools are stripped from their thread.'
+                                : 'Leads the crew. Every chat here knows who it is.'
+                            }
+                          >
+                            <GezelPicker
+                              gezels={gezels}
+                              value={selected.voormanGezelId}
+                              noneLabel={`(no ${crewLeadLabelLower(selected)})`}
+                              ariaLabel={crewLeadLabel(selected)}
+                              onValueChange={async (gezelId) => {
+                                const updated = await api.updateProject(selected.id, {
+                                  voormanGezelId: gezelId,
+                                });
+                                setSelected(updated);
+                              }}
                             />
-                          </ProjectPaneBoundary>
-                          <ProjectPaneBoundary>
-                            <ProjectLookoutsSection projectId={selected.id} />
-                          </ProjectPaneBoundary>
-                        </section>
-                      )}
+                          </SettingField>
+                          {runtimeCapabilities().background && (
+                            <SettingCheck
+                              label="Exclude from Meester progress check-ins"
+                              hint="For long-running or ambient projects. The Meester won’t ask the project lead for overall progress; direct chats and the project’s own work continue."
+                              checked={selected.nudgeConfig?.enabled === false}
+                              onChange={(checked) =>
+                                void saveMeesterProgressCheckExemption(checked)
+                              }
+                            />
+                          )}
+                        </ProjectCrewRoster>
 
-                      <section
-                        id="project-about-settings"
-                        className="project-about-section project-about-anchor"
-                      >
-                        <h3 className="project-about-section-title">Settings</h3>
-                        <div className="project-config">
+                        <ProjectDocEditor
+                          key={`${selected.id}:about`}
+                          projectId={selected.id}
+                          resourceKey={`project:${selected.id}:about`}
+                          id="project-about-overview"
+                          label="About this project"
+                          hint="Every chat in this project reads it."
+                          initial={selected.about ?? ''}
+                          onSave={async (value) => {
+                            const updated = await api.updateProject(selected.id, {
+                              about: value,
+                            });
+                            setSelected((current) =>
+                              current?.id === updated.id ? { ...current, about: value } : current,
+                            );
+                            return updated;
+                          }}
+                        />
+
+                        <ProjectDocEditor
+                          key={`${selected.id}:mission`}
+                          projectId={selected.id}
+                          resourceKey={`project:${selected.id}:mission`}
+                          id="project-about-mission"
+                          label="Mission objectives"
+                          hint="What success looks like. Every chat in this project reads it too."
+                          initial={selected.missionObjectives ?? ''}
+                          onSave={async (value) => {
+                            const updated = await api.updateProject(selected.id, {
+                              missionObjectives: value,
+                            });
+                            setSelected((current) =>
+                              current?.id === updated.id
+                                ? { ...current, missionObjectives: value }
+                                : current,
+                            );
+                            return updated;
+                          }}
+                        />
+
+                        {runtimeCapabilities().memories && (
+                          <ProjectMemoriesEditor
+                            key={`${selected.id}:memories`}
+                            projectId={selected.id}
+                            projectName={selected.name}
+                          />
+                        )}
+
+                        {runtimeCapabilities().connections && showWorkInProgressFeatures && (
+                          <section
+                            id="project-about-connections"
+                            className="gz-settings-section project-about-anchor"
+                          >
+                            <ProjectPaneBoundary>
+                              <ProjectConnectionsTab
+                                project={selected}
+                                onProjectChange={setSelected}
+                              />
+                            </ProjectPaneBoundary>
+                            <ProjectPaneBoundary>
+                              <ProjectLookoutsSection projectId={selected.id} />
+                            </ProjectPaneBoundary>
+                          </section>
+                        )}
+
+                        <SettingsSection
+                          id="project-about-workspace"
+                          className="project-about-anchor"
+                          title="Workspace"
+                          hint="Where this project’s files live and what gezellen may do with them."
+                        >
                           {runtimeCapabilities().externalFolders && (
-                            <label className="config-label">
-                              Working directory
-                              <div className="new-row">
+                            <SettingField
+                              label="Folder"
+                              controlId="project-setting-folder"
+                              hint={
+                                selected.workingDir
+                                  ? 'Gezellen work on the files in this folder.'
+                                  : 'No folder chosen, so files live in Gezel’s own workspace for this project.'
+                              }
+                            >
+                              <div className="new-row gz-setting-row">
                                 <input
-                                  placeholder="External path (leave blank for internal)"
+                                  id="project-setting-folder"
+                                  aria-describedby={settingHintId('project-setting-folder')}
+                                  placeholder="Leave blank to use Gezel’s own workspace"
                                   value={workingDirDraft}
                                   onChange={(e) => setWorkingDirDraft(e.target.value)}
                                   onBlur={() => void saveWorkingDir(workingDirDraft)}
@@ -2620,6 +2674,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 {window.__GEZEL__?.selectDirectory && (
                                   <button
                                     type="button"
+                                    className="secondary"
                                     onClick={async () => {
                                       const picked = await window.__GEZEL__?.selectDirectory?.({
                                         title: 'Choose working directory',
@@ -2636,382 +2691,90 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                   </button>
                                 )}
                               </div>
-                              <small className="muted">
-                                {selected.workingDir
-                                  ? `External: ${selected.workingDir}`
-                                  : 'Using internal workspace'}
-                              </small>
-                            </label>
+                            </SettingField>
                           )}
 
-                          <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                            {MANAGED_WORKSPACE_WRITE_SETTING_LABEL}
-                            <div className="new-row" style={{ alignItems: 'center' }}>
-                              <input
-                                type="checkbox"
-                                checked={workspaceAccess.managedWritable}
-                                onChange={(e) => {
-                                  const next = e.target.checked;
-                                  // Flipping ON for an external workingDir prompts a
-                                  // confirmation — models will be able to modify files
-                                  // in that user-supplied path. Internal workspaces
-                                  // (our folder) flip silently.
-                                  if (next && selected.workingDir) {
-                                    setShowAllowWritesConfirm(true);
-                                  } else {
-                                    void saveManagedWorkspaceWrites(next);
-                                  }
-                                }}
-                              />
-                              <span className="muted small">
-                                {selected.workingDir
-                                  ? 'Off by default for external folders. Turn on only if you trust the crew’s tools and automations to edit this path.'
-                                  : 'Internal workspace — on by default. Provider-native access, when used, follows its own project posture.'}
-                              </span>
-                            </div>
-                          </label>
+                          <SettingCheck
+                            label={MANAGED_WORKSPACE_WRITE_SETTING_LABEL}
+                            hint={
+                              selected.workingDir
+                                ? 'Off by default for a folder of your own. Turn on only if you trust the crew’s tools and automations to edit it.'
+                                : 'On by default for Gezel’s own workspace. Gezellen that run in Codex or Claude Code follow those apps’ own permissions.'
+                            }
+                            checked={workspaceAccess.managedWritable}
+                            onChange={(next) => {
+                              // Flipping ON for an external workingDir prompts a
+                              // confirmation — models will be able to modify files
+                              // in that user-supplied path. Internal workspaces
+                              // (our folder) flip silently.
+                              if (next && selected.workingDir) {
+                                setShowAllowWritesConfirm(true);
+                              } else {
+                                void saveManagedWorkspaceWrites(next);
+                              }
+                            }}
+                          />
 
                           {runtimeCapabilities().index && (
-                            <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                              Index this project's workspace
-                              <div className="new-row" style={{ alignItems: 'center' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={selected.indexingEnabled !== false}
-                                  onChange={(event) =>
-                                    void saveIndexingEnabled(event.target.checked)
-                                  }
-                                />
-                                <span className="muted small">
-                                  Builds file search, commands, the Village map, and AI summaries.
-                                  Turn it off for lightweight projects such as games or language
-                                  practice.
-                                </span>
-                              </div>
-                            </label>
+                            <SettingCheck
+                              label="Index this project's workspace"
+                              hint="Builds file search, commands, the Village map, and AI summaries. Turn it off for lightweight projects such as games or language practice."
+                              checked={selected.indexingEnabled !== false}
+                              onChange={(checked) => void saveIndexingEnabled(checked)}
+                            />
                           )}
 
                           {runtimeCapabilities().background && (
-                            <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                              Fix problems overnight
-                              <div className="new-row" style={{ alignItems: 'center' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={selected.nightlyFixesEnabled !== false}
-                                  onChange={(event) =>
-                                    void saveNightlyFixesEnabled(event.target.checked)
-                                  }
-                                />
-                                <span className="muted small">
-                                  When this project has both a Librarian and a developer, the
-                                  developer works through open issues during the night shift. Your
-                                  files aren’t touched — fixes arrive as change proposals in the
-                                  Proposals tab for you to review and apply.
-                                </span>
-                              </div>
-                            </label>
-                          )}
-
-                          {runtimeCapabilities().index && !isSharedLibraryProject(selected) && (
-                            <fieldset className="project-tab-settings">
-                              <legend>Linked projects</legend>
-                              <p className="muted small">
-                                Give this project one-way access to another project’s indexed
-                                knowledge and workspace. The other project does not gain access
-                                back. Shared documents are always included automatically.{' '}
-                                {(selected.linkedProjectIds ?? []).length} of 32 linked.
-                              </p>
-                              <div className="project-tab-settings-grid">
-                                {linkableProjects.map((project) => {
-                                  const checked = (selected.linkedProjectIds ?? []).includes(
-                                    project.id,
-                                  );
-                                  return (
-                                    <label key={project.id} className="new-row">
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        disabled={
-                                          savingProjectLinks ||
-                                          (!checked && projectLinkLimitReached)
-                                        }
-                                        onChange={(event) =>
-                                          void toggleProjectLink(project.id, event.target.checked)
-                                        }
-                                      />
-                                      <span>
-                                        {project.name}
-                                        <span className="muted small"> — {project.id}</span>
-                                        {project.archived ? (
-                                          <span className="muted small"> — archived</span>
-                                        ) : null}
-                                        {!projectManagedWorkspaceWritable(project) ? (
-                                          <span className="muted small">
-                                            {' '}
-                                            — workspace read-only
-                                          </span>
-                                        ) : null}
-                                      </span>
-                                    </label>
-                                  );
-                                })}
-                                {linkableProjects.length === 0 ? (
-                                  <span className="muted small">
-                                    No other projects are available.
-                                  </span>
-                                ) : null}
-                              </div>
-                              <small className="muted">
-                                Gezellen address linked files with the existing file tools at{' '}
-                                <code>../project-id/…</code>. Writes still follow the linked
-                                project’s own workspace-write setting.
-                              </small>
-                            </fieldset>
-                          )}
-
-                          {runtimeCapabilities().knowledge && (
-                            <ProjectKnowledgeRow project={selected} onUpdated={setSelected} />
-                          )}
-
-                          {runtimeCapabilities().catalog && (
-                            <div className="config-label" style={{ marginTop: '0.75rem' }}>
-                              Project properties
-                              <ProjectPropertiesEditor
-                                project={selected}
-                                onProjectChange={setSelected}
-                              />
-                              <small className="muted">
-                                Shared values gezellen and recurring craftbooks draw from — set the
-                                designated language once and every translation run uses it.
-                              </small>
-                            </div>
+                            <SettingCheck
+                              label="Fix problems overnight"
+                              hint="When this project has both a Librarian and a developer, the developer works through open issues during the night shift. Your files aren’t touched — fixes arrive as change proposals in the Proposals tab for you to review and apply."
+                              checked={selected.nightlyFixesEnabled !== false}
+                              onChange={(checked) => void saveNightlyFixesEnabled(checked)}
+                            />
                           )}
 
                           {runtimeCapabilities().git && (
-                            <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                              GitHub repository
-                              <div className="new-row">
+                            <SettingField
+                              label="GitHub repository"
+                              controlId="project-setting-github"
+                              hint={
+                                <>
+                                  {selected.github?.url
+                                    ? selected.github.checkoutDir
+                                      ? `Linked. Checkout: ${selected.github.checkoutDir}${selected.github.branch ? ` (${selected.github.branch})` : ''}`
+                                      : 'Linked. Use the GitHub tab to clone.'
+                                    : 'Optional. When set, gezellen gain a GitHub-linked checkout and a new GitHub tab.'}
+                                  {gitStatus && (
+                                    <>
+                                      {' '}
+                                      — <span className="status">{gitStatus}</span>
+                                    </>
+                                  )}
+                                </>
+                              }
+                            >
+                              <div className="new-row gz-setting-row">
                                 <input
+                                  id="project-setting-github"
+                                  aria-describedby={settingHintId('project-setting-github')}
                                   placeholder="https://github.com/owner/repo"
                                   value={githubUrlDraft}
                                   onChange={(e) => setGitHubUrlDraft(e.target.value)}
                                   onBlur={() => void saveGitHubUrl(githubUrlDraft)}
                                 />
                               </div>
-                              <small className="muted">
-                                {selected.github?.url
-                                  ? selected.github.checkoutDir
-                                    ? `Linked. Checkout: ${selected.github.checkoutDir}${selected.github.branch ? ` (${selected.github.branch})` : ''}`
-                                    : 'Linked. Use the GitHub tab to clone.'
-                                  : 'Optional. When set, gezellen gain a GitHub-linked checkout and a new GitHub tab.'}
-                                {gitStatus && (
-                                  <>
-                                    {' '}
-                                    — <span className="status">{gitStatus}</span>
-                                  </>
-                                )}
-                              </small>
-                            </label>
-                          )}
-
-                          <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                            {crewLeadLabel(selected)}
-                            <div className="new-row">
-                              <GezelPicker
-                                gezels={gezels}
-                                value={selected.voormanGezelId}
-                                noneLabel={`(no ${crewLeadLabelLower(selected)})`}
-                                ariaLabel={crewLeadLabel(selected)}
-                                onValueChange={async (gezelId) => {
-                                  const updated = await api.updateProject(selected.id, {
-                                    voormanGezelId: gezelId,
-                                  });
-                                  setSelected(updated);
-                                }}
-                              />
-                            </div>
-                            <small className="muted">
-                              {selected.mode === 'solo'
-                                ? 'The single gezel who handles this entire job — the Builder. Mentioned in the system prompt for any chat scoped here. Team-management tools are stripped from their thread.'
-                                : 'The gezel who leads this project’s crew. Mentioned in the system prompt for any chat scoped here.'}
-                            </small>
-                          </label>
-
-                          {runtimeCapabilities().background && (
-                            <div className="config-label" style={{ marginTop: '0.75rem' }}>
-                              <label className="new-row" style={{ alignItems: 'center' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={selected.nudgeConfig?.enabled === false}
-                                  onChange={(e) =>
-                                    void saveMeesterProgressCheckExemption(e.target.checked)
-                                  }
-                                />
-                                <span>Exclude from Meester progress check-ins</span>
-                              </label>
-                              <small className="muted">
-                                For long-running or ambient projects. The Meester won’t ask the
-                                project lead for overall progress; direct chats and the project’s
-                                own work continue.
-                              </small>
-                            </div>
-                          )}
-
-                          {runtimeCapabilities().catalog && (
-                            <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                              Project type
-                              <div className="new-row">
-                                <Select.Root
-                                  value={selected.projectTypeId || '__AUTO__'}
-                                  onValueChange={async (v) => {
-                                    const updated = await api.updateProject(selected.id, {
-                                      projectTypeId: v === '__AUTO__' ? null : v,
-                                    });
-                                    setSelected(updated);
-                                  }}
-                                >
-                                  <Select.Trigger>
-                                    <Select.Value />
-                                  </Select.Trigger>
-                                  <Select.Content>
-                                    <Select.Item value="__AUTO__">
-                                      {(() => {
-                                        const detected = getProjectType(
-                                          selected.detectedProjectType?.id,
-                                        );
-                                        return detected
-                                          ? `Auto-detect (${detected.label})`
-                                          : 'Auto-detect';
-                                      })()}
-                                    </Select.Item>
-                                    {listProjectTypes().map((t) => (
-                                      <Select.Item key={t.id} value={t.id}>
-                                        {t.label}
-                                      </Select.Item>
-                                    ))}
-                                  </Select.Content>
-                                </Select.Root>
-                              </div>
-                              <small className="muted">
-                                Tunes which craftbooks the command rail suggests for this project.
-                                Auto-detect classifies the project from its files and About text.
-                              </small>
-                            </label>
-                          )}
-
-                          <fieldset className="project-tab-settings">
-                            <legend>Project tabs</legend>
-                            <p className="muted small">
-                              Keep this project focused by hiding work areas it does not use.
-                            </p>
-                            <div className="project-tab-settings-grid">
-                              {PROJECT_TAB_VISIBILITY_OPTIONS.filter((option) =>
-                                supportsProjectSection(option.key),
-                              ).map((option) => (
-                                <label key={option.key} className="new-row">
-                                  <input
-                                    type="checkbox"
-                                    checked={projectTabIsVisible(selected, option.key)}
-                                    onChange={(event) =>
-                                      void saveTabVisibility(option.key, event.target.checked)
-                                    }
-                                  />
-                                  <span>{option.label}</span>
-                                </label>
-                              ))}
-                            </div>
-                            <small className="muted">
-                              Chat and Settings always stay available. Output appears whenever the
-                              project has a previewable page.
-                            </small>
-                          </fieldset>
-
-                          {selected.id !== 'default' && !isSharedLibraryProject(selected) && (
-                            <div className="project-archive-setting">
-                              <div className="project-archive-setting-copy">
-                                <span className="project-archive-setting-title">
-                                  {selected.archived ? 'Restore project' : 'Archive project'}
-                                </span>
-                                <small className="muted">
-                                  {selected.archived
-                                    ? 'Return this project to primary navigation. Its previous inactive status is preserved.'
-                                    : 'Hide this project from primary navigation and pause automatic project work. Its files and chats stay on disk.'}
-                                </small>
-                              </div>
-                              <button
-                                type="button"
-                                className="secondary project-archive-setting-action"
-                                onClick={() => void toggleSelectedArchive()}
-                                disabled={changingArchive}
-                              >
-                                {changingArchive
-                                  ? selected.archived
-                                    ? 'Restoring…'
-                                    : 'Archiving…'
-                                  : selected.archived
-                                    ? 'Restore project'
-                                    : 'Archive project'}
-                              </button>
-                            </div>
-                          )}
-
-                          {configuredCredentials.length > 0 && (
-                            <div className="project-credentials">
-                              <h4>Granted credentials</h4>
-                              <p className="muted small">
-                                Credentials are stored once for your whole workspace and shared
-                                across projects you grant them to. Scripts and MCP tools running in
-                                this project can resolve only the names checked below. They never
-                                see the raw values.
-                              </p>
-                              <ul className="credentials-list">
-                                {configuredCredentials.map((c) => {
-                                  const granted = (selected.grantedCredentials ?? []).includes(
-                                    c.name,
-                                  );
-                                  const destinationHint = credentialDestinationHint(c);
-                                  return (
-                                    <li key={c.name}>
-                                      <label className="new-row" style={{ alignItems: 'center' }}>
-                                        <input
-                                          type="checkbox"
-                                          checked={granted}
-                                          disabled={
-                                            !granted && (!c.stored || c.allowedOrigins.length === 0)
-                                          }
-                                          onChange={(e) =>
-                                            void toggleGrant(c.name, e.target.checked)
-                                          }
-                                        />
-                                        <span>
-                                          <code>{c.name}</code>
-                                          <span className="muted small"> — {c.label}</span>
-                                          {destinationHint && (
-                                            <span className="muted small">
-                                              {' '}
-                                              — {destinationHint}
-                                            </span>
-                                          )}
-                                        </span>
-                                      </label>
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            </div>
+                            </SettingField>
                           )}
 
                           {runtimeCapabilities().daemonSettings && (
-                            <div className="project-writes-log">
-                              <h4>Recent workspace changes</h4>
+                            <SettingField label="Recent workspace changes">
                               {writesJournal.length === 0 ? (
-                                <p className="muted small">
-                                  No workspace mutations recorded yet. Gezellen that call{' '}
-                                  <code>write_file</code>, <code>delete_path</code>,{' '}
-                                  <code>make_dir</code>, or <code>rename</code> will show up here.
+                                <p className="gz-setting-hint">
+                                  Nothing changed yet. Files gezellen write, delete, create, or
+                                  rename show up here.
                                 </p>
                               ) : (
-                                <ul>
+                                <ul className="project-writes-log">
                                   {writesJournal.map((entry, i) => (
                                     <li key={`${entry.at}:${i}`}>
                                       <span className={`writes-op writes-op-${entry.op}`}>
@@ -3042,57 +2805,270 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                   ))}
                                 </ul>
                               )}
-                            </div>
+                            </SettingField>
                           )}
-                        </div>
-                      </section>
+                        </SettingsSection>
 
-                      {runtimeCapabilities().catalog && (
-                        <section
-                          id="project-about-toolsets"
-                          className="project-about-section project-about-anchor"
-                        >
-                          <h3 className="project-about-section-title">Toolsets</h3>
-                          <ToolsetsEditor
-                            scope={{ kind: 'project', projectId: selected.id }}
-                            subject={selected.name}
+                        {showAccessSection && (
+                          <SettingsSection
+                            id="project-about-access"
+                            className="project-about-anchor"
+                            title="Access"
+                            hint="What gezellen here can reach beyond this project’s own files."
+                          >
+                            {showLinkedProjects && (
+                              <SettingField
+                                label="Linked projects"
+                                hint={
+                                  <>
+                                    One-way: this project can read the other’s files and indexed
+                                    knowledge, never the reverse, and edits follow the other
+                                    project’s own setting. Shared documents are always included
+                                    automatically. {(selected.linkedProjectIds ?? []).length} of 32
+                                    linked.
+                                  </>
+                                }
+                              >
+                                <div className="gz-setting-options">
+                                  {linkableProjects.map((project) => {
+                                    const checked = (selected.linkedProjectIds ?? []).includes(
+                                      project.id,
+                                    );
+                                    return (
+                                      <label key={project.id} className="gz-setting-option">
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          disabled={
+                                            savingProjectLinks ||
+                                            (!checked && projectLinkLimitReached)
+                                          }
+                                          onChange={(event) =>
+                                            void toggleProjectLink(project.id, event.target.checked)
+                                          }
+                                        />
+                                        <span>
+                                          {project.name}
+                                          {project.archived ? (
+                                            <span className="muted small"> — archived</span>
+                                          ) : null}
+                                          {!projectManagedWorkspaceWritable(project) ? (
+                                            <span className="muted small">
+                                              {' '}
+                                              — workspace read-only
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                  {linkableProjects.length === 0 ? (
+                                    <span className="muted small">
+                                      No other projects are available.
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </SettingField>
+                            )}
+
+                            {runtimeCapabilities().knowledge && (
+                              <ProjectKnowledgeRow project={selected} onUpdated={setSelected} />
+                            )}
+
+                            {configuredCredentials.length > 0 && (
+                              <SettingField
+                                label="Granted credentials"
+                                hint="Stored once for your whole workspace. Scripts and MCP tools here can use only the names checked, and never see the values."
+                              >
+                                <div className="gz-setting-options gz-setting-options-list">
+                                  {configuredCredentials.map((c) => {
+                                    const granted = (selected.grantedCredentials ?? []).includes(
+                                      c.name,
+                                    );
+                                    const destinationHint = credentialDestinationHint(c);
+                                    return (
+                                      <label key={c.name} className="gz-setting-option">
+                                        <input
+                                          type="checkbox"
+                                          checked={granted}
+                                          disabled={
+                                            !granted && (!c.stored || c.allowedOrigins.length === 0)
+                                          }
+                                          onChange={(e) =>
+                                            void toggleGrant(c.name, e.target.checked)
+                                          }
+                                        />
+                                        <span>
+                                          <code>{c.name}</code>
+                                          <span className="muted small"> — {c.label}</span>
+                                          {destinationHint && (
+                                            <span className="muted small">
+                                              {' '}
+                                              — {destinationHint}
+                                            </span>
+                                          )}
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </SettingField>
+                            )}
+                          </SettingsSection>
+                        )}
+
+                        {runtimeCapabilities().catalog && (
+                          <SettingsSection
+                            id="project-about-toolsets"
+                            className="project-about-anchor"
+                            title="Toolsets"
                             hint="Available to every gezel working in this project. Project MCP files are discovered automatically."
-                          />
-                        </section>
-                      )}
+                          >
+                            <ToolsetsEditor
+                              scope={{ kind: 'project', projectId: selected.id }}
+                              subject={selected.name}
+                            />
+                          </SettingsSection>
+                        )}
 
-                      {runtimeCapabilities().background && (
-                        <section
-                          id="project-about-history"
-                          className="project-about-section project-about-anchor"
+                        <SettingsSection
+                          id="project-about-preferences"
+                          className="project-about-anchor"
+                          title="Preferences"
                         >
-                          <h3 className="project-about-section-title">History</h3>
-                          <div className="project-about-history">
-                            <ProjectPaneBoundary>
-                              <HistoryView projectId={selected.id} />
-                            </ProjectPaneBoundary>
-                          </div>
-                        </section>
-                      )}
+                          {runtimeCapabilities().catalog && (
+                            <SettingField
+                              label="Project type"
+                              hint="Tunes which craftbooks the command rail suggests. Auto-detect reads the project’s files and About text."
+                            >
+                              <Select.Root
+                                value={selected.projectTypeId || '__AUTO__'}
+                                onValueChange={async (v) => {
+                                  const updated = await api.updateProject(selected.id, {
+                                    projectTypeId: v === '__AUTO__' ? null : v,
+                                  });
+                                  setSelected(updated);
+                                }}
+                              >
+                                <Select.Trigger aria-label="Project type">
+                                  <Select.Value />
+                                </Select.Trigger>
+                                <Select.Content>
+                                  <Select.Item value="__AUTO__">
+                                    {(() => {
+                                      const detected = getProjectType(
+                                        selected.detectedProjectType?.id,
+                                      );
+                                      return detected
+                                        ? `Auto-detect (${detected.label})`
+                                        : 'Auto-detect';
+                                    })()}
+                                  </Select.Item>
+                                  {listProjectTypes().map((t) => (
+                                    <Select.Item key={t.id} value={t.id}>
+                                      {t.label}
+                                    </Select.Item>
+                                  ))}
+                                </Select.Content>
+                              </Select.Root>
+                            </SettingField>
+                          )}
+
+                          {runtimeCapabilities().catalog && (
+                            <ProjectPropertiesEditor
+                              project={selected}
+                              onProjectChange={setSelected}
+                            />
+                          )}
+
+                          <SettingField
+                            label="Project tabs"
+                            hint="Hide the work areas this project doesn’t use. Chat and Settings always stay, and Output appears whenever there is a page to preview."
+                          >
+                            <div className="gz-setting-options">
+                              {PROJECT_TAB_VISIBILITY_OPTIONS.filter((option) =>
+                                supportsProjectSection(option.key),
+                              ).map((option) => (
+                                <label key={option.key} className="gz-setting-option">
+                                  <input
+                                    type="checkbox"
+                                    checked={projectTabIsVisible(selected, option.key)}
+                                    onChange={(event) =>
+                                      void saveTabVisibility(option.key, event.target.checked)
+                                    }
+                                  />
+                                  <span>{option.label}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </SettingField>
+                        </SettingsSection>
+
+                        {runtimeCapabilities().background && (
+                          <SettingsSection
+                            id="project-about-history"
+                            className="project-about-anchor"
+                            title="History"
+                          >
+                            <div className="project-about-history">
+                              <ProjectPaneBoundary>
+                                <HistoryView projectId={selected.id} showTitle={false} />
+                              </ProjectPaneBoundary>
+                            </div>
+                          </SettingsSection>
+                        )}
+
+                        {showArchiveSection && (
+                          <SettingsSection
+                            id="project-about-archive"
+                            className="project-about-anchor"
+                            title="Archive"
+                            hint={
+                              selected.archived
+                                ? 'This project is archived. Restoring returns it to primary navigation; its previous inactive status is preserved.'
+                                : 'Hide this project from primary navigation and pause automatic project work. Its files and chats stay on disk.'
+                            }
+                            actions={
+                              <button
+                                type="button"
+                                className="secondary"
+                                onClick={() => void toggleSelectedArchive()}
+                                disabled={changingArchive}
+                              >
+                                {changingArchive
+                                  ? selected.archived
+                                    ? 'Restoring…'
+                                    : 'Archiving…'
+                                  : selected.archived
+                                    ? 'Restore project'
+                                    : 'Archive project'}
+                              </button>
+                            }
+                          />
+                        )}
+                      </div>
 
                       <nav className="project-about-toc" aria-label="About sections">
                         <div className="project-about-toc-title">On this page</div>
-                        <a href="#project-about-crew">Assigned gezellen</a>
+                        <a href="#project-about-crew">Crew</a>
                         <a href="#project-about-overview">About this project</a>
                         <a href="#project-about-mission">Mission objectives</a>
-                        {runtimeCapabilities().background && (
-                          <a href="#project-about-memories">Project memories</a>
+                        {runtimeCapabilities().memories && (
+                          <a href="#project-about-memories">Memories</a>
                         )}
                         {runtimeCapabilities().connections && showWorkInProgressFeatures && (
                           <a href="#project-about-connections">Connections</a>
                         )}
-                        <a href="#project-about-settings">Settings</a>
+                        <a href="#project-about-workspace">Workspace</a>
+                        {showAccessSection && <a href="#project-about-access">Access</a>}
                         {runtimeCapabilities().catalog && (
                           <a href="#project-about-toolsets">Toolsets</a>
                         )}
+                        <a href="#project-about-preferences">Preferences</a>
                         {runtimeCapabilities().background && (
                           <a href="#project-about-history">History</a>
                         )}
+                        {showArchiveSection && <a href="#project-about-archive">Archive</a>}
                       </nav>
                     </div>
                   )}
@@ -4021,11 +3997,12 @@ function ProjectDocEditor({
   );
 
   return (
-    <section id={id} className="project-doc-editor project-about-anchor">
-      <h3 className="project-doc-editor-title">{label}</h3>
-      <p className="muted small" style={{ marginTop: 0, marginBottom: '0.4rem' }}>
-        {hint}
-      </p>
+    <SettingsSection
+      id={id}
+      className="project-doc-editor project-about-anchor"
+      title={label}
+      hint={hint}
+    >
       <div className="editor-wrap">
         <EditorShell
           ariaLabel={label}
@@ -4044,7 +4021,7 @@ function ProjectDocEditor({
           statusBarSlotRight={<AutosaveStatus autosave={autosave} />}
         />
       </div>
-    </section>
+    </SettingsSection>
   );
 }
 

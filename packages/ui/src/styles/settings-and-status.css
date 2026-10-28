@@ -347,6 +347,179 @@
   cursor: pointer;
 }
 
+/* ── Settings pages ────────────────────────────────────────────────────
+   The recipe for a page of settings (docs/ux.md → "Settings pages"), drawn
+   by `SettingsSection`, `SettingField` and `SettingCheck`. A section is a
+   heading and its content indented beneath it; sections part by space and a
+   hairline, never by a box. A box inside a section marks one thing you act
+   on (a crew member, a suggestion, an editor), not a group of settings. */
+.gz-settings-section + .gz-settings-section {
+  margin-top: 2.25rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--border);
+}
+
+.gz-settings-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.gz-settings-section-heading {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.gz-settings-section-title {
+  margin: 0;
+  font-size: var(--text-xl);
+  line-height: 1.3;
+}
+
+.gz-settings-section-hint {
+  max-width: 48rem;
+  margin: 0.3rem 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.gz-settings-section-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.5rem;
+}
+
+.gz-settings-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-top: 1.25rem;
+  padding-left: var(--gz-settings-indent, 1rem);
+}
+
+/* The body's gap is the only vertical rhythm; a child's own margin would
+   make one pair of settings sit further apart than the rest. */
+.gz-settings-section-body > * {
+  margin-block: 0;
+}
+
+.gz-setting {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+  min-width: 0;
+  max-width: 48rem;
+}
+
+/* Layout wrappers fill the field; a control (a picker, a select) keeps its
+   own width instead of stretching into a slab. */
+.gz-setting > :is(div, ul, p) {
+  align-self: stretch;
+}
+
+/* A field naming a group is a <fieldset>; it carries no border of its own. */
+fieldset:is(.gz-setting, .gz-setting-options) {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* Floated, a legend is an ordinary flex item instead of being drawn into
+   the fieldset's border, so it keeps the field's gap like a <label>. */
+legend.gz-setting-label {
+  float: left;
+  padding: 0;
+}
+
+.gz-setting-label {
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.gz-setting-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+/* An on/off setting leads with its checkbox; the hint lines up under the
+   label, not under the box. */
+.gz-setting-check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.25rem 0.6rem;
+}
+
+.gz-setting-check > input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  cursor: pointer;
+}
+
+.gz-setting-check > .gz-setting-label {
+  cursor: pointer;
+}
+
+.gz-setting-check > .gz-setting-hint {
+  grid-column: 2;
+}
+
+.gz-setting-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.gz-setting-row > input:not([type="checkbox"], [type="radio"]) {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+/* Several checkboxes under one label: a grid of plain options, with no
+   fieldset border around them. */
+.gz-setting-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.5rem 1rem;
+}
+
+.gz-setting-options-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.gz-setting-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.gz-setting-option > input {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+@container (max-width: 520px) {
+  .gz-settings-section-body {
+    --gz-settings-indent: 0;
+  }
+}
+
 /* Default permission for the CLI providers (Codex, Claude): a described tray
    in the row's value column. The label sits on the tray's first line, and
    the readout beneath the tray explains only the latched mode, so the

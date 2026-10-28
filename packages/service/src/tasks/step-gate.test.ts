@@ -229,3 +229,54 @@ describe('gateMessageFingerprint', () => {
     expect(gateMessageFingerprint('abc')).not.toBe(gateMessageFingerprint('abd'));
   });
 });
+
+describe('line-based reviewer verdict enforcement', () => {
+  const checks: NormalizedStepGate['checks'] = [
+    { kind: 'contains', file: 'verdict.md', pattern: '\\bPASS\\s*$', flags: 'm', artifact: true },
+    {
+      kind: 'notContains',
+      file: 'verdict.md',
+      pattern: '\\bFAIL\\s*$',
+      flags: 'm',
+      artifact: true,
+    },
+  ];
+  const evaluate = (text: string) =>
+    evaluateStepGate({
+      gate: gate({ checks }),
+      ws: {
+        ...ws({ 'verdict.md': 'Misleading workspace copy PASS' }),
+        readArtifact: async () => text,
+      },
+      runScript: vi.fn(),
+    });
+  it('rejects the recorded prefix FAIL even when another line ends PASS', async () => {
+    const result = await evaluate(
+      'Amounts reconcile PASS\nFAIL — report total 5440 does not match the ledger total 5415.',
+    );
+    expect(result.decision).toBe('reject');
+    expect(result.message).toContain('reports FAIL');
+  });
+  it.each([
+    'Amounts PASS Numbering PASS Dates PASS',
+    'Amounts PASS\nDates were not reviewed',
+    'PASS — amounts look right',
+    'Amounts PASS\n  FAIL — bad date',
+  ])('rejects malformed or incomplete verdict text: %s', async (text) => {
+    expect((await evaluate(text)).decision).toBe('reject');
+  });
+  it('accepts separate unambiguous passing criteria', async () => {
+    expect(
+      (await evaluate('Amounts reconcile PASS\nNumbers continue PASS\nDue dates match terms PASS'))
+        .decision,
+    ).toBe('approve');
+  });
+  it('leaves ordinary text regex gates alone', async () => {
+    const result = await evaluateStepGate({
+      gate: gate({ checks: [{ kind: 'contains', file: 'guide.md', pattern: 'PASS' }] }),
+      ws: ws({ 'guide.md': 'Explain PASS and FAIL diagnostics.' }),
+      runScript: vi.fn(),
+    });
+    expect(result.decision).toBe('approve');
+  });
+});

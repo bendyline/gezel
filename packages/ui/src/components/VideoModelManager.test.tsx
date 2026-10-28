@@ -77,7 +77,7 @@ describe('VideoModelManager active-model selection', () => {
   it('omits the Active column when no onSetActiveModel handler is given', async () => {
     render(<VideoModelManager />);
 
-    await screen.findByText('ltx-2.3-22b-fp8');
+    await screen.findByText('LTX-2.3');
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.queryByRole('columnheader', { name: 'Active' })).toBeNull();
   });
@@ -89,10 +89,10 @@ describe('VideoModelManager active-model selection', () => {
     );
 
     const ltx = await screen.findByRole('radio', {
-      name: 'Use ltx-2.3-22b-fp8 as the active video model',
+      name: 'Use LTX-2.3 as the active video model',
     });
     const wan = screen.getByRole('radio', {
-      name: 'Use wan2.2-ti2v-5b as the active video model',
+      name: 'Use Wan 2.2 TI2V-5B as the active video model',
     });
     expect(ltx).toBeChecked();
     expect(wan).not.toBeChecked();
@@ -104,7 +104,7 @@ describe('VideoModelManager active-model selection', () => {
   it('falls back to the first installed model when no default is configured', async () => {
     render(<VideoModelManager onSetActiveModel={vi.fn()} />);
 
-    const ltx = await screen.findByRole('radio', { name: /ltx-2\.3-22b-fp8/ });
+    const ltx = await screen.findByRole('radio', { name: /LTX-2\.3/ });
     expect(ltx).toBeChecked();
   });
 });
@@ -118,7 +118,7 @@ describe('VideoModelManager machine-wide models', () => {
 
     render(<VideoModelManager />);
 
-    await screen.findByText('wan2.2-ti2v-5b');
+    await screen.findByText('Wan 2.2 TI2V-5B');
     expect(screen.getByText('Machine-wide')).toBeInTheDocument();
     // Only the user-owned row keeps its Delete action.
     expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(1);

@@ -88,7 +88,14 @@ function readStoredListFraction(): number {
   }
 }
 
-export function HistoryView({ projectId }: { projectId?: string } = {}) {
+export function HistoryView({
+  projectId,
+  showTitle = true,
+}: {
+  projectId?: string;
+  /** False where the host already titles the view (a project's Settings section). */
+  showTitle?: boolean;
+} = {}) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -305,7 +312,7 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
         </button>
       )}
       <header className="history-header" hidden={compact && showCompactDetail}>
-        <h2>History</h2>
+        {showTitle && <h2>History</h2>}
         <div className="history-filters">
           {projectId === undefined && (
             <Select.Root

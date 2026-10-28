@@ -31,7 +31,7 @@ describe('AudioModelManager active-model selection', () => {
   it('omits the Active column when no onSetActiveModel handler is given', async () => {
     render(<AudioModelManager kind="stt" />);
 
-    await screen.findByText('whisper-base.en');
+    await screen.findByText('Whisper Base (English)');
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.queryByRole('columnheader', { name: 'Active' })).toBeNull();
   });
@@ -47,10 +47,10 @@ describe('AudioModelManager active-model selection', () => {
     );
 
     const small = await screen.findByRole('radio', {
-      name: 'Use whisper-small.en as the active speech-to-text model',
+      name: 'Use Whisper Small (English) as the active speech-to-text model',
     });
     const base = screen.getByRole('radio', {
-      name: 'Use whisper-base.en as the active speech-to-text model',
+      name: 'Use Whisper Base (English) as the active speech-to-text model',
     });
     expect(small).toBeChecked();
     expect(base).not.toBeChecked();
@@ -68,7 +68,7 @@ describe('AudioModelManager active-model selection', () => {
       />,
     );
 
-    const base = await screen.findByRole('radio', { name: /whisper-base\.en/ });
+    const base = await screen.findByRole('radio', { name: /Whisper Base/ });
     expect(base).toBeChecked();
   });
 
@@ -76,7 +76,7 @@ describe('AudioModelManager active-model selection', () => {
     vi.mocked(api.listInstalledSttModels).mockResolvedValue({ models: [BASE] } as never);
     render(<AudioModelManager kind="stt" onSetActiveModel={vi.fn()} />);
 
-    await screen.findByText('whisper-base.en');
+    await screen.findByText('Whisper Base (English)');
     expect(screen.queryByRole('radio')).toBeNull();
   });
 });

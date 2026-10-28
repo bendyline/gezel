@@ -7,6 +7,7 @@ import {
   classifyAdvisories,
   readVulnerabilityExceptions,
 } from './audit-vulnerability-policy.mjs';
+import { loadPnpmRuntimeInventory, pnpmRuntimeAuditInventory } from './pnpm-runtime-inventory.mjs';
 import {
   packageVersionsFromInventory,
   readProductionLicenseInventory,
@@ -19,7 +20,10 @@ if (threshold < 0) {
   throw new Error(`invalid --audit-level ${JSON.stringify(requestedLevel)}`);
 }
 
-const inventory = readProductionLicenseInventory();
+const inventory = {
+  ...readProductionLicenseInventory(),
+  ...pnpmRuntimeAuditInventory(await loadPnpmRuntimeInventory()),
+};
 const packages = packageVersionsFromInventory(inventory);
 const advisories = await requestAdvisories(packages);
 const classified = classifyAdvisories(advisories, inventory, readVulnerabilityExceptions());

@@ -4,9 +4,11 @@ import {
   cleanGenerativePrompt,
   expandVideoPrompt,
   firstSentence,
+  fixedFunctionEditSources,
   formatFixedFunctionResult,
   sanitizeExpandedVideoPrompt,
   stripGezelMentions,
+  stripMarkdownImages,
 } from './fixed-function-adapters.js';
 
 describe('stripGezelMentions', () => {
@@ -274,5 +276,31 @@ describe('formatFixedFunctionResult — fallback', () => {
     expect(formatFixedFunctionResult('web_search', raw, { query: 'foo' })).toBe(
       'Searched the web.',
     );
+  });
+});
+
+describe('fixedFunctionEditSources', () => {
+  it('maps each attached picture to the artifact path the image route reads, in order, once', () => {
+    const text = [
+      '![car](artifacts/prompts/2026-10-27-0001/message_files/car.png)',
+      '![hat](attachments/hat.png) ![old](images/old.png)',
+      '![car again](artifacts/prompts/2026-10-27-0001/message_files/car.png)',
+      'Put the hat on the car.',
+    ].join('\n');
+    expect(fixedFunctionEditSources(text, 's1')).toEqual([
+      'prompts/2026-10-27-0001/message_files/car.png',
+      'attachments/hat.png',
+      'sessions/s1/images/old.png',
+    ]);
+    expect(fixedFunctionEditSources('make it blue', 's1')).toEqual([]);
+  });
+});
+
+describe('stripMarkdownImages', () => {
+  it('leaves the words of a message with its pictures taken out', () => {
+    expect(stripMarkdownImages('![car](artifacts/x/car.png)\n\nMake the car  blue.')).toBe(
+      'Make the car blue.',
+    );
+    expect(stripMarkdownImages('![car](artifacts/x/car.png)')).toBe('');
   });
 });
