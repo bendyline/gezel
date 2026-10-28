@@ -166,4 +166,23 @@ describe('ChatManager bridge auth — production-wired issueSessionToken (end-to
     );
     expect(doc ?? '').toContain('via bridge');
   }, 60_000);
+
+  // 1.26299.99 shipped `generate_image` reading GET /api/config first, a
+  // route the session guard refuses, so every gezel's image call failed with
+  // "forbidden". The root-token tests in manager-mcp.test.ts cannot see that.
+  it('generate_image works on a session token', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptToolCalls([
+      {
+        name: 'generate_image',
+        arguments: { prompt: 'a tiny abstract compass', width: 8, height: 8, seed: 17 },
+      },
+    ]);
+    mock.script('Here is your compass.');
+    await manager.send(session.id, 'Draw me a compass.');
+
+    expect(mintedSessionTokens.length).toBeGreaterThan(0);
+    const output = mock.toolCallOutputs.find((o) => o.name === 'generate_image')?.output;
+    expect(output).toMatch(/Generated 8×8 image/);
+  }, 60_000);
 });

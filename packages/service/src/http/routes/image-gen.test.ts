@@ -154,45 +154,48 @@ describe('POST /api/image-gen/generate', () => {
     expect(((await uncapped.json()) as { meta: { steps: number } }).meta.steps).toBe(8);
   });
 
-  // The mock engine clamps its own output to 512px, so these read the size the
-  // route hands the provider rather than the size it rendered.
-  async function agentSizeAsked(providerName: string, width: number, height: number) {
-    const mock = await svc.context.imageProvider.current();
-    const output = await mock.generate({ prompt: 'fixture', width: 8, height: 8 });
-    const asked: Array<{ width?: number; height?: number }> = [];
-    const routing = vi.spyOn(svc.context.imageProvider, 'providerForModel').mockResolvedValue({
-      name: providerName,
-      listInstalledModels: async () => [],
-      generate: async (opts: { width?: number; height?: number }) => {
-        asked.push({ width: opts.width, height: opts.height });
-        return output;
-      },
-    } as unknown as ImageProvider);
+  it("holds an agent's size to a megapixel on a local engine and says so", async () => {
+    const local = await svc.context.imageProvider.current();
+    const generate = vi.spyOn(local, 'generate');
     try {
       const res = await api('POST', '/api/image-gen/generate', {
-        prompt: 'a wide banner',
-        width,
-        height,
-        capAgentSize: true,
+        prompt: 'a wide compass',
+        width: 1600,
+        height: 900,
+        capSizeForAgent: true,
       });
       expect(res.status).toBe(200);
-      const { meta } = (await res.json()) as { meta: { settingsNotes?: string[] } };
-      return { asked, notes: meta.settingsNotes ?? [] };
+      expect(generate).toHaveBeenCalledWith(expect.objectContaining({ width: 1024, height: 576 }));
+      const meta = ((await res.json()) as { meta: { settingsNotes?: string[] } }).meta;
+      expect(meta.settingsNotes).toEqual([
+        'Request normalized for agent image generation (size 1600x900 -> 1024x576).',
+      ]);
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
+  it("passes an agent's exact size through to a cloud provider", async () => {
+    const mock = await svc.context.imageProvider.current();
+    const output = await mock.generate({ prompt: 'cloud fixture', width: 8, height: 8 });
+    const generate = vi.fn(async () => output);
+    const routing = vi
+      .spyOn(svc.context.imageProvider, 'providerForModel')
+      .mockResolvedValue({ name: 'openai', generate } as unknown as ImageProvider);
+    try {
+      const res = await api('POST', '/api/image-gen/generate', {
+        prompt: 'a wide compass',
+        width: 1536,
+        height: 1024,
+        capSizeForAgent: true,
+      });
+      expect(res.status).toBe(200);
+      expect(generate).toHaveBeenCalledWith(expect.objectContaining({ width: 1536, height: 1024 }));
+      const meta = ((await res.json()) as { meta: { settingsNotes?: string[] } }).meta;
+      expect(meta.settingsNotes).toBeUndefined();
     } finally {
       routing.mockRestore();
     }
-  }
-
-  it("holds an agent's size to a megapixel on a local engine and says so", async () => {
-    const { asked, notes } = await agentSizeAsked('mock', 1600, 900);
-    expect(asked).toEqual([{ width: 1024, height: 576 }]);
-    expect(notes).toContain('Size 1600x900 held to 1024x576 for a local engine.');
-  });
-
-  it("hands a cloud provider an agent's size as asked", async () => {
-    const { asked, notes } = await agentSizeAsked('openai', 1536, 1024);
-    expect(asked).toEqual([{ width: 1536, height: 1024 }]);
-    expect(notes).toEqual([]);
   });
 
   /** A local engine with these models installed, recording what each render was handed. */

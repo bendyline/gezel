@@ -1,11 +1,6 @@
 import { seedCharacter } from '../character/index.js';
 import { parseGezelMarkdown, serializeGezelMarkdown } from '../markdown/gezel-md.js';
-import {
-  isLegacyRoleTitle,
-  legacyRoleKey,
-  plainRoleProse,
-  plainRoleTitle,
-} from '../roles/plain-names.js';
+import { isLegacyRoleTitle, plainRoleProse, plainRoleTitle } from '../roles/plain-names.js';
 import { ProjectSchema } from '../schemas/project.js';
 import { SHARED_PROJECT_MARKER, isSharedLibraryProject } from '../shared-project.js';
 import { pickRoleBasedName, slugifyEntityName } from './entities.js';
@@ -66,7 +61,9 @@ export async function ensureLayout(repo: PortableRepository): Promise<void> {
     gezels.flatMap((gezel) => (gezel.roleBasedName ? [gezel.roleBasedName] : [])),
   );
   for (const gezel of gezels) {
-    if (legacyRoleKey(gezel.role)) {
+    // Only while the role is still Dutch: an English title here re-ran the
+    // rewrite on every start, reverting a Dutch title put back by hand.
+    if (isLegacyRoleTitle(gezel.role)) {
       const aboutPath = `${gezelRoot(gezel.id)}/about.md`;
       const about = await repo.text(aboutPath);
       const plain = about === null ? null : plainRoleProse(about, gezel.role);

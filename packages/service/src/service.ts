@@ -1,5 +1,6 @@
 import { type LogOutput, getLogOutput, setLogOutput } from '@bendyline/gezel';
 import { gezelHome } from '@bendyline/gezel/paths';
+import { daemonHost } from './daemon-host.js';
 import type { EngineContext } from './http/engine-context.js';
 import type { RunningInferenceOnlyService } from './inference-host.js';
 import { resolveEffectiveServiceRole } from './runtime-discovery.js';
@@ -30,6 +31,8 @@ export function startService(
 export async function startService(
   opts: StartServiceOptions = {},
 ): Promise<RunningService<EngineContext> | RunningInferenceOnlyService> {
+  // Before any child process is spawned: see daemon-host.ts.
+  daemonHost();
   const previousLogOutput = getLogOutput();
   if (opts.logOutput) setLogOutput(opts.logOutput);
   try {

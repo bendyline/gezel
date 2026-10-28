@@ -1,10 +1,7 @@
 import { isLocalProvider } from '@bendyline/gezel';
 import type { ProjectConnectorBinding } from '@bendyline/gezel';
 import type { Context } from 'hono';
-import {
-  cameraAllowsCloud,
-  cameraBindingForArtifact,
-} from '../connectors/live/camera/frame-access.js';
+import { cameraAllowsCloud, cameraBindingForFile } from '../connectors/live/camera/frame-access.js';
 import { isOwnerCaller } from './auth.js';
 import type { ServiceContext } from './context.js';
 
@@ -26,18 +23,25 @@ export async function callerMaySeeLocation(ctx: ServiceContext, c: Context): Pro
 }
 
 /**
- * Whether this caller may read the pixels of an artifact image. Everything
- * outside a camera's corpus is unaffected. A camera's keyframes reach the
- * person's own app and on-device sessions; a cloud-model session only when
- * the camera allows it.
+ * Whether this caller may read the pixels of `file`, the absolute path a
+ * route is about to open. Everything outside a camera's corpus is
+ * unaffected. A camera's keyframes reach the person's own app and on-device
+ * sessions; a cloud-model session only when the camera allows it.
  */
-export async function callerMaySeeArtifactPixels(
+export async function callerMaySeeFilePixels(
   ctx: ServiceContext,
   c: Context,
-  project: { connectors?: ProjectConnectorBinding[] },
-  artifactPath: string,
+  project: { id: string; connectors?: ProjectConnectorBinding[] },
+  file: string,
 ): Promise<boolean> {
-  const binding = cameraBindingForArtifact(project, artifactPath);
+  const binding = await cameraBindingForFile(
+    project,
+    ctx.store.projectArtifactsDir(project.id),
+    file,
+  );
   if (!binding || cameraAllowsCloud(binding)) return true;
   return callerMaySeeLocation(ctx, c);
 }
+
+export const CAMERA_PIXELS_WITHHELD =
+  "This camera's pictures stay on this computer: only gezels running on an on-device model may see them. Read the event record's description instead.";

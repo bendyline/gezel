@@ -80,6 +80,25 @@ describe('tactical craftbook compiler', () => {
     },
   );
 
+  // Lockdown keeps package scripts off, so these gates cannot pass; 1.26299.99
+  // stalled on them until the task paused. The step says so up front instead.
+  it('tells every step gated on a test run what to do when package scripts are off', () => {
+    const release = wave.books.find((entry) => entry.id === 'refactor-module')!;
+    const doc = applyDefaultCraftbookStepPolicies(
+      tacticalCraftbookDoc(readBook(release.id), release),
+    );
+    for (const step of doc.steps) {
+      const gated = (step.gate && 'checks' in step.gate ? (step.gate.checks ?? []) : []).some(
+        (check) => check.kind === 'commandEvidence',
+      );
+      const note = /If `run_package_script` is not among your tools[^\n]*Run package scripts/;
+      expect(note.test(step.prompt ?? ''), step.id).toBe(gated);
+      // "security" would make the default step policy open the
+      // security-analysis tools on the step.
+      if (gated) expect(step.prompt?.match(note)?.[0]).not.toMatch(/security/i);
+    }
+  });
+
   it('rejects fleet hazards before compiling a document', () => {
     const book = readBook(wave.books[0]!.id);
     const unsafe: TacticalBook = {

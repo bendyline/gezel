@@ -92,6 +92,7 @@ import {
   type Task,
   type TaskNote,
   TaskNoteSchema,
+  type TaskWorkCredit,
   type TerminalMessage,
   type TerminalThread,
   TerminalThreadSchema,
@@ -112,7 +113,6 @@ import {
   isSharedLibraryProject,
   isValidKokoroVoice,
   legacyDensityToGeneralistMode,
-  legacyRoleKey,
   nowIso,
   packageScriptsEdit,
   parseGezelMarkdown,
@@ -230,6 +230,7 @@ import {
   type ProjectBoekwachterIssueRecord,
 } from './boekwachter-issue-store.js';
 import { CraftbookStore } from './craftbook-store.js';
+import { defaultAboutMarkdown, defaultAgentMarkdown, stringSeed } from './default-gezel-docs.js';
 import {
   DEFAULT_PROJECT_ABOUT_MD,
   DEFAULT_PROJECT_MISSION_MD,
@@ -256,6 +257,8 @@ import {
 import { isViewStateOnlyPatch } from './project-view-state.js';
 import { StartupHomeCache } from './startup-home.js';
 import { TaskFilesStore } from './task-files-store.js';
+import { TaskSessionIndex } from './task-session-index.js';
+import type { LiveTaskStatus, ProjectTaskSummary } from './task-status-index.js';
 import {
   type WalkDirResult,
   findHtmlPages,
@@ -439,6 +442,9 @@ export class Store {
     { mtimeMs: number; ctimeMs: number; size: number; ino: number; summary: ChatSessionSummary }
   >();
   private readonly timelineSessionCache = new FileSnapshotCache<ChatSession>();
+  /** Task ref → bound sessions, so a task's sessions never need a full listing. */
+  private readonly taskSessions = new TaskSessionIndex();
+  private readonly questionsCache = new Map<string, { identity: string; questions: Question[] }>();
 
   /**
    * Notified after every session persist/delete — the single choke point all
@@ -928,31 +934,34 @@ export class Store {
     } catch {
       return;
     }
-    const renamed = all.filter((g) => legacyRoleKey(g.role));
+    // Only a role still written in Dutch. `legacyRoleKey` also matches the
+    // English titles, which re-ran the about.md rewrite on every boot and
+    // reverted a Dutch title the person had put back (1.26299.99 audit).
+    const renamed = all.filter((g) => isLegacyRoleTitle(g.role));
     if (renamed.length === 0) return;
     const taken = new Set<string>(all.map((g) => g.roleBasedName).filter((s): s is string => !!s));
     let migrated = 0;
     for (const g of [...renamed].sort((a, b) => a.id.localeCompare(b.id))) {
       const detail = await this.tryGetGezel(g.id);
-      if (!detail?.role || !legacyRoleKey(detail.role)) continue;
+      if (!detail?.role || !isLegacyRoleTitle(detail.role)) continue;
       const dir = gezelDir(this.home, g.id, this.external);
       try {
-        if (isLegacyRoleTitle(detail.role)) {
-          const role = plainRoleTitle(detail.role);
-          if (detail.roleBasedName) taken.delete(detail.roleBasedName);
-          const roleBasedName = pickRoleBasedName(role, taken);
-          taken.add(roleBasedName);
-          const updated = {
-            ...detail.parsed,
-            frontmatter: { ...detail.parsed.frontmatter, role, roleBasedName },
-          };
-          await writeFileAtomic(join(dir, 'gezel.md'), serializeGezelMarkdown(updated));
-          migrated++;
-        }
+        // about.md first: once gezel.md carries the English title, this
+        // gezel is never selected again.
         const about = plainRoleProse(detail.about, detail.role);
         if (!detail.parsed.frontmatter.fixedFunction && about !== detail.about) {
           await writeFileAtomic(join(dir, 'about.md'), about);
         }
+        const role = plainRoleTitle(detail.role);
+        if (detail.roleBasedName) taken.delete(detail.roleBasedName);
+        const roleBasedName = pickRoleBasedName(role, taken);
+        taken.add(roleBasedName);
+        const updated = {
+          ...detail.parsed,
+          frontmatter: { ...detail.parsed.frontmatter, role, roleBasedName },
+        };
+        await writeFileAtomic(join(dir, 'gezel.md'), serializeGezelMarkdown(updated));
+        migrated++;
       } catch {
         /* best-effort — the next boot retries */
       }
@@ -4369,6 +4378,11 @@ export class Store {
     return this.artifacts.readProjectArtifactBinary(id, filePath);
   }
 
+  /** The file {@link readProjectArtifactBinary} would open, or null when it would refuse. */
+  async resolveProjectArtifactReadPath(id: string, filePath: string): Promise<string | null> {
+    return this.artifacts.resolveProjectArtifactReadPath(id, filePath);
+  }
+
   /**
    * Flexible artifact lookup for agent tools. Exact path first; if that
    * misses, walk the tree and match by basename case-insensitively. One
@@ -5605,6 +5619,7 @@ export class Store {
     // the application's perspective: either the old session or the
     // new one is at the target path, never an in-between zeroed file.
     await writeFileAtomic(path, `${JSON.stringify(session, null, 2)}\n`);
+    this.taskSessions.note(session.gezelId, session.id, session.taskRef);
     this.notifySessionChange({ type: 'write', gezelId: session.gezelId, sessionId: session.id });
     if (!this.engineOnly) await this.startupHome.cacheSession(session).catch(() => {});
   }
@@ -5780,6 +5795,7 @@ export class Store {
       /* already gone */
     }
     await this.deleteSessionWireTranscript(gezelId, sessionId);
+    this.taskSessions.forget(gezelId, sessionId);
     this.notifySessionChange({ type: 'delete', gezelId, sessionId });
   }
 
@@ -5845,14 +5861,42 @@ export class Store {
         if (!file.endsWith('.json')) continue;
         const scanned = await this.scanSessionFile(join(dir, file), `${gezelId}/${file}`);
         if (!scanned) continue;
+        this.taskSessions.note(gezelId, scanned.summary.id, scanned.summary.taskRef);
         if (opts?.projectId && scanned.summary.projectId !== opts.projectId) continue;
         summaries.push({ ...scanned.summary });
       }
+      this.taskSessions.markComplete(gezelId);
     }
-    summaries.sort((a, b) =>
-      a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0,
-    );
-    return summaries;
+    return sortSessionSummaries(summaries);
+  }
+
+  /**
+   * Summaries of the sessions bound to `taskRef`, newest activity first,
+   * optionally narrowed to one gezel or project: what {@link listSessions}
+   * filtered by `taskRef` returns, from the task-session index rather than a
+   * walk of every session file. A gezel not yet listed in full by this process
+   * is listed once first.
+   */
+  async listTaskSessions(
+    taskRef: string,
+    opts: { gezelId?: string; projectId?: string } = {},
+  ): Promise<ChatSessionSummary[]> {
+    const gezelIds = opts.gezelId
+      ? [opts.gezelId]
+      : await safeReaddir(gezelPaths(this.home, this.external).gezels);
+    await this.taskSessions.completeGezels(gezelIds, (gezelId) => this.listSessions({ gezelId }));
+    const wanted = new Set(gezelIds);
+    const summaries: ChatSessionSummary[] = [];
+    for (const { gezelId, sessionId } of this.taskSessions.sessionsFor(taskRef)) {
+      if (!wanted.has(gezelId)) continue;
+      const path = gezelSessionFile(this.home, gezelId, sessionId, this.external);
+      const scanned = await this.scanSessionFile(path, `${gezelId}/${sessionId}.json`);
+      this.taskSessions.note(gezelId, sessionId, scanned?.summary.taskRef);
+      if (!scanned || scanned.summary.taskRef !== taskRef) continue;
+      if (opts.projectId && scanned.summary.projectId !== opts.projectId) continue;
+      summaries.push({ ...scanned.summary });
+    }
+    return sortSessionSummaries(summaries);
   }
 
   /**
@@ -6833,6 +6877,30 @@ export class Store {
     return this.taskFiles.iterateProjectTasks(projectId);
   }
 
+  /** Tasks with this own status, newest first, from the status index (see `TaskFilesStore`). */
+  iterateProjectTasksWithStatus(projectId: string, status: LiveTaskStatus): AsyncIterable<Task> {
+    return this.taskFiles.iterateProjectTasksWithStatus(projectId, status);
+  }
+
+  iterateAllTasksWithStatus(status: LiveTaskStatus): AsyncIterable<Task> {
+    return this.taskFiles.iterateAllTasksWithStatus(status);
+  }
+
+  /** A gezel's completed task work across the home, from the task-work index. */
+  async taskWorkFor(gezelId: string): Promise<TaskWorkCredit> {
+    return this.taskFiles.taskWorkFor(gezelId);
+  }
+
+  /** A project's task count and newest `updatedAt`, without reading its tasks. */
+  async projectTaskSummary(projectId: string): Promise<ProjectTaskSummary> {
+    return this.taskFiles.projectTaskSummary(projectId);
+  }
+
+  /** Child task numbers of `parentRef` in `projectId` (see `TaskFilesStore.listChildTaskNums`). */
+  async listChildTaskNums(projectId: string, parentRef: string): Promise<number[]> {
+    return this.taskFiles.listChildTaskNums(projectId, parentRef);
+  }
+
   async listProjectTasks(projectId: string): Promise<Task[]> {
     return this.taskFiles.listProjectTasks(projectId);
   }
@@ -6874,7 +6942,9 @@ export class Store {
   ): Promise<void> {
     const file = projectQuestionsFile(this.home, projectId);
     await this.questionWriteLocks.run(projectId, async () => {
-      const existing = await this.listProjectQuestions(projectId);
+      // A copy: `change` may edit questions in place, and the listing's are
+      // shared with its cache even when the change is abandoned.
+      const existing = structuredClone(await this.listProjectQuestions(projectId));
       if (!change(existing)) return;
       await mkdir(dirname(file), { recursive: true });
       await writeFileAtomic(file, `${JSON.stringify(existing, null, 2)}\n`);
@@ -6887,17 +6957,24 @@ export class Store {
   }
 
   /**
-   * Newest-first list of every question in the project. Returns `[]`
-   * when the file is missing or unreadable — callers can render empty
-   * panels without try/catch boilerplate.
+   * A project's questions, newest first, or `[]` when the file is missing or
+   * unreadable. The parse is reused while the file is
+   * unchanged: hooks on every task create, step and status change read it, and
+   * re-parsing a 3.4 MB file each time took 13% of a bulk run's main thread
+   * (2026-10-27). The array is fresh; the questions are shared, so read only.
    */
   async listProjectQuestions(projectId: string): Promise<Question[]> {
     const file = projectQuestionsFile(this.home, projectId);
     try {
-      const raw = await readFile(file, 'utf8');
-      const parsed = JSON.parse(raw) as Question[];
+      const info = await stat(file);
+      const identity = `${info.ino}:${info.mtimeMs}:${info.ctimeMs}:${info.size}`;
+      const cached = this.questionsCache.get(projectId);
+      if (cached?.identity === identity) return [...cached.questions];
+      const parsed = JSON.parse(await readFile(file, 'utf8')) as Question[];
       if (!Array.isArray(parsed)) return [];
-      return sortQuestionsNewestFirst(parsed);
+      const questions = sortQuestionsNewestFirst(parsed);
+      this.questionsCache.set(projectId, { identity, questions });
+      return [...questions];
     } catch {
       return [];
     }
@@ -7355,114 +7432,6 @@ async function projectMetaFileState(path: string): Promise<string> {
   return projectMetaStateOf(await stat(path).catch(() => null));
 }
 
-function defaultAboutMarkdown(role?: string): string {
-  const roleDescription = role?.trim() ? ` for the "${role.trim()}" role` : '';
-  return `# About this role
-
-Write a few paragraphs describing the responsibilities${roleDescription}, the expertise the work requires, how to approach the work, and anything a task runner should know. Write in the second person and do not add a name, pronouns, gender, or backstory. This content is injected into the system prompt whenever a task uses this gezel.
-`;
-}
-
-function stringSeed(s: string): number {
-  // djb2 — same family as the poppetje seed helper, kept local to
-  // avoid pulling a stringHash export into core just for this. Returns
-  // a 32-bit unsigned int.
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return h >>> 0;
-}
-
-function defaultAgentMarkdown(params: {
-  id: string;
-  name: string;
-  description?: string;
-  role?: string;
-  roleBasedName?: string;
-  gender?: GezelGender;
-  voice?: string;
-  /** Seeded from the id at creation (or a template's default) and persisted. */
-  character?: GezelCharacter;
-  model?: string;
-  templateId?: string;
-  templateVersion?: string;
-  /**
-   * Frontmatter the template wants merged in. `fixedFunction` is the
-   * legacy non-scalar passthrough; `tuningProfile`, `tuning`,
-   * `reasoningEffort`, and `provider` flow from gezel-template
-   * manifests (e.g. Builder template declares
-   * `frontmatter.tuningProfile: 'thinking-coding'`). Until this
-   * function rendered them, the resolver at
-   * `manager.ts:resolveTuning` saw `gezel.parsed.frontmatter.tuningProfile`
-   * as undefined — the entire profile workstream was a no-op.
-   * When `fixedFunction` is set we still skip the LLM-shaped
-   * sections — the gezel has no system prompt.
-   */
-  extraFrontmatter?: Partial<import('@bendyline/gezel').GezelFrontmatter>;
-}): string {
-  const ff = params.extraFrontmatter?.fixedFunction;
-  const tuningProfile = params.extraFrontmatter?.tuningProfile;
-  const suggestedTuningProfile = params.extraFrontmatter?.suggestedTuningProfile;
-  const tuning = params.extraFrontmatter?.tuning;
-  const reasoningEffort = params.extraFrontmatter?.reasoningEffort;
-  const factualWriting = params.extraFrontmatter?.factualWriting;
-  const provider = params.extraFrontmatter?.provider;
-  const frontmatter = [
-    '---',
-    `id: ${params.id}`,
-    `name: ${JSON.stringify(params.name)}`,
-    ...(params.description ? [`description: ${JSON.stringify(params.description)}`] : []),
-    ...(params.role ? [`role: ${JSON.stringify(params.role)}`] : []),
-    ...(params.roleBasedName ? [`roleBasedName: ${JSON.stringify(params.roleBasedName)}`] : []),
-    ...(params.gender ? [`gender: ${JSON.stringify(params.gender)}`] : []),
-    ...(params.voice ? [`voice: ${JSON.stringify(params.voice)}`] : []),
-    ...(params.character ? [`character: ${JSON.stringify(params.character)}`] : []),
-    ...(params.model ? [`model: ${params.model}`] : []),
-    ...(provider ? [`provider: ${JSON.stringify(provider)}`] : []),
-    ...(params.templateId ? [`templateId: ${JSON.stringify(params.templateId)}`] : []),
-    ...(params.templateVersion
-      ? [`templateVersion: ${JSON.stringify(params.templateVersion)}`]
-      : []),
-    ...(tuningProfile ? [`tuningProfile: ${JSON.stringify(tuningProfile)}`] : []),
-    ...(suggestedTuningProfile
-      ? [`suggestedTuningProfile: ${JSON.stringify(suggestedTuningProfile)}`]
-      : []),
-    ...(reasoningEffort ? [`reasoningEffort: ${JSON.stringify(reasoningEffort)}`] : []),
-    ...(factualWriting !== undefined ? [`factualWriting: ${factualWriting}`] : []),
-    ...(tuning ? [`tuning: ${JSON.stringify(tuning)}`] : []),
-    // Every FixedFunctionConfig field is written by hand here; one left out
-    // is silently dropped from every gezel created with it.
-    ...(ff
-      ? [
-          'fixedFunction:',
-          `  tool: ${JSON.stringify(ff.tool)}`,
-          `  promptKey: ${JSON.stringify(ff.promptKey ?? 'prompt')}`,
-          ...(ff.defaults && Object.keys(ff.defaults).length > 0
-            ? [`  defaults: ${JSON.stringify(ff.defaults)}`]
-            : []),
-          ...(ff.requiresInputImage ? ['  requiresInputImage: true'] : []),
-        ]
-      : []),
-    '---',
-  ].join('\n');
-  if (ff) {
-    return `${frontmatter}\n`;
-  }
-  return `${frontmatter}
-
-## Instructions {[instruction]}
-
-You are a helpful agent. Describe how you should behave here.
-
-## Memory {[memory]}
-
-(Long-term facts the agent should remember go here.)
-
-## Output Format {[output]}
-
-(Describe the expected output format here.)
-`;
-}
-
 /**
  * Remove scheduled runs' sessions, and sessions opened beneath them, in place.
  * A parent chain can be loaded in any order, so walk it rather than trusting
@@ -7487,4 +7456,11 @@ function dropScheduledRunSessions(sessions: ChatSession[]): void {
   for (let i = sessions.length - 1; i >= 0; i--) {
     if (isHidden(sessions[i]!, new Set([sessions[i]!.id]))) sessions.splice(i, 1);
   }
+}
+
+/** Newest activity first: the order every session listing returns. */
+function sortSessionSummaries(summaries: ChatSessionSummary[]): ChatSessionSummary[] {
+  return summaries.sort((a, b) =>
+    a.lastActivityAt < b.lastActivityAt ? 1 : a.lastActivityAt > b.lastActivityAt ? -1 : 0,
+  );
 }

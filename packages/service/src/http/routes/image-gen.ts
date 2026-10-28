@@ -7,7 +7,6 @@ import {
   type ImageQuality,
   type Question,
   type QuestionIntent,
-  capAgentImageSize,
   chooseImageModel,
   createLogger,
   imageModelDefaultSide,
@@ -19,6 +18,7 @@ import {
 import { readImageMeta } from '@bendyline/gezel-inference/internal/utils/image-meta';
 import { Hono } from 'hono';
 
+import { capAgentImageSize } from '../../providers/image/agent-size.js';
 import { NoLocalImageModelError } from '../../providers/image/factory.js';
 import { sdCppHonorsNegativePrompt } from '../../providers/image/sd-cpp.js';
 import {
@@ -215,15 +215,16 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         req.steps !== undefined && req.capStepsAtRecommended && recommended
           ? Math.min(req.steps, recommended)
           : (req.steps ?? recommended);
-      const agentCap =
-        req.capAgentSize && providerKind(provider.name) === 'local'
+      const agentSize =
+        req.capSizeForAgent && providerKind(provider.name) === 'local'
           ? capAgentImageSize(req)
           : undefined;
       // An edit keeps its picture's shape unless another is asked.
       const source = resolvedInputs?.[0] ? readImageMeta(resolvedInputs[0].data) : null;
       const size = requestedImageSize(
         {
-          ...(agentCap?.request ?? req),
+          ...req,
+          ...(agentSize ? { width: agentSize.width, height: agentSize.height } : {}),
           model,
           ...(source?.width && source.height
             ? { sourceSize: { width: source.width, height: source.height } }
@@ -318,8 +319,8 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
       } = {
         artifactPath: writtenPath,
         workspacePath,
-        meta: agentCap?.note
-          ? { ...out.meta, settingsNotes: [agentCap.note, ...(out.meta.settingsNotes ?? [])] }
+        meta: agentSize?.note
+          ? { ...out.meta, settingsNotes: [agentSize.note, ...(out.meta.settingsNotes ?? [])] }
           : out.meta,
       };
       if (req.inline) respBody.b64Png = out.png.toString('base64');

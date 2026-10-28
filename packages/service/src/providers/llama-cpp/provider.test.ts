@@ -697,6 +697,25 @@ describe('LlamaCppProvider pool lifecycle', () => {
     } as unknown as NativeEngineSupervisor;
   }
 
+  // The app gives the whole daemon 15 s to quit; a slot save the engine never
+  // answers must not hold the engine (and its GPU memory) past that.
+  it('shutdown stops the engine even when the slot cache save never finishes', async () => {
+    vi.useFakeTimers();
+    try {
+      const stops = { n: 0 };
+      const provider = new LlamaCppProvider({ supervisor: fakePoolSupervisor(stops) });
+      provider.setCacheAdapter({
+        flushAll: () => new Promise<number>(() => {}),
+      } as unknown as Parameters<typeof provider.setCacheAdapter>[0]);
+      const stopped = provider.shutdown();
+      await vi.advanceTimersByTimeAsync(8_000);
+      await stopped;
+      expect(stops.n).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shutdown poisons the provider — createSession refuses to respawn the engine', async () => {
     const stops = { n: 0 };
     const provider = new LlamaCppProvider({ supervisor: fakePoolSupervisor(stops) });

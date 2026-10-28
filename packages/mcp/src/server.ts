@@ -10525,7 +10525,10 @@ server.tool(
         ...(args.requireEdit ? { requireEdit: true } : {}),
         ...(saveAs ? { saveAs } : {}),
         capStepsAtRecommended: true,
-        capAgentSize: true,
+        // The daemon holds the size to about a megapixel only when a local
+        // engine serves the call. Only it knows which provider that is: a
+        // session token cannot read the config.
+        capSizeForAgent: true,
         projectId,
         // Pin agent + session so the cloud-image cost-confirmation
         // gate can synthesize a question scoped to the right

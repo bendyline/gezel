@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel",
-  "version": "1.2.10",
+  "version": "1.2.11",
   "description": "Gezel core: shared types, Zod schemas, path helpers, and the gezel.md parser used across Gezel.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "schemas", "zod", "types"],

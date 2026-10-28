@@ -154,6 +154,7 @@ describe('local duration estimates', () => {
       status: 'complete',
       createdAt: '2026-10-08T10:00:00Z',
       updatedAt: '2026-10-09T12:00:00Z',
+      workMs: minutes * 60_000,
       sourceCraftbookIds: [{ role: 'main', catalogId: 'research-report' }],
       craftbook: {
         steps: [

@@ -9,7 +9,7 @@
 // Add-Type, so managed machines never got the machine engine.
 //
 //   gezel-acl reset-tree-acl -Root <dir> [-KeepSealedChild <name> -SealedSha <sha256>]
-//                            [-SeparateZones <name,name>]
+//                            [-SeparateZones <name,name>] [-OpenZones <name,name>]
 //   gezel-acl grant-service-sid -Path <dir> -Service <name> -Grant <specs>
 //
 // Exit 0 on success, 1 when the operation was refused, 2 on a usage error.
@@ -37,7 +37,8 @@ namespace Gezel.Installer
                 case "reset-tree-acl":
                 {
                     Dictionary<string, string> options = Options(args,
-                        new[] { "Root", "KeepSealedChild", "SealedSha", "SeparateZones" }, new[] { "Root" });
+                        new[] { "Root", "KeepSealedChild", "SealedSha", "SeparateZones", "OpenZones" },
+                        new[] { "Root" });
                     return options == null ? 2 : ResetTree(options);
                 }
                 case "grant-service-sid":
@@ -55,7 +56,7 @@ namespace Gezel.Installer
         {
             Console.Error.WriteLine("[gezel-acl] " + problem);
             Console.Error.WriteLine(
-                "usage: gezel-acl reset-tree-acl -Root <dir> [-KeepSealedChild <name> -SealedSha <sha256>] [-SeparateZones <names>]");
+                "usage: gezel-acl reset-tree-acl -Root <dir> [-KeepSealedChild <name> -SealedSha <sha256>] [-SeparateZones <names>] [-OpenZones <names>]");
             Console.Error.WriteLine(
                 "       gezel-acl grant-service-sid -Path <dir> -Service <name> -Grant <specs>");
             return 2;
@@ -103,6 +104,7 @@ namespace Gezel.Installer
             string keepChild = Optional(options, "KeepSealedChild");
             string sha = Optional(options, "SealedSha");
             string zones = Optional(options, "SeparateZones");
+            string openZones = Optional(options, "OpenZones");
             try
             {
                 ResetTreeAcl.EnablePrivileges();
@@ -123,11 +125,22 @@ namespace Gezel.Installer
                 var separate = new List<string>();
                 if (zones != null)
                     foreach (string zone in zones.Split(',')) separate.Add(zone.Trim());
+                var open = new List<string>();
+                if (openZones != null)
+                    foreach (string zone in openZones.Split(',')) open.Add(zone.Trim());
                 var kept = new List<string>();
+                var linked = new List<string>();
                 int secured = ResetTreeAcl.Run(options["Root"], Administrators, keep, sealedSha, separate.ToArray(),
-                    (stage, path) => { if (stage == "kept") kept.Add(path); });
+                    open.ToArray(), (stage, path) =>
+                    {
+                        if (stage == "kept") kept.Add(path);
+                        else if (stage == "left-linked") linked.Add(path);
+                    });
                 foreach (string path in kept)
                     Console.WriteLine("[reset-tree-acl] Left " + path + " as published: it is still sealed and attested.");
+                foreach (string path in linked)
+                    Console.WriteLine("[reset-tree-acl] Left " + path +
+                        " with its own access: another name of it is outside this folder.");
                 Console.WriteLine("[reset-tree-acl] Secured " + secured + " entries without following links.");
                 return 0;
             }

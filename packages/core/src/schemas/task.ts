@@ -248,6 +248,12 @@ export const TaskCraftbookStepSchema = CraftbookStepSchema.extend({
   restartResumeCount: z.number().int().nonnegative().optional(),
   lastRestartResumeAt: z.string().optional(),
   /**
+   * Work time of this pass, kept by `accrueTaskWork`: awake time the task
+   * spent active on this step while the computer ran it. Reset on
+   * re-activation, so a step a gate sent back counts its final pass.
+   */
+  workMs: z.number().nonnegative().optional(),
+  /**
    * Rolling reject trail (capped at 8 entries, oldest dropped). One entry
    * per real completion-gate rejection PLUS one per damped byte-identical
    * resubmit (`frozen: true`). `signatureHash` hashes the failing-check
@@ -701,6 +707,15 @@ export const TaskSchema = z.object({
    * still being available when the next step starts.
    */
   roleBasedNameOnlyMode: z.boolean().optional(),
+  /**
+   * Work time, kept by `accrueTaskWork` on every write: awake time the task
+   * spent active while the computer ran it. Pauses, a closed laptop and
+   * sleep add nothing, so duration estimates assume the computer stays on.
+   * Absent on tasks created before it was kept; `workedThrough` is when it
+   * was last brought up to date.
+   */
+  workMs: z.number().nonnegative().optional(),
+  workedThrough: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   createdBy: TaskAssigneeSchema,

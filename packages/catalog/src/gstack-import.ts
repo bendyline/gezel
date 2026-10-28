@@ -325,7 +325,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
       id: phase.id,
       name: phase.name,
       description: phase.description,
-      prompt: `${phase.prompt.trim()}${inputInstruction}\n\nObservable handoff: write the completed result to \`${phase.output.path}\` in ${outputLocation}. Do not merely describe what the file would contain. ${rereadInstruction} and repair any incomplete sections.`,
+      prompt: `${phase.prompt.trim()}${inputInstruction}\n\nObservable handoff: write the completed result to \`${phase.output.path}\` in ${outputLocation}. Do not merely describe what the file would contain. ${rereadInstruction} and repair any incomplete sections.${packageScriptsOffNote(phase.output.additionalChecks)}`,
       suggestedRole: phase.suggestedRole,
       ...(phase.capabilityFloor ? { capabilityFloor: phase.capabilityFloor } : {}),
       ...(priorInputs.length > 0 ? { consumes: priorInputs } : {}),
@@ -444,7 +444,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
       id: 'repair',
       name: 'Repair the deliverable',
       description: 'Fix only the concrete gaps from the latest independent review.',
-      prompt: `Read \`${workflow.review.reviewPath}\`${reviewReadTool} and repair every failed criterion in ${reviewTargets}. ${repairLocationInstruction} Preserve evidence that already passed. Re-run or re-check anything the reviewer found unproven. Ensure \`${workflow.review.artifactPath}\` is genuinely updated this turn so the repair is observable, then hand it back for independent evaluation.`,
+      prompt: `Read \`${workflow.review.reviewPath}\`${reviewReadTool} and repair every failed criterion in ${reviewTargets}. ${repairLocationInstruction} Preserve evidence that already passed. Re-run or re-check anything the reviewer found unproven. Ensure \`${workflow.review.artifactPath}\` is genuinely updated this turn so the repair is observable, then hand it back for independent evaluation.${packageScriptsOffNote(lastOutput.additionalChecks)}`,
       suggestedRole: workflow.review.repairRole ?? workflow.phases.at(-1)!.suggestedRole,
       consumes: [surfaceInput(workflow.review.reviewPath, reviewOutputIsArtifact), ...reviewInputs],
       advanceWhen: {
@@ -477,6 +477,31 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
       terminal: true,
     },
   ];
+}
+
+/**
+ * A step gated on a project-command run cannot pass while the security level
+ * keeps package scripts off, as Lockdown, the default, does since ADR 0028:
+ * the runner tools are withheld and nothing else writes the run receipt.
+ * Under 1.26299.99 these books stalled on that gate until the task paused.
+ * Saying so up front stops the step at once with the one setting to change.
+ * Keep the word "security" out of it: the default step policy reads it as a
+ * request for the security-analysis tools (craftbook-step-policy.ts).
+ */
+function packageScriptsOffNote(checks: readonly GateCheck[] | undefined): string {
+  const runs = (checks ?? []).flatMap((check) =>
+    check.kind === 'commandEvidence' && (check.script || check.bin)
+      ? [
+          check.script
+            ? { tool: 'run_package_script', command: `npm run ${check.script}` }
+            : { tool: 'run_npx', command: `npx ${check.bin}` },
+        ]
+      : [],
+  );
+  if (runs.length === 0) return '';
+  const tools = [...new Set(runs.map((run) => `\`${run.tool}\``))].join(' or ');
+  const commands = [...new Set(runs.map((run) => `\`${run.command}\``))].join(', ');
+  return `\n\nIf ${tools} is not among your tools, package scripts are turned off in this project's settings and this step cannot be proven. Do not run the tests another way or report a result you did not see: end your turn with a reply that names ${commands} and asks the person to turn on Run package scripts in Gezel's Settings, then try the task again.`;
 }
 
 function qualityOutputGate(

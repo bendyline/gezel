@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-catalog",
-  "version": "1.2.10",
+  "version": "1.2.11",
   "description": "Gezel catalog loader: resolves the model, toolset, gezel template, and craftbook catalogs from the @bendyline/gilde content package and installs toolsets.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "catalog", "models", "craftbooks"],
@@ -76,7 +76,7 @@
     "tsx": "^4.23.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10",
-    "@bendyline/gilde": "0.3.0"
+    "@bendyline/gilde": "0.3.1"
   },
   "peerDependencies": {
     "@bendyline/gilde": "*"

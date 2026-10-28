@@ -25,6 +25,7 @@ import { redactPathSecrets } from '@bendyline/gezel-inference/internal/perf/reda
 import { beginPerfRequest } from '@bendyline/gezel-inference/internal/perf/responsiveness';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { ZodError } from 'zod';
+import { daemonHost } from '../daemon-host.js';
 import { staleStepSessionRefusal } from '../tasks/stale-step-session.js';
 import {
   bearerAuth,
@@ -505,6 +506,9 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       startedAt: ctx.startedAt,
       nodeVersion: process.versions.node,
       platform: process.platform,
+      // `gezel stop` checks these before it kills the pid in runtime/pid.
+      pid: process.pid,
+      hostedBy: daemonHost(),
       ...(llamaCppBackend ? { llamaCppBackend } : {}),
       ...(llamaCppDetectedBackend ? { llamaCppDetectedBackend } : {}),
       ...(llamaCppDetectedVendor ? { llamaCppDetectedVendor } : {}),

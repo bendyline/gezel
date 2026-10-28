@@ -29,6 +29,17 @@ offline with no catalog download, and an install request returns it instead of
 fetching Gilde's copy. The Gilde manifest still supplies the tool inventory that
 craftbook `autoAllow` reads, so its `tools[]` must match what the bundled
 server publishes; the catalog contract test pins that list.
+
+The bundled copy joins only sessions that make a document
+(`bundledDocblocksJoinsSession`): a task whose craftbook declares `docblocks`
+(steps that set `toolPolicy.disallowToolsets: ['docblocks']` still drop it),
+and a delegation whose expected deliverable is a binary document. Its 19 tool
+schemas cost about 14,000 prompt tokens and a Node process per session; when
+1.26299.99 gave it to every session, the Meester's first turn grew from 22.7k
+to 37.4k prompt tokens. The gate filters the system roster once, before the
+prompt listing and the bridge spawn both read it. A copy installed at gezel,
+shared or project scope (an install from before 2.7.3, for example) is not
+gated.
 Compared with the old 2.0.0 inventory,
 `validate_document` is gone and `get_authoring_context` is present. Plain
 Markdown needs no validation preflight; conversion reports and previews carry

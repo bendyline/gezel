@@ -58,6 +58,8 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     narrateAssistantReplies: config.narrateAssistantReplies === true,
     narrateProgressUpdates: config.narrateProgressUpdates !== false,
     aiEngagementMode: config.aiEngagementMode ?? 'proactive',
+    // `gezel growth` reads it back; default on.
+    growth: { enabled: config.growth?.enabled !== false },
     showSystemTray: config.showSystemTray !== false,
     autoUpdateChecks: config.autoUpdateChecks !== false,
     quitOnClose: config.quitOnClose === true,
@@ -193,7 +195,6 @@ export const CONFIG_RESPONSE_OMITTED: Readonly<Record<string, string>> = {
   searchIndex: SERVICE_OWNED,
   digest: SERVICE_OWNED,
   meesterStatus: SERVICE_OWNED,
-  growth: SERVICE_OWNED,
   projectNudge: SERVICE_OWNED,
   localEngineMemoryGb: SERVICE_OWNED,
   allowRamSpillover: SERVICE_OWNED,

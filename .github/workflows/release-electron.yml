@@ -1748,7 +1748,9 @@ jobs:
       # download, which it would otherwise clean away.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: scripts
+          sparse-checkout: |
+            scripts
+            docs/handboek/whats-new
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
@@ -1820,6 +1822,22 @@ jobs:
             fi
           fi
 
+      # Link the release's own What's New article (named for the calendar
+      # version, 1.26300 for 1.26300.NN) only when it exists, so a release
+      # cut on a day the article was not renamed for never links a 404.
+      - name: Link the What's New article
+        id: whats-new
+        env:
+          VERSION: ${{ needs.release-preflight.outputs.version }}
+        run: |
+          calver="${VERSION%.*}"
+          article="docs/handboek/whats-new/${calver}.md"
+          if [ -f "$article" ]; then
+            echo "line=Read [what's new in ${calver}](https://github.com/bendyline/gezel/blob/main/${article})." >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No What's New article at ${article}; the release notes will not link one."
+            echo "line=" >> "$GITHUB_OUTPUT"
+          fi
       - name: Create GitHub Release
         uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
         with:
@@ -1843,6 +1861,20 @@ jobs:
           # before clicking a .deb. Keep in step with
           # docs/handboek/technical/verifying-your-download.md.
           body: |
+            ${{ steps.whats-new.outputs.line }}
+
+            ## Downloads
+
+            | Your computer | Download |
+            | --- | --- |
+            | Windows with an Intel or AMD processor | `Gezel-${{ needs.release-preflight.outputs.version }}-windows-x64.exe` |
+            | Windows on ARM, such as Snapdragon X or NVIDIA RTX Spark | `Gezel-${{ needs.release-preflight.outputs.version }}-windows-arm64.exe` |
+            | Mac with Apple silicon | `Gezel-${{ needs.release-preflight.outputs.version }}-mac-arm64.pkg` |
+            | Ubuntu or Debian | `Gezel-${{ needs.release-preflight.outputs.version }}-linux-amd64.deb`, or `-linux-arm64.deb` on ARM |
+            | Fedora and other RPM-based Linux | `Gezel-${{ needs.release-preflight.outputs.version }}-linux-x86_64.rpm`, or `-linux-aarch64.rpm` on ARM |
+
+            The `.zip`, `.blockmap` and `latest*.yml` files are for the app's own updates.
+
             ## Linux compatibility
 
             Linux installers require glibc 2.38 or newer and a C++ runtime

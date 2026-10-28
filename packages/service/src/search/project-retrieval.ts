@@ -42,9 +42,9 @@ import {
 import type { Store } from '../fs/store.js';
 import { hasDerivedIndexText } from '../index-store/classify.js';
 import {
+  groundingWords,
   proactiveRetrievalTerms,
-  queryTerms,
-  textMatchesAnyTerm,
+  textGroundsWords,
 } from '../index-store/query-terms.js';
 import { isUnmodifiedWorkspaceBootstrap } from '../workspace/template.js';
 import { RetrievalTraceBuilder } from './retrieval-trace.js';
@@ -291,14 +291,14 @@ export async function resolveSessionRetrievalPolicy(args: {
 function isGrounded(
   result: UnifiedSearchResult,
   excerpt: string,
-  terms: readonly string[],
+  words: readonly string[],
 ): boolean {
-  if (result.arm !== 'fts' || terms.length === 0) return true;
+  if (result.arm !== 'fts' || words.length === 0) return true;
   // The path and title are injected on the hit's own header line, so a
   // filename match is grounding as much as a body match is.
-  return textMatchesAnyTerm(
+  return textGroundsWords(
     `${result.title} ${result.path ?? ''} ${result.snippet ?? ''} ${excerpt}`,
-    terms,
+    words,
   );
 }
 
@@ -478,7 +478,7 @@ export async function retrieveProjectContext(args: {
   const diverse = filtered.slice(0, depth);
   for (const result of filtered.slice(depth)) trace.reject(result, 'depth');
   if (diverse.length === 0) return emit(null);
-  const terms = queryTerms(query);
+  const words = groundingWords(query);
   const maxExcerptChars = policy.mode === 'lean' ? 180 : policy.mode === 'balanced' ? 700 : 1_300;
   const hits: ProjectRetrievalHit[] = [];
   let knowledgeCount = 0;
@@ -540,7 +540,7 @@ export async function retrieveProjectContext(args: {
       trace.reject(result, 'no-excerpt');
       continue;
     }
-    if (!judged(result) && !isGrounded(result, excerpt, terms)) {
+    if (!judged(result) && !isGrounded(result, excerpt, words)) {
       trace.reject(result, 'grounding');
       continue;
     }

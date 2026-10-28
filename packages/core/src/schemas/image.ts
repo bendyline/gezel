@@ -152,12 +152,12 @@ export const ImageGenerationRequestSchema = z.object({
    */
   capStepsAtRecommended: z.boolean().optional(),
   /**
-   * Hold explicit `width`/`height` to about a megapixel when a local engine
-   * renders (`capAgentImageSize`); a cloud provider gets the size as asked.
-   * The agent tool sets this rather than deciding itself, because its session
-   * token cannot read the config that names the image provider.
+   * Hold an on-device render to about a megapixel. The agent tool sets this
+   * and the daemon applies it only when a local engine serves the request,
+   * because only the daemon knows which provider that is: a session token
+   * cannot read the config, and a cloud provider maps sizes itself.
    */
-  capAgentSize: z.boolean().optional(),
+  capSizeForAgent: z.boolean().optional(),
 });
 export type ImageGenerationRequest = z.infer<typeof ImageGenerationRequestSchema>;
 

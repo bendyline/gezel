@@ -927,15 +927,23 @@ export async function startProductService(
   // Reconcile immediately on every durable status transition: inactive
   // ancestors prune queued/running child turns, while a resumed ancestor
   // rehydrates only descendants whose own stored status is still active.
+  // Withdraw the questions and runtime cards a task has moved past. One read
+  // serves both: they close disjoint cards, and questions.json is parsed on
+  // the daemon thread for every task transition (one batch project's held
+  // 4,624 cards, 2.8 MB).
+  const withdrawPassedQuestions = async (task: Parameters<typeof withdrawStaleServiceCards>[1]) => {
+    const questions = await store.listProjectQuestions(task.projectId).catch(() => []);
+    await withdrawFinishedPassQuestions({ store, chatEvents }, task, questions).catch(
+      (err: unknown) => log.warn(`[tasks] ${task.ref}: question withdrawal failed: ${String(err)}`),
+    );
+    await withdrawStaleServiceCards({ store, chatEvents }, task, questions).catch((err: unknown) =>
+      log.warn(`[tasks] ${task.ref}: card withdrawal failed: ${String(err)}`),
+    );
+  };
   tasks.setTaskStatusChangedHook(async ({ task }) => {
     await taskRunner.reconcileStatusChange(task);
     // A finished or canceled task has no step pass left to answer for.
-    await withdrawFinishedPassQuestions({ store, chatEvents }, task).catch((err: unknown) =>
-      log.warn(`[tasks] ${task.ref}: question withdrawal failed: ${String(err)}`),
-    );
-    await withdrawStaleServiceCards({ store, chatEvents }, task).catch((err: unknown) =>
-      log.warn(`[tasks] ${task.ref}: card withdrawal failed: ${String(err)}`),
-    );
+    await withdrawPassedQuestions(task);
   });
   nightShift.setOnActivated(async () => {
     // Index first, tasks second: the catch-up flag is raised synchronously,
@@ -1227,18 +1235,22 @@ export async function startProductService(
   });
   const runtimeActivation = { store, tasks, scriptRunner, history };
   tasks.setStepActivatedHook(async ({ projectId, task, newStep, completedStep, kind }) => {
-    if (kind !== 'entry' && kind !== 'redispatch' && completedStep.completedAt) {
+    // Steps of keyed automation launches (bulk workflows) are left to the
+    // daily XP sweep: a media review finished steps every second, and each
+    // first refresh after a restart rescanned 1.4M history events and 117k
+    // tasks per gezel, a quarter of the main thread for half an hour.
+    if (
+      kind !== 'entry' &&
+      kind !== 'redispatch' &&
+      completedStep.completedAt &&
+      task.origin?.kind !== 'workflow-invocation'
+    ) {
       xpRefresher.note(stepCreditedGezelId(completedStep));
     }
     // The pass that asked is over, including an earlier pass of this same
-    // step after a gate loops back (tasks/finished-pass-questions.ts).
-    await withdrawFinishedPassQuestions({ store, chatEvents }, task).catch((err: unknown) =>
-      log.warn(`[tasks] ${task.ref}: question withdrawal failed: ${String(err)}`),
-    );
-    // Before any owner card for the new step is filed below.
-    await withdrawStaleServiceCards({ store, chatEvents }, task).catch((err: unknown) =>
-      log.warn(`[tasks] ${task.ref}: card withdrawal failed: ${String(err)}`),
-    );
+    // step after a gate loops back (tasks/finished-pass-questions.ts), and
+    // before any owner card for the new step is filed below.
+    await withdrawPassedQuestions(task);
     introduceFreshHire(task, newStep);
     if (await runActivationGate(runtimeActivation, { projectId, task, newStep })) return;
     if (await runSpawnFanout(runtimeActivation, { projectId, task, newStep })) return;
@@ -1590,15 +1602,26 @@ export async function startProductService(
     // settles, the gate has become satisfiable, so poke the parent's
     // active step. Without it the hold would be permanent — nothing else
     // notifies a spawn host that its crew finished.
+    //
+    // A step that made subtasks with `create_task` waits for them the same
+    // way, and is woken the same way. Narrowing this to spawn hosts left
+    // those parents to the stuck-step sweep, eight minutes later and with
+    // the "stuck" nudge (1.26299.99 audit).
     if (task.parentTaskRef) {
       const parsedParent = parseTaskRef(task.parentTaskRef);
       const parent = parsedParent ? await tasks.getByRef(task.parentTaskRef) : null;
       const parentStep = parent?.craftbook.steps.find((step) => step.id === parent.activeStepId);
-      // Only spawn hosts can be held by the activation barrier above. Ordinary
-      // CLI-owned batch parents have no barrier to release. Scanning their
-      // entire project history for every completed child held Codex slots for
-      // minutes once a media project accumulated tens of thousands of tasks.
-      if (parsedParent && parent?.spawnsCraftbook && parentStep && !parentStep.spawnFanout) {
+      // Ordinary CLI-owned batch parents have nothing waiting to wake, and
+      // scanning their entire project history for every completed child held
+      // Codex slots for minutes once a media project held tens of thousands of
+      // tasks. So the scan runs for spawn hosts and for subtasks a gezel made.
+      const madeByGezel = task.createdBy?.kind === 'gezel';
+      if (
+        parsedParent &&
+        (parent?.spawnsCraftbook || madeByGezel) &&
+        parentStep &&
+        !parentStep.spawnFanout
+      ) {
         const stillActive = await tasks
           .listChildren(task.parentTaskRef, { status: 'active' })
           .catch(() => []);
@@ -1607,7 +1630,7 @@ export async function startProductService(
             .redispatchActiveStep(
               parsedParent.projectId,
               parsedParent.num,
-              `last fanout child ${task.ref} settled (${outcome})`,
+              `last ${parent?.spawnsCraftbook ? 'fanout child' : 'subtask'} ${task.ref} settled (${outcome})`,
             )
             .catch((err) =>
               log.warn(

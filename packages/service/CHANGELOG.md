@@ -1,3 +1,17 @@
+## @bendyline/gezel-service [1.2.11](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-service%401.2.10...%40bendyline%2Fgezel-service%401.2.11) (2026-10-27)
+
+
+### Dependencies
+
+* **@bendyline/gezel:** upgraded to 1.2.11
+* **@bendyline/gezel-catalog:** upgraded to 1.2.11
+* **@bendyline/gezel-client:** upgraded to 1.2.11
+* **@bendyline/gezel-mcp:** upgraded to 1.2.11
+* **@bendyline/gezel-script-runtime:** upgraded to 1.0.11
+* **@bendyline/gezel-script-stdlib:** upgraded to 1.1.11
+* **@bendyline/gezel-sdk:** upgraded to 1.1.11
+* **@bendyline/gezel-inference:** upgraded to 1.0.6
+
 ## @bendyline/gezel-service [1.2.10](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-service%401.2.9...%40bendyline%2Fgezel-service%401.2.10) (2026-10-27)
 
 

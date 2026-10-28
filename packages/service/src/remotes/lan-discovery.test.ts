@@ -1,3 +1,4 @@
+import { createSocket } from 'node:dgram';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   DNS_TYPE_A,
@@ -181,6 +182,42 @@ describe('advertiser and browser over loopback', () => {
     await advertiser.stop();
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(await browser.browse()).toEqual([]);
+  });
+
+  it('keeps answering after a malformed legacy query', async () => {
+    const advertiser = createLanAdvertiser({ port: 0, multicast: false });
+    cleanup.push(() => advertiser.stop());
+    await advertiser.advertise({ ...SERVER, addresses: ['127.0.0.1'] });
+    const port = advertiser.boundPort()!;
+
+    // The packet that ended a 1.26299.99 daemon: a PTR question for us, so
+    // there is an answer to send, beside a label of invalid UTF-8 that the
+    // legacy answer has to echo.
+    const name = (...labels: Buffer[]) =>
+      Buffer.concat([...labels.flatMap((l) => [Buffer.from([l.length]), l]), Buffer.from([0])]);
+    const crafted = Buffer.concat([
+      Buffer.from([0x12, 0x34, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0]),
+      name(Buffer.from('_gezel'), Buffer.from('_tcp'), Buffer.from('local')),
+      Buffer.from([0, DNS_TYPE_PTR, 0, 1]),
+      name(Buffer.alloc(22, 0xff)),
+      Buffer.from([0, DNS_TYPE_A, 0, 1]),
+    ]);
+    const sender = createSocket('udp4');
+    cleanup.push(() => new Promise<void>((resolve) => sender.close(() => resolve())));
+    await new Promise<void>((resolve, reject) =>
+      sender.send(crafted, port, '127.0.0.1', (err) => (err ? reject(err) : resolve())),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const browser = createLanBrowser({
+      target: { address: '127.0.0.1', port },
+      requeryMs: 0,
+      expireMs: 400,
+    });
+    cleanup.push(() => browser.close());
+    expect(await browser.browse({ waitMs: 200 })).toEqual([
+      expect.objectContaining({ fingerprint: FP }),
+    ]);
   });
 
   it('does not advertise without an address a peer could dial', async () => {

@@ -864,11 +864,18 @@ export class DeviceHealthGate {
       };
     }
     const decision = evaluateDeviceHealth(sample, this.policy, this.cooling);
+    // `blocked` says new work is being held. A hot reading while nothing is
+    // waiting to start is only a reading: work already admitted keeps
+    // running, and the next admission decides. In 1.26299.99 one hotspot
+    // spike during a 27B prefill read "Paused for safety" while the reply
+    // kept streaming.
+    const holding =
+      this.admissionBlocked || (decision.hardBlocked && this.pendingAdmission !== undefined);
     const state: DeviceHealthState = !decision.telemetryAvailable
       ? 'unavailable'
       : decision.admissible
         ? 'healthy'
-        : decision.hardBlocked || this.admissionBlocked
+        : holding
           ? 'blocked'
           : this.cooling
             ? 'cooling'

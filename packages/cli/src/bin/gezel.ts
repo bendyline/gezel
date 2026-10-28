@@ -24,7 +24,9 @@ import {
   createTrustingFetch,
   discoverOrSpawn,
   isProcessAlive,
+  listProcessSnapshots,
   readRuntime,
+  requestDaemonHealth,
   resolveDaemonEntry,
   stopOwnedDaemon,
   stopProcessByPid,
@@ -68,6 +70,7 @@ import {
   shorthandEcho,
   workspaceCraftbookId,
 } from '../craftbook-shorthand.js';
+import { type DaemonStopHealth, planDaemonStop } from '../daemon-stop.js';
 import {
   CLI_ENGAGEMENT_MODE_USAGE,
   cliEngagementModeOption,
@@ -98,7 +101,11 @@ import { resolveRunPrompt } from '../run-prompt.js';
 import { checkRunReadiness } from '../run-readiness.js';
 import { RunOutput } from '../run-reply.js';
 import { registerSecretCommands } from '../secrets-command.js';
-import { registerProjectSettingsCommands, registerSecurityCommands } from '../settings-command.js';
+import {
+  registerGrowthCommand,
+  registerProjectSettingsCommands,
+  registerSecurityCommands,
+} from '../settings-command.js';
 import { installSignalCleanup } from '../signal-cleanup.js';
 import {
   type CleanupFlags,
@@ -145,6 +152,7 @@ const cliGlobals = (): CliGlobals => program.opts() as CliGlobals;
 registerSecretCommands(program, () => connectOwned(cliGlobals()));
 registerMcpCommands(program, () => connectOwned(cliGlobals()));
 registerSecurityCommands(program, () => connectOwned(cliGlobals()));
+registerGrowthCommand(program, () => connectOwned(cliGlobals()));
 
 // Apply --home before any command runs so the daemon spawn env, readRuntime,
 // and in-proc startService all resolve the same home.
@@ -608,7 +616,10 @@ program
  * `pid=… alive=false`. Remove them only while they still name the process we
  * just stopped, so a daemon that started in between keeps its files.
  */
-async function clearStaleRuntime(stoppedPid: number): Promise<void> {
+async function clearStaleRuntime(
+  stoppedPid: number,
+  opts: { pidReused?: boolean } = {},
+): Promise<void> {
   const { readFile, rm } = await import('node:fs/promises');
   const { gezelPaths } = await import('@bendyline/gezel/paths');
   const runtime = gezelPaths().runtime;
@@ -616,7 +627,7 @@ async function clearStaleRuntime(stoppedPid: number): Promise<void> {
     (await readFile(runtime.pid, 'utf8').catch(() => '')).trim(),
     10,
   );
-  if (recorded !== stoppedPid || isProcessAlive(stoppedPid)) return;
+  if (recorded !== stoppedPid || (!opts.pidReused && isProcessAlive(stoppedPid))) return;
   await Promise.all(
     [
       runtime.pid,
@@ -648,15 +659,82 @@ async function stopUserDaemon(globals: CliGlobals): Promise<void> {
     return;
   }
   const runtime = await readRuntime();
-  if (!runtime) {
-    console.log('gezeld is not running');
-    return;
+  const plan = await planDaemonStop({
+    pid: runtime?.pid ?? null,
+    alive: isProcessAlive,
+    health: runtime ? await runtimeHealth(runtime) : null,
+    commandOf: processCommand,
+  });
+  switch (plan.kind) {
+    case 'not-running':
+      console.log('gezeld is not running');
+      return;
+    case 'stale':
+      await clearStaleRuntime(runtime!.pid);
+      console.log('gezeld is not running; removed the runtime files it left behind');
+      return;
+    case 'foreign':
+      await clearStaleRuntime(runtime!.pid, { pidReused: true });
+      console.log(
+        `gezeld is not running. Its old process id ${runtime!.pid} now belongs to another program, which was left alone; removed gezeld's leftover runtime files.`,
+      );
+      return;
+    case 'unconfirmed':
+      console.error(
+        `gezeld (pid ${runtime!.pid}) is not answering, and Gezel could not read the process list to confirm that pid is still gezeld, so it was not stopped.`,
+      );
+      process.exitCode = 1;
+      return;
+    case 'mismatch':
+      console.error(
+        `The Gezel service on port ${runtime!.port} reports pid ${plan.healthPid}, but runtime/pid says ${runtime!.pid}; stopped nothing. Run \`gezel status\` to see which is running.`,
+      );
+      process.exitCode = 1;
+      return;
+    case 'brake': {
+      const result = await (await connectOwned(globals)).emergencyStopChats();
+      console.log(
+        `This Gezel service belongs to the Gezel app, which would start it again, so it keeps running. Stopped its AI work instead (${result.cancelledTurns} active ${result.cancelledTurns === 1 ? 'chat' : 'chats'}). Quit the Gezel app to shut it down.`,
+      );
+      return;
+    }
+    case 'kill':
+      if (await stopDaemonPid(runtime!.pid)) {
+        console.log(`stopped gezeld pid=${runtime!.pid}`);
+      } else {
+        console.error(`failed to confirm gezeld pid=${runtime!.pid} stopped`);
+        process.exitCode = 1;
+      }
   }
-  if (await stopDaemonPid(runtime.pid)) {
-    console.log(`stopped gezeld pid=${runtime.pid}`);
-  } else {
-    console.error(`failed to confirm gezeld pid=${runtime.pid} stopped`);
-    process.exitCode = 1;
+}
+
+/** The fields of the recorded daemon's `/api/health`, or null when nothing answers. */
+async function runtimeHealth(
+  runtime: NonNullable<Awaited<ReturnType<typeof readRuntime>>>,
+): Promise<DaemonStopHealth | null> {
+  try {
+    const response = await requestDaemonHealth(runtime.baseUrl, {
+      fetch: runtime.cert ? createTrustingFetch({ cert: runtime.cert }) : globalThis.fetch,
+      timeoutMs: 3_000,
+    });
+    if (!response.ok) return null;
+    const body = (response.body ?? {}) as { pid?: unknown; hostedBy?: unknown };
+    return {
+      ...(typeof body.pid === 'number' ? { pid: body.pid } : {}),
+      ...(body.hostedBy === 'app' || body.hostedBy === 'standalone'
+        ? { hostedBy: body.hostedBy }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function processCommand(pid: number): Promise<string | null> {
+  try {
+    return (await listProcessSnapshots()).find((entry) => entry.pid === pid)?.command ?? '';
+  } catch {
+    return null;
   }
 }
 
@@ -2224,13 +2302,37 @@ function resolveModelProvider(raw?: string): 'mlx' | 'llama-cpp' | 'ds4' {
   return resolveOnDeviceProvider(process.platform, process.arch);
 }
 
+/**
+ * Cloud and CLI providers whose concurrent turns `model concurrency` can also
+ * set. Their slots are a rate-limit choice rather than a memory one, so they
+ * have no automatic sizing: `auto` restores the provider's default (10).
+ */
+const CONCURRENCY_SERVICE_PROVIDERS = [
+  'codex-cli',
+  'anthropic-cli',
+  'copilot',
+  'openai',
+  'anthropic',
+] as const;
+
 model
   .command('concurrency [slots]')
-  .description('Show or set local inference slots; use auto to restore automatic sizing')
-  .option('-p, --provider <engine>', 'mlx | llama-cpp | ds4 (default: platform default)')
+  .description(
+    'Show or set how many turns a provider runs at once (local inference slots, or a cloud/CLI provider such as codex-cli); auto restores the default',
+  )
+  .option(
+    '-p, --provider <engine>',
+    `mlx | llama-cpp | ds4 | ${CONCURRENCY_SERVICE_PROVIDERS.join(' | ')} (default: platform default)`,
+  )
   .option('--json', 'Output the slot override as JSON')
   .action(async (slots: string | undefined, opts: { provider?: string; json?: boolean }) => {
-    const provider = resolveModelProvider(opts.provider);
+    const service = CONCURRENCY_SERVICE_PROVIDERS.find((name) => name === opts.provider);
+    if (!service && opts.provider && !['mlx', 'llama-cpp', 'ds4'].includes(opts.provider)) {
+      throw new CliError(
+        `--provider must be one of mlx, llama-cpp, ds4, ${CONCURRENCY_SERVICE_PROVIDERS.join(', ')} (got "${opts.provider}")`,
+      );
+    }
+    const provider = service ?? resolveModelProvider(opts.provider);
     if (
       slots !== undefined &&
       slots !== 'auto' &&
@@ -2247,10 +2349,14 @@ model
       await client.updateConfig({ providerConcurrency: concurrency });
     }
     const result = { provider, slots: concurrency[provider] ?? null };
+    // A cloud/CLI provider's queue is sized when the provider starts.
+    const applies = service
+      ? 'applies after a daemon restart'
+      : 'applies when idle sessions reload';
     console.log(
       opts.json
         ? JSON.stringify(result)
-        : `${provider}: ${result.slots ?? 'auto'}${result.slots === null ? '' : ' inference slots'}${slots === undefined ? '' : ' (applies when idle sessions reload)'}`,
+        : `${provider}: ${result.slots ?? 'auto'}${result.slots === null ? '' : ` ${service ? 'concurrent turns' : 'inference slots'}`}${slots === undefined ? '' : ` (${applies})`}`,
     );
   });
 

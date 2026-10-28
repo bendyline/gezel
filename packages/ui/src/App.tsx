@@ -70,6 +70,7 @@ import { runtimeCapabilities } from './runtime-capabilities.js';
 import { requestSettingsSection } from './settings-nav.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
+import { connectStartupHome, saveStartupDraft } from './startup/handoff.js';
 import { syncThemeFromConfig } from './theme.js';
 import { setVisibleInterval } from './visible-interval.js';
 
@@ -283,6 +284,21 @@ function FullApp() {
   useEffect(() => {
     selectionRef.current = selection;
   }, [selection]);
+
+  // Home takes the startup screen's handoff (its reading and any draft).
+  // Leaving Home before it mounted (Cmd+, on macOS, a tray item, a
+  // notification click on a cold launch) left the full-screen startup
+  // screen over an inert app, with nothing to take it down. Any other view
+  // takes the handoff instead: it keeps a typed draft for the Meester and
+  // lets the screen go.
+  const awayFromHome = selection !== null;
+  useEffect(() => {
+    if (!awayFromHome) return;
+    return connectStartupHome(async (view) => {
+      const meesterId = view.draft.trim() ? (await api.getConfig()).meesterGezelId : undefined;
+      await saveStartupDraft(view, meesterId);
+    });
+  }, [awayFromHome]);
 
   // The titlebar's status cluster grows with the number of busy engines and
   // queued chats, and `.app-header-right` never shrinks — so the pills shed

@@ -45,12 +45,14 @@ describe('project starter offer', () => {
       missingToolsets: {},
       establishedCodebase: false,
     });
+    // Estimates read recorded work time; a run without it is not a sample.
     const history = [
       {
         status: 'complete',
         createdAt: '2026-10-08T10:00:00Z',
+        workMs: 240_000,
         sourceCraftbookIds: [{ role: 'main', catalogId: 'research-report' }],
-        craftbook: { steps: [{ completedAt: '2026-10-08T10:04:00Z' }] },
+        craftbook: { steps: [{ completedAt: '2026-10-08T10:04:00Z', workMs: 240_000 }] },
       },
     ] as Task[];
     const context = {

@@ -187,6 +187,64 @@ Set-Content -LiteralPath $first -Value 'shared data'
 New-Item -ItemType HardLink -Path (Join-Path $sharedOnly 'shared\second.txt') -Target $first | Out-Null
 Assert ((RepairZones $sharedOnly @('shared', 'service')) -eq 4) 'A hard link inside one zone was refused'
 
+# A zone every account can already write (the machine-shared tree) holds
+# links out of the tree on purpose: pnpm's store, a local git clone's
+# objects. Refusing them dropped GezelService on upgrade. The file keeps its
+# own access and stops inheriting, so the grants NSIS publishes afterwards
+# never reach its other name; the same link anywhere else is still refused.
+function RepairOpen([string]$path, [string[]]$zones, [string[]]$open) {
+    [Gezel.Installer.ResetTreeAcl]::Run($path, $testOwner, $null, $null, $zones, $open, $null)
+}
+function AccessText([string]$path) {
+    ((Get-Acl -LiteralPath $path).Access | ForEach-Object {
+        "$($_.IdentityReference)|$($_.FileSystemRights)|$($_.AccessControlType)"
+    } | Sort-Object) -join ';'
+}
+$store = Fixture 'pnpm-store'
+$storeFile = Join-Path $store 'package.js'
+Set-Content -LiteralPath $storeFile -Value 'module.exports = 1'
+$storeAccess = AccessText $storeFile
+$openZone = Fixture 'hard-link-open-zone'
+New-Item -ItemType Directory -Path (Join-Path $openZone 'shared\projects\p\node_modules') | Out-Null
+$linkedPackage = Join-Path $openZone 'shared\projects\p\node_modules\package.js'
+New-Item -ItemType HardLink -Path $linkedPackage -Target $storeFile | Out-Null
+$leftLinked = New-Object System.Collections.Generic.List[string]
+$openCount = [Gezel.Installer.ResetTreeAcl]::Run($openZone, $testOwner, $null, $null, @('shared', 'service'), @('shared'), [Action[string,string]] {
+    param($stage, $path)
+    if ($stage -eq 'left-linked') { $leftLinked.Add($path) }
+}.GetNewClosure())
+Assert ($openCount -eq 5) "The open-zone repair secured $openCount entries"
+Assert ($leftLinked.Count -eq 1 -and $leftLinked[0] -eq $linkedPackage) 'The outside-linked file was not reported'
+Assert ((AccessText $storeFile) -eq $storeAccess) 'The outside name lost or gained access'
+Assert ((Get-Acl -LiteralPath $storeFile).AreAccessRulesProtected) 'The outside-linked file still inherits'
+Assert ((Get-Content -LiteralPath $linkedPackage).Trim() -eq 'module.exports = 1') 'Linked bytes changed'
+
+$openRoot = Fixture 'hard-link-open-root'
+New-Item -ItemType Directory -Path (Join-Path $openRoot 'projects'), (Join-Path $openRoot 'private') | Out-Null
+$rootStoreFile = Join-Path $store 'other.js'
+Set-Content -LiteralPath $rootStoreFile -Value 'other'
+New-Item -ItemType HardLink -Path (Join-Path $openRoot 'projects\other.js') -Target $rootStoreFile | Out-Null
+Assert ((RepairOpen $openRoot @('projects', 'gezels') @('projects', 'gezels')) -eq 3) 'A link out of an open zone was refused'
+New-Item -ItemType HardLink -Path (Join-Path $openRoot 'private\other.js') -Target $rootStoreFile | Out-Null
+$refused = $null
+try { RepairOpen $openRoot @('projects', 'gezels') @('projects', 'gezels') | Out-Null } catch { $refused = $_.Exception.ToString() }
+Assert ($refused -and $refused.Contains('cross trust zones')) "A link joining an open zone to the rest was accepted: $refused"
+
+$closedStoreFile = Join-Path $store 'closed.js'
+Set-Content -LiteralPath $closedStoreFile -Value 'closed'
+$closedAcl = AclText $closedStoreFile
+$closed = Fixture 'hard-link-closed-zone'
+New-Item -ItemType Directory -Path (Join-Path $closed 'service') | Out-Null
+New-Item -ItemType HardLink -Path (Join-Path $closed 'service\closed.js') -Target $closedStoreFile | Out-Null
+$refused = $null
+try { RepairOpen $closed @('shared', 'service') @('shared') | Out-Null } catch { $refused = $_.Exception.ToString() }
+Assert ($refused -and $refused.Contains('a name outside the tree')) "A link out of a closed zone was accepted: $refused"
+Assert ((AclText $closedStoreFile) -eq $closedAcl) 'A refused outside link changed its file'
+
+$refused = $false
+try { RepairOpen $closed @('shared') @('service') | Out-Null } catch { $refused = $true }
+Assert $refused 'An open zone that is not a separate zone was accepted'
+
 # A mutable handle acquired before us is a closed failure, not a reason to
 # drop sharing restrictions or invoke the old recursive fallback.
 $busy = Fixture 'busy'

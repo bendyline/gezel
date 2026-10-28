@@ -331,7 +331,15 @@ export function createLanAdvertiser(
       return;
     }
     const legacy = rinfo.port !== MDNS_PORT;
-    const response = answerQuery(query, server, legacy);
+    // Anyone on the network can send this packet, and a throw here is
+    // uncaught: it would end the daemon, not just this answer.
+    let response: Buffer | null;
+    try {
+      response = answerQuery(query, server, legacy);
+    } catch (err) {
+      log.debug(`[lan-discovery] could not answer a query: ${(err as Error).message}`);
+      return;
+    }
     if (!response) return;
     if (legacy || query.questions.some((q) => q.unicastResponse)) {
       void sendTo(active, response, rinfo.port, rinfo.address);

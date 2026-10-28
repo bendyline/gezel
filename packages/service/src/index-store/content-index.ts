@@ -1608,7 +1608,9 @@ export class ContentIndex {
           keyFiles: areaKeyFiles(r.summaryMd),
         }));
       const importers = new Map<string, Set<string>>();
-      for (const edge of index.fileEdges.all()) {
+      // Code dependencies only. A Markdown link is an edge too, so READMEs,
+      // glossaries and logo.png showed up as load-bearing (1.26299.99 audit).
+      for (const edge of index.fileEdges.all(['import', 'include'])) {
         const set = importers.get(edge.dst) ?? new Set<string>();
         set.add(edge.src);
         importers.set(edge.dst, set);

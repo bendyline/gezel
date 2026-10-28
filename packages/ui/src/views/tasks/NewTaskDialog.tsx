@@ -22,6 +22,7 @@ import {
   planOutputSummary,
   prioritizePullsForCurrentBranch,
   servesInterests,
+  spanWords,
   starterCraftbookIds,
   unmetParamAlternatives,
   visibleCatalogItems,
@@ -1431,9 +1432,7 @@ export function NewTaskDialog({
                         </p>
                       )}
                       {durationMs !== undefined && (
-                        <p className="muted">
-                          Usually about {Math.max(1, Math.round(durationMs / 60_000))} minutes here
-                        </p>
+                        <p className="muted">Usually about {spanWords(durationMs)} here</p>
                       )}
                       {!compactLaunch && (
                         <div className="gz-ntd-steps">

@@ -97,7 +97,11 @@ describe('CodexCliSession', () => {
     await session.sendAndWait('hello');
     const configPath = join(deps.runtimeDir, 'proj-1', 'sess-1', 'config.toml');
     const body = await readFile(configPath, 'utf8');
-    expect(body).toContain('instructions = "You are a test gezel."');
+    // The persona leads; the Gezel tool guide follows it for a wired bridge.
+    expect(body).toContain(
+      'instructions = "You are a test gezel.\\n\\n---\\n\\n### Calling Gezel tools',
+    );
+    expect(body).toContain('await tools.mcp__gezel__<tool>({ ... })');
     expect(body).toContain('model = "gpt-5.5"');
     expect(body).toContain('[mcp_servers.gezel]');
     expect(body).toContain('GEZEL_TOKEN = "tk"');

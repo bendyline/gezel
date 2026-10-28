@@ -52,11 +52,13 @@ gezel stop --keep-running   emergency brake: cancel AI work, unload engines,
                             switch to Reactive — the service keeps running
 gezel mode [mode]           show or set how active the AI may be
                             (read-only, reactive, reactive+tasks, full-play)
+gezel growth [on|off]       show or set gezel growth (XP and level-ups); off
+                            computes no XP, for homes that run bulk workflows
 gezel run "..."             one-shot: send a prompt, print the reply
 gezel doctor                check the installation
 ```
 
-If the desktop app's machine-wide service is in use, `gezel stop` applies the emergency brake to it instead and says the service is managed by the operating system. `gezel stop --daemon` still works and means the same as `gezel stop`.
+If the desktop app's machine-wide service is in use, `gezel stop` applies the emergency brake to it instead and says the service is managed by the operating system. It does the same for a service the Gezel app started for you, which the app would only start again: quit the app to shut that one down. `gezel stop` shuts a service down only after confirming the process is Gezel's. When the service has already exited, it removes the files the service left behind, and it never stops another program that happens to have reused the service's old process number. `gezel stop --daemon` still works and means the same as `gezel stop`.
 
 ## Which project a command uses
 

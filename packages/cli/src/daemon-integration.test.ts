@@ -615,6 +615,12 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
       await expect(runCli(...args, '0')).rejects.toMatchObject({ code: 1 });
       await expect(runCli(...args, '1.5')).rejects.toMatchObject({ code: 1 });
       await runCli(...args, 'auto', '--provider', 'llama-cpp');
+      expect(
+        JSON.parse((await runCli(...args, '16', '--provider', 'codex-cli', '--json')).stdout),
+      ).toEqual({ provider: 'codex-cli', slots: 16 });
+      expect((await client.getConfig()).providerConcurrency?.['codex-cli']).toBe(16);
+      await runCli(...args, 'auto', '--provider', 'codex-cli');
+      await expect(runCli(...args, '2', '--provider', 'gemini')).rejects.toMatchObject({ code: 1 });
       expect((await client.getConfig()).providerConcurrency).toEqual({
         ...before.providerConcurrency,
         openai: 7,
@@ -644,6 +650,20 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
     } finally {
       if (before.securityPolicy)
         await client.updateConfig({ securityPolicy: before.securityPolicy });
+    }
+  });
+
+  it('switches gezel growth off and on for the home through the CLI', async () => {
+    const before = (await client.getConfig()).growth;
+    try {
+      const off = JSON.parse((await runCli('growth', 'off', '--json')).stdout);
+      expect(off).toEqual({ growthEnabled: false });
+      expect((await client.getConfig()).growth).toEqual({ enabled: false });
+      expect((await runCli('growth')).stdout.trim()).toBe('Growth (XP and level-ups): off');
+      await runCli('growth', 'on');
+      expect((await client.getConfig()).growth).toEqual({ enabled: true });
+    } finally {
+      await client.updateConfig({ growth: { enabled: before?.enabled !== false } });
     }
   });
 

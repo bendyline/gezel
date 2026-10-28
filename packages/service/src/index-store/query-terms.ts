@@ -35,14 +35,39 @@ export function tokenizeText(text: string): string[] {
  */
 export function foldInflection(token: string): string {
   const fold = (stem: string, min: number) => (stem.length >= min ? stem : token);
-  if (token.length > 5 && token.endsWith('ies')) return fold(token.slice(0, -3), 4);
+  // A short "-ies" stem reaches unrelated words ("parties" as `part` finds
+  // "partition"); the word and its "-y" form are searched instead
+  // (searchForms).
+  if (token.length > 5 && token.endsWith('ies')) return fold(token.slice(0, -3), 5);
   if (/(?:ches|shes|sses|xes|zes)$/.test(token)) return fold(token.slice(0, -2), PREFIX_MIN_LENGTH);
   if (token.length > 4 && token.endsWith('s') && !/(?:ss|us|is)$/.test(token)) {
     return fold(token.slice(0, -1), 4);
   }
-  if (token.length > 5 && token.endsWith('ed')) return fold(token.slice(0, -2), 4);
+  if (token.length > 5 && token.endsWith('ed')) {
+    const stem = token.slice(0, -2);
+    if (stem.length >= 5) return stem;
+    // "stored" as `store`, not `stor`, which also finds "storage" and "story".
+    const withE = token.slice(0, -1);
+    return withE.endsWith('e') ? withE : token;
+  }
   if (token.length > 6 && token.endsWith('ing')) return fold(token.slice(0, -3), 4);
   return token;
+}
+
+/** The terms one query word is searched by: its fold, and the "-y" form an "-ies" word kept. */
+function searchForms(token: string): string[] {
+  const folded = foldInflection(token);
+  // A three-letter stem is no plural ("series").
+  return folded === token && token.length > 6 && token.endsWith('ies')
+    ? [token, `${token.slice(0, -3)}y`]
+    : [folded];
+}
+
+/** The words of a query that carry its meaning: every word, if all are stopwords. */
+function meaningfulWords(text: string): string[] {
+  const unique = [...new Set(tokenizeText(text))].slice(0, MAX_QUERY_TERMS);
+  const meaningful = unique.filter((token) => !QUERY_STOP_WORDS.has(token));
+  return meaningful.length > 0 ? meaningful : unique;
 }
 
 /**
@@ -51,9 +76,56 @@ export function foldInflection(token: string): string {
  * so a search for "how to" or "create" still searches for what the user typed.
  */
 export function queryTerms(text: string): string[] {
-  const unique = [...new Set(tokenizeText(text))].slice(0, MAX_QUERY_TERMS);
-  const meaningful = unique.filter((token) => !QUERY_STOP_WORDS.has(token));
-  return [...new Set((meaningful.length > 0 ? meaningful : unique).map(foldInflection))];
+  return [...new Set(meaningfulWords(text).flatMap(searchForms))].slice(0, MAX_QUERY_TERMS);
+}
+
+/**
+ * A word's base form, applied alike to a query word and to the text it should
+ * ground in: "parties" and "party" give `party`, "stored" and "store" give
+ * `stor`, "routing" and "route" give `rout`. Unlike the prefix stems the search
+ * uses, it never makes "partition" or "header" equal to a query word.
+ */
+export function baseForm(token: string): string {
+  if (token.length > 4 && token.endsWith('ies')) return `${token.slice(0, -3)}y`;
+  let word = token;
+  if (/(?:ches|shes|sses|xes|zes)$/.test(word)) word = word.slice(0, -2);
+  else if (word.length > 3 && word.endsWith('s') && !/(?:ss|us|is)$/.test(word)) {
+    word = word.slice(0, -1);
+  } else if (word.length > 4 && word.endsWith('ed')) word = undouble(word.slice(0, -2));
+  else if (word.length > 5 && word.endsWith('ing')) word = undouble(word.slice(0, -3));
+  return word.length > 3 && word.endsWith('e') ? word.slice(0, -1) : word;
+}
+
+/** "mapp" from "mapped" is `map`. */
+function undouble(stem: string): string {
+  return /([b-df-hj-np-tv-z])\1$/.test(stem) ? stem.slice(0, -1) : stem;
+}
+
+/** The words a keyword hit must be grounded in: the query's meaningful words as typed. */
+export function groundingWords(text: string): string[] {
+  return meaningfulWords(text);
+}
+
+/**
+ * Does `text` contain a word the person typed? A token grounds a query word
+ * when it starts with that word as typed ("render" grounds "renderer") or is
+ * another form of it ("parties" grounds "party", "stored" grounds "store").
+ * A token that merely shares a search stem does not: in 1.26299.99 grounding
+ * reused the stems, so "partition" grounded "parties" and "header" grounded
+ * "heading", and unrelated text reached the prompt.
+ */
+export function textGroundsWords(text: string, words: readonly string[]): boolean {
+  if (words.length === 0) return false;
+  const bases = new Set(words.map(baseForm));
+  for (const token of new Set(tokenizeText(text))) {
+    if (bases.has(baseForm(token))) return true;
+    for (const word of words) {
+      if (token === word || (word.length >= PREFIX_MIN_LENGTH && token.startsWith(word))) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**

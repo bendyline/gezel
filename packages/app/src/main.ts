@@ -209,6 +209,11 @@ let updateState: UpdateState | null = null;
 let macUpdatePkgPath: string | null = null;
 const quitCoordinator = new QuitCoordinator({
   shutdown: async () => {
+    // The service may take several seconds to save and stop a large model.
+    // Close the windows at once rather than leave them on screen, unanswering.
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.hide();
+    }
     await startupHome.flush().catch(() => {});
     if (connection) await connection.shutdown();
   },

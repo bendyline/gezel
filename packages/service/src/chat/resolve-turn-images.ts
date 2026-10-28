@@ -81,7 +81,7 @@ export interface ResolveTurnImagesInput {
    * a cloud model). They are described by the local reader instead, the
    * same way a model without vision gets them.
    */
-  withholdPixels?: (ref: string) => boolean;
+  withholdPixels?: (ref: string) => boolean | Promise<boolean>;
 }
 
 export interface ResolveTurnImagesResult {
@@ -137,7 +137,10 @@ export async function resolveTurnImages(
     { mode: input.mode, recognitionAvailable },
   );
 
-  const withheld = input.withholdPixels ? images.filter((i) => input.withholdPixels?.(i.ref)) : [];
+  const withheld: ResolvedImage[] = [];
+  for (const image of input.withholdPixels ? images : []) {
+    if (await input.withholdPixels?.(image.ref)) withheld.push(image);
+  }
   let nativeAttachments: ImageAttachment[] = [];
   if (plan.verdict === 'native') {
     const shipped = images.filter((i) => !withheld.includes(i));

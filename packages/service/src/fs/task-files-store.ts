@@ -1,6 +1,14 @@
 import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { KeyedLock, type Task, TaskSchema, createLogger, isSafeEntityId } from '@bendyline/gezel';
+import {
+  KeyedLock,
+  type Task,
+  TaskSchema,
+  type TaskWorkCredit,
+  accrueTaskWork,
+  createLogger,
+  isSafeEntityId,
+} from '@bendyline/gezel';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { beginPerfWork } from '@bendyline/gezel-inference/internal/perf/responsiveness';
 import {
@@ -17,6 +25,13 @@ import {
 import { HttpStatusError } from '@bendyline/gezel/runtime';
 import { FileSnapshotCache } from './file-snapshot-cache.js';
 import { isSyncJunkName } from './sync-junk.js';
+import { TaskLineageIndex } from './task-lineage-index.js';
+import {
+  type LiveTaskStatus,
+  type ProjectTaskSummary,
+  TaskStatusIndex,
+} from './task-status-index.js';
+import { TaskWorkIndex } from './task-work-index.js';
 
 export interface TaskFilesStoreOptions {
   home: string;
@@ -57,6 +72,11 @@ export class TaskFilesStore {
   private readonly invalidTasks = new Map<string, string>();
   private readonly records = new FileSnapshotCache<Task>(16 * 1024 * 1024);
   private readonly descriptions = new FileSnapshotCache<string>(8 * 1024 * 1024);
+  private readonly lineage = new TaskLineageIndex();
+  private readonly statuses = new TaskStatusIndex();
+  private readonly work = new TaskWorkIndex();
+  /** One shared full listing per project that completes every index. */
+  private readonly indexBuilds = new Map<string, Promise<void>>();
 
   constructor(opts: TaskFilesStoreOptions) {
     this.home = opts.home;
@@ -169,7 +189,11 @@ export class TaskFilesStore {
     // `effectiveStatus` is a runtime projection of the ancestry graph. Never
     // persist it: resuming a parent must reveal the child's unchanged own
     // status rather than a stale inherited snapshot.
-    const { description, effectiveStatus: _effectiveStatus, ...rest } = task;
+    const {
+      description,
+      effectiveStatus: _effectiveStatus,
+      ...rest
+    } = accrueTaskWork(current, task);
     void _effectiveStatus;
     const text = `${JSON.stringify({ ...rest, revision }, null, 2)}\n`;
     // The record is checked exactly as a read will check it. An inline step
@@ -185,6 +209,7 @@ export class TaskFilesStore {
     await writeFileAtomic(file, text, {
       noReplace: createOnly,
     });
+    this.noteTask(task);
     if (description !== undefined && description.trim().length > 0) {
       await this.writeTaskAbout(task.projectId, task.num, description);
     } else {
@@ -206,8 +231,10 @@ export class TaskFilesStore {
       );
       if (!cached) {
         this.invalidTasks.delete(file);
+        this.forgetTask(projectId, num);
         return null;
       }
+      this.noteTask(cached);
       // TaskManager edits aggregates before persisting them. Keep those
       // drafts separate from the validated, immutable disk snapshot.
       const parsed = structuredClone(cached);
@@ -216,6 +243,7 @@ export class TaskFilesStore {
       this.invalidTasks.delete(file);
       return parsed;
     } catch (err) {
+      this.forgetTask(projectId, num);
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         this.invalidTasks.delete(file);
         return null;
@@ -266,6 +294,97 @@ export class TaskFilesStore {
       const task = await this.readTask(projectId, num);
       if (task) yield task;
     }
+    // Every task file in the project has now been read (and noted); tasks
+    // created since the directory listing were noted when they were written.
+    this.lineage.markComplete(projectId);
+    this.statuses.markComplete(projectId);
+    this.work.markComplete(projectId);
+  }
+
+  /**
+   * Tasks in `projectId` whose own status is `status`, newest first, from the
+   * status index. The first call for a project that has not been listed in
+   * full yet lists it once; later calls read only the tasks in the bucket.
+   * Each is re-read, so a stale entry costs one read, never a wrong answer.
+   */
+  async *iterateProjectTasksWithStatus(
+    projectId: string,
+    status: LiveTaskStatus,
+  ): AsyncGenerator<Task> {
+    await this.ensureIndexed(projectId);
+    for (const num of this.statuses.nums(projectId, status)) {
+      const task = await this.readTask(projectId, num);
+      if (task?.status === status) yield task;
+    }
+  }
+
+  /** {@link iterateProjectTasksWithStatus} across every project, project by project. */
+  async *iterateAllTasksWithStatus(status: LiveTaskStatus): AsyncGenerator<Task> {
+    for (const id of await this.listProjectIds()) {
+      yield* this.iterateProjectTasksWithStatus(id, status);
+    }
+  }
+
+  /**
+   * A gezel's completed steps and tasks across every project, as
+   * `countTaskWork` would count them over all tasks. Each project is listed
+   * once per process to build the index; later calls read only memory.
+   */
+  async taskWorkFor(gezelId: string): Promise<TaskWorkCredit> {
+    for (const id of await this.listProjectIds()) await this.ensureIndexed(id);
+    return this.work.totalsFor(gezelId);
+  }
+
+  /** How many tasks `projectId` has and the newest `updatedAt` among them, without reading any. */
+  async projectTaskSummary(projectId: string): Promise<ProjectTaskSummary> {
+    await this.ensureIndexed(projectId);
+    return this.statuses.summary(projectId);
+  }
+
+  /**
+   * Numbers of the tasks whose `parentTaskRef` is `parentRef`, from the
+   * lineage index. The first call for a project that has not been listed in
+   * full yet lists it once; later calls read only memory. Entries can be
+   * stale, so callers re-read each child and check its parent.
+   */
+  async listChildTaskNums(projectId: string, parentRef: string): Promise<number[]> {
+    await this.ensureIndexed(projectId);
+    return this.lineage.childNums(projectId, parentRef);
+  }
+
+  private noteTask(task: Task): void {
+    this.lineage.note(task);
+    this.statuses.note(task);
+    this.work.note(task);
+  }
+
+  /** The task's file is gone or unreadable. Lineage entries are re-checked by their callers. */
+  private forgetTask(projectId: string, num: number): void {
+    this.statuses.forget(projectId, num);
+    this.work.forget(projectId, num);
+  }
+
+  /** List the project once, shared by concurrent callers, unless every index is complete. */
+  private async ensureIndexed(projectId: string): Promise<void> {
+    if (
+      this.lineage.isComplete(projectId) &&
+      this.statuses.isComplete(projectId) &&
+      this.work.isComplete(projectId)
+    )
+      return;
+    let build = this.indexBuilds.get(projectId);
+    if (!build) {
+      build = (async () => {
+        const end = beginPerfWork('task history: task index build');
+        try {
+          for await (const _task of this.iterateProjectTasks(projectId)) void _task;
+        } finally {
+          end();
+        }
+      })().finally(() => this.indexBuilds.delete(projectId));
+      this.indexBuilds.set(projectId, build);
+    }
+    await build;
   }
 
   async listProjectTasks(projectId: string): Promise<Task[]> {
@@ -280,15 +399,19 @@ export class TaskFilesStore {
   }
 
   async *iterateAllTasks(): AsyncGenerator<Task> {
-    const projectIds = await safeReaddir(gezelPaths(this.home).projects);
-    for (const id of projectIds) {
-      // The projects root is an ordinary user-visible directory, so apply the
-      // same centralized sync/OS-junk policy as other filesystem scanners.
-      // Entity validation is a second boundary: it rejects `.git`, arbitrary
-      // dot folders, and any other name that cannot safely be a project id.
-      if (!isSafeEntityId(id) || isSyncJunkName(id)) continue;
+    for (const id of await this.listProjectIds()) {
       yield* this.iterateProjectTasks(id);
     }
+  }
+
+  private async listProjectIds(): Promise<string[]> {
+    // The projects root is an ordinary user-visible directory, so apply the
+    // same centralized sync/OS-junk policy as other filesystem scanners.
+    // Entity validation is a second boundary: it rejects `.git`, arbitrary
+    // dot folders, and any other name that cannot safely be a project id.
+    return (await safeReaddir(gezelPaths(this.home).projects)).filter(
+      (id) => isSafeEntityId(id) && !isSyncJunkName(id),
+    );
   }
 
   async listAllTasks(): Promise<Task[]> {
