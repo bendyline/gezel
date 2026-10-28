@@ -109,7 +109,7 @@ describe('ProjectMemoriesEditor', () => {
   it('shows project days and autosaves edits to the project scope', async () => {
     render(<ProjectMemoriesEditor projectId="alpha" projectName="Alpha" />);
 
-    expect(await screen.findByText('Project memories')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Memories' })).toBeInTheDocument();
     const editor = await screen.findByRole('textbox', {
       name: 'Alpha memory for 2026-08-04',
     });

@@ -445,7 +445,7 @@ describe('Sidebar', () => {
     } as never);
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     expect(
-      await screen.findByText('None of your own yet. Everything else lives in Default.'),
+      await screen.findByText('No projects created yet.'),
     ).toBeInTheDocument();
   });
 
@@ -461,7 +461,7 @@ describe('Sidebar', () => {
     expect(currentProject).toHaveAttribute('aria-current', 'page');
     expect(currentProject.closest('li')).toHaveClass('app-sidebar-proj-row', 'active');
     expect(
-      screen.queryByText('None of your own yet. Everything else lives in Default.'),
+      screen.queryByText('No projects created yet.'),
     ).not.toBeInTheDocument();
   });
 

@@ -7429,6 +7429,8 @@ function defaultAgentMarkdown(params: {
     ...(reasoningEffort ? [`reasoningEffort: ${JSON.stringify(reasoningEffort)}`] : []),
     ...(factualWriting !== undefined ? [`factualWriting: ${factualWriting}`] : []),
     ...(tuning ? [`tuning: ${JSON.stringify(tuning)}`] : []),
+    // Every FixedFunctionConfig field is written by hand here; one left out
+    // is silently dropped from every gezel created with it.
     ...(ff
       ? [
           'fixedFunction:',
@@ -7437,6 +7439,7 @@ function defaultAgentMarkdown(params: {
           ...(ff.defaults && Object.keys(ff.defaults).length > 0
             ? [`  defaults: ${JSON.stringify(ff.defaults)}`]
             : []),
+          ...(ff.requiresInputImage ? ['  requiresInputImage: true'] : []),
         ]
       : []),
     '---',

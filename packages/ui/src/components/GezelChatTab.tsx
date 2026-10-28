@@ -385,6 +385,7 @@ function GezelChatBody({
         gezelGender: gezel.gender,
         projectName: project.projectName,
         fixedFunctionTool: gezel.fixedFunction?.tool,
+        fixedFunctionEdits: gezel.fixedFunction?.requiresInputImage,
       }),
     [
       project.precedence,
@@ -392,6 +393,7 @@ function GezelChatBody({
       gezelDisplayName,
       gezel.gender,
       gezel.fixedFunction?.tool,
+      gezel.fixedFunction?.requiresInputImage,
     ],
   );
 
@@ -455,7 +457,12 @@ function GezelChatBody({
           ) : (
             <ChatComposer
               {...(gezel.fixedFunction?.tool === 'generate_image'
-                ? { imageGenerator: { defaults: gezel.fixedFunction.defaults } }
+                ? {
+                    imageGenerator: {
+                      defaults: gezel.fixedFunction.defaults,
+                      edits: gezel.fixedFunction.requiresInputImage,
+                    },
+                  }
                 : {})}
               gezelId={gezel.id}
               gezelName={gezel.name}
@@ -545,8 +552,15 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
         gezelGender: gezel.gender,
         projectName: focused ? undefined : 'default',
         fixedFunctionTool: gezel.fixedFunction?.tool,
+        fixedFunctionEdits: gezel.fixedFunction?.requiresInputImage,
       }),
-    [gezelDisplayName, gezel.gender, focused, gezel.fixedFunction?.tool],
+    [
+      gezelDisplayName,
+      gezel.gender,
+      focused,
+      gezel.fixedFunction?.tool,
+      gezel.fixedFunction?.requiresInputImage,
+    ],
   );
 
   const composerProjectId = focused?.projectId ?? 'default';
@@ -602,7 +616,12 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
           ) : (
             <ChatComposer
               {...(gezel.fixedFunction?.tool === 'generate_image'
-                ? { imageGenerator: { defaults: gezel.fixedFunction.defaults } }
+                ? {
+                    imageGenerator: {
+                      defaults: gezel.fixedFunction.defaults,
+                      edits: gezel.fixedFunction.requiresInputImage,
+                    },
+                  }
                 : {})}
               gezelId={gezel.id}
               gezelName={gezel.name}

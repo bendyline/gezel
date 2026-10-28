@@ -105,6 +105,22 @@ describe('pickChatPlaceholder', () => {
     spy.mockRestore();
   });
 
+  it('tells an image editor to attach a picture and say what to change', () => {
+    for (const r of [0.01, 0.99]) {
+      const spy = vi.spyOn(Math, 'random').mockReturnValue(r);
+      const text = pickChatPlaceholder({
+        role: 'other',
+        gezelName: 'Rembrandt',
+        fixedFunctionTool: 'generate_image',
+        fixedFunctionEdits: true,
+      });
+      expect(text).toContain('Rembrandt');
+      expect(text).toMatch(/attach/i);
+      expect(text).toMatch(/change/i);
+      spy.mockRestore();
+    }
+  });
+
   it('gives video generators video-specific directive copy', () => {
     const spy = vi.spyOn(Math, 'random').mockReturnValue(0.2);
     const text = pickChatPlaceholder({

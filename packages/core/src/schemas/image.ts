@@ -92,9 +92,16 @@ export const ImageGenerationRequestSchema = z.object({
   /**
    * Strength of edit when an input image is supplied — 0 keeps the
    * source intact, 1 effectively ignores it. Provider-specific:
-   * sd-cpp passes through to img2img; cloud providers ignore it.
+   * sd-cpp passes through to img2img; cloud providers and models that
+   * read sources as references ignore it.
    */
   strength: z.number().min(0).max(1).optional(),
+  /**
+   * The caller asked for a change to `inputImages`, never a fresh picture:
+   * refuse when there are none, or when no model here can edit, rather than
+   * draw from the prompt alone. The image editor gezel sets this.
+   */
+  requireEdit: z.boolean().optional(),
   /** Project the output artifact belongs to. Defaults to 'default'. */
   projectId: z.string().optional(),
   /**
@@ -144,6 +151,13 @@ export const ImageGenerationRequestSchema = z.object({
    * needs 30 to 100 steps.
    */
   capStepsAtRecommended: z.boolean().optional(),
+  /**
+   * Hold explicit `width`/`height` to about a megapixel when a local engine
+   * renders (`capAgentImageSize`); a cloud provider gets the size as asked.
+   * The agent tool sets this rather than deciding itself, because its session
+   * token cannot read the config that names the image provider.
+   */
+  capAgentSize: z.boolean().optional(),
 });
 export type ImageGenerationRequest = z.infer<typeof ImageGenerationRequestSchema>;
 
@@ -214,12 +228,23 @@ export const InstalledImageModelSchema = z.object({
    *  back-compat with older responses. */
   kind: z.enum(['local', 'cloud']).optional(),
   /**
-   * Whether this model can edit a source image (img2img). Resolved by
-   * the service from the catalog declaration, the per-model assessment
-   * map, and the weights-kind default; cloud models are always capable.
-   * Optional for back-compat with older responses.
+   * Whether this model can edit a source image, by either `editMode`.
+   * Resolved by the service from the catalog declaration, the per-model
+   * assessment map, and the weights-kind default; cloud models are always
+   * capable. Optional for back-compat with older responses.
    */
   supportsImg2Img: z.boolean().optional(),
+  /**
+   * How the model uses a source picture: `reference` reads it beside an
+   * instruction and keeps what the instruction does not name (Qwen-Image-
+   * Edit, FLUX.2, cloud models); `img2img` re-noises it by `strength` (SD
+   * checkpoints). Absent when the model cannot edit.
+   */
+  editMode: z.enum(['reference', 'img2img']).optional(),
+  /** How many source pictures one edit takes. */
+  maxSourceImages: z.number().int().positive().optional(),
+  /** Made to change a picture: never drawn with for a fresh image. */
+  editOnly: z.boolean().optional(),
   /**
    * Size facts for a local model, so a client can show the pixels a shape
    * and tier will render at (core `resolveImageSize`). Absent for cloud
@@ -237,6 +262,8 @@ export type InstalledImageModel = z.infer<typeof InstalledImageModelSchema>;
 export const ListInstalledImageModelsResponseSchema = z.object({
   models: z.array(InstalledImageModelSchema),
   defaultModel: z.string().optional(),
+  /** The model an edit that names none renders with (core `chooseImageModel`). */
+  defaultEditModel: z.string().optional(),
 });
 export type ListInstalledImageModelsResponse = z.infer<
   typeof ListInstalledImageModelsResponseSchema

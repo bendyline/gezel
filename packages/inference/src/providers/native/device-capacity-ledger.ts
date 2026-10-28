@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import type { NativeCapacityCommand, NativeCapacityReply } from '@bendyline/gezel';
 import { CapacityDeniedError } from './capacity-broker.js';
+import { readProcessIdentities } from './process-identity.js';
 
 // Keep the newer builtin behind a runtime require. The current tsup/esbuild
 // target rewrites a static `node:sqlite` import to the nonexistent npm package
@@ -32,6 +33,8 @@ interface Claim {
   id: string;
   ownerPid: number;
   childPid?: number;
+  ownerIdentity?: string;
+  childIdentity?: string;
   label: string;
   bytes: number;
   gpuBytes: number;
@@ -65,6 +68,7 @@ export class DeviceCapacityLedger {
       directory: string;
       sample: () => Promise<DeviceCapacitySample>;
       alive?: (pid: number) => boolean;
+      identities?: typeof readProcessIdentities;
     },
   ) {}
 
@@ -77,9 +81,32 @@ export class DeviceCapacityLedger {
       await chmod(path, 0o600);
       db.exec('PRAGMA busy_timeout = 1000');
       db.exec('CREATE TABLE IF NOT EXISTS claims (id TEXT PRIMARY KEY, claim TEXT NOT NULL)');
+      const snapshot = db
+        .prepare('SELECT claim FROM claims')
+        .all()
+        .map((row) => JSON.parse(String(row.claim)) as Claim);
+      const pids = snapshot.flatMap((claim) => [
+        claim.ownerPid,
+        ...(claim.childPid === undefined ? [] : [claim.childPid]),
+      ]);
+      if (command.action === 'acquire') pids.push(command.ownerPid);
+      if (command.action === 'bind') pids.push(command.childPid);
+      // OS probes may spawn a helper. Never hold SQLite's writer lock while awaiting one.
+      const probe =
+        this.options.identities ?? (this.options.alive ? undefined : readProcessIdentities);
+      const identities =
+        command.action !== 'release' && probe
+          ? await probe(pids).catch(() => new Map<number, string>())
+          : new Map<number, string>();
       db.exec('BEGIN IMMEDIATE');
       try {
-        const result = this.transact(db, command, sample);
+        const result = this.transact(
+          db,
+          command,
+          sample,
+          identities,
+          new Map(snapshot.map((claim) => [claim.id, JSON.stringify(claim)])),
+        );
         db.exec('COMMIT');
         return result;
       } catch (error) {
@@ -95,18 +122,28 @@ export class DeviceCapacityLedger {
     db: DatabaseSyncType,
     command: NativeCapacityCommand,
     sample: DeviceCapacitySample,
+    identities: ReadonlyMap<number, string>,
+    observedClaims: ReadonlyMap<string, string>,
   ): NativeCapacityReply {
     const alive = this.options.alive ?? processAlive;
+    const sameProcess = (pid: number, identity?: string) => {
+      if (!alive(pid)) return false;
+      const current = identities.get(pid);
+      return identity === undefined || current === undefined || current === identity;
+    };
     const rows = db.prepare('SELECT claim FROM claims ORDER BY rowid').all();
     const claims = rows.map((row) => JSON.parse(String(row.claim)) as Claim);
     const remove = db.prepare('DELETE FROM claims WHERE id = ?');
     const save = db.prepare('UPDATE claims SET claim = ? WHERE id = ?');
     const live = claims.filter((claim) => {
+      // Another coordinator can acquire/rebind while the OS probe is in flight.
+      // Its newer claim must not be compared with our earlier process snapshot.
+      if (observedClaims.get(claim.id) !== JSON.stringify(claim)) return true;
       // An unbound grant with a dead owner could have spawned just before the
       // owner died. Keep it conservatively; never guess that its bytes are free.
       const stale =
-        (claim.childPid !== undefined && !alive(claim.childPid)) ||
-        (!alive(claim.ownerPid) && claim.phase === 'waiting');
+        (claim.childPid !== undefined && !sameProcess(claim.childPid, claim.childIdentity)) ||
+        (!sameProcess(claim.ownerPid, claim.ownerIdentity) && claim.phase === 'waiting');
       if (stale) remove.run(claim.id);
       return !stale;
     });
@@ -124,6 +161,7 @@ export class DeviceCapacityLedger {
       own = {
         id: command.id,
         ownerPid: command.ownerPid,
+        ownerIdentity: identities.get(command.ownerPid),
         label: command.label,
         bytes: command.bytes,
         gpuBytes: command.gpuBytes,
@@ -138,7 +176,10 @@ export class DeviceCapacityLedger {
     if (!own) return { state: 'released', releaseRequested: false };
     if (command.action === 'acquire' && command.priority === 'interactive')
       own.priority = 'interactive';
-    if (command.action === 'bind' && own.phase !== 'waiting') own.childPid = command.childPid;
+    if (command.action === 'bind' && own.phase !== 'waiting') {
+      own.childPid = command.childPid;
+      own.childIdentity = identities.get(command.childPid);
+    }
     if (command.action === 'ready' && own.phase === 'loading') own.phase = 'ready';
     const active = live.filter((c) => c.phase !== 'waiting');
     const waiting = live.filter((c) => c.phase === 'waiting');

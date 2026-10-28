@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { MODEL_IMG2IMG_SUPPORT, resolveImg2ImgSupport } from './img2img-support.js';
+import {
+  MODEL_IMG2IMG_SUPPORT,
+  resolveImageEditCapability,
+  resolveImg2ImgSupport,
+} from './img2img-support.js';
 
 describe('resolveImg2ImgSupport', () => {
   it('explicit capability wins over the assessment map', () => {
@@ -40,5 +44,45 @@ describe('resolveImg2ImgSupport', () => {
     // Pre-capability installs are all SD-era checkpoints.
     expect(resolveImg2ImgSupport({ modelId: 'ancient-install' }).supported).toBe(true);
     expect(resolveImg2ImgSupport({}).supported).toBe(true);
+  });
+});
+
+describe('resolveImageEditCapability', () => {
+  it('reads references for an assessed editing model, img2img for an SD checkpoint', () => {
+    expect(resolveImageEditCapability({ modelId: 'flux-2-klein-4b-q4' })).toEqual({
+      editMode: 'reference',
+      maxSourceImages: 3,
+      editOnly: false,
+    });
+    expect(resolveImageEditCapability({ modelId: 'qwen-image-edit-2511-q4' })).toEqual({
+      editMode: 'reference',
+      maxSourceImages: 3,
+      editOnly: true,
+    });
+    expect(resolveImageEditCapability({ modelId: 'sd-1.5' })).toEqual({
+      editMode: 'img2img',
+      maxSourceImages: 1,
+      editOnly: false,
+    });
+  });
+
+  it('lets an installed declaration win over the map', () => {
+    expect(
+      resolveImageEditCapability({
+        modelId: 'someone-elses-editor',
+        weightsKind: 'diffusion-model',
+        referenceImages: { max: 2 },
+        editOnly: true,
+      }),
+    ).toEqual({ editMode: 'reference', maxSourceImages: 2, editOnly: true });
+    expect(
+      resolveImageEditCapability({ modelId: 'qwen-image-edit-2511-q4', editOnly: false }).editOnly,
+    ).toBe(false);
+  });
+
+  it('says why a model cannot edit', () => {
+    const krea = resolveImageEditCapability({ modelId: 'krea-2-turbo-q4' });
+    expect(krea.editMode).toBeUndefined();
+    expect(krea.reason).toContain('krea-2-turbo-q4');
   });
 });

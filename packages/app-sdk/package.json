@@ -57,7 +57,7 @@
   },
   "dependencies": {
     "@bendyline/gezel-client": "workspace:*",
-    "undici": "8.11.2"
+    "undici": "8.12.3"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

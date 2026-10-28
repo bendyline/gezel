@@ -7,7 +7,7 @@ import {
   DeviceCapacityLedger,
   type DeviceCapacitySample,
 } from '@bendyline/gezel-inference/internal/providers/native/device-capacity-ledger';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const GIB = 1024 ** 3;
 const dirs: string[] = [];
@@ -18,6 +18,7 @@ async function fixture(overrides: Partial<DeviceCapacitySample> = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'gezel-capacity-'));
   dirs.push(directory);
   const live = new Set([1, 2, 3, 101, 102]);
+  const identities = new Map([...live].map((pid) => [pid, `birth-${pid}`]));
   const sample = {
     budgetBytes: 112 * GIB,
     gpuBudgetBytes: 96 * GIB,
@@ -29,8 +30,9 @@ async function fixture(overrides: Partial<DeviceCapacitySample> = {}) {
       directory,
       sample: async () => sample,
       alive: (pid) => live.has(pid),
+      identities: async () => identities,
     });
-  return { ledger: make(), make, sample, live };
+  return { ledger: make(), make, sample, live, identities, directory };
 }
 const request = (
   bytes: number,
@@ -287,4 +289,79 @@ describe('external memory shortfall', () => {
     availableBytes = 12 * GIB;
     expect((await ledger.execute(acquire)).state).toBe('granted');
   });
+});
+
+describe('PID reuse does not preserve old memory claims', () => {
+  it('reclaims a dead engine whose PID now belongs to a new daemon', async () => {
+    const { ledger, make, identities } = await fixture();
+    const held = request(90);
+    await ledger.execute(held);
+    await ledger.execute({ action: 'bind', id: held.id, childPid: 101 });
+    await ledger.execute({ action: 'ready', id: held.id });
+    identities.set(101, 'new-daemon-birth');
+    expect((await make().execute(request(20, false, 2))).state).toBe('granted');
+    expect((await ledger.execute({ action: 'status', id: held.id })).state).toBe('released');
+  });
+
+  it('removes a queued claim when its owner PID is reused', async () => {
+    const { ledger, identities } = await fixture();
+    const held = request(90, false, 3);
+    await ledger.execute(held);
+    const old = request(20);
+    expect((await ledger.execute(old)).state).toBe('waiting');
+    identities.set(1, 'replacement-owner');
+    await ledger.execute({ action: 'release', id: held.id });
+    expect((await ledger.execute(request(20, false, 2))).state).toBe('granted');
+    expect((await ledger.execute({ action: 'status', id: old.id })).state).toBe('released');
+  });
+
+  it('keeps an engine reservation when its birth stamp cannot be read', async () => {
+    const { ledger, identities } = await fixture();
+    const held = request(90);
+    await ledger.execute(held);
+    await ledger.execute({ action: 'bind', id: held.id, childPid: 101 });
+    identities.clear();
+    expect((await ledger.execute(request(20, false, 2))).state).toBe('waiting');
+  });
+
+  it('preserves legacy claims with no captured birth stamp', async () => {
+    const { ledger, identities } = await fixture();
+    identities.clear();
+    const held = request(90);
+    await ledger.execute(held);
+    await ledger.execute({ action: 'bind', id: held.id, childPid: 101 });
+    identities.set(101, 'unknown-original');
+    expect((await ledger.execute(request(20, false, 2))).state).toBe('waiting');
+  });
+});
+
+it('does not prune a claim acquired while another coordinator probes older process identities', async () => {
+  const { ledger, identities, directory, sample, live } = await fixture();
+  const old = request(90);
+  await ledger.execute(old);
+  await ledger.execute({ action: 'bind', id: old.id, childPid: 101 });
+  let finish!: () => void;
+  const probe = vi.fn(async () => {
+    const earlier = new Map(identities);
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    return earlier;
+  });
+  const slow = new DeviceCapacityLedger({
+    directory,
+    sample: async () => sample,
+    alive: (pid) => live.has(pid),
+    identities: probe,
+  });
+  const pending = slow.execute({ action: 'status', id: old.id });
+  await vi.waitFor(() => expect(probe).toHaveBeenCalled());
+  await ledger.execute({ action: 'release', id: old.id });
+  identities.set(101, 'replacement-engine');
+  const replacement = request(90, false, 2);
+  await ledger.execute(replacement);
+  await ledger.execute({ action: 'bind', id: replacement.id, childPid: 101 });
+  finish();
+  await pending;
+  expect((await ledger.execute({ action: 'status', id: replacement.id })).state).toBe('granted');
 });

@@ -20,6 +20,7 @@
 
 import { stripGezelMentions as stripGezelMentionMarkup } from '@bendyline/gezel';
 import { isExpectedImageDeliverablePath } from './deliverable-paths.js';
+import { findImageRefs } from './image-attachments.js';
 
 export interface FixedFunctionAdapter {
   /**
@@ -53,6 +54,41 @@ export interface FixedFunctionAdapter {
  */
 export function stripGezelMentions(text: string): string {
   return stripGezelMentionMarkup(text);
+}
+
+/** What an image editor says when a message gives it nothing to change. */
+export const IMAGE_EDITOR_NEEDS_PICTURE =
+  'Nothing to edit yet. Attach a picture, then say what to change.';
+export const IMAGE_EDITOR_NEEDS_INSTRUCTION = 'Say what to change in the picture.';
+
+/**
+ * The pictures a message to an image editor carries, as artifact paths the
+ * image route resolves, in the order attached. The composer's uploads arrive
+ * as markdown images under the project's artifacts
+ * (`artifacts/prompts/<draft>/message_files/…`); older chats used
+ * `attachments/…` and the session's `images/…`.
+ */
+export function fixedFunctionEditSources(text: string, sessionId: string): string[] {
+  const sources: string[] = [];
+  for (const ref of findImageRefs(text)) {
+    const path =
+      ref.scope === 'artifacts'
+        ? ref.filename
+        : ref.scope === 'attachments'
+          ? `attachments/${ref.filename}`
+          : `sessions/${sessionId}/images/${ref.filename}`;
+    if (!sources.includes(path)) sources.push(path);
+  }
+  return sources;
+}
+
+/** The words of a message with its pictures taken out. */
+export function stripMarkdownImages(text: string): string {
+  return text
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .trim();
 }
 
 export function fixedFunctionImagePath(path: string | null | undefined): string | null {
@@ -373,11 +409,14 @@ const ADAPTERS: Record<string, FixedFunctionAdapter> = {
           typeof toolArgs.prompt === 'string' && toolArgs.prompt.trim()
             ? `\n\nPrompt: ${truncatePrompt(toolArgs.prompt)}`
             : '';
+        // An image editor's call asks for an edit, and never gets a fresh
+        // picture instead: the route refuses before it would.
+        const verb = toolArgs.requireEdit === true ? 'Edited' : 'Generated';
         const imgTag = /<img\s+src="([^"]+)">/i.exec(rawText);
         if (imgTag) {
-          return `Generated ${dims}${shape} image with ${model}. Use \`<img src="${imgTag[1]!}">\` in workspace HTML.${skipSuffix}${promptLine}`;
+          return `${verb} ${dims}${shape} image with ${model}. Use \`<img src="${imgTag[1]!}">\` in workspace HTML.${skipSuffix}${promptLine}`;
         }
-        return `Generated ${dims}${shape} image with ${model}.${skipSuffix}${promptLine}`;
+        return `${verb} ${dims}${shape} image with ${model}.${skipSuffix}${promptLine}`;
       }
       return firstSentence(rawText);
     },

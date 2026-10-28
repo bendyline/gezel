@@ -224,7 +224,6 @@ import {
   normalizeDocumentOutputPath,
 } from './document-routing.js';
 import { createEntityResolvers } from './entity-resolvers.js';
-import { normalizeGenerateImageToolArgs } from './generate-image-normalization.js';
 import { registerGitHubTools } from './github-tools.js';
 import {
   installedScriptMissHint,
@@ -10415,7 +10414,7 @@ const promptGuidesShown = new Set<string>();
 
 server.tool(
   'generate_image',
-  "Generate or edit an image from a plain-sentence description; set `aspectRatio` for its shape. When called with just a prompt, produces a fresh image. When `inputImages` is supplied, the prompt acts as an edit/transform on the source(s) — e.g. 'just like this one but yellow', 'add a hat', 'compose these together'. Routes through whichever image engine the user has selected: the local stable-diffusion.cpp sidecar (default; img2img on a single source), Google Nano Banana 2 (multi-image edits / compositing), or OpenAI GPT Image 2 (edit / compositing). Output PNG is written to the project's `artifacts/generated/` folder and can be read back via `read_artifact`. If the prompt is for a logo and `saveAs` is omitted, the workspace copy defaults to `assets/logo.png` so HTML/CSS can reference a stable path. For shape and size pass `aspectRatio` ('9:16' for a phone wallpaper or story, '16:9' for a banner or slide, '4:5' for a portrait post) and `quality` ('draft' for a quick look, 'high' for a large print); the service fits both to the model. Use width and height only when the user named exact pixels, and omit steps. Write the prompt as sentences describing subject, setting, light and style; put any words the image must show in quotes. **Tip:** to iterate on an image you just generated, pass its `artifactPath` (returned by the previous call) — far cheaper than re-encoding the bytes. Cloud providers may surface a one-time confirmation card to the user before each call (the user can choose Always allow to silence it). On error the tool returns a message directing the user to the Image generation settings.",
+  "Generate or edit an image from a plain-sentence description; set `aspectRatio` for its shape. When called with just a prompt, produces a fresh image. When `inputImages` is supplied, the prompt acts as an edit/transform on the source(s) — e.g. 'just like this one but yellow', 'add a hat', 'compose these together'. Routes through whichever image engine the user has selected: the local stable-diffusion.cpp sidecar (default; an editing model such as Qwen Image Edit or FLUX.2 Klein follows the prompt as an instruction on up to three sources), Google Nano Banana 2 (multi-image edits / compositing), or OpenAI GPT Image 2 (edit / compositing). Output PNG is written to the project's `artifacts/generated/` folder and can be read back via `read_artifact`. If the prompt is for a logo and `saveAs` is omitted, the workspace copy defaults to `assets/logo.png` so HTML/CSS can reference a stable path. For shape and size pass `aspectRatio` ('9:16' for a phone wallpaper or story, '16:9' for a banner or slide, '4:5' for a portrait post) and `quality` ('draft' for a quick look, 'high' for a large print); the service fits both to the model. Use width and height only when the user named exact pixels, and omit steps. Write the prompt as sentences describing subject, setting, light and style; put any words the image must show in quotes. **Tip:** to iterate on an image you just generated, pass its `artifactPath` (returned by the previous call) — far cheaper than re-encoding the bytes. Cloud providers may surface a one-time confirmation card to the user before each call (the user can choose Always allow to silence it). On error the tool returns a message directing the user to the Image generation settings.",
   {
     prompt: z
       .string()
@@ -10483,7 +10482,7 @@ server.tool(
       )
       .optional()
       .describe(
-        'Source images for edit / reference-driven generation. Cloud providers accept multiple references for compositing; the local sd-cpp engine uses only the first (img2img). Not every local model supports img2img — when the resolved model does not, the sources are dropped and the result notes that the image was generated from the prompt alone. Prefer `artifactPath` over base64 when the image lives in the project.',
+        'Source images for edit / reference-driven generation. Cloud providers accept multiple references for compositing; the local engine picks an installed editing model, which takes up to three, and older local models use only the first (img2img). When no installed model can edit, the sources are dropped and the result notes that the image was generated from the prompt alone. Prefer `artifactPath` over base64 when the image lives in the project.',
       ),
     strength: z
       .number()
@@ -10491,7 +10490,13 @@ server.tool(
       .max(1)
       .optional()
       .describe(
-        'Edit strength when `inputImages` is supplied (0 = preserve source, 1 = ignore it). Local sd-cpp only; cloud providers ignore.',
+        'Edit strength when `inputImages` is supplied (0 = preserve source, 1 = ignore it). Local img2img models only; editing models and cloud providers ignore it.',
+      ),
+    requireEdit: z
+      .boolean()
+      .optional()
+      .describe(
+        'Set true when the result must be a change to `inputImages`: fail instead of drawing from the prompt alone when no installed model can edit.',
       ),
     saveAs: z
       .string()
@@ -10502,29 +10507,25 @@ server.tool(
   },
   async (args) => {
     try {
-      const config = await api.getConfig();
-      const cloud =
-        !args.model?.startsWith('remote:') &&
-        ['copilot', 'codex-cli', 'google-ai', 'openai'].includes(config.imageProvider ?? 'sd-cpp');
-      const normalized = normalizeGenerateImageToolArgs(args, cloud ? 'cloud' : 'local');
-      const imageArgs = normalized.args;
-      const saveAs = imageArgs.saveAs || inferGeneratedImageSaveAs(imageArgs.prompt);
+      const saveAs = args.saveAs || inferGeneratedImageSaveAs(args.prompt);
       const res = await api.generateImage({
-        prompt: imageArgs.prompt,
-        ...(imageArgs.negativePrompt ? { negativePrompt: imageArgs.negativePrompt } : {}),
-        ...(imageArgs.model ? { model: imageArgs.model } : {}),
-        ...(imageArgs.width ? { width: imageArgs.width } : {}),
-        ...(imageArgs.height ? { height: imageArgs.height } : {}),
-        ...(imageArgs.aspectRatio ? { aspectRatio: imageArgs.aspectRatio } : {}),
-        ...(imageArgs.quality ? { quality: imageArgs.quality } : {}),
-        ...(imageArgs.steps ? { steps: imageArgs.steps } : {}),
-        ...(imageArgs.seed !== undefined ? { seed: imageArgs.seed } : {}),
-        ...(imageArgs.inputImages && imageArgs.inputImages.length > 0
-          ? { inputImages: imageArgs.inputImages }
+        prompt: args.prompt,
+        ...(args.negativePrompt ? { negativePrompt: args.negativePrompt } : {}),
+        ...(args.model ? { model: args.model } : {}),
+        ...(args.width ? { width: args.width } : {}),
+        ...(args.height ? { height: args.height } : {}),
+        ...(args.aspectRatio ? { aspectRatio: args.aspectRatio } : {}),
+        ...(args.quality ? { quality: args.quality } : {}),
+        ...(args.steps ? { steps: args.steps } : {}),
+        ...(args.seed !== undefined ? { seed: args.seed } : {}),
+        ...(args.inputImages && args.inputImages.length > 0
+          ? { inputImages: args.inputImages }
           : {}),
-        ...(imageArgs.strength !== undefined ? { strength: imageArgs.strength } : {}),
+        ...(args.strength !== undefined ? { strength: args.strength } : {}),
+        ...(args.requireEdit ? { requireEdit: true } : {}),
         ...(saveAs ? { saveAs } : {}),
         capStepsAtRecommended: true,
+        capAgentSize: true,
         projectId,
         // Pin agent + session so the cloud-image cost-confirmation
         // gate can synthesize a question scoped to the right
@@ -10573,7 +10574,6 @@ server.tool(
       const workspaceLine = workspacePath
         ? `\n\nTo display this image in HTML, copy this exact tag verbatim — do not add any prefix, do not change the filename:\n\`<img src="${workspacePath}">\`\n\nIf you are working on a website/logo task and an HTML file already exists, your next tool call should patch that HTML with this exact tag using \`replace_in_file\` or \`write_file\`. Do not call \`generate_image\` again for the same missing image; the image asset already exists.`
         : '\n\nNOTE: workspace copy was skipped (project has an external workingDir not approved for writes). To reference from HTML, copy the image into the workspace yourself first via `write_file`.';
-      const normalizedLine = normalized.note ? ` ${normalized.note}` : '';
       const settingsLine = meta.settingsNotes?.length
         ? ` Image settings: ${meta.settingsNotes.join(' ')}`
         : '';
@@ -10590,7 +10590,7 @@ server.tool(
           ? ` For your next prompt: ${promptGuide}`
           : '';
       if (promptGuide) promptGuidesShown.add(meta.model);
-      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${normalizedLine}${settingsLine}${skippedLine}${guideLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
+      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${settingsLine}${skippedLine}${guideLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
       const content: Array<
         { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
       > = [{ type: 'text' as const, text: summary }];

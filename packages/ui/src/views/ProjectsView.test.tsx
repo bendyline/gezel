@@ -455,7 +455,7 @@ describe('ProjectsView', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
 
-    const roster = await screen.findByRole('region', { name: 'Assigned gezellen' });
+    const roster = await screen.findByRole('region', { name: 'Crew' });
     expect(within(roster).getAllByRole('listitem')).toHaveLength(2);
     expect(within(roster).getByText('Tomas')).toBeInTheDocument();
     expect(within(roster).getByText('⭐ crew lead')).toBeInTheDocument();
@@ -504,7 +504,7 @@ describe('ProjectsView', () => {
     await waitFor(() => {
       expect(api.addGezelToProject).toHaveBeenCalledWith('pj-alpha', 'amira');
     });
-    const roster = screen.getByRole('region', { name: 'Assigned gezellen' });
+    const roster = screen.getByRole('region', { name: 'Crew' });
     expect(await within(roster).findByText('Amira')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -738,7 +738,7 @@ describe('ProjectsView', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
 
     expect(await screen.findByText(/Restricted to api\.github\.com/)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Granted credentials' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Granted credentials' })).toBeInTheDocument();
     expect(screen.queryByText('Allowed HTTPS origins')).not.toBeInTheDocument();
     expect(screen.queryByText('openai.key')).not.toBeInTheDocument();
     const webhookGrant = screen.getByRole('checkbox', { name: /webhook\.bearer/ });
@@ -774,7 +774,7 @@ describe('ProjectsView', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
     await waitFor(() => expect(api.listAvailableCredentials).toHaveBeenCalled());
 
-    expect(screen.queryByRole('heading', { name: 'Granted credentials' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Granted credentials' })).not.toBeInTheDocument();
     expect(screen.queryByText('github.token')).not.toBeInTheDocument();
   });
 
@@ -936,31 +936,35 @@ describe('ProjectsView', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
 
     const toc = await screen.findByRole('navigation', { name: 'About sections' });
-    const settings = document.querySelector('#project-about-settings');
-    const toolsets = document.querySelector('#project-about-toolsets');
-    const history = document.querySelector('#project-about-history');
-    expect(settings?.nextElementSibling).toBe(toolsets);
-    expect(toolsets?.nextElementSibling).toBe(history);
-
     const links = within(toc).getAllByRole('link');
+    const hrefs = links.map((link) => link.getAttribute('href'));
     expect(links.map((link) => link.textContent)).toEqual([
-      'Assigned gezellen',
+      'Crew',
       'About this project',
       'Mission objectives',
-      'Project memories',
-      'Settings',
+      'Memories',
+      'Workspace',
+      'Access',
       'Toolsets',
+      'Preferences',
       'History',
+      'Archive',
     ]);
-    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+    expect(hrefs).toEqual([
       '#project-about-crew',
       '#project-about-overview',
       '#project-about-mission',
       '#project-about-memories',
-      '#project-about-settings',
+      '#project-about-workspace',
+      '#project-about-access',
       '#project-about-toolsets',
+      '#project-about-preferences',
       '#project-about-history',
+      '#project-about-archive',
     ]);
+    // The page renders its sections in the order the index lists them.
+    const sections = Array.from(document.querySelectorAll('.project-about-main > section'));
+    expect(sections.map((section) => `#${section.id}`)).toEqual(hrefs);
     expect(document.querySelector('#project-about-connections')).toBeNull();
   });
 
@@ -2127,7 +2131,7 @@ describe('ProjectsView', () => {
     }
 
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
-    expect(screen.getByText(/Chat and Settings always stay available/i)).toBeInTheDocument();
+    expect(screen.getByText(/Chat and Settings always stay/i)).toBeInTheDocument();
     const tasksToggle = screen.getByRole('checkbox', { name: 'Tasks' });
     expect(tasksToggle).not.toBeChecked();
     fireEvent.click(tasksToggle);

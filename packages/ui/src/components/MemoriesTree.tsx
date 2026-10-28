@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { AutosaveStatus } from './AutosaveStatus.js';
+import { SettingsSection } from './SettingsSection.js';
 
 type GezelSelectedNode =
   | { kind: 'summary'; label: string }
@@ -249,8 +250,8 @@ export function ProjectMemoriesEditor({
       id={projectId}
       ownerName={projectName}
       sectionId="project-about-memories"
-      sectionClassName="project-about-section project-about-anchor"
-      title="Project memories"
+      sectionClassName="project-about-anchor"
+      title="Memories"
       hint="Notes shared by every gezel working in this project. Changes are saved to the project’s memory files and used in future recall."
       emptyText="No project memories yet. Gezellen add shared notes here as work progresses."
     />
@@ -356,13 +357,11 @@ function MemoryDaysEditor({
   }, [scope, id, selectedDay]);
 
   return (
-    <section id={sectionId} className={sectionClassName}>
-      <h3 className="project-about-section-title">{title}</h3>
-      <p className="muted small project-memories-hint">{hint}</p>
+    <SettingsSection id={sectionId} className={sectionClassName} title={title} hint={hint}>
       {days === null ? null : daysError ? (
         <p className="error">{daysError}</p>
       ) : days.length === 0 ? (
-        <p className="placeholder">{emptyText}</p>
+        <p className="gz-setting-hint">{emptyText}</p>
       ) : (
         <div className="project-memories-browser">
           <div className="memories-tree project-memories-days">
@@ -399,7 +398,7 @@ function MemoryDaysEditor({
           </div>
         </div>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 

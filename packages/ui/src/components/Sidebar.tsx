@@ -963,7 +963,7 @@ export function Sidebar({
             // "No projects yet." sat beside a Projects area that listed
             // Default and the Shared Library, and read as a contradiction.
             <li className="app-sidebar-empty">
-              None of your own yet. Everything else lives in Default.
+              No projects created yet.
             </li>
           ) : (
             visibleProjects.map((p) => {

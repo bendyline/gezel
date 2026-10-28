@@ -145,6 +145,21 @@ export function shippedPnpmRuntimePackages(inventory) {
     }));
 }
 
+/** Include vendored packages in the same advisory request as workspace dependencies. */
+export function pnpmRuntimeAuditInventory(inventory) {
+  return {
+    bundledPnpm: [
+      { name: 'pnpm', version: inventory.pnpmVersion },
+      ...shippedPnpmRuntimePackages(inventory),
+    ].map((pkg) => ({
+      name: pkg.name,
+      versions: [pkg.version],
+      // Pin-bound metadata is not installed-byte evidence for an exception.
+      paths: [],
+    })),
+  };
+}
+
 export function pnpmTargetFor(platform, arch) {
   return `${platform}-${arch}`;
 }

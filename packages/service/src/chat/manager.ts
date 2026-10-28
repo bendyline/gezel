@@ -450,12 +450,16 @@ import {
   messageExpressesModifyIntent,
 } from './file-handoff-intent.js';
 import {
+  IMAGE_EDITOR_NEEDS_INSTRUCTION,
+  IMAGE_EDITOR_NEEDS_PICTURE,
   cleanGenerativePrompt,
   expandVideoPrompt,
+  fixedFunctionEditSources,
   fixedFunctionImageHandoff,
   fixedFunctionImagePath,
   formatFixedFunctionResult,
   stripGezelMentions,
+  stripMarkdownImages,
 } from './fixed-function-adapters.js';
 import {
   checkpointGapForStep,
@@ -1081,6 +1085,13 @@ interface InflightTurn {
    * rebuilds that never see the send's opts.
    */
   turnIntent?: TurnIntentMode;
+  /**
+   * Whose turn this is, for a turn that never builds a live session state:
+   * a fixed-function gezel calls its tool without one. Without it the
+   * activity readers skip the turn, and the timeline's in-flight check took
+   * down a direct image gezel's progress bubble a second into the render.
+   */
+  session?: InflightSessionIdentity;
   abort?: AbortController;
   /** True once a provider request has actually been issued for this turn. */
   providerStarted?: boolean;
@@ -1117,6 +1128,11 @@ interface InflightTurn {
 }
 
 type TurnIntentMode = NonNullable<SendToSessionRequest['turnIntent']>;
+
+type InflightSessionIdentity = Pick<
+  ChatSession,
+  'gezelId' | 'projectId' | 'taskRef' | 'providerName'
+>;
 
 export interface ChatManagerOptions {
   store: Store;
@@ -2562,9 +2578,8 @@ export class ChatManager extends LocalEngineRuntime {
    * avoid pinging a voorman while they're mid-thought on this project.
    */
   isProjectActive(projectId: string): boolean {
-    for (const sessionId of this.inflight.keys()) {
-      const state = this.states.get(sessionId);
-      if (state && state.record.projectId === projectId) return true;
+    for (const [sessionId, entry] of this.inflight) {
+      if (this.inflightSession(sessionId, entry)?.projectId === projectId) return true;
     }
     return this.externalConversations
       .listActive()
@@ -2625,9 +2640,8 @@ export class ChatManager extends LocalEngineRuntime {
    * flight" errors and drops the nudge on the floor.
    */
   isGezelActive(gezelId: string): boolean {
-    for (const sessionId of this.inflight.keys()) {
-      const state = this.states.get(sessionId);
-      if (state && state.record.gezelId === gezelId) return true;
+    for (const [sessionId, entry] of this.inflight) {
+      if (this.inflightSession(sessionId, entry)?.gezelId === gezelId) return true;
     }
     return this.externalConversations.listActive().some((activity) => activity.gezelId === gezelId);
   }
@@ -2639,11 +2653,18 @@ export class ChatManager extends LocalEngineRuntime {
    */
   activeTaskRefs(): Set<string> {
     const refs = new Set<string>();
-    for (const sessionId of this.inflight.keys()) {
-      const ref = this.states.get(sessionId)?.record.taskRef;
+    for (const [sessionId, entry] of this.inflight) {
+      const ref = this.inflightSession(sessionId, entry)?.taskRef;
       if (ref) refs.add(ref);
     }
     return refs;
+  }
+
+  private inflightSession(
+    sessionId: string,
+    entry: InflightTurn,
+  ): InflightSessionIdentity | undefined {
+    return this.states.get(sessionId)?.record ?? entry.session;
   }
 
   /**
@@ -2705,7 +2726,8 @@ export class ChatManager extends LocalEngineRuntime {
     }> = [];
     for (const [sessionId, entry] of this.inflight) {
       const state = this.states.get(sessionId);
-      if (!state) continue;
+      const session = this.inflightSession(sessionId, entry);
+      if (!session) continue;
       const lastProgressAt = this.telemetry.snapshot(sessionId, true)?.lastProgressAt ?? null;
       // Telemetry counters persist across turns. Do not let an earlier
       // turn's final delta make a newly queued turn look mid-stream.
@@ -2713,11 +2735,11 @@ export class ChatManager extends LocalEngineRuntime {
         lastProgressAt !== null && lastProgressAt >= entry.startedAt ? lastProgressAt : null;
       out.push({
         sessionId,
-        gezelId: state.record.gezelId,
-        projectId: state.record.projectId,
-        ...(state.record.taskRef ? { taskRef: state.record.taskRef } : {}),
-        providerName: state.record.providerName,
-        ...(state.effectiveModel ? { model: state.effectiveModel } : {}),
+        gezelId: session.gezelId,
+        projectId: session.projectId,
+        ...(session.taskRef ? { taskRef: session.taskRef } : {}),
+        providerName: session.providerName,
+        ...(state?.effectiveModel ? { model: state.effectiveModel } : {}),
         userText: entry.userText,
         startedAt: entry.startedAt,
         elapsedMs: now - entry.startedAt,
@@ -7191,6 +7213,12 @@ export class ChatManager extends LocalEngineRuntime {
     if (ffRecord) {
       const ffGezel = await this.store.getGezel(ffRecord.gezelId);
       if (ffGezel?.parsed.frontmatter.fixedFunction) {
+        inflightTurn.session = {
+          gezelId: ffRecord.gezelId,
+          projectId: ffRecord.projectId,
+          ...(ffRecord.taskRef ? { taskRef: ffRecord.taskRef } : {}),
+          providerName: ffRecord.providerName,
+        };
         return this.runFixedFunctionSend(sessionId, userText, opts);
       }
     }
@@ -9954,6 +9982,40 @@ export class ChatManager extends LocalEngineRuntime {
     }
     this.events.publish(scope, { type: 'user_message', message: userMessage });
 
+    // A turn that cannot call the tool still ends in a visible assistant
+    // bubble saying why, rather than an orphan user bubble with a transient
+    // red banner.
+    const session = record;
+    const endWithNotice = async (content: string, warning: string): Promise<ChatMessage> => {
+      const notice: ChatMessage = { role: 'assistant', content, at: nowIso(), warnings: [warning] };
+      session.messages.push(notice);
+      session.lastActivityAt = nowIso();
+      try {
+        await this.store.writeSession(session);
+      } catch {
+        /* ignore */
+      }
+      this.telemetry.noteTurnEnd(sessionId);
+      this.events.publish(scope, { type: 'complete', message: notice });
+      this.events.publish(scope, { type: 'done' });
+      return notice;
+    };
+
+    // An image editor changes the pictures attached to the message, else the
+    // one it made last in this thread. With neither, there is nothing to edit,
+    // and drawing from the words alone is not what the person asked for.
+    const editor = ff.tool === 'generate_image' && ff.requiresInputImage === true;
+    const attachedSources = editor ? fixedFunctionEditSources(userText, sessionId) : [];
+    const editSources =
+      attachedSources.length > 0
+        ? attachedSources
+        : editor && record.lastImageGeneration
+          ? [record.lastImageGeneration.artifactPath]
+          : [];
+    if (editor && editSources.length === 0) {
+      return endWithNotice(IMAGE_EDITOR_NEEDS_PICTURE, IMAGE_EDITOR_NEEDS_PICTURE);
+    }
+
     let pool: McpBridgePool;
     try {
       pool = await this.ensureFixedFunctionBridge(record, gezel);
@@ -9963,31 +10025,10 @@ export class ChatManager extends LocalEngineRuntime {
 
     if (!pool.hasTool(ff.tool)) {
       const stepBlock = await this.stepPolicyExcludingTool(record, ff.tool);
-      const knownErrr = new Error(
-        stepBlock
-          ? `step "${stepBlock.stepId}" of task ${stepBlock.taskRef} does not allow ${ff.tool} (its tool policy excludes it), and this gezel can only call ${ff.tool}`
-          : `MCP tool "${ff.tool}" is not registered for this gezel — check the install or the tool's MCP server`,
-      );
-      // Persist a visible assistant bubble carrying the error so the
-      // user understands why nothing happened, rather than leaving an
-      // orphan user bubble with a transient red banner.
-      const errorAssistantMessage: ChatMessage = {
-        role: 'assistant',
-        content: `${ff.tool} failed: ${knownErrr.message}`,
-        at: nowIso(),
-        warnings: [knownErrr.message],
-      };
-      record.messages.push(errorAssistantMessage);
-      record.lastActivityAt = nowIso();
-      try {
-        await this.store.writeSession(record);
-      } catch {
-        /* ignore */
-      }
-      this.telemetry.noteTurnEnd(sessionId);
-      this.events.publish(scope, { type: 'complete', message: errorAssistantMessage });
-      this.events.publish(scope, { type: 'done' });
-      return errorAssistantMessage;
+      const reason = stepBlock
+        ? `step "${stepBlock.stepId}" of task ${stepBlock.taskRef} does not allow ${ff.tool} (its tool policy excludes it), and this gezel can only call ${ff.tool}`
+        : `MCP tool "${ff.tool}" is not registered for this gezel — check the install or the tool's MCP server`;
+      return endWithNotice(`${ff.tool} failed: ${reason}`, reason);
     }
 
     // Compose args. User text on `promptKey` always wins over a
@@ -10007,6 +10048,12 @@ export class ChatManager extends LocalEngineRuntime {
         ? await this.resolveFixedFunctionTaskImageArgs(record, userText)
         : null;
     let promptValue = taskImageArgs?.prompt ?? stripGezelMentions(userText);
+    if (editor) {
+      promptValue = stripMarkdownImages(promptValue);
+      if (!promptValue) {
+        return endWithNotice(IMAGE_EDITOR_NEEDS_INSTRUCTION, IMAGE_EDITOR_NEEDS_INSTRUCTION);
+      }
+    }
     // Settings stated in the message ("9:16", "as a phone wallpaper", "hi-res")
     // become render settings and leave the prompt: an image model draws the
     // words it is given, so a phone would appear beside the lighthouse. The
@@ -10035,7 +10082,7 @@ export class ChatManager extends LocalEngineRuntime {
     // and thread seed / source image so the composition carries over.
     // Task-driven sessions skip this — their prompt is the task brief.
     const refinementArgs: Record<string, unknown> = {};
-    if (ff.tool === 'generate_image' && !record.taskRef) {
+    if (ff.tool === 'generate_image' && !record.taskRef && !editor) {
       const prev = record.lastImageGeneration;
       // "Make it 9:16" alone redraws the last picture, same seed, new shape.
       const plan =
@@ -10096,8 +10143,9 @@ export class ChatManager extends LocalEngineRuntime {
     // ("can you generate a smiling cat?" → "a smiling cat") — diffusion
     // models render the literal text, so the request words become subject
     // matter and wreck the output. Other fixed-function tools (search,
-    // etc.) keep the verbatim text.
-    if (ff.tool === 'generate_image' || ff.tool === 'generate_video') {
+    // etc.) keep the verbatim text, and so does an editor: "make the sky
+    // red" is an instruction, and peeling "make" would leave a caption.
+    if ((ff.tool === 'generate_image' && !editor) || ff.tool === 'generate_video') {
       promptValue = cleanGenerativePrompt(promptValue);
     }
     // Video models (LTX / LTX-2) are trained on long, descriptive captions
@@ -10119,6 +10167,14 @@ export class ChatManager extends LocalEngineRuntime {
         ? {
             ...withoutImageSizeKeys(ff.defaults),
             ...refinementArgs,
+            ...(editor
+              ? {
+                  inputImages: editSources.map((artifactPath) => ({ artifactPath })),
+                  // Only an img2img model reads it; an editing model ignores it.
+                  strength: IMG2IMG_EDIT_STRENGTH,
+                  requireEdit: true,
+                }
+              : {}),
             // Least to most specific: the gezel's defaults, the picture a
             // follow-up continues, the strip's picks, then what this message
             // said. Each shape replaces the pixels below it.

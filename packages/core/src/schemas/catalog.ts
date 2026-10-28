@@ -2157,6 +2157,9 @@ export type ImageModelHardwareTier = z.infer<typeof ImageModelHardwareTierSchema
  * a GGUF. The aux role name maps 1:1 onto the sd-server flag name, so
  * adding the enum value here is enough — no launcher code change needed.
  * Ming-Image also needs Ling's external tokenizer JSON via --tokenizer.
+ * `llm_vision` is the vision tower a GGUF encoder ships as a separate
+ * mmproj file: Qwen-Image-Edit reads the source picture through it, and
+ * without it the encoder never sees what it is asked to change.
  */
 export const ImageModelAuxiliaryRoleSchema = z.enum([
   'vae',
@@ -2164,6 +2167,7 @@ export const ImageModelAuxiliaryRoleSchema = z.enum([
   'clip_g',
   't5xxl',
   'llm',
+  'llm_vision',
   'tokenizer',
 ]);
 export type ImageModelAuxiliaryRole = z.infer<typeof ImageModelAuxiliaryRoleSchema>;
@@ -2195,6 +2199,18 @@ export type ImageModelAuxiliaryFile = z.infer<typeof ImageModelAuxiliaryFileSche
 export const ImagePromptStyleSchema = z.enum(['sentences', 'tags']);
 export type ImagePromptStyle = z.infer<typeof ImagePromptStyleSchema>;
 
+/**
+ * A model that reads source pictures as references and follows an
+ * instruction about them ("make the car blue"), keeping what the
+ * instruction does not name: Qwen-Image-Edit, FLUX.2. The engine passes
+ * them beside the prompt (sd-server's `extra_images`), not as the noised
+ * starting point img2img uses. `max` is how many one edit takes.
+ */
+export const ImageReferenceInputSchema = z.object({
+  max: z.number().int().positive(),
+});
+export type ImageReferenceInput = z.infer<typeof ImageReferenceInputSchema>;
+
 export const ImageModelIdentitySchema = IdentityCommonSchema.extend({
   kind: z.literal('image-model'),
   /** Recommended sampler steps; the generate endpoint falls back to this. */
@@ -2223,6 +2239,13 @@ export const ImageModelIdentitySchema = IdentityCommonSchema.extend({
    * See `resolveImg2ImgSupport` in the service's image provider layer.
    */
   supportsImg2Img: z.boolean().optional(),
+  /** Edits by reading source pictures as references. See {@link ImageReferenceInputSchema}. */
+  referenceImages: ImageReferenceInputSchema.optional(),
+  /**
+   * Made to change a picture rather than draw a new one. Never chosen for a
+   * request without a source picture, and refuses one when named.
+   */
+  editOnly: z.boolean().optional(),
   /**
    * How the model reads a prompt: plain `sentences` (Flux, Krea, MOSS) or
    * comma-separated booru `tags` (Animagine). Told to the gezel that writes
@@ -2308,6 +2331,10 @@ export const ImageModelManifestSchema = z.object({
   weightsKind: z.enum(['checkpoint', 'diffusion-model']).default('checkpoint'),
   /** Mirrors {@link ImageModelIdentitySchema.supportsImg2Img}. */
   supportsImg2Img: z.boolean().optional(),
+  /** Mirrors {@link ImageModelIdentitySchema.referenceImages}. */
+  referenceImages: ImageReferenceInputSchema.optional(),
+  /** Mirrors {@link ImageModelIdentitySchema.editOnly}. */
+  editOnly: z.boolean().optional(),
   /** Mirrors {@link ImageModelIdentitySchema.promptStyle}. */
   promptStyle: ImagePromptStyleSchema.optional(),
   /** Mirrors {@link ImageModelIdentitySchema.rendersText}. */

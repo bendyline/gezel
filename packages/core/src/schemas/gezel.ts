@@ -108,6 +108,13 @@ export const FixedFunctionConfigSchema = z.object({
   promptKey: z.string().min(1).default('prompt'),
   /** Defaults merged into every call; user text on `promptKey` always wins. */
   defaults: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * `generate_image` only: the gezel changes a picture it is given. The
+   * pictures attached to the message, else the one it made last in the
+   * thread, go to the tool as `inputImages`; a message with neither is
+   * refused rather than drawn from the words alone.
+   */
+  requiresInputImage: z.boolean().optional(),
 });
 export type FixedFunctionConfig = z.infer<typeof FixedFunctionConfigSchema>;
 
