@@ -962,9 +962,7 @@ export function Sidebar({
           {visibleProjects.length === 0 ? (
             // "No projects yet." sat beside a Projects area that listed
             // Default and the Shared Library, and read as a contradiction.
-            <li className="app-sidebar-empty">
-              No projects created yet.
-            </li>
+            <li className="app-sidebar-empty">No projects created yet.</li>
           ) : (
             visibleProjects.map((p) => {
               const projectTab = toRecentTab({ kind: 'project', id: p.id });

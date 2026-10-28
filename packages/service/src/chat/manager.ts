@@ -136,7 +136,6 @@ import {
   resolveSecurityPolicy,
   roleDeliverableScripts,
   sameSessionSubject,
-  stepDeliverablePath,
   stepTurnSteering,
   taskEffectiveStatus,
   tierAtLeast,
@@ -185,10 +184,6 @@ import {
 } from '../app-tools/relay-registry.js';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
 import { toolsetIdsExplicitlyDisabledForStep } from '../craftbook/step-toolsets.js';
-import {
-  DEFAULT_PROJECT_ABOUT_MD,
-  DEFAULT_PROJECT_MISSION_MD,
-} from '../fs/default-project-docs.js';
 import type { Store } from '../fs/store.js';
 import { rankProjectsForGezel } from '../gezels/roster.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
@@ -462,12 +457,11 @@ import {
   cleanGenerativePrompt,
   expandVideoPrompt,
   fixedFunctionEditSources,
-  fixedFunctionImageHandoff,
-  fixedFunctionImagePath,
   formatFixedFunctionResult,
   stripGezelMentions,
   stripMarkdownImages,
 } from './fixed-function-adapters.js';
+import { resolveFixedFunctionTaskImageArgs } from './fixed-function-task-image.js';
 import {
   checkpointGapForStep,
   classifyExecutionTierFor,
@@ -602,9 +596,6 @@ import { renderWorkspaceGestalt } from './workspace-gestalt.js';
 import { roleGetsWorkspaceOrientation } from './workspace-prompt-listing.js';
 
 const DEFAULT_PROJECT_ID = 'default';
-const SEEDED_DEFAULT_PROJECT_DOCS = new Set(
-  [DEFAULT_PROJECT_ABOUT_MD, DEFAULT_PROJECT_MISSION_MD].map((doc) => doc.trim()),
-);
 
 /**
  * Upper bound on the streamed reply text buffered for abort salvage
@@ -10077,7 +10068,7 @@ export class ChatManager extends LocalEngineRuntime {
     const promptKey = ff.promptKey ?? 'prompt';
     const taskImageArgs =
       ff.tool === 'generate_image'
-        ? await this.resolveFixedFunctionTaskImageArgs(record, userText)
+        ? await resolveFixedFunctionTaskImageArgs(this.store, record, userText)
         : null;
     let promptValue = taskImageArgs?.prompt ?? stripGezelMentions(userText);
     if (editor) {
@@ -10320,92 +10311,6 @@ export class ChatManager extends LocalEngineRuntime {
       ...(asked.quality ? { quality: asked.quality } : {}),
       at: nowIso(),
     };
-  }
-
-  /**
-   * Fixed-function image gezels do not read the LLM system prompt. A task
-   * handoff's user message is only a generic "you've been assigned" seed, so
-   * forwarding it verbatim would render the workflow instructions instead of
-   * the requested subject. Recover the visual brief and output path from the
-   * persisted project/task/step metadata that an LLM-backed worker would have
-   * received in its prompt.
-   *
-   * Plain chat sends keep the user's text unchanged. An explicit
-   * expectedDeliverable still supplies an authoritative saveAs for either
-   * path, matching message_gezel's file-handoff contract.
-   */
-  private async resolveFixedFunctionTaskImageArgs(
-    record: ChatSession,
-    userText: string,
-  ): Promise<{ prompt: string; saveAs?: string }> {
-    const explicitPath =
-      record.expectedDeliverable?.kind === 'file'
-        ? fixedFunctionImagePath(record.expectedDeliverable.filePath)
-        : null;
-    if (!record.taskRef) {
-      const handoff = fixedFunctionImageHandoff(userText);
-      const saveAs = explicitPath ?? handoff.saveAs;
-      return {
-        prompt: handoff.prompt,
-        ...(saveAs ? { saveAs } : {}),
-      };
-    }
-
-    const parsed = parseTaskRef(record.taskRef);
-    if (!parsed) {
-      return {
-        prompt: stripGezelMentions(userText),
-        ...(explicitPath ? { saveAs: explicitPath } : {}),
-      };
-    }
-
-    try {
-      const [task, project] = await Promise.all([
-        this.store.readTask(parsed.projectId, parsed.num),
-        this.store.getProject(record.projectId),
-      ]);
-      const step = task
-        ? ((record.stepId
-            ? task.craftbook.steps.find((candidate) => candidate.id === record.stepId)
-            : undefined) ??
-          task.craftbook.steps.find((candidate) => candidate.id === task.activeStepId))
-        : undefined;
-      const stepPath = step ? fixedFunctionImagePath(stepDeliverablePath(step)) : null;
-      const promptParts: string[] = [];
-      const seenPromptParts = new Set<string>();
-      for (const candidate of [
-        task?.title,
-        task?.description,
-        project?.about,
-        project?.missionObjectives,
-        step?.description,
-      ]) {
-        const part = candidate?.trim();
-        const key = part?.replace(/\s+/g, ' ').toLowerCase();
-        if (!part || !key || seenPromptParts.has(key)) continue;
-        // Default's seeded docs describe the catch-all bucket, not the
-        // picture; ~800 chars of it ahead of the step description can crowd
-        // the actual subject out of a short-prompt image engine.
-        if (SEEDED_DEFAULT_PROJECT_DOCS.has(part)) continue;
-        seenPromptParts.add(key);
-        promptParts.push(part);
-      }
-      const prompt = promptParts.join('\n\n');
-      const saveAs = explicitPath ?? stepPath;
-      return {
-        prompt: prompt || stripGezelMentions(userText),
-        ...(saveAs ? { saveAs } : {}),
-      };
-    } catch (err) {
-      log.warn(
-        `fixed-function image handoff metadata lookup failed for ${record.taskRef}:`,
-        err instanceof Error ? err.message : err,
-      );
-      return {
-        prompt: stripGezelMentions(userText),
-        ...(explicitPath ? { saveAs: explicitPath } : {}),
-      };
-    }
   }
 
   /**
