@@ -238,7 +238,7 @@ export function AudioModelManager({
                           type="radio"
                           name={`active-${kind}-model`}
                           className="gz-active-model-radio"
-                          aria-label={`Use ${m.id} as the active ${kind === 'stt' ? 'speech-to-text' : 'text-to-speech'} model`}
+                          aria-label={`Use ${m.name} as the active ${kind === 'stt' ? 'speech-to-text' : 'text-to-speech'} model`}
                           checked={activeModelId === m.id}
                           onChange={() => {
                             // Re-selecting the active model would still reset the
@@ -248,10 +248,7 @@ export function AudioModelManager({
                         />
                       </td>
                     )}
-                    <td>
-                      <code>{m.id}</code>
-                      <div className="muted small">{m.name}</div>
-                    </td>
+                    <td>{m.name}</td>
                     <td>{formatSize(m.approxSizeBytes)}</td>
                     <td className="muted small">
                       {m.installedAt
@@ -331,7 +328,7 @@ export function AudioModelManager({
         title={`Delete ${kind === 'stt' ? 'STT' : 'TTS'} model?`}
         message={
           toDelete
-            ? `"${toDelete}" will be removed from local storage. This frees disk space; download it again later to use it.`
+            ? `"${installed.find((m) => m.id === toDelete)?.name ?? toDelete}" will be removed from local storage. This frees disk space; download it again later to use it.`
             : ''
         }
         confirmLabel="Delete"

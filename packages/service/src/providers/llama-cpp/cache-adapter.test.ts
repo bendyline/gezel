@@ -775,3 +775,39 @@ describe('LlamaCppCacheAdapter — one-shot sessions', () => {
     expect(saved).not.toContain('sess-run-3.bin');
   });
 });
+
+describe('llama snapshot handoff serialization', () => {
+  it('saves an evicted binding only once and does not delete the next owner', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-cache-handoff-'));
+    let finishSave!: () => void;
+    const saving = new Promise<void>((resolve) => {
+      finishSave = resolve;
+    });
+    const saves: string[] = [];
+    const adapter = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://local.invalid',
+      slotSavePath: dir,
+      fetchImpl: (async (url, init) => {
+        if (String(url).endsWith('/slots')) return Response.json([{ id: 0, n_prompt_tokens: 100 }]);
+        const file = JSON.parse(String(init?.body)).filename as string;
+        saves.push(file);
+        await saving;
+        return Response.json({});
+      }) as typeof fetch,
+    });
+    try {
+      await adapter.prepareForSend('old');
+      const eviction = adapter.evict(['old']);
+      await vi.waitFor(() => expect(saves).toEqual(['sess-old.bin']));
+      const handoff = adapter.prepareForSend('new');
+      const repeats = Array.from({ length: 10 }, () => adapter.evict(['old']));
+      finishSave();
+      await Promise.all([eviction, handoff, ...repeats]);
+      expect(saves).toEqual(['sess-old.bin']);
+      expect((await adapter.reportUsage()).map((entry) => entry.sessionId)).toEqual(['new']);
+    } finally {
+      finishSave?.();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

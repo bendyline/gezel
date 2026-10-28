@@ -352,7 +352,7 @@ export function VideoModelManager({
                           type="radio"
                           name="active-video-model"
                           className="gz-active-model-radio"
-                          aria-label={`Use ${m.id} as the active video model`}
+                          aria-label={`Use ${m.name} as the active video model`}
                           checked={activeModelId === m.id}
                           onChange={() => {
                             // Re-selecting the active model would still reset the
@@ -362,10 +362,7 @@ export function VideoModelManager({
                         />
                       </td>
                     )}
-                    <td>
-                      <code>{m.id}</code>
-                      <div className="muted small">{m.name}</div>
-                    </td>
+                    <td>{m.name}</td>
                     <td>{formatSize(m.approxSizeBytes)}</td>
                     <td className="muted small">{new Date(m.installedAt).toLocaleDateString()}</td>
                     <td>
@@ -467,7 +464,7 @@ export function VideoModelManager({
         title="Delete video model?"
         message={
           toDelete
-            ? `"${toDelete}" will be removed from local storage. This frees disk space; download it again later to use it.`
+            ? `"${installed.find((m) => m.id === toDelete)?.name ?? toDelete}" will be removed from local storage. This frees disk space; download it again later to use it.`
             : ''
         }
         confirmLabel="Delete"

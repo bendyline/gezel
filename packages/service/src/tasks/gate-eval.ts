@@ -33,6 +33,7 @@ import {
 } from '@bendyline/gezel/checks';
 import ts from 'typescript';
 import { parseFrontmatter } from '../index-store/frontmatter.js';
+import { lineReviewVerdictFailure } from './review-verdict.js';
 
 /**
  * Read-only workspace view a static gate evaluates against. Backed by the
@@ -422,7 +423,15 @@ export async function evaluateGate(
   const judges = checks.filter((c) => c.kind === 'judge');
   const outcomes: GateCheckOutcome[] = [];
   for (const c of mechanical) {
-    outcomes.push(await evalCheck(c, ws, deps));
+    const outcome = await evalCheck(c, ws, deps);
+    if (outcome.ok) {
+      const failure = await lineReviewVerdictFailure(c, checks, ws);
+      if (failure) {
+        outcome.ok = false;
+        outcome.detail = failure;
+      }
+    }
+    outcomes.push(outcome);
   }
   const mechanicalFailed = outcomes.some((o) => !o.ok);
   for (const c of judges) {

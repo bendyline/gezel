@@ -8,6 +8,7 @@
  * This is the template the video + audio remote providers follow.
  */
 
+import { chooseImageModel } from '@bendyline/gezel';
 import { parseRemoteModelId } from '../remote/model-id.js';
 import type {
   ImageEngineHealth,
@@ -48,7 +49,7 @@ export class RemoteImageProvider implements ImageProvider {
     const model = input.model
       ? (parseRemoteModelId(input.model)?.modelId ?? input.model)
       : this.opts.defaultModelId
-        ? await this.resolveDefaultModelId()
+        ? await this.chooseModel((input.inputImages?.length ?? 0) > 0)
         : undefined;
     const res = await this.opts.fetch(`${this.opts.baseUrl}/v1/remote/image/generate`, {
       method: 'POST',
@@ -81,11 +82,17 @@ export class RemoteImageProvider implements ImageProvider {
     return { png: Buffer.from(body.png, 'base64'), meta: body.meta };
   }
 
-  /** The configured default when the server has it installed, else its first model. */
+  /** The configured default when the server has it and it draws, else its first model that draws. */
   async resolveDefaultModelId(): Promise<string | undefined> {
+    return this.chooseModel(false);
+  }
+
+  private async chooseModel(hasSources: boolean): Promise<string | undefined> {
     const models = await this.listInstalledModels();
-    const configured = await this.opts.defaultModelId?.();
-    return configured && models.some((m) => m.id === configured) ? configured : models[0]?.id;
+    return chooseImageModel(models, {
+      defaultModelId: await this.opts.defaultModelId?.(),
+      hasSources,
+    });
   }
 
   async listInstalledModels(): Promise<InstalledImageModelInfo[]> {

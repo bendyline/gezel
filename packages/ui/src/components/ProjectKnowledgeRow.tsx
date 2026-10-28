@@ -1,6 +1,7 @@
 import type { KnowledgeCatalogStatus } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { SettingField, settingHintId } from './SettingsSection.js';
 
 type ProjectDetail = Awaited<ReturnType<typeof api.updateProject>>;
 
@@ -57,11 +58,15 @@ export function ProjectKnowledgeRow({
   };
 
   return (
-    <label className="config-label" style={{ marginTop: '0.75rem' }}>
-      Knowledge catalogs
-      <div className="new-row" style={{ alignItems: 'center' }}>
+    <SettingField
+      label="Knowledge catalogs"
+      controlId="project-setting-knowledge"
+      hint="Reference material gezellen in this project can search and cite. Manage the catalogs themselves in Settings."
+    >
+      <div className="gz-setting-row">
         <select
-          aria-label="Knowledge catalog scope"
+          id="project-setting-knowledge"
+          aria-describedby={settingHintId('project-setting-knowledge')}
           value={mode}
           onChange={(e) => {
             const nextMode = e.target.value as 'inherit' | 'selected' | 'off';
@@ -74,33 +79,24 @@ export function ProjectKnowledgeRow({
         </select>
       </div>
       {mode === 'selected' && (
-        <fieldset className="project-tab-settings">
-          <legend>Catalogs in scope</legend>
-          <div className="project-tab-settings-grid">
-            {catalogs.map((c) => {
-              const checked = refs.some(
-                (r) => r.publisherId === c.ref.publisherId && r.catalogId === c.ref.catalogId,
-              );
-              return (
-                <label key={c.ref.catalogId} className="new-row">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(e) =>
-                      toggleRef(c.ref.publisherId, c.ref.catalogId, e.target.checked)
-                    }
-                  />
-                  <span>{c.name ?? c.ref.catalogId}</span>
-                </label>
-              );
-            })}
-          </div>
+        <fieldset className="gz-setting-options" aria-label="Catalogs in scope">
+          {catalogs.map((c) => {
+            const checked = refs.some(
+              (r) => r.publisherId === c.ref.publisherId && r.catalogId === c.ref.catalogId,
+            );
+            return (
+              <label key={c.ref.catalogId} className="gz-setting-option">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => toggleRef(c.ref.publisherId, c.ref.catalogId, e.target.checked)}
+                />
+                <span>{c.name ?? c.ref.catalogId}</span>
+              </label>
+            );
+          })}
         </fieldset>
       )}
-      <small className="muted">
-        Reference material gezellen in this project can search and cite. Manage the catalogs
-        themselves in Settings.
-      </small>
-    </label>
+    </SettingField>
   );
 }

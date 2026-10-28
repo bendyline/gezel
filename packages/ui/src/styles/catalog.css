@@ -1150,6 +1150,15 @@ a.license-button:hover {
   margin-bottom: 0.5rem;
 }
 
+/* Inside a settings section the section already frames the list, so the
+   panel's own box would be a second, unexplained border. */
+.gz-settings-section-body > .gezel-toolsets-panel {
+  padding: 0;
+  border: 0;
+  background: none;
+  margin-bottom: 0;
+}
+
 .gezel-toolsets-header {
   display: flex;
   justify-content: space-between;

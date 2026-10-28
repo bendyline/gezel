@@ -122,7 +122,7 @@
     "@bendyline/gezk": "workspace:*",
     "@xmldom/xmldom": "^0.9.12",
     "yaml": "^2.9.0",
-    "zod": "^4.4.3"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

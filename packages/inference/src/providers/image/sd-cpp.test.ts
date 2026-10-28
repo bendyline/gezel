@@ -21,6 +21,25 @@ afterEach(async () => {
   await rm(modelsRoot, { recursive: true, force: true });
 });
 
+async function installModelManifest(
+  id: string,
+  name: string,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
+  await mkdir(join(modelsRoot, id), { recursive: true });
+  await writeFile(
+    join(modelsRoot, id, 'manifest.json'),
+    JSON.stringify({
+      id,
+      name,
+      approxSizeBytes: 1,
+      installedAt: new Date().toISOString(),
+      ...extra,
+    }),
+    'utf8',
+  );
+}
+
 describe('StableDiffusionCppProvider.generate', () => {
   it('sends an A1111 txt2img payload and decodes images[0]', async () => {
     const pngB64 = Buffer.concat([PNG_SIGNATURE, Buffer.alloc(4, 0)]).toString('base64');
@@ -190,23 +209,24 @@ describe('StableDiffusionCppProvider.generate', () => {
 
     const out = await provider.generate({
       prompt: 'same craftsman, no lettering',
-      model: 'flux-2-klein-4b-q4',
+      model: 'krea-2-turbo-q4',
       inputImages: [{ data: Buffer.from('fake-png'), mimeType: 'image/png' }],
       strength: 0.6,
     });
 
     expect(calls[0]!.url).toBe('http://fake:9081/sdapi/v1/txt2img');
     expect(calls[0]!.body.init_images).toBeUndefined();
-    expect(out.meta.img2imgSkippedReason).toMatch(/flux-2-klein-4b-q4/);
+    expect(calls[0]!.body.extra_images).toBeUndefined();
+    expect(out.meta.img2imgSkippedReason).toMatch(/krea-2-turbo-q4/);
   });
 
   it('lets an explicit installed-manifest capability override the assessment map', async () => {
-    await mkdir(join(modelsRoot, 'flux-2-klein-4b-q4'), { recursive: true });
+    await mkdir(join(modelsRoot, 'krea-2-turbo-q4'), { recursive: true });
     await writeFile(
-      join(modelsRoot, 'flux-2-klein-4b-q4', 'manifest.json'),
+      join(modelsRoot, 'krea-2-turbo-q4', 'manifest.json'),
       JSON.stringify({
-        id: 'flux-2-klein-4b-q4',
-        name: 'FLUX.2 Klein',
+        id: 'krea-2-turbo-q4',
+        name: 'Krea 2 Turbo',
         approxSizeBytes: 1,
         installedAt: new Date().toISOString(),
         weightsKind: 'diffusion-model',
@@ -232,12 +252,117 @@ describe('StableDiffusionCppProvider.generate', () => {
 
     const out = await provider.generate({
       prompt: 'edit it',
-      model: 'flux-2-klein-4b-q4',
+      model: 'krea-2-turbo-q4',
       inputImages: [{ data: Buffer.from('fake-png'), mimeType: 'image/png' }],
     });
 
     expect(calls[0]!.url).toBe('http://fake:9081/sdapi/v1/img2img');
     expect(out.meta.img2imgSkippedReason).toBeUndefined();
+  });
+
+  it("sends a reference editor's sources beside the instruction, not as an init image", async () => {
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: async (url, init) => {
+        requests.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+        return Response.json({ images: [PNG_SIGNATURE.toString('base64')] });
+      },
+    });
+    const source = (name: string) => ({ data: Buffer.from(name), mimeType: 'image/png' });
+
+    const out = await provider.generate({
+      prompt: 'Put the hat from the second picture on the car.',
+      model: 'flux-2-klein-4b-q4',
+      inputImages: [source('car'), source('hat')],
+      strength: 0.6,
+    });
+
+    expect(requests[0]!.url).toBe('http://fake:9081/sdapi/v1/txt2img');
+    expect(requests[0]!.body.extra_images).toEqual([
+      Buffer.from('car').toString('base64'),
+      Buffer.from('hat').toString('base64'),
+    ]);
+    expect(requests[0]!.body.init_images).toBeUndefined();
+    expect(requests[0]!.body.denoising_strength).toBeUndefined();
+    expect(out.meta.img2imgSkippedReason).toBeUndefined();
+    expect(out.meta.settingsNotes).toBeUndefined();
+
+    await provider.generate({
+      prompt: 'Combine them.',
+      model: 'flux-2-klein-4b-q4',
+      inputImages: ['a', 'b', 'c', 'd'].map(source),
+    });
+    expect(requests[1]!.body.extra_images).toHaveLength(3);
+  });
+
+  it('notes the sources it left out when an edit carries more than the model takes', async () => {
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: async () => Response.json({ images: [PNG_SIGNATURE.toString('base64')] }),
+    });
+    const out = await provider.generate({
+      prompt: 'Combine them.',
+      model: 'flux-2-klein-4b-q4',
+      inputImages: ['a', 'b', 'c', 'd'].map((n) => ({
+        data: Buffer.from(n),
+        mimeType: 'image/png',
+      })),
+    });
+    expect(out.meta.settingsNotes).toEqual([
+      'Used the first 3 of 4 source pictures; flux-2-klein-4b-q4 takes 3.',
+    ]);
+  });
+
+  it('renders Qwen Image Edit at its model-card guidance with the Euler sampler', async () => {
+    const requests: Record<string, unknown>[] = [];
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: async (_url, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return Response.json({ images: [PNG_SIGNATURE.toString('base64')] });
+      },
+    });
+    await provider.generate({
+      prompt: 'Make the car blue.',
+      model: 'qwen-image-edit-2511-q4',
+      inputImages: [{ data: Buffer.from('car'), mimeType: 'image/png' }],
+    });
+    expect(requests[0]).toMatchObject({
+      cfg_scale: 4,
+      sampler_name: 'Euler',
+      steps: 20,
+      extra_images: [Buffer.from('car').toString('base64')],
+    });
+  });
+
+  it('refuses an edit-only model a render with nothing to edit, before asking the engine', async () => {
+    await installModelManifest('qwen-image-edit-2511-q4', 'Qwen Image Edit 2511', {
+      weightsKind: 'diffusion-model',
+      referenceImages: { max: 3 },
+      editOnly: true,
+    });
+    const fetchImpl = vi.fn(async () => Response.json({ images: [] }));
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl,
+    });
+
+    await expect(
+      provider.generate({ prompt: 'a lighthouse', model: 'qwen-image-edit-2511-q4' }),
+    ).rejects.toMatchObject({
+      code: 'image_source_required',
+      message: expect.stringMatching(/^Qwen Image Edit 2511 changes a picture/),
+    });
+    // Named or not: the only model here edits, so a fresh picture has no model.
+    await expect(provider.generate({ prompt: 'a lighthouse' })).rejects.toMatchObject({
+      code: 'image_source_required',
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('surfaces unreachable-server errors with a helpful message', async () => {
@@ -555,6 +680,62 @@ describe('StableDiffusionCppProvider default model', () => {
     const out = await provider.generate({ prompt: 'x' });
     expect(out.meta.model).toBe('bbb-model');
   });
+
+  it('draws a fresh picture with a model that draws, even when an edit-only one is configured', async () => {
+    await installModelManifest('qwen-image-edit-2511-q4', 'Aaa Image Edit', { editOnly: true });
+    await installModel('sdxl-base-1.0', 'SDXL');
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: okFetch(),
+      defaultModelId: 'qwen-image-edit-2511-q4',
+    });
+
+    expect(await provider.resolveDefaultModelId()).toBe('sdxl-base-1.0');
+    const out = await provider.generate({ prompt: 'x' });
+    expect(out.meta.model).toBe('sdxl-base-1.0');
+  });
+
+  it('edits with a model that can when the request names none', async () => {
+    await installModel('sdxl-base-1.0', 'Bbb SDXL');
+    await installModel('flux-2-klein-4b-q4', 'Zzz Klein');
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: okFetch(),
+      defaultModelId: 'sdxl-base-1.0',
+    });
+
+    const out = await provider.generate({
+      prompt: 'make it blue',
+      inputImages: [{ data: Buffer.from('car'), mimeType: 'image/png' }],
+    });
+    expect(out.meta.model).toBe('flux-2-klein-4b-q4');
+  });
+
+  it('lists how each installed model edits', async () => {
+    await installModel('flux-2-klein-4b-q4', 'Klein');
+    await installModelManifest('qwen-image-edit-2511-q4', 'Qwen Edit', {
+      referenceImages: { max: 3 },
+      editOnly: true,
+    });
+    await installModel('krea-2-turbo-q4', 'Krea');
+    await installModel('sd-1.5', 'SD 1.5');
+    const provider = new StableDiffusionCppProvider({ baseUrl: 'http://fake', modelsRoot });
+
+    const byId = new Map((await provider.listInstalledModels()).map((m) => [m.id, m]));
+    expect(byId.get('flux-2-klein-4b-q4')).toMatchObject({
+      editMode: 'reference',
+      maxSourceImages: 3,
+    });
+    expect(byId.get('flux-2-klein-4b-q4')?.editOnly).toBeUndefined();
+    expect(byId.get('qwen-image-edit-2511-q4')).toMatchObject({
+      editMode: 'reference',
+      editOnly: true,
+    });
+    expect(byId.get('krea-2-turbo-q4')?.editMode).toBeUndefined();
+    expect(byId.get('sd-1.5')).toMatchObject({ editMode: 'img2img', maxSourceImages: 1 });
+  });
 });
 
 describe('StableDiffusionCppProvider.pullModel', () => {
@@ -789,6 +970,64 @@ describe('StableDiffusionCppProvider.pullModel', () => {
     expect(manifest.auxiliaryFiles).toEqual([
       { role: 'vae', filename: 'vae.safetensors' },
       { role: 'llm', filename: 'llm.gguf' },
+    ]);
+  });
+
+  it("persists an editing model's capability and its vision encoder", async () => {
+    const unet = Buffer.from('fake-qwen-edit');
+    const llm = Buffer.from('fake-qwen25-vl');
+    const vision = Buffer.from('fake-mmproj');
+    const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+    const responseFor: Record<string, Buffer> = {
+      'https://hf.invalid/qwen/edit.gguf': unet,
+      'https://hf.invalid/qwen/vl.gguf': llm,
+      'https://hf.invalid/qwen/mmproj-F16.gguf': vision,
+    };
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake',
+      modelsRoot,
+      fetchImpl: async (url) => {
+        const body = responseFor[String(url)];
+        return body
+          ? new Response(body, { status: 200, headers: { 'Content-Length': String(body.length) } })
+          : new Response('not found', { status: 404 });
+      },
+    });
+
+    for await (const e of provider.pullModel('qwen-image-edit-2511-q4', {
+      downloadUrl: 'https://hf.invalid/qwen/edit.gguf',
+      sha256: sha(unet),
+      approxSizeBytes: unet.length,
+      name: 'Qwen Image Edit 2511',
+      weightsKind: 'diffusion-model',
+      supportsImg2Img: false,
+      referenceImages: { max: 3 },
+      editOnly: true,
+      auxiliaryFiles: [
+        {
+          role: 'llm',
+          downloadUrl: 'https://hf.invalid/qwen/vl.gguf',
+          sha256: sha(llm),
+          approxSizeBytes: llm.length,
+        },
+        {
+          role: 'llm_vision',
+          downloadUrl: 'https://hf.invalid/qwen/mmproj-F16.gguf',
+          sha256: sha(vision),
+          approxSizeBytes: vision.length,
+        },
+      ],
+    })) {
+      expect(e.type).not.toBe('error');
+    }
+
+    const manifest = JSON.parse(
+      await readFile(join(modelsRoot, 'qwen-image-edit-2511-q4', 'manifest.json'), 'utf8'),
+    );
+    expect(manifest).toMatchObject({ referenceImages: { max: 3 }, editOnly: true });
+    expect(manifest.auxiliaryFiles).toEqual([
+      { role: 'llm', filename: 'llm.gguf' },
+      { role: 'llm_vision', filename: 'llm_vision.gguf' },
     ]);
   });
 

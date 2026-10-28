@@ -49,8 +49,13 @@ export function ImageGeneratorGezelHint() {
     return () => window.removeEventListener('gezel:gezel-updated', handler);
   }, [refresh]);
 
+  // An image editor forwards to the same tool but cannot draw a new picture.
   const existing = useMemo(
-    () => gezels.filter((g) => g.fixedFunction?.tool === IMAGE_GENERATOR_TOOL),
+    () =>
+      gezels.filter(
+        (g) =>
+          g.fixedFunction?.tool === IMAGE_GENERATOR_TOOL && !g.fixedFunction.requiresInputImage,
+      ),
     [gezels],
   );
 

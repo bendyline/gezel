@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "pnpmVersion": "11.27.1",
-  "packageSha256": "d50f8841e67ef0b1d82e7c90b240656c7ca04d5f1aa33f06108007c81fd76766",
+  "pnpmVersion": "11.28.9",
+  "packageSha256": "e54b07e5634b7bf4352153e0c8c25bcef2930a29e3d1bdc42a9eaf2ffd4436df",
   "packages": [
     {
       "name": "@isaacs/fs-minipass",
@@ -165,7 +165,7 @@
     },
     {
       "name": "undici",
-      "version": "6.28.1",
+      "version": "6.29.1",
       "license": "MIT",
       "dependencies": []
     },

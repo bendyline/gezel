@@ -28,6 +28,7 @@ const MODEL_1024PX_DEFAULT = new Set<string>([
   'ming-image-0.1-design-bf16',
   'moss-image-sft-q4',
   'iris-3b-f32',
+  'qwen-image-edit-2511-q4',
 ]);
 
 /** The square side, in pixels, a local model renders at when nothing is asked. */
@@ -129,11 +130,48 @@ export function fitImageSizeToRange(
 const toMultiple = (v: number, multiple = SHAPE_MULTIPLE) =>
   Math.max(multiple, Math.round(v / multiple) * multiple);
 
+/**
+ * An agent's explicit pixels are held to about a megapixel, the size most
+ * current models were trained at, before the model's range applies, so SD 1.5
+ * still lands at 768 and Ming at no less than 1024. A cap below the training
+ * size degrades the image rather than speeding it up: SDXL-class models garble
+ * composition at 512. Local engines only; a cloud provider takes the size as
+ * asked.
+ */
+const AGENT_IMAGE_MAX_SIDE_PX = 1024;
+
+export function capAgentImageSize<
+  T extends { width?: number | undefined; height?: number | undefined },
+>(request: T): { request: T; note?: string } {
+  const { width, height } = request;
+  const capped = (v: number) => Math.min(AGENT_IMAGE_MAX_SIDE_PX, toMultiple(v, FIT_MULTIPLE));
+  let note: string | undefined;
+  const next = { ...request };
+  if (width !== undefined && height !== undefined) {
+    const maxSide = Math.max(width, height);
+    if (maxSide > AGENT_IMAGE_MAX_SIDE_PX) {
+      const scale = AGENT_IMAGE_MAX_SIDE_PX / maxSide;
+      next.width = capped(width * scale);
+      next.height = capped(height * scale);
+      note = `Size ${width}x${height} held to ${next.width}x${next.height} for a local engine.`;
+    }
+  } else if (width !== undefined && width > AGENT_IMAGE_MAX_SIDE_PX) {
+    next.width = AGENT_IMAGE_MAX_SIDE_PX;
+    note = `Width ${width} held to ${AGENT_IMAGE_MAX_SIDE_PX} for a local engine.`;
+  } else if (height !== undefined && height > AGENT_IMAGE_MAX_SIDE_PX) {
+    next.height = AGENT_IMAGE_MAX_SIDE_PX;
+    note = `Height ${height} held to ${AGENT_IMAGE_MAX_SIDE_PX} for a local engine.`;
+  }
+  return { request: next, ...(note ? { note } : {}) };
+}
+
 export interface ImageSizeRequest {
   width?: number | undefined;
   height?: number | undefined;
   aspectRatio?: ImageAspectRatio | undefined;
   quality?: ImageQuality | undefined;
+  /** The picture an edit changes. Its shape is the edit's when none is asked. */
+  sourceSize?: { width: number; height: number } | undefined;
 }
 
 /**
@@ -144,7 +182,7 @@ export interface ImageSizeRequest {
  * - One side alone: the other side is the model's default, as engines have
  *   always filled it.
  * - Otherwise: the model's trained area times the quality tier, in the asked
- *   ratio (square when none), on multiples of 64.
+ *   ratio, else the source picture's, else square, on multiples of 64.
  */
 export function resolveImageSize(
   request: ImageSizeRequest,
@@ -165,7 +203,12 @@ export function resolveImageSize(
           };
   } else {
     const area = model.defaultSidePx ** 2 * IMAGE_QUALITY_AREA[request.quality ?? 'standard'];
-    const ratio = aspectRatio ? aspectRatioValue(aspectRatio) : 1;
+    const source = request.sourceSize;
+    const ratio = aspectRatio
+      ? aspectRatioValue(aspectRatio)
+      : source && source.width > 0 && source.height > 0
+        ? source.width / source.height
+        : 1;
     size = {
       width: toMultiple(Math.sqrt(area * ratio)),
       height: toMultiple(Math.sqrt(area / ratio)),

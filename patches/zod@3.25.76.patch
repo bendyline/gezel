@@ -1,0 +1,112 @@
+--- a/v3/types.cjs
++++ b/v3/types.cjs
+@@ -1790,6 +1790,7 @@
+                     exact: true,
+                     message: def.exactLength.message,
+                 });
++                if (tooBig) return parseUtil_js_1.INVALID;
+                 status.dirty();
+             }
+         }
+@@ -1816,7 +1817,7 @@
+                     exact: false,
+                     message: def.maxLength.message,
+                 });
+-                status.dirty();
++                return parseUtil_js_1.INVALID;
+             }
+         }
+         if (ctx.common.async) {
+@@ -2843,7 +2844,7 @@
+                     exact: false,
+                     message: def.maxSize.message,
+                 });
+-                status.dirty();
++                return parseUtil_js_1.INVALID;
+             }
+         }
+         const valueType = this._def.valueType;
+--- a/v3/types.js
++++ b/v3/types.js
+@@ -1769,6 +1769,7 @@
+                     exact: true,
+                     message: def.exactLength.message,
+                 });
++                if (tooBig) return INVALID;
+                 status.dirty();
+             }
+         }
+@@ -1795,7 +1796,7 @@
+                     exact: false,
+                     message: def.maxLength.message,
+                 });
+-                status.dirty();
++                return INVALID;
+             }
+         }
+         if (ctx.common.async) {
+@@ -2814,7 +2815,7 @@
+                     exact: false,
+                     message: def.maxSize.message,
+                 });
+-                status.dirty();
++                return INVALID;
+             }
+         }
+         const valueType = this._def.valueType;
+--- a/v4/core/schemas.cjs
++++ b/v4/core/schemas.cjs
+@@ -104,6 +104,25 @@
+             return payload;
+         };
+         inst._zod.run = (payload, ctx) => {
++            const value = payload.value;
++            const size = def.type === "array" && Array.isArray(value) ? value.length
++                : def.type === "set" && value instanceof Set ? value.size
++                : def.type === "map" && value instanceof Map ? value.size : -1;
++            if (size >= 0 && !ctx?.skipChecks) {
++                for (const ch of checks) {
++                    const bound = ch._zod.def;
++                    if (!/^(?:min|max)_(?:length|size)$|^(?:length|size)_equals$/.test(bound.check)) break;
++                    const maximum = bound.maximum ?? bound.length ?? bound.size;
++                    if (size > maximum && (!bound.when || bound.when(payload))) {
++                        const start = payload.issues.length;
++                        ch._zod.check(payload);
++                        if (payload.issues.length > start) {
++                            payload.issues[start].continue = false;
++                            return payload;
++                        }
++                    }
++                }
++            }
+             const result = inst._zod.parse(payload, ctx);
+             if (result instanceof Promise) {
+                 if (ctx.async === false)
+--- a/v4/core/schemas.js
++++ b/v4/core/schemas.js
+@@ -74,6 +74,25 @@
+             return payload;
+         };
+         inst._zod.run = (payload, ctx) => {
++            const value = payload.value;
++            const size = def.type === "array" && Array.isArray(value) ? value.length
++                : def.type === "set" && value instanceof Set ? value.size
++                : def.type === "map" && value instanceof Map ? value.size : -1;
++            if (size >= 0 && !ctx?.skipChecks) {
++                for (const ch of checks) {
++                    const bound = ch._zod.def;
++                    if (!/^(?:min|max)_(?:length|size)$|^(?:length|size)_equals$/.test(bound.check)) break;
++                    const maximum = bound.maximum ?? bound.length ?? bound.size;
++                    if (size > maximum && (!bound.when || bound.when(payload))) {
++                        const start = payload.issues.length;
++                        ch._zod.check(payload);
++                        if (payload.issues.length > start) {
++                            payload.issues[start].continue = false;
++                            return payload;
++                        }
++                    }
++                }
++            }
+             const result = inst._zod.parse(payload, ctx);
+             if (result instanceof Promise) {
+                 if (ctx.async === false)

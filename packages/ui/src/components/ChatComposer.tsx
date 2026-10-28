@@ -308,9 +308,10 @@ export interface ChatComposerProps {
   /**
    * Set when the message goes to a direct image gezel: shows the image strip
    * (shape, size, model) above the To line and sends its settings with the
-   * message. `defaults` are the gezel's stored `fixedFunction.defaults`.
+   * message. `defaults` are the gezel's stored `fixedFunction.defaults`;
+   * `edits` is set for an image editor, whose strip offers editing models.
    */
-  imageGenerator?: { defaults?: Record<string, unknown> | undefined };
+  imageGenerator?: { defaults?: Record<string, unknown> | undefined; edits?: boolean | undefined };
   /**
    * Where setup stands while Send waits for a model, in the words of the
    * surface that runs it (the meester's welcome: "downloading the AI model ·
@@ -640,6 +641,7 @@ export function ChatComposer({
     draft,
     defaults: imageGenerator?.defaults,
     text: intentPreviewText,
+    edits: imageGenerator?.edits === true,
   });
   const promptAssistEnabled = runtimeCapabilities().promptAssist === true;
   // A prefill can arrive with its task attached (a welcome first project that

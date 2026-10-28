@@ -148,6 +148,33 @@ describe('ChatManager — fixed-function gezels', () => {
     expect(await readFile(join(home, 'documents', 'ff-out.md'), 'utf8')).toBe('later handoff');
   }, 30_000);
 
+  it('lists its turn as in flight while the tool runs', async () => {
+    // The timeline drops any live bubble whose session the in-flight list
+    // leaves out; a fixed-function turn has no provider state to list it by.
+    const gezel = await store.createGezel(makeWriteDocFf());
+    const session = await manager.ensureOrCreateSession({ gezelId: gezel.id });
+    let listed: ReturnType<typeof manager.listInflight>[number] | undefined;
+    let gezelActive = false;
+    let projectActive = false;
+    events.subscribe(session.id, (e) => {
+      if (e.type !== 'user_message') return;
+      listed = manager.listInflight().find((turn) => turn.sessionId === session.id);
+      gezelActive = manager.isGezelActive(gezel.id);
+      projectActive = manager.isProjectActive(session.projectId);
+    });
+
+    await manager.send(session.id, 'hello from the user');
+
+    expect(listed).toMatchObject({
+      gezelId: gezel.id,
+      projectId: session.projectId,
+      userText: 'hello from the user',
+    });
+    expect(gezelActive).toBe(true);
+    expect(projectActive).toBe(true);
+    expect(manager.listInflight()).toHaveLength(0);
+  }, 30_000);
+
   it('user text overrides any colliding default on the prompt key', async () => {
     const gezel = await store.createGezel({
       name: 'Picasso',
@@ -503,6 +530,76 @@ describe('ChatManager — fixed-function gezels', () => {
     expect(args).not.toContain('catch-all');
     expect(args).not.toContain('promoted into a project');
   }, 30_000);
+
+  describe('an image editor', () => {
+    async function makeEditor() {
+      const gezel = await store.createGezel({
+        name: 'Rembrandt',
+        role: 'Image editor',
+        frontmatter: {
+          fixedFunction: { tool: 'generate_image', promptKey: 'prompt', requiresInputImage: true },
+        },
+      });
+      return { gezel, session: await manager.ensureOrCreateSession({ gezelId: gezel.id }) };
+    }
+
+    /** A picture uploaded through the composer, as the sent message refers to it. */
+    async function attachPicture(name: string): Promise<string> {
+      const engine = await svc.context.imageProvider.current();
+      const { png } = await engine.generate({ prompt: name, width: 32, height: 24 });
+      const path = `prompts/2026-10-27-0001/message_files/${name}.png`;
+      await store.writeProjectArtifactBinary('default', path, png);
+      return `![${name}](artifacts/${path})`;
+    }
+
+    it('turns away a message with no picture before calling the tool', async () => {
+      const { gezel, session } = await makeEditor();
+      const reply = await manager.send(session.id, 'make the sky a sunset');
+      expect(reply.content).toBe('Nothing to edit yet. Attach a picture, then say what to change.');
+      expect(reply.warnings?.length).toBe(1);
+      expect(reply.toolCalls).toBeUndefined();
+      const disk = await store.getSession(gezel.id, session.id);
+      expect(disk?.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
+    }, 30_000);
+
+    it('edits the attached picture, keeping the words as the instruction', async () => {
+      const { session } = await makeEditor();
+      const picture = await attachPicture('car');
+      const reply = await manager.send(session.id, `${picture}\n\nMake the car blue.`);
+
+      expect(reply.toolCalls?.[0]?.success).toBe(true);
+      const args = reply.toolCalls?.[0]?.argsFull ?? '';
+      // "Make" stays: an edit is an instruction, not a caption to clean.
+      expect(args).toContain('Make the car blue.');
+      expect(args).not.toContain('![car]');
+      expect(args).toContain('prompts/2026-10-27-0001/message_files/car.png');
+      expect(args).toContain('requireEdit');
+      expect(reply.content).toMatch(/^Edited \d+×\d+ image with /);
+      const engine = (await svc.context.imageProvider.current()) as unknown as {
+        lastInputImageCount: number;
+      };
+      expect(engine.lastInputImageCount).toBe(1);
+    }, 30_000);
+
+    it('keeps editing its last picture when a follow-up attaches none', async () => {
+      const { gezel, session } = await makeEditor();
+      await manager.send(session.id, `${await attachPicture('car')} Make the car blue.`);
+      const prev = (await store.getSession(gezel.id, session.id))?.lastImageGeneration;
+      expect(prev?.artifactPath).toBeDefined();
+
+      const second = await manager.send(session.id, 'Now add a dog beside it.');
+      const args = second.toolCalls?.[0]?.argsFull ?? '';
+      expect(args).toContain(prev!.artifactPath);
+      expect(args).toContain('Now add a dog beside it.');
+    }, 30_000);
+
+    it('asks what to change when only a picture arrives', async () => {
+      const { session } = await makeEditor();
+      const reply = await manager.send(session.id, await attachPicture('car'));
+      expect(reply.content).toBe('Say what to change in the picture.');
+      expect(reply.toolCalls).toBeUndefined();
+    }, 30_000);
+  });
 
   it('does not write about.md for fixed-function gezels', async () => {
     const gezel = await store.createGezel(makeWriteDocFf());

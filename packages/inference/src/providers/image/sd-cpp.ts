@@ -20,7 +20,12 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createAwakeTimeout, createLogger, imageModelDefaultSide } from '@bendyline/gezel';
+import {
+  chooseImageModel,
+  createAwakeTimeout,
+  createLogger,
+  imageModelDefaultSide,
+} from '@bendyline/gezel';
 import { resolveModelDirectory } from '../../models/model-id.js';
 import {
   MODEL_HASH_READ_BUFFER_BYTES,
@@ -38,7 +43,7 @@ import { downloadWithRetry } from '../../utils/download-with-retry.js';
 import { readImageMeta } from '../../utils/image-meta.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
-import { resolveImg2ImgSupport } from './img2img-support.js';
+import { resolveImageEditCapability } from './img2img-support.js';
 import {
   ImageCapacityError,
   type ImageEngineHealth,
@@ -50,6 +55,7 @@ import {
   type ImageModelPullEvent,
   type ImageModelPullSpec,
   type ImageProvider,
+  ImageSourceRequiredError,
   type InstalledImageModelInfo,
 } from './types.js';
 
@@ -138,6 +144,10 @@ export const MODEL_SAMPLE_STEP_DEFAULTS = new Map<string, number>([
   // The publisher recommends 100; 50 renders the same at half the time
   // (300 s to 148 s per 1024px image on a DGX Spark, image bench 2026-10-19).
   ['iris-3b-f32', 50],
+  // The publisher recommends 40; at 20 a recolor matched it apart from a
+  // hubcap's trim, and a restyle and a two-picture composite held up, in half
+  // the time (654 s to 334 s per 1024x768 edit on an RTX Spark N1X, 2026-10-27).
+  ['qwen-image-edit-2511-q4', 20],
 ]);
 
 /**
@@ -166,6 +176,8 @@ export const MODEL_CFG_DEFAULTS = new Map<string, number>([
   ['iris-3b-f32', 3],
   // The model card's recommendation; the server's 7 over-saturates it.
   ['animagine-xl-4', 5],
+  // The model card's true CFG.
+  ['qwen-image-edit-2511-q4', 4],
 ]);
 
 /**
@@ -183,6 +195,7 @@ export const MODEL_SAMPLER_DEFAULTS = new Map<string, string>([
   ['ming-image-0.1-design-bf16', 'Euler'],
   ['moss-image-sft-q4', 'Euler'],
   ['iris-3b-f32', 'Euler'],
+  ['qwen-image-edit-2511-q4', 'Euler'],
 ]);
 
 /**
@@ -200,6 +213,18 @@ export const VAE_TILING_INCOMPATIBLE_MODELS = new Set<string>([
   'krea-2-turbo-q4',
   'krea-2-turbo-q6',
   'krea-2-turbo-q8',
+  // The same Qwen-Image VAE file as Krea 2.
+  'qwen-image-edit-2511-q4',
+]);
+
+/**
+ * `--model-args` a model needs. Qwen-Image-Edit 2511 was trained with its
+ * reference latents at timestep zero; upstream warns that edits degrade
+ * badly without the flag, and the engine only infers it from a marker
+ * tensor not every quantization carries.
+ */
+const MODEL_ARGS = new Map<string, string>([
+  ['qwen-image-edit-2511-q4', 'qwen_image_zero_cond_t=true'],
 ]);
 
 /**
@@ -220,6 +245,8 @@ export interface SdServerLoadProfile {
    * measured not to change.
    */
   stepCache?: 'easycache';
+  /** `--model-args` key=value list. See MODEL_ARGS. */
+  modelArgs?: string;
 }
 
 /**
@@ -231,7 +258,11 @@ export interface SdServerLoadProfile {
 const EASYCACHE_MODELS = new Set<string>(['moss-image-sft-q4']);
 
 export function sdServerLoadProfile(modelId: string): SdServerLoadProfile {
-  const stepCache = EASYCACHE_MODELS.has(modelId) ? { stepCache: 'easycache' as const } : {};
+  const modelArgs = MODEL_ARGS.get(modelId);
+  const extras = {
+    ...(EASYCACHE_MODELS.has(modelId) ? { stepCache: 'easycache' as const } : {}),
+    ...(modelArgs ? { modelArgs } : {}),
+  };
   if (modelId === 'iris-3b-f32') {
     // Iris generates pixels directly: no VAE to tile. Upstream's Iris recipe
     // enables diffusion flash attention for the 1024px sequence. The
@@ -242,7 +273,7 @@ export function sdServerLoadProfile(modelId: string): SdServerLoadProfile {
       defaultSidePx: imageModelDefaultSide(modelId),
       bf16TensorPattern: '^model\\.diffusion_model\\.',
       diffusionFlashAttention: true,
-      ...stepCache,
+      ...extras,
     };
   }
   // Tiling avoids VAE-decode OOM on large images, but produces visible
@@ -251,7 +282,7 @@ export function sdServerLoadProfile(modelId: string): SdServerLoadProfile {
     vaeDecode: VAE_TILING_INCOMPATIBLE_MODELS.has(modelId) ? 'untiled' : 'tiled',
     defaultSidePx: imageModelDefaultSide(modelId),
     diffusionFlashAttention: false,
-    ...stepCache,
+    ...extras,
   };
 }
 
@@ -330,7 +361,26 @@ export class StableDiffusionCppProvider implements ImageProvider {
   private async generateInner(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
     const { signal } = input;
     if (signal?.aborted) throw new ImageGenerationCancelledError();
-    const modelId = input.model ?? (await this.resolveDefaultModelId());
+    const hasSources = (input.inputImages?.length ?? 0) > 0;
+    const modelId = input.model ?? (await this.chooseModel(hasSources));
+    const installed = await this.readInstalledManifestFields(modelId);
+    const capability = resolveImageEditCapability({
+      modelId,
+      explicit: installed?.supportsImg2Img,
+      weightsKind: installed?.weightsKind,
+      referenceImages: installed?.referenceImages,
+      editOnly: installed?.editOnly,
+    });
+    // An edit-only model handed nothing to edit, named or the only kind
+    // installed, fails here rather than after a launch that loads its weights.
+    if (!hasSources) {
+      const blocker = capability.editOnly
+        ? { id: modelId, name: installed?.name }
+        : modelId === undefined
+          ? (await this.listInstalledModels()).find((m) => m.editOnly)
+          : undefined;
+      if (blocker) throw new ImageSourceRequiredError(blocker.name ?? blocker.id ?? 'This model');
+    }
     const defaultDimension = imageModelDefaultSide(modelId);
     const width = input.width ?? defaultDimension;
     const height = input.height ?? defaultDimension;
@@ -408,19 +458,22 @@ export class StableDiffusionCppProvider implements ImageProvider {
       // is reported on meta so every caller (route, MCP tool, chat
       // bubble) can say so honestly.
       let img2imgSkippedReason: string | undefined;
+      const settingsNotes: string[] = [];
       if (inputImages.length > 0) {
-        const installed = await this.readInstalledManifestFields(modelId);
-        const verdict = resolveImg2ImgSupport({
-          modelId,
-          explicit: installed?.supportsImg2Img,
-          weightsKind: installed?.weightsKind,
-        });
-        if (!verdict.supported) {
-          img2imgSkippedReason = verdict.reason ?? 'model does not support image editing (img2img)';
+        const max = capability.maxSourceImages ?? 1;
+        if (!capability.editMode) {
+          img2imgSkippedReason =
+            capability.reason ?? 'model does not support image editing (img2img)';
           log.info(
             `[sd-cpp] dropping ${inputImages.length} input image(s): ${img2imgSkippedReason}`,
           );
           inputImages = [];
+        } else if (inputImages.length > max) {
+          log.info(`[sd-cpp] received ${inputImages.length} input images; ${modelId} takes ${max}`);
+          settingsNotes.push(
+            `Used the first ${max} of ${inputImages.length} source pictures; ${installed?.name ?? modelId} takes ${max}.`,
+          );
+          inputImages = inputImages.slice(0, max);
         }
       }
       const body: Record<string, unknown> = {
@@ -436,15 +489,13 @@ export class StableDiffusionCppProvider implements ImageProvider {
       const sampler = modelId ? MODEL_SAMPLER_DEFAULTS.get(modelId) : undefined;
       if (sampler) body.sampler_name = sampler;
       let endpoint = `${baseUrl}/sdapi/v1/txt2img`;
-      // Img2img: a single source image drives `/sdapi/v1/img2img` via
-      // `init_images` (base64). stable-diffusion.cpp's img2img path takes
-      // one image, so we use the first and warn for any extras.
-      if (inputImages.length > 0) {
-        if (inputImages.length > 1) {
-          log.info(
-            `[sd-cpp] received ${inputImages.length} input images; img2img uses the first only`,
-          );
-        }
+      if (inputImages.length > 0 && capability.editMode === 'reference') {
+        // A reference editor reads the sources beside the instruction
+        // (`extra_images` becomes the engine's ref_images) and renders
+        // from noise; `strength` has no meaning there.
+        body.extra_images = inputImages.map((image) => Buffer.from(image.data).toString('base64'));
+      } else if (inputImages.length > 0) {
+        // Img2img: one source drives `/sdapi/v1/img2img` via `init_images`.
         const first = inputImages[0]!;
         body.init_images = [Buffer.from(first.data).toString('base64')];
         if (typeof input.strength === 'number') body.denoising_strength = input.strength;
@@ -512,6 +563,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
           heightPx: rendered?.height || height,
           durationMs: Date.now() - started,
           ...(img2imgSkippedReason ? { img2imgSkippedReason } : {}),
+          ...(settingsNotes.length > 0 ? { settingsNotes } : {}),
         },
       };
     } catch (err) {
@@ -544,12 +596,21 @@ export class StableDiffusionCppProvider implements ImageProvider {
           installedAt?: string;
           weightsKind?: 'checkpoint' | 'diffusion-model';
           supportsImg2Img?: boolean;
+          referenceImages?: unknown;
+          editOnly?: unknown;
           fileSha256?: Record<string, string>;
         };
         if (!parsed.id || !parsed.name || !parsed.approxSizeBytes || !parsed.installedAt) continue;
         if (!(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256))) {
           continue;
         }
+        const capability = resolveImageEditCapability({
+          modelId: parsed.id,
+          explicit: parsed.supportsImg2Img,
+          weightsKind: parsed.weightsKind,
+          referenceImages: parseReferenceImages(parsed.referenceImages),
+          editOnly: typeof parsed.editOnly === 'boolean' ? parsed.editOnly : undefined,
+        });
         out.push({
           id: parsed.id,
           name: parsed.name,
@@ -559,6 +620,10 @@ export class StableDiffusionCppProvider implements ImageProvider {
           ...(typeof parsed.supportsImg2Img === 'boolean'
             ? { supportsImg2Img: parsed.supportsImg2Img }
             : {}),
+          ...(capability.editMode
+            ? { editMode: capability.editMode, maxSourceImages: capability.maxSourceImages }
+            : {}),
+          ...(capability.editOnly ? { editOnly: true } : {}),
         });
       } catch {
         /* skip malformed entries */
@@ -641,6 +706,8 @@ export class StableDiffusionCppProvider implements ImageProvider {
           weightsFilename,
           weightsKind: spec.weightsKind,
           ...(spec.supportsImg2Img !== undefined ? { supportsImg2Img: spec.supportsImg2Img } : {}),
+          ...(spec.referenceImages ? { referenceImages: spec.referenceImages } : {}),
+          ...(spec.editOnly !== undefined ? { editOnly: spec.editOnly } : {}),
           weightsSizeBytes: weightsActualSize,
           sha256: spec.sha256.toLowerCase(),
           auxiliaryFiles: auxiliaryRecords,
@@ -825,16 +892,20 @@ export class StableDiffusionCppProvider implements ImageProvider {
   }
 
   /**
-   * The configured default when it is installed, else the first installed
-   * model id, else undefined. Stable ordering matches
-   * {@link listInstalledModels} so the default is deterministic.
+   * The model a fresh picture renders with: the configured default when it
+   * is installed and draws, else the first installed model that draws. Stable
+   * ordering matches {@link listInstalledModels} so the default is
+   * deterministic.
    */
   async resolveDefaultModelId(): Promise<string | undefined> {
-    const models = await this.listInstalledModels();
-    if (this.defaultModelId && models.some((m) => m.id === this.defaultModelId)) {
-      return this.defaultModelId;
-    }
-    return models[0]?.id;
+    return this.chooseModel(false);
+  }
+
+  private async chooseModel(hasSources: boolean): Promise<string | undefined> {
+    return chooseImageModel(await this.listInstalledModels(), {
+      defaultModelId: this.defaultModelId,
+      hasSources,
+    });
   }
 
   private async defaultSampleSteps(modelId: string | undefined): Promise<number> {
@@ -858,9 +929,12 @@ export class StableDiffusionCppProvider implements ImageProvider {
    * the img2img capability.)
    */
   private async readInstalledManifestFields(modelId: string | undefined): Promise<{
+    name?: string;
     recommendedSteps?: number;
     weightsKind?: 'checkpoint' | 'diffusion-model';
     supportsImg2Img?: boolean;
+    referenceImages?: { max: number };
+    editOnly?: boolean;
   } | null> {
     if (!modelId) return null;
     try {
@@ -868,11 +942,16 @@ export class StableDiffusionCppProvider implements ImageProvider {
       if (!root) return null;
       const raw = await readFile(join(root, modelId, 'manifest.json'), 'utf8');
       const parsed = JSON.parse(raw) as {
+        name?: unknown;
         recommendedSteps?: unknown;
         weightsKind?: unknown;
         supportsImg2Img?: unknown;
+        referenceImages?: unknown;
+        editOnly?: unknown;
       };
+      const referenceImages = parseReferenceImages(parsed.referenceImages);
       return {
+        ...(typeof parsed.name === 'string' ? { name: parsed.name } : {}),
         ...(typeof parsed.recommendedSteps === 'number'
           ? { recommendedSteps: parsed.recommendedSteps }
           : {}),
@@ -882,6 +961,8 @@ export class StableDiffusionCppProvider implements ImageProvider {
         ...(typeof parsed.supportsImg2Img === 'boolean'
           ? { supportsImg2Img: parsed.supportsImg2Img }
           : {}),
+        ...(referenceImages ? { referenceImages } : {}),
+        ...(typeof parsed.editOnly === 'boolean' ? { editOnly: parsed.editOnly } : {}),
       };
     } catch {
       return null;
@@ -913,6 +994,11 @@ const RECENT_ENGINE_LINES = 40;
  */
 const ENGINE_MEMORY_SHORTFALL =
   /cannot make enough memory available|out of (?:device )?memory|ErrorOutOfDeviceMemory|failed to allocate/i;
+
+function parseReferenceImages(value: unknown): { max: number } | undefined {
+  const max = (value as { max?: unknown } | null)?.max;
+  return typeof max === 'number' && Number.isInteger(max) && max > 0 ? { max } : undefined;
+}
 
 function emitProgress(input: ImageGenerationInput, progress: ImageGenerationProgress): void {
   try {

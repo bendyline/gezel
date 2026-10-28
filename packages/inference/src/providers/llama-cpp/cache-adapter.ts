@@ -324,7 +324,11 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
   }
 
   async evict(sessionIds: readonly string[]): Promise<void> {
-    const generation = this.engineGeneration;
+    return this.withAllocationLock((generation) => this.evictUnlocked(sessionIds, generation));
+  }
+
+  private async evictUnlocked(sessionIds: readonly string[], generation: number): Promise<void> {
+    if (generation !== this.engineGeneration) return;
     // Save before forgetting so the session can resume on next access.
     // Persistence is best-effort; failures are logged and the local
     // mapping is still cleared (controller view stays consistent).
@@ -412,7 +416,11 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
    */
   async flushAll(): Promise<number> {
     if (!this.slotSavePath) return 0;
-    const generation = this.engineGeneration;
+    return this.withAllocationLock((generation) => this.flushAllUnlocked(generation));
+  }
+
+  private async flushAllUnlocked(generation: number): Promise<number> {
+    if (generation !== this.engineGeneration) return 0;
     let saved = 0;
     for (const [sessionId, slot] of this.sessionToSlot) {
       if (await this.saveSlotForSession(slot, sessionId)) saved++;
@@ -428,6 +436,14 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
    * {@link prepareForSend}.
    */
   private async allocateSlot(sessionId: string): Promise<number> {
+    return this.withAllocationLock((generation) => {
+      this.assertEngineGeneration(generation);
+      return this.allocateSlotUnlocked(sessionId, generation);
+    });
+  }
+
+  // Eviction and idle flushing must not save a slot after a handoff has rebound it.
+  private async withAllocationLock<T>(work: (generation: number) => Promise<T>): Promise<T> {
     const generation = this.engineGeneration;
     const previous = this.allocationTail;
     let release!: () => void;
@@ -437,8 +453,7 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
 
     await previous;
     try {
-      this.assertEngineGeneration(generation);
-      return await this.allocateSlotUnlocked(sessionId, generation);
+      return await work(generation);
     } finally {
       release();
     }

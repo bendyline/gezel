@@ -1,4 +1,9 @@
-import { ImageQualitySchema, imageModelDefaultSide } from '@bendyline/gezel';
+import {
+  ImageQualitySchema,
+  type InstalledImageModel,
+  chooseImageModel,
+  imageModelDefaultSide,
+} from '@bendyline/gezel';
 import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import {
   INVALID_MODEL_ID_CODE,
@@ -10,8 +15,9 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { SSEStreamingApi } from 'hono/streaming';
 import { imageCatalogFits, imageModelFit, wontRunRefusal } from '../../models/media-fit.js';
-import { resolveImg2ImgSupport } from '../../providers/image/img2img-support.js';
+import { resolveImageEditCapability } from '../../providers/image/img2img-support.js';
 import { UnknownImageModelError } from '../../providers/image/pull-registry.js';
+import type { InstalledImageModelInfo } from '../../providers/image/types.js';
 import type { EngineContext } from '../engine-context.js';
 import { mediaFitContext } from './media-fit-context.js';
 
@@ -24,28 +30,27 @@ export function imageModelRoutes(ctx: EngineContext): Hono {
   /** List installed image models (not the catalog — installed weights on disk). */
   app.get('/models', proxy, async (c) => {
     const provider = await ctx.imageProvider.current();
-    const [models, defaultModel] = await Promise.all([
+    const [installed, defaultModel] = await Promise.all([
       provider.listInstalledModels(),
       provider.resolveDefaultModelId?.().catch(() => undefined),
     ]);
     const kind = providerKind(provider.name);
-    // Cloud providers can report account-specific edit support; local models resolve through
-    // the explicit-field → assessment-map → weights-kind ladder so the UI
-    // and MCP callers can tell which installed models can edit an image.
+    // Cloud providers can report account-specific edit support and edit by
+    // instruction; local models resolve through the explicit-field →
+    // assessment-map → weights-kind ladder so the UI and MCP callers can
+    // tell which installed models can edit an image, and how.
+    const models = installed.map((m) => ({ ...m, ...imageModelEditFacts(kind, m) }));
+    const defaultEditModel = chooseImageModel(models, {
+      defaultModelId: defaultModel,
+      hasSources: true,
+    });
     return c.json({
       ...(defaultModel ? { defaultModel } : {}),
+      ...(defaultEditModel ? { defaultEditModel } : {}),
       models: await Promise.all(
         models.map(async (m) => ({
           ...m,
           kind,
-          supportsImg2Img:
-            kind === 'cloud'
-              ? (m.supportsImg2Img ?? true)
-              : resolveImg2ImgSupport({
-                  modelId: m.id,
-                  explicit: m.supportsImg2Img,
-                  weightsKind: m.weightsKind,
-                }).supported,
           ...(kind === 'local' ? await localImageModelFacts(ctx, m.id) : {}),
         })),
       ),
@@ -212,6 +217,40 @@ function withResolvers<T>(): { promise: Promise<T>; resolve: (value: T) => void 
 }
 export function providerKind(name: string): 'local' | 'cloud' {
   return ['google-ai', 'openai', 'copilot', 'codex-cli'].includes(name) ? 'cloud' : 'local';
+}
+
+/**
+ * Whether and how a listed model edits a picture. Cloud models edit by
+ * instruction, as the account allows. A local engine reports its own
+ * resolution; one that predates it (an older machine broker or paired
+ * server) is resolved here through the same ladder.
+ */
+export function imageModelEditFacts(
+  kind: 'local' | 'cloud',
+  m: InstalledImageModelInfo,
+): Pick<InstalledImageModel, 'supportsImg2Img' | 'editMode' | 'maxSourceImages' | 'editOnly'> {
+  if (kind === 'cloud') {
+    const edits = m.supportsImg2Img ?? true;
+    return { supportsImg2Img: edits, ...(edits ? { editMode: 'reference' as const } : {}) };
+  }
+  const capability = m.editMode
+    ? { editMode: m.editMode, maxSourceImages: m.maxSourceImages, editOnly: m.editOnly ?? false }
+    : resolveImageEditCapability({
+        modelId: m.id,
+        explicit: m.supportsImg2Img,
+        weightsKind: m.weightsKind,
+        editOnly: m.editOnly,
+      });
+  return {
+    supportsImg2Img: capability.editMode !== undefined,
+    ...(capability.editMode
+      ? {
+          editMode: capability.editMode,
+          ...(capability.maxSourceImages ? { maxSourceImages: capability.maxSourceImages } : {}),
+        }
+      : {}),
+    ...(capability.editOnly ? { editOnly: true } : {}),
+  };
 }
 
 /** Size and prompting facts a client needs to describe a local model's render. */

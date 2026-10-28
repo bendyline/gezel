@@ -298,11 +298,14 @@ export function ImageModelManager({
   // still installed, else the first installed model (the engine's own
   // fallback). The highlighted radio mirrors what a
   // generation would really load.
-  const showActivePicker = Boolean(onSetActiveModel) && installed.length > 0;
+  // A model made only for editing never draws a new picture, so it is never
+  // the active one (core `chooseImageModel`); an edit picks it on its own.
+  const drawing = installed.filter((m) => !m.editOnly);
+  const showActivePicker = Boolean(onSetActiveModel) && drawing.length > 0;
   const activeModelId =
-    configuredDefaultModelId && installedIds.has(configuredDefaultModelId)
+    configuredDefaultModelId && drawing.some((m) => m.id === configuredDefaultModelId)
       ? configuredDefaultModelId
-      : installed[0]?.id;
+      : drawing[0]?.id;
 
   return (
     <div className="ollama-model-manager">
@@ -355,24 +358,30 @@ export function ImageModelManager({
                   <tr key={m.id}>
                     {showActivePicker && (
                       <td className="gz-active-model-column">
-                        <input
-                          type="radio"
-                          name="active-image-model"
-                          className="gz-active-model-radio"
-                          aria-label={`Use ${m.id} as the active image model`}
-                          checked={activeModelId === m.id}
-                          onChange={() => {
-                            // Re-selecting the active model would still reset the
-                            // provider and cold-reload a warm engine — no-op it.
-                            if (activeModelId !== m.id) void onSetActiveModel?.(m.id);
-                          }}
-                        />
+                        {m.editOnly ? (
+                          <span
+                            className="muted small"
+                            title="Changes a picture you give it; never draws a new one"
+                          >
+                            Edits
+                          </span>
+                        ) : (
+                          <input
+                            type="radio"
+                            name="active-image-model"
+                            className="gz-active-model-radio"
+                            aria-label={`Use ${m.name} as the active image model`}
+                            checked={activeModelId === m.id}
+                            onChange={() => {
+                              // Re-selecting the active model would still reset the
+                              // provider and cold-reload a warm engine — no-op it.
+                              if (activeModelId !== m.id) void onSetActiveModel?.(m.id);
+                            }}
+                          />
+                        )}
                       </td>
                     )}
-                    <td>
-                      <code>{m.id}</code>
-                      <div className="muted small">{m.name}</div>
-                    </td>
+                    <td>{m.name}</td>
                     <td>{formatSize(m.approxSizeBytes)}</td>
                     <td className="muted small">{new Date(m.installedAt).toLocaleDateString()}</td>
                     <td>
@@ -469,7 +478,7 @@ export function ImageModelManager({
         title="Delete image model?"
         message={
           toDelete
-            ? `"${toDelete}" will be removed from local storage. This frees disk space; download it again later to use it.`
+            ? `"${installed.find((m) => m.id === toDelete)?.name ?? toDelete}" will be removed from local storage. This frees disk space; download it again later to use it.`
             : ''
         }
         confirmLabel="Delete"

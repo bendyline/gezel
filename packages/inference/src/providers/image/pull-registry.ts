@@ -121,6 +121,8 @@ export class ImageModelPullRegistry {
       ...(manifest.supportsImg2Img !== undefined
         ? { supportsImg2Img: manifest.supportsImg2Img }
         : {}),
+      ...(manifest.referenceImages ? { referenceImages: manifest.referenceImages } : {}),
+      ...(manifest.editOnly !== undefined ? { editOnly: manifest.editOnly } : {}),
       auxiliaryFiles: manifest.auxiliaryFiles.map((aux) => ({
         role: aux.role,
         downloadUrl: aux.downloadUrl,

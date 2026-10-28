@@ -419,6 +419,20 @@
   min-width: 0;
 }
 
+/* Keep messages and document reading/editing surfaces copyable without
+   opting their surrounding toolbars, author labels, or navigation in. */
+.msg-body,
+.msg-body-rich,
+.msg-handoff-note-headline,
+.msg-handoff-note-context,
+.msg-handoff-note-full,
+.squisq-page,
+.squisq-linear-content,
+.squisq-wysiwyg-editor {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .msg-body {
   white-space: pre-wrap;
   word-wrap: break-word;

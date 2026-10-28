@@ -198,6 +198,107 @@ describe('POST /api/image-gen/generate', () => {
     }
   });
 
+  /** A local engine with these models installed, recording what each render was handed. */
+  async function withLocalModels(
+    installed: Array<{ id: string; name: string; editOnly?: boolean }>,
+    defaultModel: string | undefined,
+    body: Record<string, unknown>,
+  ) {
+    const mock = await svc.context.imageProvider.current();
+    const output = await mock.generate({ prompt: 'fixture', width: 8, height: 8 });
+    const rendered: Array<{ model?: string; width?: number; height?: number; sources: number }> =
+      [];
+    const routing = vi.spyOn(svc.context.imageProvider, 'providerForModel').mockResolvedValue({
+      name: 'mock',
+      listInstalledModels: async () =>
+        installed.map((m) => ({ ...m, approxSizeBytes: 1, installedAt: '2026-10-27T00:00:00Z' })),
+      resolveDefaultModelId: async () => defaultModel,
+      generate: async (opts: {
+        model?: string;
+        width?: number;
+        height?: number;
+        inputImages?: unknown[];
+      }) => {
+        rendered.push({
+          model: opts.model,
+          width: opts.width,
+          height: opts.height,
+          sources: opts.inputImages?.length ?? 0,
+        });
+        return output;
+      },
+    } as unknown as ImageProvider);
+    try {
+      const res = await api('POST', '/api/image-gen/generate', body);
+      return { status: res.status, json: (await res.json()) as Record<string, unknown>, rendered };
+    } finally {
+      routing.mockRestore();
+    }
+  }
+
+  async function sourcePng(width: number, height: number) {
+    const mock = await svc.context.imageProvider.current();
+    return (await mock.generate({ prompt: 'source', width, height })).png.toString('base64');
+  }
+
+  it("edits with an installed editing model, in the source's shape", async () => {
+    const data = await sourcePng(160, 90);
+    const { status, rendered } = await withLocalModels(
+      [
+        { id: 'sdxl-base-1.0', name: 'SDXL' },
+        { id: 'flux-2-klein-4b-q4', name: 'Klein' },
+      ],
+      'sdxl-base-1.0',
+      { prompt: 'make the car blue', inputImages: [{ data, mimeType: 'image/png' }] },
+    );
+    expect(status).toBe(200);
+    expect(rendered).toEqual([
+      { model: 'flux-2-klein-4b-q4', width: 1344, height: 768, sources: 1 },
+    ]);
+  });
+
+  it('refuses an edit request with no picture to change', async () => {
+    const { status, json, rendered } = await withLocalModels(
+      [{ id: 'flux-2-klein-4b-q4', name: 'Klein' }],
+      undefined,
+      { prompt: 'make the car blue', requireEdit: true },
+    );
+    expect(status).toBe(400);
+    expect(json.code).toBe('image_source_required');
+    expect(rendered).toEqual([]);
+  });
+
+  it('refuses an edit request when no installed model can edit, instead of drawing', async () => {
+    const { status, json, rendered } = await withLocalModels(
+      [{ id: 'krea-2-turbo-q4', name: 'Krea' }],
+      'krea-2-turbo-q4',
+      {
+        prompt: 'make the car blue',
+        requireEdit: true,
+        inputImages: [{ data: await sourcePng(16, 16), mimeType: 'image/png' }],
+      },
+    );
+    expect(status).toBe(409);
+    expect(json.code).toBe('image_edit_unavailable');
+    expect(rendered).toEqual([]);
+  });
+
+  it('refuses an edit-only model a fresh picture before its engine loads', async () => {
+    const editOnly = [
+      { id: 'qwen-image-edit-2511-q4', name: 'Qwen Image Edit 2511', editOnly: true },
+    ];
+    for (const body of [
+      { prompt: 'a lighthouse', model: 'qwen-image-edit-2511-q4' },
+      { prompt: 'a lighthouse' },
+    ]) {
+      const { status, json, rendered } = await withLocalModels(editOnly, undefined, body);
+      expect(status).toBe(400);
+      expect(json.code).toBe('image_source_required');
+      expect(json.error).toMatch(/^Qwen Image Edit 2511 changes a picture/);
+      expect(rendered).toEqual([]);
+    }
+  });
+
   it('rejects an empty prompt with 400', async () => {
     const res = await api('POST', '/api/image-gen/generate', { prompt: '' });
     expect(res.status).toBe(400);
@@ -240,6 +341,54 @@ describe('GET /api/image-gen/models', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { models: unknown[] };
     expect(Array.isArray(body.models)).toBe(true);
+  });
+
+  it('says how each model edits and which one an edit uses', async () => {
+    const listing = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      name,
+      approxSizeBytes: 1,
+      installedAt: '2026-10-27T00:00:00Z',
+      ...extra,
+    });
+    const current = vi.spyOn(svc.context.imageProvider, 'current').mockResolvedValue({
+      name: 'sd-cpp',
+      listInstalledModels: async () => [
+        listing('krea-2-turbo-q4', 'Krea'),
+        listing('qwen-image-edit-2511-q4', 'Qwen Edit', {
+          editMode: 'reference',
+          maxSourceImages: 3,
+          editOnly: true,
+        }),
+        // An older engine lists no edit facts; the route resolves them.
+        listing('flux-2-klein-4b-q4', 'Klein'),
+      ],
+      resolveDefaultModelId: async () => 'krea-2-turbo-q4',
+    } as unknown as ImageProvider);
+    try {
+      const body = (await (await api('GET', '/api/image-gen/models')).json()) as {
+        defaultModel?: string;
+        defaultEditModel?: string;
+        models: Array<Record<string, unknown>>;
+      };
+      expect(body.defaultModel).toBe('krea-2-turbo-q4');
+      expect(body.defaultEditModel).toBe('qwen-image-edit-2511-q4');
+      const byId = new Map(body.models.map((m) => [m.id, m]));
+      expect(byId.get('krea-2-turbo-q4')).toMatchObject({ supportsImg2Img: false });
+      expect(byId.get('krea-2-turbo-q4')?.editMode).toBeUndefined();
+      expect(byId.get('qwen-image-edit-2511-q4')).toMatchObject({
+        supportsImg2Img: true,
+        editMode: 'reference',
+        editOnly: true,
+      });
+      expect(byId.get('flux-2-klein-4b-q4')).toMatchObject({
+        supportsImg2Img: true,
+        editMode: 'reference',
+        maxSourceImages: 3,
+      });
+    } finally {
+      current.mockRestore();
+    }
   });
 });
 

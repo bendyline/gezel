@@ -63,6 +63,7 @@ export * from './fitness-badge.js';
 export * from './recommendation.js';
 export * from './media-memory.js';
 export * from './image-size.js';
+export * from './image-model-choice.js';
 export * from './image-prompting.js';
 export * from './image-cues.js';
 export * from './prompt-assist.js';

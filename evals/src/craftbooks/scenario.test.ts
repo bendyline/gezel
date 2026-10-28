@@ -1256,7 +1256,7 @@ describe('craftbook generic scenario adapter', () => {
     expect(client.getTaskByRef).toHaveBeenCalledWith('T-2');
   });
 
-  it('requires a matching craftbook task to reach its terminal step', async () => {
+  it('waits for terminal work to finish before passing workflow mode', async () => {
     const task = {
       projectId: 'project-1',
       num: 1,
@@ -1287,6 +1287,15 @@ describe('craftbook generic scenario adapter', () => {
         summary: 'The real workflow reaches its terminal step.',
       },
     });
+
+    const ctx = {
+      client,
+      meesterId: 'meester',
+      log: vi.fn(),
+      logChanged: vi.fn(),
+    } as unknown as EvalContext;
+    await expect(scenario.successCheck(ctx)).resolves.toEqual({ done: false });
+    task.status = 'complete';
 
     await expect(
       scenario.successCheck({

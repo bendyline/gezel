@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { requestAdvisories } from './audit-vulnerabilities-lib.mjs';
+import { pnpmRuntimeAuditInventory } from './pnpm-runtime-inventory.mjs';
+import { packageVersionsFromInventory } from './production-dependency-inventory.mjs';
 
 test('retries transient timeouts and preserves the request', async () => {
   const requests = [];
@@ -135,4 +137,20 @@ test('deduplicates and sorts advisory results', async () => {
       { id: 7, name: 'alpha', severity: 'moderate' },
     ],
   );
+});
+
+test('advisory requests include bundled pnpm versions outside the workspace lockfile', () => {
+  const packages = packageVersionsFromInventory({
+    MIT: [{ name: 'undici', versions: ['8.12.3'], paths: ['/workspace/undici'] }],
+    ...pnpmRuntimeAuditInventory({
+      pnpmVersion: '11.28.9',
+      packages: [
+        { name: 'undici', version: '6.29.1', license: 'MIT', dependencies: [] },
+        { name: '@reflink/reflink', version: '1.0.0', license: 'MIT', dependencies: [] },
+      ],
+    }),
+  });
+  assert.deepEqual(packages.undici, ['6.29.1', '8.12.3']);
+  assert.deepEqual(packages.pnpm, ['11.28.9']);
+  assert.equal(packages['@reflink/reflink'], undefined);
 });
