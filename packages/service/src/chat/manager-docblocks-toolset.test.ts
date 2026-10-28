@@ -312,10 +312,27 @@ describe('ChatManager — the bundled DocBlocks joins only document work', () =>
     expect(extras).toContain('docblocks');
   });
 
-  it('still joins wherever the person installed a copy themselves', async () => {
-    await store.writeInstalledToolsets({ kind: 'gezel', gezelId: 'ada' }, [
-      docblocksToolset(join(home, 'stub')),
+  const withVersion = (version: string): InstalledToolset => {
+    const base = docblocksToolset(join(home, 'stub'));
+    return { ...base, version, runtime: { ...base.runtime, version } } as InstalledToolset;
+  };
+
+  // 1.26300.100: one "make a PowerPoint" request installed the catalog's
+  // older DocBlocks into Default, and every later Meester turn carried its
+  // tools again (21k → 38k prompt tokens).
+  it('treats an older or equal copy installed elsewhere as the shipped one', async () => {
+    await store.writeInstalledToolsets({ kind: 'project', projectId: 'default' }, [
+      withVersion('2.3.0'),
     ]);
+    await store.writeInstalledToolsets({ kind: 'gezel', gezelId: 'ada' }, [withVersion('2.3.4')]);
+    const { extras } = await createOpts(
+      await manager.createSession({ gezelId: 'ada', projectId: 'default' }),
+    );
+    expect(extras).not.toContain('docblocks');
+  });
+
+  it('still joins wherever someone installed a newer copy', async () => {
+    await store.writeInstalledToolsets({ kind: 'gezel', gezelId: 'ada' }, [withVersion('2.4.0')]);
     const { extras } = await createOpts(await manager.createSession({ gezelId: 'ada' }));
     expect(extras).toContain('docblocks');
   });

@@ -10,6 +10,7 @@ import {
 import { Hono } from 'hono';
 
 import type { VideoInputBytes, VideoProvider } from '../../providers/video/types.js';
+import { CAMERA_PIXELS_WITHHELD, callerMaySeeFilePixels } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
 
 import { videoModelRoutes } from './video-models.js';
@@ -53,6 +54,18 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
     // Resolve an artifact-path input image to bytes before forwarding.
     let resolvedInput: VideoInputBytes | undefined;
     if (req.inputImage) {
+      // The clip and its poster frame go back to the caller, so a camera
+      // keyframe as the first frame passes the same check as reading it.
+      if ('artifactPath' in req.inputImage) {
+        const project = await ctx.store.getProject(projectId).catch(() => null);
+        const file = await ctx.store.resolveProjectArtifactReadPath(
+          projectId,
+          req.inputImage.artifactPath.replace(/^artifacts\//, ''),
+        );
+        if (project && file && !(await callerMaySeeFilePixels(ctx, c, project, file))) {
+          return c.json({ error: CAMERA_PIXELS_WITHHELD }, 403);
+        }
+      }
       try {
         resolvedInput = await resolveInputImage(ctx, projectId, req.inputImage);
       } catch (err) {

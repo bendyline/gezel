@@ -101,6 +101,7 @@ import {
   type TimelineMessage,
   type ToolsetConfig,
   type ToolsetsScope,
+  compareSemver,
   createLogger,
   decodeProjectGezelId,
   deriveThreadTitleFromMessages,
@@ -5856,8 +5857,8 @@ export class Store {
     const summaries: ChatSessionSummary[] = [];
     for (const gezelId of gezelIds) {
       const dir = gezelSessionsDir(this.home, gezelId, this.external);
-      const files = await safeReaddir(dir);
-      for (const file of files) {
+      const files = await readdirIfReadable(dir);
+      for (const file of files ?? []) {
         if (!file.endsWith('.json')) continue;
         const scanned = await this.scanSessionFile(join(dir, file), `${gezelId}/${file}`);
         if (!scanned) continue;
@@ -5865,7 +5866,9 @@ export class Store {
         if (opts?.projectId && scanned.summary.projectId !== opts.projectId) continue;
         summaries.push({ ...scanned.summary });
       }
-      this.taskSessions.markComplete(gezelId);
+      // A listing that failed (a busy or locked folder) leaves the gezel to be
+      // listed in full again, rather than its task sessions looking absent.
+      if (files) this.taskSessions.markComplete(gezelId);
     }
     return sortSessionSummaries(summaries);
   }
@@ -5891,8 +5894,14 @@ export class Store {
       if (!wanted.has(gezelId)) continue;
       const path = gezelSessionFile(this.home, gezelId, sessionId, this.external);
       const scanned = await this.scanSessionFile(path, `${gezelId}/${sessionId}.json`);
-      this.taskSessions.note(gezelId, sessionId, scanned?.summary.taskRef);
-      if (!scanned || scanned.summary.taskRef !== taskRef) continue;
+      if (!scanned) {
+        // Only a session that is gone leaves the index. One that could not be
+        // read right now would otherwise be replaced by a new empty thread.
+        if (await isMissingFile(path)) this.taskSessions.forget(gezelId, sessionId);
+        continue;
+      }
+      this.taskSessions.note(gezelId, sessionId, scanned.summary.taskRef);
+      if (scanned.summary.taskRef !== taskRef) continue;
       if (opts.projectId && scanned.summary.projectId !== opts.projectId) continue;
       summaries.push({ ...scanned.summary });
     }
@@ -7132,6 +7141,26 @@ export class Store {
     return this.bundledToolsets.some((entry) => entry.toolsetId === id);
   }
 
+  /**
+   * Whether the copy this build ships replaces `version` of `id` installed
+   * anywhere else: same toolset, at the shipped version or older. Before
+   * DocBlocks shipped with Gezel, launching a document craftbook installed it
+   * into the project, and from 1.26300 the same launch still downloaded an
+   * older copy beside the shipped one. That copy joined every session in the
+   * project, so one PowerPoint request put ~17k tokens of tool schemas back
+   * into each Meester turn (1.26300.100 audit). A version that does not parse
+   * is never replaced.
+   */
+  bundledToolsetSupersedes(id: string, version: string): boolean {
+    const bundled = this.bundledToolsets.find((entry) => entry.toolsetId === id);
+    if (!bundled) return false;
+    try {
+      return compareSemver(version, bundled.version) <= 0;
+    } catch {
+      return false;
+    }
+  }
+
   async listInstalledToolsets(scope: ToolsetsScope): Promise<InstalledToolset[]> {
     const stored = await this.listStoredToolsets(scope);
     if (scope.kind !== 'system') return stored;
@@ -7299,6 +7328,29 @@ async function safeReaddir(dir: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+/** A directory's entries: [] when it does not exist, null when it could not be read. */
+async function readdirIfReadable(dir: string): Promise<string[] | null> {
+  try {
+    return await readdir(dir);
+  } catch (err) {
+    return isMissingError(err) ? [] : null;
+  }
+}
+
+async function isMissingFile(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return false;
+  } catch (err) {
+    return isMissingError(err);
+  }
+}
+
+function isMissingError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
 /**

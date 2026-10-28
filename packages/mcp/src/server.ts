@@ -4867,11 +4867,26 @@ function craftbookSetupRequiredText(craftbookId: string, missing: CraftbookTools
 async function autoInstallTrustedCraftbookToolsets(
   project: string,
   requirements: CraftbookToolsetNeed[],
+  missing: readonly CraftbookToolsetNeed[],
 ): Promise<string[]> {
   const installed: string[] = [];
   const scope = { kind: 'project' as const, projectId: project };
   const roster = await api.listInstalledToolsets(scope);
+  const machineWide = new Set(
+    (
+      await api.listInstalledToolsets({ kind: 'system' }).catch(() => ({ toolsets: [] }))
+    ).toolsets.map((entry) => entry.toolsetId),
+  );
+  const missingIds = new Set(missing.map((need) => need.toolsetId));
   for (const need of requirements) {
+    // A toolset that serves the whole machine, as the DocBlocks shipped with
+    // Gezel does, already satisfies the book: a project copy beside it is a
+    // second, often older copy that joined every session in the project
+    // (1.26300.100 audit). Otherwise install a missing toolset, or refresh a
+    // project copy that has fallen behind the catalog.
+    if (machineWide.has(need.toolsetId)) continue;
+    const projectCopy = roster.toolsets.some((entry) => entry.toolsetId === need.toolsetId);
+    if (!projectCopy && !missingIds.has(need.toolsetId)) continue;
     const detail = await api.getCatalogItem('toolset', need.toolsetId, {
       ...(need.sourceId ? { source: need.sourceId } : {}),
     });
@@ -5060,6 +5075,7 @@ async function launchCraftbookTask(args: {
   const installed = await autoInstallTrustedCraftbookToolsets(
     args.project,
     declaredRequirements.filter((need) => !need.optional),
+    missing,
   );
   if (installed.length > 0) {
     projectCraftbooks = await api.listProjectCraftbooks(args.project);

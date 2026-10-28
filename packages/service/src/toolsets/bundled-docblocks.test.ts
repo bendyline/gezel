@@ -82,3 +82,45 @@ it('returns the shipped runtime for install requests and refuses to remove it', 
   expect(remove.status).toBe(400);
   expect(await store.listInstalledToolsets({ kind: 'system' })).toEqual([bundled]);
 });
+
+// 1.26300.100: a craftbook launch asked for the catalog's pinned 2.7.0, which
+// skipped the shortcut above and put a 351 MB older copy into the project.
+it('satisfies a versioned project install it is at least as new as', async () => {
+  home = await mkdtemp(join(tmpdir(), 'gezel-docblocks-versioned-install-'));
+  const bundled = bundledDocblocksToolset();
+  const store = new Store({ home, bundledToolsets: [bundled] });
+  const project = await store.createProject({ name: 'Decks' });
+  const get = vi.fn(async () => null);
+  const app = catalogRoutes({ store, catalog: { get } } as unknown as ServiceContext);
+  const request = (version: string) =>
+    app.request('/toolset/docblocks/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope: { kind: 'project', projectId: project.id },
+        version,
+        sourceId: 'bundled',
+      }),
+    });
+  for (const version of ['2.7.0', bundled.version]) {
+    const res = await request(version);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, installed: bundled });
+  }
+  expect(get).not.toHaveBeenCalled();
+  expect(await store.listInstalledToolsets({ kind: 'project', projectId: project.id })).toEqual([]);
+  // A newer catalog version is a real install, not the shipped copy.
+  await request('99.0.0');
+  expect(get).toHaveBeenCalledWith('toolset', 'docblocks', 'bundled', '99.0.0');
+});
+
+it('supersedes only copies of a shipped toolset at its version or older', async () => {
+  home = await mkdtemp(join(tmpdir(), 'gezel-docblocks-supersedes-'));
+  const bundled = bundledDocblocksToolset();
+  const store = new Store({ home, bundledToolsets: [bundled] });
+  expect(store.bundledToolsetSupersedes('docblocks', '2.7.0')).toBe(true);
+  expect(store.bundledToolsetSupersedes('docblocks', bundled.version)).toBe(true);
+  expect(store.bundledToolsetSupersedes('docblocks', '99.0.0')).toBe(false);
+  expect(store.bundledToolsetSupersedes('docblocks', 'old')).toBe(false);
+  expect(store.bundledToolsetSupersedes('playwright', '0.0.1')).toBe(false);
+});

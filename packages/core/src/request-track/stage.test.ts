@@ -108,6 +108,24 @@ describe('stepPersonLabel', () => {
     );
   });
 
+  // 1.26300.100 showed "Soren is acquiring and verify sources" on every
+  // PowerPoint request; 13 catalog books named steps this way.
+  it('turns every verb the step name joins, and leaves nouns alone', () => {
+    const label = (name: string) => stepPersonLabel({ name }, 'make');
+    expect(label('Acquire and verify sources')).toBe('acquiring and verifying sources');
+    expect(label('Review and write the report')).toBe('reviewing and writing the report');
+    expect(label('Write and run the query')).toBe('writing and running the query');
+    expect(label('Gather & triage changes')).toBe('gathering & triaging changes');
+    expect(label('Reproduce & scope')).toBe('reproducing & scoping');
+    expect(label('Implement the smallest fix and verify it')).toBe(
+      'implementing the smallest fix and verifying it',
+    );
+    expect(label('Draft the post, then review it')).toBe('drafting the post, then reviewing it');
+    expect(label('Extract actions & decisions')).toBe('extracting actions & decisions');
+    expect(label('Review for completeness and tone')).toBe('reviewing for completeness and tone');
+    expect(label('Publish the video and GIF')).toBe('publishing the video and GIF');
+  });
+
   it('turns a verb into its -ing form', () => {
     expect(['write', 'plan', 'verify', 'tie', 'see', 're-measure', 'fix'].map(gerund)).toEqual([
       'writing',

@@ -1,8 +1,11 @@
 import { RenderImageRequestSchema, createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
+import { CAMERA_PIXELS_WITHHELD, callerMaySeeFilePixels } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
+
+class CameraPixelsWithheldError extends Error {}
 
 /**
  * Image rendering — POST /api/render/image. Flattens the composition,
@@ -21,12 +24,20 @@ export function renderRoutes(ctx: ServiceContext): Hono {
     }
     const req = parsed.data;
     const projectId = req.projectId ?? 'default';
+    const project = await ctx.store.getProject(projectId).catch(() => null);
 
     try {
       const result = await ctx.renderer.render(req, {
         resolveImage: async (p) => {
           const hit = await ctx.store.resolveProjectArtifact(projectId, p);
           if (hit.kind !== 'found') return null;
+          // The composite goes back to the caller inline and lands in
+          // `renders/`, outside the camera's corpus, so a keyframe layer
+          // must pass the same check as a direct read of it.
+          const file = await ctx.store.resolveProjectArtifactReadPath(projectId, hit.path);
+          if (project && file && !(await callerMaySeeFilePixels(ctx, c, project, file))) {
+            throw new CameraPixelsWithheldError(CAMERA_PIXELS_WITHHELD);
+          }
           // The resolve path returns string content; for binary images we
           // re-read via the dedicated binary path so we get raw bytes.
           const raw = await ctx.store.readProjectArtifactBinary(projectId, hit.path);
@@ -68,6 +79,7 @@ export function renderRoutes(ctx: ServiceContext): Hono {
         engine: result.engine,
       });
     } catch (err) {
+      if (err instanceof CameraPixelsWithheldError) return c.json({ error: err.message }, 403);
       const message = err instanceof Error ? err.message : String(err);
       log.warn('[render] failed:', message);
       return c.json({ error: message }, 500);

@@ -243,11 +243,17 @@ export class TaskFilesStore {
       this.invalidTasks.delete(file);
       return parsed;
     } catch (err) {
-      this.forgetTask(projectId, num);
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        this.forgetTask(projectId, num);
         this.invalidTasks.delete(file);
         return null;
       }
+      // A file that does not parse leaves the indexes. One that could not be
+      // read right now (EBUSY or EPERM from antivirus, a backup or a synced
+      // folder) is still a task: forgetting it left an active task undispatched
+      // until restart on a daemon running without the app (1.26300.100 audit).
+      if (!code) this.forgetTask(projectId, num);
       const message = err instanceof Error ? err.message : String(err);
       if (this.invalidTasks.get(file) !== message) {
         log.warn(
@@ -285,8 +291,8 @@ export class TaskFilesStore {
 
   /** Stream newest first so existence checks can stop without retaining history. */
   async *iterateProjectTasks(projectId: string): AsyncGenerator<Task> {
-    const names = await safeReaddir(projectTasksDir(this.home, projectId, this.external));
-    const nums = names
+    const names = await readdirIfReadable(projectTasksDir(this.home, projectId, this.external));
+    const nums = (names ?? [])
       .filter((name) => /^\d+$/.test(name))
       .map(Number)
       .sort((a, b) => b - a);
@@ -294,6 +300,9 @@ export class TaskFilesStore {
       const task = await this.readTask(projectId, num);
       if (task) yield task;
     }
+    // A listing that failed proves nothing about the project: marking it
+    // complete would make it look empty to the scheduler until restart.
+    if (!names) return;
     // Every task file in the project has now been read (and noted); tasks
     // created since the directory listing were noted when they were written.
     this.lineage.markComplete(projectId);
@@ -358,7 +367,7 @@ export class TaskFilesStore {
     this.work.note(task);
   }
 
-  /** The task's file is gone or unreadable. Lineage entries are re-checked by their callers. */
+  /** The task's file is gone or does not parse. Lineage entries are re-checked by their callers. */
   private forgetTask(projectId: string, num: number): void {
     this.statuses.forget(projectId, num);
     this.work.forget(projectId, num);
@@ -552,9 +561,15 @@ async function readdirIfPresent(path: string): Promise<string[]> {
 }
 
 async function safeReaddir(path: string): Promise<string[]> {
+  return (await readdirIfReadable(path)) ?? [];
+}
+
+/** A directory's entries: [] when it does not exist, null when it could not be read. */
+async function readdirIfReadable(path: string): Promise<string[] | null> {
   try {
     return await readdir(path);
-  } catch {
-    return [];
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? [] : null;
   }
 }

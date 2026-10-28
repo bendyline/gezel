@@ -49,9 +49,10 @@ export function bundledDocblocksToolset(): InstalledToolset {
  * whose first turn grew from 22.7k to 37.4k tokens. Only work that makes a
  * document needs it: a craftbook that declares DocBlocks (its steps that do
  * not make the file still drop it through `disallowToolsets`), and a
- * delegation whose expected deliverable is a binary document. A copy the
- * person installed at gezel, shared or project scope is not this one and
- * always joins.
+ * delegation whose expected deliverable is a binary document. A copy
+ * installed at gezel, shared or project scope joins every session there,
+ * unless this one supersedes it (`Store.bundledToolsetSupersedes`), which
+ * makes it this one.
  */
 export function bundledDocblocksJoinsSession(session: {
   craftbookToolsetIds?: readonly string[];

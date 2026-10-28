@@ -15074,8 +15074,14 @@ export class ChatManager extends LocalEngineRuntime {
           (!(builtinOnlyStep || appItemFocus) || entry.runtime.kind === 'builtin') &&
           !stepDisabledToolsetIds.has(entry.toolsetId),
       );
-    const activePerGezel = activeToolsets(perGezel);
-    const activeShared = activeToolsets(shared);
+    // A copy installed elsewhere that the shipped one replaces is the shipped
+    // one: it joins only where the shipped copy would.
+    const activeInstalled = (entries: readonly InstalledToolset[]): InstalledToolset[] =>
+      activeToolsets(entries).filter(
+        (entry) => !this.store.bundledToolsetSupersedes(entry.toolsetId, entry.version),
+      );
+    const activePerGezel = activeInstalled(perGezel);
+    const activeShared = activeInstalled(shared);
     // Filtered here, before both the prompt listing and the bridge spawn read
     // it, so the two cannot disagree about whether the tools exist.
     const bundledDocblocksJoins = bundledDocblocksJoinsSession({
@@ -15090,7 +15096,7 @@ export class ChatManager extends LocalEngineRuntime {
         entry.toolsetId !== BUNDLED_DOCBLOCKS_TOOLSET_ID ||
         !this.store.isBundledToolset(entry.toolsetId),
     );
-    const activePerProject = activeToolsets(perProject);
+    const activePerProject = activeInstalled(perProject);
     if (stepDisabledToolsetIds.size > 0) {
       log.debug(
         `task-step toolsets: suppressed ${[...stepDisabledToolsetIds].join(', ')} for ${record.taskRef ?? record.id}/${taskContext?.step?.id ?? 'unknown-step'} by explicit step instruction`,

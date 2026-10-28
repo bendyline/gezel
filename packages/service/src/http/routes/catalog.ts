@@ -141,10 +141,14 @@ async function installCatalogToolset(
     if (!project) return { ok: false, status: 404, error: 'project not found' };
   }
 
+  // The shipped copy satisfies any install it is at least as new as. A
+  // craftbook launch asks for the catalog's pinned version, which can be
+  // older than the one Gezel ships; installing it would only add a second,
+  // older copy that every session in the scope then loads.
   if (
     ctx.store.isBundledToolset(id) &&
     (!body.sourceId || body.sourceId === 'bundled') &&
-    !body.version
+    (!body.version || ctx.store.bundledToolsetSupersedes(id, body.version))
   ) {
     const installed = (await ctx.store.listInstalledToolsets({ kind: 'system' })).find(
       (entry) => entry.toolsetId === id,
