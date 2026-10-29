@@ -433,12 +433,9 @@ button.danger {
   white-space: nowrap;
 }
 
-.project-config {
-  margin-bottom: 0.75rem;
-}
-
-/* Project Settings tab is a single long-scrolling page with an inset content column and
-   a sticky local index. Its container query resolves against the surrounding
+/* Project Settings tab is a single long-scrolling page: one column of
+   settings sections (docs/ux.md → "Settings pages") beside a sticky local
+   index. Its container query resolves against the surrounding
    `.project-body-content`, so it responds to the actual tab width (including
    output-pane splits), not only to the whole window width. */
 .project-about-page {
@@ -449,17 +446,14 @@ button.danger {
   width: 100%;
   max-width: 96rem;
   margin: 0 auto;
-  padding: clamp(1rem, 2.5vw, 2rem) clamp(1rem, 3vw, 2.5rem) 2.5rem;
+  padding: clamp(1rem, 2.5vw, 2rem) clamp(1rem, 3vw, 2.5rem) 3rem;
 }
 
-.project-about-page > :not(.project-about-toc) {
-  grid-column: 1;
+.project-about-main {
   min-width: 0;
 }
 
 .project-about-toc {
-  grid-column: 2;
-  grid-row: 1 / span 8;
   align-self: start;
   position: sticky;
   top: 1.25rem;
@@ -502,10 +496,6 @@ button.danger {
   scroll-margin-top: 1.25rem;
 }
 
-.project-doc-editor-title {
-  margin: 0 0 0.25rem;
-}
-
 /* Autosave status, rendered into the editor shell's bottom status bar. It
    inherits that bar's small muted type rather than carrying a chip of its
    own — save state is ambient, not an announcement. Idle renders nothing
@@ -536,20 +526,6 @@ button.danger {
 .autosave-status .link-btn {
   font-size: inherit;
   padding: 0 0.2rem;
-}
-
-.project-about-section {
-  border-top: 1px solid var(--border);
-  padding-top: 1.25rem;
-  margin-top: 0.75rem;
-}
-
-.project-about-section-title {
-  margin: 0 0 0.75rem;
-}
-
-.project-memories-hint {
-  margin: -0.35rem 0 0.75rem;
 }
 
 .project-memories-browser {
@@ -621,31 +597,12 @@ button.danger {
   font-size: var(--text-xs);
 }
 
-.project-crew-settings {
-  padding: 0.85rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--panel) 76%, var(--surface));
-}
-
-.project-crew-settings-title {
-  margin: 0;
-}
-
-.project-crew-settings-heading {
+/* The Librarian card and the night-work suggestions: what the crew does
+   on its own, one card per thing you can switch on or off. */
+.project-crew-background {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.2rem;
-}
-
-.project-crew-add {
-  flex: 0 0 auto;
-}
-
-.project-crew-settings-hint {
-  margin: 0 0 0.65rem;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .project-crew-list {
@@ -710,7 +667,6 @@ button.danger {
   align-items: center;
   justify-content: space-between;
   gap: 0.85rem;
-  margin-top: 0.75rem;
   padding: 0.65rem 0.7rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -748,7 +704,6 @@ button.danger {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  margin-top: 0.5rem;
 }
 
 .suggested-work-row {
@@ -804,17 +759,6 @@ button.danger {
 
 .suggested-work-error {
   margin: 0.2rem 0 0;
-}
-
-.project-properties {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 0.35rem;
-}
-
-.project-properties-row {
-  margin: 0;
 }
 
 /* Report-action cards — gezel-action fence widgets in rendered reports. */
@@ -1246,10 +1190,9 @@ button.danger {
   padding: 0;
 }
 
-/* Connections and History bring their own heading; drop their top margin
-   so it lines up with the section divider like the Settings title does. */
-.project-about-section .gz-mail-header h3,
-.project-about-history .history-header h2 {
+/* Connections brings its own heading; drop its top margin so it lines up
+   with the section divider like every other section title. */
+.gz-settings-section .gz-mail-header h3 {
   margin-top: 0;
 }
 
@@ -1271,106 +1214,6 @@ button.danger {
   .project-memories-days {
     max-height: 10rem;
   }
-}
-
-.config-label {
-  display: block;
-  font-size: 0.9rem;
-}
-
-.config-label small {
-  display: block;
-  margin-top: 0.25rem;
-}
-
-.project-tab-settings {
-  margin: 1rem 0 0;
-  padding: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-}
-
-.project-tab-settings legend {
-  padding: 0 0.25rem;
-  font-size: var(--text-md);
-  font-weight: 600;
-}
-
-.project-tab-settings > p {
-  margin: 0 0 0.65rem;
-}
-
-.project-tab-settings-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
-  gap: 0.45rem 0.75rem;
-  margin-bottom: 0.65rem;
-}
-
-.project-tab-settings-grid .new-row {
-  gap: 0.45rem;
-  align-items: center;
-}
-
-.project-tab-settings > small {
-  display: block;
-}
-
-/* Reversible project lifecycle action. It lives with the project's other
-   settings instead of competing with the primary tab navigation. */
-.project-archive-setting {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-top: 1rem;
-  padding: 0.85rem 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-
-.project-archive-setting-copy {
-  min-width: 0;
-}
-
-.project-archive-setting-title {
-  display: block;
-  font-weight: 600;
-}
-
-.project-archive-setting-copy small {
-  display: block;
-  margin-top: 0.2rem;
-}
-
-.project-archive-setting-action {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-@container (max-width: 520px) {
-  .project-archive-setting {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .project-archive-setting-action {
-    align-self: flex-start;
-  }
-}
-
-/* Granted-credentials list: a checkbox list, not a bulleted one. Drop
-   the default <ul> disc + indent so each row reads "☐ name — label"
-   flush-left under the heading. The checkbox + text live in a
-   `.new-row` label whose alignment is handled by the rules above. */
-.credentials-list {
-  list-style: none;
-  margin: 0.5rem 0 0;
-  padding: 0;
-}
-
-.credentials-list .new-row {
-  gap: 0.5rem;
 }
 
 .file-tree-header {
@@ -1521,17 +1364,6 @@ button.danger {
 /* ── Recent workspace-changes log (Settings tab) ── */
 
 .project-writes-log {
-  margin-top: 1rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border);
-}
-
-.project-writes-log h4 {
-  margin: 0 0 0.4rem 0;
-  font-size: 0.9rem;
-}
-
-.project-writes-log ul {
   list-style: none;
   padding: 0;
   margin: 0;

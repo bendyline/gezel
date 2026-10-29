@@ -331,6 +331,7 @@ export function buildSdServerArgs(model: ResolvedInstalledModel, port: number): 
   }
   if (profile.vaeDecode === 'tiled') args.push('--vae-tiling');
   if (profile.stepCache) args.push('--cache-mode', profile.stepCache);
+  if (profile.modelArgs) args.push('--model-args', profile.modelArgs);
   args.push('--listen-ip', '127.0.0.1', '--listen-port', String(port));
   return args;
 }

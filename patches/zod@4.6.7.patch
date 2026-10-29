@@ -1,0 +1,56 @@
+--- a/v3/types.cjs
++++ b/v3/types.cjs
+@@ -1792,6 +1792,7 @@
+                     exact: true,
+                     message: def.exactLength.message,
+                 });
++                if (tooBig) return parseUtil_js_1.INVALID;
+                 status.dirty();
+             }
+         }
+@@ -1818,7 +1819,7 @@
+                     exact: false,
+                     message: def.maxLength.message,
+                 });
+-                status.dirty();
++                return parseUtil_js_1.INVALID;
+             }
+         }
+         if (ctx.common.async) {
+@@ -2849,7 +2850,7 @@
+                     exact: false,
+                     message: def.maxSize.message,
+                 });
+-                status.dirty();
++                return parseUtil_js_1.INVALID;
+             }
+         }
+         const valueType = this._def.valueType;
+--- a/v3/types.js
++++ b/v3/types.js
+@@ -1771,6 +1771,7 @@
+                     exact: true,
+                     message: def.exactLength.message,
+                 });
++                if (tooBig) return INVALID;
+                 status.dirty();
+             }
+         }
+@@ -1797,7 +1798,7 @@
+                     exact: false,
+                     message: def.maxLength.message,
+                 });
+-                status.dirty();
++                return INVALID;
+             }
+         }
+         if (ctx.common.async) {
+@@ -2820,7 +2821,7 @@
+                     exact: false,
+                     message: def.maxSize.message,
+                 });
+-                status.dirty();
++                return INVALID;
+             }
+         }
+         const valueType = this._def.valueType;

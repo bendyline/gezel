@@ -766,7 +766,7 @@ async function ensureWorker(ctx: EvalContext, spec: CraftbookEvalSpec): Promise<
           role: 'Workflow Operator',
           description: 'Executes the assigned craftbook task end to end.',
           about:
-            'Follow the assigned craftbook task through its real steps and gates. Use task notes for phase handoffs, advance only after satisfying the active gate, and continue until a terminal step is active or the task is complete.',
+            'Follow the assigned craftbook task through its real steps and gates. Use task notes for phase handoffs, advance only after satisfying the active gate, and continue until the task is complete, including the work and gate of its terminal step.',
         }
       : undefined);
   if (!worker) return null;
@@ -1253,11 +1253,11 @@ async function taskGraphTextForSpec(
       `no task sourced from craftbook ${spec.craftbookId}; saw ${listed.tasks.length} task(s)`,
     );
   }
-  // A strategy arm finishes when the task does: its own gates have accepted
+  // Workflow and strategy runs finish when the task does: its own gates have accepted
   // the result. "The terminal step is active" is not that for an outcome
   // task, whose only step is terminal from the start, so judging on it
   // stopped outcome runs before their contract gate ever ran.
-  if (opts.requireFinished && matching.length > 0) {
+  if ((opts.requireFinished || spec.mode === 'workflow') && matching.length > 0) {
     if (!matching.some((task) => task.status === 'complete')) {
       failures.push(
         `task sourced from craftbook ${spec.craftbookId} has not finished: its gates have not accepted the result yet`,

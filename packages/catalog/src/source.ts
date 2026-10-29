@@ -1453,6 +1453,8 @@ function mergeIdentityAndVersion(
       ...(identity.supportsImg2Img !== undefined
         ? { supportsImg2Img: identity.supportsImg2Img }
         : {}),
+      ...(identity.referenceImages ? { referenceImages: identity.referenceImages } : {}),
+      ...(identity.editOnly !== undefined ? { editOnly: identity.editOnly } : {}),
       ...(identity.promptStyle ? { promptStyle: identity.promptStyle } : {}),
       ...(identity.rendersText !== undefined ? { rendersText: identity.rendersText } : {}),
       auxiliaryFiles: version.auxiliaryFiles,

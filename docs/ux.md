@@ -105,10 +105,12 @@ pacing of a transition. If a first-time user can't quite put a finger on
   [Typography](#typography) below; read it before styling any text.
 - **Density** is moderate. We're not Linear-tight and not Notion-loose.
   Line-height is comfortable; gaps between related controls are ~0.5rem.
-- **Text selection** belongs to content, not application chrome. Settings and
-  dialogs keep headings, descriptions, labels, and control text non-selectable;
-  editable fields plus copyable values such as paths, commands, and code opt
-  back into selection explicitly.
+- **Text selection** belongs to content, not application chrome. The shell,
+  navigation, settings, and dialogs keep headings, descriptions, labels, and
+  control text non-selectable by default. Chat message bodies, document reading
+  surfaces, the composer, and text fields remain selectable; controls inside
+  those surfaces do not. Copyable values outside them opt in with
+  `.gz-selectable-text` (preformatted output is selectable too).
 - **Spelling is American English** everywhere a person reads it: UI
   strings, Handboek articles, starter prompts, and prompt text a model may
   echo back. *Practice*, *color*, *organize*, *labeled*, *catalog*, *gray*.
@@ -393,6 +395,77 @@ The contract:
   machine-health temperature control's key-shaped thumb is the one
   deliberate variant.
 
+## Settings pages
+
+A page of settings is something a person scans for one thing, so its shape
+has to say where that thing is before they read a word. A project's Settings
+tab is the reference implementation. App Settings panels move to the same
+pieces when they are next touched (Settings → About you already uses them).
+The pieces live in
+[components/SettingsSection.tsx](../packages/ui/src/components/SettingsSection.tsx)
+(`SettingsSection`, `SettingField`, `SettingCheck`). The one CSS recipe is the
+"Settings pages" block in
+[styles/settings-and-status.css](../packages/ui/src/styles/settings-and-status.css).
+Don't restyle a settings page per surface; extend the recipe and this section.
+
+- **Group by the question a person is asking.** For a project: Crew (who
+  works here), About and Mission (what the work is), Memories, Workspace
+  (where the files live and what may change them), Access (what reaches
+  beyond this project), Toolsets, Preferences (how the work is tailored),
+  History, and Archive. One section titled "Settings" that held fifteen
+  unrelated controls is what this replaced: the only way to find anything in
+  it was to read all of it. A setting sits beside the thing it changes, so
+  the Crew Lead picker goes under the crew it picks from, not eight fields
+  further down.
+- **A section is a heading, one line of description, and an indented
+  body.** The serif heading (`--text-xl`) and its muted description sit at
+  the page edge, with the section's actions (Add Gezel, Add connection) at
+  the right of the heading row. The content is indented 1rem beneath them.
+  That indent is what says "this belongs to that heading", with no chrome.
+  It drops to zero below 520px of container width, where width matters more
+  than hierarchy.
+- **Sections are parted by space and one hairline, nothing else.** There is
+  2.25rem above the hairline and 2rem below it. Inside a body, settings sit
+  1.5rem apart and the body owns that rhythm. A child's own vertical margin
+  is reset, so no pair of settings drifts further apart than the rest.
+- **Never draw a box around a group of settings.** A border says "this is
+  one thing". Draw one only around something you act on as a unit: a crew
+  member, a suggestion with Enable and Don't suggest, the Librarian card, an
+  editor. Never draw one around a list of checkboxes or a whole section. A
+  `<fieldset>` here has its border reset, and a component that brings its
+  own panel (`ToolsetsEditor`) drops that panel inside a section. Several
+  boxed cards together get a field label saying what they are, such as
+  "Background work" over the Librarian and night-work cards.
+- **Every setting reads label, then control, then hint.** `SettingField`
+  sets a semibold `--text-md` label above the control and a muted
+  `--text-sm` hint below it. The field is capped at 48rem, so a text input
+  never runs the width of a wide window. Give the control an id
+  (`controlId`) so the label names it and the hint describes it. A list of
+  options, or a picker that labels itself, becomes a `<fieldset>` named by
+  its legend. Wrappers fill the field; pickers and selects keep their own
+  width.
+- **An on/off setting leads with its checkbox.** `SettingCheck` puts the
+  box first, its label beside it, and the hint aligned under the label. The
+  label is the checkbox's whole accessible name and the hint its
+  description. Never put a heading line above a checkbox whose only
+  neighbor is the explanation: the box reads as belonging to the
+  paragraph.
+- **One heading per section.** An embedded view that brings its own title
+  turns it off when it is placed in a section (`HistoryView`
+  `showTitle={false}`). A section heading over the view's own copy of the
+  same word was the History section's double title.
+- **Hints say what changes for the person, in a sentence.** Write "Every
+  chat in this project reads it", not "Flows into the system prompt". Leave
+  out ids, paths and internal posture names unless the person needs them
+  to act. A hint that only repeats its label is cut.
+- **The page index lists every section, in page order.** The sticky "On
+  this page" rail names each section by its heading. The same capability
+  check that hides a section hides its entry. `ProjectsView.test.tsx`
+  checks that the rail and the rendered sections agree.
+- **The lifecycle action comes last.** Archive (or Restore) is its own
+  final section: a heading, what it does, and one key. It never sits
+  between ordinary preferences.
+
 ## Typography
 
 Two typefaces, both bundled as woff2 (see
@@ -463,7 +536,9 @@ gap above it; notices, errors, and progress boxes stay tight to the section
 they belong to. Stacked cards in a flat settings pane sit 2.5rem apart, since
 spacing is the only separator once the card chrome is stripped. Both rules
 live in [styles/catalog.css](../packages/ui/src/styles/catalog.css);
-don't set a section's top margin inline.
+don't set a section's top margin inline. A page built from
+`SettingsSection` takes its spacing from the recipe in
+[Settings pages](#settings-pages) instead.
 
 ## Foundation
 

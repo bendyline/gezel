@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  capAgentImageSize,
   fitImageSizeToRange,
   imageModelDefaultSide,
   nearestAspectRatio,
@@ -99,6 +100,19 @@ describe('resolveImageSize', () => {
     });
     expect(resolveImageSize({ width: 768 }, flux)).toEqual({ width: 768, height: 1024 });
   });
+
+  it("keeps an edit's source shape at the trained area unless another shape is asked", () => {
+    const sourceSize = { width: 4000, height: 3000 };
+    expect(resolveImageSize({ sourceSize }, flux)).toEqual({ width: 1152, height: 896 });
+    expect(resolveImageSize({ sourceSize, aspectRatio: '1:1' }, flux)).toEqual({
+      width: 1024,
+      height: 1024,
+    });
+    expect(resolveImageSize({ sourceSize, width: 800, height: 600 }, flux)).toEqual({
+      width: 800,
+      height: 600,
+    });
+  });
 });
 
 describe('nearestAspectRatio', () => {
@@ -140,5 +154,25 @@ describe('fitImageSizeToRange', () => {
       width: 768,
       height: 256,
     });
+  });
+});
+
+describe('capAgentImageSize', () => {
+  it('keeps modest requests unchanged', () => {
+    expect(capAgentImageSize({ prompt: 'sunset', width: 512, steps: 4 })).toEqual({
+      request: { prompt: 'sunset', width: 512, steps: 4 },
+    });
+  });
+
+  it('caps oversized two-dimensional requests while preserving aspect ratio', () => {
+    const actual = capAgentImageSize({ width: 1600, height: 900, steps: 30 });
+    expect(actual.request).toEqual({ width: 1024, height: 576, steps: 30 });
+    expect(actual.note).toBe('Size 1600x900 held to 1024x576 for a local engine.');
+  });
+
+  it('caps a single oversized dimension', () => {
+    const actual = capAgentImageSize({ width: 2048 });
+    expect(actual.request).toEqual({ width: 1024 });
+    expect(actual.note).toBe('Width 2048 held to 1024 for a local engine.');
   });
 });

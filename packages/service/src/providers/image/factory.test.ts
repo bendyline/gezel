@@ -310,6 +310,27 @@ describe('buildSdServerArgs — aux role mapping', () => {
     expect(args).not.toContain('--vae-tiling');
   });
 
+  it('launches Qwen Image Edit 2511 with its vision encoder, zero-cond-t, and an untiled VAE', () => {
+    const args = buildSdServerArgs(
+      {
+        ...modelWithAux([
+          { role: 'vae', path: '/tmp/qe/vae.safetensors' },
+          { role: 'llm', path: '/tmp/qe/llm.gguf' },
+          { role: 'llm_vision', path: '/tmp/qe/llm_vision.gguf' },
+        ]),
+        id: 'qwen-image-edit-2511-q4',
+      },
+      8765,
+    );
+    expect(args[args.indexOf('--llm') + 1]).toBe('/tmp/qe/llm.gguf');
+    expect(args[args.indexOf('--llm_vision') + 1]).toBe('/tmp/qe/llm_vision.gguf');
+    expect(args[args.indexOf('--model-args') + 1]).toBe('qwen_image_zero_cond_t=true');
+    expect(args[args.indexOf('--steps') + 1]).toBe('20');
+    // The same Qwen-Image VAE as Krea 2, which seams under tiling.
+    expect(args).not.toContain('--vae-tiling');
+    expect(buildSdServerArgs(modelWithAux([]), 8765)).not.toContain('--model-args');
+  });
+
   it('launches distilled checkpoint models with their fast sample-step default', () => {
     const args = buildSdServerArgs(
       {

@@ -17,6 +17,8 @@ export interface UseComposerImageSettingsOptions {
   defaults: Record<string, unknown> | undefined;
   /** The text in the composer now. */
   text: string;
+  /** The gezel edits an attached picture: offer the models that can. */
+  edits?: boolean;
 }
 
 export interface ComposerImageSettings {
@@ -47,6 +49,7 @@ export function useComposerImageSettings({
   draft,
   defaults,
   text,
+  edits = false,
 }: UseComposerImageSettingsOptions): ComposerImageSettings {
   const [picks, setPicks] = useState<ImageSettings>({});
   const picksRef = useRef(picks);
@@ -55,6 +58,7 @@ export function useComposerImageSettings({
   const [catalog, setCatalog] = useState<{
     models: InstalledImageModel[];
     defaultModel?: string;
+    defaultEditModel?: string;
   } | null>(null);
   const [highRefusals, setHighRefusals] = useState<Map<string, string>>(new Map());
   const draftRef = useRef(draft);
@@ -108,8 +112,15 @@ export function useComposerImageSettings({
     () => effectiveImageSettings({ defaults, picks, cues: cues?.settings }),
     [defaults, picks, cues],
   );
-  const modelId = effective.model ?? catalog?.defaultModel ?? catalog?.models[0]?.id;
-  const model = catalog?.models.find((m) => m.id === modelId);
+  // An editor offers the models that can change a picture; a generator, the
+  // ones that draw, since an edit-only model refuses a blank page.
+  const models = useMemo(
+    () => (catalog?.models ?? []).filter((m) => (edits ? m.editMode !== undefined : !m.editOnly)),
+    [catalog, edits],
+  );
+  const modelId =
+    effective.model ?? (edits ? catalog?.defaultEditModel : catalog?.defaultModel) ?? models[0]?.id;
+  const model = models.find((m) => m.id === modelId);
 
   const pick = useCallback(
     (patch: ImageSettings) => {
@@ -147,7 +158,7 @@ export function useComposerImageSettings({
     cues,
     effective,
     model,
-    models: catalog?.models ?? [],
+    models,
     highRefusal: model ? (highRefusals.get(model.id) ?? null) : null,
     pick,
     dismissCues,

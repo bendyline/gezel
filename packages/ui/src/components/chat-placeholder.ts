@@ -31,6 +31,8 @@ interface Args {
    * tool. Overrides `role`.
    */
   fixedFunctionTool?: string;
+  /** The fixed-function gezel edits an attached picture (`requiresInputImage`). */
+  fixedFunctionEdits?: boolean;
 }
 
 type NamedVariant = (name: string, pronouns: GezelPronounForms) => string;
@@ -89,6 +91,12 @@ const GENERATOR_VARIANTS: Record<string, ReadonlyArray<(name: string) => string>
     (name) =>
       `${name} turns a description into a clip. Just list what you want to see — "waves crashing on rocks at sunset" — keywords are fine.`,
   ],
+  // An image editor's message is a picture plus what to change about it.
+  edit_image: [
+    (name) => `Attach a picture and tell ${name} what to change — e.g. "make the sky a sunset."`,
+    (name) =>
+      `${name} edits the picture you attach. Say what to change: "remove the car," "turn it into a watercolor."`,
+  ],
 };
 
 const GENERATOR_GENERIC: ReadonlyArray<(name: string) => string> = [
@@ -115,7 +123,8 @@ export function pickChatPlaceholder(args: Args): string {
   // conversational pools entirely — "ask them anything" is misleading
   // for a gezel that only forwards text to one tool.
   if (args.fixedFunctionTool) {
-    const pool = GENERATOR_VARIANTS[args.fixedFunctionTool] ?? GENERATOR_GENERIC;
+    const key = args.fixedFunctionEdits ? 'edit_image' : args.fixedFunctionTool;
+    const pool = GENERATOR_VARIANTS[key] ?? GENERATOR_GENERIC;
     const pick = pool[Math.floor(Math.random() * pool.length)];
     return sentenceCase(pick ? pick(gezelName) : GENERATOR_GENERIC[0]!(gezelName));
   }

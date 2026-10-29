@@ -48,6 +48,7 @@ import {
 } from './prune-runtime-files.mjs';
 import { stageSharpCompatibilityStub, verifySharpCompatibilityTree } from './sharp-compat.mjs';
 import { signMachOTree } from './sign-macho-tree.mjs';
+import { stageDeployedSecurityPatches } from './stage-deployed-security-patches.mjs';
 import { createBundleArchive, verifyBundleArchiveRoundTrip } from './verify-bundle-archive.mjs';
 import { verifyPeTree } from './verify-pe-tree.mjs';
 
@@ -91,6 +92,7 @@ async function main() {
   // Public npm consumers opt into native/large optional peers. Installer
   // builds remain full-featured by merging the private deployment-only package.
   await deployMlRuntime(repoRoot, target, 'build-service-bundle');
+  await stageDeployedSecurityPatches(target);
 
   const gezeldBin = join(target, 'dist', 'bin', 'gezeld.js');
   if (!existsSync(gezeldBin)) {
@@ -168,6 +170,7 @@ async function main() {
     );
   }
   console.log('[build-service-bundle] verified bundled browser UI');
+  await verifyDeployedVulnerabilityExceptions(target);
   const handboekCatalog = join(target, 'dist', 'handboek.gezk');
   if (!existsSync(handboekCatalog)) {
     throw new Error(

@@ -500,6 +500,7 @@ function ProjectChatBody({
         gezelGender: selectedGezel.gender,
         projectName: project.name,
         fixedFunctionTool: selectedGezel.fixedFunction?.tool,
+        fixedFunctionEdits: selectedGezel.fixedFunction?.requiresInputImage,
       }),
     [
       isVoorman,
@@ -507,6 +508,7 @@ function ProjectChatBody({
       selectedGezel.gender,
       project.name,
       selectedGezel.fixedFunction?.tool,
+      selectedGezel.fixedFunction?.requiresInputImage,
     ],
   );
 
@@ -705,7 +707,12 @@ function ProjectChatBody({
                       }
                     : {})}
                   {...(selectedGezel.fixedFunction?.tool === 'generate_image'
-                    ? { imageGenerator: { defaults: selectedGezel.fixedFunction.defaults } }
+                    ? {
+                        imageGenerator: {
+                          defaults: selectedGezel.fixedFunction.defaults,
+                          edits: selectedGezel.fixedFunction.requiresInputImage,
+                        },
+                      }
                     : {})}
                   onPivotToMention={(mentionedGezelId) => {
                     // Project-chat pivot: when the user @-mentions another

@@ -519,6 +519,44 @@
   }
 }
 
+/* Selection belongs to content. Inherit this default from the document so
+   app chrome and portaled menus stay quiet without disabling descendants
+   of the content surfaces that explicitly opt back in. Controls inside
+   those surfaces still behave like controls. */
+:where(
+    body,
+    button,
+    select,
+    summary,
+    [role="button"],
+    [role="tab"],
+    [role="menuitem"],
+    [role="option"]
+  ) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+:where(
+    input:not([type]),
+    input[type="email"],
+    input[type="number"],
+    input[type="password"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="text"],
+    input[type="url"],
+    textarea,
+    [contenteditable=""],
+    [contenteditable="true"],
+    [contenteditable="plaintext-only"],
+    pre,
+    .gz-selectable-text
+  ) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* Form controls don't inherit font-family by default in most browsers —
    force them to pick up the UI font so buttons, inputs, selects, and
    textareas all read in Hanken Grotesk. */

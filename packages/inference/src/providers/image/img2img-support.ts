@@ -1,5 +1,7 @@
 /**
- * Per-model img2img capability resolution for the local sd-cpp engine.
+ * Per-model image-editing capability for the local sd-cpp engine: whether a
+ * model re-noises a source (img2img), reads sources as references beside an
+ * instruction, or cannot use one. The img2img half first.
  *
  * stable-diffusion.cpp's `/sdapi/v1/img2img` endpoint accepts
  * `init_images` for any loaded model, but whether the *architecture*
@@ -59,6 +61,54 @@ export interface Img2ImgSupportVerdict {
   supported: boolean;
   /** Human-readable reason, set only when unsupported. */
   reason?: string;
+}
+
+/**
+ * Models that edit by reading source pictures as references beside an
+ * instruction (sd-server's `extra_images`), rather than re-noising one. The
+ * same ladder as above: a catalog `referenceImages` declaration persisted at
+ * pull time wins, then this map, which is how installs that predate the
+ * field learn it.
+ *
+ * FLUX.2 Klein: verified on the pinned engine (native sd-cpp master-975) on
+ * an RTX Spark, 2026-10-27, recoloring, adding an object and composing two
+ * sources at 4 steps in 12 s.
+ */
+export const MODEL_REFERENCE_EDIT_SUPPORT = new Map<
+  string,
+  { maxImages: number; editOnly?: boolean }
+>([
+  ['flux-2-klein-4b-q4', { maxImages: 3 }],
+  ['qwen-image-edit-2511-q4', { maxImages: 3, editOnly: true }],
+]);
+
+export interface ImageEditCapabilityInput extends Img2ImgSupportInput {
+  /** Explicit `referenceImages` from catalog/installed metadata. */
+  referenceImages?: { max: number } | undefined;
+  /** Explicit `editOnly` from catalog/installed metadata. */
+  editOnly?: boolean | undefined;
+}
+
+export interface ImageEditCapability {
+  /** Absent when the model cannot use a source picture at all. */
+  editMode?: 'reference' | 'img2img';
+  /** Sources one edit takes: the reference limit, or 1 for img2img. */
+  maxSourceImages?: number;
+  editOnly: boolean;
+  /** Why the model cannot edit; set only when `editMode` is absent. */
+  reason?: string;
+}
+
+export function resolveImageEditCapability(input: ImageEditCapabilityInput): ImageEditCapability {
+  const assessed = input.modelId ? MODEL_REFERENCE_EDIT_SUPPORT.get(input.modelId) : undefined;
+  const editOnly = input.editOnly ?? assessed?.editOnly ?? false;
+  const maxImages = input.referenceImages?.max ?? assessed?.maxImages;
+  if (maxImages !== undefined) {
+    return { editMode: 'reference', maxSourceImages: maxImages, editOnly };
+  }
+  const img2img = resolveImg2ImgSupport(input);
+  if (img2img.supported) return { editMode: 'img2img', maxSourceImages: 1, editOnly };
+  return { editOnly, ...(img2img.reason ? { reason: img2img.reason } : {}) };
 }
 
 export function resolveImg2ImgSupport(input: Img2ImgSupportInput): Img2ImgSupportVerdict {

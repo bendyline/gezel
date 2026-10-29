@@ -7,6 +7,7 @@ import {
   type ImageQuality,
   type Question,
   type QuestionIntent,
+  chooseImageModel,
   createLogger,
   imageModelDefaultSide,
   imagePromptGuide,
@@ -14,12 +15,17 @@ import {
   resolveHarnessToolsConfig,
   resolveImageSize,
 } from '@bendyline/gezel';
+import { readImageMeta } from '@bendyline/gezel-inference/internal/utils/image-meta';
 import { type Context, Hono } from 'hono';
 
 import { capAgentImageSize } from '../../providers/image/agent-size.js';
 import { NoLocalImageModelError } from '../../providers/image/factory.js';
 import { sdCppHonorsNegativePrompt } from '../../providers/image/sd-cpp.js';
-import type { ImageInputBytes, ImageProvider } from '../../providers/image/types.js';
+import {
+  type ImageInputBytes,
+  type ImageProvider,
+  ImageSourceRequiredError,
+} from '../../providers/image/types.js';
 import { parseRemoteModelId } from '../../providers/remote/model-id.js';
 import {
   CAMERA_PIXELS_CLOUD_ENGINE,
@@ -28,7 +34,7 @@ import {
   cameraKeepsFileLocal,
 } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
-import { imageModelRoutes, providerKind } from './image-models.js';
+import { imageModelEditFacts, imageModelRoutes, providerKind } from './image-models.js';
 
 const log = createLogger('image-gen');
 
@@ -120,6 +126,30 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
       }
     }
+    const hasSources = (resolvedInputs?.length ?? 0) > 0;
+    if (req.requireEdit && !hasSources) {
+      return c.json({ error: 'Attach the picture to change.', code: 'image_source_required' }, 400);
+    }
+
+    // The model is decided once, here, so the steps and size below are that
+    // model's, and the machine broker or a paired server renders the same one.
+    const kind = providerKind(provider.name);
+    let model = req.model;
+    if (kind === 'local') {
+      const choice = await chooseLocalImageModel(provider, req.model, hasSources);
+      if (choice.refusal) return c.json(choice.refusal, 400);
+      model = choice.model;
+      if (req.requireEdit && choice.edits === false) {
+        return c.json(
+          {
+            error:
+              'None of the image models on this computer can change a picture. Download one that can, such as Qwen Image Edit or FLUX.2 Klein, in Settings → Image generation.',
+            code: 'image_edit_unavailable',
+          },
+          409,
+        );
+      }
+    }
 
     if (providerKind(provider.name) === 'cloud' && req.gezelId && req.sessionId) {
       const config = await ctx.store.readConfig();
@@ -192,7 +222,7 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
     try {
       const manifest =
         providerKind(provider.name) === 'local'
-          ? await resolveImageModelManifest(ctx, provider, req.model)
+          ? await resolveImageModelManifest(ctx, provider, model)
           : undefined;
       const recommended = manifest?.recommendedSteps;
       const resolvedSteps =
@@ -203,8 +233,17 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         req.capSizeForAgent && providerKind(provider.name) === 'local'
           ? capAgentImageSize(req)
           : undefined;
+      // An edit keeps its picture's shape unless another is asked.
+      const source = resolvedInputs?.[0] ? readImageMeta(resolvedInputs[0].data) : null;
       const size = requestedImageSize(
-        agentSize ? { ...req, width: agentSize.width, height: agentSize.height } : req,
+        {
+          ...req,
+          ...(agentSize ? { width: agentSize.width, height: agentSize.height } : {}),
+          model,
+          ...(source?.width && source.height
+            ? { sourceSize: { width: source.width, height: source.height } }
+            : {}),
+        },
         manifest,
         providerKind(provider.name),
       );
@@ -212,7 +251,7 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         signal: c.req.raw.signal,
         prompt: req.prompt,
         ...(req.negativePrompt ? { negativePrompt: req.negativePrompt } : {}),
-        ...(req.model ? { model: req.model } : {}),
+        ...(model ? { model } : {}),
         ...(size.width ? { width: size.width } : {}),
         ...(size.height ? { height: size.height } : {}),
         ...(req.aspectRatio ? { aspectRatio: req.aspectRatio } : {}),
@@ -309,6 +348,9 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
     } catch (err) {
       if (err instanceof NoLocalImageModelError) {
         return c.json({ error: 'no_local_image_model', hint: err.message }, 409);
+      }
+      if (err instanceof ImageSourceRequiredError) {
+        return c.json({ error: err.message, code: err.code }, 400);
       }
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     } finally {
@@ -498,6 +540,53 @@ export async function resolveRecommendedImageSteps(
   return (await resolveImageModelManifest(ctx, provider, requestedModel))?.recommendedSteps;
 }
 
+/**
+ * The local model a request renders with (core `chooseImageModel`) and
+ * whether it can use the sources: unknown when the engine does not list it
+ * (nothing installed, where the engine says what to download). A model made
+ * only for editing is refused a request with nothing to edit, named or not,
+ * before its engine loads.
+ */
+export async function chooseLocalImageModel(
+  provider: Pick<ImageProvider, 'listInstalledModels' | 'resolveDefaultModelId'>,
+  requestedModel: string | undefined,
+  hasSources: boolean,
+): Promise<{
+  model?: string;
+  edits?: boolean;
+  refusal?: { error: string; code: 'image_source_required' };
+}> {
+  const installed = await provider.listInstalledModels().catch(() => []);
+  const models = installed.map((m) => ({ ...m, ...imageModelEditFacts('local', m) }));
+  const model =
+    requestedModel ??
+    chooseImageModel(models, {
+      defaultModelId: await provider.resolveDefaultModelId?.().catch(() => undefined),
+      hasSources,
+    });
+  const bare = model ? (parseRemoteModelId(model)?.modelId ?? model) : undefined;
+  const chosen = models.find((m) => m.id === bare);
+  const blocker = hasSources
+    ? undefined
+    : chosen?.editOnly
+      ? chosen
+      : model === undefined
+        ? models.find((m) => m.editOnly)
+        : undefined;
+  if (blocker) {
+    return {
+      refusal: {
+        error: new ImageSourceRequiredError(blocker.name).message,
+        code: 'image_source_required',
+      },
+    };
+  }
+  return {
+    ...(model ? { model } : {}),
+    ...(chosen ? { edits: chosen.editMode !== undefined } : {}),
+  };
+}
+
 /** The catalog entry of the model this request will run, when the catalog lists it. */
 export async function resolveImageModelManifest(
   ctx: Pick<ServiceContext, 'catalog'>,
@@ -564,6 +653,7 @@ export function requestedImageSize(
     height?: number | undefined;
     aspectRatio?: ImageAspectRatio | undefined;
     quality?: ImageQuality | undefined;
+    sourceSize?: { width: number; height: number } | undefined;
   },
   manifest: Pick<ImageModelManifest, 'id' | 'widthRange' | 'heightRange'> | undefined,
   kind: 'local' | 'cloud',
@@ -575,7 +665,7 @@ export function requestedImageSize(
       heightRange: manifest.heightRange,
     });
   }
-  if (kind === 'local' && (req.aspectRatio || req.quality)) {
+  if (kind === 'local' && (req.aspectRatio || req.quality || req.sourceSize)) {
     const modelId = req.model ? (parseRemoteModelId(req.model)?.modelId ?? req.model) : undefined;
     return resolveImageSize(req, { defaultSidePx: imageModelDefaultSide(modelId) });
   }

@@ -73,7 +73,7 @@ attribution file is taken from the exact Electron distribution being packaged.
 |---|---|---|---|
 | **Electron** | `43.8.3` | MIT, with bundled Chromium notices | [electron/electron](https://github.com/electron/electron) |
 | **Node.js** | `24.22.1` | MIT, with bundled third-party notices | [nodejs/node](https://github.com/nodejs/node) |
-| **pnpm** | `11.27.1` | MIT | [pnpm/pnpm](https://github.com/pnpm/pnpm) |
+| **pnpm** | `11.28.9` | MIT | [pnpm/pnpm](https://github.com/pnpm/pnpm) |
 | **DuckDB** | `1.5.5` | MIT | [duckdb/duckdb](https://github.com/duckdb/duckdb) |
 | **MXC launcher** | `1.0.0` | MIT | [microsoft/mxc](https://github.com/microsoft/mxc) — Microsoft eXecution Containers' `wxc-exec.exe`, taken unmodified from the [`@microsoft/mxc-sdk`](https://www.npmjs.com/package/@microsoft/mxc-sdk) npm package; Windows installers only |
 
@@ -108,7 +108,7 @@ published installer are intentionally omitted.
 | `semver` | `7.8.5` | ISC | all released targets |
 | `tar` | `7.5.22` | BlueOak-1.0.0 | all released targets |
 | `tinyglobby` | `0.2.17` | MIT | all released targets |
-| `undici` | `6.28.1` | MIT | all released targets |
+| `undici` | `6.29.1` | MIT | all released targets |
 | `v8-compile-cache` | `2.4.0` | MIT | all released targets |
 | `which` | `6.0.1` | ISC | all released targets |
 | `yallist` | `5.0.0` | BlueOak-1.0.0 | all released targets |

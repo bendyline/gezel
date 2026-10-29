@@ -54,9 +54,9 @@
   "dependencies": {
     "@bendyline/gezel": "workspace:*",
     "@bendyline/gezel-client": "workspace:*",
-    "@modelcontextprotocol/sdk": "1.32.1",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "typescript": "^6.0.3",
-    "zod": "^4.4.3"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

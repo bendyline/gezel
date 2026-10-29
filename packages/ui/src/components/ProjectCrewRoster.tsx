@@ -1,6 +1,6 @@
 import type { GezelSummary, ProjectDetail } from '@bendyline/gezel';
 import { displayName, roleForMatching } from '@bendyline/gezel';
-import { useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { crewLeadLabelLower } from '../labels.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { GezelIcon } from './GezelIcon.js';
@@ -8,12 +8,14 @@ import {
   ProjectAddGezelDialog,
   type ProjectTemplateGezelOptions,
 } from './ProjectAddGezelDialog.js';
+import { SettingField, SettingsSection } from './SettingsSection.js';
 import { SuggestedNightWork } from './SuggestedNightWork.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 /**
  * Project membership summary and add-crew entry point at the top of Project
- * Settings.
+ * Settings. `children` are the crew's own settings (the lead picker), shown
+ * right under the members they choose from.
  *
  * Chat recipient selection lives in ChatComposer's To-line picker; this
  * surface manages durable project membership while task and conversation
@@ -27,6 +29,7 @@ export function ProjectCrewRoster({
   onAddGezel,
   onCreateTemplateGezel,
   onRemoveGezel,
+  children,
 }: {
   project: ProjectDetail;
   gezels: GezelSummary[];
@@ -39,6 +42,7 @@ export function ProjectCrewRoster({
     options: ProjectTemplateGezelOptions,
   ) => Promise<void>;
   onRemoveGezel?: (gezelId: string) => Promise<void>;
+  children?: ReactNode;
 }) {
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
   const [showAddGezel, setShowAddGezel] = useState(false);
@@ -90,16 +94,14 @@ export function ProjectCrewRoster({
   };
 
   return (
-    <section
+    <SettingsSection
       id="project-about-crew"
-      className="project-crew-settings project-about-anchor"
-      aria-labelledby="project-crew-settings-title"
-    >
-      <div className="project-crew-settings-heading">
-        <h3 id="project-crew-settings-title" className="project-crew-settings-title">
-          Assigned gezellen
-        </h3>
-        {onAddGezel && onCreateTemplateGezel && (
+      className="project-about-anchor project-crew-settings"
+      title="Crew"
+      hint="The gezellen on this project. Anyone you give a task or a conversation here joins automatically."
+      actions={
+        onAddGezel &&
+        onCreateTemplateGezel && (
           <button
             type="button"
             className="primary project-crew-add"
@@ -107,12 +109,9 @@ export function ProjectCrewRoster({
           >
             Add Gezel
           </button>
-        )}
-      </div>
-      <p className="muted small project-crew-settings-hint">
-        The crew attached to this project. Change the lead below; task and conversation assignments
-        are added automatically.
-      </p>
+        )
+      }
+    >
       {assigned.length > 0 ? (
         <ul className="project-crew-list">
           {assigned.map(({ gezel, isLead }) => {
@@ -146,57 +145,64 @@ export function ProjectCrewRoster({
           No gezellen are assigned to this project yet.
         </p>
       )}
-      {runtimeCapabilities().index && (
-        <div
-          className={`project-autonomous-role${
-            projectBoekwachter ? ' project-autonomous-role-active' : ''
-          }`}
-        >
-          <div className="project-autonomous-role-copy">
-            <span className="project-autonomous-role-title">
-              AI indexing {projectBoekwachter ? 'on' : 'off'}
-            </span>
-            <span className="muted small">
-              {projectBoekwachter
-                ? `${projectBoekwachter.name} studies changed files, writes short summaries and reviews, and prepares weekly digests while the workshop is quiet.`
-                : 'Structural file and symbol search stays available. Add the Librarian to this crew for background AI summaries, reviews, and digests.'}
-            </span>
+      {children}
+      {(runtimeCapabilities().index || runtimeCapabilities().background) && (
+        <SettingField label="Background work">
+          <div className="project-crew-background">
+            {runtimeCapabilities().index && (
+              <div
+                className={`project-autonomous-role${
+                  projectBoekwachter ? ' project-autonomous-role-active' : ''
+                }`}
+              >
+                <div className="project-autonomous-role-copy">
+                  <span className="project-autonomous-role-title">
+                    AI indexing {projectBoekwachter ? 'on' : 'off'}
+                  </span>
+                  <span className="muted small">
+                    {projectBoekwachter
+                      ? `${projectBoekwachter.name} studies changed files, writes short summaries and reviews, and prepares weekly digests while the workshop is quiet.`
+                      : 'Structural file and symbol search stays available. Add the Librarian to this crew for background AI summaries, reviews, and digests.'}
+                  </span>
+                </div>
+                {projectBoekwachter ? (
+                  <button
+                    type="button"
+                    className="subtle"
+                    disabled={boekwachterBusy || !onRemoveGezel}
+                    onClick={() => void changeBoekwachter('remove')}
+                  >
+                    {boekwachterBusy ? 'Updating…' : 'Remove Librarian'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="subtle"
+                    disabled={boekwachterBusy || !designatedBoekwachter || !onAddGezel}
+                    onClick={() => void changeBoekwachter('add')}
+                  >
+                    {boekwachterBusy
+                      ? 'Updating…'
+                      : designatedBoekwachter
+                        ? `Add ${designatedBoekwachter.name}`
+                        : 'No Librarian available'}
+                  </button>
+                )}
+              </div>
+            )}
+            {boekwachterError && (
+              <p className="error small project-autonomous-role-error">{boekwachterError}</p>
+            )}
+            {runtimeCapabilities().background && (
+              <SuggestedNightWork
+                projectId={project.id}
+                projectProperties={project.properties}
+                refreshKey={[project.voormanGezelId ?? '', ...(project.gezelIds ?? [])].join('|')}
+                recentlyAddedGezelId={recentlyAddedGezelId}
+              />
+            )}
           </div>
-          {projectBoekwachter ? (
-            <button
-              type="button"
-              className="subtle"
-              disabled={boekwachterBusy || !onRemoveGezel}
-              onClick={() => void changeBoekwachter('remove')}
-            >
-              {boekwachterBusy ? 'Updating…' : 'Remove Librarian'}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="subtle"
-              disabled={boekwachterBusy || !designatedBoekwachter || !onAddGezel}
-              onClick={() => void changeBoekwachter('add')}
-            >
-              {boekwachterBusy
-                ? 'Updating…'
-                : designatedBoekwachter
-                  ? `Add ${designatedBoekwachter.name}`
-                  : 'No Librarian available'}
-            </button>
-          )}
-        </div>
-      )}
-      {boekwachterError && (
-        <p className="error small project-autonomous-role-error">{boekwachterError}</p>
-      )}
-      {runtimeCapabilities().background && (
-        <SuggestedNightWork
-          projectId={project.id}
-          projectProperties={project.properties}
-          refreshKey={[project.voormanGezelId ?? '', ...(project.gezelIds ?? [])].join('|')}
-          recentlyAddedGezelId={recentlyAddedGezelId}
-        />
+        </SettingField>
       )}
       {onAddGezel && onCreateTemplateGezel && (
         <ProjectAddGezelDialog
@@ -209,6 +215,6 @@ export function ProjectCrewRoster({
           onCreateTemplate={onCreateTemplateGezel}
         />
       )}
-    </section>
+    </SettingsSection>
   );
 }

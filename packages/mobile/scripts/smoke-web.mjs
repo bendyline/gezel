@@ -297,7 +297,7 @@ try {
     .click();
   await page.getByRole('dialog').waitFor({ state: 'detached' });
   await page
-    .getByRole('region', { name: 'Assigned gezellen', exact: true })
+    .getByRole('region', { name: 'Crew', exact: true })
     .getByText('Ada Field Guide', { exact: true })
     .waitFor();
   await checkpoint('phone-project-settings');

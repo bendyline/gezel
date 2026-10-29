@@ -63,7 +63,7 @@ describe('ImageModelManager active-model selection', () => {
   it('omits the Active column when no onSetActiveModel handler is given', async () => {
     render(<ImageModelManager />);
 
-    await screen.findByText('flux-2-klein-4b-q4');
+    await screen.findByText('FLUX.2 Klein 4B (Q4)');
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.queryByRole('columnheader', { name: 'Active' })).toBeNull();
   });
@@ -75,10 +75,10 @@ describe('ImageModelManager active-model selection', () => {
     );
 
     const krea = await screen.findByRole('radio', {
-      name: 'Use krea-2-turbo-q4 as the active image model',
+      name: 'Use Krea 2 Turbo (Q4) as the active image model',
     });
     const flux = screen.getByRole('radio', {
-      name: 'Use flux-2-klein-4b-q4 as the active image model',
+      name: 'Use FLUX.2 Klein 4B (Q4) as the active image model',
     });
     expect(krea).toBeChecked();
     expect(flux).not.toBeChecked();
@@ -91,8 +91,32 @@ describe('ImageModelManager active-model selection', () => {
     const onSet = vi.fn();
     render(<ImageModelManager configuredDefaultModelId="deleted-model" onSetActiveModel={onSet} />);
 
-    const flux = await screen.findByRole('radio', { name: /flux-2-klein-4b-q4/ });
+    const flux = await screen.findByRole('radio', { name: /FLUX.2 Klein 4B/ });
     expect(flux).toBeChecked();
+  });
+
+  it('never makes a model that only edits the active one', async () => {
+    vi.mocked(api.listInstalledImageModels).mockResolvedValue({
+      models: [
+        {
+          id: 'a-qwen-image-edit',
+          name: 'Qwen Image Edit',
+          approxSizeBytes: 19 * GiB,
+          installedAt: '2026-10-27T00:00:00.000Z',
+          editMode: 'reference',
+          editOnly: true,
+        },
+        ...TWO_INSTALLED.models,
+      ],
+    } as never);
+    render(
+      <ImageModelManager configuredDefaultModelId="a-qwen-image-edit" onSetActiveModel={vi.fn()} />,
+    );
+
+    const flux = await screen.findByRole('radio', { name: /FLUX.2 Klein 4B/ });
+    expect(flux).toBeChecked();
+    expect(screen.queryByRole('radio', { name: /Qwen Image Edit/ })).toBeNull();
+    expect(screen.getByText('Edits')).toBeInTheDocument();
   });
 });
 

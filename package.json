@@ -137,8 +137,9 @@
     "verify:licenses": "node scripts/verify-packaged-licenses.mjs packages/app/dist/licenses && pnpm verify:npm-licenses",
     "verify:npm-licenses": "node --test scripts/npm-pack-output.test.mjs && node scripts/verify-service-package-licenses.mjs && node scripts/verify-connectors-spectral-package-licenses.mjs",
     "audit:sbom": "node scripts/generate-sbom.mjs",
-    "audit:vulnerabilities": "node scripts/audit-vulnerabilities.mjs",
-    "test:audit-vulnerabilities": "node --test scripts/audit-vulnerabilities.test.mjs scripts/audit-vulnerability-policy.test.mjs",
+    "audit:vulnerabilities": "node scripts/run-with-dependency-lease.mjs audit:vulnerabilities:unleased",
+    "audit:vulnerabilities:unleased": "node scripts/audit-vulnerabilities.mjs",
+    "test:audit-vulnerabilities": "node scripts/run-with-dependency-lease.mjs test:audit-vulnerabilities:unleased",
     "setup": "node scripts/setup.mjs",
     "fetch:native": "node scripts/fetch-native-binaries.mjs",
     "check:workflows": "node scripts/check-workflow-action-pins.mjs",
@@ -205,7 +206,8 @@
     "mobile:test:scripts:unleased": "node packages/mobile/scripts/test-scripts.mjs",
     "check:embedding-consumers": "node scripts/check-embedding-consumers.mjs",
     "mobile:catalog:refresh": "node scripts/run-with-dependency-lease.mjs mobile:catalog:refresh:unleased",
-    "mobile:catalog:refresh:unleased": "pnpm --filter @bendyline/gezel-catalog exec tsx ../capacitor/scripts/refresh-catalog.ts"
+    "mobile:catalog:refresh:unleased": "pnpm --filter @bendyline/gezel-catalog exec tsx ../capacitor/scripts/refresh-catalog.ts",
+    "test:audit-vulnerabilities:unleased": "node --test scripts/audit-vulnerabilities.test.mjs scripts/audit-vulnerability-policy.test.mjs scripts/dependency-security-regressions.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

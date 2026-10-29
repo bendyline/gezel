@@ -13,6 +13,12 @@ This is a deliberately narrow, fixed-function role. It doesn't edit your files o
 
 ::handboek-gezel-roster{role=image-generator}
 
+## Editing a picture
+
+To change a picture rather than make a new one, add an **Image editor** gezel from the gilde. Attach a picture to your message and say what to change ("remove the people in the background," "turn it into a watercolor"). It changes that and keeps the rest. Send the next change without a picture and it keeps editing the last result, or attach up to three pictures to combine them. A message with no picture to change is turned away, so it never draws something new from words alone.
+
+On this computer, editing needs a model that can do it. **Qwen Image Edit 2511** is made for editing and does nothing else. **FLUX.2 Klein** draws new pictures and edits too. Whenever a picture comes with the request, from the Image editor or from any gezel, Gezel picks an installed model that can edit it, and the result keeps the picture's shape unless you choose another. Download them in **Settings → Image generation**.
+
 ## Using GitHub Copilot
 
 Choose **GitHub Copilot CLI** in **Settings → Image generation → Engine** to use Copilot's experimental image generator. Install or update the Copilot runtime there if needed. Gezel uses your existing Copilot sign-in, or the GitHub token configured in Gezel; no separate image API key is required. Your account's image access, organization policies, and usage limits still apply. Being signed in does not guarantee image generation is available.
