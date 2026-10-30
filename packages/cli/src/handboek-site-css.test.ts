@@ -15,6 +15,15 @@ const appDark =
 const appGround = (source: string, tone: string) =>
   source.match(new RegExp(`--gezel-ground-${tone}:\\s*(#[0-9a-f]{6})`))?.[1];
 
+describe('Handboek site side panels', () => {
+  it('cap their height and scroll, since a sticky panel taller than the window cannot', () => {
+    const rule = BASELINE_CSS.match(/^\.hb-sidebar, \.hb-onthispage \{([\s\S]*?)^\}/m)?.[1] ?? '';
+    expect(rule).toContain('position: sticky;');
+    expect(rule).toContain('max-height: calc(100vh - 3rem);');
+    expect(rule).toContain('overflow-y: auto;');
+  });
+});
+
 describe('Handboek site craftbook grounds', () => {
   it("match the app's ground colors in light and dark", () => {
     expect(appLight).not.toBe('');

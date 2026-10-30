@@ -158,7 +158,23 @@ body.hb {
   padding: 2rem 1.5rem 4rem;
 }
 
-.hb-sidebar, .hb-onthispage { position: sticky; top: 1.5rem; font-size: 0.9rem; }
+/* A sticky panel taller than the window pins its top and leaves the rest
+   unreachable until the page ends, so each side panel is capped at the
+   viewport and scrolls on its own. The left padding, cancelled by the
+   negative margin, keeps the current-page marker (which sits 0.6rem
+   outside the list) and focus rings inside the scroll box, which would
+   otherwise clip them. */
+.hb-sidebar, .hb-onthispage {
+  position: sticky;
+  top: 1.5rem;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  margin-left: -0.6rem;
+  padding: 0 0.25rem 1rem 0.6rem;
+  font-size: 0.9rem;
+}
 .hb-sidebar section { margin-bottom: 1.5rem; }
 .hb-sidebar h2, .hb-onthispage h2 {
   margin: 0 0 0.5rem;
@@ -509,7 +525,7 @@ ${groundRules}
 }
 @media (max-width: 48rem) {
   .hb-layout { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; padding: 1.25rem 1rem 3rem; }
-  .hb-sidebar { position: static; }
+  .hb-sidebar { position: static; max-height: none; overflow: visible; }
   .hb-article { padding: 1.5rem 1.25rem 2rem; }
   .hb-hero h1 { font-size: 2rem; }
 }
