@@ -35,7 +35,11 @@ A phone reads each photo in tiers, and the model gets everything that ran:
 1. **Labels and text from the OS, always.** `GezelVision.read` (app-owned
    plugin, `packages/mobile/native/{ios,android}`) runs the classifier and
    the text recognizer. Each platform keeps only labels its classifier is
-   sure of: Apple's 90%-precision curve, ML Kit's 0.7 confidence.
+   sure of: Apple's 90%-precision curve, ML Kit's 0.7 confidence. On iOS
+   both run on one serial queue under a 30-second bound, because Vision can
+   block without end while iOS is still preparing an on-device asset: a stop
+   or the bound cancels the requests and answers without waiting. Labels that
+   finished still count; with none, the photo is reported unread.
 2. **A description from the OS describer** where it is ready: Nano on
    Android, Foundation Models on iOS 27. Fetching Nano's image model is a
    Settings action (Settings → AI → Photos), never something a chat turn starts.

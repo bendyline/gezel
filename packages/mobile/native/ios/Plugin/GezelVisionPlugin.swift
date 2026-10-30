@@ -27,6 +27,16 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
     private static let maxImageBase64 = 22_400_000
     private static let maxTextCharacters = 4000
     private static let maxLabels = 10
+    /// Vision's recognizers block their thread, and one can wait without end
+    /// for an on-device asset iOS is still preparing: a CI simulator sat five
+    /// minutes in text recognition while its linguistic data was locked. A
+    /// read gives up after this long (uptime, so a sleeping phone does not
+    /// spend it) and frees the slot for the next photo.
+    static let recognizeTimeout: TimeInterval = 30
+    static let timedOutMessage = "Reading this photo took too long"
+    /// Every read runs here, off Swift's cooperative pool, so a recognizer
+    /// that never returns strands one thread; reads queued behind it time out.
+    private static let recognizer = DispatchQueue(label: "com.bendyline.gezel.vision", qos: .userInitiated)
     private let lock = NSLock()
     private var activeId: String?
     private var activeTask: Task<Void, Never>?
@@ -40,10 +50,66 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
         let message: String
         var errorDescription: String? { message }
     }
+    struct TimedOut: LocalizedError {
+        var errorDescription: String? { GezelVisionPlugin.timedOutMessage }
+    }
     struct Decoded {
         let image: CGImage
         let width: Int
         let height: Int
+    }
+    struct Reading {
+        let labels: [[String: Any]]
+        let text: String
+    }
+
+    /// Settles one read from whichever comes first: the recognizers finishing,
+    /// the timeout, or a stop. Whatever arrives later is dropped.
+    final class ReadingGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Reading, Error>?
+        private var outcome: Result<Reading, Error>?
+        private var labels: [[String: Any]]?
+
+        var settled: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return outcome != nil
+        }
+        func wait(_ continuation: CheckedContinuation<Reading, Error>) {
+            lock.lock()
+            if let outcome {
+                lock.unlock()
+                continuation.resume(with: outcome)
+                return
+            }
+            self.continuation = continuation
+            lock.unlock()
+        }
+        /// Classification ran; a timeout during text recognition still answers with these.
+        func record(labels: [[String: Any]]) {
+            lock.lock(); defer { lock.unlock() }
+            self.labels = labels
+        }
+        func settle(_ result: Result<Reading, Error>) {
+            lock.lock()
+            guard outcome == nil else { lock.unlock(); return }
+            outcome = result
+            let waiting = continuation
+            continuation = nil
+            lock.unlock()
+            waiting?.resume(with: result)
+        }
+        /// Only both recognizers failing is an error, and a timeout counts as text failing.
+        func timeOut() {
+            lock.lock()
+            let labels = self.labels
+            lock.unlock()
+            if let labels {
+                settle(.success(Reading(labels: labels, text: "")))
+            } else {
+                settle(.failure(TimedOut()))
+            }
+        }
     }
 
     public override func load() {
@@ -98,6 +164,7 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
             switch outcome {
             case .success(let result): call.resolve(result)
             case .failure(is CancellationError): call.reject("Photo reading stopped", "cancelled")
+            case .failure(let error as TimedOut): call.reject(error.localizedDescription, "timeout")
             case .failure(let error): call.reject(error.localizedDescription, "failed")
             }
         }
@@ -127,7 +194,7 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
         try Task.checkCancellation()
         var result: [String: Any] = ["width": decoded.width, "height": decoded.height]
         var models: [String] = []
-        let reading = try recognize(decoded.image)
+        let reading = try await recognize(decoded.image)
         if !reading.labels.isEmpty { models.append("apple-vision-classify") }
         if !reading.text.isEmpty { models.append("apple-vision-text") }
         result["labels"] = reading.labels
@@ -175,25 +242,65 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// Each recognizer runs on its own, so one that cannot run here (the
     /// simulator has no classifier) still leaves the other's reading. Only
-    /// both failing is an error.
-    static func recognize(_ image: CGImage) throws -> (labels: [[String: Any]], text: String) {
+    /// both failing is an error. A stop or the timeout cancels both requests
+    /// and answers without waiting for Vision to return.
+    static func recognize(_ image: CGImage) async throws -> Reading {
+        try Task.checkCancellation()
         let classify = VNClassifyImageRequest()
         let text = VNRecognizeTextRequest()
         text.recognitionLevel = .accurate
         text.usesLanguageCorrection = true
-        let handler = VNImageRequestHandler(cgImage: image, options: [:])
-        let classified = (try? handler.perform([classify])) != nil
-        do { try handler.perform([text]) } catch where classified {}
-        // Vision scores all ~1,300 classes; Apple's guidance is to keep the
-        // ones that hold 90% precision, which drops its hedges ("structure").
-        let labels = (classify.results ?? [])
+        let gate = ReadingGate()
+        let stop = {
+            classify.cancel()
+            text.cancel()
+        }
+        Self.recognizer.async {
+            // A read that timed out while queued behind a stuck one has nothing left to do.
+            guard !gate.settled else { return }
+            let handler = VNImageRequestHandler(cgImage: image, options: [:])
+            let classified = (try? handler.perform([classify])) != nil
+            let found = classified ? Self.trustedLabels(classify) : []
+            if classified { gate.record(labels: found) }
+            do {
+                try handler.perform([text])
+            } catch where classified {
+            } catch {
+                gate.settle(.failure(error))
+                return
+            }
+            gate.settle(.success(Reading(labels: found, text: Self.recognizedText(text))))
+        }
+        let deadline = DispatchWorkItem {
+            stop()
+            gate.timeOut()
+        }
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + Self.recognizeTimeout, execute: deadline)
+        defer { deadline.cancel() }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Reading, Error>) in
+                gate.wait(continuation)
+            }
+        } onCancel: {
+            stop()
+            gate.settle(.failure(CancellationError()))
+        }
+    }
+
+    /// Vision scores all ~1,300 classes; Apple's guidance is to keep the
+    /// ones that hold 90% precision, which drops its hedges ("structure").
+    static func trustedLabels(_ request: VNClassifyImageRequest) -> [[String: Any]] {
+        (request.results ?? [])
             .filter { $0.hasPrecisionRecallCurve ? $0.hasMinimumRecall(0.01, forPrecision: 0.9) : $0.confidence >= 0.5 }
             .sorted { $0.confidence > $1.confidence }
             .prefix(maxLabels)
             .map { ["label": $0.identifier.replacingOccurrences(of: "_", with: " "), "confidence": Double($0.confidence)] as [String: Any] }
-        let lines = (text.results ?? []).compactMap { $0.topCandidates(1).first?.string }
-        let joined = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        return (Array(labels), String(joined.prefix(maxTextCharacters)))
+    }
+
+    static func recognizedText(_ request: VNRecognizeTextRequest) -> String {
+        let joined = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+            .joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(joined.prefix(maxTextCharacters))
     }
 
     static func describerStatus() -> [String: Any] {
