@@ -41,6 +41,48 @@ reusable recipes of its own.
 
 ::handboek-model-scorecard{suites=core,productivity,developer,complex-work}
 
+## October 28–30 Spark comparison and review data
+
+Qwen 3.8 27B Q4 and Gemma 4 12B Q4 completed **258 planned attempts** on
+Windows ARM64 with an NVIDIA RTX Spark N1X and native 0.1.54. The four task
+sets each have three repetitions per model and scenario across the complete
+campaign. The tables retain three separate segments: 169 original attempts,
+83 continuation attempts, and six final attempts. These segments show counts,
+not percentages; the original and later script-isolation conditions are not
+pooled.
+
+On the original condition, Qwen passed 65/84 eligible attempts and Gemma
+52/84. Gemma's median engine decode speed was 66.15 tokens/s versus Qwen's
+26.44. The two later segments used the same verified condition with the
+Windows script sandbox disabled while other script permissions remained.
+All raw outcomes and fixed scores are retained. Two raw infrastructure
+exclusions remain, including a model-authored unevaluable gate. The published
+table additionally sets aside the final Gemma fanout attempt because capacity
+admission blocked it before inference; the download preserves its original
+failure classification and explains the correction.
+
+All **119 artifact judgments**, covering 125 produced paths across 112
+trials, are included in the download. The table uses one primary review per
+trial, keeps different rubrics separate, and excludes six primary A/B reviews
+whose rubric did not fit the output. Two declared artifacts were missing;
+144 trials had no declared quality rubric. These were bounded source reviews,
+not complete interactive or visual checks. Some automatic passes contained
+incorrect results, including the final Gemma parameterized report.
+
+Task performance includes every attempt within its own segment: engine-log
+decode and prefill, duration, and separately reported system RSS and GPU memory.
+The companion adds first-action and first-artifact timings, tokens, GPU
+utilization, sample coverage, exact review axes and justifications, per-trial
+postmortems, and infrastructure/evaluator findings. Local-model token evidence
+is unavailable for the admission-blocked attempt, rather than reported as zero.
+
+Download the [scorecard data](../assets/scorecards/2026-10-30-spark-native-0-1-54/scorecard.json),
+[full judging and performance data](../assets/scorecards/2026-10-30-spark-native-0-1-54/scorecard-details.json),
+[reviewed report](../assets/scorecards/2026-10-30-spark-native-0-1-54/report.md),
+and [all trials](../assets/scorecards/2026-10-30-spark-native-0-1-54/overall-trials.csv).
+[Download notes and validation](../assets/scorecards/2026-10-30-spark-native-0-1-54/README.md)
+explain the preserved baselines, review selection and published attribution.
+
 ## October 28–30 R9700 comparison and review data
 
 The Qwen 3.8 27B Q4 and Gemma 4 12B Q4 comparison completed all **258 trials**

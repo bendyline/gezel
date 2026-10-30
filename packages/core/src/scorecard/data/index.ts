@@ -80,7 +80,16 @@ import run_2026_10_27_windows_gemma4_12b_native_0_1_54 from './runs/2026-10-27-w
 import run_2026_10_28_r9700_native_0_1_54 from './runs/2026-10-28-r9700-native-0-1-54.json' with {
   type: 'json',
 };
+import run_2026_10_28_spark_native_0_1_54_original from './runs/2026-10-28-spark-native-0-1-54-original.json' with {
+  type: 'json',
+};
+import run_2026_10_29_spark_native_0_1_54_continuation from './runs/2026-10-29-spark-native-0-1-54-continuation.json' with {
+  type: 'json',
+};
 import run_2026_10_30_r9700_docblocks_activation from './runs/2026-10-30-r9700-docblocks-activation.json' with {
+  type: 'json',
+};
+import run_2026_10_30_spark_native_0_1_54_final_six from './runs/2026-10-30-spark-native-0-1-54-final-six.json' with {
   type: 'json',
 };
 
@@ -113,5 +122,8 @@ export const RUN_SHARDS: ScorecardDataset[] = [
   run_2026_10_25_m5max_bolt_five as unknown as ScorecardDataset,
   run_2026_10_27_windows_gemma4_12b_native_0_1_54 as unknown as ScorecardDataset,
   run_2026_10_28_r9700_native_0_1_54 as unknown as ScorecardDataset,
+  run_2026_10_28_spark_native_0_1_54_original as unknown as ScorecardDataset,
+  run_2026_10_29_spark_native_0_1_54_continuation as unknown as ScorecardDataset,
   run_2026_10_30_r9700_docblocks_activation as unknown as ScorecardDataset,
+  run_2026_10_30_spark_native_0_1_54_final_six as unknown as ScorecardDataset,
 ];
