@@ -33,10 +33,7 @@ function fixture(t) {
   );
   writeFileSync(
     join(root, 'scripts/prepare-package.mjs'),
-    `import { readFileSync, writeFileSync } from 'node:fs';
-const source = 'src/browser.ts';
-writeFileSync(source, readFileSync(source, 'utf8').replaceAll('0.0.0', process.argv[2]));
-`,
+    "console.log('stamped core build ' + process.argv[2]);\n",
   );
   writeFileSync(
     join(root, 'pnpm.mjs'),
@@ -95,12 +92,13 @@ test('repeats the exact consumer failure after cleanup and retains its report', 
   assert.equal(readFileSync(join(root, 'packages/core/src/browser.ts'), 'utf8'), developmentSource);
 });
 
-test('a passing consumer run still restores the development stamp and exits successfully', (t) => {
+test('a passing consumer run leaves core source untouched and exits successfully', (t) => {
   const root = fixture(t);
   const report = join(root, '.cache/consumer-report.json');
   const result = rehearse(root, { GEZEL_CONSUMER_REPORT_PATH: report, TEST_CONSUMER_EXIT: '0' });
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /stamped core build 1\.2\.3/);
   assert.match(result.stdout, /release candidate with core 1.2.3 passed/);
   assert.doesNotMatch(result.stdout, /rehearsal: FAILED/);
   assert.equal(readFileSync(join(root, 'packages/core/src/browser.ts'), 'utf8'), developmentSource);

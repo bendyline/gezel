@@ -103,15 +103,24 @@ computes any version, so without intervention every published package would
 report `0.0.0` forever.
 [`scripts/prepare-package.mjs`](../scripts/prepare-package.mjs) closes that gap:
 `@semantic-release/exec`'s `prepareCmd` runs it once per package, it no-ops for
-everything except `packages/core`, and for core it stamps the constant, rebuilds
-core, and asserts the rebuilt `dist` actually carries the version before the
-publish step is allowed to pack it.
+everything except `packages/core`, and for core it rebuilds core with the stamp
+and asserts the rebuilt `dist` actually carries the version before the publish
+step is allowed to pack it.
+
+The stamp reaches the build, never the source. `prepare-package.mjs` passes it
+as `GEZEL_RELEASE_VERSION` / `GEZEL_RELEASE_CONTENT_COMPAT`, and core's
+`tsup.config.ts` swaps it into `browser.ts` as esbuild loads the file
+([`scripts/core-version-stamp.mjs`](../scripts/core-version-stamp.mjs)). The
+checkout therefore always reads `0.0.0`. It used to rewrite the source and
+restore it afterwards, and the rehearsal below runs that inside `pnpm all` for
+minutes: a commit made in that window carried `GEZEL_VERSION = '1.2.11'` to the
+branch. The constants are typed `string` so the published declarations do not
+promise `'0.0.0'`.
 
 One stamp covers everything because core is `external` to every other package's
 tsup build — the constant lives in core's `dist` alone and the rest import it.
-Like the Electron stamp, the rewritten source is deliberately **not** committed:
-`.releaserc.json`'s git assets are `CHANGELOG.md` and `package.json` only, and
-each release re-stamps from a `0.0.0` checkout.
+The Electron release ([`scripts/stamp-version.mjs`](../scripts/stamp-version.mjs))
+still rewrites the source, but only in a release job's throwaway checkout.
 
 ## `workspace:*` and why we publish with pnpm
 
@@ -267,20 +276,16 @@ which takes several minutes.
 part of the canonical `pnpm all` / `pnpm validate` gate and has a dedicated PR
 job; the publish workflow reaches it through that same gate. `check:packages`
 proves ordinary development packs; this proves the artifacts npm will actually
-receive. It stamps
-`packages/core/src/browser.ts` with the current core version exactly as
-`prepare-package.mjs` does at release time, packs every published package, and
-hands the result to `check-package-consumers.mjs` in strict release mode
+receive. It runs `prepare-package.mjs` with the current core version, exactly
+as the release does, packs every published package, and hands the result to
+`check-package-consumers.mjs` in strict release mode
 (`--require-release-stamp`), which additionally asserts the installed
 `gezel --version` matches.
 
-The stamped constant must never reach a commit, so the script restores the
-source and rebuilds core in a `finally`. It refuses to start unless
-`GEZEL_VERSION` and `GEZEL_CONTENT_COMPAT` are both at their development
-`0.0.0`, and verifies they are again afterwards. Restoring "whatever was there
-at start-up" is not enough: an interrupted earlier run leaves the file already
-stamped, and a faithful restore then writes the release version straight back
-while reporting success.
+It never writes `packages/core/src/browser.ts`, so committing while it runs is
+safe. Core's `dist` is stamped for the duration, and a `finally` rebuilds it for
+development. An interrupted run can leave that `dist` stamped; it is ignored by
+Git, and the next `pnpm build` replaces it.
 
 Consumer failures are saved with their error output under
 `.cache/consumer-checks/` (override the JSON file path with

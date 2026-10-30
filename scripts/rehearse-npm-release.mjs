@@ -3,26 +3,19 @@
  * Produce and exercise the same release-stamped tarballs npm receives.
  *
  * A normal `pnpm pack` is useful for checking package shape, but it cannot
- * prove the product version: source intentionally stays at GEZEL_VERSION
- * 0.0.0 and semantic-release stamps core only after it computes the release.
- * This rehearsal performs that stamp with the current package version, packs
- * all public packages, then runs the clean npm-consumer contract in strict
- * release mode. Source and dist are restored to development state afterward.
+ * prove the product version: source stays at GEZEL_VERSION 0.0.0 and
+ * semantic-release stamps core's build only after it computes the release.
+ * This rehearsal performs that stamped build with the current package version,
+ * packs all public packages, then runs the clean npm-consumer contract in
+ * strict release mode. Core's dist is rebuilt for development afterward; its
+ * source is never written, so a commit made mid-rehearsal cannot carry a stamp.
  *
  * Usage:
  *   node scripts/rehearse-npm-release.mjs
  *   node scripts/rehearse-npm-release.mjs --output artifacts/npm-release-candidate
  */
 import { spawnSync } from 'node:child_process';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,58 +42,7 @@ if (existsSync(outputDir) && readdirSync(outputDir).some((file) => file.endsWith
 }
 mkdirSync(outputDir, { recursive: true });
 
-const sourcePath = resolve(repoRoot, 'packages/core/src/browser.ts');
 const consumerReport = consumerCheckReportPath(repoRoot);
-
-/**
- * The development values of the two constants `prepare-package.mjs` stamps.
- * A checkout must carry these before the rehearsal begins and must carry them
- * again after it ends.
- */
-const DEVELOPMENT_STAMP = {
-  GEZEL_VERSION: '0.0.0',
-  GEZEL_CONTENT_COMPAT: '0.0.0',
-};
-
-/** Read the stamped constants out of core's source. */
-function readStamp(source) {
-  return Object.fromEntries(
-    Object.keys(DEVELOPMENT_STAMP).map((name) => [
-      name,
-      new RegExp(`export const ${name} = '([^']*)';`).exec(source)?.[1] ?? null,
-    ]),
-  );
-}
-
-function describeStamp(stamp) {
-  return Object.entries(stamp)
-    .map(([name, value]) => `${name} = ${value === null ? '(not found)' : `'${value}'`}`)
-    .join(', ');
-}
-
-function isDevelopmentStamp(stamp) {
-  return Object.entries(DEVELOPMENT_STAMP).every(([name, value]) => stamp[name] === value);
-}
-
-// The restore below cannot be "write back whatever was there at start-up".
-// This script stamps a release version into a source constant that must never
-// reach a commit, and an earlier interrupted run — or a manual
-// `prepare-package.mjs` — leaves that constant already stamped. Trusting the
-// start-up read then faithfully restores the stamped value and the rehearsal
-// reports success while leaving a non-0.0.0 GEZEL_VERSION in the working
-// tree. Refuse to start from anything but the development baseline, and the
-// text captured here is known-good by construction.
-const originalSource = readFileSync(sourcePath, 'utf8');
-const originalStamp = readStamp(originalSource);
-if (!isDevelopmentStamp(originalStamp)) {
-  throw new Error(
-    [
-      `packages/core/src/browser.ts is not at its development baseline (${describeStamp(originalStamp)}).`,
-      'A previous release or rehearsal left it stamped. Restore it before rehearsing:',
-      '  git checkout -- packages/core/src/browser.ts && pnpm --filter @bendyline/gezel run build',
-    ].join('\n'),
-  );
-}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -177,16 +119,6 @@ try {
   failureMessages.push(err.message);
   console.error(err.message);
 } finally {
-  writeFileSync(sourcePath, originalSource, 'utf8');
-  // Prove it rather than assume it: this constant reaching a commit is the
-  // one outcome the whole guard exists to prevent.
-  const restoredStamp = readStamp(readFileSync(sourcePath, 'utf8'));
-  if (!isDevelopmentStamp(restoredStamp)) {
-    failed = true;
-    const message = `rehearsal: packages/core/src/browser.ts was left stamped (${describeStamp(restoredStamp)}) — run \`git checkout -- packages/core/src/browser.ts\` before committing`;
-    failureMessages.push(message);
-    console.error(message);
-  }
   let restore;
   let restoreError;
   try {
