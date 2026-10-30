@@ -27,9 +27,8 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
     private static let maxImageBase64 = 22_400_000
     private static let maxTextCharacters = 4000
     private static let maxLabels = 10
-    /// Vision's recognizers block their thread, and one can wait without end
-    /// for an on-device asset iOS is still preparing: a CI simulator sat five
-    /// minutes in text recognition while its linguistic data was locked. A
+    /// Vision's recognizers block their thread and take no deadline, so a call
+    /// that never returned would hold the only read slot until relaunch. A
     /// read gives up after this long (uptime, so a sleeping phone does not
     /// spend it) and frees the slot for the next photo.
     static let recognizeTimeout: TimeInterval = 30
@@ -240,10 +239,9 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
         return Decoded(image: image, width: width > 0 ? width : image.width, height: height > 0 ? height : image.height)
     }
 
-    /// Each recognizer runs on its own, so one that cannot run here (the
-    /// simulator has no classifier) still leaves the other's reading. Only
-    /// both failing is an error. A stop or the timeout cancels both requests
-    /// and answers without waiting for Vision to return.
+    /// Each recognizer runs on its own, so one that fails still leaves the
+    /// other's reading. Only both failing is an error. A stop or the timeout
+    /// cancels both requests and answers without waiting for Vision to return.
     static func recognize(_ image: CGImage) async throws -> Reading {
         try Task.checkCancellation()
         let classify = VNClassifyImageRequest()

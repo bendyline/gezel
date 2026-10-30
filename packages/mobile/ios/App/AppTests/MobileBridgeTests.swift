@@ -61,13 +61,7 @@ final class MobileBridgeTests: XCTestCase {
             let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
             print("GEZEL_VISION \(name) \(data.flatMap { String(data: $0, encoding: .utf8) } ?? "")")
         }
-        let status = try await invoke("status", [:])
-        report("status", status)
-        // A simulator still preparing Apple's on-device assets can stall Vision's
-        // text recognition (five minutes on a 2026-10-30 runner). The plugin
-        // bounds the read; only in that state is hitting the bound not a failure.
-        let preparing = (status["describer"] as? PluginCallResultData)?["state"] as? String == "downloading"
-        let unready = XCTSkip("Vision hit its \(Int(GezelVisionPlugin.recognizeTimeout)) s limit while this simulator was still preparing Apple's on-device assets")
+        report("status", try await invoke("status", [:]))
         let sign = UIGraphicsImageRenderer(size: CGSize(width: 900, height: 500)).jpegData(withCompressionQuality: 0.9) { context in
             UIColor(red: 0.78, green: 0.16, blue: 0.16, alpha: 1).setFill()
             context.fill(CGRect(x: 0, y: 0, width: 900, height: 500))
@@ -77,17 +71,11 @@ final class MobileBridgeTests: XCTestCase {
             ("Trail closed for repairs" as NSString).draw(at: CGPoint(x: 90, y: 320), withAttributes: small)
         }
         let started = Date()
-        let read: PluginCallResultData
-        do {
-            read = try await invoke("read", ["requestId": UUID().uuidString, "image": sign.base64EncodedString(), "mimeType": "image/jpeg", "describe": true])
-        } catch let error where preparing && error.localizedDescription == GezelVisionPlugin.timedOutMessage {
-            throw unready
-        }
+        let read = try await invoke("read", ["requestId": UUID().uuidString, "image": sign.base64EncodedString(), "mimeType": "image/jpeg", "describe": true])
         let seconds = Date().timeIntervalSince(started)
         report("sign", read.merging(["ms": Int(seconds * 1000)]) { $1 })
-        // Classification finished but text recognition ran out the clock.
-        if preparing && seconds >= GezelVisionPlugin.recognizeTimeout { throw unready }
-        XCTAssertTrue((read["text"] as? String ?? "").contains("STOP"), read["text"] as? String ?? "")
+        let text = read["text"] as? String ?? ""
+        XCTAssertTrue(text.contains("STOP"), "Read \(text.debugDescription) in \(Int(seconds)) s; reads stop waiting at \(Int(GezelVisionPlugin.recognizeTimeout)) s")
         let caches = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
         if let photo = try? Data(contentsOf: caches.appendingPathComponent("vision-probe.jpg")) {
             let begun = Date()
