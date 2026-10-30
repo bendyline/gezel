@@ -799,6 +799,11 @@ async function startStaticServer(
   const server: Server = createServer(async (req, res) => {
     try {
       const parsed = new URL(req.url ?? '/', 'http://127.0.0.1');
+      // Chrome probes for an icon even though this runtime check materializes only HTML and JS.
+      if (parsed.pathname === '/favicon.ico') {
+        res.writeHead(204).end();
+        return;
+      }
       const pathname = parsed.pathname === '/' ? '/index.html' : parsed.pathname;
       const target = resolve(root, `.${decodeURIComponent(pathname)}`);
       if (target !== root && !target.startsWith(`${root}${sep}`)) {
