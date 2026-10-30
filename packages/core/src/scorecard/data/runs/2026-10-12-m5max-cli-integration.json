@@ -59,35 +59,45 @@
       "engine": "anthropic-cli",
       "tier": "cloud",
       "runId": "2026-10-12-m5max-cli-integration",
-      "suiteId": "productivity",
+      "suiteId": "complex-work",
       "cells": [
         {
-          "scenarioId": "docblocks-theme-roundtrip",
+          "scenarioId": "craftbook-route-multi",
           "trials": 1,
           "successes": 1,
           "nonModelFailures": 0,
-          "medianDurationMs": 26698
+          "medianDurationMs": 129451
         },
         {
-          "scenarioId": "wikipedia-research-brief",
+          "scenarioId": "craftbook-export-generalize",
           "trials": 1,
           "successes": 1,
           "nonModelFailures": 0,
-          "medianDurationMs": 46699
+          "medianDurationMs": 97980
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-6-luna",
+      "label": "GPT-6 Luna · Codex CLI",
+      "engine": "codex-cli",
+      "tier": "cloud",
+      "runId": "2026-10-12-m5max-cli-integration",
+      "suiteId": "complex-work",
+      "cells": [
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 178663
         },
         {
-          "scenarioId": "craftbook-powerpoint-deck",
+          "scenarioId": "craftbook-export-generalize",
           "trials": 1,
           "successes": 1,
           "nonModelFailures": 0,
-          "medianDurationMs": 192401
-        },
-        {
-          "scenarioId": "craftbook-research-to-document",
-          "trials": 1,
-          "successes": 1,
-          "nonModelFailures": 0,
-          "medianDurationMs": 151869
+          "medianDurationMs": 103169
         }
       ]
     },
@@ -130,85 +140,6 @@
       ]
     },
     {
-      "modelId": "claude-sonnet-5-5",
-      "label": "Claude Sonnet 5.5 · Claude CLI",
-      "engine": "anthropic-cli",
-      "tier": "cloud",
-      "runId": "2026-10-12-m5max-cli-integration",
-      "suiteId": "developer",
-      "cells": [
-        {
-          "scenarioId": "craftbook-bug-fix-tdd",
-          "trials": 1,
-          "successes": 1,
-          "nonModelFailures": 0,
-          "medianDurationMs": 151675
-        }
-      ]
-    },
-    {
-      "modelId": "claude-sonnet-5-5",
-      "label": "Claude Sonnet 5.5 · Claude CLI",
-      "engine": "anthropic-cli",
-      "tier": "cloud",
-      "runId": "2026-10-12-m5max-cli-integration",
-      "suiteId": "complex-work",
-      "cells": [
-        {
-          "scenarioId": "craftbook-route-multi",
-          "trials": 1,
-          "successes": 1,
-          "nonModelFailures": 0,
-          "medianDurationMs": 129451
-        },
-        {
-          "scenarioId": "craftbook-export-generalize",
-          "trials": 1,
-          "successes": 1,
-          "nonModelFailures": 0,
-          "medianDurationMs": 97980
-        }
-      ]
-    },
-    {
-      "modelId": "gpt-6-luna",
-      "label": "GPT-6 Luna · Codex CLI",
-      "engine": "codex-cli",
-      "tier": "cloud",
-      "runId": "2026-10-12-m5max-cli-integration",
-      "suiteId": "productivity",
-      "cells": [
-        {
-          "scenarioId": "docblocks-theme-roundtrip",
-          "trials": 1,
-          "successes": 1,
-          "nonModelFailures": 0,
-          "medianDurationMs": 37352
-        },
-        {
-          "scenarioId": "wikipedia-research-brief",
-          "trials": 1,
-          "successes": 1,
-          "nonModelFailures": 0,
-          "medianDurationMs": 42386
-        },
-        {
-          "scenarioId": "craftbook-powerpoint-deck",
-          "trials": 1,
-          "successes": 1,
-          "nonModelFailures": 0,
-          "medianDurationMs": 157621
-        },
-        {
-          "scenarioId": "craftbook-research-to-document",
-          "trials": 1,
-          "successes": 1,
-          "nonModelFailures": 0,
-          "medianDurationMs": 117633
-        }
-      ]
-    },
-    {
       "modelId": "gpt-6-luna",
       "label": "GPT-6 Luna · Codex CLI",
       "engine": "codex-cli",
@@ -247,6 +178,23 @@
       ]
     },
     {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Claude CLI",
+      "engine": "anthropic-cli",
+      "tier": "cloud",
+      "runId": "2026-10-12-m5max-cli-integration",
+      "suiteId": "developer",
+      "cells": [
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 151675
+        }
+      ]
+    },
+    {
       "modelId": "gpt-6-luna",
       "label": "GPT-6 Luna · Codex CLI",
       "engine": "codex-cli",
@@ -264,26 +212,78 @@
       ]
     },
     {
+      "modelId": "claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5 · Claude CLI",
+      "engine": "anthropic-cli",
+      "tier": "cloud",
+      "runId": "2026-10-12-m5max-cli-integration",
+      "suiteId": "productivity",
+      "cells": [
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 26698
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 46699
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 192401
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 151869
+        }
+      ]
+    },
+    {
       "modelId": "gpt-6-luna",
       "label": "GPT-6 Luna · Codex CLI",
       "engine": "codex-cli",
       "tier": "cloud",
       "runId": "2026-10-12-m5max-cli-integration",
-      "suiteId": "complex-work",
+      "suiteId": "productivity",
       "cells": [
         {
-          "scenarioId": "craftbook-route-multi",
+          "scenarioId": "docblocks-theme-roundtrip",
           "trials": 1,
           "successes": 1,
           "nonModelFailures": 0,
-          "medianDurationMs": 178663
+          "medianDurationMs": 37352
         },
         {
-          "scenarioId": "craftbook-export-generalize",
+          "scenarioId": "wikipedia-research-brief",
           "trials": 1,
           "successes": 1,
           "nonModelFailures": 0,
-          "medianDurationMs": 103169
+          "medianDurationMs": 42386
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 157621
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 117633
         }
       ]
     }

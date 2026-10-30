@@ -19,6 +19,7 @@ import {
   CraftbookStepPromptProfileSchema,
   CraftbookStepSchema,
   CraftbookStepToolPolicySchema,
+  type CraftbookStepZodSchema,
   CraftbookToolsetNeedSchema,
   ModelTierSchema,
   NewCraftbookStepSchema,
@@ -154,7 +155,7 @@ export type TaskNightShift = z.infer<typeof TaskNightShiftSchema>;
  */
 export const MAX_RESTART_RESUMES = 3;
 
-export const TaskCraftbookStepSchema = CraftbookStepSchema.extend({
+const TaskCraftbookStepLifecycleShape = {
   createdAt: z.string(),
   completedAt: z.string().optional(),
   attemptCount: z.number().int().nonnegative().optional(),
@@ -291,7 +292,19 @@ export const TaskCraftbookStepSchema = CraftbookStepSchema.extend({
       }),
     )
     .optional(),
-});
+};
+/**
+ * Named for the reason {@link CraftbookStepZodSchema} is: every task embeds
+ * its steps several times over (`steps`, `sourceSteps`, the task craftbook),
+ * and each copy wrote the whole step shape out again.
+ */
+export interface TaskCraftbookStepZodSchema
+  extends z.ZodObject<
+    z.core.util.Extend<CraftbookStepZodSchema['shape'], typeof TaskCraftbookStepLifecycleShape>
+  > {}
+export const TaskCraftbookStepSchema: TaskCraftbookStepZodSchema = CraftbookStepSchema.extend(
+  TaskCraftbookStepLifecycleShape,
+);
 export type TaskCraftbookStep = z.infer<typeof TaskCraftbookStepSchema>;
 export type GateAttemptRecord = NonNullable<TaskCraftbookStep['gateAttemptHistory']>[number];
 

@@ -1,0 +1,1533 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "2026-10-30-r9700-docblocks-activation",
+      "provenance": {
+        "startedAt": "2026-10-30T01:28:17.595Z",
+        "device": {
+          "label": "Windows · Ryzen 9 7950X3D · Radeon AI PRO R9700",
+          "platform": "win32",
+          "arch": "x64",
+          "memoryGb": 64,
+          "osRelease": "win32 10.0.26300",
+          "cpuModel": "AMD Ryzen 9 7950X3D 16-Core Processor",
+          "gpuModel": "AMD Radeon AI PRO R9700"
+        },
+        "harnessCommit": "22fec99111a5",
+        "sourceHash": "10a41de112c12aa33f12715ea0e1f30666cce2a8bf657064944820ed9f92b2e4",
+        "serviceBuildHash": "a2895bfd70f4977c900dd7b8b22d6e85bae493da5eb380a73eb791778a2f111d",
+        "catalogHash": "2f12c2abbb9c4b216cda840c89d5683e7798b35e27fd683ea1f9bd864aa93e19",
+        "gildeVersion": "0.3.1",
+        "count": 3,
+        "judgeModelId": null,
+        "engineBuilds": {
+          "llama-cpp": "Gezel native 0.1.54 · Vulkan"
+        }
+      },
+      "scope": "subset",
+      "memoryCoverage": "system-only",
+      "suites": [
+        "productivity"
+      ],
+      "scenariosBySuite": {
+        "productivity": [
+          "docblocks-theme-roundtrip"
+        ]
+      },
+      "note": "Separate six-trial DocBlocks activation condition, three repetitions per model. The supported binary expectedDeliverable contract exposed all 19 DocBlocks tools, changing the session/tool condition; it does not replace the 258-trial baseline. Qwen passed 2/3 and Gemma 0/3. Binary messageGezel repair was rejected before delivery, so these are not clean model-only failures or ignored nudges. Initial tool-schema and grounding errors are analyzed separately. Three Qwen reports were judged; three Gemma reports were absent. Original prompts, gates, generalist auto and native 0.1.54 were retained. See the separate condition postmortem in the R9700 download."
+    },
+    {
+      "id": "2026-10-28-r9700-native-0-1-54",
+      "provenance": {
+        "startedAt": "2026-10-28T05:23:55.736Z",
+        "device": {
+          "label": "Windows · Ryzen 9 7950X3D · Radeon AI PRO R9700",
+          "platform": "win32",
+          "arch": "x64",
+          "memoryGb": 64,
+          "osRelease": "win32 10.0.26300",
+          "cpuModel": "AMD Ryzen 9 7950X3D 16-Core Processor",
+          "gpuModel": "AMD Radeon AI PRO R9700"
+        },
+        "harnessCommit": "22fec99111a5",
+        "sourceHash": "10a41de112c12aa33f12715ea0e1f30666cce2a8bf657064944820ed9f92b2e4",
+        "serviceBuildHash": "a2895bfd70f4977c900dd7b8b22d6e85bae493da5eb380a73eb791778a2f111d",
+        "catalogHash": "2f12c2abbb9c4b216cda840c89d5683e7798b35e27fd683ea1f9bd864aa93e19",
+        "gildeVersion": "0.3.1",
+        "count": 3,
+        "judgeModelId": null,
+        "engineBuilds": {
+          "llama-cpp": "Gezel native 0.1.54 · Vulkan"
+        }
+      },
+      "scope": "suite",
+      "memoryCoverage": "system-only",
+      "suites": [
+        "core",
+        "productivity",
+        "developer",
+        "complex-work"
+      ],
+      "scenariosBySuite": {
+        "core": [
+          "tictactoe",
+          "petshop",
+          "tankcombat",
+          "schema-migration",
+          "failing-tests-spec",
+          "symptom-debug",
+          "data-wrangle",
+          "incident-postmortem",
+          "ops-runbook-anomaly",
+          "plan-and-estimate",
+          "conflict-synthesis"
+        ],
+        "productivity": [
+          "constrained-comms",
+          "records-intake",
+          "plan-and-estimate",
+          "meeting-followup",
+          "craftbook-spreadsheet-model",
+          "conflict-synthesis",
+          "docblocks-theme-roundtrip",
+          "craftbook-powerpoint-deck",
+          "wikipedia-research-brief",
+          "craftbook-week-plan",
+          "craftbook-ab-test-readout",
+          "craftbook-annotated-bibliography",
+          "craftbook-research-to-document"
+        ],
+        "developer": [
+          "fix-squisq-bugs",
+          "dev-craftbook-routing",
+          "interface-contract",
+          "craftbook-code-review",
+          "craftbook-api-contract-review",
+          "craftbook-deep-security-review",
+          "large-pr-review",
+          "craftbook-codemod-sweep",
+          "craftbook-refactor-module",
+          "craftbook-bug-fix-tdd"
+        ],
+        "complex-work": [
+          "craftbook-find-vs-create",
+          "craftbook-edit-midtask",
+          "craftbook-invoice-run",
+          "craftbook-author-linear",
+          "craftbook-route-multi",
+          "craftbook-export-generalize",
+          "craftbook-author-params",
+          "craftbook-author-gate-script",
+          "craftbook-author-fanout"
+        ]
+      },
+      "note": "258 frozen trials across four suites, three repetitions per model/scenario. Native 0.1.54, llama.cpp Vulkan, generalist auto. Six raw infra exclusions remain: three Qwen custom-gate Windows denyNet failures and three model-authored gate-configuration failures (two Gemma, one Qwen); the latter are not Windows failures. Qwen complex-work has no eligible custom-gate cell, so its suite headline is withheld. Baseline DocBlocks lacked its tools in all six trials. The separately labeled activation subset does not replace these outcomes. Task measurements include every attempted trial and use engine-log throughput, not admission probes; system RSS and GPU memory are separate. Review means use declared Codex inline axes or game-HTML Claude reviews, never both for the same trial. Six misaligned A/B reviews, seven incidental HTML reviews and 137 tasks with no applicable artifact review are excluded from these means. Both complete judge ledgers, corrected spreadsheet selections, capability-rubric differences, performance gaps and evaluator/setup findings are preserved in the R9700 downloadable report."
+    }
+  ],
+  "results": [
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 (27B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "UD-Q4_K_M",
+      "runId": "2026-10-30-r9700-docblocks-activation",
+      "suiteId": "productivity",
+      "runtime": {
+        "contextTokens": 142336,
+        "peakMemoryMb": 22657,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "activation-correction",
+          "label": "Separate activation condition · all attempts",
+          "trials": 3,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 3,
+            "median": 55.72,
+            "min": 54.59,
+            "max": 56.53
+          },
+          "prefillTokensPerSec": {
+            "samples": 3,
+            "median": 780.47,
+            "min": 779.01,
+            "max": 786.13
+          },
+          "durationMs": {
+            "samples": 3,
+            "median": 130113,
+            "min": 111632,
+            "max": 418200
+          },
+          "peakRssMb": {
+            "samples": 3,
+            "median": 22657,
+            "min": 22491,
+            "max": 22994
+          },
+          "peakGpuMemMb": {
+            "samples": 3,
+            "median": 29168,
+            "min": 29162,
+            "max": 29170
+          },
+          "judgments": [
+            {
+              "meanScore": 5.433333333333334,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "docblocks-theme-roundtrip"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 130113
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "quantization": "UD-Q4_K_XL",
+      "runId": "2026-10-30-r9700-docblocks-activation",
+      "suiteId": "productivity",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 17640,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "activation-correction",
+          "label": "Separate activation condition · all attempts",
+          "trials": 3,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 3,
+            "median": 118.92,
+            "min": 117.91,
+            "max": 124.89
+          },
+          "prefillTokensPerSec": {
+            "samples": 3,
+            "median": 1199.86,
+            "min": 1093.31,
+            "max": 1206.24
+          },
+          "durationMs": {
+            "samples": 3,
+            "median": 363917,
+            "min": 356805,
+            "max": 405681
+          },
+          "peakRssMb": {
+            "samples": 3,
+            "median": 17640,
+            "min": 15597,
+            "max": 17829
+          },
+          "peakGpuMemMb": {
+            "samples": 3,
+            "median": 15039,
+            "min": 15039,
+            "max": 15054
+          },
+          "judgments": [],
+          "noArtifact": 3,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 363917
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 (27B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "UD-Q4_K_M",
+      "runId": "2026-10-28-r9700-native-0-1-54",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 142336,
+        "peakMemoryMb": 19205,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "frozen",
+          "label": "Frozen · native 0.1.54 · all attempts",
+          "trials": 33,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 33,
+            "median": 62.91,
+            "min": 40.33,
+            "max": 76.26
+          },
+          "prefillTokensPerSec": {
+            "samples": 33,
+            "median": 825.88,
+            "min": 742.44,
+            "max": 847.74
+          },
+          "durationMs": {
+            "samples": 33,
+            "median": 131812,
+            "min": 36327,
+            "max": 918036
+          },
+          "peakRssMb": {
+            "samples": 33,
+            "median": 19205,
+            "min": 17240,
+            "max": 27565
+          },
+          "peakGpuMemMb": {
+            "samples": 33,
+            "median": 29741,
+            "min": 28810,
+            "max": 29912
+          },
+          "judgments": [
+            {
+              "meanScore": 8.38888888888889,
+              "artifacts": 9,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "default-html-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 24
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 68790
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 886881
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 135053
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 150251
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 43308
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 42317
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 236933
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 283817
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 78740
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 60601
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 279683
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 (27B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "UD-Q4_K_M",
+      "runId": "2026-10-28-r9700-native-0-1-54",
+      "suiteId": "productivity",
+      "runtime": {
+        "contextTokens": 142336,
+        "peakMemoryMb": 22729,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "frozen",
+          "label": "Frozen · native 0.1.54 · all attempts",
+          "trials": 39,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 39,
+            "median": 59.2,
+            "min": 41.81,
+            "max": 67.67
+          },
+          "prefillTokensPerSec": {
+            "samples": 39,
+            "median": 809.47,
+            "min": 753.12,
+            "max": 850.97
+          },
+          "durationMs": {
+            "samples": 39,
+            "median": 218922,
+            "min": 48611,
+            "max": 2519119
+          },
+          "peakRssMb": {
+            "samples": 39,
+            "median": 22729,
+            "min": 17354,
+            "max": 28402
+          },
+          "peakGpuMemMb": {
+            "samples": 39,
+            "median": 29736,
+            "min": 28893,
+            "max": 30004
+          },
+          "judgments": [
+            {
+              "meanScore": 6.7,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-annotated-bibliography"
+            },
+            {
+              "meanScore": 7.2,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-powerpoint-deck"
+            },
+            {
+              "meanScore": 6.666666666666667,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-research-to-document"
+            },
+            {
+              "meanScore": 6.5,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-spreadsheet-model"
+            },
+            {
+              "meanScore": 1.7,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-week-plan"
+            },
+            {
+              "meanScore": 7.8,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "docblocks-theme-roundtrip"
+            },
+            {
+              "meanScore": 7.766666666666667,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "meeting-followup"
+            },
+            {
+              "meanScore": 6.5,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "wikipedia-research-brief"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 15
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 61262
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 102243
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 60691
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 154836
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 546494
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 158605
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 206581
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 400179
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 206481
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2227139
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 510244
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 223087
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 336429
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 (27B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "UD-Q4_K_M",
+      "runId": "2026-10-28-r9700-native-0-1-54",
+      "suiteId": "developer",
+      "runtime": {
+        "contextTokens": 142336,
+        "peakMemoryMb": 23369,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "frozen",
+          "label": "Frozen · native 0.1.54 · all attempts",
+          "trials": 30,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 30,
+            "median": 57.16,
+            "min": 44.17,
+            "max": 69.52
+          },
+          "prefillTokensPerSec": {
+            "samples": 30,
+            "median": 800.2,
+            "min": 610.21,
+            "max": 835.56
+          },
+          "durationMs": {
+            "samples": 30,
+            "median": 540658.5,
+            "min": 65503,
+            "max": 3345452
+          },
+          "peakRssMb": {
+            "samples": 30,
+            "median": 23368.5,
+            "min": 17819,
+            "max": 29377
+          },
+          "peakGpuMemMb": {
+            "samples": 29,
+            "median": 29892,
+            "min": 28893,
+            "max": 30790
+          },
+          "judgments": [
+            {
+              "meanScore": 7.166666666666667,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-api-contract-review"
+            },
+            {
+              "meanScore": 4.133333333333334,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-bug-fix-tdd"
+            },
+            {
+              "meanScore": 7.166666666666667,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-code-review"
+            },
+            {
+              "meanScore": 7.433333333333334,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-codemod-sweep"
+            },
+            {
+              "meanScore": 7.7,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-deep-security-review"
+            },
+            {
+              "meanScore": 3.9,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-refactor-module"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 12
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "fix-squisq-bugs",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 78699
+        },
+        {
+          "scenarioId": "dev-craftbook-routing",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 119386
+        },
+        {
+          "scenarioId": "interface-contract",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 71564
+        },
+        {
+          "scenarioId": "craftbook-code-review",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 153114
+        },
+        {
+          "scenarioId": "craftbook-api-contract-review",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 577067
+        },
+        {
+          "scenarioId": "craftbook-deep-security-review",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 177408
+        },
+        {
+          "scenarioId": "large-pr-review",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1625476
+        },
+        {
+          "scenarioId": "craftbook-codemod-sweep",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2450287
+        },
+        {
+          "scenarioId": "craftbook-refactor-module",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1829414
+        },
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2165133
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 (27B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "UD-Q4_K_M",
+      "runId": "2026-10-28-r9700-native-0-1-54",
+      "suiteId": "complex-work",
+      "runtime": {
+        "contextTokens": 142336,
+        "peakMemoryMb": 27054,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "frozen",
+          "label": "Frozen · native 0.1.54 · all attempts",
+          "trials": 27,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 27,
+            "median": 50.59,
+            "min": 44.4,
+            "max": 70.6
+          },
+          "prefillTokensPerSec": {
+            "samples": 27,
+            "median": 762.01,
+            "min": 685.52,
+            "max": 830.18
+          },
+          "durationMs": {
+            "samples": 27,
+            "median": 932421,
+            "min": 57736,
+            "max": 3264805
+          },
+          "peakRssMb": {
+            "samples": 27,
+            "median": 27054,
+            "min": 17605,
+            "max": 29221
+          },
+          "peakGpuMemMb": {
+            "samples": 27,
+            "median": 29924,
+            "min": 29374,
+            "max": 30224
+          },
+          "judgments": [
+            {
+              "meanScore": 6.466666666666666,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-invoice-run"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 24
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 63959
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 568870
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 361251
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 908395
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1003087
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 1,
+          "medianDurationMs": 709440
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1024723
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 3,
+          "medianDurationMs": 3062915
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2323179
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "quantization": "UD-Q4_K_XL",
+      "runId": "2026-10-28-r9700-native-0-1-54",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 16721,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "frozen",
+          "label": "Frozen · native 0.1.54 · all attempts",
+          "trials": 33,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 33,
+            "median": 136.61,
+            "min": 109.89,
+            "max": 159.16
+          },
+          "prefillTokensPerSec": {
+            "samples": 33,
+            "median": 1437.51,
+            "min": 958.51,
+            "max": 1594.27
+          },
+          "durationMs": {
+            "samples": 33,
+            "median": 101662,
+            "min": 30217,
+            "max": 971412
+          },
+          "peakRssMb": {
+            "samples": 33,
+            "median": 16721,
+            "min": 10612,
+            "max": 22694
+          },
+          "peakGpuMemMb": {
+            "samples": 33,
+            "median": 14749,
+            "min": 13809,
+            "max": 21587
+          },
+          "judgments": [
+            {
+              "meanScore": 6.966666666666666,
+              "artifacts": 9,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "default-html-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 24
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 45848
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 124498
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 56526
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 135751
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 53298
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 70616
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 872559
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 192874
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 71288
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 30810
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 101662
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "quantization": "UD-Q4_K_XL",
+      "runId": "2026-10-28-r9700-native-0-1-54",
+      "suiteId": "productivity",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 18695,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "frozen",
+          "label": "Frozen · native 0.1.54 · all attempts",
+          "trials": 39,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 39,
+            "median": 132.86,
+            "min": 112.51,
+            "max": 153.97
+          },
+          "prefillTokensPerSec": {
+            "samples": 39,
+            "median": 1319.42,
+            "min": 1068.68,
+            "max": 1559.57
+          },
+          "durationMs": {
+            "samples": 39,
+            "median": 146834,
+            "min": 30225,
+            "max": 1881860
+          },
+          "peakRssMb": {
+            "samples": 39,
+            "median": 18695,
+            "min": 10610,
+            "max": 34216
+          },
+          "peakGpuMemMb": {
+            "samples": 39,
+            "median": 14728,
+            "min": 13891,
+            "max": 14959
+          },
+          "judgments": [
+            {
+              "meanScore": 6.766666666666667,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-annotated-bibliography"
+            },
+            {
+              "meanScore": 7.7,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-powerpoint-deck"
+            },
+            {
+              "meanScore": 6.533333333333334,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-research-to-document"
+            },
+            {
+              "meanScore": 3.5,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-spreadsheet-model"
+            },
+            {
+              "meanScore": 1.1333333333333335,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-week-plan"
+            },
+            {
+              "meanScore": 4.1000000000000005,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "docblocks-theme-roundtrip"
+            },
+            {
+              "meanScore": 7.633333333333333,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "meeting-followup"
+            },
+            {
+              "meanScore": 2.9666666666666663,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "wikipedia-research-brief"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 15
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 42305
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 130399
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 30717
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 156772
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 414667
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 36120
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 254625
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 146834
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 101731
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 439689
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 456894
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 116529
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 167425
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "quantization": "UD-Q4_K_XL",
+      "runId": "2026-10-28-r9700-native-0-1-54",
+      "suiteId": "developer",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 19207,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "frozen",
+          "label": "Frozen · native 0.1.54 · all attempts",
+          "trials": 30,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 30,
+            "median": 124.6,
+            "min": 113.31,
+            "max": 149.03
+          },
+          "prefillTokensPerSec": {
+            "samples": 30,
+            "median": 1041.4650000000001,
+            "min": 321.89,
+            "max": 1420.43
+          },
+          "durationMs": {
+            "samples": 30,
+            "median": 438567,
+            "min": 45336,
+            "max": 3695498
+          },
+          "peakRssMb": {
+            "samples": 30,
+            "median": 19206.5,
+            "min": 13206,
+            "max": 26821
+          },
+          "peakGpuMemMb": {
+            "samples": 30,
+            "median": 14902,
+            "min": 13892,
+            "max": 15221
+          },
+          "judgments": [
+            {
+              "meanScore": 4.166666666666667,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-api-contract-review"
+            },
+            {
+              "meanScore": 4.3,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-bug-fix-tdd"
+            },
+            {
+              "meanScore": 6.666666666666667,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-code-review"
+            },
+            {
+              "meanScore": 5.466666666666666,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-codemod-sweep"
+            },
+            {
+              "meanScore": 5,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-deep-security-review"
+            },
+            {
+              "meanScore": 3.366666666666667,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-refactor-module"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 12
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "fix-squisq-bugs",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 66732
+        },
+        {
+          "scenarioId": "dev-craftbook-routing",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 333422
+        },
+        {
+          "scenarioId": "interface-contract",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 45884
+        },
+        {
+          "scenarioId": "craftbook-code-review",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 108519
+        },
+        {
+          "scenarioId": "craftbook-api-contract-review",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 373616
+        },
+        {
+          "scenarioId": "craftbook-deep-security-review",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 202920
+        },
+        {
+          "scenarioId": "large-pr-review",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1273126
+        },
+        {
+          "scenarioId": "craftbook-codemod-sweep",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1116180
+        },
+        {
+          "scenarioId": "craftbook-refactor-module",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2887122
+        },
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1861101
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "quantization": "UD-Q4_K_XL",
+      "runId": "2026-10-28-r9700-native-0-1-54",
+      "suiteId": "complex-work",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 21362,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "frozen",
+          "label": "Frozen · native 0.1.54 · all attempts",
+          "trials": 27,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 27,
+            "median": 112.73,
+            "min": 98.44,
+            "max": 155.81
+          },
+          "prefillTokensPerSec": {
+            "samples": 27,
+            "median": 1031.92,
+            "min": 837.39,
+            "max": 1435.19
+          },
+          "durationMs": {
+            "samples": 27,
+            "median": 436166,
+            "min": 49193,
+            "max": 1803338
+          },
+          "peakRssMb": {
+            "samples": 27,
+            "median": 21362,
+            "min": 11740,
+            "max": 26511
+          },
+          "peakGpuMemMb": {
+            "samples": 27,
+            "median": 14920,
+            "min": 14363,
+            "max": 15456
+          },
+          "judgments": [
+            {
+              "meanScore": 5.533333333333334,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "craftbook-invoice-run"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 24
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 121395
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 176281
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 193175
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 438297
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 284760
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 864222
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 454739
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 539065
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1705139
+        }
+      ]
+    }
+  ]
+}

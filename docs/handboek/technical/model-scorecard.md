@@ -41,6 +41,67 @@ reusable recipes of its own.
 
 ::handboek-model-scorecard{suites=core,productivity,developer,complex-work}
 
+## October 28–30 R9700 comparison and review data
+
+The Qwen 3.8 27B Q4 and Gemma 4 12B Q4 comparison completed all **258 trials**
+across four task sets, with three repetitions per model and scenario.
+Qwen passed 104/125 eligible attempts; Gemma passed 81/127. Six raw exclusions
+remain recorded: three Windows sandbox failures and three model-authored
+gate configurations that the harness classified as infrastructure failures.
+Qwen's complex-work suite has no eligible custom-gate attempt, so that suite's
+headline is withheld while all its observations remain available.
+
+Download the [scorecard data](../assets/scorecards/2026-10-28-r9700-native-0-1-54/scorecard.json)
+and [full run data with judging and performance](../assets/scorecards/2026-10-28-r9700-native-0-1-54/scorecard-details.json).
+The companion includes per-trial fixed scores, both advisory judge ledgers,
+scenario and repetition results, latency, throughput, RAM/GPU measurements,
+postmortems and review audits. Known setup and evaluator problems remain
+visible beside the frozen results. Different review rubrics stay separate;
+misaligned A/B and incidental fixture-page opinions are excluded from the
+website's quality means and retained in the download.
+
+A **separate six-trial activation subset** exposed the missing DocBlocks tools
+and produced two Qwen passes and no Gemma passes. It does not replace the
+original six setup failures. Binary repair messages were rejected before
+delivery; the postmortem distinguishes that framework limitation from initial
+schema and grounding errors. All trials and judging are complete.
+
+Both models ran on Windows with a Radeon AI PRO R9700 and native 0.1.54.
+The task tables show engine-log measurements across all attempts; system RSS
+and GPU memory remain separate, and one GPU observation is missing.
+[Download notes and validation](../assets/scorecards/2026-10-28-r9700-native-0-1-54/README.md)
+explain all denominators, review selections, timing limitations and the
+frozen capability implementation's differences from its prose rubric.
+
+## October 28 Windows Gemma 4 12B results
+
+Gemma 4 12B completed all four task sets on an RTX 5070 Ti laptop using
+native 0.1.54: 129 attempts, three per scenario in each suite, with 89 raw
+passes. Twelve attempts lacked required tools and one had an unevaluable
+model-authored gate. The reviewed subset contains 89 passes in 116 attempts;
+the download retains every raw verdict and exclusion reason.
+
+All 59 applicable artifacts were judged, including outputs from failed
+attempts. The **Artifact reviews** tables keep each rubric separate, exclude
+three A/B reviews with mismatched axes, and distinguish 70 tasks with no
+applicable rubric from missing artifacts. These were unblinded source and
+artifact reviews by `codex-inline/current-session`. Nine deferred browser
+checks subsequently passed on unchanged saved artifacts; these short checks
+do not establish complete gameplay or visual quality.
+
+The **Task performance** tables cover all 129 attempts, with per-trial
+medians, ranges and sample counts for native output and prefill speed, wall
+time, peak system RSS and peak GPU memory. The overall median native output
+rate was 121.16 tokens/s. Admission-probe rates remain separate. Exact token
+counts, GPU utilization, memory samples and fixed-score breakdowns are in the
+download.
+
+Download the [scorecard data](../assets/scorecards/2026-10-27-windows-gemma4-12b-native-0-1-54/scorecard.json),
+[full judging and performance report](../assets/scorecards/2026-10-27-windows-gemma4-12b-native-0-1-54/scorecard-details.json),
+and [measurement notes](../assets/scorecards/2026-10-27-windows-gemma4-12b-native-0-1-54/README.md).
+The run identifier retains the October 27 scheduling date; execution occurred
+on October 28.
+
 ## October 25 M5 Max Bolt comparison and review data
 
 The five-model core campaign completed all 165 trials: 11 scenarios, three

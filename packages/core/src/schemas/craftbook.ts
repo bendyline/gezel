@@ -368,7 +368,7 @@ export type StepRunWhen = z.infer<typeof StepRunWhenSchema>;
 export const CraftbookStepStageSchema = z.enum(['intake', 'make', 'check']);
 export type CraftbookStepStage = z.infer<typeof CraftbookStepStageSchema>;
 
-export const CraftbookStepSchema = z.object({
+const CraftbookStepShape = {
   id: z.string().min(1),
   name: z.string().min(1),
   description: z.string().optional(),
@@ -465,7 +465,14 @@ export const CraftbookStepSchema = z.object({
    * tool call. Inert unless the craftbook also declares `spawn`.
    */
   spawnFanout: z.boolean().optional(),
-});
+};
+/**
+ * Named so the declarations that embed a step (every craftbook, spawn config
+ * and manifest) print this name rather than the whole shape again. They held
+ * a dozen copies, against the package's size budget.
+ */
+export interface CraftbookStepZodSchema extends z.ZodObject<typeof CraftbookStepShape> {}
+export const CraftbookStepSchema: CraftbookStepZodSchema = z.object(CraftbookStepShape);
 export type CraftbookStep = z.infer<typeof CraftbookStepSchema>;
 
 /**
@@ -1207,7 +1214,7 @@ export type StepDeliverable = z.infer<typeof StepDeliverableSchema>;
  * Step blueprint for create/update requests. `id` is optional — a slug is
  * derived from `name` when omitted.
  */
-export const NewCraftbookStepSchema = z.object({
+const NewCraftbookStepShape = {
   id: z.string().optional(),
   name: z.string().min(1),
   description: z.string().optional(),
@@ -1257,7 +1264,10 @@ export const NewCraftbookStepSchema = z.object({
   terminal: z.boolean().optional(),
   /** See {@link CraftbookStepSchema.shape.spawnFanout}. */
   spawnFanout: z.boolean().optional(),
-});
+};
+/** Named for the reason {@link CraftbookStepZodSchema} is. */
+export interface NewCraftbookStepZodSchema extends z.ZodObject<typeof NewCraftbookStepShape> {}
+export const NewCraftbookStepSchema: NewCraftbookStepZodSchema = z.object(NewCraftbookStepShape);
 export type NewCraftbookStep = z.infer<typeof NewCraftbookStepSchema>;
 
 /**

@@ -61,19 +61,20 @@ describe('::handboek-model-scorecard', () => {
     const result = data.results[0]!;
     result.label = 'Model <unsafe>|name';
     result.cells = [
-      { scenarioId: 'petshop', trials: 2, successes: 0, nonModelFailures: 2 },
+      { scenarioId: 'petshop', trials: 3, successes: 0, nonModelFailures: 3 },
       { scenarioId: 'tictactoe', trials: 2, successes: 2, nonModelFailures: 0 },
     ];
     result.taskMeasurements = [
       {
         id: 'slow',
         label: 'Restricted period',
-        trials: 2,
+        trials: 3,
         source: 'engine-log',
         outputTokensPerSec: { samples: 2, min: 3, median: 3.5, max: 4 },
         judgments: [],
         noArtifact: 1,
         excludedReviews: 1,
+        notApplicableReviews: 1,
       },
       {
         id: 'fast',
@@ -105,6 +106,7 @@ describe('::handboek-model-scorecard', () => {
       expect(output).not.toContain('Tasks passed');
       expect(output).toContain('No artifact');
       expect(output).toContain('Excluded reviews');
+      expect(output).toContain('Not applicable');
       expect(output).not.toContain('<unsafe>');
     }
     const html = renderScorecardFilterHtml(data, ['core'], { includeTaskCount: true });
