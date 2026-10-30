@@ -65,8 +65,10 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // the three step shapes (`CraftbookStepZodSchema`, `NewCraftbookStepZodSchema`,
   // `TaskCraftbookStepZodSchema`) took out 23 copies, ~160 KB unpacked but only
   // 5 KB packed, because gzip already folds repeats that sit close together.
-  // Name another embedded schema the same way next time: HistoryEventKindSchema
-  // (9 copies), ChatModelTuningSchema (10) and ChatMessageSchema (7) are the
+  // It tripped at 2.10 MB again; naming HistoryEventKindSchema's type
+  // (`HistoryEventKindZodSchema`) took out 8 copies of the kind enum, ~5 KB
+  // packed. Name another embedded schema the same way next time:
+  // ChatModelTuningSchema (10 copies) and ChatMessageSchema (7) are the
   // largest repeats left in the `.d.ts` output.)
   '@bendyline/gezel': 2_100_000, //                    2.10 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
