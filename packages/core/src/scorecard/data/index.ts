@@ -77,6 +77,12 @@ import run_2026_10_25_m5max_bolt_five from './runs/2026-10-25-m5max-bolt-five.js
 import run_2026_10_27_windows_gemma4_12b_native_0_1_54 from './runs/2026-10-27-windows-gemma4-12b-native-0-1-54.json' with {
   type: 'json',
 };
+import run_2026_10_28_r9700_native_0_1_54 from './runs/2026-10-28-r9700-native-0-1-54.json' with {
+  type: 'json',
+};
+import run_2026_10_30_r9700_docblocks_activation from './runs/2026-10-30-r9700-docblocks-activation.json' with {
+  type: 'json',
+};
 
 /** Every recorded sweep. Merged (and ordered by recency) by ../index.ts. */
 export const RUN_SHARDS: ScorecardDataset[] = [
@@ -106,4 +112,6 @@ export const RUN_SHARDS: ScorecardDataset[] = [
   run_2026_10_21_m5max_ornith_observed_subset as unknown as ScorecardDataset,
   run_2026_10_25_m5max_bolt_five as unknown as ScorecardDataset,
   run_2026_10_27_windows_gemma4_12b_native_0_1_54 as unknown as ScorecardDataset,
+  run_2026_10_28_r9700_native_0_1_54 as unknown as ScorecardDataset,
+  run_2026_10_30_r9700_docblocks_activation as unknown as ScorecardDataset,
 ];
