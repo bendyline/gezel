@@ -1,0 +1,1269 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "2026-10-28-dgx-spark-class",
+      "provenance": {
+        "startedAt": "2026-10-28T19:13:42.417Z",
+        "device": {
+          "label": "DGX Spark Class",
+          "platform": "linux",
+          "arch": "arm64",
+          "memoryGb": 122,
+          "osRelease": "linux 6.17.0-1029-nvidia",
+          "cpuModel": "Arm Cortex-X925 + Cortex-A725 (20 cores)",
+          "gpuModel": "NVIDIA GB10"
+        },
+        "harnessCommit": "22fec991",
+        "gildeVersion": "0.3.1",
+        "count": 3,
+        "judgeModelId": "anthropic-cli/claude-sonnet-4-6",
+        "engineBuilds": {
+          "llama-cpp": "Gezel native 0.1.54 · CUDA 13.0 · 620d2225cc436ab0b001e3200e590e3b286ef9ab"
+        }
+      },
+      "scope": "suite",
+      "memoryCoverage": "incomplete",
+      "suites": [
+        "core",
+        "productivity",
+        "developer",
+        "complex-work"
+      ],
+      "scenariosBySuite": {
+        "core": [
+          "tictactoe",
+          "petshop",
+          "tankcombat",
+          "schema-migration",
+          "failing-tests-spec",
+          "symptom-debug",
+          "data-wrangle",
+          "incident-postmortem",
+          "ops-runbook-anomaly",
+          "plan-and-estimate",
+          "conflict-synthesis"
+        ],
+        "productivity": [
+          "constrained-comms",
+          "records-intake",
+          "plan-and-estimate",
+          "meeting-followup",
+          "craftbook-spreadsheet-model",
+          "conflict-synthesis",
+          "docblocks-theme-roundtrip",
+          "craftbook-powerpoint-deck",
+          "wikipedia-research-brief",
+          "craftbook-week-plan",
+          "craftbook-ab-test-readout",
+          "craftbook-annotated-bibliography",
+          "craftbook-research-to-document"
+        ],
+        "developer": [
+          "fix-squisq-bugs",
+          "dev-craftbook-routing",
+          "interface-contract",
+          "craftbook-code-review",
+          "craftbook-api-contract-review",
+          "craftbook-deep-security-review",
+          "large-pr-review",
+          "craftbook-codemod-sweep",
+          "craftbook-refactor-module",
+          "craftbook-bug-fix-tdd"
+        ],
+        "complex-work": [
+          "craftbook-find-vs-create",
+          "craftbook-edit-midtask",
+          "craftbook-invoice-run",
+          "craftbook-author-linear",
+          "craftbook-route-multi",
+          "craftbook-export-generalize",
+          "craftbook-author-params",
+          "craftbook-author-gate-script",
+          "craftbook-author-fanout"
+        ]
+      },
+      "note": "Qwen 3.8 27B Q4 and Gemma 4 12B Q4 on a DGX Spark (NVIDIA GB10, Linux) with native 0.1.54: llama.cpp on CUDA, with MTP speculative decoding on by default for both models. 258 trials, three per model and scenario, ran October 28–30, 2026; none was repeated or replaced, and every raw verdict is kept. Three failures are set aside as infrastructure: one Linux script-sandbox failure and two gates the model wrote itself, which the harness classed as setup failures. Evaluation homes had package scripts switched off, so bug-fix-tdd, codemod-sweep and refactor-module could not pass for either model; without those 18 trials the developer failure rate is 0/21 for Qwen and 7/21 for Gemma. docblocks-theme-roundtrip lacked its DocBlocks tools in all six trials, and the harness stopped two Qwen route-multi trials and one Qwen author-fanout trial while they were still progressing. Task speeds are engine-log medians over every attempt. Memory is not shown: the GB10 shares its memory with the GPU in a way the measurement cannot see. Artifact reviews are by Claude Sonnet 4.6, one column per rubric. The six A/B readout reviews used a mismatched rubric and seven reviews graded a starting or incidental page instead of the work, so those 13 are excluded."
+    }
+  ],
+  "results": [
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "quantization": "UD-Q4_K_XL",
+      "runId": "2026-10-28-dgx-spark-class",
+      "suiteId": "complex-work",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 16454,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "all-attempts",
+          "label": "Native 0.1.54 · CUDA · all attempts",
+          "trials": 27,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 27,
+            "median": 69.77,
+            "min": 60.37,
+            "max": 89.12
+          },
+          "prefillTokensPerSec": {
+            "samples": 27,
+            "median": 1488.31,
+            "min": 1105.6,
+            "max": 1656.97
+          },
+          "durationMs": {
+            "samples": 27,
+            "median": 565780,
+            "min": 70461,
+            "max": 2668454
+          },
+          "judgments": [
+            {
+              "meanScore": 4.933333333333334,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-invoice-run"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 4,
+          "notApplicableReviews": 20
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 115891
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 367343
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 235539
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 507083
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 312688
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 925956
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 630943
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1276411
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1446224
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 (27B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "UD-Q4_K_M",
+      "runId": "2026-10-28-dgx-spark-class",
+      "suiteId": "complex-work",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 13128,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "all-attempts",
+          "label": "Native 0.1.54 · CUDA · all attempts",
+          "trials": 27,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 27,
+            "median": 24.82,
+            "min": 20.76,
+            "max": 35.64
+          },
+          "prefillTokensPerSec": {
+            "samples": 27,
+            "median": 757.21,
+            "min": 633.61,
+            "max": 807.13
+          },
+          "durationMs": {
+            "samples": 27,
+            "median": 1186287,
+            "min": 74237,
+            "max": 6053271
+          },
+          "judgments": [
+            {
+              "meanScore": 6.466666666666666,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-invoice-run"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 3,
+          "notApplicableReviews": 21
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 79572
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1030622
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 550566
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2143982
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1043531
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1070318
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1564552
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 2,
+          "medianDurationMs": 3839482
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3537854
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "quantization": "UD-Q4_K_XL",
+      "runId": "2026-10-28-dgx-spark-class",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 9951,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "all-attempts",
+          "label": "Native 0.1.54 · CUDA · all attempts",
+          "trials": 33,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 33,
+            "median": 79.52,
+            "min": 63.35,
+            "max": 90.79
+          },
+          "prefillTokensPerSec": {
+            "samples": 33,
+            "median": 1610.34,
+            "min": 1169.66,
+            "max": 1697.62
+          },
+          "durationMs": {
+            "samples": 33,
+            "median": 69008,
+            "min": 30611,
+            "max": 322315
+          },
+          "judgments": [
+            {
+              "meanScore": 6.877777777777776,
+              "artifacts": 9,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "default-html-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 0,
+          "notApplicableReviews": 24
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 53840
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 317188
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 63043
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 158031
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 31079
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 161513
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 69008
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 165632
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 96977
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 30803
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 35635
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 (27B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "UD-Q4_K_M",
+      "runId": "2026-10-28-dgx-spark-class",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 6100,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "all-attempts",
+          "label": "Native 0.1.54 · CUDA · all attempts",
+          "trials": 33,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 33,
+            "median": 30.63,
+            "min": 20.73,
+            "max": 37.71
+          },
+          "prefillTokensPerSec": {
+            "samples": 33,
+            "median": 781.15,
+            "min": 733.93,
+            "max": 816.27
+          },
+          "durationMs": {
+            "samples": 33,
+            "median": 134187,
+            "min": 40762,
+            "max": 580126
+          },
+          "judgments": [
+            {
+              "meanScore": 8.233333333333333,
+              "artifacts": 9,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "default-html-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 0,
+          "notApplicableReviews": 24
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 114469
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 434147
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 226077
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 188808
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 40874
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 50592
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 117358
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 436645
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 111571
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 91472
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 288938
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "quantization": "UD-Q4_K_XL",
+      "runId": "2026-10-28-dgx-spark-class",
+      "suiteId": "developer",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 14429,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "all-attempts",
+          "label": "Native 0.1.54 · CUDA · all attempts",
+          "trials": 30,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 30,
+            "median": 78.3,
+            "min": 67.48,
+            "max": 89.52
+          },
+          "prefillTokensPerSec": {
+            "samples": 30,
+            "median": 1488.67,
+            "min": 1142.14,
+            "max": 1706.31
+          },
+          "durationMs": {
+            "samples": 30,
+            "median": 388666,
+            "min": 53828,
+            "max": 2385679
+          },
+          "judgments": [
+            {
+              "meanScore": 6.833333333333333,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-api-contract-review"
+            },
+            {
+              "meanScore": 5.233333333333333,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-bug-fix-tdd"
+            },
+            {
+              "meanScore": 7.666666666666667,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-code-review"
+            },
+            {
+              "meanScore": 3.766666666666667,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-codemod-sweep"
+            },
+            {
+              "meanScore": 7.366666666666667,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-deep-security-review"
+            },
+            {
+              "meanScore": 1.9666666666666666,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-refactor-module"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 0,
+          "notApplicableReviews": 12
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "fix-squisq-bugs",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 70766
+        },
+        {
+          "scenarioId": "dev-craftbook-routing",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 380584
+        },
+        {
+          "scenarioId": "interface-contract",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 54050
+        },
+        {
+          "scenarioId": "craftbook-code-review",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 118053
+        },
+        {
+          "scenarioId": "craftbook-api-contract-review",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 396748
+        },
+        {
+          "scenarioId": "craftbook-deep-security-review",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 288380
+        },
+        {
+          "scenarioId": "large-pr-review",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1440026
+        },
+        {
+          "scenarioId": "craftbook-codemod-sweep",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 988285
+        },
+        {
+          "scenarioId": "craftbook-refactor-module",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1270618
+        },
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2292663
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 (27B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "UD-Q4_K_M",
+      "runId": "2026-10-28-dgx-spark-class",
+      "suiteId": "developer",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 9011,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "all-attempts",
+          "label": "Native 0.1.54 · CUDA · all attempts",
+          "trials": 30,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 30,
+            "median": 28.59,
+            "min": 22.71,
+            "max": 35.05
+          },
+          "prefillTokensPerSec": {
+            "samples": 30,
+            "median": 769.675,
+            "min": 593.52,
+            "max": 810.47
+          },
+          "durationMs": {
+            "samples": 30,
+            "median": 764548,
+            "min": 77069,
+            "max": 5130638
+          },
+          "judgments": [
+            {
+              "meanScore": 8.833333333333334,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-api-contract-review"
+            },
+            {
+              "meanScore": 6.666666666666667,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-bug-fix-tdd"
+            },
+            {
+              "meanScore": 8.666666666666666,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-code-review"
+            },
+            {
+              "meanScore": 7.566666666666666,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-codemod-sweep"
+            },
+            {
+              "meanScore": 8.9,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-deep-security-review"
+            },
+            {
+              "meanScore": 6.8999999999999995,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-refactor-module"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 0,
+          "notApplicableReviews": 12
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "fix-squisq-bugs",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 112532
+        },
+        {
+          "scenarioId": "dev-craftbook-routing",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 107993
+        },
+        {
+          "scenarioId": "interface-contract",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 91927
+        },
+        {
+          "scenarioId": "craftbook-code-review",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 218912
+        },
+        {
+          "scenarioId": "craftbook-api-contract-review",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1155906
+        },
+        {
+          "scenarioId": "craftbook-deep-security-review",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 351526
+        },
+        {
+          "scenarioId": "large-pr-review",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1493301
+        },
+        {
+          "scenarioId": "craftbook-codemod-sweep",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3682312
+        },
+        {
+          "scenarioId": "craftbook-refactor-module",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3384815
+        },
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3894351
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "quantization": "UD-Q4_K_XL",
+      "runId": "2026-10-28-dgx-spark-class",
+      "suiteId": "productivity",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 12690,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "all-attempts",
+          "label": "Native 0.1.54 · CUDA · all attempts",
+          "trials": 39,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 39,
+            "median": 76.9,
+            "min": 64.29,
+            "max": 87.37
+          },
+          "prefillTokensPerSec": {
+            "samples": 39,
+            "median": 1578.28,
+            "min": 1456.91,
+            "max": 1798.06
+          },
+          "durationMs": {
+            "samples": 39,
+            "median": 182733,
+            "min": 29769,
+            "max": 3841001
+          },
+          "judgments": [
+            {
+              "meanScore": 7.7,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-annotated-bibliography"
+            },
+            {
+              "meanScore": 7.366666666666667,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-powerpoint-deck"
+            },
+            {
+              "meanScore": 8.033333333333333,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-research-to-document"
+            },
+            {
+              "meanScore": 8,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-spreadsheet-model"
+            },
+            {
+              "meanScore": 5.266666666666667,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-week-plan"
+            },
+            {
+              "meanScore": 4.766666666666667,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "docblocks-theme-roundtrip"
+            },
+            {
+              "meanScore": 8.200000000000001,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "meeting-followup"
+            },
+            {
+              "meanScore": 7.433333333333334,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "wikipedia-research-brief"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 3,
+          "notApplicableReviews": 12
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 29911
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 132446
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 30621
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 162044
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 429476
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 107443
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 313113
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 182733
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 252363
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 374544
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 685350
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 149547
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 361676
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 (27B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "UD-Q4_K_M",
+      "runId": "2026-10-28-dgx-spark-class",
+      "suiteId": "productivity",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 8959,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "all-attempts",
+          "label": "Native 0.1.54 · CUDA · all attempts",
+          "trials": 39,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 39,
+            "median": 29.38,
+            "min": 20.96,
+            "max": 35.65
+          },
+          "prefillTokensPerSec": {
+            "samples": 39,
+            "median": 790.15,
+            "min": 719,
+            "max": 816.82
+          },
+          "durationMs": {
+            "samples": 39,
+            "median": 365884,
+            "min": 60579,
+            "max": 5411493
+          },
+          "judgments": [
+            {
+              "meanScore": 8.8,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-annotated-bibliography"
+            },
+            {
+              "meanScore": 7.266666666666667,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-powerpoint-deck"
+            },
+            {
+              "meanScore": 8.7,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-research-to-document"
+            },
+            {
+              "meanScore": 8.5,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-spreadsheet-model"
+            },
+            {
+              "meanScore": 8.766666666666667,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "craftbook-week-plan"
+            },
+            {
+              "meanScore": 8.566666666666666,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "docblocks-theme-roundtrip"
+            },
+            {
+              "meanScore": 8.700000000000001,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "meeting-followup"
+            },
+            {
+              "meanScore": 8.433333333333334,
+              "artifacts": 3,
+              "judgeModel": "anthropic-cli/claude-sonnet-4-6",
+              "rubricId": "wikipedia-research-brief"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 3,
+          "notApplicableReviews": 12
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 60595
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 95649
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 90517
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 146404
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 509478
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 350771
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 224174
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 503649
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 468202
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2478876
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1109274
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 432769
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 455325
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "counts": {
+    "trials": 258,
+    "passes": 196,
+    "taskFailures": 59,
+    "rawNonModelFailures": 3,
+    "developerToolPhaseFailures": 18,
+    "judged": 121,
+    "notJudged": 137,
+    "tableJudged": 108,
+    "tableNoArtifact": 0,
+    "tableExcludedReviews": 13,
+    "tableNotApplicable": 137
+  },
+  "developerSuite": {
+    "qwen3.8-27b-q4": {
+      "failureRate": "9/30",
+      "failureRateExcludingToolPhase": "0/21"
+    },
+    "gemma4-12b-q4": {
+      "failureRate": "16/30",
+      "failureRateExcludingToolPhase": "7/21"
+    }
+  },
+  "modelScenarioCells": 86,
+  "repetitions": 3,
+  "exactRepetitions": true,
+  "originalEvidenceModified": false,
+  "newInferenceCalls": 0,
+  "newJudgeCalls": 0,
+  "rawClassificationCorrections": 0,
+  "ingestedCellsMatchEvidence": true,
+  "judgeLedgerMatchesTrialReports": true,
+  "evidenceFilesVerified": 948,
+  "schemas": [
+    "ScorecardDatasetSchema v1"
+  ]
+}
