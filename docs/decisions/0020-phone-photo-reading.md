@@ -39,7 +39,11 @@ A phone reads each photo in tiers, and the model gets everything that ran:
    both run on one serial queue under a 30-second bound, because Vision's
    calls block and take no deadline: a stop or the bound cancels the requests
    and answers without waiting. Labels that finished still count; with none,
-   the photo is reported unread.
+   the photo is reported unread. When it is the text recognizer that ran out
+   of time, the reading is partial and its digest says so, because a missing
+   transcription would otherwise read as a photo with no text. While the queue
+   is still on one photo past the bound, new reads fail at once instead of
+   waiting behind a call that may never return.
 2. **A description from the OS describer** where it is ready: Nano on
    Android, Foundation Models on iOS 27. Fetching Nano's image model is a
    Settings action (Settings → AI → Photos), never something a chat turn starts.

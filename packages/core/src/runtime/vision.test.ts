@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderDigestBody, spliceIntoText } from '../recognition/digest.js';
 import {
+  PORTABLE_TEXT_TIMED_OUT_REASON,
   imageFormat,
   imageMimeType,
   portableImageDigest,
@@ -84,5 +85,48 @@ describe('portable vision helpers', () => {
     ]);
     expect(spliced).toContain('![Photo](attached-image-1)');
     expect(spliced).toContain('<image-digest ref="attached-image-1">');
+  });
+
+  it('tells the model when text recognition gave up, even beside a description', () => {
+    const recognition = portableImageRecognition({
+      bytes: JPEG,
+      sha256: SHA,
+      durationMs: 30_000,
+      at: '2026-10-30T10:00:00.000Z',
+      reading: {
+        description: 'A red sign beside a trail.',
+        labels: ['sign'],
+        textTimedOut: true,
+        models: ['apple-vision-classify', 'apple-foundation-models'],
+      },
+    });
+    expect(recognition).toMatchObject({
+      status: 'partial',
+      failureReason: PORTABLE_TEXT_TIMED_OUT_REASON,
+    });
+    expect(recognition.ocrText).toBeUndefined();
+    const digest = renderDigestBody(recognition);
+    expect(digest).toContain('A red sign beside a trail.');
+    expect(digest.endsWith(`Note: ${PORTABLE_TEXT_TIMED_OUT_REASON}.`)).toBe(true);
+  });
+
+  it('notes why a reading is partial only when a reason was recorded', () => {
+    const base = portableImageRecognition({
+      bytes: JPEG,
+      sha256: SHA,
+      durationMs: 5,
+      at: '2026-10-30T10:00:00.000Z',
+      reading: { labels: ['dog'], models: ['apple-vision'] },
+    });
+    expect(base.status).toBe('partial');
+    expect(renderDigestBody(base)).not.toContain('Note:');
+    // The desktop's cut-off transcription uses the same contract.
+    const cutOff = {
+      ...base,
+      failureReason: 'transcription incomplete — stopped at the 60s ceiling',
+    };
+    expect(renderDigestBody(cutOff)).toContain(
+      'Note: transcription incomplete — stopped at the 60s ceiling.',
+    );
   });
 });

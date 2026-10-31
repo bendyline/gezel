@@ -28,6 +28,8 @@ export interface NativeVisionPlugin {
     /** Already cut at what this platform's classifier calls trustworthy. */
     labels?: Array<{ label: string; confidence: number }>;
     text?: string;
+    /** Text recognition ran out of time (iOS), so an empty `text` is not "no text". */
+    textTimedOut?: boolean;
     description?: string;
     describer: SystemDescriberState | 'failed';
     width?: number;
@@ -104,6 +106,7 @@ export function createNativeVision(
           ),
         ].slice(0, MAX_LABELS),
         ...(result.text?.trim() ? { text: result.text.trim() } : {}),
+        ...(result.textTimedOut ? { textTimedOut: true } : {}),
         ...(result.description?.trim() ? { description: result.description.trim() } : {}),
         ...(result.width ? { width: result.width } : {}),
         ...(result.height ? { height: result.height } : {}),

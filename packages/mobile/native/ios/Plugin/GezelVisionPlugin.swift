@@ -34,8 +34,9 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
     static let recognizeTimeout: TimeInterval = 30
     static let timedOutMessage = "Reading this photo took too long"
     /// Every read runs here, off Swift's cooperative pool, so a recognizer
-    /// that never returns strands one thread; reads queued behind it time out.
+    /// that never returns strands one thread rather than a shared one.
     private static let recognizer = DispatchQueue(label: "com.bendyline.gezel.vision", qos: .userInitiated)
+    private static let recognizerWatch = RecognizerWatch()
     private let lock = NSLock()
     private var activeId: String?
     private var activeTask: Task<Void, Never>?
@@ -60,6 +61,30 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
     struct Reading {
         let labels: [[String: Any]]
         let text: String
+        /// Text recognition did not finish, so an empty `text` says nothing about the photo.
+        let textTimedOut: Bool
+    }
+
+    /// When the recognizer queue started the photo it is still on. Reads go
+    /// one at a time, so a queue that has been on one photo for longer than a
+    /// read may wait is stuck, and a new read would only time out behind it.
+    final class RecognizerWatch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var since: DispatchTime?
+
+        func begin() {
+            lock.lock(); defer { lock.unlock() }
+            since = .now()
+        }
+        func end() {
+            lock.lock(); defer { lock.unlock() }
+            since = nil
+        }
+        func stuck(after limit: TimeInterval) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard let since else { return false }
+            return DispatchTime.now() >= since + limit
+        }
     }
 
     /// Settles one read from whichever comes first: the recognizers finishing,
@@ -104,7 +129,7 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
             let labels = self.labels
             lock.unlock()
             if let labels {
-                settle(.success(Reading(labels: labels, text: "")))
+                settle(.success(Reading(labels: labels, text: "", textTimedOut: true)))
             } else {
                 settle(.failure(TimedOut()))
             }
@@ -148,6 +173,10 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
         lock.lock()
         if activeId != nil || backgrounded {
             lock.unlock(); call.reject("Photo reading is busy or Gezel is in the background", "busy"); return
+        }
+        // Fail at once rather than after a full wait behind a call that may never return.
+        if Self.recognizerWatch.stuck(after: Self.recognizeTimeout) {
+            lock.unlock(); call.reject("Photo reading is still stuck on an earlier photo", "busy"); return
         }
         activeId = id
         activeTask = Task.detached(priority: .userInitiated) { [weak self] in
@@ -198,6 +227,7 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
         if !reading.text.isEmpty { models.append("apple-vision-text") }
         result["labels"] = reading.labels
         result["text"] = reading.text
+        if reading.textTimedOut { result["textTimedOut"] = true }
         var describer = (describerStatus()["state"] as? String) ?? "unavailable"
         if describe && describer == "ready" {
             do {
@@ -256,6 +286,8 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
         Self.recognizer.async {
             // A read that timed out while queued behind a stuck one has nothing left to do.
             guard !gate.settled else { return }
+            Self.recognizerWatch.begin()
+            defer { Self.recognizerWatch.end() }
             let handler = VNImageRequestHandler(cgImage: image, options: [:])
             let classified = (try? handler.perform([classify])) != nil
             let found = classified ? Self.trustedLabels(classify) : []
@@ -267,7 +299,7 @@ public final class GezelVisionPlugin: CAPPlugin, CAPBridgedPlugin {
                 gate.settle(.failure(error))
                 return
             }
-            gate.settle(.success(Reading(labels: found, text: Self.recognizedText(text))))
+            gate.settle(.success(Reading(labels: found, text: Self.recognizedText(text), textTimedOut: false)))
         }
         let deadline = DispatchWorkItem {
             stop()

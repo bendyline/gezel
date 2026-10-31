@@ -101,6 +101,9 @@ export function renderDigestBody(
   }
   if (recognition.status === 'static-only') {
     lines.push('', 'No description available — only the file details above are known.');
+  } else if (recognition.status === 'partial' && recognition.failureReason) {
+    // A cut-off reading otherwise reads as complete, and a missing part as absent.
+    lines.push('', `Note: ${defuse(recognition.failureReason)}.`);
   } else if (recognition.status === 'failed') {
     lines.push(
       '',

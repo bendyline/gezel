@@ -4,10 +4,11 @@ import { type PortableInference, PortableProductService } from './product-servic
 import { portableFixture } from './test-files.js';
 import {
   PORTABLE_LABELS_ONLY_WARNINGS,
+  PORTABLE_TEXT_TIMED_OUT_WARNING,
   PORTABLE_UNREAD_IMAGE_WARNING,
   PORTABLE_UNSEEN_IMAGE_WARNING,
 } from './turn-attachments.js';
-import type { PortableVision } from './vision.js';
+import { PORTABLE_TEXT_TIMED_OUT_REASON, type PortableVision } from './vision.js';
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0x00, 0x10]);
 
@@ -198,6 +199,30 @@ describe('chat attachments on the portable host', () => {
     const user = await f.userMessage();
     expect(user?.recognizedImages?.[0]?.status).toBe('partial');
     expect(user?.warnings).toEqual([PORTABLE_LABELS_ONLY_WARNINGS['not-installed']]);
+  });
+
+  it('says when text recognition ran out of time instead of implying the photo has none', async () => {
+    const read = vi.fn<PortableVision['read']>(async () => ({
+      labels: ['outdoor', 'sky'],
+      textTimedOut: true,
+      models: ['apple-vision-classify'],
+      describer: 'unavailable' as const,
+    }));
+    const f = await fixture({ vision: { read } });
+    await f.attach('photo.jpg', JPEG);
+
+    expect(await f.send('What does the sign say?\n\n![Photo](message_files/photo.jpg)')).toBe(200);
+    await f.settled(1);
+
+    const prompt = f.sentText();
+    expect(prompt).toContain('Scene labels: outdoor, sky');
+    expect(prompt).toContain(`Note: ${PORTABLE_TEXT_TIMED_OUT_REASON}.`);
+    const user = await f.userMessage();
+    expect(user?.recognizedImages?.[0]?.status).toBe('partial');
+    expect(user?.warnings).toEqual([
+      PORTABLE_LABELS_ONLY_WARNINGS.unavailable,
+      PORTABLE_TEXT_TIMED_OUT_WARNING,
+    ]);
   });
 
   it('falls back to the cannot-see note when the recognizers fail', async () => {
