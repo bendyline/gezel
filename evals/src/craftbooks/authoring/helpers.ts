@@ -9,7 +9,7 @@ import {
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { postSniffFeedback } from '../../sniff-feedback.ts';
 import type { EvalContext, SuccessCheckResult } from '../../types.ts';
-import { findProjectIdByName } from '../shared.ts';
+import { findProjectIdByName, taskProgressFingerprint } from '../shared.ts';
 
 /**
  * Shared plumbing for the craftbook AUTHORING scenarios (the format A/B
@@ -389,6 +389,21 @@ export interface AuthoringPollArgs {
    * run restarts the stall clock.
    */
   milestones?: number;
+  /** A counted unit has started and not finished; see `recordSniff`. */
+  unitsUnderway?: boolean;
+  /**
+   * The graded task's live position (`runningTaskProgress`), passed while
+   * that task is still running. The repair ladder then counts a nudge as
+   * failed only when the task did not move after it, instead of counting each
+   * write to `repairPath`.
+   *
+   * Without it, route-multi charged the recipe's own steps as failed repairs:
+   * four gezels each wrote the press release in their step, every write read
+   * as a completed post-nudge mutation with the "not finished" failure
+   * unchanged, and the ladder ended two qwen3.8-27b trials while the task was
+   * still walking its steps, one 80 seconds into the last (2026-10-29).
+   */
+  taskProgress?: string;
   /** Virtual surface named in the feedback message (not a real file). */
   repairPath: string;
   /**
@@ -425,6 +440,7 @@ export async function finishAuthoringPoll(
       ? {}
       : { deliverableMissing: args.deliverableMissing }),
     ...(args.milestones !== undefined ? { milestones: args.milestones } : {}),
+    ...(args.unitsUnderway ? { unitsUnderway: true } : {}),
     ...(args.failures[0] !== undefined ? { failReason: args.failures[0] } : {}),
   });
   // `bytes` belongs in the line even though the craftbook variant is what
@@ -455,6 +471,7 @@ export async function finishAuthoringPoll(
       targetGezelId: args.targetGezelId,
       expectedDeliverable: null,
       repairDirective: args.repairDirective,
+      ...(args.taskProgress !== undefined ? { progressSourceText: args.taskProgress } : {}),
     },
   );
   return { done: false };
@@ -499,6 +516,15 @@ export function unfinishedTaskFailure(args: {
 }): string {
   const source = args.source ? ` (${args.source})` : '';
   return `task ${args.ref}${source} has status "${args.status}" — advance THIS task to a terminal step with advance_task_step/set_task_status. Do NOT invoke the recipe again or create a second task: a new task starts the work over and does not count.`;
+}
+
+/**
+ * The graded task's live position while it is unfinished — the authoring
+ * scenarios' `taskProgress`. A finished task has nothing left to walk, so its
+ * repairs are judged on the deliverable again.
+ */
+export function runningTaskProgress(task: Task | null | undefined): string | undefined {
+  return task && task.status !== 'complete' ? taskProgressFingerprint([task]) : undefined;
 }
 
 /**

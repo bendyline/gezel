@@ -78,7 +78,7 @@ describe('SourceWriteGuard — binary-container paths refuse text writes', () =>
     );
     expect(verdict?.kind).toBe('reject');
     const error = verdict?.kind === 'reject' ? verdict.error : '';
-    expect(error).toContain('binary container');
+    expect(error).toContain('is a .pptx file, which is binary');
     expect(error).toContain('copy_artifact_to_workspace');
     expect(error).toContain('deliverables/d-day.pptx');
   });

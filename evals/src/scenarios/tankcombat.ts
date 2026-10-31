@@ -114,6 +114,7 @@ function tankCombatAssertions(): RuntimeAssertion[] {
 
 export const tankCombatScenario: EvalScenario = {
   id: 'tankcombat',
+  htmlDeliverable: 'index.html',
   description:
     'Meester creates a project, recruits a developer, and ships a playable top-down tank combat arcade game in a single HTML file.',
   prompt: `Create a new project for this work (e.g. \`Tank Combat Arcade\`) and build a top-down tank combat arcade game there. Write the entire game as a single self-contained file at \`workspace/index.html\` IN THAT NEW PROJECT (HTML + inline \`<style>\` + inline \`<script>\`, no external assets, no build step). The player controls a tank with arrow keys (or WASD), fires projectiles with space, and fights at least one enemy tank. Track a score on screen. Make keyboard input observable in the browser: expose \`window.gameState = gameState\` or update a \`document.body.dataset.inputTick\` value inside key handlers so automated runtime checks can see input activity. The first concrete deliverable is the index.html file inside the new project — write it now. ${TANK_COMBAT_HTML_REPAIR_DIRECTIVE}`,

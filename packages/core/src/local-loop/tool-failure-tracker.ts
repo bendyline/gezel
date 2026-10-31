@@ -53,6 +53,23 @@ const GROUNDING_REQUIRED_ABORT_AT = 3;
  */
 const ARTIFACT_COLLISION_ABORT_AT = 3;
 
+/**
+ * The write guard refuses a write far shorter than the file it would replace.
+ * Gemma 4 12B sent the same 676-byte fragment for a 5,921-byte page five times
+ * and heard "re-emitting the whole file keeps corrupting it" — but nothing had
+ * been written, and it believed it was sending the whole file (petshop,
+ * 2026-10-30). The refusal is explained from the first one, and the turn stops
+ * at the third byte-identical refusal instead of the fifth.
+ */
+const FRAGMENT_REPEAT_ABORT_AT = 3;
+
+/** Why a source write failed, which picks the next corrective. */
+export type SourceWriteFailureKind =
+  | 'truncated'
+  | 'not-persisted'
+  | 'grounding-required'
+  | 'fragment';
+
 export interface ToolFailureTrackerOpts {
   softWarningAt?: number;
   hardAbortAt?: number;
@@ -91,7 +108,7 @@ export interface ToolFailureTrackerOpts {
 export interface ToolFailureLoop {
   tool: string;
   count: number;
-  sourceFailureKind?: 'truncated' | 'not-persisted' | 'grounding-required';
+  sourceFailureKind?: SourceWriteFailureKind;
   transportFailure?: boolean;
   missingPath?: boolean;
 }
@@ -104,7 +121,7 @@ export interface ToolFailureResult {
   /** Current consecutive-fail count for this tool (0 when result was a success). */
   count: number;
   /** Source-write failure class used to choose the next-turn corrective. */
-  sourceFailureKind?: 'truncated' | 'not-persisted' | 'grounding-required';
+  sourceFailureKind?: SourceWriteFailureKind;
   /** The shared internal MCP/service transport failed, not this tool's schema. */
   transportFailure?: boolean;
   /** The failing calls were reads of a path that does not exist. */
@@ -113,6 +130,8 @@ export interface ToolFailureResult {
 
 export class ToolFailureTracker {
   private readonly failures = new Map<string, number>();
+  private readonly lastFailureOutput = new Map<string, string>();
+  private readonly identicalFailures = new Map<string, number>();
   private transportFailures = 0;
   private readonly softWarningAt: number;
   private readonly hardAbortAt: number;
@@ -139,6 +158,8 @@ export class ToolFailureTracker {
     if (!isFailureOutput(output)) {
       // Success — reset this tool's counter.
       this.failures.set(toolName, 0);
+      this.lastFailureOutput.delete(toolName);
+      this.identicalFailures.delete(toolName);
       // Any successful MCP call proves the shared backchannel is reachable.
       this.transportFailures = 0;
       return { output, shouldAbort: false, count: 0 };
@@ -158,6 +179,12 @@ export class ToolFailureTracker {
     }
     const fails = (this.failures.get(toolName) ?? 0) + 1;
     this.failures.set(toolName, fails);
+    const identical =
+      this.lastFailureOutput.get(toolName) === output
+        ? (this.identicalFailures.get(toolName) ?? 1) + 1
+        : 1;
+    this.identicalFailures.set(toolName, identical);
+    this.lastFailureOutput.set(toolName, output);
     // A tool may label a stale reference as non-retryable while still
     // offering a different recovery tool (for example list_projects or
     // start_project). Give the model one chance to follow that route, but
@@ -219,15 +246,28 @@ export class ToolFailureTracker {
       }
       return { output, shouldAbort: false, count: fails, missingPath: true };
     }
-    const sourceFailureKind = isSourceEditFailureTool(toolName)
+    const sourceFailureKind: SourceWriteFailureKind | undefined = isSourceEditFailureTool(toolName)
       ? isGroundingRequiredWriteFailure(output)
         ? 'grounding-required'
         : isTruncatedSourceWriteFailure(output)
           ? 'truncated'
           : isAtomicallyRejectedSourceWriteFailure(output)
             ? 'not-persisted'
-            : undefined
+            : isFragmentWriteRefusal(output)
+              ? 'fragment'
+              : undefined
       : undefined;
+    if (sourceFailureKind === 'fragment') {
+      if (identical >= FRAGMENT_REPEAT_ABORT_AT || fails >= this.hardAbortAt) {
+        return { output, shouldAbort: true, count: fails, sourceFailureKind };
+      }
+      return {
+        output: `${output}\n\n[runtime] ${fragmentCorrective(this.surgicalEditsAvailable)}`,
+        shouldAbort: false,
+        count: fails,
+        sourceFailureKind,
+      };
+    }
     if (sourceFailureKind === 'grounding-required' && fails >= GROUNDING_REQUIRED_ABORT_AT) {
       return { output, shouldAbort: true, count: fails, sourceFailureKind };
     }
@@ -287,7 +327,7 @@ export class ToolFailureTracker {
     /** See {@link ToolFailureTrackerOpts.delegationAvailable}. */
     delegationAvailable?: boolean;
     /** See {@link ToolFailureResult.sourceFailureKind}. */
-    sourceFailureKind?: 'truncated' | 'not-persisted' | 'grounding-required';
+    sourceFailureKind?: SourceWriteFailureKind;
     transportFailure?: boolean;
     /** See {@link ToolFailureResult.missingPath}. */
     missingPath?: boolean;
@@ -301,6 +341,9 @@ export class ToolFailureTracker {
       return `[${opts.providerLabel}] aborting — Gezel's internal tool connection failed ${opts.count} times in this turn. The calls were not rejected by their schemas; the local service backchannel was unavailable, so changing tools or arguments cannot recover this turn.`;
     }
     if (isSourceEditFailureTool(opts.toolName)) {
+      if (opts.sourceFailureKind === 'fragment') {
+        return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` was refused ${opts.count} times. ${fragmentCorrective(opts.surgicalEditsAvailable ?? false)}`;
+      }
       if (opts.sourceFailureKind === 'grounding-required') {
         return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` was blocked ${opts.count} times because no source evidence had been collected. STOP writing. In the next continuation, call the research or search tool named in the latest refusal first, then write from its returned evidence.`;
       }
@@ -336,7 +379,7 @@ export class ToolFailureTracker {
     toolName: string;
     count: number;
     delegationAvailable?: boolean;
-    sourceFailureKind?: 'truncated' | 'not-persisted' | 'grounding-required';
+    sourceFailureKind?: SourceWriteFailureKind;
     transportFailure?: boolean;
     missingPath?: boolean;
   }): string {
@@ -347,6 +390,9 @@ export class ToolFailureTracker {
       return `Gezel lost its internal tool connection, so the turn was stopped after ${opts.count} failed calls. Your chat and completed tool history were preserved; retry after the service reconnects.`;
     }
     if (isSourceEditFailureTool(opts.toolName)) {
+      if (opts.sourceFailureKind === 'fragment') {
+        return 'The model kept sending part of a file in place of the whole file, so the turn was stopped. Nothing was overwritten. Try sending your message again.';
+      }
       if (opts.sourceFailureKind === 'grounding-required') {
         return `The model kept trying to save factual text before researching, so the turn was stopped after ${opts.count} blocked writes. The next continuation will be directed to collect source evidence first.`;
       }
@@ -398,7 +444,7 @@ export class ToolFailureTracker {
     count: number;
     surgicalEditsAvailable?: boolean;
     delegationAvailable?: boolean;
-    sourceFailureKind?: 'truncated' | 'not-persisted' | 'grounding-required';
+    sourceFailureKind?: SourceWriteFailureKind;
     transportFailure?: boolean;
     missingPath?: boolean;
     artifactWriterAvailable?: boolean;
@@ -494,6 +540,18 @@ function isTruncatedSourceWriteFailure(output: string): boolean {
   return /content looks truncated|final HTML tag is incomplete|<script>`? tag is opened but not closed|starts as full HTML but ends before|complete file contents in one tool call/i.test(
     output,
   );
+}
+
+/** The write guard's refusal of a write far shorter than the file it replaces. */
+function isFragmentWriteRefusal(output: string): boolean {
+  return /much shorter source file/i.test(output);
+}
+
+function fragmentCorrective(surgicalEditsAvailable: boolean): string {
+  const edit = surgicalEditsAvailable
+    ? ' To change part of it, edit only those lines with `replace_lines({ path, startLine, endLine, content })`, reading the range off the `read_file` gutter.'
+    : '';
+  return `Nothing was written, and the file on disk is unchanged: what you sent is much shorter than the file it would replace, so it reads as a fragment, not the whole file.${edit} To replace the file, read it, then send every line of the new version. Sending the same content again will be refused again.`;
 }
 
 function isAtomicallyRejectedSourceWriteFailure(output: string): boolean {

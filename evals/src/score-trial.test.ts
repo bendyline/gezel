@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { score } from './bin/score-trial.ts';
+import { score, sessionBehaviorRedFlags } from './bin/score-trial.ts';
 
 let tempRoot: string;
 
@@ -960,5 +960,33 @@ describe('score-trial failReason with embedded quotes', () => {
     await writeFile(join(tempRoot, 'history.jsonl'), '');
 
     expect(score(tempRoot).sniff.latest?.failReason).toBe('missing "Timeline" header');
+  });
+});
+
+describe('prose-as-deliverable red flag', () => {
+  const body = 'Checked every record against the brief. '.repeat(30);
+  const reply = (content: string, toolCalls: Array<{ name: string }> = []) => [
+    { role: 'assistant', at: '2026-10-29T00:00:00Z', content, toolCalls },
+  ];
+  const flagged = (messages: ReturnType<typeof reply>) =>
+    sessionBehaviorRedFlags('reza', messages).some((f) => f.pattern === 'prose-as-deliverable');
+
+  it('flags a titled multi-section report sent as chat', () => {
+    expect(flagged(reply(`# Store health review\n\n## Findings\n${body}\n## Next\n${body}`))).toBe(
+      true,
+    );
+  });
+
+  it('does not flag a status report with sections but no title', () => {
+    expect(
+      flagged(reply(`Here is where things stand.\n\n## What I built\n${body}\n## Next\n${body}`)),
+    ).toBe(false);
+  });
+
+  it('does not flag a report written beside a saved recipe or a started task', () => {
+    const report = `# Supplier intake\n\n## Q1\n${body}\n## Q2\n${body}`;
+    expect(flagged(reply(report, [{ name: 'craftbook_write' }]))).toBe(false);
+    expect(flagged(reply(report, [{ name: 'mcp__docblocks__save_artifact' }]))).toBe(false);
+    expect(flagged(reply(report, [{ name: 'read_file' }]))).toBe(true);
   });
 });

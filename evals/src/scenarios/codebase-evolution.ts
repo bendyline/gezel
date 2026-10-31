@@ -988,6 +988,7 @@ export function feedbackPathForPhase(phase: CodebasePhase, check: PhaseCheck): s
 
 export const codebaseEvolutionScenario: EvalScenario = {
   id: 'codebase-evolution',
+  htmlDeliverable: 'index.html',
   requires: ['chromium'],
   description:
     'Phased codebase iteration: build a monolithic Launch Board app, add priority filtering, add due-date summaries, then refactor the inline JS into src/state.js, src/render.js, and src/app.js without losing features.',

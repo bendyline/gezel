@@ -14,6 +14,7 @@ import {
   noDeliverableWritten,
   parseJsonValue,
   progressBytes,
+  runningTaskProgress,
   sendWorkerKickoff,
   unfinishedTaskFailure,
 } from './helpers.ts';
@@ -114,6 +115,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
   });
   let gradeProjectId = projectId;
   let taskSteps: number | undefined;
+  let taskProgress: string | undefined;
   let scriptSource: string | undefined;
   if (!book) {
     failures.push(
@@ -145,6 +147,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     } else {
       gradeProjectId = found.projectId;
       taskSteps = completedTaskSteps(found.task);
+      taskProgress = runningTaskProgress(found.task);
       if (found.task.status !== 'complete') {
         failures.push(
           unfinishedTaskFailure({
@@ -169,6 +172,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     failures,
     bytes: progressBytes(reportText, scriptSource, book ? book.craftbook.id : null),
     milestones: taskSteps,
+    taskProgress,
     // `scriptSource` is the gate script embedded in the authored book, not
     // the workspace deliverable this scenario waits on.
     deliverableMissing: noDeliverableWritten(reportText),

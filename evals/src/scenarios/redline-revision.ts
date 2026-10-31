@@ -424,6 +424,7 @@ const REVISION_GRACE_MS = 3 * 60_000;
 
 export const redlineRevisionScenario: EvalScenario = {
   id: 'redline-revision',
+  htmlDeliverable: 'tracker.html',
   description:
     'Staged requirement changes: build a single-file habit tracker, then absorb two mid-flight revisions (dark theme; remove the Add button → Enter key + counter) without regressing the kickoff\'s persistent "no external network requests" constraint.',
   prompt: [

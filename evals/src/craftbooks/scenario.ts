@@ -29,7 +29,12 @@ import {
   evaluateCraftbookGateChecks,
   isEvalOnlyCheck,
 } from './gates.ts';
-import { findProjectIdByName as findProjectId, workspaceFromClient } from './shared.ts';
+import {
+  findProjectIdByName as findProjectId,
+  stepActivations,
+  taskProgressFingerprint,
+  workspaceFromClient,
+} from './shared.ts';
 import type {
   CraftbookEvalDeliverable,
   CraftbookEvalGateCheck,
@@ -1160,33 +1165,6 @@ function taskAssigneeGezelId(task: Task): string | undefined {
 }
 
 /**
- * A fingerprint of how far the craftbook task has WALKED, distinct from the
- * rendered `task-graph.md` view the grader reads.
- *
- * The rendered view lists the step definitions, which never change, so it is
- * byte-identical from the first poll to the last even while the task advances
- * through five steps. Anything that needs to ask "did this move?" — the
- * escalation ladder above all — has to read the live position instead: the
- * task's status, its active step, and each step's attempt count.
- */
-function taskProgressFingerprint(tasks: Task[]): string {
-  return tasks
-    .map((task) => {
-      const steps = task.craftbook.steps
-        .map((step) => `${step.id}:${stepActivations(step)}`)
-        .join(',');
-      return `${task.ref}|${task.status}|${task.activeStepId ?? '-'}|${steps}`;
-    })
-    .sort()
-    .join('\n');
-}
-
-function stepActivations(step: object): number {
-  const count = (step as { attemptCount?: unknown }).attemptCount;
-  return typeof count === 'number' && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
-}
-
-/**
  * Activations of one step that still count as progress. A loop that keeps
  * re-entering the same steps stops earning milestones here, so an unbounded
  * `evaluate → build` cycle holds the plateau key and the retry loop can still
@@ -2194,6 +2172,7 @@ export function craftbookScenarioFromSpec(bookSpec: CraftbookEvalSpec): EvalScen
     ...(spec.progressTimeoutMs !== undefined ? { progressTimeoutMs: spec.progressTimeoutMs } : {}),
     ...(judge ? { judge } : {}),
     ...(spec.mocks && spec.mocks.length > 0 ? { mockServices: spec.mocks } : {}),
+    ...(spec.needsPackageScripts ? { packageScripts: true } : {}),
     // Books whose deterministic success needs raster files must declare an
     // image model, exactly like petshop/tool-routing-image. This is what
     // arms the runner's whole image path — resolve/require sd-server, warm

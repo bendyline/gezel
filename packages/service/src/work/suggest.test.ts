@@ -1,4 +1,8 @@
-import type { CraftbookSuggestion, SuggestedWorkItem } from '@bendyline/gezel';
+import {
+  type CraftbookSuggestion,
+  type SuggestedWorkItem,
+  securityPolicyForLevel,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
@@ -337,6 +341,43 @@ describe('suggestWork', () => {
     });
     expect(result.options.map((o) => o.id)).toEqual(['craftbook:bug-fix-tdd', 'task-here']);
     expect(result.guidance[0]).toMatchObject({ kind: 'specialist', tool: 'delegate_developer' });
+  });
+
+  it('says a book that runs project commands needs package scripts while they are off', async () => {
+    const shelf = (async () => ({
+      items: [
+        {
+          manifest: {
+            kind: 'craftbook-template',
+            id: 'bug-fix-tdd',
+            category: 'code-quality',
+            commands: [{ scope: 'script', name: 'test' }],
+          },
+        },
+      ],
+      missingToolsets: {},
+      establishedCodebase: false,
+    })) as unknown as NonNullable<SuggestWorkInput['listOffer']>;
+    const run = (level: 'lockdown' | 'free') =>
+      suggestWork(
+        deps({
+          store: {
+            readConfig: async () => ({ securityPolicy: securityPolicyForLevel(level) }),
+          } as unknown as Store,
+        }),
+        {
+          request: cartBug,
+          projectId: 'shop',
+          listOffer: shelf,
+          rankCraftbooks: books({ id: 'bug-fix-tdd', score: 0.52, semantic: 0.58, lexical: 0.2 }),
+        },
+      );
+    const book = (result: Awaited<ReturnType<typeof run>>) =>
+      result.options.find((o) => o.id === 'craftbook:bug-fix-tdd');
+    expect(book(await run('lockdown'))).toMatchObject({
+      setupRequired: ['the "Run package scripts" setting'],
+    });
+    expect(book(await run('free'))).not.toHaveProperty('setupRequired');
   });
 
   // qwen3.8-27b work-routing check, 2026-10-22: the request named an existing

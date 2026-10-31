@@ -130,6 +130,29 @@ export interface RankOptions {
   coldEmbedderBudgetMs?: number;
   /** Test seam for the embedder's readiness. */
   embedderStatus?: () => EmbeddingPipelineStatus;
+  /**
+   * Also score each sentence of a multi-sentence query on its own, and rank a
+   * book by whichever passage matches it best. A person's message puts its
+   * subject and its procedure in different sentences, and one embedding of
+   * the whole paragraph is about the subject: "our CSV export repeats rows
+   * … I want a test that fails on the current code first, and only then the
+   * fix" put spreadsheet books on top and bug-fix-tdd 39th, while that last
+   * sentence alone ranks it first (dev-craftbook-routing, 2026-10-30). The
+   * routing floors were measured on single sentences, so this also scores
+   * closer to how they were set. Words alone still rank the whole query.
+   */
+  passages?: boolean;
+}
+
+/** Fewer words than this carry too little to rank a book on ("Thanks, that works."). */
+const MIN_PASSAGE_WORDS = 6;
+
+function queryPassages(query: string): string[] {
+  const sentences = query
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.split(/\s+/).length >= MIN_PASSAGE_WORDS);
+  return sentences.length > 1 ? [query, ...sentences] : [query];
 }
 
 /**
@@ -144,63 +167,76 @@ export async function rankCraftbookSuggestions(
 ): Promise<CraftbookSuggestion[]> {
   const topK = opts.topK ?? DEFAULT_TOP_K;
   if (candidates.length === 0 || !query.trim()) return [];
+  const passages = opts.passages ? queryPassages(query) : [query];
 
-  const lexical = new Map<string, number>();
+  const lexical = new Map<string, number[]>();
   for (const c of candidates) {
+    const book = { id: c.id, name: c.name, tags: c.tags, description: c.description };
     lexical.set(
       c.id,
-      scoreCandidate(query, { id: c.id, name: c.name, tags: c.tags, description: c.description })
-        .score,
+      passages.map((passage) => scoreCandidate(passage, book).score),
     );
   }
 
-  const semantic = await computeSemantic(query, candidates, opts);
+  const semantic = await computeSemantic(passages, candidates, opts);
   // Scale-aware floor: blended vs lexical-only scores live on different
   // scales (see DEFAULT_MIN_SCORE_LEXICAL).
   const minScore = opts.minScore ?? (semantic ? DEFAULT_MIN_SCORE : DEFAULT_MIN_SCORE_LEXICAL);
 
   const ranked: CraftbookSuggestion[] = candidates.map((c) => {
-    const lex = lexical.get(c.id) ?? 0;
+    const lex = lexical.get(c.id) ?? [0];
     const sem = semantic?.get(c.id);
-    const score = sem !== undefined ? W_EMBED * sem + W_TOKEN * lex : lex;
+    if (!sem) return { ...c, score: lex[0] ?? 0, lexical: lex[0] ?? 0 };
+    let best = 0;
+    for (let i = 1; i < sem.length; i++) {
+      if (blend(sem[i]!, lex[i] ?? 0) > blend(sem[best]!, lex[best] ?? 0)) best = i;
+    }
     return {
       ...c,
-      score,
-      ...(sem !== undefined ? { semantic: sem } : {}),
-      lexical: lex,
+      score: blend(sem[best]!, lex[best] ?? 0),
+      semantic: sem[best]!,
+      lexical: lex[best] ?? 0,
     };
   });
   ranked.sort((a, b) => (b.score !== a.score ? b.score - a.score : a.id.localeCompare(b.id)));
   return ranked.filter((r) => r.score >= minScore).slice(0, topK);
 }
 
+function blend(semantic: number, lexical: number): number {
+  return W_EMBED * semantic + W_TOKEN * lexical;
+}
+
+/** Each candidate's cosine against every passage, in passage order. */
 async function computeSemantic(
-  query: string,
+  passages: string[],
   candidates: CraftbookCandidate[],
   opts: RankOptions,
-): Promise<Map<string, number> | null> {
+): Promise<Map<string, number[]> | null> {
   const useCache = !opts.embedder;
   const e = opts.embedder ?? defaultEmbedder;
   try {
     const status = (opts.embedderStatus ?? embeddingPipelineStatus)();
-    const queryVector = e.embed(query);
-    let qVec: number[];
+    const queryVectors =
+      passages.length === 1
+        ? e.embed(passages[0]!).then((vector) => [vector])
+        : e.embedBatch(passages);
+    let qVecs: number[][];
     if (opts.coldEmbedderBudgetMs !== undefined && (status === 'cold' || status === 'warming')) {
       // A first request after launch (or on a new install, mid-download) would
       // otherwise hold the turn for the model: ~45 s in a fresh eval home.
-      const loaded = await withinBudget(queryVector, opts.coldEmbedderBudgetMs);
+      const loaded = await withinBudget(queryVectors, opts.coldEmbedderBudgetMs);
       if (!loaded) {
         log.debug(`[craftbook] ranking on words while embeddings are ${status}`);
-        void queryVector
+        void queryVectors
           .then(() =>
-            computeSemantic(query, candidates, { ...opts, coldEmbedderBudgetMs: undefined }),
+            computeSemantic(passages, candidates, { ...opts, coldEmbedderBudgetMs: undefined }),
           )
           .catch(() => {});
         return null;
       }
-      qVec = loaded.value;
+      qVecs = loaded.value;
     } else {
-      qVec = await queryVector;
+      qVecs = await queryVectors;
     }
     if (useCache) await vectorCache.ready();
     const vecById = new Map<string, number[]>();
@@ -220,10 +256,14 @@ async function computeSemantic(
         if (useCache) vectorCache.set(n.text, v);
       });
     }
-    const out = new Map<string, number>();
+    const out = new Map<string, number[]>();
     for (const c of candidates) {
       const v = vecById.get(c.id);
-      if (v) out.set(c.id, clamp01(cosine(qVec, v)));
+      if (v)
+        out.set(
+          c.id,
+          qVecs.map((qVec) => clamp01(cosine(qVec, v))),
+        );
     }
     return out;
   } catch (err) {
@@ -285,6 +325,7 @@ export async function suggestCraftbooks(
     topK?: number;
     minScore?: number;
     coldEmbedderBudgetMs?: number;
+    passages?: boolean;
   },
 ): Promise<CraftbookSuggestion[]> {
   const candidates = await gatherCandidates(deps, opts.projectId);
@@ -294,6 +335,7 @@ export async function suggestCraftbooks(
     ...(opts.coldEmbedderBudgetMs !== undefined
       ? { coldEmbedderBudgetMs: opts.coldEmbedderBudgetMs }
       : {}),
+    ...(opts.passages ? { passages: true } : {}),
   });
 }
 

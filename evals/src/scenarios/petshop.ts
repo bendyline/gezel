@@ -241,6 +241,7 @@ async function findValidRasterFiles(
 
 export const petShopScenario: EvalScenario = {
   id: 'petshop',
+  htmlDeliverable: 'index.html',
   description:
     'Meester orchestrates a multi-tool job: developer builds a pet shop HTML site, image-generator renders a custom logo, and the page references it.',
   prompt:

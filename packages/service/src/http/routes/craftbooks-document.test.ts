@@ -6,6 +6,7 @@ import { serializeCraftbookDoc } from '@bendyline/gezel';
 import type { CraftbookDoc } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { denyNetBoundaryAvailable } from '../../sandbox/runner.js';
 import { type RunningService, startService } from '../../service.js';
 
 /**
@@ -241,11 +242,12 @@ describe('craftbook document routes — end to end', () => {
       task: { activeStepId?: string };
     };
     expect(heldBody.gate?.decision).toBe('reject');
-    if (process.platform !== 'darwin') {
-      // denyNet craftbook gates require an OS network sandbox. Windows and
-      // Linux fail closed instead of treating the JS preload as a malicious-
+    if (!(await denyNetBoundaryAvailable())) {
+      // denyNet craftbook gates require an OS network sandbox. A host without
+      // one fails closed instead of treating the JS preload as a malicious-
       // code boundary; the runner surfaces its actionable refusal text rather
-      // than the underlying exit code 126. macOS executes under Seatbelt.
+      // than the underlying exit code 126. macOS executes under Seatbelt,
+      // Linux under a systemd user unit, Windows in its container.
       expect(heldBody.gate?.message).toContain(
         'denyNet requires an enforceable OS network boundary',
       );
@@ -316,6 +318,9 @@ describe('craftbook document routes — end to end', () => {
   it.runIf(process.platform !== 'darwin')(
     'does not extend launch trust to scripts edited after task creation',
     async () => {
+      // Untrusted code runs too where a boundary confines it, so the refusal
+      // that marks the untrusted lane appears only on a host without one.
+      if (await denyNetBoundaryAvailable()) return;
       const create = await api('POST', '/api/projects/default/tasks', {
         title: 'Trust is content bound',
         description: 'A later craftbook edit cannot silently inherit the launch authorization.',

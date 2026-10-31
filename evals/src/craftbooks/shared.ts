@@ -1,3 +1,4 @@
+import type { Task } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import type { CraftbookEvalWorkspace } from './gates.ts';
 
@@ -117,4 +118,31 @@ export function workspaceFromClient(
       return cached;
     },
   };
+}
+
+/**
+ * A fingerprint of how far the craftbook task has WALKED, distinct from the
+ * rendered `task-graph.md` view the grader reads.
+ *
+ * The rendered view lists the step definitions, which never change, so it is
+ * byte-identical from the first poll to the last even while the task advances
+ * through five steps. Anything that needs to ask "did this move?" — the
+ * escalation ladder above all — has to read the live position instead: the
+ * task's status, its active step, and each step's attempt count.
+ */
+export function taskProgressFingerprint(tasks: readonly Task[]): string {
+  return tasks
+    .map((task) => {
+      const steps = (task.craftbook?.steps ?? [])
+        .map((step) => `${step.id}:${stepActivations(step)}`)
+        .join(',');
+      return `${task.ref}|${task.status}|${task.activeStepId ?? '-'}|${steps}`;
+    })
+    .sort()
+    .join('\n');
+}
+
+export function stepActivations(step: object): number {
+  const count = (step as { attemptCount?: unknown }).attemptCount;
+  return typeof count === 'number' && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 }

@@ -246,10 +246,11 @@ describe('ChatManager — the bundled DocBlocks joins only document work', () =>
     });
   });
 
-  async function createOpts(session: { id: string }) {
+  async function createOpts(session: { id: string }, message = 'hello') {
     mock.script('done');
-    await manager.send(session.id, 'hello');
-    const create = mock.calls.filter((c) => c.kind === 'create').at(-1);
+    await manager.send(session.id, message);
+    // A rebuilt session resumes its provider state, so either call carries the opts.
+    const create = mock.calls.filter((c) => c.kind === 'create' || c.kind === 'resume').at(-1);
     const opts = create?.opts as { extraMcpServers?: Array<{ id: string }> } | undefined;
     return { extras: (opts?.extraMcpServers ?? []).map((extra) => extra.id) };
   }
@@ -310,6 +311,37 @@ describe('ChatManager — the bundled DocBlocks joins only document work', () =>
       }),
     );
     expect(extras).toContain('docblocks');
+  });
+
+  // docblocks-theme-roundtrip, 2026-10-29: a plain chat asking to restyle a
+  // deck from a brand deck had no `infer_theme_from_file` in 6 of 6 trials.
+  it('joins a plain chat whose person names an Office file', async () => {
+    const { extras } = await createOpts(
+      await manager.createSession({ gezelId: 'ada' }),
+      'Bring `source/quarterly-review.md` in line with `source/brand-reference.pptx`.',
+    );
+    expect(extras).toContain('docblocks');
+  });
+
+  it('rebuilds a running plain chat once its person names an Office file', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    expect((await createOpts(session)).extras).not.toContain('docblocks');
+    // A rebuild resumes the provider session; background one-shots create their own.
+    const rebuilds = () => mock.calls.filter((c) => c.kind === 'resume').length;
+    expect((await createOpts(session, 'Now fix the table in report.docx')).extras).toContain(
+      'docblocks',
+    );
+    expect(rebuilds()).toBe(1);
+    await createOpts(session, 'Thanks, that looks right.');
+    expect(rebuilds()).toBe(1);
+  });
+
+  it('stays out of a chat that names only a PDF', async () => {
+    const { extras } = await createOpts(
+      await manager.createSession({ gezelId: 'ada' }),
+      'Summarize contracts/lease.pdf for me.',
+    );
+    expect(extras).not.toContain('docblocks');
   });
 
   const withVersion = (version: string): InstalledToolset => {

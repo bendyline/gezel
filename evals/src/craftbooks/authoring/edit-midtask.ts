@@ -7,6 +7,7 @@ import {
   findTaskForCraftbook,
   finishAuthoringPoll,
   progressBytes,
+  runningTaskProgress,
   sendWorkerKickoff,
   unfinishedTaskFailure,
 } from './helpers.ts';
@@ -209,6 +210,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     // summary the model writes counts.
     bytes: progressBytes(summaryText),
     milestones: completedTaskSteps(task),
+    taskProgress: runningTaskProgress(task),
     deliverableMissing: summaryText === null || summaryText.length === 0,
     repairPath: `task ${task.ref} craftbook`,
     repairDirective: [

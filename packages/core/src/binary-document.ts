@@ -62,6 +62,29 @@ export function binaryDocumentContainer(
 }
 
 /**
+ * What a write tool answers when a model sends text to a binary document path.
+ * The local-model write guard and the tool server's own check both use it, so
+ * a model hears one remedy whichever refuses first. Tools are named only when
+ * `hasTool` says the session has them.
+ */
+export function binaryDocumentWriteRefusalText(
+  path: string,
+  opts: { drawer: 'workspace' | 'artifacts'; hasTool: (name: string) => boolean },
+): string {
+  const ext = binaryDocumentExtension(path) ?? 'binary';
+  const convert = opts.hasTool('convert_document') && opts.hasTool('save_artifact');
+  const copy = opts.drawer === 'workspace' && opts.hasTool('copy_artifact_to_workspace');
+  const make = convert
+    ? ' Write the content as Markdown, convert it with `convert_document`, and save the result with `save_artifact`; if it is already saved, do not convert it again.'
+    : ' Produce it with the document tools, which convert Markdown into this format.';
+  const land = copy
+    ? ` Then make exactly one call: \`copy_artifact_to_workspace({ source: "<artifact path>", dest: "${path}" })\` to land the saved file at this path.`
+    : '';
+  const none = convert || copy ? '' : ' If you have no tool that makes one, say so in your reply.';
+  return `Not written: \`${path}\` is a .${ext} file, which is binary, and text written to it makes a file that will not open.${make}${land}${none}`;
+}
+
+/**
  * Leading magic bytes each container must start with.
  *
  * `mp4` is the exception: its `ftyp` box is at offset 4, behind a 4-byte

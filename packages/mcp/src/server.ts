@@ -123,6 +123,7 @@ import {
   askUserQuestionText,
   assertCraftbookGraph,
   asyncHandoffReleaseInstruction,
+  binaryDocumentWriteRefusalText,
   coerceDeliverableKind,
   composeCraftbookLaunch,
   craftbookDocFormatFromEnv,
@@ -137,6 +138,7 @@ import {
   getTaskText,
   inferDeliverableKind,
   inferScriptScope,
+  isBinaryDocumentPath,
   isOwnerStep,
   isReservedShadowArtifactPath,
   isTrustedConstrainedToolset,
@@ -2211,6 +2213,24 @@ function rasterImageWriteRefusal(path: string) {
   };
 }
 
+/**
+ * Text written to a .docx, .pptx, .xlsx or .pdf path makes a file that will not
+ * open. Gemma 4 12B wrote the JSON that `convert_document` returned into
+ * `tasks/eval/report.docx` with write_artifact, and the step's container check
+ * rejected it four times (research-to-document, 2026-10-30). The local-model
+ * write guard saw only write_file; this covers every provider and both drawers.
+ * DocBlocks runs as its own server, so its tools are named only when the
+ * session's authorized list carries them.
+ */
+function binaryDocumentWriteRefusal(path: string, drawer: 'workspace' | 'artifacts') {
+  if (!isBinaryDocumentPath(path)) return null;
+  const hasTool = (name: string) =>
+    name === 'copy_artifact_to_workspace'
+      ? toolIsAuthorizedForThisSession(name)
+      : authorizedToolNames?.has(canonicalToolName(name)) === true;
+  return errorResult(binaryDocumentWriteRefusalText(path, { drawer, hasTool }));
+}
+
 server.tool(
   'write_file',
   GEZEL_TOOL_DESCRIPTIONS.write_file,
@@ -2232,7 +2252,7 @@ server.tool(
         content: [{ type: 'text' as const, text: notice }, ...written.content],
       };
     }
-    const raster = rasterImageWriteRefusal(path);
+    const raster = rasterImageWriteRefusal(path) ?? binaryDocumentWriteRefusal(path, 'workspace');
     if (raster) return raster;
     const scoped = await taskScopedWriteRefusal(path, 'workspace');
     if (scoped) return scoped;
@@ -2395,7 +2415,7 @@ server.tool(
   async ({ path, content, create }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
-    const raster = rasterImageWriteRefusal(path);
+    const raster = rasterImageWriteRefusal(path) ?? binaryDocumentWriteRefusal(path, 'workspace');
     if (raster) return raster;
     const scoped = await taskScopedWriteRefusal(path, 'workspace');
     if (scoped) return scoped;
@@ -4127,7 +4147,7 @@ async function writeArtifactToolCall({
 }) {
   const stale = await staleStepMutationResult();
   if (stale) return stale;
-  const raster = rasterImageWriteRefusal(path);
+  const raster = rasterImageWriteRefusal(path) ?? binaryDocumentWriteRefusal(path, 'artifacts');
   if (raster) return raster;
   const scoped = await taskScopedWriteRefusal(path, 'artifacts');
   if (scoped) return scoped;
