@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { calVerPrefix } from './calver.mjs';
+import { missingCoreVersionDeclaration, stampCoreVersionSource } from './core-version-stamp.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -32,6 +33,8 @@ const packagePaths = [
   resolve(repoRoot, 'packages/core/package.json'),
   resolve(repoRoot, 'packages/service/package.json'),
 ];
+// Rewritten in place, unlike the npm release's build-time stamp, because this
+// only ever runs in a release job's throwaway checkout.
 const coreVersionPath = resolve(repoRoot, 'packages/core/src/browser.ts');
 
 function arg(name) {
@@ -83,17 +86,9 @@ const packages = packagePaths.map((pkgPath) => {
   return { pkgPath, source };
 });
 const coreSource = readFileSync(coreVersionPath, 'utf8');
-const versionPattern = /export const GEZEL_VERSION = '[^']*';/;
-if (!versionPattern.test(coreSource)) {
-  console.error(`could not find GEZEL_VERSION declaration in ${coreVersionPath}`);
-  process.exit(1);
-}
-// Already the calendar line, so content floors compare against the same value.
-// Stamped explicitly anyway: the npm channel sets it to something else, and a
-// checkout that only ever ran this script must not inherit a stale compat.
-const contentCompatPattern = /export const GEZEL_CONTENT_COMPAT = '[^']*';/;
-if (!contentCompatPattern.test(coreSource)) {
-  console.error(`could not find GEZEL_CONTENT_COMPAT declaration in ${coreVersionPath}`);
+const missingDeclaration = missingCoreVersionDeclaration(coreSource);
+if (missingDeclaration) {
+  console.error(`could not find ${missingDeclaration} declaration in ${coreVersionPath}`);
   process.exit(1);
 }
 
@@ -102,10 +97,12 @@ for (const { pkgPath, source } of packages) {
   console.log(`stamped ${pkgPath} → ${version}`);
 }
 
+// The content compat is already the calendar line here, so floors compare
+// against the same value. Stamped explicitly anyway: the npm channel sets it
+// to something else, and a checkout that only ran this must not inherit a
+// stale compat.
 writeFileSync(
   coreVersionPath,
-  coreSource
-    .replace(versionPattern, `export const GEZEL_VERSION = '${version}';`)
-    .replace(contentCompatPattern, `export const GEZEL_CONTENT_COMPAT = '${version}';`),
+  stampCoreVersionSource(coreSource, { version, contentCompat: version }),
 );
 console.log(`stamped ${coreVersionPath} → ${version}`);

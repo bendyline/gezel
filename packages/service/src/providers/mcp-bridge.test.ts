@@ -501,6 +501,29 @@ describe('McpBridge', () => {
     ).toMatch(/logo\.svg/);
   });
 
+  it('refuses text written to an office document path in either drawer', async () => {
+    const artifact = await bridge.callTool('write_artifact', {
+      path: 'tasks/eval/report.docx',
+      content: '{ "id": "fdf6f8d7", "artifactUri": "docblocks://artifact/1" }',
+    });
+    expect(artifact).toContain('Not written: `tasks/eval/report.docx` is a .docx file');
+    expect(artifact).not.toContain('copy_artifact_to_workspace');
+    expect(await bridge.callTool('list_artifacts', { path: 'tasks/eval' })).not.toContain(
+      'report.docx',
+    );
+    const workspace = await bridge.callTool('write_file', {
+      path: 'deliverables/deck.pptx',
+      content: '# Quarterly review\n\n---\n\n## Revenue',
+    });
+    expect(workspace).toContain('`deliverables/deck.pptx` is a .pptx file');
+    expect(workspace).toContain(
+      'copy_artifact_to_workspace({ source: "<artifact path>", dest: "deliverables/deck.pptx" })',
+    );
+    expect(
+      await bridge.callTool('append_to_file', { path: 'notes.pdf', content: 'more' }),
+    ).toContain('`notes.pdf` is a .pdf file');
+  });
+
   it('says a listed folder does not exist instead of calling it empty', async () => {
     await bridge.callTool('write_file', { path: 'store/repairs.json', content: '{}\n' });
     expect(await bridge.callTool('list_dir', { path: 'store/repairs' })).toBe(

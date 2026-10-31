@@ -94,12 +94,10 @@ async function main(): Promise<void> {
       for (const scenarioId of dirsUnder(join(sweepRoot, modelId, suiteId))) {
         const scenario = SCENARIOS[scenarioId];
         if (!scenario) continue;
-        // Judge whatever has a judgeable artifact, rather than only
-        // scenarios declaring a spec: NO core scenario declares one — the
-        // anchored games rely on the default first-HTML rubric, and that
-        // rubric (visual quality, polish) is precisely what they were
-        // built for. `maybeJudgeTrial` returns false when nothing matches,
-        // so a markdown-only scenario simply skips.
+        // A scenario is judged on its declared deliverable: a `judge` spec,
+        // or the `htmlDeliverable` page the anchored games build, which the
+        // default rubric (visual quality, polish) was made for.
+        // `maybeJudgeTrial` returns false for everything else.
         const usedRubric = scenario.judge ? 'scenario' : 'default-html';
         for (const trialId of dirsUnder(join(sweepRoot, modelId, suiteId, scenarioId))) {
           const runDir = join(sweepRoot, modelId, suiteId, scenarioId, trialId);
@@ -138,6 +136,7 @@ async function main(): Promise<void> {
               prompt: scenario.prompt,
               description: scenario.description,
               judge: scenario.judge,
+              htmlDeliverable: scenario.htmlDeliverable,
             },
             runDir,
             log: () => {},

@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import {
   KeyedLock,
@@ -77,6 +77,8 @@ export class TaskFilesStore {
   private readonly work = new TaskWorkIndex();
   /** One shared full listing per project that completes every index. */
   private readonly indexBuilds = new Map<string, Promise<void>>();
+  /** The highest task number this store has issued or found reserved, by counter file. */
+  private readonly issuedTaskNums = new Map<string, number>();
 
   constructor(opts: TaskFilesStoreOptions) {
     this.home = opts.home;
@@ -89,7 +91,8 @@ export class TaskFilesStore {
     // hand-rolled chain kept the rejected promise as the queue head and
     // refused every later allocation for the project until restart.
     const file = projectTaskNextIdFile(this.home, projectId, this.external);
-    return taskNumLocks.run(resolve(file), async () => {
+    const key = resolve(file);
+    return taskNumLocks.run(key, async () => {
       let current = 0;
       try {
         const raw = await readFile(file, 'utf8');
@@ -106,58 +109,112 @@ export class TaskFilesStore {
           );
         }
       }
-      // A restored/stale counter can be valid yet lower than the surviving
-      // tasks or outputs. Include every directory that reserves task IDs,
-      // even when its task.json has been deleted or damaged.
-      const tasksDir = projectTasksDir(this.home, projectId, this.external);
-      for (const name of await readdirIfPresent(tasksDir)) {
-        if (/^\d+$/.test(name)) current = Math.max(current, reservedTaskNum(name, tasksDir));
-      }
-      // Gezels can create folders in the artifacts drawer, so a folder name
-      // there is a hint, not a record: one stray `tasks/99999999999999999999`
-      // must not block task creation for the project, and one near the top of
-      // the range must not use the range up.
-      for (const dir of [
-        join(projectArtifactsDir(this.home, projectId, this.external), 'tasks'),
-        projectDiffpacksDir(this.home, projectId, this.external),
-      ]) {
-        for (const name of await readdirIfPresent(dir)) {
-          if (!/^\d+$/.test(name)) continue;
-          const num = Number(name);
-          if (Number.isSafeInteger(num) && num <= MAX_DRAWER_TASK_NUM) {
-            current = Math.max(current, num);
-          } else {
-            log.warn(
-              `Ignoring ${join(dir, name)} when numbering tasks: no task can have that number.`,
-            );
-          }
-        }
-      }
-      const packsFile = projectDiffpacksFile(this.home, projectId);
-      try {
-        const packs = JSON.parse(await readFile(packsFile, 'utf8')) as { diffpacks?: unknown };
-        if (!packs || !Array.isArray(packs.diffpacks)) throw new Error('invalid diffpacks list');
-        for (const pack of packs.diffpacks) {
-          if (!isRecord(pack) || typeof pack.packId !== 'string')
-            throw new Error('invalid proposal identity');
-          if (/^\d+$/.test(pack.packId))
-            current = Math.max(current, reservedTaskNum(pack.packId, packsFile));
-        }
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-          throw new Error(
-            `Cannot recover task identities from ${packsFile}; repair it before creating a task.`,
-            { cause: err },
-          );
-        }
+      current = Math.max(current, await this.proposalTaskNums(projectId));
+      // The directory scan lists every task folder, which took seconds per
+      // task in a 145k-task project and capped creation near 22 a minute
+      // (2026-10-27). Once this store has scanned, the counter it publishes
+      // stays ahead of everything it issued; a reservation made outside the
+      // allocator is caught when its number comes up, and rescanned past.
+      const issued = this.issuedTaskNums.get(key);
+      if (issued !== undefined) current = Math.max(current, issued);
+      if (issued === undefined || (await this.taskNumReserved(projectId, current + 1))) {
+        current = Math.max(current, await this.directoryTaskNums(projectId));
       }
       const num = current + 1;
       if (!Number.isSafeInteger(num))
         throw new Error(`Task numbers are exhausted for ${projectId}.`);
       await mkdir(dirname(file), { recursive: true });
       await writeFileAtomic(file, `${num}\n`);
+      this.issuedTaskNums.set(key, num);
       return num;
     });
+  }
+
+  /**
+   * The highest number reserved by a folder. A restored/stale counter can be
+   * valid yet lower than the surviving tasks or outputs, so every directory
+   * that reserves task IDs counts, even when its task.json has been deleted
+   * or damaged.
+   */
+  private async directoryTaskNums(projectId: string): Promise<number> {
+    let current = 0;
+    const tasksDir = projectTasksDir(this.home, projectId, this.external);
+    for (const name of await readdirIfPresent(tasksDir)) {
+      if (/^\d+$/.test(name)) current = Math.max(current, reservedTaskNum(name, tasksDir));
+    }
+    // Gezels can create folders in the artifacts drawer, so a folder name
+    // there is a hint, not a record: one stray `tasks/99999999999999999999`
+    // must not block task creation for the project, and one near the top of
+    // the range must not use the range up.
+    for (const dir of this.drawerTaskDirs(projectId)) {
+      for (const name of await readdirIfPresent(dir)) {
+        if (!/^\d+$/.test(name)) continue;
+        const num = Number(name);
+        if (Number.isSafeInteger(num) && num <= MAX_DRAWER_TASK_NUM) {
+          current = Math.max(current, num);
+        } else {
+          log.warn(
+            `Ignoring ${join(dir, name)} when numbering tasks: no task can have that number.`,
+          );
+        }
+      }
+    }
+    return current;
+  }
+
+  private drawerTaskDirs(projectId: string): string[] {
+    return [
+      join(projectArtifactsDir(this.home, projectId, this.external), 'tasks'),
+      projectDiffpacksDir(this.home, projectId, this.external),
+    ];
+  }
+
+  /** Whether any folder already claims `num`, without listing the folders. */
+  private async taskNumReserved(projectId: string, num: number): Promise<boolean> {
+    const name = String(num);
+    const paths = [
+      join(projectTasksDir(this.home, projectId, this.external), name),
+      ...this.drawerTaskDirs(projectId).map((dir) => join(dir, name)),
+    ];
+    const found = await Promise.all(
+      paths.map((path) =>
+        stat(path).then(
+          () => true,
+          (err: NodeJS.ErrnoException) => {
+            if (err.code === 'ENOENT') return false;
+            throw new Error(
+              `Cannot read task identities in ${path}; check its permissions before creating a task.`,
+              { cause: err },
+            );
+          },
+        ),
+      ),
+    );
+    return found.includes(true);
+  }
+
+  /** The highest number a saved change proposal reserves. */
+  private async proposalTaskNums(projectId: string): Promise<number> {
+    let current = 0;
+    const packsFile = projectDiffpacksFile(this.home, projectId);
+    try {
+      const packs = JSON.parse(await readFile(packsFile, 'utf8')) as { diffpacks?: unknown };
+      if (!packs || !Array.isArray(packs.diffpacks)) throw new Error('invalid diffpacks list');
+      for (const pack of packs.diffpacks) {
+        if (!isRecord(pack) || typeof pack.packId !== 'string')
+          throw new Error('invalid proposal identity');
+        if (/^\d+$/.test(pack.packId))
+          current = Math.max(current, reservedTaskNum(pack.packId, packsFile));
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw new Error(
+          `Cannot recover task identities from ${packsFile}; repair it before creating a task.`,
+          { cause: err },
+        );
+      }
+    }
+    return current;
   }
 
   /** Reject stale aggregates and advance the caller's revision after a successful save. */
@@ -243,11 +300,17 @@ export class TaskFilesStore {
       this.invalidTasks.delete(file);
       return parsed;
     } catch (err) {
-      this.forgetTask(projectId, num);
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        this.forgetTask(projectId, num);
         this.invalidTasks.delete(file);
         return null;
       }
+      // A file that does not parse leaves the indexes. One that could not be
+      // read right now (EBUSY or EPERM from antivirus, a backup or a synced
+      // folder) is still a task: forgetting it left an active task undispatched
+      // until restart on a daemon running without the app (1.26300.100 audit).
+      if (!code) this.forgetTask(projectId, num);
       const message = err instanceof Error ? err.message : String(err);
       if (this.invalidTasks.get(file) !== message) {
         log.warn(
@@ -285,8 +348,8 @@ export class TaskFilesStore {
 
   /** Stream newest first so existence checks can stop without retaining history. */
   async *iterateProjectTasks(projectId: string): AsyncGenerator<Task> {
-    const names = await safeReaddir(projectTasksDir(this.home, projectId, this.external));
-    const nums = names
+    const names = await readdirIfReadable(projectTasksDir(this.home, projectId, this.external));
+    const nums = (names ?? [])
       .filter((name) => /^\d+$/.test(name))
       .map(Number)
       .sort((a, b) => b - a);
@@ -294,6 +357,9 @@ export class TaskFilesStore {
       const task = await this.readTask(projectId, num);
       if (task) yield task;
     }
+    // A listing that failed proves nothing about the project: marking it
+    // complete would make it look empty to the scheduler until restart.
+    if (!names) return;
     // Every task file in the project has now been read (and noted); tasks
     // created since the directory listing were noted when they were written.
     this.lineage.markComplete(projectId);
@@ -358,7 +424,7 @@ export class TaskFilesStore {
     this.work.note(task);
   }
 
-  /** The task's file is gone or unreadable. Lineage entries are re-checked by their callers. */
+  /** The task's file is gone or does not parse. Lineage entries are re-checked by their callers. */
   private forgetTask(projectId: string, num: number): void {
     this.statuses.forget(projectId, num);
     this.work.forget(projectId, num);
@@ -552,9 +618,15 @@ async function readdirIfPresent(path: string): Promise<string[]> {
 }
 
 async function safeReaddir(path: string): Promise<string[]> {
+  return (await readdirIfReadable(path)) ?? [];
+}
+
+/** A directory's entries: [] when it does not exist, null when it could not be read. */
+async function readdirIfReadable(path: string): Promise<string[] | null> {
   try {
     return await readdir(path);
-  } catch {
-    return [];
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? [] : null;
   }
 }

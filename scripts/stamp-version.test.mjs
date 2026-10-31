@@ -24,6 +24,10 @@ test('release stamping updates packages, runtime constant, service metadata, and
       // stamp-version imports it for the shared day-of-year math.
       copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs')),
       copyFile(
+        join(here, 'core-version-stamp.mjs'),
+        join(root, 'scripts', 'core-version-stamp.mjs'),
+      ),
+      copyFile(
         join(here, 'verify-release-version.mjs'),
         join(root, 'scripts', 'verify-release-version.mjs'),
       ),
@@ -50,7 +54,7 @@ test('release stamping updates packages, runtime constant, service metadata, and
     }
     await writeFile(
       join(root, 'packages', 'core', 'src', 'browser.ts'),
-      "export const BEFORE = true;\nexport const GEZEL_VERSION = '0.0.0';\nexport const GEZEL_CONTENT_COMPAT = '0.0.0';\n",
+      "export const BEFORE = true;\nexport const GEZEL_VERSION: string = '0.0.0';\nexport const GEZEL_CONTENT_COMPAT: string = '0.0.0';\n",
     );
 
     const version = '1.26123.45';
@@ -81,12 +85,12 @@ test('release stamping updates packages, runtime constant, service metadata, and
       );
     }
     const stampedCore = await readFile(join(root, 'packages', 'core', 'src', 'browser.ts'), 'utf8');
-    assert.match(stampedCore, /GEZEL_VERSION = '1\.26123\.45'/);
+    assert.match(stampedCore, /GEZEL_VERSION: string = '1\.26123\.45'/);
     // The Electron scheme is already the calendar line, so both constants take
     // the same value here. Stamped explicitly all the same: an npm release sets
     // them to different things, and a build left on the '0.0.0' sentinel would
     // treat every content floor as a dev build and gate nothing.
-    assert.match(stampedCore, /GEZEL_CONTENT_COMPAT = '1\.26123\.45'/);
+    assert.match(stampedCore, /GEZEL_CONTENT_COMPAT: string = '1\.26123\.45'/);
 
     const serviceMeta = join(root, 'service-bundle.meta.json');
     const sbom = join(root, 'artifacts', 'gezel.cdx.json');
@@ -127,6 +131,10 @@ test('--print computes a release version without mutating the checkout', async (
     await mkdir(join(root, 'scripts'), { recursive: true });
     await copyFile(join(here, 'stamp-version.mjs'), join(root, 'scripts', 'stamp-version.mjs'));
     await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
+    await copyFile(
+      join(here, 'core-version-stamp.mjs'),
+      join(root, 'scripts', 'core-version-stamp.mjs'),
+    );
     const { stdout } = await execFileP(process.execPath, [
       join(root, 'scripts', 'stamp-version.mjs'),
       '--inc',
@@ -148,6 +156,10 @@ test('a missing runtime version declaration does not partially stamp package fil
     await mkdir(join(root, 'packages', 'service'), { recursive: true });
     await copyFile(join(here, 'stamp-version.mjs'), join(root, 'scripts', 'stamp-version.mjs'));
     await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
+    await copyFile(
+      join(here, 'core-version-stamp.mjs'),
+      join(root, 'scripts', 'core-version-stamp.mjs'),
+    );
 
     const paths = [
       join(root, 'package.json'),
@@ -190,6 +202,10 @@ test('a missing content-compat declaration does not partially stamp package file
     await mkdir(join(root, 'packages', 'service'), { recursive: true });
     await copyFile(join(here, 'stamp-version.mjs'), join(root, 'scripts', 'stamp-version.mjs'));
     await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
+    await copyFile(
+      join(here, 'core-version-stamp.mjs'),
+      join(root, 'scripts', 'core-version-stamp.mjs'),
+    );
 
     const paths = [
       join(root, 'package.json'),

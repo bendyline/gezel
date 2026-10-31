@@ -110,6 +110,31 @@ describe('isImmediateFileWriteTurn', () => {
     ).toBe(false);
   });
 
+  it('does not treat a conditional write as a write-now instruction', () => {
+    const context = { toolSurfaceIsWriteFileOnly: false };
+    const refactorKickoff =
+      'First BASELINE: run the suite and record it green before anything moves — and where the code about to be reshaped has no tests, write characterization tests FIRST, pinning CURRENT behavior bugs included.';
+    expect(isImmediateFileWritePrompt(refactorKickoff, context)).toBe(false);
+    expect(isImmediateFileWriteTurn(refactorKickoff, ROSTER)).toBe(false);
+    expect(
+      isImmediateFileWritePrompt(
+        'If the brief is missing: write it now with `write_file`.',
+        context,
+      ),
+    ).toBe(false);
+  });
+
+  it('still fires on an unconditional write beside a conditional one', () => {
+    const context = { toolSurfaceIsWriteFileOnly: false };
+    expect(
+      isImmediateFileWritePrompt(
+        'If the old notes exist, write them into the archive. Write `plan.md` now.',
+        context,
+      ),
+    ).toBe(true);
+    expect(isImmediateFileWritePrompt('Write the summary file first.', context)).toBe(true);
+  });
+
   it('still fires when the reads are already behind the turn', () => {
     const context = { toolSurfaceIsWriteFileOnly: false };
     expect(isImmediateFileWritePrompt('Your next tool call must be `write_file`.', context)).toBe(

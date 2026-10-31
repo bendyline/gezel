@@ -23,6 +23,7 @@ import { parseMarkdown } from '@bendyline/squisq/markdown';
 import type { OgCardPlan, OgCardsResult } from './handboek-og-cards.js';
 import { ogCardPath, writeOgCards } from './handboek-og-cards.js';
 import {
+  CATALOG_COUNTS_FILE,
   CRAFTBOOK_ART_FILE,
   type SiteCatalogPage,
   buildSiteCatalog,
@@ -230,11 +231,11 @@ export async function runHandboekExport(
     );
     if (sitePage?.html) rendered = `${rendered}\n${sitePage.html}`;
     if (demo) rendered = insertDemoSection(rendered, demoSectionHtml(demo, entry.title));
-    if (art) rendered = insertAfterTitle(rendered, craftbookArtHtml(entry.title));
+    if (art) rendered = insertAfterTitle(rendered, craftbookArtHtml(entry.title, art.ground));
     const { html: body, headings } = withHeadingIds(rendered);
     const dir = join(out, ...entry.id.split('/'));
     await mkdir(dir, { recursive: true });
-    if (art) await writeFile(join(dir, CRAFTBOOK_ART_FILE), art);
+    if (art) await writeFile(join(dir, CRAFTBOOK_ART_FILE), art.bytes);
     if (demo) {
       await writePageDemo(
         join(dir, 'demo'),
@@ -316,6 +317,11 @@ export async function runHandboekExport(
     await cp(assetsSrc, join(out, 'assets'), { recursive: true });
   }
   await writeFile(join(out, 'assets', 'handboek.css'), BASELINE_CSS, 'utf8');
+  await writeFile(
+    join(out, CATALOG_COUNTS_FILE),
+    `${JSON.stringify(site.counts, null, 2)}\n`,
+    'utf8',
+  );
 
   // Last, and never fatal: the pages above are the deliverable, and a page
   // whose card is missing still unfurls with its title, description, and the

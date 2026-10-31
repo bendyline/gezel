@@ -1,6 +1,12 @@
 import { copyFile, mkdir } from 'node:fs/promises';
 import { defineConfig } from 'tsup';
+import { releaseStampFromEnv, releaseStampPlugin } from '../../scripts/core-version-stamp.mjs';
 import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
+
+// A release build (scripts/prepare-package.mjs) stamps GEZEL_VERSION and
+// GEZEL_CONTENT_COMPAT into the compiled output only. Rewriting src/browser.ts
+// instead let a commit made mid-release capture the stamp.
+const releaseStamp = releaseStampFromEnv(process.env);
 
 export default defineConfig({
   entry: [
@@ -65,6 +71,7 @@ export default defineConfig({
   // gave a consumer of two entries two copies of each class. Shared modules
   // now live in chunks every entry imports.
   splitting: true,
+  esbuildPlugins: releaseStamp ? [releaseStampPlugin(releaseStamp, 'src/browser.ts')] : [],
   onSuccess: async () => {
     await stripSourcemapCommentsFromBuild();
     await mkdir('dist/speech-models', { recursive: true });

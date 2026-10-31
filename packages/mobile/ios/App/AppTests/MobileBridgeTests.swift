@@ -72,8 +72,10 @@ final class MobileBridgeTests: XCTestCase {
         }
         let started = Date()
         let read = try await invoke("read", ["requestId": UUID().uuidString, "image": sign.base64EncodedString(), "mimeType": "image/jpeg", "describe": true])
-        report("sign", read.merging(["ms": Int(Date().timeIntervalSince(started) * 1000)]) { $1 })
-        XCTAssertTrue((read["text"] as? String ?? "").contains("STOP"), read["text"] as? String ?? "")
+        let seconds = Date().timeIntervalSince(started)
+        report("sign", read.merging(["ms": Int(seconds * 1000)]) { $1 })
+        let text = read["text"] as? String ?? ""
+        XCTAssertTrue(text.contains("STOP"), "Read \(text.debugDescription) in \(Int(seconds)) s; reads stop waiting at \(Int(GezelVisionPlugin.recognizeTimeout)) s")
         let caches = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
         if let photo = try? Data(contentsOf: caches.appendingPathComponent("vision-probe.jpg")) {
             let begun = Date()

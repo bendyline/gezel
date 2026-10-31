@@ -74,7 +74,10 @@ import {
   terminalToolClosingText,
 } from '@bendyline/gezel-inference/internal/providers/terminal-tool-policy';
 import { coerceArgsToSchema } from '@bendyline/gezel-inference/internal/providers/tool-arg-schema-coercion';
-import { ToolFailureTracker } from '@bendyline/gezel-inference/internal/providers/tool-failure-tracker';
+import {
+  type SourceWriteFailureKind,
+  ToolFailureTracker,
+} from '@bendyline/gezel-inference/internal/providers/tool-failure-tracker';
 import { ToolRepeatTracker } from '@bendyline/gezel-inference/internal/providers/tool-repeat-tracker';
 import type {
   ExternalToolCall,
@@ -1552,7 +1555,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
       let abortDueToFailureLoop: {
         tool: string;
         count: number;
-        sourceFailureKind?: 'truncated' | 'not-persisted' | 'grounding-required';
+        sourceFailureKind?: SourceWriteFailureKind;
         transportFailure?: boolean;
       } | null = null;
       let terminalActionClosing: string | null = null;

@@ -1,4 +1,10 @@
 {
-  "$comment": "Critical npm advisories accepted in the clean npm-consumer graph (scripts/check-package-consumers.mjs). Each entry needs the GHSA id, why it is unreachable or acceptable, and an expiry (YYYY-MM-DD) after which the gate fails again. Prefer fixing the dependency.",
-  "advisories": []
+  "$comment": "High and critical npm advisories accepted in the clean npm-consumer graph (scripts/check-package-consumers.mjs). Each entry needs the GHSA id, why it is unreachable or acceptable, and an expiry (YYYY-MM-DD) after which the gate fails again. Prefer fixing the dependency.",
+  "advisories": [
+    {
+      "id": "GHSA-mrhx-c7xc-m3w5",
+      "reason": "Zod memory exhaustion on oversized constrained collections, fixed only in 4.6.6; zod 3 has no patched release. Gezel's own packages use zod 4. The zod 3 copies come from @atproto/* (zod ^3.23.8 in every release; validates Bluesky connector responses) and @bendyline/docblocks-cli, which pins zod 3.25.76 exactly in every 2.7.x release (validates tool arguments in its own child process). Clears when DocBlocks moves to zod 4; atproto has no fix to take.",
+      "expires": "2026-11-30"
+    }
+  ]
 }

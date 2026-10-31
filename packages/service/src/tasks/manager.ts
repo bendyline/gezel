@@ -156,6 +156,12 @@ import {
 import { type StepGateOutcome, evaluateStepGate, gateMessageFingerprint } from './step-gate.js';
 export { StepCompletionBlockedError };
 import {
+  packageCommandsOffDetail,
+  packageCommandsOffNote,
+  unrunnableGateCommands,
+  unrunnableStepCommands,
+} from './package-commands-off.js';
+import {
   bumpStepActivation,
   findBranchGoto,
   isOwnerStep,
@@ -3428,6 +3434,50 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       };
     }
 
+    // The same pre-flight for a command the step must see run while package
+    // scripts are off: the rejection names `run_package_script`, which no
+    // session has, so a retry can only repeat it.
+    const unrunnable = await unrunnableGateCommands(this.store, task, gate, outcome);
+    if (unrunnable) {
+      const message = `This gate cannot be met right now: it needs ${unrunnable.join(', ')} to run, and running package scripts is off in the security settings. The task is paused for a human decision; do not retry.`;
+      const paused = await this.setStatus(projectId, task.num, 'paused').catch(() => ({
+        ...task,
+        status: 'paused' as const,
+      }));
+      await this.appendNote(projectId, task.num, {
+        text: packageCommandsOffNote(step, unrunnable, true),
+        author: { kind: 'user' },
+        stepId: step.id,
+      }).catch(() => {});
+      log.warn(
+        `[gate] ${task.ref} step "${step.id}" needs ${unrunnable.join(', ')} but package scripts are off — pausing without consuming an attempt`,
+      );
+      await logGated('reject', priorAttempts, true, outcome);
+      if (task.status !== 'paused') {
+        await this.emitNeedsHelp({
+          projectId,
+          task,
+          stepId: step.id,
+          reason: 'gate_unsatisfiable',
+          detail: packageCommandsOffDetail(step, unrunnable),
+        });
+      }
+      return {
+        kind: 'held',
+        task: paused,
+        info: {
+          message,
+          messageFingerprint: gateMessageFingerprint(message),
+          attempt: priorAttempts,
+          maxAttempts: gate.maxAttempts,
+          paused: true,
+          cached: false,
+          unsatisfiable: true,
+          ...(outcome.checkResults ? { checkResults: outcome.checkResults } : {}),
+        },
+      };
+    }
+
     const rawMessage = outcome.message ?? 'Gate rejected the step.';
     // Plateau scoring: same failing-check identity set as the trailing
     // attempts = no progress. Stage directives replace the raw verdict so
@@ -3770,6 +3820,26 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     task: Task,
     step: Pick<TaskCraftbookStep, 'id' | 'name' | 'advanceWhen' | 'gate'>,
   ): Promise<boolean> {
+    const commands = await unrunnableStepCommands(this.store, task, step);
+    if (commands) {
+      await this.setStatus(projectId, task.num, 'paused').catch(() => {});
+      await this.appendNote(projectId, task.num, {
+        text: packageCommandsOffNote(step, commands, false),
+        author: { kind: 'user' },
+        stepId: step.id,
+      }).catch(() => {});
+      log.warn(
+        `[tasks] ${task.ref} step "${step.id}" needs ${commands.join(', ')} but package scripts are off — pausing instead of dispatching`,
+      );
+      await this.emitNeedsHelp({
+        projectId,
+        task,
+        stepId: step.id,
+        reason: 'gate_unsatisfiable',
+        detail: packageCommandsOffDetail(step, commands),
+      });
+      return true;
+    }
     const files = await unsatisfiableStepWorkspaceFiles(this.store, projectId, task, step);
     if (!files) return false;
     const fileList = files.map((f) => `\`${f}\``).join(', ');

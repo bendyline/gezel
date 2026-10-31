@@ -296,7 +296,20 @@ describe('runHandboekExport', () => {
     expect(gallery).toContain('class="hb-gallery"');
     const book = await readFile(join(out, 'craftbook', 'status-report', 'index.html'), 'utf8');
     expect(book).toContain('class="hb-craftbook-art"');
+    expect(book).toMatch(/class="hb-craftbook-art"[^>]* data-ground="[a-z]+"/);
+    expect(gallery).toMatch(/<img src="\.\.\/craftbook\/[^"]+\/logo\.webp" alt="" data-ground="/);
     expect(existsSync(join(out, 'craftbook', 'status-report', 'logo.webp'))).toBe(true);
+
+    const counts = JSON.parse(await readFile(join(out, 'catalog-counts.json'), 'utf8'));
+    expect(Object.keys(counts).sort()).toEqual([
+      'characters',
+      'connectors',
+      'craftbooks',
+      'models',
+      'projectTypeDemos',
+      'projectTypes',
+    ]);
+    expect(counts.craftbooks).toBeGreaterThan(100);
 
     const demoPages = await readFile(
       join(out, 'project-type', 'caregiving-binder', 'index.html'),

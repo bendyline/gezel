@@ -339,12 +339,14 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
   assert.match(
     consumerCheck,
     /blockingAdvisories\(auditReport, readAuditAllowlist\(\)\)/,
-    'npm consumer checks must apply the critical allowlist gate',
+    'npm consumer checks must apply the allowlist gate',
   );
+  // Stricter than the workspace gates above: a consumer cannot take a fixed
+  // version past an exact pin, so a high advisory there needs our release.
   assert.match(
     consumerAudit,
-    /const BLOCKING = new Set\(\['critical'\]\)/,
-    'the clean npm consumer graph must block on critical advisories only',
+    /const BLOCKING = new Set\(\['high', 'critical'\]\)/,
+    'the clean npm consumer graph must block on high and critical advisories',
   );
   assert.match(
     consumerCheck,

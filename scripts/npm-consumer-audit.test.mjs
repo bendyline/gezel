@@ -39,27 +39,40 @@ const REPORT = {
   },
 };
 
-test('reports a critical advisory once, under the package it affects', () => {
+test('reports each high and critical advisory once, under the package it affects', () => {
   const found = blockingAdvisories(REPORT, []);
   assert.deepEqual(
     found.map((a) => [a.id, a.pkg, a.severity]),
-    [['GHSA-7q85-xj36-vmfc', 'adm-zip', 'critical']],
+    [
+      ['GHSA-7q85-xj36-vmfc', 'adm-zip', 'critical'],
+      ['GHSA-v53p-9fqp-m79j', 'nodemailer', 'high'],
+    ],
   );
 });
 
-test('high and lower advisories never block', () => {
-  const { 'adm-zip': _critical, ...rest } = REPORT.vulnerabilities;
-  assert.deepEqual(blockingAdvisories({ vulnerabilities: rest }, []), []);
+test('moderate and lower advisories never block', () => {
+  const moderate = REPORT.vulnerabilities['adm-zip'].via[1];
+  const report = { vulnerabilities: { 'adm-zip': { severity: 'moderate', via: [moderate] } } };
+  assert.deepEqual(blockingAdvisories(report, []), []);
 });
 
 test('an unexpired allowlist entry accepts the advisory', () => {
-  const allowlist = [{ id: 'GHSA-7q85-xj36-vmfc', reason: 'unreachable', expires: '2026-12-31' }];
+  const allowlist = [
+    { id: 'GHSA-7q85-xj36-vmfc', reason: 'unreachable', expires: '2026-12-31' },
+    { id: 'GHSA-v53p-9fqp-m79j', reason: 'unreachable', expires: '2026-12-31' },
+  ];
   assert.deepEqual(blockingAdvisories(REPORT, allowlist, new Date('2026-10-01')), []);
 });
 
 test('an expired allowlist entry blocks again', () => {
-  const allowlist = [{ id: 'GHSA-7q85-xj36-vmfc', reason: 'unreachable', expires: '2026-09-01' }];
-  assert.equal(blockingAdvisories(REPORT, allowlist, new Date('2026-10-01')).length, 1);
+  const allowlist = [
+    { id: 'GHSA-7q85-xj36-vmfc', reason: 'unreachable', expires: '2026-09-01' },
+    { id: 'GHSA-v53p-9fqp-m79j', reason: 'unreachable', expires: '2026-12-31' },
+  ];
+  assert.deepEqual(
+    blockingAdvisories(REPORT, allowlist, new Date('2026-10-01')).map((a) => a.id),
+    ['GHSA-7q85-xj36-vmfc'],
+  );
 });
 
 test('the allowlist requires a reason and an expiry', () => {

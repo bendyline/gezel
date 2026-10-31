@@ -16,7 +16,7 @@ import {
   resolveImageSize,
 } from '@bendyline/gezel';
 import { readImageMeta } from '@bendyline/gezel-inference/internal/utils/image-meta';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import { capAgentImageSize } from '../../providers/image/agent-size.js';
 import { NoLocalImageModelError } from '../../providers/image/factory.js';
@@ -27,6 +27,12 @@ import {
   ImageSourceRequiredError,
 } from '../../providers/image/types.js';
 import { parseRemoteModelId } from '../../providers/remote/model-id.js';
+import {
+  CAMERA_PIXELS_CLOUD_ENGINE,
+  CAMERA_PIXELS_WITHHELD,
+  callerMaySeeFilePixels,
+  cameraKeepsFileLocal,
+} from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
 import { imageModelEditFacts, imageModelRoutes, providerKind } from './image-models.js';
 
@@ -106,6 +112,14 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
     // shouldn't have to know about.
     let resolvedInputs: ImageInputBytes[] | undefined;
     if (req.inputImages && req.inputImages.length > 0) {
+      const withheld = await cameraInputWithheld(
+        ctx,
+        c,
+        projectId,
+        req.inputImages,
+        providerKind(provider.name),
+      );
+      if (withheld) return c.json({ error: withheld }, 403);
       try {
         resolvedInputs = await resolveInputImages(ctx, projectId, req.inputImages);
       } catch (err) {
@@ -456,6 +470,33 @@ function buildPrompt(
       ? `edit ${inputImageCount} reference image${inputImageCount === 1 ? '' : 's'}`
       : 'generate an image';
   return `**${friendly}** is about to ${action} (model \`${model}\`). Use a credit?\n\n> ${trimmed}`;
+}
+
+/**
+ * Why a camera keyframe among `inputs` may not be used here, or null. A
+ * cloud engine receives the keyframe itself, whoever is asking, and the
+ * edited image goes back to the caller, so both the engine and the caller
+ * must be allowed to see the camera's pictures. Base64 inputs carry no path,
+ * so only the routes that hand out a keyframe's bytes guard them.
+ */
+async function cameraInputWithheld(
+  ctx: ServiceContext,
+  c: Context,
+  projectId: string,
+  inputs: ImageInputSource[],
+  engine: 'local' | 'cloud',
+): Promise<string | null> {
+  const project = await ctx.store.getProject(projectId).catch(() => null);
+  if (!project) return null;
+  for (const entry of inputs) {
+    if (!('artifactPath' in entry)) continue;
+    const stripped = entry.artifactPath.replace(/^artifacts\//, '');
+    const file = await ctx.store.resolveProjectArtifactReadPath(projectId, stripped);
+    if (!file || !(await cameraKeepsFileLocal(ctx, project, file))) continue;
+    if (engine === 'cloud') return CAMERA_PIXELS_CLOUD_ENGINE;
+    if (!(await callerMaySeeFilePixels(ctx, c, project, file))) return CAMERA_PIXELS_WITHHELD;
+  }
+  return null;
 }
 
 async function resolveInputImages(

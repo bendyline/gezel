@@ -33,7 +33,14 @@ server publishes; the catalog contract test pins that list.
 The bundled copy joins only sessions that make a document
 (`bundledDocblocksJoinsSession`): a task whose craftbook declares `docblocks`
 (steps that set `toolPolicy.disallowToolsets: ['docblocks']` still drop it),
-and a delegation whose expected deliverable is a binary document. Its 19 tool
+a delegation whose expected deliverable is a binary document, and a chat in
+which the person named a `.pptx`, `.docx` or `.xlsx` file. That last one is
+read from the person's own messages, so it only ever turns on, and the session
+is rebuilt once, on the message that first names one. PDFs do not count:
+reading one is `read_doc_as_markdown`'s job, and making one is a craftbook's.
+Without it, a designer asked in plain chat to restyle a deck from a brand deck
+had no `infer_theme_from_file` (docblocks-theme-roundtrip, 0 of 6 trials,
+2026-10-29). Its 19 tool
 schemas cost about 14,000 prompt tokens and a Node process per session; when
 1.26299.99 gave it to every session, the Meester's first turn grew from 22.7k
 to 37.4k prompt tokens. The gate filters the system roster once, before the

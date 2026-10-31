@@ -16,6 +16,7 @@ import {
   isStepGated,
   parseJsonRecords,
   parseJsonValue,
+  runningTaskProgress,
   taskReferencesCraftbook,
   unfinishedTaskFailure,
   ungatedBuildStepIds,
@@ -523,5 +524,37 @@ describe('completedTaskSteps', () => {
   it('reports nothing when there is no task to count', () => {
     expect(completedTaskSteps(null)).toBeUndefined();
     expect(completedTaskSteps({})).toBeUndefined();
+  });
+});
+
+describe('runningTaskProgress', () => {
+  // The repair ladder reads this to tell a recipe walking its steps from a
+  // frozen one; the press-release writes of route-multi's steps are not
+  // failed repairs.
+  const task = (status: Task['status'], activeStepId: string, reviewAttempts: number) =>
+    ({
+      ref: 'fieldstone-launch-comms/1',
+      status,
+      activeStepId,
+      craftbook: {
+        steps: [
+          { id: 'draft', attemptCount: 1 },
+          { id: 'review', attemptCount: reviewAttempts },
+        ],
+      },
+    }) as unknown as Task;
+
+  it('moves when the task advances a step or re-enters one', () => {
+    const drafting = runningTaskProgress(task('active', 'draft', 0));
+    const reviewing = runningTaskProgress(task('active', 'review', 1));
+    const revising = runningTaskProgress(task('active', 'review', 2));
+    expect(drafting).toBeDefined();
+    expect(new Set([drafting, reviewing, revising]).size).toBe(3);
+    expect(runningTaskProgress(task('active', 'review', 1))).toBe(reviewing);
+  });
+
+  it('stops once the task is finished or absent', () => {
+    expect(runningTaskProgress(task('complete', 'review', 1))).toBeUndefined();
+    expect(runningTaskProgress(null)).toBeUndefined();
   });
 });

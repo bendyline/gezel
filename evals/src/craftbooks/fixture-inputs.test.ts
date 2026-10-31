@@ -27,7 +27,7 @@ describe('pinned fixture input correction', () => {
     (change) => {
       const changed = structuredClone(loaded);
       const helper = changed.spec.setup.files!.find((file) => file.path === 'src/log.js')!;
-      if (change === 'version') changed.version = '1.0.6';
+      if (change === 'version') changed.version = '1.0.7';
       if (change === 'book') changed.craftbookId = 'another-book';
       if (change === 'content') helper.content += '\n// fetchUserData\n';
       if (change === 'explicit-input') helper.modelInput = true;

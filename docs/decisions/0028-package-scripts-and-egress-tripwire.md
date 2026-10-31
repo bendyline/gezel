@@ -72,8 +72,13 @@ paths did not:
 
 - About nine catalog code craftbooks (bug-fix-tdd, codemod-sweep,
   refactor-module, …) prove their work by running npm scripts and now need
-  **Run package scripts** on. `gezel do` names the switch; the UI launch does
-  not yet warn before the run.
+  **Run package scripts** on. `gezel do` names the switch, and `suggest_work`
+  lists it as setup on those books. The UI launch does not warn before the
+  run, but a step whose gate needs a command run pauses when it activates,
+  with a note naming the switch, instead of dispatching a gezel that has no
+  way to run it ([package-commands-off.ts](../../packages/service/src/tasks/package-commands-off.ts)).
+  Before that, every such trial in the 2026-10-28 DGX Spark scorecard looped
+  for 11 to 71 minutes.
 - Lockdown plus External services is no longer the Unrestricted preset; it
   reads as Custom.
 - The tripwire is easy to evade on purpose. It targets trained-in habits,

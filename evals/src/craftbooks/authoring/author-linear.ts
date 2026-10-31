@@ -13,6 +13,7 @@ import {
   noDeliverableWritten,
   parseJsonRecords,
   progressBytes,
+  runningTaskProgress,
   sendWorkerKickoff,
   unfinishedTaskFailure,
   ungatedBuildStepIds,
@@ -143,6 +144,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
   // authored work (the outputs land wherever the task lives).
   let gradeProjectId = projectId;
   let taskSteps: number | undefined;
+  let taskProgress: string | undefined;
   if (!book) {
     failures.push(
       'no reusable authored craftbook with at least 3 steps exists yet — author "CSV Order Cleanup" (inspect, clean, verify) as a craftbook template, not as ad-hoc chat work',
@@ -162,6 +164,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     } else {
       gradeProjectId = found.projectId;
       taskSteps = completedTaskSteps(found.task);
+      taskProgress = runningTaskProgress(found.task);
       if (found.task.status !== 'complete') {
         failures.push(
           unfinishedTaskFailure({
@@ -201,6 +204,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
     ),
     milestones: taskSteps,
+    taskProgress,
     deliverableMissing: noDeliverableWritten(cleanText, anomaliesText, reportTextLinear),
     repairPath: 'craftbook: CSV Order Cleanup',
     repairDirective: [

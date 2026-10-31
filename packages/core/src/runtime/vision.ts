@@ -15,6 +15,8 @@ export interface PortableImageReading {
   description?: string;
   labels?: string[];
   text?: string;
+  /** Text recognition ran out of time, so a missing `text` does not mean the photo has none. */
+  textTimedOut?: boolean;
   width?: number;
   height?: number;
   /**
@@ -44,6 +46,9 @@ export interface PortableVision {
 export const PORTABLE_MAX_IMAGES_PER_TURN = 4;
 export const PORTABLE_MAX_DIGEST_CHARS = Math.min(DEFAULT_MAX_DIGEST_CHARS, 1200);
 const PORTABLE_MAX_LABELS = 8;
+/** The model reads this under the labels; without it, no text reads as "the photo has none". */
+export const PORTABLE_TEXT_TIMED_OUT_REASON =
+  'text recognition ran out of time, so any text in the image was not read';
 
 export const PORTABLE_IMAGE_FILE = /\.(?:png|jpe?g|gif|webp|heic|heif|avif|bmp|tiff?)$/i;
 
@@ -129,8 +134,10 @@ export function portableImageRecognition(input: {
     ...(text ? { ocrText: text } : {}),
     engine: reading.models.some((model) => model.startsWith('llama-cpp:')) ? 'llama-cpp' : 'system',
     modelId: reading.models.join('+') || 'none',
-    // Labels without a sentence are a real but partial reading.
-    status: description ? 'ok' : read ? 'partial' : 'static-only',
+    // Labels without a sentence are a real but partial reading, and so is
+    // any reading whose text recognizer gave up before it finished.
+    status: description && !reading.textTimedOut ? 'ok' : read ? 'partial' : 'static-only',
+    ...(reading.textTimedOut ? { failureReason: PORTABLE_TEXT_TIMED_OUT_REASON } : {}),
     durationMs: Math.max(0, Math.round(input.durationMs)),
     at: input.at,
   };

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "publicationId": "2026-10-28-r9700-native-0-1-54",
+  "regenerate": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-r9700-scorecard.mjs",
+  "check": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-r9700-scorecard.mjs --check",
+  "files": [
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-10-28-r9700-native-0-1-54.json",
+      "bytes": 38850,
+      "sha256": "d68a693850f96d0a5c824b352b5c9169d06119669d8258a5aee2c61efd2bc3c1"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-28-r9700-native-0-1-54/runs/2026-10-28-r9700-native-0-1-54.json",
+      "bytes": 38850,
+      "sha256": "d68a693850f96d0a5c824b352b5c9169d06119669d8258a5aee2c61efd2bc3c1"
+    },
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-10-30-r9700-docblocks-activation.json",
+      "bytes": 5545,
+      "sha256": "033bbad2fe7beee9b7af13964b7f59489763350ea8fee0328ebb5ddbc6aea0e8"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-28-r9700-native-0-1-54/runs/2026-10-30-r9700-docblocks-activation.json",
+      "bytes": 5545,
+      "sha256": "033bbad2fe7beee9b7af13964b7f59489763350ea8fee0328ebb5ddbc6aea0e8"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-28-r9700-native-0-1-54/scorecard.json",
+      "bytes": 44335,
+      "sha256": "4e7e258f65ce5510dfc7154657912b624ff04b40347fca85ff71c46265bcb006"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-28-r9700-native-0-1-54/scorecard-details.json",
+      "bytes": 17239844,
+      "sha256": "b029a0728e6ca86810a7c97af79faaea3648265f8f9a8924921f17c7dd27f7da"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-28-r9700-native-0-1-54/verification.json",
+      "bytes": 891,
+      "sha256": "30a8e8c79f20901ed7906cfd72f65b2d5633430100d58e588378073c07971ac3"
+    }
+  ]
+}

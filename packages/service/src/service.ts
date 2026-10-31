@@ -1,4 +1,5 @@
 import { type LogOutput, getLogOutput, setLogOutput } from '@bendyline/gezel';
+import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import { gezelHome } from '@bendyline/gezel/paths';
 import { daemonHost } from './daemon-host.js';
 import type { EngineContext } from './http/engine-context.js';
@@ -33,6 +34,8 @@ export async function startService(
 ): Promise<RunningService<EngineContext> | RunningInferenceOnlyService> {
   // Before any child process is spawned: see daemon-host.ts.
   daemonHost();
+  // Before any worker or child loads ONNX Runtime: see core native/onnx-telemetry.ts.
+  disableOnnxRuntimeTelemetry();
   const previousLogOutput = getLogOutput();
   if (opts.logOutput) setLogOutput(opts.logOutput);
   try {

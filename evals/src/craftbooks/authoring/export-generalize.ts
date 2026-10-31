@@ -14,6 +14,7 @@ import {
   noDeliverableWritten,
   parseJsonRecords,
   progressBytes,
+  runningTaskProgress,
   sendWorkerKickoff,
   unfinishedTaskFailure,
 } from './helpers.ts';
@@ -423,6 +424,7 @@ async function assessRecipe(
       book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
     ),
     milestones: completedTaskSteps(found?.task),
+    taskProgress: runningTaskProgress(found?.task),
     deliverableMissing: noDeliverableWritten(q1Report, q1Clean, q2Report, q2Clean),
     repairPath: 'craftbook: supplier intake recipe',
     repairDirective: [

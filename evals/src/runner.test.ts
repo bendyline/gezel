@@ -770,6 +770,34 @@ describe('soft watchdog inflight handling', () => {
     ).toBe(false);
   });
 
+  it('the fast path waits on an in-flight turn only while a declared unit is underway', () => {
+    const storeRun = [
+      { sessionId: 'abababab-7777', gezelId: 'zara', projectId: 'stores', elapsedMs: 9 * 60_000 },
+    ];
+    const fast = {
+      fastPathTripped: true,
+      longPathTripped: false,
+      stallPathTripped: false,
+      chatterPathTripped: false,
+      inflightTurns: storeRun,
+      inflightDeferMs: inflightDeferMsForEngine('llama-cpp'),
+    };
+    expect(shouldDeferRetryLoopForInflight({ ...fast, unitsUnderway: true })).toBe(true);
+    expect(shouldDeferRetryLoopForInflight(fast)).toBe(false);
+    // Bounded by the stall budget, like the stall path.
+    expect(
+      shouldDeferRetryLoopForInflight({
+        ...fast,
+        unitsUnderway: true,
+        inflightTurns: [{ ...storeRun[0]!, elapsedMs: 20 * 60_000 }],
+      }),
+    ).toBe(false);
+    // Chatter never waits, unit or not.
+    expect(
+      shouldDeferRetryLoopForInflight({ ...fast, chatterPathTripped: true, unitsUnderway: true }),
+    ).toBe(false);
+  });
+
   it('a genuinely wedged turn past the stall budget still fails the trial', () => {
     // The deferral is not unbounded — a turn stuck 20 min is past the 15-min
     // stall budget and the HARD progress watchdog stays the real backstop.

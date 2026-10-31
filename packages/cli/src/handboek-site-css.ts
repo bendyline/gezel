@@ -1,3 +1,33 @@
+import { CATALOG_GROUND_TONES, type CatalogGroundTone } from '@bendyline/gezel';
+
+/**
+ * The colored paper behind each craftbook mark, the same values as the app's
+ * `--gezel-ground-<tone>` in packages/ui/src/styles/foundation.css. A test
+ * holds the two equal, so retune a tone there and copy it here.
+ */
+export const SITE_GROUND_COLORS: Readonly<
+  Record<CatalogGroundTone, { light: string; dark: string }>
+> = {
+  indigo: { light: '#4f5d7e', dark: '#3e4961' },
+  slate: { light: '#6f8aa0', dark: '#576b7b' },
+  teal: { light: '#5f8a86', dark: '#4b6b67' },
+  sage: { light: '#8a9a76', dark: '#6b775b' },
+  forest: { light: '#4f6249', dark: '#3e4c39' },
+  ochre: { light: '#c49a45', dark: '#977736' },
+  terracotta: { light: '#b0724c', dark: '#88593b' },
+  rose: { light: '#c08a86', dark: '#946b67' },
+  plum: { light: '#7d6378', dark: '#614d5d' },
+};
+
+const groundTokens = (scheme: 'light' | 'dark', indent: string): string =>
+  CATALOG_GROUND_TONES.map(
+    (tone) => `${indent}--hb-ground-${tone}: ${SITE_GROUND_COLORS[tone][scheme]};`,
+  ).join('\n');
+
+const groundRules = CATALOG_GROUND_TONES.map(
+  (tone) => `[data-ground="${tone}"] { --hb-mark-ground: var(--hb-ground-${tone}); }`,
+).join('\n');
+
 /**
  * Baseline stylesheet shipped with the static Handboek export, written to
  * `<out>/assets/handboek.css` and linked first on every page.
@@ -35,10 +65,12 @@ export const BASELINE_CSS = `:root {
   --hb-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --hb-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 6px 18px rgba(0, 0, 0, 0.06);
   --hb-measure: 42rem;
+${groundTokens('light', '  ')}
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
+${groundTokens('dark', '    ')}
     --hb-canvas: #141517;
     --hb-panel: #1c1d20;
     --hb-reading: #1a1b1e;
@@ -126,7 +158,23 @@ body.hb {
   padding: 2rem 1.5rem 4rem;
 }
 
-.hb-sidebar, .hb-onthispage { position: sticky; top: 1.5rem; font-size: 0.9rem; }
+/* A sticky panel taller than the window pins its top and leaves the rest
+   unreachable until the page ends, so each side panel is capped at the
+   viewport and scrolls on its own. The left padding, cancelled by the
+   negative margin, keeps the current-page marker (which sits 0.6rem
+   outside the list) and focus rings inside the scroll box, which would
+   otherwise clip them. */
+.hb-sidebar, .hb-onthispage {
+  position: sticky;
+  top: 1.5rem;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  margin-left: -0.6rem;
+  padding: 0 0.25rem 1rem 0.6rem;
+  font-size: 0.9rem;
+}
 .hb-sidebar section { margin-bottom: 1.5rem; }
 .hb-sidebar h2, .hb-onthispage h2 {
   margin: 0 0 0.5rem;
@@ -371,15 +419,18 @@ body.hb {
 }
 .hb-demo-open { font-size: 0.9rem; }
 
-/* Craftbook woodcuts: one under each craftbook's title, and a gallery shelf. */
+/* Craftbook marks: one under each craftbook's title, and a gallery shelf.
+   Marks are transparent cut-outs, so the image's own background is the
+   colored paper the app paints behind them, picked by data-ground. Cream
+   stays as the fallback for a mark that names no ground. */
+${groundRules}
 .hb-craftbook-art {
   display: block;
   width: 160px;
   height: 160px;
   margin: 0 0 1.25rem;
   border-radius: var(--hb-radius-md);
-  background: #e8dec7;
-  box-shadow: inset 0 0 0 1px rgba(74, 52, 30, 0.14);
+  background: var(--hb-mark-ground, #e8dec7);
 }
 .hb-article .hb-gallery {
   list-style: none;
@@ -408,7 +459,7 @@ body.hb {
   width: 96px;
   height: 96px;
   border-radius: var(--hb-radius-md);
-  background: #e8dec7;
+  background: var(--hb-mark-ground, #e8dec7);
 }
 .hb-gallery-title { font-family: var(--hb-font-display); font-weight: 700; color: var(--hb-sage); }
 .hb-gallery-summary { font-size: 0.85rem; line-height: 1.4; color: var(--hb-ink-muted); }
@@ -474,7 +525,7 @@ body.hb {
 }
 @media (max-width: 48rem) {
   .hb-layout { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; padding: 1.25rem 1rem 3rem; }
-  .hb-sidebar { position: static; }
+  .hb-sidebar { position: static; max-height: none; overflow: visible; }
   .hb-article { padding: 1.5rem 1.25rem 2rem; }
   .hb-hero h1 { font-size: 2rem; }
 }

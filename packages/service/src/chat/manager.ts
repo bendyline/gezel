@@ -332,6 +332,7 @@ import { taskReferencesAsRetrieval } from '../tasks/references.js';
 import {
   BUNDLED_DOCBLOCKS_TOOLSET_ID,
   bundledDocblocksJoinsSession,
+  threadNamesOfficeDocument,
 } from '../toolsets/bundled-docblocks.js';
 import {
   discoverProjectMcpToolsets,
@@ -974,6 +975,12 @@ interface LiveSessionState {
    * this one collapses the surface to the pre-resolved invoke action.
    */
   exactCraftbookConstrained: boolean;
+  /**
+   * The person named an Office file in this thread, which brings the bundled
+   * DocBlocks into the session. It only ever turns on, so a thread rebuilds
+   * once, on the message that first names one.
+   */
+  officeDocumentThread: boolean;
   /**
    * D4 clamp lifetime: a gate rejected this session's deliverable and
    * the validator has not approved since (derived from persisted gate
@@ -13792,6 +13799,10 @@ export class ChatManager extends LocalEngineRuntime {
         ? exactCraftbookConstraintActive(existing.record, gezel, pendingUserText)
         : false;
       const gateRepairConstrained = await gateRepairConstraintActive(this.store, existing.record);
+      const officeDocumentThread = threadNamesOfficeDocument(
+        existing.record.messages,
+        pendingUserText,
+      );
       // Its paired server went away (or came back): rebuild so the turn goes
       // where it can be answered. Probed first when a turn is about to run.
       const remoteRerouted = await this.remoteRouteChanged(
@@ -13823,6 +13834,7 @@ export class ChatManager extends LocalEngineRuntime {
           projectOrchestrationConstrained !== existing.projectOrchestrationConstrained ||
           exactCraftbookConstrained !== existing.exactCraftbookConstrained ||
           gateRepairConstrained !== existing.gateRepairConstrained ||
+          officeDocumentThread !== existing.officeDocumentThread ||
           codexPermissionMode !== existing.codexPermissionModeSnapshot ||
           claudePermissionMode !== existing.claudePermissionModeSnapshot)
       ) {
@@ -13865,6 +13877,11 @@ export class ChatManager extends LocalEngineRuntime {
           log.info(
             `tool-clamp: gate-repair session surface changed for ${existing.record.gezelId} ` +
               `(${existing.gateRepairConstrained ? 'on' : 'off'} → ${gateRepairConstrained ? 'on' : 'off'})`,
+          );
+        }
+        if (officeDocumentThread !== existing.officeDocumentThread) {
+          log.info(
+            `session ${existing.record.id.slice(0, 8)}: an Office file was named; rebuilding with DocBlocks`,
           );
         }
         if (codexPermissionMode !== existing.codexPermissionModeSnapshot) {
@@ -14129,6 +14146,7 @@ export class ChatManager extends LocalEngineRuntime {
       projectOrchestrationConstrained,
       exactCraftbookConstrained,
       gateRepairConstrained,
+      officeDocumentThread: threadNamesOfficeDocument(record.messages, pendingUserText),
       ...(sessionOpts.modelTier ? { modelTier: sessionOpts.modelTier } : {}),
       ...(sessionOpts.profile ? { profile: sessionOpts.profile } : {}),
       ...(sessionOpts.toolCapWarnings && sessionOpts.toolCapWarnings.length > 0
@@ -15035,8 +15053,14 @@ export class ChatManager extends LocalEngineRuntime {
           (!(builtinOnlyStep || appItemFocus) || entry.runtime.kind === 'builtin') &&
           !stepDisabledToolsetIds.has(entry.toolsetId),
       );
-    const activePerGezel = activeToolsets(perGezel);
-    const activeShared = activeToolsets(shared);
+    // A copy installed elsewhere that the shipped one replaces is the shipped
+    // one: it joins only where the shipped copy would.
+    const activeInstalled = (entries: readonly InstalledToolset[]): InstalledToolset[] =>
+      activeToolsets(entries).filter(
+        (entry) => !this.store.bundledToolsetSupersedes(entry.toolsetId, entry.version),
+      );
+    const activePerGezel = activeInstalled(perGezel);
+    const activeShared = activeInstalled(shared);
     // Filtered here, before both the prompt listing and the bridge spawn read
     // it, so the two cannot disagree about whether the tools exist.
     const bundledDocblocksJoins = bundledDocblocksJoinsSession({
@@ -15044,6 +15068,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(record.expectedDeliverable?.kind === 'file' && record.expectedDeliverable.filePath
         ? { expectedDeliverablePath: record.expectedDeliverable.filePath }
         : {}),
+      namesOfficeDocument: threadNamesOfficeDocument(record.messages, pendingUserText),
     });
     const activeSystem = activeToolsets(system).filter(
       (entry) =>
@@ -15051,7 +15076,7 @@ export class ChatManager extends LocalEngineRuntime {
         entry.toolsetId !== BUNDLED_DOCBLOCKS_TOOLSET_ID ||
         !this.store.isBundledToolset(entry.toolsetId),
     );
-    const activePerProject = activeToolsets(perProject);
+    const activePerProject = activeInstalled(perProject);
     if (stepDisabledToolsetIds.size > 0) {
       log.debug(
         `task-step toolsets: suppressed ${[...stepDisabledToolsetIds].join(', ')} for ${record.taskRef ?? record.id}/${taskContext?.step?.id ?? 'unknown-step'} by explicit step instruction`,

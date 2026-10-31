@@ -28,6 +28,7 @@ import {
   resolveTransformersModelOptions,
   verifyProfileArtifacts,
 } from '@bendyline/gezel-knowledge';
+import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import {
   HF_CACHE_DIR_ENV,
   ModelFileDownloadError,
@@ -278,6 +279,7 @@ export async function loadPipeline(): Promise<Pipeline> {
         // and throws "Unable to get model file path or buffer". The dir is
         // passed via env so this works in the embed worker thread too, which
         // inherits `process.env` but has no other view of the gezel home.
+        disableOnnxRuntimeTelemetry();
         const cacheDir = process.env[HF_CACHE_DIR_ENV];
         if (cacheDir) await pinTransformersCacheDir(cacheDir);
         const { pipeline, env } = await import('@huggingface/transformers');
@@ -391,6 +393,7 @@ async function verifyDaemonPipeline(): Promise<boolean> {
 }
 
 async function defaultTransformersCacheDir(): Promise<string> {
+  disableOnnxRuntimeTelemetry();
   const { env } = await import('@huggingface/transformers');
   // 4.x types it nullable: null only where there is no filesystem cache.
   return env.cacheDir ?? '';

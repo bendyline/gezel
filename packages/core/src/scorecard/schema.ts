@@ -265,11 +265,16 @@ export const ScorecardTaskMeasurementSchema = z
     judgments: z.array(ScorecardJudgeSchema.extend({ rubricId: z.string().min(1) }).strict()),
     noArtifact: z.number().int().nonnegative(),
     excludedReviews: z.number().int().nonnegative(),
+    /** Trials with no applicable qualitative rubric; distinct from a missing deliverable. */
+    notApplicableReviews: z.number().int().nonnegative().optional(),
   })
   .strict()
   .superRefine((group, ctx) => {
     const reviewed = group.judgments.reduce((sum, judge) => sum + judge.artifacts, 0);
-    if (reviewed + group.noArtifact + group.excludedReviews !== group.trials) {
+    if (
+      reviewed + group.noArtifact + group.excludedReviews + (group.notApplicableReviews ?? 0) !==
+      group.trials
+    ) {
       ctx.addIssue({ code: 'custom', message: 'Review accounting must cover every trial' });
     }
     const rubricIds = group.judgments.map((judge) => judge.rubricId);

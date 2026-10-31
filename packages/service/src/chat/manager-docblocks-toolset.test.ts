@@ -246,10 +246,11 @@ describe('ChatManager — the bundled DocBlocks joins only document work', () =>
     });
   });
 
-  async function createOpts(session: { id: string }) {
+  async function createOpts(session: { id: string }, message = 'hello') {
     mock.script('done');
-    await manager.send(session.id, 'hello');
-    const create = mock.calls.filter((c) => c.kind === 'create').at(-1);
+    await manager.send(session.id, message);
+    // A rebuilt session resumes its provider state, so either call carries the opts.
+    const create = mock.calls.filter((c) => c.kind === 'create' || c.kind === 'resume').at(-1);
     const opts = create?.opts as { extraMcpServers?: Array<{ id: string }> } | undefined;
     return { extras: (opts?.extraMcpServers ?? []).map((extra) => extra.id) };
   }
@@ -312,10 +313,58 @@ describe('ChatManager — the bundled DocBlocks joins only document work', () =>
     expect(extras).toContain('docblocks');
   });
 
-  it('still joins wherever the person installed a copy themselves', async () => {
-    await store.writeInstalledToolsets({ kind: 'gezel', gezelId: 'ada' }, [
-      docblocksToolset(join(home, 'stub')),
+  // docblocks-theme-roundtrip, 2026-10-29: a plain chat asking to restyle a
+  // deck from a brand deck had no `infer_theme_from_file` in 6 of 6 trials.
+  it('joins a plain chat whose person names an Office file', async () => {
+    const { extras } = await createOpts(
+      await manager.createSession({ gezelId: 'ada' }),
+      'Bring `source/quarterly-review.md` in line with `source/brand-reference.pptx`.',
+    );
+    expect(extras).toContain('docblocks');
+  });
+
+  it('rebuilds a running plain chat once its person names an Office file', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    expect((await createOpts(session)).extras).not.toContain('docblocks');
+    // A rebuild resumes the provider session; background one-shots create their own.
+    const rebuilds = () => mock.calls.filter((c) => c.kind === 'resume').length;
+    expect((await createOpts(session, 'Now fix the table in report.docx')).extras).toContain(
+      'docblocks',
+    );
+    expect(rebuilds()).toBe(1);
+    await createOpts(session, 'Thanks, that looks right.');
+    expect(rebuilds()).toBe(1);
+  });
+
+  it('stays out of a chat that names only a PDF', async () => {
+    const { extras } = await createOpts(
+      await manager.createSession({ gezelId: 'ada' }),
+      'Summarize contracts/lease.pdf for me.',
+    );
+    expect(extras).not.toContain('docblocks');
+  });
+
+  const withVersion = (version: string): InstalledToolset => {
+    const base = docblocksToolset(join(home, 'stub'));
+    return { ...base, version, runtime: { ...base.runtime, version } } as InstalledToolset;
+  };
+
+  // 1.26300.100: one "make a PowerPoint" request installed the catalog's
+  // older DocBlocks into Default, and every later Meester turn carried its
+  // tools again (21k → 38k prompt tokens).
+  it('treats an older or equal copy installed elsewhere as the shipped one', async () => {
+    await store.writeInstalledToolsets({ kind: 'project', projectId: 'default' }, [
+      withVersion('2.3.0'),
     ]);
+    await store.writeInstalledToolsets({ kind: 'gezel', gezelId: 'ada' }, [withVersion('2.3.4')]);
+    const { extras } = await createOpts(
+      await manager.createSession({ gezelId: 'ada', projectId: 'default' }),
+    );
+    expect(extras).not.toContain('docblocks');
+  });
+
+  it('still joins wherever someone installed a newer copy', async () => {
+    await store.writeInstalledToolsets({ kind: 'gezel', gezelId: 'ada' }, [withVersion('2.4.0')]);
     const { extras } = await createOpts(await manager.createSession({ gezelId: 'ada' }));
     expect(extras).toContain('docblocks');
   });

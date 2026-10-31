@@ -18,6 +18,7 @@ import { createLogger } from '@bendyline/gezel';
 import { PipelineLoadError } from '@bendyline/gezel-inference/internal/memory/embed-core';
 import { retireModelWorker } from '@bendyline/gezel-inference/internal/utils/retire-model-worker';
 import { findServiceWorkerEntry } from '@bendyline/gezel-inference/internal/utils/service-worker-entry';
+import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import { type FaceDetectOutcome, type FaceModelPaths, runFaceDetect } from './face-embed-core.js';
 import {
   type ImageEmbedJob,
@@ -175,6 +176,7 @@ function ensureWorker(): Worker | null {
     return null;
   }
   try {
+    disableOnnxRuntimeTelemetry();
     const w = new Worker(entry);
     w.on('message', onMessage);
     w.on('error', (err) => onWorkerDown(err instanceof Error ? err.message : String(err)));

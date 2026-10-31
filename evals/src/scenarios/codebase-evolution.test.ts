@@ -476,11 +476,12 @@ describe('codebase-evolution phased checks', () => {
   });
 
   it('runtime check passes rendered seed tasks in a module-based Launch Board', async () => {
-    const report = await checkCodebaseRuntime(
-      makeWorkspaceContext(FINAL_FILES),
-      'launch-board',
-      FINAL_FILES,
-    );
+    const files = {
+      ...FINAL_FILES,
+      // Headless shell does not always make the automatic icon request that Chrome makes.
+      [APP_PATH]: `await fetch('/favicon.ico');\n${FINAL_FILES[APP_PATH]}`,
+    };
+    const report = await checkCodebaseRuntime(makeWorkspaceContext(files), 'launch-board', files);
 
     expect(report.bootstrapError).toBeUndefined();
     expect(report.ran).toBe(true);
@@ -488,6 +489,22 @@ describe('codebase-evolution phased checks', () => {
     expect(report.passed).toContain('no-page-errors');
     expect(report.passed).toContain('seed-tasks-render');
     expect(report.passed).toContain('add-task-persists');
+  }, 30_000);
+
+  it('runtime check still rejects a missing application module', async () => {
+    const files = {
+      ...FINAL_FILES,
+      [APP_PATH]: `import './missing.js';\n${FINAL_FILES[APP_PATH]}`,
+    };
+    const report = await checkCodebaseRuntime(makeWorkspaceContext(files), 'launch-board', files);
+
+    expect(report.bootstrapError).toBeUndefined();
+    expect(report.ran).toBe(true);
+    expect(report.failed).toContainEqual({
+      name: 'no-page-errors',
+      why: expect.stringContaining('404'),
+    });
+    expect(report.passed).not.toContain('no-page-errors');
   }, 30_000);
 
   it('phase 4 module graph rejects named imports that target missing exports', () => {

@@ -6,6 +6,7 @@ import {
   type SiteCatalogSource,
   TOOLSET_CATALOG_ID,
   buildSiteCatalog,
+  craftbookArtHtml,
   demoSectionHtml,
   insertAfterTitle,
   insertDemoSection,
@@ -100,6 +101,7 @@ const catalog = stubCatalog(
         id: 'pitch-deck',
         name: 'Pitch Deck',
         description: 'Make a deck. More.',
+        category: 'marketing',
         logo: 'logo.webp',
       }),
       summary('craftbook-template', {
@@ -164,6 +166,23 @@ describe('buildSiteCatalog', () => {
       '<a href="../craftbook/pitch-deck/"><img src="../craftbook/pitch-deck/logo.webp"',
     );
     expect([...craftbookArt.keys()]).toEqual(['pitch-deck']);
+  });
+
+  it('counts what the site publishes, for the landing page to quote', async () => {
+    const { counts } = await buildSiteCatalog(catalog);
+    expect(counts.craftbooks).toBe(2);
+    expect(counts.projectTypeDemos).toBe(1);
+    expect(Object.values(counts).every((n) => Number.isInteger(n) && n >= 0)).toBe(true);
+  });
+
+  it("paints each mark on its category's ground, as the app does", async () => {
+    const { pages, craftbookArt } = await buildSiteCatalog(catalog);
+    expect(craftbookArt.get('pitch-deck')?.ground).toBe('terracotta');
+    expect(pages.find((p) => p.entry.id === 'craftbooks-index')!.html).toContain(
+      'src="../craftbook/pitch-deck/logo.webp" alt="" data-ground="terracotta"',
+    );
+    expect(craftbookArtHtml('Pitch Deck', 'terracotta')).toContain('data-ground="terracotta"');
+    expect(craftbookArtHtml('Pitch Deck', undefined)).not.toContain('data-ground');
   });
 
   it('copies only page files for a demo, and skips entries that escape the pages folder', async () => {

@@ -10,6 +10,7 @@ import {
   findTaskForCraftbookAnywhere,
   finishAuthoringPoll,
   progressBytes,
+  runningTaskProgress,
   sendMeesterKickoff,
   unfinishedTaskFailure,
 } from './helpers.ts';
@@ -257,6 +258,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     // out/press-release.md "EXISTS" and not to recreate it.
     bytes: progressBytes(release),
     milestones: completedTaskSteps(found?.task),
+    taskProgress: runningTaskProgress(found?.task),
     deliverableMissing: release === null || release.length === 0,
     repairPath: RELEASE_PATH,
     repairDirective: [

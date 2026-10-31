@@ -1,0 +1,1708 @@
+{
+  "schemaVersion": 1,
+  "judgeProvider": "codex-inline",
+  "judgeModel": "current-session",
+  "judgments": [
+    {
+      "packetId": "08b2ac893106",
+      "cellId": "r3-qwen-core-tictactoe",
+      "trialId": "tictactoe-qwen3-8-27b-q4-2026-10-29T20-28-58-123Z-esws",
+      "scenarioId": "tictactoe",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-core-tictactoe/tictactoe/tictactoe-qwen3-8-27b-q4-2026-10-29T20-28-58-123Z-esws/workspace/tic-tac-toe-game/index.html",
+      "primaryForCell": true,
+      "artifactSha256": "6c0451f6ff4fbaaf2618050fada8daf74850ae95e733a7d43ed70ef187b72a03",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-29T20:58:05.475Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 3464,
+      "artifactBytes": 3464,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "visualQuality",
+          "description": "Does it look like a real product, or a debug page?"
+        },
+        {
+          "name": "functionalCompleteness",
+          "description": "Does it implement the user's stated brief?"
+        },
+        {
+          "name": "codeQuality",
+          "description": "Would a developer reading the source be embarrassed?"
+        },
+        {
+          "name": "polish",
+          "description": "Are there surprising / delightful touches?"
+        }
+      ],
+      "scoreAxes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 7,
+        "codeQuality": 7,
+        "polish": 3
+      },
+      "justification": "Clear two-player logic covers wins, draws, blocked occupied cells and reset. Native disabled buttons and separated state functions are sound. The fixed-size board, unlabelled empty cells, non-live status and lack of winning-line emphasis leave a basic presentation.",
+      "meanScore": 5.5
+    },
+    {
+      "packetId": "6037fee834bb",
+      "cellId": "r3-gemma-core-tictactoe",
+      "trialId": "tictactoe-gemma4-12b-q4-2026-10-29T20-33-58-525Z-jej2",
+      "scenarioId": "tictactoe",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-core-tictactoe/tictactoe/tictactoe-gemma4-12b-q4-2026-10-29T20-33-58-525Z-jej2/workspace/this-work-e/index.html",
+      "primaryForCell": true,
+      "artifactSha256": "42861385c2e107f46f7ca83b631142ae8a87e9c86cc7d778eca98feea27f2f5f",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-29T20:58:05.475Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 4781,
+      "artifactBytes": 4781,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "visualQuality",
+          "description": "Does it look like a real product, or a debug page?"
+        },
+        {
+          "name": "functionalCompleteness",
+          "description": "Does it implement the user's stated brief?"
+        },
+        {
+          "name": "codeQuality",
+          "description": "Would a developer reading the source be embarrassed?"
+        },
+        {
+          "name": "polish",
+          "description": "Are there surprising / delightful touches?"
+        }
+      ],
+      "scoreAxes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 7,
+        "codeQuality": 6,
+        "polish": 3
+      },
+      "justification": "Implements alternating turns, all win lines, draws and reset with readable state handling. Styling is basic; the 340px board can overflow narrow screens. Taken/end-state cells remain focusable, status lacks live announcements, and there is no winning-line highlight.",
+      "meanScore": 5.25
+    },
+    {
+      "packetId": "58c17ea7c173",
+      "cellId": "r3-gemma-core-petshop",
+      "trialId": "petshop-gemma4-12b-q4-2026-10-29T20-37-21-739Z-le7d",
+      "scenarioId": "petshop",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-core-petshop/petshop/petshop-gemma4-12b-q4-2026-10-29T20-37-21-739Z-le7d/workspace/build-me-a-single-page-pet-shop-website/index.html",
+      "primaryForCell": true,
+      "artifactSha256": "979a330d7a5b5436ebff56e5756c69e83a1a783fac8b726af4f6f2361a6a7eac",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-29T20:58:05.475Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 8648,
+      "artifactBytes": 8648,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "visualQuality",
+          "description": "Does it look like a real product, or a debug page?"
+        },
+        {
+          "name": "functionalCompleteness",
+          "description": "Does it implement the user's stated brief?"
+        },
+        {
+          "name": "codeQuality",
+          "description": "Would a developer reading the source be embarrassed?"
+        },
+        {
+          "name": "polish",
+          "description": "Are there surprising / delightful touches?"
+        }
+      ],
+      "scoreAxes": {
+        "visualQuality": 6,
+        "functionalCompleteness": 6,
+        "codeQuality": 5,
+        "polish": 4
+      },
+      "justification": "A coherent services/products/contact page references a confirmed generated PNG logo. Responsive cards and labelled fields help, but the header has no narrow-screen treatment. Cart is alert-only; the form falsely says a message was received despite no submission. Focus outlines are removed.",
+      "meanScore": 5.25
+    },
+    {
+      "packetId": "4e41db855025",
+      "cellId": "r3-qwen-core-petshop",
+      "trialId": "petshop-qwen3-8-27b-q4-2026-10-29T20-42-49-511Z-03zm",
+      "scenarioId": "petshop",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-core-petshop/petshop/petshop-qwen3-8-27b-q4-2026-10-29T20-42-49-511Z-03zm/workspace/pet-shop-website/index.html",
+      "primaryForCell": true,
+      "artifactSha256": "2d17b6fafd412d6c5c61a0ef3948e063c7e4ab2e5cd640322cf6eaffc5ad5a89",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-29T20:58:05.475Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 17224,
+      "artifactBytes": 17224,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "visualQuality",
+          "description": "Does it look like a real product, or a debug page?"
+        },
+        {
+          "name": "functionalCompleteness",
+          "description": "Does it implement the user's stated brief?"
+        },
+        {
+          "name": "codeQuality",
+          "description": "Would a developer reading the source be embarrassed?"
+        },
+        {
+          "name": "polish",
+          "description": "Are there surprising / delightful touches?"
+        }
+      ],
+      "scoreAxes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 7,
+        "codeQuality": 6,
+        "polish": 6
+      },
+      "justification": "Warm consistent styling, mobile navigation, product/adoption cards and a working in-memory cart with totals/removal go beyond a bare page. The generated PNG is present. Checkout is clearly a demo, but the drawer lacks focus management/Escape handling and the menu lacks expanded-state semantics.",
+      "meanScore": 6.5
+    },
+    {
+      "packetId": "78cb58f8d948",
+      "cellId": "r3-qwen-core-tankcombat",
+      "trialId": "tankcombat-qwen3-8-27b-q4-2026-10-29T20-52-35-831Z-92r0",
+      "scenarioId": "tankcombat",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-core-tankcombat/tankcombat/tankcombat-qwen3-8-27b-q4-2026-10-29T20-52-35-831Z-92r0/workspace/tank-combat-arcade/index.html",
+      "primaryForCell": true,
+      "artifactSha256": "797f8ac6332281f9387d3eccbefb12b6f78cbc48b8317de8be97d5ac08c871bd",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-29T21:00:36.379Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 8450,
+      "artifactBytes": 8450,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "visualQuality",
+          "description": "Does it look like a real product, or a debug page?"
+        },
+        {
+          "name": "functionalCompleteness",
+          "description": "Does it implement the user's stated brief?"
+        },
+        {
+          "name": "codeQuality",
+          "description": "Would a developer reading the source be embarrassed?"
+        },
+        {
+          "name": "polish",
+          "description": "Are there surprising / delightful touches?"
+        }
+      ],
+      "scoreAxes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 7,
+        "codeQuality": 6,
+        "polish": 4
+      },
+      "justification": "Self-contained combat has WASD/arrows, space fire, pursuing/shooting enemies, hit points, score and observable input. Reverse iteration handles removals clearly. The fixed 800px canvas lacks responsive sizing, movement depends on frame rate, and game over offers no restart or hit-feedback effects.",
+      "meanScore": 5.5
+    },
+    {
+      "packetId": "0fe6b8f51e4a",
+      "cellId": "r3-gemma-core-tankcombat",
+      "trialId": "tankcombat-gemma4-12b-q4-2026-10-29T20-58-13-560Z-my41",
+      "scenarioId": "tankcombat",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-core-tankcombat/tankcombat/tankcombat-gemma4-12b-q4-2026-10-29T20-58-13-560Z-my41/workspace/this-work-e/index.html",
+      "primaryForCell": true,
+      "artifactSha256": "702d971ae4d71a63fb5de887ef834bb15d89e06cc7e5fb59b9d874bc420ff4e2",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-29T21:02:42.206Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 8579,
+      "artifactBytes": 8579,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "visualQuality",
+          "description": "Does it look like a real product, or a debug page?"
+        },
+        {
+          "name": "functionalCompleteness",
+          "description": "Does it implement the user's stated brief?"
+        },
+        {
+          "name": "codeQuality",
+          "description": "Would a developer reading the source be embarrassed?"
+        },
+        {
+          "name": "polish",
+          "description": "Are there surprising / delightful touches?"
+        }
+      ],
+      "scoreAxes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 4,
+        "codeQuality": 3,
+        "polish": 3
+      },
+      "justification": "Particles, score and enemy pursuit provide a basic game. Left/right and A/D do nothing; forward/reverse force turns. The firing cooldown never decrements, requiring key release. Splicing arrays during forEach risks skipped updates/collisions. There are no control instructions or clear death feedback.",
+      "meanScore": 3.75
+    },
+    {
+      "packetId": "e4377e8a6dc9",
+      "cellId": "r3-qwen-productivity-meeting-followup",
+      "trialId": "meeting-followup-qwen3-8-27b-q4-2026-10-29T23-32-33-898Z-scrq",
+      "scenarioId": "meeting-followup",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-productivity-meeting-followup/meeting-followup/meeting-followup-qwen3-8-27b-q4-2026-10-29T23-32-33-898Z-scrq/workspace/orchid-launch-follow-up/meeting-brief.md",
+      "primaryForCell": true,
+      "artifactSha256": "6a9ce2716b4d06f6b963cf758e485b0825abfe77d45772a72af87b0f4fd5602d",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-29T23:55:05.255Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 1563,
+      "artifactBytes": 1563,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "decisionClarity",
+          "description": "Separates decisions, open questions, actions, and risks cleanly."
+        },
+        {
+          "name": "grounding",
+          "description": "Owners, dates, scope, and dependencies match the transcript and roster."
+        },
+        {
+          "name": "actionability",
+          "description": "A reader can execute the follow-up without rereading the transcript."
+        },
+        {
+          "name": "brevity",
+          "description": "The brief is scannable and avoids transcript-style repetition."
+        }
+      ],
+      "scoreAxes": {
+        "decisionClarity": 8,
+        "grounding": 9,
+        "actionability": 9,
+        "brevity": 8
+      },
+      "justification": "Clearly rejects stale proposals and preserves all four owners, dates and the A2 dependency. The action table is immediately usable, with annual-plan and rollback ownership correctly unresolved. Source attribution is explicit; repeating the dependency and rollback gap adds a little length.",
+      "meanScore": 8.5
+    },
+    {
+      "packetId": "daa11b945508",
+      "cellId": "r3-gemma-productivity-meeting-followup",
+      "trialId": "meeting-followup-gemma4-12b-q4-2026-10-29T23-37-01-229Z-ne86",
+      "scenarioId": "meeting-followup",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-meeting-followup/meeting-followup/meeting-followup-gemma4-12b-q4-2026-10-29T23-37-01-229Z-ne86/workspace/orchid-launch-follow-up/meeting-brief.md",
+      "primaryForCell": true,
+      "artifactSha256": "2917b0b2f42e313f4d611a3d61361f97709b470ce1f588d9c6b094f0571956da",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-29T23:55:05.255Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 833,
+      "artifactBytes": 833,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "decisionClarity",
+          "description": "Separates decisions, open questions, actions, and risks cleanly."
+        },
+        {
+          "name": "grounding",
+          "description": "Owners, dates, scope, and dependencies match the transcript and roster."
+        },
+        {
+          "name": "actionability",
+          "description": "A reader can execute the follow-up without rereading the transcript."
+        },
+        {
+          "name": "brevity",
+          "description": "The brief is scannable and avoids transcript-style repetition."
+        }
+      ],
+      "scoreAxes": {
+        "decisionClarity": 8,
+        "grounding": 9,
+        "actionability": 8,
+        "brevity": 9
+      },
+      "justification": "Compact, accurate separation of decisions, actions, open questions and risks. All names and deadlines match the transcript, including the migration dependency and unscheduled legal review. The brief lacks source attribution and action IDs, making register cross-reference less convenient.",
+      "meanScore": 8.5
+    },
+    {
+      "packetId": "7198fc430ed9",
+      "cellId": "r3-gemma-productivity-craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-gemma4-12b-q4-2026-10-29T23-42-22-296Z-kwml",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-craftbook-spreadsheet-model/craftbook-spreadsheet-model/craftbook-spreadsheet-model-gemma4-12b-q4-2026-10-29T23-42-22-296Z-kwml/artifacts/spreadsheet-financial-model-workflow-eval/tasks/1/scope.md",
+      "primaryForCell": true,
+      "artifactSha256": "9c473f963ac32aff34923103fa9ab47a80c838690d198fb786a4d80eefaf1001",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-29T23:55:05.255Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 1302,
+      "artifactBytes": 1302,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "workflow fidelity",
+          "description": "The result reflects the named craftbook sequence and its declared acceptance gates rather than a freehand substitute."
+        },
+        {
+          "name": "usefulness",
+          "description": "The deliverable is coherent, actionable, and suitable for the craftbook purpose stated in the local brief."
+        }
+      ],
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 3
+      },
+      "justification": "The scope defines editable drivers, formulas and scenarios before building, but substitutes unsupported SaaS assumptions for the seeded business context. Its net-burn formula is actually net operating cash flow, promised runway has no cash input or formula, and the sanity checklist supplies no expected numeric test.",
+      "meanScore": 4.5
+    },
+    {
+      "packetId": "e43860fcc448",
+      "cellId": "r3-qwen-productivity-craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-qwen3-8-27b-q4-2026-10-29T23-49-01-087Z-1y0b",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-productivity-craftbook-spreadsheet-model/craftbook-spreadsheet-model/craftbook-spreadsheet-model-qwen3-8-27b-q4-2026-10-29T23-49-01-087Z-1y0b/artifacts/spreadsheet-financial-model-workflow-eval/tasks/1/scope.md",
+      "primaryForCell": true,
+      "artifactSha256": "fb439bc4113f3fd636f23e578d4263fbdb8e38d49d355b78d1849aa6b8e3d05b",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T00:59:25.921Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 3955,
+      "artifactBytes": 3955,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "workflow fidelity",
+          "description": "The result reflects the named craftbook sequence and its declared acceptance gates rather than a freehand substitute."
+        },
+        {
+          "name": "usefulness",
+          "description": "The deliverable is coherent, actionable, and suitable for the craftbook purpose stated in the local brief."
+        }
+      ],
+      "scoreAxes": {
+        "workflow fidelity": 7,
+        "usefulness": 5
+      },
+      "justification": "A well-structured scope grounded in the four customer records, with editable assumptions, formulas and sanity cases. However all three expected scenario revenues are arithmetically wrong: the stated formulas yield 4248.30, 4531.52 and 3924.62. The unsourced risk/growth assumptions also need clearer hypothetical labeling.",
+      "meanScore": 6
+    },
+    {
+      "packetId": "9d2634e96b47",
+      "cellId": "r3-gemma-productivity-docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-gemma4-12b-q4-2026-10-30T00-10-04-313Z-9f65",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-gemma4-12b-q4-2026-10-30T00-10-04-313Z-9f65/workspace/brand-theme-alignment/theme-report.md",
+      "primaryForCell": true,
+      "artifactSha256": "852210f9921b2d0278212da88d487ca01afdbed3dc05fbe3f278e025d73c0e6c",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T00:59:25.921Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 423,
+      "artifactBytes": 423,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "grounding",
+          "description": "No invented detail: every specific claim is one of the values listed above, a slide count or comparison figure, or is plainly hedged. Fonts or colors beyond that list are fabrication."
+        },
+        {
+          "name": "candor",
+          "description": "Differences the comparison found are stated plainly rather than smoothed over."
+        },
+        {
+          "name": "usefulness",
+          "description": "The recommendation is a decision someone could act on this week."
+        }
+      ],
+      "scoreAxes": {
+        "grounding": 2,
+        "candor": 3,
+        "usefulness": 2
+      },
+      "justification": "Lists the expected theme values but falsely attributes them to a successful inference call; no DocBlocks call occurred. It admits the slide count and comparison are unverified, then contradicts that uncertainty by declaring high alignment and recommending final use without a saved themed deck.",
+      "meanScore": 2.3333333333333335
+    },
+    {
+      "packetId": "e92ae8ac6d16",
+      "cellId": "r3-qwen-productivity-docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-10-30T00-22-23-506Z-9oo5",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-10-30T00-22-23-506Z-9oo5/workspace/brand-theme-alignment/theme-report.md",
+      "primaryForCell": true,
+      "artifactSha256": "e84454f6aaeaf9af4fe901868b660ea14d196fd609a538e6fa06b30111d60a6d",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T00:59:25.921Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 1536,
+      "artifactBytes": 1536,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "grounding",
+          "description": "No invented detail: every specific claim is one of the values listed above, a slide count or comparison figure, or is plainly hedged. Fonts or colors beyond that list are fabrication."
+        },
+        {
+          "name": "candor",
+          "description": "Differences the comparison found are stated plainly rather than smoothed over."
+        },
+        {
+          "name": "usefulness",
+          "description": "The recommendation is a decision someone could act on this week."
+        }
+      ],
+      "scoreAxes": {
+        "grounding": 4,
+        "candor": 8,
+        "usefulness": 5
+      },
+      "justification": "Candidly reports unavailable tools, no conversion and no verified comparison instead of inventing theme values. But its repeated claim that the brand deck is missing is false: the captured workspace contains it. Enabling DocBlocks is useful advice; requesting another deck is unsupported.",
+      "meanScore": 5.666666666666667
+    },
+    {
+      "packetId": "57596457b4dc",
+      "cellId": "r3-qwen-productivity-craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-qwen3-8-27b-q4-2026-10-30T00-26-11-137Z-5mmc",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-productivity-craftbook-powerpoint-deck/craftbook-powerpoint-deck/craftbook-powerpoint-deck-qwen3-8-27b-q4-2026-10-30T00-26-11-137Z-5mmc/workspace/powerpoint-grounding-eval/powerpoint/eval/deck.md",
+      "primaryForCell": true,
+      "artifactSha256": "44129b566a906b1d59d18b5831e1ae658c79596dd7a898b1f551ec34b08fcd14",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T00:59:25.921Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 1984,
+      "artifactBytes": 1984,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "source-acquisition",
+          "description": "The workflow read and cited the exact supplied source before outlining."
+        },
+        {
+          "name": "outline-parity",
+          "description": "Every numbered outline slide appears exactly once as a same-title H1 in powerpoint/eval/deck.md, in order."
+        },
+        {
+          "name": "grounding",
+          "description": "Every metric and action comes from source/brief.md and no extra metric was invented."
+        },
+        {
+          "name": "convertibility",
+          "description": "One H1 per slide and concise block content make the source ready for DocBlocks PPTX conversion."
+        }
+      ],
+      "scoreAxes": {
+        "source-acquisition": 9,
+        "outline-parity": 9,
+        "grounding": 8,
+        "convertibility": 8
+      },
+      "justification": "The source was read before outlining, and all seven H1 titles match the approved outline. Original figures and actions are preserved with clear citations; derived differences are correct. Short blocks convert cleanly, though claims about comparable coverage add interpretation and a sources slide follows the requested action close.",
+      "meanScore": 8.5
+    },
+    {
+      "packetId": "22a6070c18b6",
+      "cellId": "r3-gemma-productivity-craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-gemma4-12b-q4-2026-10-30T00-39-24-281Z-w6nv",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-craftbook-powerpoint-deck/craftbook-powerpoint-deck/craftbook-powerpoint-deck-gemma4-12b-q4-2026-10-30T00-39-24-281Z-w6nv/workspace/powerpoint-grounding-eval/powerpoint/eval/deck.md",
+      "primaryForCell": true,
+      "artifactSha256": "43f80d68ef75ce105a5639fcebb75065811b5c30543d68d4895aace44920e9d2",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T00:59:25.921Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 1156,
+      "artifactBytes": 1156,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "source-acquisition",
+          "description": "The workflow read and cited the exact supplied source before outlining."
+        },
+        {
+          "name": "outline-parity",
+          "description": "Every numbered outline slide appears exactly once as a same-title H1 in powerpoint/eval/deck.md, in order."
+        },
+        {
+          "name": "grounding",
+          "description": "Every metric and action comes from source/brief.md and no extra metric was invented."
+        },
+        {
+          "name": "convertibility",
+          "description": "One H1 per slide and concise block content make the source ready for DocBlocks PPTX conversion."
+        }
+      ],
+      "scoreAxes": {
+        "source-acquisition": 8,
+        "outline-parity": 9,
+        "grounding": 9,
+        "convertibility": 8
+      },
+      "justification": "Read and cited the supplied brief before outlining; six H1s reproduce the approved outline in order. All metrics and actions are faithful, and concise bullets suit conversion. Generic introductory bullets repeat the evidence, and the deck ends with references rather than the requested next actions.",
+      "meanScore": 8.5
+    },
+    {
+      "packetId": "0469b9e780e2",
+      "cellId": "r3-gemma-productivity-wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-gemma4-12b-q4-2026-10-30T00-46-07-809Z-8yiu",
+      "scenarioId": "wikipedia-research-brief",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-wikipedia-research-brief/wikipedia-research-brief/wikipedia-research-brief-gemma4-12b-q4-2026-10-30T00-46-07-809Z-8yiu/workspace/analytical-engine-research-brief/research-brief.md",
+      "primaryForCell": true,
+      "artifactSha256": "48335936c8dc619e22f377b1efe211255b4d53cd1e70ac33b1dc2ad1aa6ef645",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T00:59:25.921Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 7081,
+      "artifactBytes": 7081,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "synthesis",
+          "description": "Builds an argument across sources rather than listing source summaries."
+        },
+        {
+          "name": "grounding",
+          "description": "Claims and dates stay faithful to the signed local source cards."
+        },
+        {
+          "name": "citationQuality",
+          "description": "Source ids appear near the claims they support and make provenance easy to audit."
+        },
+        {
+          "name": "calibration",
+          "description": "Separates documented facts, interpretation, and disputed historical shorthand."
+        }
+      ],
+      "scoreAxes": {
+        "synthesis": 5,
+        "grounding": 6,
+        "citationQuality": 6,
+        "calibration": 7
+      },
+      "justification": "Core chronology, Bernoulli algorithm and disputed first-programmer label are accurate. Repeated translation/notes summaries dilute synthesis. Symbol manipulation, CPU analogy and lack-of-prototype claims exceed the local cards without clear hedging; the longer-notes claim repeatedly cites ADA rather than the supporting MENABREA card.",
+      "meanScore": 6
+    },
+    {
+      "packetId": "85713ff19f8a",
+      "cellId": "r3-qwen-productivity-wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-qwen3-8-27b-q4-2026-10-30T00-54-05-180Z-kebn",
+      "scenarioId": "wikipedia-research-brief",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-productivity-wikipedia-research-brief/wikipedia-research-brief/wikipedia-research-brief-qwen3-8-27b-q4-2026-10-30T00-54-05-180Z-kebn/workspace/analytical-engine-research-brief/research-brief.md",
+      "primaryForCell": true,
+      "artifactSha256": "631c333eb2c01447593120241501ad51387521f41fba0fe5814a5465dfcbfca9",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T01:02:51.694Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 7890,
+      "artifactBytes": 7890,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "synthesis",
+          "description": "Builds an argument across sources rather than listing source summaries."
+        },
+        {
+          "name": "grounding",
+          "description": "Claims and dates stay faithful to the signed local source cards."
+        },
+        {
+          "name": "citationQuality",
+          "description": "Source ids appear near the claims they support and make provenance easy to audit."
+        },
+        {
+          "name": "calibration",
+          "description": "Separates documented facts, interpretation, and disputed historical shorthand."
+        }
+      ],
+      "scoreAxes": {
+        "synthesis": 6,
+        "grounding": 7,
+        "citationQuality": 8,
+        "calibration": 7
+      },
+      "justification": "Accurate chronology, well-matched source IDs and explicit boundaries around absent dates and interpretation. Repetition weakens synthesis. Claims that the algorithms never ran on any working hardware, and the asserted two causes of the authorship debate, exceed the limited cards; the disputed title itself stays qualified.",
+      "meanScore": 7
+    },
+    {
+      "packetId": "0b14556282f9",
+      "cellId": "r3-gemma-productivity-craftbook-week-plan",
+      "trialId": "craftbook-week-plan-gemma4-12b-q4-2026-10-30T01-42-16-313Z-i980",
+      "scenarioId": "craftbook-week-plan",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-craftbook-week-plan/craftbook-week-plan/craftbook-week-plan-gemma4-12b-q4-2026-10-30T01-42-16-313Z-i980/workspace/calendar-desk-week-plan-eval/tasks/eval/report.md",
+      "primaryForCell": true,
+      "artifactSha256": "94ee5dcd73c45e514112e71893f9770706402c5263992b87585a12aa3b1a6449",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T03:04:58.726Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 2202,
+      "artifactBytes": 2202,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "coverage",
+          "description": "Every event from the calendar week appears in the plan; nothing is silently dropped and nothing is invented."
+        },
+        {
+          "name": "prioritization",
+          "description": "Focus blocks land in real gaps, the biggest work gets the biggest gap, and follow-ups sit on days with room."
+        },
+        {
+          "name": "conflict-handling",
+          "description": "The overlapping pair is named with a concrete proposed fix the owner can accept in one decision."
+        },
+        {
+          "name": "realism",
+          "description": "The load picture is honest — heavy days are called heavy, and no day is over-packed to look tidy."
+        }
+      ],
+      "scoreAxes": {
+        "coverage": 2,
+        "prioritization": 1,
+        "conflict-handling": 2,
+        "realism": 2
+      },
+      "justification": "Names the vendor sync, Priya and Harborview, but omits five events, all times and the dated follow-ups. No timed focus blocks or load assessment. It misdescribes the budget-review/Priya overlap as overlapping 1:1s and offers no concrete reschedule. Generic weekday actions and a claimed robust plan do not match the calendar.",
+      "meanScore": 1.75
+    },
+    {
+      "packetId": "8243309e5df8",
+      "cellId": "r3-gemma-productivity-craftbook-week-plan",
+      "trialId": "craftbook-week-plan-gemma4-12b-q4-2026-10-30T01-42-16-313Z-i980",
+      "scenarioId": "craftbook-week-plan",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-craftbook-week-plan/craftbook-week-plan/craftbook-week-plan-gemma4-12b-q4-2026-10-30T01-42-16-313Z-i980/artifacts/calendar-desk-week-plan-eval/tasks/eval/report.md",
+      "primaryForCell": false,
+      "artifactSha256": "693870aa6d79a2188389ce34ea7b4eaae14a13e17bbba376535b10e292d77218",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T03:04:58.726Z",
+      "status": "judged",
+      "reviewMethod": "source-review",
+      "reviewedBytes": 1875,
+      "artifactBytes": 1875,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "coverage",
+          "description": "Every event from the calendar week appears in the plan; nothing is silently dropped and nothing is invented."
+        },
+        {
+          "name": "prioritization",
+          "description": "Focus blocks land in real gaps, the biggest work gets the biggest gap, and follow-ups sit on days with room."
+        },
+        {
+          "name": "conflict-handling",
+          "description": "The overlapping pair is named with a concrete proposed fix the owner can accept in one decision."
+        },
+        {
+          "name": "realism",
+          "description": "The load picture is honest — heavy days are called heavy, and no day is over-packed to look tidy."
+        }
+      ],
+      "scoreAxes": {
+        "coverage": 0,
+        "prioritization": 1,
+        "conflict-handling": 1,
+        "realism": 1
+      },
+      "justification": "Uses October 26-November 1 instead of the service's July week, with invented Meeting A/B and Event 3-11 placeholders. Focus blocks and a heavy Wednesday lack calendar support. The actual budget-review/Priya clash is absent; a fictional meeting is claimed moved without evidence. Follow-up names survive, but July deadlines are ignored.",
+      "meanScore": 0.75
+    },
+    {
+      "packetId": "5ee670134618",
+      "cellId": "r3-gemma-productivity-craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-gemma4-12b-q4-2026-10-30T01-59-21-485Z-84o3",
+      "scenarioId": "craftbook-ab-test-readout",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-craftbook-ab-test-readout/craftbook-ab-test-readout/craftbook-ab-test-readout-gemma4-12b-q4-2026-10-30T01-59-21-485Z-84o3/workspace/a-b-test-readout-eval/tasks/3/readout.md",
+      "primaryForCell": true,
+      "artifactSha256": "5d46777b49524922b4a869587cbc956884bf180c99ba459c7aba7152b88bc324",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T04:02:28.487Z",
+      "status": "judged",
+      "reviewMethod": "source-review-with-frozen-fixtures",
+      "reviewedBytes": 3098,
+      "artifactBytes": 3098,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "safety",
+          "description": "Dry-run posture is explicit: no real credentials, clear stop-before-side-effect boundary."
+        },
+        {
+          "name": "mapping",
+          "description": "Fake endpoints/commands are mapped completely to the workflow steps."
+        },
+        {
+          "name": "signals",
+          "description": "Success, failure, retry, and abort conditions are all defined."
+        },
+        {
+          "name": "containment",
+          "description": "The plan cannot accidentally reach a real service from a mock context."
+        }
+      ],
+      "rubricApplicability": "mismatched",
+      "rubricLimitation": "Frozen mock-service execution axes do not measure A/B statistical readout quality.",
+      "scoreAxes": {
+        "safety": 0,
+        "mapping": 0,
+        "signals": 2,
+        "containment": 3
+      },
+      "justification": "Do-not-ship and the refund threshold supply a decision stop signal, but no explicit dry-run boundary, fake-command mapping or retry/abort procedure is given. This is local analytical prose. These literal frozen axes mismatch the task; they do not grade the analysis. Its unit confusion is documented separately.",
+      "meanScore": 1.25
+    },
+    {
+      "packetId": "92b16ccea70f",
+      "cellId": "r3-gemma-productivity-craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-gemma4-12b-q4-2026-10-30T01-59-21-485Z-84o3",
+      "scenarioId": "craftbook-ab-test-readout",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-craftbook-ab-test-readout/craftbook-ab-test-readout/craftbook-ab-test-readout-gemma4-12b-q4-2026-10-30T01-59-21-485Z-84o3/artifacts/a-b-test-readout-eval/tasks/2/readout.md",
+      "primaryForCell": false,
+      "artifactSha256": "2c1e2363b6b19a0db4d932166f08a0331b4ff65f0034b55b583425f5fd1b4cc0",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T04:02:28.487Z",
+      "status": "judged",
+      "reviewMethod": "source-review-with-frozen-fixtures",
+      "reviewedBytes": 2592,
+      "artifactBytes": 2592,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "safety",
+          "description": "Dry-run posture is explicit: no real credentials, clear stop-before-side-effect boundary."
+        },
+        {
+          "name": "mapping",
+          "description": "Fake endpoints/commands are mapped completely to the workflow steps."
+        },
+        {
+          "name": "signals",
+          "description": "Success, failure, retry, and abort conditions are all defined."
+        },
+        {
+          "name": "containment",
+          "description": "The plan cannot accidentally reach a real service from a mock context."
+        }
+      ],
+      "rubricApplicability": "mismatched",
+      "rubricLimitation": "Frozen mock-service execution axes do not measure A/B statistical readout quality.",
+      "scoreAxes": {
+        "safety": 0,
+        "mapping": 0,
+        "signals": 2,
+        "containment": 3
+      },
+      "justification": "The report says not to ship and proposes a design review, but does not specify dry-run credentials, fake endpoints, retry or abort handling. It is local prose. The declared axes assess a mock execution plan and mismatch this readout; the literal low scores are not a statistical-quality verdict.",
+      "meanScore": 1.25
+    },
+    {
+      "packetId": "87606b7b14e2",
+      "cellId": "r3-gemma-productivity-craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-gemma4-12b-q4-2026-10-30T01-59-21-485Z-84o3",
+      "scenarioId": "craftbook-ab-test-readout",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-craftbook-ab-test-readout/craftbook-ab-test-readout/craftbook-ab-test-readout-gemma4-12b-q4-2026-10-30T01-59-21-485Z-84o3/artifacts/a-b-test-readout-eval/tasks/3/readout.md",
+      "primaryForCell": false,
+      "artifactSha256": "76b1046fa5887596344de61be493bc587be92c6b1eac2359e395c362d797a6a8",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T04:02:28.487Z",
+      "status": "judged",
+      "reviewMethod": "source-review-with-frozen-fixtures",
+      "reviewedBytes": 2484,
+      "artifactBytes": 2484,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "safety",
+          "description": "Dry-run posture is explicit: no real credentials, clear stop-before-side-effect boundary."
+        },
+        {
+          "name": "mapping",
+          "description": "Fake endpoints/commands are mapped completely to the workflow steps."
+        },
+        {
+          "name": "signals",
+          "description": "Success, failure, retry, and abort conditions are all defined."
+        },
+        {
+          "name": "containment",
+          "description": "The plan cannot accidentally reach a real service from a mock context."
+        }
+      ],
+      "rubricApplicability": "mismatched",
+      "rubricLimitation": "Frozen mock-service execution axes do not measure A/B statistical readout quality.",
+      "scoreAxes": {
+        "safety": 0,
+        "mapping": 0,
+        "signals": 2,
+        "containment": 3
+      },
+      "justification": "A no-ship guardrail supplies a stop decision. No explicit dry-run boundary, mock endpoint mapping or retry/abort procedure appears; the artifact itself is analytical prose. These frozen axes are mismatched to the task. The unlabelled confidence-interval scale and speculative customer mechanism are reviewed separately.",
+      "meanScore": 1.25
+    },
+    {
+      "packetId": "d75b45a0e9fc",
+      "cellId": "r3-gemma-productivity-craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-gemma4-12b-q4-2026-10-30T01-59-21-485Z-84o3",
+      "scenarioId": "craftbook-ab-test-readout",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-craftbook-ab-test-readout/craftbook-ab-test-readout/craftbook-ab-test-readout-gemma4-12b-q4-2026-10-30T01-59-21-485Z-84o3/artifacts/a-b-test-readout-eval/tasks/eval/readout.md",
+      "primaryForCell": false,
+      "artifactSha256": "a182f30ead37bc87ebc61f29d638326c11fd3b5a09128c87fe802cb7ed6e8fb2",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T04:02:28.487Z",
+      "status": "judged",
+      "reviewMethod": "source-review-with-frozen-fixtures",
+      "reviewedBytes": 1334,
+      "artifactBytes": 1334,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "safety",
+          "description": "Dry-run posture is explicit: no real credentials, clear stop-before-side-effect boundary."
+        },
+        {
+          "name": "mapping",
+          "description": "Fake endpoints/commands are mapped completely to the workflow steps."
+        },
+        {
+          "name": "signals",
+          "description": "Success, failure, retry, and abort conditions are all defined."
+        },
+        {
+          "name": "containment",
+          "description": "The plan cannot accidentally reach a real service from a mock context."
+        }
+      ],
+      "rubricApplicability": "mismatched",
+      "rubricLimitation": "Frozen mock-service execution axes do not measure A/B statistical readout quality.",
+      "scoreAxes": {
+        "safety": 0,
+        "mapping": 0,
+        "signals": 2,
+        "containment": 3
+      },
+      "justification": "The two-clause no-ship rule is clear, but the file gives no dry-run posture, fake commands or retry/abort protocol. Local prose offers limited containment evidence. These literal axes mismatch the requested analysis; their low mean does not assess the statistical decision or the report's insufficient length for its gate.",
+      "meanScore": 1.25
+    },
+    {
+      "packetId": "1de704f5b60b",
+      "cellId": "r3-qwen-productivity-craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-qwen3-8-27b-q4-2026-10-30T03-31-42-753Z-25al",
+      "scenarioId": "craftbook-ab-test-readout",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-productivity-craftbook-ab-test-readout/craftbook-ab-test-readout/craftbook-ab-test-readout-qwen3-8-27b-q4-2026-10-30T03-31-42-753Z-25al/workspace/a-b-test-readout-eval/tasks/eval/readout.md",
+      "primaryForCell": true,
+      "artifactSha256": "a7c409d510c16b2b71f3644d7439eebf3bb366fac739a2c2c52eef1fcb21a1ce",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T04:02:28.487Z",
+      "status": "judged",
+      "reviewMethod": "source-review-with-frozen-fixtures",
+      "reviewedBytes": 2681,
+      "artifactBytes": 2681,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "safety",
+          "description": "Dry-run posture is explicit: no real credentials, clear stop-before-side-effect boundary."
+        },
+        {
+          "name": "mapping",
+          "description": "Fake endpoints/commands are mapped completely to the workflow steps."
+        },
+        {
+          "name": "signals",
+          "description": "Success, failure, retry, and abort conditions are all defined."
+        },
+        {
+          "name": "containment",
+          "description": "The plan cannot accidentally reach a real service from a mock context."
+        }
+      ],
+      "rubricApplicability": "mismatched",
+      "rubricLimitation": "Frozen mock-service execution axes do not measure A/B statistical readout quality.",
+      "scoreAxes": {
+        "safety": 0,
+        "mapping": 0,
+        "signals": 2,
+        "containment": 3
+      },
+      "justification": "Ship nothing today supplies an explicit decision stop; no credential boundary, fake endpoint mapping or retry/abort procedure is defined. It is local analytical prose. The frozen mock-safety axes mismatch this task and must not be read as analysis quality; unsupported certainty and power claims are reviewed separately.",
+      "meanScore": 1.25
+    },
+    {
+      "packetId": "52a61a7d9982",
+      "cellId": "r3-qwen-productivity-craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-qwen3-8-27b-q4-2026-10-30T03-52-12-504Z-seaq",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-productivity-craftbook-annotated-bibliography/craftbook-annotated-bibliography/craftbook-annotated-bibliography-qwen3-8-27b-q4-2026-10-30T03-52-12-504Z-seaq/workspace/annotated-bibliography-eval/bibliography.md",
+      "primaryForCell": true,
+      "artifactSha256": "627a9af173f50a8b74dcb527ed8ccf4ba1c2e63336977b52964d4b096c72cdd7",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T04:02:28.487Z",
+      "status": "judged",
+      "reviewMethod": "source-review-with-frozen-fixtures",
+      "reviewedBytes": 6026,
+      "artifactBytes": 6026,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "accuracy",
+          "description": "Computed figures are correct against the seeded records."
+        },
+        {
+          "name": "grounding",
+          "description": "Every claim traces to the seeded data — nothing invented."
+        },
+        {
+          "name": "structure",
+          "description": "Tables and sections make the analysis checkable at a glance."
+        },
+        {
+          "name": "actionability",
+          "description": "Recommendations follow from the findings and are concretely doable."
+        }
+      ],
+      "scoreAxes": {
+        "accuracy": 8,
+        "grounding": 7,
+        "structure": 8,
+        "actionability": 7
+      },
+      "justification": "All six citations and seeded numbers are retained, with consistent summary, critique and relevance sections. Observational and single-region limitations are explained. Some additions exceed the cards: clinical meaningfulness of the 18-point gain, household underreporting and rural context for the pilot. Practical implications are useful but mostly broad.",
+      "meanScore": 7.5
+    },
+    {
+      "packetId": "2bd15a5b7ac3",
+      "cellId": "r3-gemma-productivity-craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-gemma4-12b-q4-2026-10-30T04-00-21-611Z-4t0k",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-craftbook-annotated-bibliography/craftbook-annotated-bibliography/craftbook-annotated-bibliography-gemma4-12b-q4-2026-10-30T04-00-21-611Z-4t0k/workspace/annotated-bibliography-eval/bibliography.md",
+      "primaryForCell": true,
+      "artifactSha256": "f688af34919f22a31c70c4db049335feb3953e155b25b806854cf1e35468ccbc",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T04:06:52.580Z",
+      "status": "judged",
+      "reviewMethod": "source-review-with-frozen-fixtures",
+      "reviewedBytes": 3655,
+      "artifactBytes": 3655,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "accuracy",
+          "description": "Computed figures are correct against the seeded records."
+        },
+        {
+          "name": "grounding",
+          "description": "Every claim traces to the seeded data — nothing invented."
+        },
+        {
+          "name": "structure",
+          "description": "Tables and sections make the analysis checkable at a glance."
+        },
+        {
+          "name": "actionability",
+          "description": "Recommendations follow from the findings and are concretely doable."
+        }
+      ],
+      "scoreAxes": {
+        "accuracy": 7,
+        "grounding": 7,
+        "structure": 8,
+        "actionability": 6
+      },
+      "justification": "All six seeded sources, names, years and numerical findings appear with uniform three-part annotations. Observational and regional limits are acknowledged. Breakeven is loosely recast as cost-effectiveness; connectivity becomes a primary cause and privacy claims go beyond the cards. Relevance is clear, but practical implications remain broad.",
+      "meanScore": 7
+    },
+    {
+      "packetId": "3be7220d3c5a",
+      "cellId": "r3-gemma-productivity-craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-gemma4-12b-q4-2026-10-30T04-06-04-182Z-lbfs",
+      "scenarioId": "craftbook-research-to-document",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-productivity-craftbook-research-to-document/craftbook-research-to-document/craftbook-research-to-document-gemma4-12b-q4-2026-10-30T04-06-04-182Z-lbfs/workspace/word-document-from-content-eval/documents/eval/report.md",
+      "primaryForCell": true,
+      "artifactSha256": "52848061c5951033747ee5dd389111772b09753cc96315955cf7f919eeb45e9c",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T05:03:10.576Z",
+      "status": "judged",
+      "reviewMethod": "source-review-with-frozen-fixtures",
+      "reviewedBytes": 1041,
+      "artifactBytes": 1041,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "grounding",
+          "description": "Every metric and action comes from the seeded brief."
+        },
+        {
+          "name": "structure",
+          "description": "The source has a usable title, summary, sections, table, and next actions."
+        },
+        {
+          "name": "convertibility",
+          "description": "The Markdown is complete enough for direct DocBlocks DOCX conversion without HTML or XML."
+        }
+      ],
+      "scoreAxes": {
+        "grounding": 9,
+        "structure": 7,
+        "convertibility": 8
+      },
+      "justification": "Preserves all five brief facts and all three prescribed actions with source references. Title, summary, compact comparison table and sections are complete and directly convertible. Findings largely repeat the table and actions remain terse, but no new metrics or implementation claims are introduced.",
+      "meanScore": 8
+    },
+    {
+      "packetId": "705589a17fc5",
+      "cellId": "r3-qwen-productivity-craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-qwen3-8-27b-q4-2026-10-30T04-13-31-622Z-plss",
+      "scenarioId": "craftbook-research-to-document",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-productivity-craftbook-research-to-document/craftbook-research-to-document/craftbook-research-to-document-qwen3-8-27b-q4-2026-10-30T04-13-31-622Z-plss/workspace/word-document-from-content-eval/documents/eval/report.md",
+      "primaryForCell": true,
+      "artifactSha256": "d45c23cc108491978f1b35aa7609c768e564dca94f510f1c9be6fc881d5cb888",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T05:03:10.576Z",
+      "status": "judged",
+      "reviewMethod": "source-review-with-frozen-fixtures",
+      "reviewedBytes": 1814,
+      "artifactBytes": 1814,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "grounding",
+          "description": "Every metric and action comes from the seeded brief."
+        },
+        {
+          "name": "structure",
+          "description": "The source has a usable title, summary, sections, table, and next actions."
+        },
+        {
+          "name": "convertibility",
+          "description": "The Markdown is complete enough for direct DocBlocks DOCX conversion without HTML or XML."
+        }
+      ],
+      "scoreAxes": {
+        "grounding": 7,
+        "structure": 8,
+        "convertibility": 8
+      },
+      "justification": "All metrics and prescribed actions are retained in a clear, complete Markdown report. It adds unverified claims that customers hear nothing until a decision and that barcode exceptions currently stall processing, despite saying nothing beyond the brief was added. The expanded action descriptions are plausible proposals, not sourced facts.",
+      "meanScore": 7.666666666666667
+    },
+    {
+      "packetId": "b490124c9735",
+      "cellId": "r3-gemma-developer-craftbook-code-review",
+      "trialId": "craftbook-code-review-gemma4-12b-q4-2026-10-30T04-51-16-972Z-mbt4",
+      "scenarioId": "craftbook-code-review",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-developer-craftbook-code-review/craftbook-code-review/craftbook-code-review-gemma4-12b-q4-2026-10-30T04-51-16-972Z-mbt4/artifacts/code-review-workflow-eval/reviews/rev-eval-1/report.md",
+      "primaryForCell": true,
+      "artifactSha256": "0fd69f8e09774eddecb25f2de40a41a25b83c317f936181a9b21e1c9bac9a86a",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T05:03:10.576Z",
+      "status": "judged",
+      "reviewMethod": "source-review-with-frozen-fixtures",
+      "reviewedBytes": 1651,
+      "artifactBytes": 1651,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "workflow fidelity",
+          "description": "The result reflects the named craftbook sequence and its declared acceptance gates rather than a freehand substitute."
+        },
+        {
+          "name": "usefulness",
+          "description": "The deliverable is coherent, actionable, and suitable for the craftbook purpose stated in the local brief."
+        }
+      ],
+      "scoreAxes": {
+        "workflow fidelity": 8,
+        "usefulness": 5
+      },
+      "justification": "Follows the snapshot-to-report workflow with severity-ranked findings and a consistent request-changes verdict. Correctly flags SQL interpolation, swallowed settings errors and pagination, while respecting the three deliberate patterns. It misses the export handle leak and debug logging; settings and pagination line citations point past the defects.",
+      "meanScore": 6.5
+    },
+    {
+      "packetId": "3958bbc5a809",
+      "cellId": "r3-qwen-developer-craftbook-code-review",
+      "trialId": "craftbook-code-review-qwen3-8-27b-q4-2026-10-30T04-57-04-983Z-ddo7",
+      "scenarioId": "craftbook-code-review",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-developer-craftbook-code-review/craftbook-code-review/craftbook-code-review-qwen3-8-27b-q4-2026-10-30T04-57-04-983Z-ddo7/artifacts/code-review-workflow-eval/reviews/rev-eval-1/report.md",
+      "primaryForCell": true,
+      "artifactSha256": "4efba32eeaa4173cd1be0df1a474fe886d7a49bf0a9bdf0ce4e640b091398653",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T05:09:49.872Z",
+      "status": "judged",
+      "reviewMethod": "Read the entire 3504-byte report and compare with the previously read full seeded diff, manifest and review conventions. Source-only review, no rendering or source execution; target identity visible from the row after packet collection.",
+      "reviewedBytes": 3504,
+      "artifactBytes": 3504,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "workflow fidelity",
+          "description": "The result reflects the named craftbook sequence and its declared acceptance gates rather than a freehand substitute."
+        },
+        {
+          "name": "usefulness",
+          "description": "The deliverable is coherent, actionable, and suitable for the craftbook purpose stated in the local brief."
+        }
+      ],
+      "scoreAxes": {
+        "workflow fidelity": 9,
+        "usefulness": 7
+      },
+      "justification": "Correctly identifies the commit scope, uses the required report structure and verdict, and respects the three deliberate idioms. All five seeded defect families appear, but catch-block false success has no findings-table entry or fix. The INSERT citation points to line 10 instead of 11; other recommendations are concrete.",
+      "meanScore": 8
+    },
+    {
+      "packetId": "4e88a5d85ad7",
+      "cellId": "r3-qwen-developer-craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-qwen3-8-27b-q4-2026-10-30T05-03-25-618Z-omdm",
+      "scenarioId": "craftbook-api-contract-review",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-developer-craftbook-api-contract-review/craftbook-api-contract-review/craftbook-api-contract-review-qwen3-8-27b-q4-2026-10-30T05-03-25-618Z-omdm/artifacts/api-contract-review-workflow-eval/tasks/eval/api-review.md",
+      "primaryForCell": true,
+      "artifactSha256": "42cf226fc52e102abbfde8f804fc848f39fa90e4bfa2a03a2850ebc48b45d587",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T06:05:44.609Z",
+      "status": "judged",
+      "reviewMethod": "Read each complete declared report (2.2–12.1 KiB), then compare with the seeded API contract/routes/conventions and security source/policy. Read both complete security findings.json files. Static review only; no generated code was executed. Packets were read before consulting their mapping; model identity was visible in later fixture and outcome inspection.",
+      "reviewedBytes": 12017,
+      "artifactBytes": 12017,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "workflow fidelity",
+          "description": "The result reflects the named craftbook sequence and its declared acceptance gates rather than a freehand substitute."
+        },
+        {
+          "name": "usefulness",
+          "description": "The deliverable is coherent, actionable, and suitable for the craftbook purpose stated in the local brief."
+        }
+      ],
+      "scoreAxes": {
+        "workflow fidelity": 8,
+        "usefulness": 6
+      },
+      "justification": "Reconciles all three real drifts, clears the deliberate non-drifts and supplies concrete snippets. But it invents an unshipped/new-API premise to declare removals, renames and type changes backward-compatible; version 1.0.0 does not establish that. UUID requirements are also unsupported. Strong analysis needs a conditional migration verdict.",
+      "meanScore": 7
+    },
+    {
+      "packetId": "afa0e3cacda9",
+      "cellId": "r3-gemma-developer-craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-gemma4-12b-q4-2026-10-30T05-23-04-710Z-m2nu",
+      "scenarioId": "craftbook-api-contract-review",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-developer-craftbook-api-contract-review/craftbook-api-contract-review/craftbook-api-contract-review-gemma4-12b-q4-2026-10-30T05-23-04-710Z-m2nu/artifacts/api-contract-review-workflow-eval/tasks/eval/api-review.md",
+      "primaryForCell": true,
+      "artifactSha256": "39567b4311eadad3578f0249d2211bdb08ab649b4fab425df5117bdd7ccf39b0",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T06:05:44.609Z",
+      "status": "judged",
+      "reviewMethod": "Read each complete declared report (2.2–12.1 KiB), then compare with the seeded API contract/routes/conventions and security source/policy. Read both complete security findings.json files. Static review only; no generated code was executed. Packets were read before consulting their mapping; model identity was visible in later fixture and outcome inspection.",
+      "reviewedBytes": 2197,
+      "artifactBytes": 2197,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "workflow fidelity",
+          "description": "The result reflects the named craftbook sequence and its declared acceptance gates rather than a freehand substitute."
+        },
+        {
+          "name": "usefulness",
+          "description": "The deliverable is coherent, actionable, and suitable for the craftbook purpose stated in the local brief."
+        }
+      ],
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 3
+      },
+      "justification": "Has the requested report sections and some useful snippets, but misses the unimplemented history route and undocumented single-widget handler. It calls the type mismatch non-blocking, proposes a path rename while declaring no breaking changes, and defines an auth scheme without applying security. The approval conflicts with its blocking findings.",
+      "meanScore": 4.5
+    },
+    {
+      "packetId": "ab2483b7fee8",
+      "cellId": "r3-gemma-developer-craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-gemma4-12b-q4-2026-10-30T05-32-37-696Z-5ndk",
+      "scenarioId": "craftbook-deep-security-review",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-developer-craftbook-deep-security-review/craftbook-deep-security-review/craftbook-deep-security-review-gemma4-12b-q4-2026-10-30T05-32-37-696Z-5ndk/workspace/security-maintenance-eval/security-review/REPORT.md",
+      "primaryForCell": true,
+      "artifactSha256": "77b27be9d09d117c513115ef6be39ad09a21bee3a46e64084ccc5063906a2c98",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T06:05:44.609Z",
+      "status": "judged",
+      "reviewMethod": "Read each complete declared report (2.2–12.1 KiB), then compare with the seeded API contract/routes/conventions and security source/policy. Read both complete security findings.json files. Static review only; no generated code was executed. Packets were read before consulting their mapping; model identity was visible in later fixture and outcome inspection.",
+      "reviewedBytes": 4343,
+      "artifactBytes": 4343,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "verification",
+          "description": "Raw leads are confirmed as real source-to-sink or authorization paths."
+        },
+        {
+          "name": "systemic analysis",
+          "description": "Findings are grouped by root cause and blast radius."
+        },
+        {
+          "name": "remediation",
+          "description": "The report and JSON contain concrete, severity-consistent fixes."
+        }
+      ],
+      "scoreAxes": {
+        "verification": 4,
+        "systemic analysis": 5,
+        "remediation": 4
+      },
+      "justification": "Finds the three real admin defects, but also labels the explicitly safe static command and allow-listed SQL as vulnerabilities. Root-cause discussion is broad; false positives distort severity and remediation. JSON still lacks theme after serial repairs, and creating directories/files is not an equivalent archive fix.",
+      "meanScore": 4.333333333333333
+    },
+    {
+      "packetId": "69c8e9262196",
+      "cellId": "r3-qwen-developer-craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-qwen3-8-27b-q4-2026-10-30T05-39-22-210Z-edea",
+      "scenarioId": "craftbook-deep-security-review",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-developer-craftbook-deep-security-review/craftbook-deep-security-review/craftbook-deep-security-review-qwen3-8-27b-q4-2026-10-30T05-39-22-210Z-edea/workspace/security-maintenance-eval/security-review/REPORT.md",
+      "primaryForCell": true,
+      "artifactSha256": "52ad73e5af92d36288ffc6832081f66d8240ac94be33c033083971ed742856cd",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T06:05:44.609Z",
+      "status": "judged",
+      "reviewMethod": "Read each complete declared report (2.2–12.1 KiB), then compare with the seeded API contract/routes/conventions and security source/policy. Read both complete security findings.json files. Static review only; no generated code was executed. Packets were read before consulting their mapping; model identity was visible in later fixture and outcome inspection.",
+      "reviewedBytes": 7479,
+      "artifactBytes": 7479,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "verification",
+          "description": "Raw leads are confirmed as real source-to-sink or authorization paths."
+        },
+        {
+          "name": "systemic analysis",
+          "description": "Findings are grouped by root cause and blast radius."
+        },
+        {
+          "name": "remediation",
+          "description": "The report and JSON contain concrete, severity-consistent fixes."
+        }
+      ],
+      "scoreAxes": {
+        "verification": 8,
+        "systemic analysis": 9,
+        "remediation": 8
+      },
+      "justification": "Traces all three admin defects, correctly clears the safe look-alikes, groups architectural causes and gives practical router, parameterized-SQL and no-shell fixes. JSON agrees and validates. Minor overclaims remain: five routes instead of six and error-detail leakage despite only stdout being returned; this is static, not exploit-tested verification.",
+      "meanScore": 8.333333333333334
+    },
+    {
+      "packetId": "33f63a8f16ff",
+      "cellId": "r3-gemma-developer-craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-gemma4-12b-q4-2026-10-30T06-35-59-302Z-bima",
+      "scenarioId": "craftbook-codemod-sweep",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-developer-craftbook-codemod-sweep/craftbook-codemod-sweep/craftbook-codemod-sweep-gemma4-12b-q4-2026-10-30T06-35-59-302Z-bima/artifacts/profile-cards/tasks/1/verification.md",
+      "primaryForCell": true,
+      "artifactSha256": "6588cf60d9a22ae6eddf71f7a12ad5d15bf72c533aa712e952f1a323e13df761",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T07:13:53.572Z",
+      "status": "judged",
+      "reviewMethod": "Read the entire 1142-byte verification report, its enumeration/change/reviewer notes, all final code/test/brief files, the seeded brief, recorded grep and mutation history, and final harness failures. Static review; no generated code was re-executed. Target identity was visible during diagnosis.",
+      "reviewedBytes": 1142,
+      "artifactBytes": 1142,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "Enumeration completeness",
+          "description": "Every site was found by real searches before any edit - the definition, the re-export, the imports and call sites, and the log string - with the changelog excluded for a stated reason rather than missed."
+        },
+        {
+          "name": "Invariant discipline",
+          "description": "The change stayed mechanical: nothing changed beyond the declared rename, the excluded files are untouched, and behavior is identical."
+        },
+        {
+          "name": "Reconciled verification",
+          "description": "The residual re-scan is quoted with its result, the found/changed/excluded counts add up exactly, and the suite run backing the green claim is real."
+        }
+      ],
+      "scoreAxes": {
+        "Enumeration completeness": 7,
+        "Invariant discipline": 1,
+        "Reconciled verification": 0
+      },
+      "justification": "A real pre-edit grep found all functional sites and identified historical exclusions, but the brief was wrongly counted as editable. Final exports/imports disagree and the protected brief is changed. Claims of zero residuals, reconciled counts and npm test success lack supporting calls and contradict the final files and failing harness tests.",
+      "meanScore": 2.6666666666666665
+    },
+    {
+      "packetId": "95e2b148a4dd",
+      "cellId": "r3-qwen-developer-craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-qwen3-8-27b-q4-2026-10-30T07-07-47-387Z-doak",
+      "scenarioId": "craftbook-codemod-sweep",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-developer-craftbook-codemod-sweep/craftbook-codemod-sweep/craftbook-codemod-sweep-qwen3-8-27b-q4-2026-10-30T07-07-47-387Z-doak/artifacts/profile-cards/tasks/1/verification.md",
+      "primaryForCell": true,
+      "artifactSha256": "25448c8dab4f284cbd175e35dc785605607742cfee40cc3b3433b798b7a27e20",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T08:11:11.649Z",
+      "status": "judged",
+      "reviewMethod": "Read the complete 3563-byte declared verification artifact, enumeration/change/reviewer notes, all eight final workspace files, recorded pre-edit and residual searches, and gate feedback. Compared final files byte-for-byte with the frozen fixture plus the declared rename. No generated code re-executed. Target identity visible during diagnosis.",
+      "reviewedBytes": 3563,
+      "artifactBytes": 3563,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "Enumeration completeness",
+          "description": "Every site was found by real searches before any edit - the definition, the re-export, the imports and call sites, and the log string - with the changelog excluded for a stated reason rather than missed."
+        },
+        {
+          "name": "Invariant discipline",
+          "description": "The change stayed mechanical: nothing changed beyond the declared rename, the excluded files are untouched, and behavior is identical."
+        },
+        {
+          "name": "Reconciled verification",
+          "description": "The residual re-scan is quoted with its result, the found/changed/excluded counts add up exactly, and the suite run backing the green claim is real."
+        }
+      ],
+      "scoreAxes": {
+        "Enumeration completeness": 9,
+        "Invariant discipline": 9,
+        "Reconciled verification": 7
+      },
+      "justification": "Real pre-edit and residual searches cover every site and exclusion; all final files match the mechanical rename or unchanged seed. Counts reconcile and the missing suite run is stated honestly. Verification remains incomplete without that run; the counter-scan prose also calls three profile sites two lines.",
+      "meanScore": 8.333333333333334
+    },
+    {
+      "packetId": "91b527ce5cb3",
+      "cellId": "r3-qwen-developer-craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-qwen3-8-27b-q4-2026-10-30T07-40-14-033Z-ec6s",
+      "scenarioId": "craftbook-refactor-module",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-developer-craftbook-refactor-module/craftbook-refactor-module/craftbook-refactor-module-qwen3-8-27b-q4-2026-10-30T07-40-14-033Z-ec6s/artifacts/crewlog/tasks/1/change-notes.md",
+      "primaryForCell": true,
+      "artifactSha256": "14b3f2dca21824fdc073277598e1507b5f8817bd24dee6345c6f993e8ba625f1",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T08:16:22.545Z",
+      "status": "judged",
+      "reviewMethod": "Read the complete 1496-byte declared change-notes artifact, final baseline/plan/verification notes, brief, source and characterization tests. Compared six seeded workspace files byte-for-byte with frozen refactor-module 2.0.6 fixtures and inspected recorded tool calls and gate failures. No generated code re-executed; target identity visible during diagnosis.",
+      "reviewedBytes": 1496,
+      "artifactBytes": 1496,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "Guardrail-first discipline",
+          "description": "The suite was genuinely run and recorded green before any restructuring, characterization coverage was considered honestly, and the baseline counted the duplication with a stated method."
+        },
+        {
+          "name": "Reversible-stage execution",
+          "description": "The restructure happened in small planned stages at the real sites, with the suite kept green between stages and deviations recorded honestly rather than papered over."
+        },
+        {
+          "name": "Genuine deduplication",
+          "description": "One shared implementation remains, both call sites use it, public exports survived unchanged, and no behavior change was smuggled in under cover of the refactor."
+        }
+      ],
+      "scoreAxes": {
+        "Guardrail-first discipline": 2,
+        "Reversible-stage execution": 0,
+        "Genuine deduplication": 0
+      },
+      "justification": "Some baseline measurement and characterization coverage exist, but no suite run supports the green claims. The three stages are described as executed although the shared module is absent and both source files are byte-identical to their seeds. No extraction or deduplication occurred.",
+      "meanScore": 0.6666666666666666
+    },
+    {
+      "packetId": "e021bdf073be",
+      "cellId": "r3-gemma-developer-craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-gemma4-12b-q4-2026-10-30T08-19-54-101Z-h0f2",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-developer-craftbook-bug-fix-tdd/craftbook-bug-fix-tdd/craftbook-bug-fix-tdd-gemma4-12b-q4-2026-10-30T08-19-54-101Z-h0f2/artifacts/orderly-pricing/tasks/1/fix-notes.md",
+      "primaryForCell": true,
+      "artifactSha256": "8b976d03bfef4d4f25c0b2821af8c9884c393045b4725586d71328082cb34215",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T09:09:43.136Z",
+      "status": "judged",
+      "reviewMethod": "Read the entire 553-byte fix-notes target and all supporting reports, final pricing source and test. Inspected both recorded source replacements and command-gate rejections. No generated code re-executed; target identity visible during diagnosis.",
+      "reviewedBytes": 553,
+      "artifactBytes": 553,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "Repro-first discipline",
+          "description": "A failing test was genuinely written and run before the fix, in the project's real test layout, and the red evidence quotes a real run rather than a claim."
+        },
+        {
+          "name": "Fix minimality",
+          "description": "The change is the smallest correct edit at the real defect site; no special-casing of the reported input, no unrelated churn."
+        },
+        {
+          "name": "Honest verification",
+          "description": "Validation re-ran the original reproduction, distinguishes verified results from anything unverified, and the review graded evidence rather than summaries."
+        }
+      ],
+      "scoreAxes": {
+        "Repro-first discipline": 3,
+        "Fix minimality": 2,
+        "Honest verification": 0
+      },
+      "justification": "The boundary test was genuinely written before a minimal correct edit, but no agent test run supports the red or green claims. The edit was later reverted, leaving the original defect. Notes still claim the reproduction and neighboring cases pass; validation and review artifacts are absent.",
+      "meanScore": 1.6666666666666667
+    },
+    {
+      "packetId": "d84d9b3743a6",
+      "cellId": "r3-qwen-developer-craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-qwen3-8-27b-q4-2026-10-30T08-41-09-901Z-e81i",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-developer-craftbook-bug-fix-tdd/craftbook-bug-fix-tdd/craftbook-bug-fix-tdd-qwen3-8-27b-q4-2026-10-30T08-41-09-901Z-e81i/artifacts/orderly-pricing/tasks/1/fix-notes.md",
+      "primaryForCell": true,
+      "artifactSha256": "f1731b66eda45869a156a895ea1693395da2698a668cacf4431a30a66829722c",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T10:17:06.051Z",
+      "status": "judged",
+      "reviewMethod": "Read each declared markdown target in full (1100, 1189 and 529 bytes); read the six invoice HTML files, seeded books, bug-fix source/test and supporting reports, each under 20 KiB. Compared final files to fixture hashes and inspected recorded tools and recipe gates. Static HTML/CSS review only, no browser rendering or generated-code execution. Target identities were visible during supporting-evidence diagnosis.",
+      "reviewedBytes": 1100,
+      "artifactBytes": 1100,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "Repro-first discipline",
+          "description": "A failing test was genuinely written and run before the fix, in the project's real test layout, and the red evidence quotes a real run rather than a claim."
+        },
+        {
+          "name": "Fix minimality",
+          "description": "The change is the smallest correct edit at the real defect site; no special-casing of the reported input, no unrelated churn."
+        },
+        {
+          "name": "Honest verification",
+          "description": "Validation re-ran the original reproduction, distinguishes verified results from anything unverified, and the review graded evidence rather than summaries."
+        }
+      ],
+      "scoreAxes": {
+        "Repro-first discipline": 4,
+        "Fix minimality": 2,
+        "Honest verification": 2
+      },
+      "justification": "A real boundary test precedes the proposed minimal fix, and supporting notes acknowledge missing execution. However, pricing.js still uses >; the displayed >= diff was never applied. The target claims red then green results without test receipts, contradicting both final code and the pending-evidence caveats.",
+      "meanScore": 2.6666666666666665
+    },
+    {
+      "packetId": "01942556b99b",
+      "cellId": "r3-qwen-complex-work-craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-qwen3-8-27b-q4-2026-10-30T09-54-01-116Z-wvmn",
+      "scenarioId": "craftbook-invoice-run",
+      "modelId": "qwen3.8-27b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-qwen-complex-work-craftbook-invoice-run/craftbook-invoice-run/craftbook-invoice-run-qwen3-8-27b-q4-2026-10-30T09-54-01-116Z-wvmn/workspace/fieldnote-studio-office/report.md",
+      "primaryForCell": true,
+      "artifactSha256": "5345402894ea5c61724c909b2ed3599b4a2a71d89f6a70b9ec2169f472f59a44",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T10:17:06.051Z",
+      "status": "judged",
+      "reviewMethod": "Read each declared markdown target in full (1100, 1189 and 529 bytes); read the six invoice HTML files, seeded books, bug-fix source/test and supporting reports, each under 20 KiB. Compared final files to fixture hashes and inspected recorded tools and recipe gates. Static HTML/CSS review only, no browser rendering or generated-code execution. Target identities were visible during supporting-evidence diagnosis.",
+      "reviewedBytes": 1189,
+      "artifactBytes": 1189,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "numeric integrity",
+          "description": "Every amount traces to a tracked ledger entry; nothing estimated or invented."
+        },
+        {
+          "name": "numbering continuity",
+          "description": "Invoice numbers continue 2026-041 with no skip and no repeat."
+        },
+        {
+          "name": "professionalism",
+          "description": "The invoices look worth paying — clear line items, terms-correct due dates, print-ready pages."
+        },
+        {
+          "name": "completeness",
+          "description": "One invoice per billable client, the idle client skipped on purpose, and the books updated."
+        },
+        {
+          "name": "print-polish",
+          "description": "Each invoice is styled for paper — an @page rule, honest margins, a professional face."
+        }
+      ],
+      "scoreAxes": {
+        "numeric integrity": 9,
+        "numbering continuity": 9,
+        "professionalism": 7,
+        "completeness": 4,
+        "print-polish": 8
+      },
+      "justification": "All three base amounts and numbers match the ledger; due dates follow net 30/14 and print CSS is thoughtful. The idle client and previously billed entry are correctly excluded. Books remain unchanged at 041/uninvoiced. The summary claims invoices went out without delivery evidence; HTML omits currency and invents an issuer email.",
+      "meanScore": 7.4
+    },
+    {
+      "packetId": "103833d20eb9",
+      "cellId": "r3-gemma-complex-work-craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-gemma4-12b-q4-2026-10-30T10-05-24-627Z-3jyl",
+      "scenarioId": "craftbook-invoice-run",
+      "modelId": "gemma4-12b-q4",
+      "artifactPath": "evals/runs/scorecard-2026-10-29-spark-native-0.1.54-continuation/r3-gemma-complex-work-craftbook-invoice-run/craftbook-invoice-run/craftbook-invoice-run-gemma4-12b-q4-2026-10-30T10-05-24-627Z-3jyl/workspace/fieldnote-studio-office/report.md",
+      "primaryForCell": true,
+      "artifactSha256": "e1bddc5fd0c2bd0e8a81c92761f66a4776f3e98ff1e44d7b2718989af439bcae",
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "judgedAt": "2026-10-30T10:17:06.051Z",
+      "status": "judged",
+      "reviewMethod": "Read each declared markdown target in full (1100, 1189 and 529 bytes); read the six invoice HTML files, seeded books, bug-fix source/test and supporting reports, each under 20 KiB. Compared final files to fixture hashes and inspected recorded tools and recipe gates. Static HTML/CSS review only, no browser rendering or generated-code execution. Target identities were visible during supporting-evidence diagnosis.",
+      "reviewedBytes": 529,
+      "artifactBytes": 529,
+      "truncated": false,
+      "axes": [
+        {
+          "name": "numeric integrity",
+          "description": "Every amount traces to a tracked ledger entry; nothing estimated or invented."
+        },
+        {
+          "name": "numbering continuity",
+          "description": "Invoice numbers continue 2026-041 with no skip and no repeat."
+        },
+        {
+          "name": "professionalism",
+          "description": "The invoices look worth paying — clear line items, terms-correct due dates, print-ready pages."
+        },
+        {
+          "name": "completeness",
+          "description": "One invoice per billable client, the idle client skipped on purpose, and the books updated."
+        },
+        {
+          "name": "print-polish",
+          "description": "Each invoice is styled for paper — an @page rule, honest margins, a professional face."
+        }
+      ],
+      "scoreAxes": {
+        "numeric integrity": 8,
+        "numbering continuity": 9,
+        "professionalism": 4,
+        "completeness": 4,
+        "print-polish": 6
+      },
+      "justification": "Base amounts total 5415 and numbers run 042-044 with the idle client skipped. The ledger stays at 041/uninvoiced. Due dates violate client terms, contact details are missing or placeholders, and zero tax/USD are unsupported assumptions. Each HTML has paper margins and print CSS, but spacing and styling vary; no rendered print check.",
+      "meanScore": 6.2
+    }
+  ],
+  "noArtifact": [
+    {
+      "cellId": "r3-qwen-productivity-craftbook-week-plan",
+      "trialId": "craftbook-week-plan-qwen3-8-27b-q4-2026-10-30T01-02-13-592Z-axyn",
+      "scenarioId": "craftbook-week-plan",
+      "required": true,
+      "status": "noArtifact",
+      "artifactCount": 0,
+      "judgedCount": 0,
+      "packetIds": [],
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "scoreAxes": null,
+      "meanScore": null,
+      "justification": "Declared artifact was not produced; no qualitative score assigned."
+    },
+    {
+      "cellId": "r3-gemma-developer-craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-gemma4-12b-q4-2026-10-30T08-10-00-047Z-q346",
+      "scenarioId": "craftbook-refactor-module",
+      "required": true,
+      "status": "noArtifact",
+      "artifactCount": 0,
+      "judgedCount": 0,
+      "packetIds": [],
+      "judgeProvider": "codex-inline",
+      "judgeModel": "current-session",
+      "scoreAxes": null,
+      "meanScore": null,
+      "justification": "Declared artifact was not produced; no qualitative score assigned."
+    }
+  ],
+  "updatedAt": "2026-10-30T13:20:06.668Z",
+  "method": "Exact declared scenario axes or default HTML axes; fixed 0-10 rubric in evals/src/llm-judge.ts. Bounded source review (20 KiB per artifact); no additional interactive browser review. Packets omit model names, but the operator can see campaign metadata; this is not a double-blind study. Advisory scores never modify the objective composite.",
+  "coverageSnapshotAt": "2026-10-30T13:19:01.848Z",
+  "baseline": "spark-89-no-os-sandbox-2026-10-29"
+}

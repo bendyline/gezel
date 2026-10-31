@@ -34,7 +34,10 @@ describe('craftbook test.json cli shims', () => {
         }
       }
     }
-    expect(shims).toBeGreaterThan(15);
+    // Proves the loader found the shims at all. Six books moved from a mock
+    // service and CLI probe to seeded offline data (gilde 2026-10-22, first
+    // served by 0.3.2), which took the count from 21 to 15.
+    expect(shims).toBeGreaterThan(10);
     expect(failures, failures.join('\n')).toEqual([]);
   });
 });
