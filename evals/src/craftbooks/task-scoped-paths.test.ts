@@ -19,14 +19,24 @@ import { loadCraftbookTestSpecsSync } from './test-spec-loader.ts';
  *    that concrete path, because no craftbook task is guaranteed to exist
  *    for `{{task.dir}}` to resolve against.
  */
+/**
+ * Released sidecars that still pin, each fixed in the next Gilde version. The
+ * match is version-exact, so the fixed version is checked like any other.
+ * changelog-writeup 1.0.3 (gilde 0.3.2) is the first version of that book the
+ * harness loaded; earlier ones never reached Gilde's legacy index, so the
+ * sweep that unpinned the rest never saw it.
+ */
+const PINNED_UNTIL_NEXT_VERSION = new Map([['changelog-writeup', '1.0.3']]);
+
 describe('craftbook eval sidecars keep working files task-scoped', () => {
   const specs = loadCraftbookTestSpecsSync();
 
   it('no sidecar pins workPath outside the task folder without a structural reason', () => {
     const offenders: string[] = [];
-    for (const { craftbookId, spec } of specs) {
+    for (const { craftbookId, version, spec } of specs) {
       const workPath = spec.setup?.craftbookParams?.workPath;
       if (typeof workPath !== 'string' || workPath.includes('{{task.')) continue;
+      if (PINNED_UNTIL_NEXT_VERSION.get(craftbookId) === version) continue;
       const seedsIntoWorkPath = (spec.setup?.files ?? []).some(
         (f) => typeof f.path === 'string' && f.path.startsWith(`${workPath}/`),
       );
