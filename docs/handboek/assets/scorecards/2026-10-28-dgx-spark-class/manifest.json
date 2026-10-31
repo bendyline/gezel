@@ -21,8 +21,8 @@
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-28-dgx-spark-class/scorecard-details.json",
-      "bytes": 6737058,
-      "sha256": "402c2cccc91b5af8c5324693c3e884e050acf29858acbf683851bf8c0b891897"
+      "bytes": 6741583,
+      "sha256": "e5e704cec4d7f9cbf9374d93d5d5de45cc9d81173ead82a7a2221133e8ea73ea"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-28-dgx-spark-class/judging/judge-report.json",
@@ -36,8 +36,8 @@
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-28-dgx-spark-class/report.md",
-      "bytes": 19806,
-      "sha256": "9dfc3e8d5c81d38675605cb02988923566268602a55d9bf54414e92fed236b5b"
+      "bytes": 24306,
+      "sha256": "0b92756bb35003087a1af007b81f411fd634e6a1c1be28cb5d3125747146d6f7"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-28-dgx-spark-class/verification.json",

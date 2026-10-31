@@ -2,6 +2,26 @@
 
 This is the reviewed analysis behind the October 28–30 DGX Spark round on the model scorecard.
 
+## Corrections and follow-up (October 31)
+
+Two statements in the first version of this report were wrong. Both are corrected in the sections below:
+- **Gemma's recipe-routing misses started in `suggest_work`, not in Gemma.** In all three dev-craftbook-routing trials, `suggest_work` answered that no existing recipe fit and advised saving a new one with `craftbook_write`, and Gemma did what it was told. Qwen got the same answer and found the recipe another way. The ranker embedded the whole message, which was mostly about the CSV export, so bug-fix-tdd ranked 39th. It also kept only six books before setting aside the ones a code fix cannot start. Gemma's find-vs-create and route-multi misses began the same way: `suggest_work` offered Job Hunt or Trip Planner plus a new project, never SEO Metadata Pack or press-release.
+- **Gemma wrote text into `report.docx` with `write_artifact`, not `write_file`.** A guard already refused that write through `write_file`; `write_artifact` had none.
+
+This round's numbers stay as recorded. Gezel and the harness have since fixed the following (6d17349f):
+- Defect 1: a craftbook scenario whose book declares package commands now runs with package scripts on. In the product, such a step pauses with a note for the person when the setting is off, instead of looping.
+- Defect 2: DocBlocks joins a plain chat whose messages name a `.pptx`, `.docx` or `.xlsx` file.
+- Defects 3 and 4: authoring scenarios track the task's progress, so step completions no longer count as failed repairs. The fast stall check now waits while a store run is underway.
+- Defect 5: Linux runs gate scripts the model writes, carrying their report-back channel over standard pipes.
+- Defect 6: a gate the model wrote during the trial counts as a model failure.
+- Defect 7: the default HTML review grades only the page a scenario asks for.
+- Defect 8: summaries after a recipe write or task launch no longer count as prose-as-deliverable, and the flag needs a real `#` title.
+- Defect 9: a refused partial write is explained as refused, and the turn stops at the third identical refusal.
+- `suggest_work` now also ranks each sentence of a longer message, and ranks 40 books deep before filtering. dev-craftbook-routing now gets bug-fix-tdd first, and Gemma's own wording in find-vs-create and route-multi gets the right recipe first.
+- `write_artifact` refuses text written to an Office or PDF path.
+
+Recipe content changes are written but not yet published in Gilde. They cover deep-security-review, ab-test-readout, and the copied runbook rubric in release-notes, changelog-writeup and investigate. The affected scenarios need a re-run to measure the models without these defects.
+
 | | |
 |---|---|
 | Machine | DGX Spark (NVIDIA GB10, 122 GB unified memory), linux-arm64 CUDA |
@@ -144,7 +164,7 @@ Framework-gap trials, composite under 5:
 | Total trial wall-clock | 34.8 h | 16.0 h |
 | Tokens (input / output) | 17.4 M / 1.99 M | 20.2 M / 1.94 M |
 
-Compared with Oct 12, Qwen decode is unchanged (30.1 then; 28.9 in this run's admission probe) and prefill rose 13% (699 to 791). Qwen's shorter complex-work trials are therefore not engine speed: edit-midtask fell from 47 to 17 min and export-generalize from 31 to 18 min because the trials took fewer turns. Developer was slower overall (350 to 725 min), because the tool-phase trials looped for about an hour each before being stopped.
+Compared with Oct 12, Qwen's engine speed is unchanged. That round ran native 0.1.49 with the same settings: 4 threads, MTP on, f16 cache and a 256K context. Over every trial, decode was 29.2 tokens/s then and 28.6 now, and prefill was 731 then and 779 now. Matched by context depth from the engine's per-request timings, decode is within 2% up to 64K tokens, and prefill is 3–7% faster except at 32–64K, where it is 5% slower. Above 64K, decode was 15% slower, but MTP draft acceptance also fell from 0.74 to 0.59. That follows what the long developer loops were generating, not the engine. (The first version compared one-sample admission probes: 30.1 against 28.9.) Qwen's shorter complex-work trials are therefore not engine speed: edit-midtask fell from 47 to 17 min and export-generalize from 31 to 18 min because the trials took fewer turns. Developer was slower overall (350 to 725 min), because the tool-phase trials looped for about an hour each before being stopped.
 
 Gemma 4 12b is the first sub-15B model with a full four-suite record on this machine. It runs 2.7× faster at decode and finishes the four suites in 46% of Qwen's wall-clock.
 
@@ -181,14 +201,15 @@ Where the judge and the gates disagree:
 
 ## Negatives
 
-- **Gemma does not route to library recipes.**
-  - dev-craftbook-routing 0/3: it called `suggest_work` three times in trial `ux7q`, then wrote its own recipe with `craftbook_write`.
-  - It missed find-vs-create once and route-multi once in the same way.
-- **Gemma drifts from schemas on structured output.**
-  - deep-security-review wrote `findings.json` with `"line": "3, 6"`, and left out `line` in another trial. The plateau rule ended it after 6 repairs: each fix broke another field.
-  - large-pr-review listed 121 or 89 paths when the PR changes exactly 120.
-  - ab-test-readout re-sent an identical `stats.json` that was missing `control.rate`.
-- **Gemma writes text to binary paths.** In research-to-document 1/3 it used `write_file` to put text into `report.docx`, even though `convert_document` and `save_artifact` were on the tool surface.
+- **Gemma follows `suggest_work` where Qwen looks further** (corrected; see the top of this report).
+  - dev-craftbook-routing 0/3: each time, `suggest_work` said no recipe fit and advised `craftbook_write`, so Gemma wrote its own recipe. Qwen got the same answer and found bug-fix-tdd anyway.
+  - route-multi: `suggest_work` offered Trip Planner and a new project, and Gemma started a new project.
+  - find-vs-create: `suggest_work` offered Job Hunt and a new project, and the Meester handed the job to a developer. The developer found SEO Metadata Pack with `list_craftbooks` but never started it, which is Gemma's own miss.
+- **Gemma drifts from schemas on structured output, but in two of the three cases the eval contributed.**
+  - deep-security-review: the scenario gives the worker a request, not the recipe, and the request never named the record fields. Gemma learned them one repair at a time, and the plateau rule ended the trial after 6 repairs. Its authorization finding covered two routes, so it wrote `"line": "3, 6"` in one trial and `"lines": [3, 6]` in another.
+  - large-pr-review is a real miss. One ledger listed 121 paths: it added `feature-001`, `feature-119` and `feature-120` by following the numbering, and left out two of the three non-feature files. Another stopped 31 files short.
+  - ab-test-readout: the eval's fixed `stats.json` format had no field for a confidence interval. The book's review step fails a readout without one, and its writing step adds no numbers, so the first task cycled between writing and review 13 times and paused. A relaunched task then rewrote `stats.json` with its own keys (`conversion_rate` for `rate`), which is why the oracle reported `control.rate` missing.
+- **Gemma writes text to binary paths.** In research-to-document 1/3 it used `write_artifact` to put text into `report.docx`, even though `convert_document` and `save_artifact` were on the tool surface. (The first version said `write_file`, which a guard already refused.)
 - **Gemma repeats an identical refused write.** In petshop it sent the same 676-byte `write_file` five times against the shrink guard.
 - **Both models are weak at authoring craftbooks:**
   - author-fanout 0/3 each. Two Qwen trials and one Gemma trial wrote fixed per-store steps instead of a fanout.
@@ -199,10 +220,12 @@ Where the judge and the gates disagree:
 ## Tactical fixes (parameter and prompt)
 
 - **Refused writes:** in `packages/core/src/local-loop/tool-failure-tracker.ts` (lines 248 and 315), branch on the shrink-guard refusal text ("Refusing to replace … much shorter"). Replace "keeps corrupting it" with "your write was refused: it would cut `<path>` from N to M bytes, so your content is a fragment. Change only the part you meant with `replace_lines`." Also cap identical-argument refusals at 2, not 5. Justified by Gemma petshop, where `failureMode` was `repair-aborted` after 5 byte-identical refused writes.
-- **Recipe routing for small models:** add a model-profile behavior in `packages/service/src/model-profile/behaviors/`, on by default for the small tier in `packages/inference/src/model-profile/defaults.ts`. When `suggest_work` returned a library match this turn, the next action must be `invoke_craftbook` with that id; `craftbook_write` is acceptable only after the person declines it. Justified by Gemma dev-craftbook-routing 0/3, where `suggest_work` was called before `craftbook_write`.
-- **Findings schema in the step prompt:** in gilde `data/craftbook-templates/de/deep-security-review/versions/1.1.4/craftbook.json`, put a literal one-record example with `"line": <integer, first line>` into the findings step prompt, and keep the gate's message naming the field. Justified by Gemma 1/3, plateau on `line`.
+- **Recipe routing for small models: withdrawn.** The first version proposed a small-model behavior that would make `invoke_craftbook` follow any `suggest_work` match. In these trials `suggest_work` offered no match, so the behavior would not have helped. The fix belonged in `suggest_work`'s ranking, and is done.
+- **Findings schema:** written for Gilde deep-security-review 1.1.5, not yet published. The report step shows one example record and says a weakness found in several places gets one record per place. A new gate checks every record's fields. Because this scenario never shows the worker the recipe, its request now names the fields too.
 
 ## Strategic fixes (framework)
+
+All six are done as of October 31; see the top of this report.
 
 1. **Run evals at the security level the scenario needs, not blanket lockdown.** `evals/src/runner.ts` (security block around lines 1250–1283) should give the developer craftbook scenarios a preset with `allowPackageScriptExecution: true` and keep everything else at lockdown. A scenario-level `securityLevel`, or a `packageScripts: true` capability, beats a global switch. Restores 9 trials per model.
 2. **Give Linux a network boundary for script RPC runs.** In `runner.ts:158`, `!opts.rpcChannel` turns off the systemd boundary for every model-authored script on Linux. `systemd-run --pipe` carries stdio, which is what the stdio RPC needs; the Windows MXC lane already uses stdio-RPC under a container. Until that lands, gate scripts written by the model fail closed on every Linux install, which is a product gap, not just an eval one.
@@ -226,8 +249,10 @@ Where the judge and the gates disagree:
 
 ## Next experiment
 
-Fix defects 1, 3 and 7 in the harness, which is cheap and touches no model behavior. Then re-run only the affected cells, 3 trials each, on this Spark:
-- developer: bug-fix-tdd, codemod-sweep, refactor-module;
-- complex-work: route-multi, author-fanout.
+With the fixes above in place, re-run only the affected cells, 3 trials per model, on this Spark:
+- developer: bug-fix-tdd, codemod-sweep, refactor-module, dev-craftbook-routing, and deep-security-review for Gemma;
+- complex-work: route-multi, author-fanout, author-gate-script, and find-vs-create for Gemma;
+- productivity: docblocks-theme-roundtrip, research-to-document, and ab-test-readout for Gemma;
+- core: petshop for Gemma.
 
-That gives a clean developer number for both models and settles whether route-multi and author-fanout are real. Then try the recipe-routing behavior as an A/B on Gemma 4 12b: dev-craftbook-routing, find-vs-create and route-multi, 3 trials per arm.
+That gives clean developer and complex-work numbers for both models. It also shows whether route-multi and author-fanout fail for real reasons, and whether Gemma routes to recipes once `suggest_work` offers them. The recipe-routing behavior A/B from the first version is dropped.

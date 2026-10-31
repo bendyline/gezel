@@ -60,6 +60,12 @@ its DocBlocks tools in all six trials. The harness stopped two Qwen
 route-multi trials and one Qwen author-fanout trial while their tasks were
 still progressing. All of these count as failures.
 
+**The reviewed report was corrected on October 31.** It first said Gemma
+ignored the recipes Gezel suggested. In fact Gezel's suggestion tool offered
+no fitting recipe, and Gemma did what it said. The report also named the
+wrong tool for Gemma's text write into a Word file. It now lists the fixes
+made since this round. The numbers here are unchanged.
+
 ## Judging
 
 After the sweep, Claude Sonnet 4.6 (through the Claude CLI) reviewed 121

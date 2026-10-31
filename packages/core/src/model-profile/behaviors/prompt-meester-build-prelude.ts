@@ -181,21 +181,44 @@ export function namesDocumentDeliverable(text: string): boolean {
   return DOCUMENT_DELIVERABLE_RE.test(text);
 }
 
+const SEPARATE_PROJECT_RE =
+  /\b(?:new|fresh|separate|another|dedicated)\s+(?:(?:standalone|independent)\s+)?(?:project|workspace)\b/gi;
+const NEGATION_RE =
+  /\b(?:not|no|never|without|avoid(?:ing)?|instead\s+of|rather\s+than|dont|didnt|doesnt|wont|shouldnt|cant|cannot)\b|n['’]t\b/i;
+/** Words before the phrase a negation may govern: "do not want to open a new project". */
+const NEGATION_WINDOW_WORDS = 6;
+
+/**
+ * A negation governs the phrase it shares a clause with, so a comma or dash
+ * ends its reach: "No, put it in a new project" still asks for one.
+ */
+function negatedBefore(text: string, index: number): boolean {
+  const clause =
+    text
+      .slice(0, index)
+      .split(/[.;:!?,()\n—–]/)
+      .pop() ?? '';
+  const words = clause.trim().split(/\s+/).slice(-NEGATION_WINDOW_WORDS).join(' ');
+  return NEGATION_RE.test(words);
+}
+
 /**
  * In an already-scoped project, a generic build request means "work here".
  * Starting another project requires explicit project/workspace language;
  * `new game` is deliberately insufficient because `new` describes the
  * deliverable, not a request to leave the current project.
+ *
+ * Language that rules a project out is the opposite request. Read without
+ * its negation, "never create another project for this job" (the line every
+ * authoring eval ends with) and "please don't start a new project" turned
+ * suggest_work to project types: a press release in Rotterdam was offered
+ * Trip Planner instead of the press-release recipe (2026-10-31).
  */
 export function explicitlyRequestsSeparateProject(text: string): boolean {
-  return (
-    /\b(?:new|fresh|separate|another|dedicated)\s+(?:(?:standalone|independent)\s+)?(?:project|workspace)\b/i.test(
-      text,
-    ) ||
-    /\b(?:as|in|into|under|for)\s+(?:a|an)\s+(?:new|fresh|separate|another|dedicated)\s+(?:project|workspace)\b/i.test(
-      text,
-    )
-  );
+  for (const match of text.matchAll(SEPARATE_PROJECT_RE)) {
+    if (!negatedBefore(text, match.index)) return true;
+  }
+  return false;
 }
 
 const MEESTER_BUILD_PRELUDE =

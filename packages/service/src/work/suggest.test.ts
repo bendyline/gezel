@@ -230,6 +230,23 @@ describe('suggestWork', () => {
     expect(result.options.map((o) => o.id)).toEqual(['task-here']);
   });
 
+  // route-multi, 2026-10-31: the authoring eval's "never create another
+  // project" read as a request for one, and Trip Planner replaced the recipe.
+  it('keeps the recipe when the person rules out another project', async () => {
+    const result = await suggestWork(deps(), {
+      request:
+        'We are opening our first permanent workshop in Rotterdam and I need a press release for journalists. ' +
+        'Do ALL work inside THIS project — never create another project for this job.',
+      projectId: 'fieldstone-launch-comms',
+      rankCraftbooks: books({ id: 'press-release', score: 0.51, semantic: 0.615, lexical: 0.267 }),
+      rankTypes: typeScores({ id: 'type:trip-planner', score: 0.48, semantic: 0.64 }),
+    });
+    expect(result.options[0]?.id).toBe('craftbook:press-release');
+    expect(result.options.some((o) => o.kind === 'project-type' || o.id === 'new-project')).toBe(
+      false,
+    );
+  });
+
   it('matches recurring work only for recurring or stopping wording', async () => {
     const item: SuggestedWorkItem = {
       key: 'gezel-template:cso:security-review',
